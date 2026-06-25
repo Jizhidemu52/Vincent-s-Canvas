@@ -41,12 +41,13 @@ import {
 } from "lucide-react";
 import { useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
 import {
+  addAssetToProjectAt,
   addAssetToProject,
   addTextNode,
+  addGenerationTargetFrame,
   applyImageOperation,
   commitShapeEdit,
   configureNodeGeneration,
-  connectWorkflowNode,
   copyPasteSelectedNodes,
   createInitialWorkspace,
   createProject,
@@ -75,6 +76,16 @@ const SECOND_TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 
 type ViewMode = "login" | "home" | "canvas" | "admin";
 type DragMode = "move" | "resize";
+type ShapeEditDraft = { nodeId: string; shape: "ellipse" | "rectangle" | "freehand"; prompt: string } | null;
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
 
 function createWorkspace() {
   return createInitialWorkspace({ userId: "designer-lina", designerName: "Lina Zhou", creditBalance: 180, role: "designer" });
@@ -84,6 +95,7 @@ export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => createWorkspace());
   const [view, setView] = useState<ViewMode>("login");
   const [rightPanel, setRightPanel] = useState<"context" | "history" | "assets" | "prompts">("context");
+  const [shapeEditDraft, setShapeEditDraft] = useState<ShapeEditDraft>(null);
   const activeProject = workspace.projects.find((project) => project.id === workspace.activeProjectId);
   const selectedNode = activeProject?.nodes.find((node) => node.id === activeProject.selectedNodeIds[0]) ?? activeProject?.nodes[0];
 
@@ -121,7 +133,6 @@ export default function App() {
     });
     setView("canvas");
   }
-
   function openProject(projectId: string) {
     setWorkspace((current) => ({ ...current, activeProjectId: projectId }));
     setView("canvas");
@@ -178,7 +189,6 @@ export default function App() {
       })
     );
   }
-
   function connectSelectionToNewModule(moduleType: ModuleType) {
     addWorkflowModule(moduleType);
   }
@@ -195,8 +205,31 @@ export default function App() {
     setWorkspace((current) => runWorkflowChain(current, activeProject.id, selectedNode.id));
   }
 
-  function runBatch() {
+  async function runBatch(files?: FileList | null) {
     if (!activeProject) return;
+    const imageFiles = Array.from(files ?? []).filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length) {
+      const prompt = selectedNode?.generation.prompt.trim() || "统一去背并调整成柔和棚拍光，保持服装版型清晰。";
+      const imported = await Promise.all(
+        imageFiles.map(async (file) => ({
+          name: file.name,
+          source: await readFileAsDataUrl(file),
+          width: 240,
+          height: 320
+        }))
+      );
+      setWorkspace((current) => {
+        const queued = importBatchFolder(current, activeProject.id, {
+          folderName: "imported-folder",
+          prompt,
+          modelId: selectedNode?.generation.modelId || "background-cleaner",
+          outputCount: selectedNode?.generation.outputCount || 1,
+          files: imported
+        });
+        return runBatchQueue(queued, activeProject.id);
+      });
+      return;
+    }
     setWorkspace((current) => {
       const queued = importBatchFolder(current, activeProject.id, {
         folderName: "sample-folder",
@@ -212,17 +245,25 @@ export default function App() {
       return runBatchQueue(queued, activeProject.id);
     });
   }
-
   function shapeEdit() {
     if (!activeProject || !selectedNode) return;
-    setWorkspace((current) =>
-      commitShapeEdit(current, activeProject.id, selectedNode.id, {
-        shape: "ellipse",
-        prompt: "只在圈选区域增加精细刺绣花型，保持其他区域不变。"
-      })
-    );
+    setShapeEditDraft({
+      nodeId: selectedNode.id,
+      shape: "ellipse",
+      prompt: "只在圈选区域增加精细刺绣花型，保持其他区域不变。"
+    });
   }
 
+  function confirmShapeEdit() {
+    if (!activeProject || !shapeEditDraft) return;
+    setWorkspace((current) =>
+      commitShapeEdit(current, activeProject.id, shapeEditDraft.nodeId, {
+        shape: shapeEditDraft.shape,
+        prompt: shapeEditDraft.prompt
+      })
+    );
+    setShapeEditDraft(null);
+  }
   function saveAsset() {
     if (!activeProject || !selectedNode) return;
     setWorkspace((current) => saveNodeAsAsset(current, activeProject.id, selectedNode.id));
@@ -239,6 +280,10 @@ export default function App() {
         onBack={() => setView("home")}
         onRightPanel={setRightPanel}
         onWorkspaceChange={setWorkspace}
+        shapeEditDraft={shapeEditDraft}
+        onShapeEditDraft={setShapeEditDraft}
+        onConfirmShapeEdit={confirmShapeEdit}
+        onCancelShapeEdit={() => setShapeEditDraft(null)}
         onUpdateConfig={updateSelectedConfig}
         onImportImages={importImagePair}
         onGenerate={runSelectedGeneration}
@@ -251,6 +296,7 @@ export default function App() {
         onRemoveBg={() => setWorkspace((current) => applyImageOperation(current, activeProject.id, selectedNode!.id, "removeBackground"))}
         onShapeEdit={shapeEdit}
         onSaveAsset={saveAsset}
+        onAddTargetFrame={() => setWorkspace((current) => addGenerationTargetFrame(current, activeProject.id))}
       />
     );
   }
@@ -443,14 +489,36 @@ function MetricCard({ label, value, detail }: { label: string; value: number; de
   );
 }
 
+function exportProjectPackage(workspace: Workspace, project: Project) {
+  const payload = {
+    project,
+    assets: workspace.assets,
+    prompts: workspace.prompts,
+    history: workspace.history.filter((entry) => entry.projectId === project.id),
+    models: workspace.modelRegistry.map(({ id, name, provider, group, capability }) => ({ id, name, provider, group, capability })),
+    exportedAt: new Date().toISOString()
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${project.name.replace(/\s+/g, "-").toLowerCase()}-canvas-package.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function CanvasView({
   workspace,
   project,
   selectedNode,
   rightPanel,
+  shapeEditDraft,
   onBack,
   onRightPanel,
   onWorkspaceChange,
+  onShapeEditDraft,
+  onConfirmShapeEdit,
+  onCancelShapeEdit,
   onUpdateConfig,
   onImportImages,
   onGenerate,
@@ -462,15 +530,20 @@ function CanvasView({
   onUpscale,
   onRemoveBg,
   onShapeEdit,
-  onSaveAsset
+  onSaveAsset,
+  onAddTargetFrame
 }: {
   workspace: Workspace;
   project: Project;
   selectedNode?: CanvasNode;
   rightPanel: "context" | "history" | "assets" | "prompts";
+  shapeEditDraft: ShapeEditDraft;
   onBack: () => void;
   onRightPanel: (panel: "context" | "history" | "assets" | "prompts") => void;
   onWorkspaceChange: (updater: (workspace: Workspace) => Workspace) => void;
+  onShapeEditDraft: (draft: ShapeEditDraft) => void;
+  onConfirmShapeEdit: () => void;
+  onCancelShapeEdit: () => void;
   onUpdateConfig: (patch: Partial<CanvasNode["generation"]>) => void;
   onImportImages: () => void;
   onGenerate: () => void;
@@ -483,6 +556,7 @@ function CanvasView({
   onRemoveBg: () => void;
   onShapeEdit: () => void;
   onSaveAsset: () => void;
+  onAddTargetFrame: () => void;
 }) {
   const stats = useMemo(
     () => ({
@@ -503,6 +577,9 @@ function CanvasView({
         onRedo={() => onWorkspaceChange((current) => redoProject(current, project.id))}
         onCopy={() => onWorkspaceChange((current) => copyPasteSelectedNodes(current, project.id))}
         onDelete={() => onWorkspaceChange((current) => deleteSelectedNodes(current, project.id))}
+        onAddTargetFrame={onAddTargetFrame}
+        onExport={() => exportProjectPackage(workspace, project)}
+        onShapeEdit={onShapeEdit}
       />
       <section className="recraft-canvas">
         <PromptCard
@@ -511,6 +588,7 @@ function CanvasView({
           onUpdateConfig={onUpdateConfig}
           onGenerate={onGenerate}
           onBatch={onBatch}
+          onBatchFiles={onBatch}
           onPromptInsert={(prompt) => onUpdateConfig({ prompt })}
         />
         <CanvasStage
@@ -536,6 +614,13 @@ function CanvasView({
           onPanel={onRightPanel}
           onAddModule={onAddModule}
           onPromptInsert={(prompt) => onUpdateConfig({ prompt })}
+        />
+        <ShapeEditDialog
+          draft={shapeEditDraft}
+          node={shapeEditDraft ? project.nodes.find((node) => node.id === shapeEditDraft.nodeId) : undefined}
+          onDraft={onShapeEditDraft}
+          onCancel={onCancelShapeEdit}
+          onConfirm={onConfirmShapeEdit}
         />
       </section>
     </main>
@@ -594,7 +679,10 @@ function TopToolbar({
   onUndo,
   onRedo,
   onCopy,
-  onDelete
+  onDelete,
+  onAddTargetFrame,
+  onExport,
+  onShapeEdit
 }: {
   onBack: () => void;
   onImportImages: () => void;
@@ -603,6 +691,9 @@ function TopToolbar({
   onRedo: () => void;
   onCopy: () => void;
   onDelete: () => void;
+  onAddTargetFrame: () => void;
+  onExport: () => void;
+  onShapeEdit: () => void;
 }) {
   return (
     <header className="canvas-toolbar">
@@ -615,11 +706,13 @@ function TopToolbar({
       </div>
       <div className="toolbar-center">
         <button type="button" onClick={onImportImages}><ImagePlus size={14} /> Upload images</button>
-        <button type="button"><BoxSelect size={14} /> Edit area</button>
+        <button type="button" onClick={onAddTargetFrame}><SquareDashedMousePointer size={14} /> Target frame</button>
+        <button type="button" onClick={onShapeEdit}><BoxSelect size={14} /> Edit area</button>
         <button type="button"><Scissors size={14} /> Remove bg</button>
         <button type="button"><Shirt size={14} /> Make Mockup</button>
         <button type="button"><Archive size={14} /> Vectorize</button>
         <button type="button" onClick={onWorkflow}><Play size={14} /> Run workflow</button>
+        <button type="button" onClick={onExport}><Download size={14} /> Export package</button>
       </div>
       <div className="toolbar-right">
         <button type="button" className="icon-button" onClick={onUndo} title="Undo"><Undo2 size={15} /></button>
@@ -637,6 +730,7 @@ function PromptCard({
   onUpdateConfig,
   onGenerate,
   onBatch,
+  onBatchFiles,
   onPromptInsert
 }: {
   workspace: Workspace;
@@ -644,8 +738,10 @@ function PromptCard({
   onUpdateConfig: (patch: Partial<CanvasNode["generation"]>) => void;
   onGenerate: () => void;
   onBatch: () => void;
+  onBatchFiles: (files: FileList | null) => void;
   onPromptInsert: (prompt: string) => void;
 }) {
+  const batchInputRef = useRef<HTMLInputElement | null>(null);
   const groups = Array.from(new Set(workspace.modelRegistry.map((model) => model.group)));
   return (
     <aside className="prompt-card">
@@ -710,6 +806,19 @@ function PromptCard({
       </div>
       <button type="button" className="generate-button" onClick={onGenerate}>Generate</button>
       <button type="button" className="secondary-button" onClick={onBatch}>Batch mode</button>
+      <button type="button" className="secondary-button" onClick={() => batchInputRef.current?.click()}>
+        <Upload size={13} /> Import folder
+      </button>
+      <input
+        ref={batchInputRef}
+        className="hidden-file-input"
+        aria-label="Batch folder input"
+        type="file"
+        multiple
+        accept="image/*"
+        onChange={(event) => onBatchFiles(event.currentTarget.files)}
+        {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+      />
     </aside>
   );
 }
@@ -731,6 +840,29 @@ function CanvasStage({
   const [lasso, setLasso] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const selectedIds = project.selectedNodeIds;
   const selectedSet = new Set(selectedIds);
+
+  async function importCanvasFiles(files: FileList | File[], clientX?: number, clientY?: number) {
+    const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    if (!imageFiles.length) return;
+    const rect = stageRef.current?.getBoundingClientRect();
+    const baseX = rect && typeof clientX === "number" ? (clientX - rect.left - project.viewport.x) / project.viewport.zoom : 640;
+    const baseY = rect && typeof clientY === "number" ? (clientY - rect.top - project.viewport.y) / project.viewport.zoom : 360;
+    const imported = await Promise.all(
+      imageFiles.map(async (file, index) => ({
+        asset: {
+          name: file.name,
+          source: await readFileAsDataUrl(file),
+          width: 360,
+          height: 520
+        },
+        x: Math.round(baseX + index * 36),
+        y: Math.round(baseY + index * 36)
+      }))
+    );
+    onWorkspaceChange((current) =>
+      imported.reduce((workspace, item) => addAssetToProjectAt(workspace, project.id, item.asset, item.x, item.y), current)
+    );
+  }
 
   function selectNode(id: string, append: boolean) {
     onWorkspaceChange((current) => selectNodes(current, project.id, [id], append));
@@ -804,9 +936,27 @@ function CanvasStage({
       ref={stageRef}
       className={`stage ${project.viewport.background}`}
       aria-label="Infinite canvas"
+      tabIndex={0}
       onPointerDown={panCanvas}
       onWheel={zoomCanvas}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        void importCanvasFiles(event.dataTransfer.files, event.clientX, event.clientY);
+      }}
+      onPaste={(event) => {
+        void importCanvasFiles(event.clipboardData.files);
+      }}
     >
+      {!project.nodes.length && (
+        <div className="drop-hint">
+          <Upload size={18} />
+          <span>Drop images here</span>
+        </div>
+      )}
       <div className="stage-world" style={{ transform: `translate(${project.viewport.x}px, ${project.viewport.y}px) scale(${project.viewport.zoom})` }}>
         <svg className="stage-wires" viewBox="0 0 2400 1600" aria-hidden="true">
           {project.connections.map((connection) => {
@@ -833,6 +983,7 @@ function CanvasStage({
             onSelect={selectNode}
             onWorkspaceChange={onWorkspaceChange}
             onConnectModule={onConnectModule}
+            workspace={workspace}
           />
         ))}
       </div>
@@ -850,7 +1001,8 @@ function CanvasNodeView({
   highlighted,
   onSelect,
   onWorkspaceChange,
-  onConnectModule
+  onConnectModule,
+  workspace
 }: {
   projectId: string;
   node: CanvasNode;
@@ -859,13 +1011,22 @@ function CanvasNodeView({
   onSelect: (id: string, append: boolean) => void;
   onWorkspaceChange: (updater: (workspace: Workspace) => Workspace) => void;
   onConnectModule: (moduleType: ModuleType) => void;
+  workspace: Workspace;
 }) {
-  const isImageLike = node.type === "image" || node.type === "batch" || node.type === "imageGroup" || node.kind === "generated";
+  const isImageLike =
+    node.type === "image" ||
+    node.type === "batch" ||
+    node.type === "imageGroup" ||
+    node.kind === "generated" ||
+    node.kind === "operation" ||
+    node.kind === "edit";
   const isText = node.type === "text";
   const isModule = !isImageLike && !isText;
+  const [inlineEditorOpen, setInlineEditorOpen] = useState(false);
+  const modelGroups = Array.from(new Set(workspace.modelRegistry.map((model) => model.group)));
 
-  function startPointer(event: PointerEvent<HTMLButtonElement>, mode: DragMode = "move") {
-    if ((event.target as HTMLElement).closest(".node-port")) return;
+  function startPointer(event: PointerEvent<HTMLDivElement>, mode: DragMode = "move") {
+    if ((event.target as HTMLElement).closest(".node-port, .inline-node-editor")) return;
     event.preventDefault();
     event.stopPropagation();
     onSelect(node.id, event.shiftKey || event.ctrlKey || event.metaKey);
@@ -906,8 +1067,9 @@ function CanvasNodeView({
   }
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className={`stage-node ${node.type} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""}`}
       style={{ left: node.x, top: node.y, width: node.width, minHeight: node.height }}
       onPointerDown={(event) => startPointer(event)}
@@ -915,6 +1077,7 @@ function CanvasNodeView({
       onDoubleClick={(event) => {
         event.stopPropagation();
         onSelect(node.id, false);
+        if (isImageLike) setInlineEditorOpen((current) => !current);
       }}
     >
       <span className="node-label">{isImageLike ? "Image" : isText ? "Text" : node.moduleType ?? node.type}</span>
@@ -945,7 +1108,7 @@ function CanvasNodeView({
       {isModule && (
         <div className="workflow-box">
           <Network size={20} />
-          <strong>{node.moduleType ?? node.type}</strong>
+          <strong>{node.metadata.targetFrame ? node.name : node.moduleType ?? node.type}</strong>
           <small>{node.generation.modelId}</small>
           <span>{node.references.length} refs</span>
         </div>
@@ -954,14 +1117,84 @@ function CanvasNodeView({
       {selected && (
         <span
           className="resize-handle"
-          style={{ left: node.width - 9, top: node.height + 9 }}
-          onPointerDown={(event) => startPointer(event as PointerEvent<HTMLButtonElement>, "resize")}
+          style={{ left: node.width - 18, top: Math.max(28, node.height - 18) }}
+          onPointerDown={(event) => startPointer(event as PointerEvent<HTMLDivElement>, "resize")}
           aria-label="Resize image"
+        />
+      )}
+      {selected && inlineEditorOpen && isImageLike && (
+        <InlineNodeEditor
+          node={node}
+          modelGroups={modelGroups}
+          models={workspace.modelRegistry}
+          onUpdate={(patch) =>
+            onWorkspaceChange((current) =>
+              configureNodeGeneration(current, projectId, node.id, {
+                ...node.generation,
+                ...patch,
+                entryPoint: "inline"
+              })
+            )
+          }
+          onGenerate={() => onWorkspaceChange((current) => runGeneration(current, projectId, node.id))}
         />
       )}
       <span className="node-port input" />
       <span className="node-port output" onPointerDown={startWire} title="Drag to create workflow node" />
-    </button>
+    </div>
+  );
+}
+
+function InlineNodeEditor({
+  node,
+  modelGroups,
+  models,
+  onUpdate,
+  onGenerate
+}: {
+  node: CanvasNode;
+  modelGroups: string[];
+  models: Workspace["modelRegistry"];
+  onUpdate: (patch: Partial<CanvasNode["generation"]>) => void;
+  onGenerate: () => void;
+}) {
+  return (
+    <div className="inline-node-editor" onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+      <label>
+        <span>Model</span>
+        <select aria-label="Inline model" value={node.generation.modelId} onChange={(event) => onUpdate({ modelId: event.target.value })}>
+          {modelGroups.map((group) => (
+            <optgroup key={group} label={group}>
+              {models.filter((model) => model.group === group).map((model) => (
+                <option key={model.id} value={model.id}>{model.name}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
+      <textarea
+        aria-label="Inline prompt"
+        value={node.generation.prompt}
+        onChange={(event) => onUpdate({ prompt: event.target.value })}
+        placeholder="在图片下方直接输入提示词，例如：参考这张服装做一款新的刺绣马甲。"
+      />
+      <div className="inline-node-actions">
+        <label>
+          <span>Count</span>
+          <input
+            aria-label="Inline output count"
+            type="number"
+            min={1}
+            max={4}
+            value={node.generation.outputCount}
+            onChange={(event) => onUpdate({ outputCount: Number(event.target.value) })}
+          />
+        </label>
+        <button type="button" onClick={onGenerate} disabled={!node.generation.prompt.trim()}>
+          Generate
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1043,6 +1276,57 @@ function NodeToolbar({
       <button type="button" title="Save asset" onClick={onSaveAsset}><Database size={15} /></button>
       <button type="button" title="Download"><Download size={15} /></button>
       <button type="button" title="Magic edit"><Wand2 size={15} /></button>
+    </div>
+  );
+}
+
+function ShapeEditDialog({
+  draft,
+  node,
+  onDraft,
+  onCancel,
+  onConfirm
+}: {
+  draft: ShapeEditDraft;
+  node?: CanvasNode;
+  onDraft: (draft: ShapeEditDraft) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!draft || !node) return null;
+  const shapes: Array<NonNullable<ShapeEditDraft>["shape"]> = ["ellipse", "rectangle", "freehand"];
+  return (
+    <div className="shape-dialog" role="dialog" aria-label="Mask edit confirmation">
+      <div className="shape-preview">
+        <img src={node.source} alt={node.name} />
+        <span className={`shape-overlay ${draft.shape}`} />
+      </div>
+      <div className="shape-panel">
+        <strong>Confirm mask edit</strong>
+        <div className="shape-options" aria-label="Mask shape">
+          {shapes.map((shape) => (
+            <button
+              type="button"
+              key={shape}
+              className={draft.shape === shape ? "active" : ""}
+              onClick={() => onDraft({ ...draft, shape })}
+            >
+              {shape}
+            </button>
+          ))}
+        </div>
+        <textarea
+          aria-label="Mask edit prompt"
+          value={draft.prompt}
+          onChange={(event) => onDraft({ ...draft, prompt: event.target.value })}
+        />
+        <div className="shape-actions">
+          <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
+          <button type="button" className="generate-button" onClick={onConfirm} disabled={!draft.prompt.trim()}>
+            Confirm edit
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -448,21 +448,25 @@ export function createProject(workspace: Workspace, name: string) {
   };
 }
 
-export function addAssetToProject(workspace: Workspace, projectId: string, asset: AssetInput): Workspace {
+export function addAssetToProjectAt(workspace: Workspace, projectId: string, asset: AssetInput, x?: number, y?: number): Workspace {
   return updateProject(workspace, projectId, (project) => {
     const node = createNode({
       type: "image",
       kind: "upload",
       name: asset.name,
       source: asset.source,
-      x: 640 + project.nodes.length * 82,
-      y: 360 + project.nodes.length * 36,
+      x: x ?? 640 + project.nodes.length * 82,
+      y: y ?? 90 + project.nodes.length * 36,
       width: asset.width,
       height: asset.height,
       metadata: { originalWidth: asset.width, originalHeight: asset.height }
     });
     return withUndo(project, { nodes: [...project.nodes, node], selectedNodeIds: [node.id] });
   });
+}
+
+export function addAssetToProject(workspace: Workspace, projectId: string, asset: AssetInput): Workspace {
+  return addAssetToProjectAt(workspace, projectId, asset);
 }
 
 export function addTextNode(workspace: Workspace, projectId: string, content: string, x = 620, y = 260): Workspace {
@@ -942,6 +946,34 @@ export function runWorkflowChain(workspace: Workspace, projectId: string, startN
     cursorId = nextNode.id;
   }
   return currentWorkspace;
+}
+
+export function addGenerationTargetFrame(workspace: Workspace, projectId: string): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const anchor = project.nodes.find((node) => project.selectedNodeIds.includes(node.id)) ?? project.nodes[project.nodes.length - 1];
+    const targetNode = createNode({
+      type: "config",
+      kind: "workflow",
+      name: "Generation target frame",
+      source: "target-frame",
+      x: anchor ? anchor.x + anchor.width + 180 : 760,
+      y: anchor ? anchor.y : 360,
+      width: 320,
+      height: 320,
+      generation: {
+        prompt: "在这个目标框中生成新的图片结果。",
+        modelId: "gpt-image-2-medium",
+        outputCount: 1,
+        entryPoint: "workflow"
+      },
+      metadata: { targetFrame: true, aspectRatio: "1:1" }
+    });
+    return withUndo(project, {
+      nodes: [...project.nodes, targetNode],
+      connections: anchor ? [...project.connections, connect(anchor.id, targetNode.id)] : project.connections,
+      selectedNodeIds: [targetNode.id]
+    });
+  });
 }
 
 export function saveNodeAsAsset(workspace: Workspace, projectId: string, nodeId: string): Workspace {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   addAssetToProject,
+  addAssetToProjectAt,
+  addGenerationTargetFrame,
   applyImageOperation,
   connectWorkflowNode,
   commitShapeEdit,
@@ -51,6 +53,52 @@ describe("designer canvas workspace behavior", () => {
     expect(configured.projects[0].nodes[0].generation.entryPoint).toBe("inline");
   });
 
+  it("places dropped images at the canvas pointer location", () => {
+    const { workspace, project } = createProject(createInitialWorkspace(), "Dropped references");
+    const withAsset = addAssetToProjectAt(
+      workspace,
+      project.id,
+      {
+        name: "dropped.png",
+        source: "data:image/png;base64,dropped",
+        width: 360,
+        height: 520
+      },
+      280,
+      420
+    );
+
+    expect(withAsset.projects[0].nodes[0]).toMatchObject({
+      name: "dropped.png",
+      x: 280,
+      y: 420,
+      width: 360,
+      height: 520
+    });
+  });
+
+  it("adds a generation target frame connected to the selected upstream node", () => {
+    const { workspace, project } = createProject(createInitialWorkspace(), "Target frame");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "reference.png",
+      source: "reference",
+      width: 360,
+      height: 520
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const withTarget = addGenerationTargetFrame(withAsset, project.id);
+    const target = withTarget.projects[0].nodes.find((node) => node.metadata.targetFrame)!;
+
+    expect(target).toMatchObject({
+      type: "config",
+      kind: "workflow",
+      name: "Generation target frame"
+    });
+    expect(withTarget.projects[0].connections).toEqual(
+      expect.arrayContaining([expect.objectContaining({ fromNodeId: source.id, toNodeId: target.id })])
+    );
+  });
+
   it("generates outputs beside the source image, spends credits, and writes history", () => {
     const { workspace, project } = createProject(createInitialWorkspace({ credits: 10 }), "Sleeve options");
     const withAsset = addAssetToProject(workspace, project.id, {
@@ -97,8 +145,9 @@ describe("designer canvas workspace behavior", () => {
     });
 
     expect(edited.projects[0].nodes).toHaveLength(3);
-    expect(edited.projects[0].nodes[1]).toMatchObject({ kind: "operation", operation: "upscale" });
-    expect(edited.projects[0].nodes[2]).toMatchObject({ kind: "edit", editShape: "ellipse" });
+    expect(edited.projects[0].nodes[1]).toMatchObject({ kind: "operation", operation: "upscale", references: [source.id] });
+    expect(edited.projects[0].nodes[2]).toMatchObject({ kind: "edit", editShape: "ellipse", references: [source.id] });
+    expect(edited.projects[0].nodes[2].source).toContain("#shape-edit");
     expect(edited.projects[0].nodes[2].x).toBeGreaterThan(source.x);
   });
 

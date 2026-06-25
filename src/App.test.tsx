@@ -81,4 +81,38 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Access policy")).toBeInTheDocument();
     expect(screen.getByText("Server only")).toBeInTheDocument();
   });
+
+  it("supports the image node inline model/prompt entry and generation loop", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.dblClick(screen.getByText("fashion-reference.jpg"));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Inline model" }), "nanobanana2");
+    await user.type(screen.getByRole("textbox", { name: "Inline prompt" }), "参考这张图做一件新的刺绣背心");
+    const generateButtons = screen.getAllByRole("button", { name: "Generate" });
+    await user.click(generateButtons[generateButtons.length - 1]);
+
+    expect(screen.getByText("fashion-reference.jpg result 1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(screen.getByText(/nanobanana2/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/参考这张图做一件新的刺绣背心/).length).toBeGreaterThan(0);
+  });
+
+  it("confirms mask edits, creates target frames, and keeps them visible on canvas", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: /Edit area/i }));
+    expect(screen.getByRole("dialog", { name: "Mask edit confirmation" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "rectangle" }));
+    await user.click(screen.getByRole("button", { name: "Confirm edit" }));
+    expect(screen.getByText("fashion-reference.jpg mask edit")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Target frame/i }));
+    expect(screen.getByText("Generation target frame")).toBeInTheDocument();
+    expect(screen.getByText("gpt-image-2-medium")).toBeInTheDocument();
+  });
 });
