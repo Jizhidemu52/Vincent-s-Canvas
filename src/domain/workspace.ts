@@ -1,0 +1,959 @@
+export type NodeType =
+  | "image"
+  | "text"
+  | "imageGroup"
+  | "config"
+  | "edit"
+  | "upscale"
+  | "removeBg"
+  | "batch"
+  | "assistant";
+
+export type NodeKind = "upload" | "generated" | "operation" | "edit" | "workflow" | "referenceGroup";
+export type NodeStatus = "idle" | "selected" | "running" | "done" | "error";
+export type OperationType = "generate" | "edit" | "upscale" | "removeBackground" | "crop" | "duplicate" | "download";
+export type ModuleType = "upload" | "edit" | "upscale" | "removeBackground" | "generate";
+export type PortType = "image" | "text" | "config" | "result";
+
+export interface Profile {
+  userId: string;
+  designerName: string;
+  role: "designer" | "admin";
+  creditBalance: number;
+  creditUsed: number;
+  credits: number;
+}
+
+export interface NodePort {
+  id: string;
+  type: PortType;
+  label: string;
+}
+
+export interface NodeTransform {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  scaleX: number;
+  scaleY: number;
+  lockedRatio: boolean;
+}
+
+export interface GenerationConfig {
+  prompt: string;
+  modelId: string;
+  outputCount: number;
+  entryPoint: "inspector" | "inline" | "workflow";
+  size?: string;
+  quality?: string;
+}
+
+export interface CanvasNode {
+  id: string;
+  type: NodeType;
+  kind: NodeKind;
+  name: string;
+  source: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  inputs: NodePort[];
+  outputs: NodePort[];
+  status: NodeStatus;
+  metadata: Record<string, unknown>;
+  references: string[];
+  referenceIds?: string[];
+  transform: NodeTransform;
+  generation: GenerationConfig;
+  parentId?: string;
+  operation?: OperationType;
+  editShape?: "ellipse" | "rectangle" | "freehand";
+  moduleType?: ModuleType;
+  errorMessage?: string;
+}
+
+export interface Connection {
+  id: string;
+  fromNodeId: string;
+  fromPort: string;
+  toNodeId: string;
+  toPort: string;
+  from: string;
+  to: string;
+}
+
+export interface Viewport {
+  x: number;
+  y: number;
+  zoom: number;
+  background: "blank" | "dots" | "grid";
+  minimapOpen: boolean;
+}
+
+export interface BatchItem {
+  id: string;
+  name: string;
+  source: string;
+  width: number;
+  height: number;
+  status: "queued" | "processing" | "done" | "error";
+}
+
+export interface BatchQueue {
+  folderName: string;
+  prompt: string;
+  modelId: string;
+  outputCount: number;
+  items: BatchItem[];
+}
+
+export interface AssetInput {
+  name: string;
+  source: string;
+  width: number;
+  height: number;
+}
+
+export interface BatchImport {
+  folderName: string;
+  prompt: string;
+  modelId: string;
+  outputCount: number;
+  files: AssetInput[];
+}
+
+export interface GenerationRequest {
+  projectId: string;
+  nodeId: string;
+  modelId: string;
+  prompt: string;
+  referenceNodeIds: string[];
+  outputCount: number;
+  operation: OperationType;
+}
+
+export interface GenerationResult {
+  status: "queued" | "running" | "succeeded" | "failed";
+  outputs: AssetInput[];
+  creditCost: number;
+  historyId: string;
+  errorMessage?: string;
+}
+
+export interface HistoryEntry {
+  id: string;
+  projectId: string;
+  nodeId: string;
+  prompt: string;
+  modelId: string;
+  outputCount: number;
+  creditCost: number;
+  operation?: OperationType;
+  moduleType?: ModuleType;
+  referenceCount?: number;
+  createdAt: string;
+}
+
+export interface LibraryAsset {
+  id: string;
+  type: "image" | "text";
+  title: string;
+  source: string;
+  tags: string[];
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PromptPreset {
+  id: string;
+  title: string;
+  prompt: string;
+  tags: string[];
+  source: "internal" | "designer" | "remote";
+}
+
+interface ProjectSnapshot {
+  nodes: CanvasNode[];
+  connections: Connection[];
+  viewport: Viewport;
+  selectedNodeIds: string[];
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  nodes: CanvasNode[];
+  connections: Connection[];
+  selectedNodeIds: string[];
+  viewport: Viewport;
+  batchQueue: BatchItem[];
+  batchConfig?: Omit<BatchQueue, "items">;
+  undoStack: ProjectSnapshot[];
+  redoStack: ProjectSnapshot[];
+  updatedAt: string;
+}
+
+export interface ModelDefinition {
+  id: string;
+  name: string;
+  provider: "openai" | "nanobanana" | "comfyui" | "runninghub" | "internal";
+  group: "Trending models" | "Image" | "Edit" | "Operations";
+  capability: ModuleType[];
+  cost: number;
+}
+
+export interface Workspace {
+  profile: Profile;
+  projects: Project[];
+  activeProjectId?: string;
+  history: HistoryEntry[];
+  assets: LibraryAsset[];
+  prompts: PromptPreset[];
+  modelRegistry: ModelDefinition[];
+}
+
+let idCounter = 0;
+
+function createId(prefix: string) {
+  idCounter += 1;
+  return `${prefix}-${idCounter}`;
+}
+
+function now() {
+  return new Date().toISOString();
+}
+
+function defaultViewport(): Viewport {
+  return { x: 0, y: 0, zoom: 1, background: "blank", minimapOpen: true };
+}
+
+function defaultGeneration(overrides: Partial<GenerationConfig> = {}): GenerationConfig {
+  return {
+    prompt: "",
+    modelId: "gpt-image-2-medium",
+    outputCount: 1,
+    entryPoint: "inspector",
+    size: "1:1",
+    quality: "auto",
+    ...overrides
+  };
+}
+
+function portsFor(type: NodeType): Pick<CanvasNode, "inputs" | "outputs"> {
+  if (type === "image" || type === "text") {
+    return {
+      inputs: [{ id: "in", type: type === "text" ? "text" : "image", label: "Input" }],
+      outputs: [{ id: "out", type: type === "text" ? "text" : "image", label: "Output" }]
+    };
+  }
+  if (type === "imageGroup") {
+    return {
+      inputs: [{ id: "refs", type: "image", label: "References" }],
+      outputs: [{ id: "out", type: "image", label: "Reference group" }]
+    };
+  }
+  return {
+    inputs: [
+      { id: "image", type: "image", label: "Images" },
+      { id: "text", type: "text", label: "Prompt" }
+    ],
+    outputs: [{ id: "result", type: "result", label: "Result" }]
+  };
+}
+
+function createNode(input: {
+  type: NodeType;
+  kind?: NodeKind;
+  name: string;
+  source?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  generation?: Partial<GenerationConfig>;
+  references?: string[];
+  operation?: OperationType;
+  moduleType?: ModuleType;
+  parentId?: string;
+  metadata?: Record<string, unknown>;
+}): CanvasNode {
+  const ports = portsFor(input.type);
+  const transform = {
+    x: input.x,
+    y: input.y,
+    width: input.width,
+    height: input.height,
+    rotation: 0,
+    scaleX: 1,
+    scaleY: 1,
+    lockedRatio: input.type === "image"
+  };
+  const references = input.references ?? [];
+  return {
+    id: createId("node"),
+    type: input.type,
+    kind: input.kind ?? (input.type === "image" ? "upload" : input.type === "imageGroup" ? "referenceGroup" : "workflow"),
+    name: input.name,
+    source: input.source ?? "",
+    x: input.x,
+    y: input.y,
+    width: input.width,
+    height: input.height,
+    ...ports,
+    status: "idle",
+    metadata: input.metadata ?? {},
+    references,
+    referenceIds: references,
+    transform,
+    generation: defaultGeneration(input.generation),
+    parentId: input.parentId,
+    operation: input.operation,
+    moduleType: input.moduleType
+  };
+}
+
+function snapshot(project: Project): ProjectSnapshot {
+  return {
+    nodes: project.nodes,
+    connections: project.connections,
+    viewport: project.viewport,
+    selectedNodeIds: project.selectedNodeIds
+  };
+}
+
+function withUndo(project: Project, patch: Omit<Partial<Project>, "undoStack" | "redoStack">): Project {
+  return {
+    ...project,
+    ...patch,
+    undoStack: [snapshot(project), ...project.undoStack].slice(0, 50),
+    redoStack: [],
+    updatedAt: now()
+  };
+}
+
+function updateProject(workspace: Workspace, projectId: string, updater: (project: Project) => Project): Workspace {
+  return {
+    ...workspace,
+    projects: workspace.projects.map((project) => (project.id === projectId ? updater(project) : project))
+  };
+}
+
+export function findProject(workspace: Workspace, projectId: string) {
+  const project = workspace.projects.find((item) => item.id === projectId);
+  if (!project) throw new Error("Project not found");
+  return project;
+}
+
+export function findNode(project: Project, nodeId: string) {
+  const node = project.nodes.find((item) => item.id === nodeId);
+  if (!node) throw new Error("Node not found");
+  return node;
+}
+
+function connect(fromNodeId: string, toNodeId: string, fromPort = "out", toPort = "image"): Connection {
+  return {
+    id: createId("connection"),
+    fromNodeId,
+    fromPort,
+    toNodeId,
+    toPort,
+    from: fromNodeId,
+    to: toNodeId
+  };
+}
+
+function placeNextTo(node: CanvasNode, index = 1) {
+  return {
+    x: node.x + node.width + 120 * index,
+    y: node.y + 34 * (index - 1)
+  };
+}
+
+function spendCredits(workspace: Workspace, cost: number): Workspace {
+  if (workspace.profile.creditBalance < cost) throw new Error("Not enough credits");
+  return {
+    ...workspace,
+    profile: {
+      ...workspace.profile,
+      creditBalance: workspace.profile.creditBalance - cost,
+      creditUsed: workspace.profile.creditUsed + cost,
+      credits: workspace.profile.creditBalance - cost
+    }
+  };
+}
+
+export function createInitialWorkspace(profile: Partial<Profile> = {}): Workspace {
+  const creditBalance = profile.creditBalance ?? profile.credits ?? 120;
+  return {
+    profile: {
+      ...profile,
+      userId: profile.userId ?? "designer-demo",
+      designerName: profile.designerName ?? "Demo Designer",
+      role: profile.role ?? "designer",
+      creditBalance,
+      creditUsed: profile.creditUsed ?? 0,
+      credits: creditBalance
+    },
+    projects: [],
+    history: [],
+    assets: [],
+    prompts: [
+      {
+        id: "prompt-fashion-edit",
+        title: "局部服装改款",
+        prompt: "只修改选区内的服装细节，保持模特姿势、背景、光线和版型不变。",
+        tags: ["edit", "fashion"],
+        source: "internal"
+      },
+      {
+        id: "prompt-reference-design",
+        title: "双参考设计",
+        prompt: "参考图一的版型和图二的纹理，生成一款新的女装单品，保持高级成衣摄影质感。",
+        tags: ["reference", "design"],
+        source: "internal"
+      }
+    ],
+    modelRegistry: [
+      { id: "gpt-image-2-high", name: "GPT Image 2 High", provider: "openai", group: "Trending models", capability: ["generate", "edit"], cost: 24 },
+      { id: "gpt-image-2-medium", name: "GPT Image 2 Medium", provider: "openai", group: "Trending models", capability: ["generate", "edit"], cost: 7 },
+      { id: "gpt-image-2-low", name: "GPT Image 2 Low", provider: "openai", group: "Trending models", capability: ["generate", "edit"], cost: 2 },
+      { id: "nanobanana2", name: "Nano Banana 2", provider: "nanobanana", group: "Trending models", capability: ["generate", "edit"], cost: 11 },
+      { id: "nanobanana2-pro", name: "Nano Banana Pro", provider: "nanobanana", group: "Trending models", capability: ["generate", "edit"], cost: 20 },
+      { id: "flux-pro", name: "Flux Pro", provider: "internal", group: "Image", capability: ["generate", "edit"], cost: 6 },
+      { id: "upscale-pro", name: "Creative Upscale", provider: "internal", group: "Operations", capability: ["upscale"], cost: 4 },
+      { id: "background-cleaner", name: "Remove Background", provider: "internal", group: "Operations", capability: ["removeBackground"], cost: 2 }
+    ]
+  };
+}
+
+export function createProject(workspace: Workspace, name: string) {
+  const project: Project = {
+    id: createId("project"),
+    name,
+    nodes: [],
+    connections: [],
+    selectedNodeIds: [],
+    viewport: defaultViewport(),
+    batchQueue: [],
+    undoStack: [],
+    redoStack: [],
+    updatedAt: now()
+  };
+  return {
+    workspace: { ...workspace, projects: [project, ...workspace.projects], activeProjectId: project.id },
+    project
+  };
+}
+
+export function addAssetToProject(workspace: Workspace, projectId: string, asset: AssetInput): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const node = createNode({
+      type: "image",
+      kind: "upload",
+      name: asset.name,
+      source: asset.source,
+      x: 640 + project.nodes.length * 82,
+      y: 360 + project.nodes.length * 36,
+      width: asset.width,
+      height: asset.height,
+      metadata: { originalWidth: asset.width, originalHeight: asset.height }
+    });
+    return withUndo(project, { nodes: [...project.nodes, node], selectedNodeIds: [node.id] });
+  });
+}
+
+export function addTextNode(workspace: Workspace, projectId: string, content: string, x = 620, y = 260): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const node = createNode({
+      type: "text",
+      kind: "workflow",
+      name: "Prompt note",
+      source: content,
+      x,
+      y,
+      width: 260,
+      height: 160,
+      metadata: { content }
+    });
+    return withUndo(project, { nodes: [...project.nodes, node], selectedNodeIds: [node.id] });
+  });
+}
+
+export function configureNodeGeneration(
+  workspace: Workspace,
+  projectId: string,
+  nodeId: string,
+  generation: GenerationConfig
+): Workspace {
+  return updateProject(workspace, projectId, (project) =>
+    withUndo(project, {
+      nodes: project.nodes.map((node) => (node.id === nodeId ? { ...node, generation } : node))
+    })
+  );
+}
+
+export function updateNodeTransform(
+  workspace: Workspace,
+  projectId: string,
+  nodeId: string,
+  patch: Partial<NodeTransform>
+): Workspace {
+  return updateProject(workspace, projectId, (project) =>
+    withUndo(project, {
+      nodes: project.nodes.map((node) => {
+        if (node.id !== nodeId) return node;
+        const transform = { ...node.transform, ...patch };
+        return { ...node, transform, x: transform.x, y: transform.y, width: transform.width, height: transform.height };
+      })
+    })
+  );
+}
+
+export function updateViewport(workspace: Workspace, projectId: string, patch: Partial<Viewport>): Workspace {
+  return updateProject(workspace, projectId, (project) => withUndo(project, { viewport: { ...project.viewport, ...patch } }));
+}
+
+export function selectNodes(workspace: Workspace, projectId: string, nodeIds: string[], append = false): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const selected = append ? Array.from(new Set([...project.selectedNodeIds, ...nodeIds])) : nodeIds;
+    return {
+      ...project,
+      selectedNodeIds: selected,
+      nodes: project.nodes.map((node) => ({ ...node, status: selected.includes(node.id) ? "selected" : "idle" }))
+    };
+  });
+}
+
+export function deleteSelectedNodes(workspace: Workspace, projectId: string): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const selected = new Set(project.selectedNodeIds);
+    return withUndo(project, {
+      nodes: project.nodes.filter((node) => !selected.has(node.id)),
+      connections: project.connections.filter((item) => !selected.has(item.fromNodeId) && !selected.has(item.toNodeId)),
+      selectedNodeIds: []
+    });
+  });
+}
+
+export function copyPasteSelectedNodes(workspace: Workspace, projectId: string): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const selected = project.nodes.filter((node) => project.selectedNodeIds.includes(node.id));
+    const idMap = new Map<string, string>();
+    const clones = selected.map((node) => {
+      const id = createId("node");
+      idMap.set(node.id, id);
+      return {
+        ...node,
+        id,
+        name: `${node.name} copy`,
+        x: node.x + 42,
+        y: node.y + 42,
+        transform: { ...node.transform, x: node.transform.x + 42, y: node.transform.y + 42 },
+        parentId: node.id,
+        status: "selected" as NodeStatus
+      };
+    });
+    const clonedConnections = project.connections
+      .filter((connection) => idMap.has(connection.fromNodeId) && idMap.has(connection.toNodeId))
+      .map((connection) => connect(idMap.get(connection.fromNodeId)!, idMap.get(connection.toNodeId)!, connection.fromPort, connection.toPort));
+    return withUndo(project, {
+      nodes: [...project.nodes.map((node) => ({ ...node, status: "idle" as NodeStatus })), ...clones],
+      connections: [...project.connections, ...clonedConnections],
+      selectedNodeIds: clones.map((node) => node.id)
+    });
+  });
+}
+
+export function undoProject(workspace: Workspace, projectId: string): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const [previous, ...rest] = project.undoStack;
+    if (!previous) return project;
+    return {
+      ...project,
+      ...previous,
+      undoStack: rest,
+      redoStack: [snapshot(project), ...project.redoStack],
+      updatedAt: now()
+    };
+  });
+}
+
+export function redoProject(workspace: Workspace, projectId: string): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const [next, ...rest] = project.redoStack;
+    if (!next) return project;
+    return {
+      ...project,
+      ...next,
+      redoStack: rest,
+      undoStack: [snapshot(project), ...project.undoStack],
+      updatedAt: now()
+    };
+  });
+}
+
+export function runGeneration(workspace: Workspace, projectId: string, nodeId: string): Workspace {
+  const project = findProject(workspace, projectId);
+  const source = findNode(project, nodeId);
+  if (!source.generation.prompt.trim()) throw new Error("Prompt is required");
+  const cost = source.generation.outputCount;
+  const charged = spendCredits(workspace, cost);
+
+  const generatedNodes = Array.from({ length: source.generation.outputCount }, (_, index) => {
+    const position = placeNextTo(source, index + 1);
+    return createNode({
+      type: "image",
+      kind: "generated",
+      name: `${source.name} result ${index + 1}`,
+      source: `${source.source || "generated"}#generated-${index + 1}`,
+      x: position.x,
+      y: position.y,
+      width: source.width,
+      height: source.height,
+      generation: source.generation,
+      parentId: source.id,
+      references: source.type === "imageGroup" ? source.references : source.references.length ? source.references : [source.id],
+      metadata: { prompt: source.generation.prompt, modelId: source.generation.modelId }
+    });
+  });
+
+  const updated = updateProject(charged, projectId, (item) =>
+    withUndo(item, {
+      nodes: [...item.nodes, ...generatedNodes],
+      connections: [...item.connections, ...generatedNodes.map((node) => connect(source.id, node.id, "out", "in"))],
+      selectedNodeIds: generatedNodes.map((node) => node.id)
+    })
+  );
+
+  return {
+    ...updated,
+    history: [
+      {
+        id: createId("history"),
+        projectId,
+        nodeId,
+        prompt: source.generation.prompt,
+        modelId: source.generation.modelId,
+        outputCount: source.generation.outputCount,
+        creditCost: cost,
+        operation: "generate",
+        referenceCount: source.references.length || 1,
+        createdAt: now()
+      },
+      ...updated.history
+    ]
+  };
+}
+
+export function applyImageOperation(
+  workspace: Workspace,
+  projectId: string,
+  nodeId: string,
+  operation: OperationType
+): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const source = findNode(project, nodeId);
+    const type: NodeType =
+      operation === "upscale" ? "upscale" : operation === "removeBackground" ? "removeBg" : operation === "edit" ? "edit" : "config";
+    const position = placeNextTo(source, 1);
+    const operationNode = createNode({
+      type,
+      kind: "operation",
+      name: `${source.name} ${operation}`,
+      operation,
+      source: `${source.source}#${operation}`,
+      parentId: source.id,
+      references: [source.id],
+      x: position.x,
+      y: position.y,
+      width: source.width,
+      height: source.height,
+      generation: {
+        prompt: operation === "upscale" ? "高清放大，保留织物纹理和版型。" : "去除背景并保持主体边缘干净。",
+        modelId: operation === "upscale" ? "upscale-pro" : "background-cleaner",
+        entryPoint: "workflow"
+      }
+    });
+    return withUndo(project, {
+      nodes: [...project.nodes, operationNode],
+      connections: [...project.connections, connect(source.id, operationNode.id)],
+      selectedNodeIds: [operationNode.id]
+    });
+  });
+}
+
+export function commitShapeEdit(
+  workspace: Workspace,
+  projectId: string,
+  nodeId: string,
+  edit: { shape: "ellipse" | "rectangle" | "freehand"; prompt: string }
+): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const source = findNode(project, nodeId);
+    const position = placeNextTo(source, 2);
+    const editNode = createNode({
+      type: "edit",
+      kind: "edit",
+      name: `${source.name} mask edit`,
+      source: `${source.source}#shape-edit`,
+      parentId: source.id,
+      references: [source.id],
+      x: position.x,
+      y: position.y,
+      width: source.width,
+      height: source.height,
+      generation: { prompt: edit.prompt, modelId: source.generation.modelId, entryPoint: "workflow" },
+      metadata: { editShape: edit.shape }
+    });
+    editNode.editShape = edit.shape;
+    return withUndo(project, {
+      nodes: [...project.nodes, editNode],
+      connections: [...project.connections, connect(source.id, editNode.id)],
+      selectedNodeIds: [editNode.id]
+    });
+  });
+}
+
+export function importBatchFolder(workspace: Workspace, projectId: string, batch: BatchImport): Workspace {
+  return updateProject(workspace, projectId, (project) =>
+    withUndo(project, {
+      batchConfig: {
+        folderName: batch.folderName,
+        prompt: batch.prompt,
+        modelId: batch.modelId,
+        outputCount: batch.outputCount
+      },
+      batchQueue: batch.files.map((file) => ({
+        id: createId("batch"),
+        name: file.name,
+        source: file.source,
+        width: file.width,
+        height: file.height,
+        status: "queued"
+      }))
+    })
+  );
+}
+
+export function runBatchQueue(workspace: Workspace, projectId: string): Workspace {
+  const project = findProject(workspace, projectId);
+  if (!project.batchConfig) throw new Error("Batch configuration is required");
+  if (!project.batchConfig.prompt.trim()) throw new Error("Prompt is required");
+  const creditCost = project.batchQueue.length * project.batchConfig.outputCount;
+  const charged = spendCredits(workspace, creditCost);
+  const generatedNodes = project.batchQueue.map((item, index) =>
+    createNode({
+      type: "batch",
+      kind: "generated",
+      name: `${item.name} batch result`,
+      source: `${item.source}#batch-generated`,
+      x: 620 + index * 148,
+      y: 720,
+      width: item.width,
+      height: item.height,
+      generation: {
+        prompt: project.batchConfig!.prompt,
+        modelId: project.batchConfig!.modelId,
+        outputCount: project.batchConfig!.outputCount,
+        entryPoint: "workflow"
+      }
+    })
+  );
+  const updated = updateProject(charged, projectId, (item) =>
+    withUndo(item, {
+      batchQueue: item.batchQueue.map((queueItem) => ({ ...queueItem, status: "done" })),
+      nodes: [...item.nodes, ...generatedNodes],
+      selectedNodeIds: generatedNodes.map((node) => node.id)
+    })
+  );
+  return {
+    ...updated,
+    history: [
+      {
+        id: createId("history"),
+        projectId,
+        nodeId: project.batchQueue[0]?.id ?? projectId,
+        prompt: project.batchConfig.prompt,
+        modelId: project.batchConfig.modelId,
+        outputCount: creditCost,
+        creditCost,
+        operation: "generate",
+        createdAt: now()
+      },
+      ...updated.history
+    ]
+  };
+}
+
+export function connectWorkflowNode(
+  workspace: Workspace,
+  projectId: string,
+  from: string,
+  to: string,
+  fromPort = "out",
+  toPort = "image"
+): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    findNode(project, from);
+    findNode(project, to);
+    const exists = project.connections.some((connection) => connection.fromNodeId === from && connection.toNodeId === to);
+    return exists ? project : withUndo(project, { connections: [...project.connections, connect(from, to, fromPort, toPort)] });
+  });
+}
+
+export function mergeReferenceSelection(
+  workspace: Workspace,
+  projectId: string,
+  nodeIds: string[],
+  name: string
+): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const references = nodeIds.map((id) => findNode(project, id));
+    const left = Math.min(...references.map((node) => node.x));
+    const top = Math.min(...references.map((node) => node.y));
+    const groupNode = createNode({
+      type: "imageGroup",
+      kind: "referenceGroup",
+      name,
+      source: references.map((node) => node.source).join("|"),
+      x: left + 96,
+      y: top + 220,
+      width: 360,
+      height: 220,
+      references: nodeIds,
+      metadata: { referenceCount: nodeIds.length }
+    });
+    return withUndo(project, {
+      nodes: [...project.nodes, groupNode],
+      connections: [...project.connections, ...nodeIds.map((id) => connect(id, groupNode.id))],
+      selectedNodeIds: [groupNode.id]
+    });
+  });
+}
+
+export function createWorkflowModuleFromSelection(
+  workspace: Workspace,
+  projectId: string,
+  sourceIds: string[],
+  config: { moduleType: ModuleType; prompt: string; modelId: string }
+): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const sources = sourceIds.map((id) => findNode(project, id));
+    const anchor = sources[sources.length - 1];
+    const type: NodeType =
+      config.moduleType === "generate"
+        ? "config"
+        : config.moduleType === "removeBackground"
+          ? "removeBg"
+          : config.moduleType === "upload"
+            ? "image"
+            : config.moduleType;
+    const references = sources.flatMap((node) => (node.type === "imageGroup" ? node.references : [node.id]));
+    const moduleNode = createNode({
+      type,
+      kind: "workflow",
+      name: `${config.moduleType} module`,
+      source: "workflow-module",
+      moduleType: config.moduleType,
+      parentId: anchor.id,
+      references,
+      x: anchor.x + anchor.width + 180,
+      y: anchor.y + 10,
+      width: 260,
+      height: 150,
+      generation: {
+        prompt: config.prompt,
+        modelId: config.modelId,
+        outputCount: 1,
+        entryPoint: "workflow"
+      }
+    });
+    return withUndo(project, {
+      nodes: [...project.nodes, moduleNode],
+      connections: [...project.connections, ...sourceIds.map((id) => connect(id, moduleNode.id))],
+      selectedNodeIds: [moduleNode.id]
+    });
+  });
+}
+
+function executeModule(workspace: Workspace, projectId: string, moduleNode: CanvasNode): Workspace {
+  if (!moduleNode.generation.prompt.trim()) throw new Error("Prompt is required");
+  const charged = spendCredits(workspace, moduleNode.generation.outputCount);
+  const updated = updateProject(charged, projectId, (project) => {
+    const generatedNode = createNode({
+      type: "image",
+      kind: "generated",
+      name: `${moduleNode.name} output`,
+      source: `${moduleNode.source || "workflow"}#${moduleNode.moduleType}-output`,
+      parentId: moduleNode.id,
+      references: moduleNode.references,
+      x: moduleNode.x + moduleNode.width + 112,
+      y: moduleNode.y,
+      width: 420,
+      height: 420,
+      generation: moduleNode.generation,
+      metadata: { moduleType: moduleNode.moduleType }
+    });
+    return withUndo(project, {
+      nodes: [...project.nodes, generatedNode],
+      connections: [...project.connections, connect(moduleNode.id, generatedNode.id, "result", "in")],
+      selectedNodeIds: [generatedNode.id]
+    });
+  });
+  return {
+    ...updated,
+    history: [
+      {
+        id: createId("history"),
+        projectId,
+        nodeId: moduleNode.id,
+        prompt: moduleNode.generation.prompt,
+        modelId: moduleNode.generation.modelId,
+        outputCount: moduleNode.generation.outputCount,
+        creditCost: moduleNode.generation.outputCount,
+        operation: moduleNode.operation,
+        moduleType: moduleNode.moduleType,
+        referenceCount: moduleNode.references.length,
+        createdAt: now()
+      },
+      ...updated.history
+    ]
+  };
+}
+
+export function runWorkflowChain(workspace: Workspace, projectId: string, startNodeId: string): Workspace {
+  let currentWorkspace = workspace;
+  let cursorId = startNodeId;
+  const visited = new Set<string>();
+  while (!visited.has(cursorId)) {
+    visited.add(cursorId);
+    const project = findProject(currentWorkspace, projectId);
+    const nextConnection = project.connections.find((connection) => connection.fromNodeId === cursorId);
+    if (!nextConnection) break;
+    const nextNode = findNode(project, nextConnection.toNodeId);
+    if (nextNode.kind !== "workflow" && nextNode.type !== "config" && nextNode.type !== "edit" && nextNode.type !== "upscale") {
+      cursorId = nextNode.id;
+      continue;
+    }
+    currentWorkspace = executeModule(currentWorkspace, projectId, nextNode);
+    cursorId = nextNode.id;
+  }
+  return currentWorkspace;
+}
+
+export function saveNodeAsAsset(workspace: Workspace, projectId: string, nodeId: string): Workspace {
+  const node = findNode(findProject(workspace, projectId), nodeId);
+  const asset: LibraryAsset = {
+    id: createId("asset"),
+    type: node.type === "text" ? "text" : "image",
+    title: node.name,
+    source: node.source,
+    tags: node.type === "text" ? ["prompt"] : ["canvas"],
+    createdAt: now(),
+    metadata: { projectId, nodeId }
+  };
+  return { ...workspace, assets: [asset, ...workspace.assets] };
+}
