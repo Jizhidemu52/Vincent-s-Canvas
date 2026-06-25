@@ -115,4 +115,26 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Generation target frame")).toBeInTheDocument();
     expect(screen.getByText("gpt-image-2-medium")).toBeInTheDocument();
   });
+
+  it("shows generation records and credit usage in the home history and profile views", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.dblClick(screen.getByText("fashion-reference.jpg"));
+    await user.type(screen.getByRole("textbox", { name: "Inline prompt" }), "生成一款带盘扣的黑色马甲");
+    const generateButtons = screen.getAllByRole("button", { name: "Generate" });
+    await user.click(generateButtons[generateButtons.length - 1]);
+    await user.click(screen.getByRole("button", { name: "Projects" }));
+
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(screen.getByRole("region", { name: "History management" })).toBeInTheDocument();
+    expect(screen.getByText(/生成一款带盘扣的黑色马甲/)).toBeInTheDocument();
+    expect(screen.getByText("fashion-reference.jpg result 1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Profile" }));
+    expect(screen.getByRole("region", { name: "Profile credit management" })).toBeInTheDocument();
+    expect(screen.getByText("Credit balance")).toBeInTheDocument();
+    expect(screen.getByText("-1")).toBeInTheDocument();
+  });
 });

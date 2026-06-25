@@ -77,6 +77,7 @@ const SECOND_TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 type ViewMode = "login" | "home" | "canvas" | "admin";
 type DragMode = "move" | "resize";
 type ShapeEditDraft = { nodeId: string; shape: "ellipse" | "rectangle" | "freehand"; prompt: string } | null;
+type HomeSection = "Projects" | "History" | "Profile";
 
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -359,10 +360,19 @@ function HomeView({
   onOpenProject: (projectId: string) => void;
   onAdmin: () => void;
 }) {
+  const [activeSection, setActiveSection] = useState<HomeSection>("Projects");
   const projectCards = workspace.projects.length ? workspace.projects : [];
   return (
     <main className="home-shell">
-      <SideNav workspace={workspace} active="Projects" onAdmin={onAdmin} />
+      <SideNav
+        workspace={workspace}
+        active={activeSection}
+        onAdmin={onAdmin}
+        onCreateProject={onCreateProject}
+        onNavigate={(section) => {
+          if (section === "Projects" || section === "History" || section === "Profile") setActiveSection(section);
+        }}
+      />
       <section className="home-main">
         <div className="home-banner">
           <div>
@@ -375,37 +385,185 @@ function HomeView({
             <small>{workspace.profile.creditUsed} credits used</small>
           </div>
         </div>
-        <div className="home-filters">
-          <button type="button" className="filter active">My projects</button>
-          <button type="button" className="filter">Shared by me</button>
-          <button type="button" className="filter">Shared with me</button>
-          <button type="button" className="filter">Featured projects</button>
-          <button type="button" className="filter muted">Last opened <ChevronDown size={13} /></button>
-        </div>
-        <section className="project-grid" aria-label="Projects">
-          <button type="button" className="project-card create-card" onClick={onCreateProject} aria-label="New project">
-            <span className="plus">+</span>
-            <strong>Create new project</strong>
-          </button>
-          {projectCards.map((project) => (
-            <button type="button" className="project-card" key={project.id} onClick={() => onOpenProject(project.id)}>
-              <div className="project-thumb">
-                {project.nodes[0]?.source ? <img src={project.nodes[0].source} alt="" /> : <span>No images</span>}
-              </div>
-              <strong>{project.name}</strong>
-              <small>{project.nodes.length} nodes · modified just now</small>
-            </button>
-          ))}
-          {!projectCards.length && (
-            <article className="project-card empty-project-card">
-              <div className="project-thumb"><span>No images</span></div>
-              <strong>Untitled</strong>
-              <small>Create a task to enter canvas</small>
-            </article>
-          )}
-        </section>
+        {activeSection === "Projects" && <ProjectsPanel projects={projectCards} onCreateProject={onCreateProject} onOpenProject={onOpenProject} />}
+        {activeSection === "History" && <HistoryPanel workspace={workspace} onOpenProject={onOpenProject} />}
+        {activeSection === "Profile" && <ProfilePanel workspace={workspace} />}
       </section>
     </main>
+  );
+}
+
+function ProjectsPanel({
+  projects,
+  onCreateProject,
+  onOpenProject
+}: {
+  projects: Project[];
+  onCreateProject: () => void;
+  onOpenProject: (projectId: string) => void;
+}) {
+  return (
+    <>
+      <div className="home-filters">
+        <button type="button" className="filter active">My projects</button>
+        <button type="button" className="filter">Shared by me</button>
+        <button type="button" className="filter">Shared with me</button>
+        <button type="button" className="filter">Featured projects</button>
+        <button type="button" className="filter muted">Last opened <ChevronDown size={13} /></button>
+      </div>
+      <section className="project-grid" aria-label="Projects">
+        <button type="button" className="project-card create-card" onClick={onCreateProject} aria-label="New project">
+          <span className="plus">+</span>
+          <strong>Create new project</strong>
+        </button>
+        {projects.map((project) => (
+          <button type="button" className="project-card" key={project.id} onClick={() => onOpenProject(project.id)}>
+            <div className="project-thumb">
+              {project.nodes[0]?.source ? <img src={project.nodes[0].source} alt="" /> : <span>No images</span>}
+            </div>
+            <strong>{project.name}</strong>
+            <small>{project.nodes.length} nodes · modified just now</small>
+          </button>
+        ))}
+        {!projects.length && (
+          <article className="project-card empty-project-card">
+            <div className="project-thumb"><span>No images</span></div>
+            <strong>Untitled</strong>
+            <small>Create a task to enter canvas</small>
+          </article>
+        )}
+      </section>
+    </>
+  );
+}
+
+function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOpenProject: (projectId: string) => void }) {
+  const generatedNodes = workspace.projects.flatMap((project) =>
+    project.nodes
+      .filter((node) => node.kind === "generated" || node.kind === "edit" || node.kind === "operation")
+      .map((node) => ({ project, node }))
+  );
+  return (
+    <section className="home-section" aria-label="History management">
+      <div className="section-heading">
+        <div>
+          <h2>History</h2>
+          <p>Designer generation records, model usage, credit cost, project source and reusable outputs.</p>
+        </div>
+        <span>{workspace.history.length} records</span>
+      </div>
+      <div className="history-layout">
+        <div className="history-records">
+          {workspace.history.length ? (
+            workspace.history.map((entry) => {
+              const project = workspace.projects.find((item) => item.id === entry.projectId);
+              return (
+                <article className="history-record" key={entry.id}>
+                  <div>
+                    <strong>{entry.modelId}</strong>
+                    <small>{entry.creditCost} credits · {entry.outputCount} output · {entry.referenceCount ?? 0} refs</small>
+                  </div>
+                  <p>{entry.prompt}</p>
+                  <button type="button" onClick={() => project && onOpenProject(project.id)} disabled={!project}>
+                    Open project
+                  </button>
+                </article>
+              );
+            })
+          ) : (
+            <article className="empty-history">
+              <strong>No generation history yet</strong>
+              <p>Run a generation, edit, upscale, remove background or batch job inside a project to populate this ledger.</p>
+            </article>
+          )}
+        </div>
+        <div className="history-gallery" aria-label="Generated image gallery">
+          {generatedNodes.length ? (
+            generatedNodes.slice(0, 12).map(({ project, node }) => (
+              <button type="button" key={node.id} className="history-thumb" onClick={() => onOpenProject(project.id)}>
+                <img src={node.source} alt="" />
+                <strong>{node.name}</strong>
+                <small>{project.name}</small>
+              </button>
+            ))
+          ) : (
+            <div className="history-thumb empty">No generated images</div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProfilePanel({ workspace }: { workspace: Workspace }) {
+  const usagePercent = Math.min(100, Math.round((workspace.profile.creditUsed / Math.max(1, workspace.profile.creditUsed + workspace.profile.creditBalance)) * 100));
+  const modelSpend = workspace.history.reduce<Record<string, number>>((memo, entry) => {
+    memo[entry.modelId] = (memo[entry.modelId] ?? 0) + entry.creditCost;
+    return memo;
+  }, {});
+  return (
+    <section className="home-section" aria-label="Profile credit management">
+      <div className="section-heading">
+        <div>
+          <h2>Profile</h2>
+          <p>Account quota management for the designer name, role, model access and credit usage.</p>
+        </div>
+        <span>{workspace.profile.role}</span>
+      </div>
+      <div className="profile-grid">
+        <article className="profile-card account-card">
+          <span>Designer</span>
+          <strong>{workspace.profile.designerName}</strong>
+          <small>{workspace.profile.userId}</small>
+        </article>
+        <article className="profile-card credit-card">
+          <span>Credit balance</span>
+          <strong>{workspace.profile.creditBalance}</strong>
+          <small>{workspace.profile.creditUsed} credits used</small>
+          <div className="credit-meter"><i style={{ width: `${usagePercent}%` }} /></div>
+        </article>
+        <article className="profile-card">
+          <span>Project access</span>
+          <strong>{workspace.projects.length}</strong>
+          <small>active internal workspaces</small>
+        </article>
+        <article className="profile-card">
+          <span>Model registry</span>
+          <strong>{workspace.modelRegistry.length}</strong>
+          <small>server-hosted provider entries</small>
+        </article>
+      </div>
+      <div className="profile-ledger">
+        <article>
+          <h3>Credit ledger</h3>
+          {workspace.history.length ? (
+            workspace.history.slice(0, 6).map((entry) => (
+              <div className="ledger-row" key={entry.id}>
+                <span>{entry.modelId}</span>
+                <strong>-{entry.creditCost}</strong>
+                <small>{entry.prompt}</small>
+              </div>
+            ))
+          ) : (
+            <p>No credit deductions yet. Failed or empty-prompt jobs do not spend credits.</p>
+          )}
+        </article>
+        <article>
+          <h3>Model spend</h3>
+          {Object.keys(modelSpend).length ? (
+            Object.entries(modelSpend).map(([modelId, credits]) => (
+              <div className="ledger-row" key={modelId}>
+                <span>{modelId}</span>
+                <strong>{credits}</strong>
+                <small>credits consumed</small>
+              </div>
+            ))
+          ) : (
+            <p>Spend by model will appear after designers run generation jobs.</p>
+          )}
+        </article>
+      </div>
+    </section>
   );
 }
 
@@ -627,7 +785,19 @@ function CanvasView({
   );
 }
 
-function SideNav({ workspace, active, onAdmin }: { workspace: Workspace; active: string; onAdmin?: () => void }) {
+function SideNav({
+  workspace,
+  active,
+  onAdmin,
+  onCreateProject,
+  onNavigate
+}: {
+  workspace: Workspace;
+  active: string;
+  onAdmin?: () => void;
+  onCreateProject?: () => void;
+  onNavigate?: (section: string) => void;
+}) {
   const items = [
     ["Projects", Grid2X2],
     ["Editing templates", Layers3],
@@ -644,7 +814,7 @@ function SideNav({ workspace, active, onAdmin }: { workspace: Workspace; active:
         <button type="button" className="icon-button"><Menu size={15} /></button>
         <strong>{active}</strong>
       </div>
-      <button type="button" className="black-action"><FolderPlus size={14} /> Create new project</button>
+      <button type="button" className="black-action" onClick={onCreateProject}><FolderPlus size={14} /> Create new project</button>
       {workspace.profile.role === "admin" && (
         <button type="button" className="admin-action" onClick={onAdmin}>
           <Database size={14} />
@@ -652,12 +822,21 @@ function SideNav({ workspace, active, onAdmin }: { workspace: Workspace; active:
         </button>
       )}
       <nav>
-        {items.map(([label, Icon]) => (
-          <button type="button" key={label} className={active === label ? "active" : ""}>
+        {items.map(([label, Icon]) => {
+          const enabled = label === "Projects" || label === "History" || label === "Profile";
+          return (
+          <button
+            type="button"
+            key={label}
+            className={`${active === label ? "active" : ""} ${enabled ? "" : "disabled"}`}
+            onClick={() => enabled && onNavigate?.(label)}
+            disabled={!enabled}
+          >
             <Icon size={15} />
             {label}
           </button>
-        ))}
+          );
+        })}
       </nav>
       <div className="credit-chip">
         <span>{workspace.profile.designerName.slice(0, 1)}</span>
