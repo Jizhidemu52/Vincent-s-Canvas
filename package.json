@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "api": "tsx server/http.ts",
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -21,10 +22,12 @@
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.0",
+    "@types/node": "^26.0.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "jsdom": "^25.0.1",
     "playwright": "^1.61.1",
+    "tsx": "^4.22.4",
     "vitest": "^2.1.0"
   }
 }
