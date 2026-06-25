@@ -19,6 +19,19 @@ export interface ApiError {
   errorMessage: string;
 }
 
+export interface AdminUsageSummary {
+  totalCreditsUsed: number;
+  totalHistoryEntries: number;
+  modelUsage: Array<{ modelId: string; count: number; credits: number }>;
+}
+
+export interface ProviderHealth {
+  provider: string;
+  status: "healthy" | "degraded";
+  modelCount: number;
+  keyLocation: "server";
+}
+
 export function createServerState(profile: Partial<Profile> = {}): ServerState {
   const workspace = createInitialWorkspace(profile);
   return {
@@ -94,6 +107,35 @@ export const apiRoutes = {
   "/api/models": (state: ServerState) => state.models,
   "/api/profile": (state: ServerState) => state.profile,
   "/api/history": (state: ServerState) => state.history,
+  "/api/admin/audit": (state: ServerState) => state.history,
+  "/api/admin/usage": (state: ServerState): AdminUsageSummary => {
+    const byModel = new Map<string, { modelId: string; count: number; credits: number }>();
+    for (const entry of state.history) {
+      const current = byModel.get(entry.modelId) ?? { modelId: entry.modelId, count: 0, credits: 0 };
+      byModel.set(entry.modelId, {
+        modelId: entry.modelId,
+        count: current.count + entry.outputCount,
+        credits: current.credits + entry.creditCost
+      });
+    }
+    return {
+      totalCreditsUsed: state.profile.creditUsed,
+      totalHistoryEntries: state.history.length,
+      modelUsage: Array.from(byModel.values())
+    };
+  },
+  "/api/admin/providers": (state: ServerState): ProviderHealth[] => {
+    const counts = new Map<string, number>();
+    for (const model of state.models) {
+      counts.set(model.provider, (counts.get(model.provider) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([provider, modelCount]) => ({
+      provider,
+      status: "healthy",
+      modelCount,
+      keyLocation: "server"
+    }));
+  },
   "/api/generations": (state: ServerState, request: GenerationRequest, requestId?: string) =>
     runMockModel(state, { ...request, operation: "generate" }, requestId),
   "/api/edits": (state: ServerState, request: GenerationRequest, requestId?: string) =>
@@ -112,7 +154,14 @@ export function callApi(
 ) {
   try {
     const route = apiRoutes[path];
-    if (path === "/api/models" || path === "/api/profile" || path === "/api/history") {
+    if (
+      path === "/api/models" ||
+      path === "/api/profile" ||
+      path === "/api/history" ||
+      path === "/api/admin/audit" ||
+      path === "/api/admin/usage" ||
+      path === "/api/admin/providers"
+    ) {
       return route(state, request as GenerationRequest, requestId);
     }
     if (!request) {

@@ -73,7 +73,7 @@ import {
 const TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 const SECOND_TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 
-type ViewMode = "home" | "canvas";
+type ViewMode = "login" | "home" | "canvas" | "admin";
 type DragMode = "move" | "resize";
 
 function createWorkspace() {
@@ -82,10 +82,24 @@ function createWorkspace() {
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => createWorkspace());
-  const [view, setView] = useState<ViewMode>("home");
+  const [view, setView] = useState<ViewMode>("login");
   const [rightPanel, setRightPanel] = useState<"context" | "history" | "assets" | "prompts">("context");
   const activeProject = workspace.projects.find((project) => project.id === workspace.activeProjectId);
   const selectedNode = activeProject?.nodes.find((node) => node.id === activeProject.selectedNodeIds[0]) ?? activeProject?.nodes[0];
+
+  function login(email: string) {
+    const isAdmin = email.toLowerCase().includes("admin");
+    setWorkspace((current) => ({
+      ...current,
+      profile: {
+        ...current.profile,
+        userId: email,
+        designerName: isAdmin ? "Admin Ops" : "Lina Zhou",
+        role: isAdmin ? "admin" : "designer"
+      }
+    }));
+    setView("home");
+  }
 
   function openNewProject() {
     setWorkspace((current) => {
@@ -241,22 +255,68 @@ export default function App() {
     );
   }
 
-  return <HomeView workspace={workspace} onCreateProject={openNewProject} onOpenProject={openProject} />;
+  if (view === "admin") {
+    return <AdminView workspace={workspace} onBack={() => setView("home")} />;
+  }
+
+  if (view === "login") {
+    return <LoginView onLogin={login} />;
+  }
+
+  return <HomeView workspace={workspace} onCreateProject={openNewProject} onOpenProject={openProject} onAdmin={() => setView("admin")} />;
+}
+
+function LoginView({ onLogin }: { onLogin: (email: string) => void }) {
+  const [email, setEmail] = useState("admin@company.local");
+  const [password, setPassword] = useState("canvas-demo");
+  return (
+    <main className="login-shell">
+      <section className="login-panel">
+        <div className="login-brand">
+          <span>内部访问</span>
+          <h1>登录 Canvas Ops</h1>
+          <p>进入公司设计工作台，统一管理项目、图片素材、生图接口、额度和后台监控。</p>
+        </div>
+        <label>
+          <span>邮箱</span>
+          <input aria-label="Email" value={email} onChange={(event) => setEmail(event.target.value)} />
+        </label>
+        <label>
+          <span>密码</span>
+          <input aria-label="Password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+        </label>
+        <button type="button" className="generate-button" onClick={() => email.trim() && password.trim() && onLogin(email)}>
+          登录
+        </button>
+      </section>
+      <aside className="login-copy">
+        <strong>团队工作台</strong>
+        <p>把公司内部图片生产集中到一个受控空间。</p>
+        <ul>
+          <li>项目、画布和图片来源都会绑定到团队账号。</li>
+          <li>生图接口密钥只保存在公司后端边界内。</li>
+          <li>生成图片会带着创建人、模型和提示词回到素材库。</li>
+        </ul>
+      </aside>
+    </main>
+  );
 }
 
 function HomeView({
   workspace,
   onCreateProject,
-  onOpenProject
+  onOpenProject,
+  onAdmin
 }: {
   workspace: Workspace;
   onCreateProject: () => void;
   onOpenProject: (projectId: string) => void;
+  onAdmin: () => void;
 }) {
   const projectCards = workspace.projects.length ? workspace.projects : [];
   return (
     <main className="home-shell">
-      <SideNav workspace={workspace} active="Projects" />
+      <SideNav workspace={workspace} active="Projects" onAdmin={onAdmin} />
       <section className="home-main">
         <div className="home-banner">
           <div>
@@ -300,6 +360,86 @@ function HomeView({
         </section>
       </section>
     </main>
+  );
+}
+
+function AdminView({ workspace, onBack }: { workspace: Workspace; onBack: () => void }) {
+  const totalNodes = workspace.projects.reduce((sum, project) => sum + project.nodes.length, 0);
+  const totalConnections = workspace.projects.reduce((sum, project) => sum + project.connections.length, 0);
+  const runningJobs = workspace.projects.reduce((sum, project) => sum + project.nodes.filter((node) => node.status === "running").length, 0);
+  const providers = workspace.modelRegistry.reduce<Record<string, number>>((memo, model) => {
+    memo[model.provider] = (memo[model.provider] ?? 0) + 1;
+    return memo;
+  }, {});
+
+  return (
+    <main className="admin-shell">
+      <SideNav workspace={workspace} active="Profile" onAdmin={onBack} />
+      <section className="admin-main">
+        <header className="admin-header">
+          <button type="button" className="toolbar-pill" onClick={onBack}>Back to projects</button>
+          <div>
+            <h1>Admin monitoring</h1>
+            <p>账号额度、模型渠道、项目活动和生成审计。</p>
+          </div>
+        </header>
+        <section className="admin-metrics">
+          <MetricCard label="Projects" value={workspace.projects.length} detail="active canvas workspaces" />
+          <MetricCard label="Canvas nodes" value={totalNodes} detail={`${totalConnections} workflow links`} />
+          <MetricCard label="Credits used" value={workspace.profile.creditUsed} detail={`${workspace.profile.creditBalance} remaining`} />
+          <MetricCard label="Running jobs" value={runningJobs} detail={`${workspace.history.length} history entries`} />
+        </section>
+        <section className="admin-grid">
+          <article className="admin-card">
+            <h2>Model providers</h2>
+            {Object.entries(providers).map(([provider, count]) => (
+              <div className="admin-row" key={provider}>
+                <span>{provider}</span>
+                <strong>{count} models</strong>
+                <small>healthy · backend hosted</small>
+              </div>
+            ))}
+          </article>
+          <article className="admin-card">
+            <h2>Recent audit</h2>
+            {workspace.history.length ? (
+              workspace.history.slice(0, 6).map((entry) => (
+                <div className="admin-row" key={entry.id}>
+                  <span>{entry.modelId}</span>
+                  <strong>{entry.creditCost} credits</strong>
+                  <small>{entry.prompt}</small>
+                </div>
+              ))
+            ) : (
+              <p>No generation audit yet. Run a canvas job to populate this panel.</p>
+            )}
+          </article>
+          <article className="admin-card">
+            <h2>Access policy</h2>
+            <div className="admin-row">
+              <span>API keys</span>
+              <strong>Server only</strong>
+              <small>front end stores model ids and parameters, never provider secrets</small>
+            </div>
+            <div className="admin-row">
+              <span>Role</span>
+              <strong>{workspace.profile.role}</strong>
+              <small>{workspace.profile.userId}</small>
+            </div>
+          </article>
+        </section>
+      </section>
+    </main>
+  );
+}
+
+function MetricCard({ label, value, detail }: { label: string; value: number; detail: string }) {
+  return (
+    <article className="metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </article>
   );
 }
 
@@ -402,7 +542,7 @@ function CanvasView({
   );
 }
 
-function SideNav({ workspace, active }: { workspace: Workspace; active: string }) {
+function SideNav({ workspace, active, onAdmin }: { workspace: Workspace; active: string; onAdmin?: () => void }) {
   const items = [
     ["Projects", Grid2X2],
     ["Editing templates", Layers3],
@@ -420,6 +560,12 @@ function SideNav({ workspace, active }: { workspace: Workspace; active: string }
         <strong>{active}</strong>
       </div>
       <button type="button" className="black-action"><FolderPlus size={14} /> Create new project</button>
+      {workspace.profile.role === "admin" && (
+        <button type="button" className="admin-action" onClick={onAdmin}>
+          <Database size={14} />
+          Admin monitoring
+        </button>
+      )}
       <nav>
         {items.map(([label, Icon]) => (
           <button type="button" key={label} className={active === label ? "active" : ""}>

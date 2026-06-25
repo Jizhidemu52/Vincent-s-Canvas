@@ -3,9 +3,16 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import App from "./App";
 
+async function login(user: ReturnType<typeof userEvent.setup>) {
+  render(<App />);
+  expect(screen.getByText("登录 Canvas Ops")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "登录" }));
+}
+
 describe("Designer canvas app shell", () => {
-  it("shows account, history, and project management before opening the canvas", () => {
-    render(<App />);
+  it("shows account, history, and project management before opening the canvas", async () => {
+    const user = userEvent.setup();
+    await login(user);
 
     expect(screen.getByText("Profile")).toBeInTheDocument();
     expect(screen.getAllByText("Projects").length).toBeGreaterThan(0);
@@ -18,7 +25,7 @@ describe("Designer canvas app shell", () => {
 
   it("opens the Recraft-like infinite canvas only after a project is created", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await login(user);
 
     await user.click(screen.getByRole("button", { name: "New project" }));
 
@@ -31,7 +38,7 @@ describe("Designer canvas app shell", () => {
 
   it("supports reference uploads, model prompt controls, and right dock panels after entering canvas", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await login(user);
 
     await user.click(screen.getByRole("button", { name: "New project" }));
     await user.click(screen.getByRole("button", { name: /Upload images/i }));
@@ -52,7 +59,7 @@ describe("Designer canvas app shell", () => {
 
   it("runs batch mode and writes visible generation history", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await login(user);
 
     await user.click(screen.getByRole("button", { name: "New project" }));
     await user.type(screen.getByPlaceholderText(/\[TARGET\]/), "统一去背并保持服装边缘清晰");
@@ -61,5 +68,17 @@ describe("Designer canvas app shell", () => {
 
     expect(screen.getByText(/background-cleaner/i)).toBeInTheDocument();
     expect(screen.getAllByText(/credits/i).length).toBeGreaterThan(0);
+  });
+
+  it("opens admin monitoring for an admin session", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: /Admin monitoring/i }));
+
+    expect(screen.getByRole("heading", { name: "Admin monitoring" })).toBeInTheDocument();
+    expect(screen.getByText("Model providers")).toBeInTheDocument();
+    expect(screen.getByText("Access policy")).toBeInTheDocument();
+    expect(screen.getByText("Server only")).toBeInTheDocument();
   });
 });

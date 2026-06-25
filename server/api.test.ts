@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { callApi, createServerState, type ApiError } from "./api";
 import type { GenerationRequest, GenerationResult } from "../src/domain/workspace";
+import type { AdminUsageSummary, ProviderHealth } from "./api";
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
   return {
@@ -75,5 +76,21 @@ describe("backend hosted mock API", () => {
     expect(duplicate.errorMessage).toBe("Duplicate request");
     expect(state.profile.creditBalance).toBe(26);
     expect(state.history).toHaveLength(1);
+  });
+
+  it("reports admin usage, audit, and provider health without exposing secrets", () => {
+    const state = createServerState({ creditBalance: 30 });
+    callApi(state, "/api/generations", request({ outputCount: 1 }), "usage-1");
+    callApi(state, "/api/upscale", request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }), "usage-2");
+
+    const usage = callApi(state, "/api/admin/usage") as AdminUsageSummary;
+    const audit = callApi(state, "/api/admin/audit") as ReturnType<typeof createServerState>["history"];
+    const providers = callApi(state, "/api/admin/providers") as ProviderHealth[];
+
+    expect(usage.totalCreditsUsed).toBeGreaterThan(0);
+    expect(usage.modelUsage.some((item) => item.modelId === "gpt-image-2-low")).toBe(true);
+    expect(audit).toHaveLength(2);
+    expect(providers.every((provider) => provider.keyLocation === "server")).toBe(true);
+    expect(providers.some((provider) => provider.provider === "openai" && provider.status === "healthy")).toBe(true);
   });
 });
