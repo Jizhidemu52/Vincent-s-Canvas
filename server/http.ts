@@ -1,7 +1,18 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
-import { apiRoutes, callApi, createServerState, getWorkspaceSnapshot, saveWorkspaceSnapshot, type ApiError, type ServerState, type WorkspaceSnapshot } from "./api";
+import {
+  adjustAccountCredits,
+  apiRoutes,
+  callApi,
+  createServerState,
+  getWorkspaceSnapshot,
+  saveWorkspaceSnapshot,
+  type ApiError,
+  type CreditAdjustmentRequest,
+  type ServerState,
+  type WorkspaceSnapshot
+} from "./api";
 import { loadServerState, saveServerState } from "./storage";
 import type { GenerationRequest, GenerationResult } from "../src/domain/workspace";
 
@@ -113,6 +124,24 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
           return;
         }
         sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
+        return;
+      }
+
+      if (pathname === "/api/admin/credits") {
+        if (request.method === "OPTIONS") {
+          sendJson(response, 204);
+          return;
+        }
+        if (request.method !== "POST") {
+          sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
+          return;
+        }
+        const body = await readJsonBody<Partial<CreditAdjustmentRequest>>(request, bodyLimitBytes);
+        const result = adjustAccountCredits(state, body ?? {}, userId);
+        if (!isApiError(result) && stateFilePath) {
+          saveServerState(stateFilePath, state);
+        }
+        sendJson(response, statusFromApiResult(result), result);
         return;
       }
 

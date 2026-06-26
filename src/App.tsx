@@ -39,7 +39,7 @@ import {
   ZoomIn,
   ZoomOut
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent, type WheelEvent } from "react";
 import {
   addAssetToProjectAt,
   addAssetToProject,
@@ -70,10 +70,11 @@ import {
   type OperationType,
   type ModuleType,
   type NodeTransform,
+  type Profile,
   type Project,
   type Workspace
 } from "./domain/workspace";
-import { fetchBackendSnapshot, fetchWorkspaceSnapshot, saveWorkspaceSnapshot, submitGenerationRequest } from "./services/modelApi";
+import { adjustDesignerCredits, fetchBackendSnapshot, fetchWorkspaceSnapshot, saveWorkspaceSnapshot, submitGenerationRequest } from "./services/modelApi";
 
 const TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 const SECOND_TEST_IMAGE = "/fixtures/fashion-reference.jpg";
@@ -532,6 +533,23 @@ export default function App() {
     setWorkspace((current) => addTextNode(current, activeProject.id, content, 760, 260));
   }
 
+  async function adjustCredits(targetUserId: string, delta: number, reason: string) {
+    const updatedProfile = await adjustDesignerCredits({ targetUserId, delta, reason }, activeUserId);
+    if (updatedProfile.userId === activeUserId) {
+      setWorkspace((current) => ({
+        ...current,
+        profile: {
+          ...current.profile,
+          creditBalance: updatedProfile.creditBalance,
+          credits: updatedProfile.credits,
+          creditUsed: updatedProfile.creditUsed
+        }
+      }));
+    }
+    setApiNotice(`Credits updated for ${updatedProfile.userId}: ${updatedProfile.creditBalance} remaining`);
+    return updatedProfile;
+  }
+
   if (view === "canvas" && activeProject) {
     return (
       <CanvasView
@@ -568,7 +586,7 @@ export default function App() {
   }
 
   if (view === "admin") {
-    return <AdminView workspace={workspace} onBack={() => setView("home")} />;
+    return <AdminView workspace={workspace} notice={apiNotice} onBack={() => setView("home")} onAdjustCredits={adjustCredits} />;
   }
 
   if (view === "login") {
@@ -832,14 +850,42 @@ function ProfilePanel({ workspace }: { workspace: Workspace }) {
   );
 }
 
-function AdminView({ workspace, onBack }: { workspace: Workspace; onBack: () => void }) {
+function AdminView({
+  workspace,
+  notice,
+  onBack,
+  onAdjustCredits
+}: {
+  workspace: Workspace;
+  notice: string;
+  onBack: () => void;
+  onAdjustCredits: (targetUserId: string, delta: number, reason: string) => Promise<Profile>;
+}) {
   const totalNodes = workspace.projects.reduce((sum, project) => sum + project.nodes.length, 0);
   const totalConnections = workspace.projects.reduce((sum, project) => sum + project.connections.length, 0);
   const runningJobs = workspace.projects.reduce((sum, project) => sum + project.nodes.filter((node) => node.status === "running").length, 0);
+  const [targetUserId, setTargetUserId] = useState(workspace.profile.userId);
+  const [creditDelta, setCreditDelta] = useState("20");
+  const [creditReason, setCreditReason] = useState("Monthly design allocation");
+  const [creditNotice, setCreditNotice] = useState(notice);
+  const [isAdjusting, setIsAdjusting] = useState(false);
   const providers = workspace.modelRegistry.reduce<Record<string, number>>((memo, model) => {
     memo[model.provider] = (memo[model.provider] ?? 0) + 1;
     return memo;
   }, {});
+
+  async function submitCreditAdjustment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsAdjusting(true);
+    try {
+      const profile = await onAdjustCredits(targetUserId, Number(creditDelta), creditReason);
+      setCreditNotice(`${profile.designerName} now has ${profile.creditBalance} credits`);
+    } catch (error) {
+      setCreditNotice(error instanceof Error ? error.message : "Credit adjustment failed");
+    } finally {
+      setIsAdjusting(false);
+    }
+  }
 
   return (
     <main className="admin-shell">
@@ -895,6 +941,42 @@ function AdminView({ workspace, onBack }: { workspace: Workspace; onBack: () => 
               <strong>{workspace.profile.role}</strong>
               <small>{workspace.profile.userId}</small>
             </div>
+          </article>
+          <article className="admin-card">
+            <h2>Credit management</h2>
+            <form className="admin-credit-form" onSubmit={submitCreditAdjustment}>
+              <label>
+                <span>Designer account</span>
+                <input
+                  aria-label="Designer account"
+                  value={targetUserId}
+                  onChange={(event) => setTargetUserId(event.target.value)}
+                  placeholder="designer@company.local"
+                />
+              </label>
+              <label>
+                <span>Credit delta</span>
+                <input
+                  aria-label="Credit delta"
+                  type="number"
+                  step={1}
+                  value={creditDelta}
+                  onChange={(event) => setCreditDelta(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Reason</span>
+                <input
+                  aria-label="Credit reason"
+                  value={creditReason}
+                  onChange={(event) => setCreditReason(event.target.value)}
+                />
+              </label>
+              <button type="submit" className="generate-button" disabled={isAdjusting}>
+                {isAdjusting ? "Updating..." : "Update credits"}
+              </button>
+              <small aria-live="polite">{creditNotice}</small>
+            </form>
           </article>
         </section>
       </section>

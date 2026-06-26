@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { callApi, createServerState, type ApiError } from "./api";
+import { adjustAccountCredits, callApi, createServerState, type ApiError } from "./api";
 import type { GenerationRequest, GenerationResult, Profile } from "../src/domain/workspace";
 import type { AdminUsageSummary, ProviderHealth } from "./api";
 
@@ -114,5 +114,33 @@ describe("backend hosted mock API", () => {
     expect(bobHistory[0].modelId).toBe("upscale-pro");
     expect(usage.totalHistoryEntries).toBe(2);
     expect(state.history).toHaveLength(0);
+  });
+
+  it("lets admins adjust designer credit balances without exposing account state", () => {
+    const state = createServerState({ creditBalance: 30 });
+
+    const adjusted = adjustAccountCredits(
+      state,
+      { targetUserId: "alice@company.local", delta: 15, reason: "monthly allocation" },
+      "admin@company.local"
+    ) as Profile;
+    const aliceProfile = callApi(state, "/api/profile", undefined, undefined, "alice@company.local") as Profile;
+
+    expect(adjusted.creditBalance).toBe(45);
+    expect(aliceProfile.creditBalance).toBe(45);
+    expect(aliceProfile.creditUsed).toBe(0);
+  });
+
+  it("rejects unauthorized or invalid credit adjustments without dirty side effects", () => {
+    const state = createServerState({ creditBalance: 30 });
+    const before = callApi(state, "/api/profile", undefined, undefined, "alice@company.local") as Profile;
+
+    const unauthorized = adjustAccountCredits(state, { targetUserId: "alice@company.local", delta: 10 }, "designer@company.local") as ApiError;
+    const negative = adjustAccountCredits(state, { targetUserId: "alice@company.local", delta: -31 }, "admin@company.local") as ApiError;
+    const after = callApi(state, "/api/profile", undefined, undefined, "alice@company.local") as Profile;
+
+    expect(unauthorized).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+    expect(negative).toMatchObject({ status: "failed", errorMessage: "Credit balance cannot be negative" });
+    expect(after.creditBalance).toBe(before.creditBalance);
   });
 });

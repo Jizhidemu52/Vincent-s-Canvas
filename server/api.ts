@@ -36,6 +36,12 @@ export interface ApiError {
   errorMessage: string;
 }
 
+export interface CreditAdjustmentRequest {
+  targetUserId: string;
+  delta: number;
+  reason?: string;
+}
+
 export interface AdminUsageSummary {
   totalCreditsUsed: number;
   totalHistoryEntries: number;
@@ -121,6 +127,44 @@ function allHistory(state: ServerState) {
 
 function totalCreditsUsed(state: ServerState) {
   return state.profile.creditUsed + Object.values(state.accounts).reduce((sum, account) => sum + account.profile.creditUsed, 0);
+}
+
+function isAdminUser(state: ServerState, userId?: string) {
+  const account = getAccountWorkspace(state, userId);
+  return account.profile.role === "admin" || Boolean(normalizeUserId(userId)?.includes("admin"));
+}
+
+export function adjustAccountCredits(state: ServerState, request: Partial<CreditAdjustmentRequest>, adminUserId?: string): Profile | ApiError {
+  try {
+    if (!isAdminUser(state, adminUserId)) {
+      throw new Error("Admin role required");
+    }
+    const targetUserId = normalizeUserId(request.targetUserId);
+    if (!targetUserId) {
+      throw new Error("Target user is required");
+    }
+    const delta = Number(request.delta);
+    if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 10_000) {
+      throw new Error("Credit delta must be a non-zero integer between -10000 and 10000");
+    }
+    const account = getAccountWorkspace(state, targetUserId);
+    const nextBalance = account.profile.creditBalance + delta;
+    if (nextBalance < 0) {
+      throw new Error("Credit balance cannot be negative");
+    }
+    account.profile = {
+      ...account.profile,
+      creditBalance: nextBalance,
+      credits: nextBalance
+    };
+    saveAccountWorkspace(state, account, targetUserId);
+    return account.profile;
+  } catch (error) {
+    return {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Unknown server error"
+    };
+  }
 }
 
 export function getWorkspaceSnapshot(state: ServerState, userId?: string): WorkspaceSnapshot {

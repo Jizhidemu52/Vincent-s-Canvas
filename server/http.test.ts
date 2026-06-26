@@ -187,6 +187,29 @@ describe("HTTP API server", () => {
     expect(bobHistory).toHaveLength(0);
   });
 
+  it("allows admin credit adjustments over HTTP and rejects non-admin callers", async () => {
+    const adjustResponse = await fetch(`${context.baseUrl}/api/admin/credits`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ targetUserId: "alice@company.local", delta: 25, reason: "monthly allocation" })
+    });
+    const adjusted = (await adjustResponse.json()) as Profile;
+    const aliceProfile = (await (await fetch(`${context.baseUrl}/api/profile`, { headers: { "x-user-id": "alice@company.local" } })).json()) as Profile;
+    const unauthorizedResponse = await fetch(`${context.baseUrl}/api/admin/credits`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "designer@company.local" },
+      body: JSON.stringify({ targetUserId: "alice@company.local", delta: 10 })
+    });
+    const afterUnauthorized = (await (await fetch(`${context.baseUrl}/api/profile`, { headers: { "x-user-id": "alice@company.local" } })).json()) as Profile;
+
+    expect(adjustResponse.status).toBe(200);
+    expect(adjusted.creditBalance).toBe(35);
+    expect(aliceProfile.creditBalance).toBe(35);
+    expect(unauthorizedResponse.status).toBe(400);
+    expect(await unauthorizedResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+    expect(afterUnauthorized.creditBalance).toBe(35);
+  });
+
   it("persists profile balance, history, and duplicate request ids across server restarts", async () => {
     await new Promise<void>((resolve, reject) => {
       context.server.close((error) => (error ? reject(error) : resolve()));

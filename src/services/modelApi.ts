@@ -8,6 +8,12 @@ export interface BackendSnapshot {
   models?: ModelDefinition[];
 }
 
+export interface CreditAdjustmentRequest {
+  targetUserId: string;
+  delta: number;
+  reason?: string;
+}
+
 export type WorkspaceSnapshot = Pick<
   Workspace,
   "profile" | "projects" | "activeProjectId" | "history" | "assets" | "prompts" | "modelRegistry"
@@ -76,4 +82,13 @@ export async function saveWorkspaceSnapshot(workspace: Workspace, userId?: strin
     body: JSON.stringify(snapshot)
   });
   return readJson<WorkspaceSnapshot>(response);
+}
+
+export async function adjustDesignerCredits(request: CreditAdjustmentRequest, adminUserId?: string): Promise<Profile> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/credits`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...userHeaders(adminUserId) },
+    body: JSON.stringify(request)
+  });
+  return readJson<Profile>(response);
 }

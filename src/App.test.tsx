@@ -64,6 +64,28 @@ beforeEach(() => {
           modelRegistry: backendWorkspace.modelRegistry
         });
       }
+      if (url.endsWith("/api/admin/credits")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        const request = JSON.parse(String(init?.body)) as { targetUserId: string; delta: number; reason?: string };
+        const nextBalance = backendProfile.creditBalance + Number(request.delta);
+        if (!Number.isInteger(Number(request.delta)) || Number(request.delta) === 0 || nextBalance < 0) {
+          return jsonResponse({ status: "failed", errorMessage: "Credit balance cannot be negative" }, 400);
+        }
+        backendProfile = {
+          ...backendProfile,
+          userId: request.targetUserId,
+          designerName: request.targetUserId.includes("admin") ? "Admin Ops" : request.targetUserId.split("@")[0],
+          role: request.targetUserId.includes("admin") ? "admin" : "designer",
+          creditBalance: nextBalance,
+          credits: nextBalance
+        };
+        backendWorkspace = { ...backendWorkspace, profile: backendProfile };
+        return jsonResponse(backendProfile);
+      }
       if (url.endsWith("/api/profile")) return jsonResponse(backendProfile);
       if (url.endsWith("/api/history")) return jsonResponse(backendHistory);
       if (url.endsWith("/api/models")) {
@@ -234,6 +256,16 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Model providers")).toBeInTheDocument();
     expect(screen.getByText("Access policy")).toBeInTheDocument();
     expect(screen.getByText("Server only")).toBeInTheDocument();
+    expect(screen.getByText("Credit management")).toBeInTheDocument();
+
+    await user.clear(screen.getByRole("spinbutton", { name: "Credit delta" }));
+    await user.type(screen.getByRole("spinbutton", { name: "Credit delta" }), "20");
+    await user.click(screen.getByRole("button", { name: "Update credits" }));
+
+    expect(await screen.findByText("Admin Ops now has 200 credits")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Back to projects" }));
+    await user.click(screen.getByRole("button", { name: "Profile" }));
+    expect(screen.getByRole("region", { name: "Profile credit management" })).toHaveTextContent("200");
   });
 
   it("supports the image node inline model/prompt entry and generation loop", async () => {
