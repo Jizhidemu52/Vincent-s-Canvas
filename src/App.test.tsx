@@ -319,6 +319,41 @@ describe("Designer canvas app shell", () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/upscale$/), expect.objectContaining({ method: "POST" }));
   });
 
+  it("wires toolbar download, magic edit, and top remove background actions", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByText("fashion-reference.jpg"));
+
+    let downloadAnchor: HTMLAnchorElement | undefined;
+    const createElement = document.createElement.bind(document);
+    const createElementSpy = vi.spyOn(document, "createElement").mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+      const element = createElement(tagName, options);
+      if (tagName === "a") {
+        downloadAnchor = element as HTMLAnchorElement;
+        vi.spyOn(downloadAnchor, "click").mockImplementation(() => undefined);
+      }
+      return element;
+    });
+    try {
+      await user.click(screen.getByRole("button", { name: "Download" }));
+      expect(downloadAnchor?.download).toBe("fashion-reference.jpg");
+      expect(downloadAnchor?.href).toContain("/fixtures/fashion-reference.jpg");
+    } finally {
+      createElementSpy.mockRestore();
+    }
+
+    await user.click(screen.getByRole("button", { name: "Magic edit" }));
+    expect(screen.getByRole("dialog", { name: "Mask edit confirmation" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await user.click(screen.getByRole("button", { name: /Remove bg/i }));
+    expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
+    expect(screen.getByText("Backend removeBackground succeeded, 2 credits used")).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/remove-bg$/), expect.objectContaining({ method: "POST" }));
+  });
+
   it("runs workflow modules through backend APIs", async () => {
     const user = userEvent.setup();
     await login(user);

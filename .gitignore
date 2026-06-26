@@ -3,6 +3,7 @@ dist/
 *.tsbuildinfo
 *.log
 *.png
+!docs/assets/*.png
 .playwright-mcp/
 .data/
 vite.config.js

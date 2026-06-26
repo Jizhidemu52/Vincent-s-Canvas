@@ -1012,6 +1012,14 @@ function exportProjectPackage(workspace: Workspace, project: Project) {
   URL.revokeObjectURL(url);
 }
 
+export function downloadCanvasNode(node?: CanvasNode) {
+  if (!node?.source) return;
+  const link = document.createElement("a");
+  link.href = node.source;
+  link.download = node.name.replace(/[\\/:*?"<>|]+/g, "-") || "canvas-image.png";
+  link.click();
+}
+
 function CanvasView({
   workspace,
   project,
@@ -1093,6 +1101,7 @@ function CanvasView({
         onAddTargetFrame={onAddTargetFrame}
         onExport={() => exportProjectPackage(workspace, project)}
         onShapeEdit={onShapeEdit}
+        onRemoveBg={onRemoveBg}
       />
       <section className="recraft-canvas">
         <PromptCard
@@ -1120,6 +1129,7 @@ function CanvasView({
           onShapeEdit={onShapeEdit}
           onSaveAsset={onSaveAsset}
           onGroupReferences={onGroupReferences}
+          onDownload={() => downloadCanvasNode(selectedNode)}
         />
         <RightDock
           workspace={workspace}
@@ -1220,7 +1230,8 @@ function TopToolbar({
   onDelete,
   onAddTargetFrame,
   onExport,
-  onShapeEdit
+  onShapeEdit,
+  onRemoveBg
 }: {
   onBack: () => void;
   onImportImages: () => void;
@@ -1232,6 +1243,7 @@ function TopToolbar({
   onAddTargetFrame: () => void;
   onExport: () => void;
   onShapeEdit: () => void;
+  onRemoveBg: () => void;
 }) {
   return (
     <header className="canvas-toolbar">
@@ -1246,7 +1258,7 @@ function TopToolbar({
         <button type="button" onClick={onImportImages}><ImagePlus size={14} /> Upload images</button>
         <button type="button" onClick={onAddTargetFrame}><SquareDashedMousePointer size={14} /> Target frame</button>
         <button type="button" onClick={onShapeEdit}><BoxSelect size={14} /> Edit area</button>
-        <button type="button"><Scissors size={14} /> Remove bg</button>
+        <button type="button" onClick={onRemoveBg}><Scissors size={14} /> Remove bg</button>
         <button type="button"><Shirt size={14} /> Make Mockup</button>
         <button type="button"><Archive size={14} /> Vectorize</button>
         <button type="button" onClick={onWorkflow}><Play size={14} /> Run workflow</button>
@@ -1861,7 +1873,8 @@ function NodeToolbar({
   onRemoveBg,
   onShapeEdit,
   onSaveAsset,
-  onGroupReferences
+  onGroupReferences,
+  onDownload
 }: {
   selectedNode?: CanvasNode;
   onUpscale: () => void;
@@ -1869,6 +1882,7 @@ function NodeToolbar({
   onShapeEdit: () => void;
   onSaveAsset: () => void;
   onGroupReferences: () => void;
+  onDownload: () => void;
 }) {
   if (!selectedNode) return null;
   return (
@@ -1878,8 +1892,8 @@ function NodeToolbar({
       <button type="button" title="Mask edit" onClick={onShapeEdit}><CircleDashed size={15} /></button>
       <button type="button" title="Group references" onClick={onGroupReferences}><SquareDashedMousePointer size={15} /></button>
       <button type="button" title="Save asset" onClick={onSaveAsset}><Database size={15} /></button>
-      <button type="button" title="Download"><Download size={15} /></button>
-      <button type="button" title="Magic edit"><Wand2 size={15} /></button>
+      <button type="button" title="Download" onClick={onDownload}><Download size={15} /></button>
+      <button type="button" title="Magic edit" onClick={onShapeEdit}><Wand2 size={15} /></button>
     </div>
   );
 }
