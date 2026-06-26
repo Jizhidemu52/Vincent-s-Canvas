@@ -10,6 +10,7 @@ import {
   type PromptPreset,
   type Workspace
 } from "../src/domain/workspace";
+import { getProviderHealth, runProviderModel, type ProviderHealth } from "./providers";
 
 export interface ServerState {
   profile: Profile;
@@ -41,12 +42,7 @@ export interface AdminUsageSummary {
   modelUsage: Array<{ modelId: string; count: number; credits: number }>;
 }
 
-export interface ProviderHealth {
-  provider: string;
-  status: "healthy" | "degraded";
-  modelCount: number;
-  keyLocation: "server";
-}
+export type { ProviderHealth } from "./providers";
 
 export function createServerState(profile: Partial<Profile> = {}): ServerState {
   const workspace = createInitialWorkspace(profile);
@@ -172,7 +168,7 @@ function assertRequest(state: ServerState, request: GenerationRequest, requestId
   return { model, cost, account };
 }
 
-function runMockModel(state: ServerState, request: GenerationRequest, requestId?: string, userId?: string): GenerationResult {
+function runModel(state: ServerState, request: GenerationRequest, requestId?: string, userId?: string): GenerationResult {
   const { model, cost, account } = assertRequest(state, request, requestId, userId);
   if (requestId) {
     state.submittedRequestIds.add(requestId);
@@ -200,17 +196,7 @@ function runMockModel(state: ServerState, request: GenerationRequest, requestId?
   account.history = [entry, ...account.history];
   saveAccountWorkspace(state, account, userId);
 
-  return {
-    status: "succeeded",
-    creditCost: cost,
-    historyId,
-    outputs: Array.from({ length: request.outputCount }, (_, index) => ({
-      name: `${model.name} output ${index + 1}.jpg`,
-      source: `mock://${request.operation}/${request.nodeId}/${index + 1}`,
-      width: request.operation === "upscale" ? 2048 : 1024,
-      height: request.operation === "upscale" ? 2048 : 1024
-    }))
-  };
+  return runProviderModel(request, model, historyId, cost);
 }
 
 export const apiRoutes = {
@@ -237,26 +223,15 @@ export const apiRoutes = {
       modelUsage: Array.from(byModel.values())
     };
   },
-  "/api/admin/providers": (state: ServerState): ProviderHealth[] => {
-    const counts = new Map<string, number>();
-    for (const model of state.models) {
-      counts.set(model.provider, (counts.get(model.provider) ?? 0) + 1);
-    }
-    return Array.from(counts.entries()).map(([provider, modelCount]) => ({
-      provider,
-      status: "healthy",
-      modelCount,
-      keyLocation: "server"
-    }));
-  },
+  "/api/admin/providers": (state: ServerState): ProviderHealth[] => getProviderHealth(state.models),
   "/api/generations": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
-    runMockModel(state, { ...request, operation: "generate" }, requestId, userId),
+    runModel(state, { ...request, operation: "generate" }, requestId, userId),
   "/api/edits": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
-    runMockModel(state, { ...request, operation: "edit" }, requestId, userId),
+    runModel(state, { ...request, operation: "edit" }, requestId, userId),
   "/api/upscale": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
-    runMockModel(state, { ...request, operation: "upscale" }, requestId, userId),
+    runModel(state, { ...request, operation: "upscale" }, requestId, userId),
   "/api/remove-bg": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
-    runMockModel(state, { ...request, operation: "removeBackground" }, requestId, userId)
+    runModel(state, { ...request, operation: "removeBackground" }, requestId, userId)
 };
 
 export function callApi(
