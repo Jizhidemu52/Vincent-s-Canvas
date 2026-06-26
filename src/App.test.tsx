@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -300,6 +300,28 @@ describe("Designer canvas app shell", () => {
     expect(await screen.findByText("Backend workflow completed 1 module")).toBeInTheDocument();
     expect((await screen.findAllByText("backend result 1.jpg")).length).toBeGreaterThan(0);
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/edits$/), expect.objectContaining({ method: "POST" }));
+  });
+
+  it("opens a workflow module picker from an image output port", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const initialNodeCount = screen.getAllByTestId("canvas-node").length;
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from fashion-reference.jpg"));
+    fireEvent.pointerUp(window);
+
+    expect(screen.getByText("Choose module")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Upscale clean high-res output/i }));
+    await waitFor(() => {
+      expect(screen.getAllByTestId("canvas-node").length).toBeGreaterThan(initialNodeCount);
+    });
+    expect(screen.getByText("upscale-pro")).toBeInTheDocument();
+
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: /Run workflow/i }));
+    expect(await screen.findByText("Backend workflow completed 1 module")).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/upscale$/), expect.objectContaining({ method: "POST" }));
   });
 
   it("shows generation records and credit usage in the home history and profile views", async () => {

@@ -284,25 +284,27 @@ export default function App() {
     });
   }
 
-  function addWorkflowModule(moduleType: ModuleType) {
+  function addWorkflowModule(moduleType: ModuleType, sourceNodeIds?: string[]) {
     if (!activeProject || !selectedNode) return;
+    const resolvedSourceIds = sourceNodeIds?.length ? sourceNodeIds : activeProject.selectedNodeIds.length ? activeProject.selectedNodeIds : [selectedNode.id];
+    const firstSource = activeProject.nodes.find((node) => node.id === resolvedSourceIds[0]) ?? selectedNode;
     const prompt =
       moduleType === "upscale"
         ? "高清放大，保留服装纤维、刺绣和边缘细节。"
         : moduleType === "edit"
           ? "在保持模特姿势和版型不变的前提下，做局部款式编辑。"
           : "参考上游图片和文本，生成新的服装设计方案。";
-    const modelId = moduleType === "upscale" ? "upscale-pro" : selectedNode.generation.modelId || "gpt-image-2-medium";
+    const modelId = moduleType === "upscale" ? "upscale-pro" : firstSource.generation.modelId || "gpt-image-2-medium";
     setWorkspace((current) =>
-      createWorkflowModuleFromSelection(current, activeProject.id, activeProject.selectedNodeIds.length ? activeProject.selectedNodeIds : [selectedNode.id], {
+      createWorkflowModuleFromSelection(current, activeProject.id, resolvedSourceIds, {
         moduleType,
         prompt,
         modelId
       })
     );
   }
-  function connectSelectionToNewModule(moduleType: ModuleType) {
-    addWorkflowModule(moduleType);
+  function connectSelectionToNewModule(moduleType: ModuleType, sourceNodeIds?: string[]) {
+    addWorkflowModule(moduleType, sourceNodeIds);
   }
 
   function groupReferences() {
@@ -977,7 +979,7 @@ function CanvasView({
   onBatch: () => void;
   onWorkflow: () => void;
   onAddModule: (moduleType: ModuleType) => void;
-  onConnectModule: (moduleType: ModuleType) => void;
+  onConnectModule: (moduleType: ModuleType, sourceNodeIds?: string[]) => void;
   onGroupReferences: () => void;
   onAssistantNote: (content: string) => void;
   onUpscale: () => void;
@@ -1292,11 +1294,12 @@ function CanvasStage({
   project: Project;
   selectedNode?: CanvasNode;
   onWorkspaceChange: (updater: (workspace: Workspace) => Workspace) => void;
-  onConnectModule: (moduleType: ModuleType) => void;
+  onConnectModule: (moduleType: ModuleType, sourceNodeIds?: string[]) => void;
   onGenerateNode: (nodeId: string) => void;
 }) {
   const stageRef = useRef<HTMLElement | null>(null);
   const [lasso, setLasso] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [modulePicker, setModulePicker] = useState<{ nodeId: string; x: number; y: number } | null>(null);
   const selectedIds = project.selectedNodeIds;
   const selectedSet = new Set(selectedIds);
 
@@ -1327,9 +1330,15 @@ function CanvasStage({
     onWorkspaceChange((current) => selectNodes(current, project.id, [id], append));
   }
 
+  function openModulePicker(node: CanvasNode) {
+    selectNode(node.id, false);
+    setModulePicker({ nodeId: node.id, x: node.x + node.width + 38, y: node.y + 8 });
+  }
+
   function panCanvas(event: PointerEvent<HTMLElement>) {
     if (event.target !== event.currentTarget) return;
     event.preventDefault();
+    setModulePicker(null);
     const rect = event.currentTarget.getBoundingClientRect();
     const startX = event.clientX;
     const startY = event.clientY;
@@ -1441,16 +1450,60 @@ function CanvasStage({
             highlighted={Boolean(selectedNode && project.connections.some((item) => (item.fromNodeId === selectedNode.id && item.toNodeId === node.id) || (item.toNodeId === selectedNode.id && item.fromNodeId === node.id)))}
             onSelect={selectNode}
             onWorkspaceChange={onWorkspaceChange}
-            onConnectModule={onConnectModule}
+            onOpenModulePicker={openModulePicker}
             onGenerateNode={onGenerateNode}
             workspace={workspace}
           />
         ))}
+        {modulePicker && (
+          <WorkflowModulePicker
+            x={modulePicker.x}
+            y={modulePicker.y}
+            onPick={(moduleType) => {
+              onConnectModule(moduleType, [modulePicker.nodeId]);
+              setModulePicker(null);
+            }}
+            onCancel={() => setModulePicker(null)}
+          />
+        )}
       </div>
       {lasso && <div className="lasso" style={lasso} />}
       <ZoomControls workspace={workspace} project={project} onWorkspaceChange={onWorkspaceChange} />
       {project.viewport.minimapOpen && <MiniMap project={project} />}
     </section>
+  );
+}
+
+function WorkflowModulePicker({
+  x,
+  y,
+  onPick,
+  onCancel
+}: {
+  x: number;
+  y: number;
+  onPick: (moduleType: ModuleType) => void;
+  onCancel: () => void;
+}) {
+  const options: Array<{ type: ModuleType; label: string; detail: string }> = [
+    { type: "generate", label: "Generate", detail: "new design from references" },
+    { type: "edit", label: "Edit", detail: "controlled image edit" },
+    { type: "upscale", label: "Upscale", detail: "clean high-res output" },
+    { type: "removeBackground", label: "Remove BG", detail: "cutout for product use" },
+    { type: "upload", label: "Upload/ref", detail: "reference handoff node" }
+  ];
+
+  return (
+    <div className="workflow-picker" style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()}>
+      <strong>Choose module</strong>
+      {options.map((option) => (
+        <button type="button" key={option.type} onClick={() => onPick(option.type)}>
+          <b>{option.label}</b>
+          <span>{option.detail}</span>
+        </button>
+      ))}
+      <button type="button" className="workflow-picker-cancel" onClick={onCancel}>Cancel</button>
+    </div>
   );
 }
 
@@ -1461,7 +1514,7 @@ function CanvasNodeView({
   highlighted,
   onSelect,
   onWorkspaceChange,
-  onConnectModule,
+  onOpenModulePicker,
   onGenerateNode,
   workspace
 }: {
@@ -1471,7 +1524,7 @@ function CanvasNodeView({
   highlighted: boolean;
   onSelect: (id: string, append: boolean) => void;
   onWorkspaceChange: (updater: (workspace: Workspace) => Workspace) => void;
-  onConnectModule: (moduleType: ModuleType) => void;
+  onOpenModulePicker: (node: CanvasNode) => void;
   onGenerateNode: (nodeId: string) => void;
   workspace: Workspace;
 }) {
@@ -1522,7 +1575,7 @@ function CanvasNodeView({
     event.preventDefault();
     onSelect(node.id, false);
     const handleUp = () => {
-      onConnectModule("generate");
+      onOpenModulePicker(node);
       window.removeEventListener("pointerup", handleUp);
     };
     window.addEventListener("pointerup", handleUp);
@@ -1603,7 +1656,13 @@ function CanvasNodeView({
         />
       )}
       <span className="node-port input" />
-      <span className="node-port output" onPointerDown={startWire} title="Drag to create workflow node" />
+      <span
+        className="node-port output"
+        data-testid={`workflow-output-port-${node.id}`}
+        aria-label={`Create workflow from ${node.name}`}
+        onPointerDown={startWire}
+        title="Drag to create workflow node"
+      />
     </div>
   );
 }

@@ -1134,6 +1134,52 @@ button {
   color: #808080;
 }
 
+.workflow-picker {
+  position: absolute;
+  z-index: 16;
+  display: grid;
+  width: 190px;
+  gap: 6px;
+  border: 1px solid #d8d8d8;
+  border-radius: 8px;
+  background: white;
+  padding: 9px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+}
+
+.workflow-picker strong {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #666;
+}
+
+.workflow-picker button {
+  display: grid;
+  gap: 2px;
+  border: 1px solid #e3e3e3;
+  border-radius: 7px;
+  background: #f8f8f8;
+  padding: 8px;
+  text-align: left;
+}
+
+.workflow-picker button:hover {
+  border-color: #21c9b6;
+  background: #effbf9;
+}
+
+.workflow-picker button span {
+  color: #777;
+  font-size: 11px;
+}
+
+.workflow-picker .workflow-picker-cancel {
+  justify-items: center;
+  background: white;
+  color: #777;
+}
+
 .text-node p {
   margin: 0;
   color: #333;
