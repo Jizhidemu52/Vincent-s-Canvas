@@ -4,5 +4,6 @@ dist/
 *.log
 *.png
 .playwright-mcp/
+.data/
 vite.config.js
 vite.config.d.ts

@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { apiRoutes, callApi, createServerState, type ApiError, type ServerState } from "./api";
+import { loadServerState, saveServerState } from "./storage";
 import type { GenerationRequest, GenerationResult } from "../src/domain/workspace";
 
 type ApiPath = keyof typeof apiRoutes;
@@ -20,6 +21,7 @@ const writeRoutes = new Set<ApiPath>(["/api/generations", "/api/edits", "/api/up
 
 export interface ApiHttpServerOptions {
   state?: ServerState;
+  stateFilePath?: string;
   bodyLimitBytes?: number;
 }
 
@@ -80,7 +82,8 @@ function isApiPath(pathname: string): pathname is ApiPath {
 }
 
 export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server {
-  const state = options.state ?? createServerState();
+  const stateFilePath = options.stateFilePath;
+  const state = options.state ?? (stateFilePath ? loadServerState(stateFilePath) : createServerState());
   const bodyLimitBytes = options.bodyLimitBytes ?? 1_000_000;
 
   return createServer(async (request, response) => {
@@ -113,6 +116,9 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
         }
         const body = await readJsonBody(request, bodyLimitBytes);
         const result = callApi(state, pathname, body, request.headers["x-request-id"]?.toString());
+        if (!isApiError(result) && stateFilePath) {
+          saveServerState(stateFilePath, state);
+        }
         sendJson(response, statusFromApiResult(result), result);
         return;
       }
@@ -129,7 +135,8 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
 export async function startApiServer(options: StartApiServerOptions = {}) {
   const host = options.host ?? process.env.API_HOST ?? "127.0.0.1";
   const port = options.port ?? Number(process.env.API_PORT ?? 8787);
-  const server = createApiHttpServer(options);
+  const stateFilePath = options.stateFilePath ?? process.env.API_STATE_FILE ?? resolve(".data", "server-state.json");
+  const server = createApiHttpServer({ ...options, stateFilePath });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {

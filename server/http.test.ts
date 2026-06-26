@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServerState } from "./api";
 import { createApiHttpServer } from "./http";
 import type { GenerationRequest, GenerationResult, Profile } from "../src/domain/workspace";
@@ -16,9 +19,9 @@ function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
   };
 }
 
-async function startTestServer() {
+async function startTestServer(stateFilePath?: string) {
   const state = createServerState({ creditBalance: 10 });
-  const server = createApiHttpServer({ state });
+  const server = createApiHttpServer(stateFilePath ? { stateFilePath } : { state });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Test server failed to bind a port");
@@ -108,5 +111,43 @@ describe("HTTP API server", () => {
 
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("persists profile balance, history, and duplicate request ids across server restarts", async () => {
+    await new Promise<void>((resolve, reject) => {
+      context.server.close((error) => (error ? reject(error) : resolve()));
+    });
+    const dir = mkdtempSync(join(tmpdir(), "designer-canvas-api-"));
+    const stateFilePath = join(dir, "server-state.json");
+    try {
+      const first = await startTestServer(stateFilePath);
+      await fetch(`${first.baseUrl}/api/generations`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-request-id": "persisted-request" },
+        body: JSON.stringify(request())
+      });
+      await new Promise<void>((resolve, reject) => {
+        first.server.close((error) => (error ? reject(error) : resolve()));
+      });
+
+      const second = await startTestServer(stateFilePath);
+      const profile = (await (await fetch(`${second.baseUrl}/api/profile`)).json()) as Profile;
+      const history = (await (await fetch(`${second.baseUrl}/api/history`)).json()) as unknown[];
+      const duplicate = await fetch(`${second.baseUrl}/api/generations`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-request-id": "persisted-request" },
+        body: JSON.stringify(request())
+      });
+      await new Promise<void>((resolve, reject) => {
+        second.server.close((error) => (error ? reject(error) : resolve()));
+      });
+
+      expect(profile.creditBalance).toBe(118);
+      expect(history).toHaveLength(1);
+      expect(duplicate.status).toBe(409);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      context = await startTestServer();
+    }
   });
 });
