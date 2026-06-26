@@ -58,7 +58,6 @@ import {
   mergeReferenceSelection,
   redoProject,
   runBatchQueue,
-  runWorkflowChain,
   saveNodeAsAsset,
   selectNodes,
   undoProject,
@@ -267,8 +266,54 @@ export default function App() {
   }
 
   function runWorkflow() {
+    void runWorkflowThroughApi();
+  }
+
+  async function runWorkflowThroughApi() {
     if (!activeProject || !selectedNode) return;
-    setWorkspace((current) => runWorkflowChain(current, activeProject.id, selectedNode.id));
+    const projectId = activeProject.id;
+    let cursorId = selectedNode.id;
+    const visited = new Set<string>();
+    let executed = 0;
+    try {
+      setApiNotice("Running backend workflow chain...");
+      while (!visited.has(cursorId)) {
+        visited.add(cursorId);
+        const connection = activeProject.connections.find((item) => item.fromNodeId === cursorId);
+        if (!connection) break;
+        const nextNode = activeProject.nodes.find((node) => node.id === connection.toNodeId);
+        if (!nextNode) break;
+        const isExecutable =
+          nextNode.kind === "workflow" ||
+          nextNode.type === "config" ||
+          nextNode.type === "edit" ||
+          nextNode.type === "upscale" ||
+          nextNode.type === "removeBg";
+        if (!isExecutable) {
+          cursorId = nextNode.id;
+          continue;
+        }
+        const operation = operationForNode(nextNode);
+        const request = {
+          projectId,
+          nodeId: nextNode.id,
+          modelId: nextNode.generation.modelId,
+          prompt: nextNode.generation.prompt,
+          referenceNodeIds: nextNode.references.length ? nextNode.references : [cursorId],
+          outputCount: nextNode.generation.outputCount,
+          operation
+        };
+        const result = await submitGenerationRequest(request);
+        const serverState = await fetchBackendSnapshot();
+        setWorkspace((current) => applyGenerationResultToCanvas(current, projectId, nextNode.id, request, result, serverState));
+        executed += 1;
+        cursorId = nextNode.id;
+      }
+      setRightPanel("history");
+      setApiNotice(executed ? `Backend workflow completed ${executed} module${executed > 1 ? "s" : ""}` : "No downstream workflow modules");
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Backend workflow failed");
+    }
   }
 
   async function runBatch(files?: FileList | null) {

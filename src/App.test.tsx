@@ -228,6 +228,21 @@ describe("Designer canvas app shell", () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/upscale$/), expect.objectContaining({ method: "POST" }));
   });
 
+  it("runs workflow modules through backend APIs", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: "Edit node" }));
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: /Run workflow/i }));
+
+    expect(await screen.findByText("Backend workflow completed 1 module")).toBeInTheDocument();
+    expect((await screen.findAllByText("backend result 1.jpg")).length).toBeGreaterThan(0);
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/edits$/), expect.objectContaining({ method: "POST" }));
+  });
+
   it("shows generation records and credit usage in the home history and profile views", async () => {
     const user = userEvent.setup();
     await login(user);
