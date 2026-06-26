@@ -113,18 +113,20 @@ export default function App() {
   const [shapeEditDraft, setShapeEditDraft] = useState<ShapeEditDraft>(null);
   const [apiNotice, setApiNotice] = useState("Backend API ready");
   const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string>();
   const activeProject = workspace.projects.find((project) => project.id === workspace.activeProjectId);
   const selectedNode = activeProject?.nodes.find((node) => node.id === activeProject.selectedNodeIds[0]) ?? activeProject?.nodes[0];
+  const activeUserId = currentUserId ?? workspace.profile.userId;
 
   useEffect(() => {
     if (view === "login" || !workspaceReady) return;
     const saveTimer = window.setTimeout(() => {
-      void saveWorkspaceSnapshot(workspace).catch((error) => {
+      void saveWorkspaceSnapshot(workspace, activeUserId).catch((error) => {
         setApiNotice(error instanceof Error ? `Workspace save failed: ${error.message}` : "Workspace save failed");
       });
     }, 250);
     return () => window.clearTimeout(saveTimer);
-  }, [workspace, view, workspaceReady]);
+  }, [activeUserId, workspace, view, workspaceReady]);
 
   function login(email: string) {
     const isAdmin = email.toLowerCase().includes("admin");
@@ -133,6 +135,7 @@ export default function App() {
       designerName: isAdmin ? "Admin Ops" : "Lina Zhou",
       role: isAdmin ? ("admin" as const) : ("designer" as const)
     };
+    setCurrentUserId(email);
     setWorkspaceReady(false);
     setWorkspace((current) => ({
       ...current,
@@ -142,7 +145,7 @@ export default function App() {
       }
     }));
     setView("home");
-    void fetchWorkspaceSnapshot()
+    void fetchWorkspaceSnapshot(email)
       .then((snapshot) => {
         setWorkspace((current) => {
           const projects = snapshot.projects ?? current.projects;
@@ -252,8 +255,8 @@ export default function App() {
     };
     try {
       setApiNotice("Running backend model request...");
-      const result = await submitGenerationRequest(request);
-      const serverState = await fetchBackendSnapshot();
+      const result = await submitGenerationRequest(request, activeUserId);
+      const serverState = await fetchBackendSnapshot(activeUserId);
       setWorkspace((current) => applyGenerationResultToCanvas(current, projectId, source.id, request, result, serverState));
       setRightPanel("history");
       setApiNotice(`Backend ${operation} succeeded, ${result.creditCost} credits used`);
@@ -345,8 +348,8 @@ export default function App() {
           outputCount: nextNode.generation.outputCount,
           operation
         };
-        const result = await submitGenerationRequest(request);
-        const serverState = await fetchBackendSnapshot();
+        const result = await submitGenerationRequest(request, activeUserId);
+        const serverState = await fetchBackendSnapshot(activeUserId);
         setWorkspace((current) => applyGenerationResultToCanvas(current, projectId, nextNode.id, request, result, serverState));
         executed += 1;
         cursorId = nextNode.id;
@@ -443,10 +446,10 @@ export default function App() {
           referenceNodeIds: [file.name],
           outputCount: batch.outputCount,
           operation: batch.modelId === "background-cleaner" ? "removeBackground" : "generate"
-        });
+        }, activeUserId);
         results.push(result);
       }
-      const serverState = await fetchBackendSnapshot();
+      const serverState = await fetchBackendSnapshot(activeUserId);
       setWorkspace((current) => applyBatchGenerationResultsToCanvas(current, projectId, batch, results, serverState));
       setRightPanel("history");
       setApiNotice(`Backend batch completed for ${batch.files.length} images`);

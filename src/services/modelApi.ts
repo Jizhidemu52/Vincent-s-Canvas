@@ -20,6 +20,10 @@ function endpointForOperation(operation: GenerationRequest["operation"]) {
   return "/api/generations";
 }
 
+function userHeaders(userId?: string): Record<string, string> {
+  return userId ? { "x-user-id": userId } : {};
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   const payload = (await response.json()) as T & { errorMessage?: string };
   if (!response.ok || payload.errorMessage) {
@@ -28,33 +32,35 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload;
 }
 
-export async function submitGenerationRequest(request: GenerationRequest): Promise<GenerationResult> {
+export async function submitGenerationRequest(request: GenerationRequest, userId?: string): Promise<GenerationResult> {
   const response = await fetch(`${API_BASE_URL}${endpointForOperation(request.operation)}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-request-id": `${request.projectId}:${request.nodeId}:${request.operation}:${Date.now()}`
+      "x-request-id": `${request.projectId}:${request.nodeId}:${request.operation}:${Date.now()}`,
+      ...userHeaders(userId)
     },
     body: JSON.stringify(request)
   });
   return readJson<GenerationResult>(response);
 }
 
-export async function fetchBackendSnapshot(): Promise<BackendSnapshot> {
+export async function fetchBackendSnapshot(userId?: string): Promise<BackendSnapshot> {
+  const init = { headers: userHeaders(userId) };
   const [profile, history, models] = await Promise.all([
-    fetch(`${API_BASE_URL}/api/profile`).then((response) => readJson<Profile>(response)),
-    fetch(`${API_BASE_URL}/api/history`).then((response) => readJson<HistoryEntry[]>(response)),
+    fetch(`${API_BASE_URL}/api/profile`, init).then((response) => readJson<Profile>(response)),
+    fetch(`${API_BASE_URL}/api/history`, init).then((response) => readJson<HistoryEntry[]>(response)),
     fetch(`${API_BASE_URL}/api/models`).then((response) => readJson<ModelDefinition[]>(response))
   ]);
   return { profile, history, models };
 }
 
-export async function fetchWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
-  const response = await fetch(`${API_BASE_URL}/api/workspace`);
+export async function fetchWorkspaceSnapshot(userId?: string): Promise<WorkspaceSnapshot> {
+  const response = await fetch(`${API_BASE_URL}/api/workspace`, { headers: userHeaders(userId) });
   return readJson<WorkspaceSnapshot>(response);
 }
 
-export async function saveWorkspaceSnapshot(workspace: Workspace): Promise<WorkspaceSnapshot> {
+export async function saveWorkspaceSnapshot(workspace: Workspace, userId?: string): Promise<WorkspaceSnapshot> {
   const snapshot: WorkspaceSnapshot = {
     profile: workspace.profile,
     projects: workspace.projects,
@@ -66,7 +72,7 @@ export async function saveWorkspaceSnapshot(workspace: Workspace): Promise<Works
   };
   const response = await fetch(`${API_BASE_URL}/api/workspace`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...userHeaders(userId) },
     body: JSON.stringify(snapshot)
   });
   return readJson<WorkspaceSnapshot>(response);

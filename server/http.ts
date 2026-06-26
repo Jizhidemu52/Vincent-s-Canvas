@@ -32,12 +32,16 @@ export interface StartApiServerOptions extends ApiHttpServerOptions {
 
 function corsHeaders() {
   return {
-    "access-control-allow-headers": "content-type,x-request-id",
+    "access-control-allow-headers": "content-type,x-request-id,x-user-id",
     "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-origin": "*",
     "cache-control": "no-store",
     "content-type": "application/json; charset=utf-8"
   };
+}
+
+function userIdFromRequest(request: IncomingMessage) {
+  return request.headers["x-user-id"]?.toString();
 }
 
 function sendJson(response: ServerResponse, statusCode: number, payload?: unknown) {
@@ -89,18 +93,19 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
   return createServer(async (request, response) => {
     try {
       const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+      const userId = userIdFromRequest(request);
       if (pathname === "/api/workspace") {
         if (request.method === "OPTIONS") {
           sendJson(response, 204);
           return;
         }
         if (request.method === "GET") {
-          sendJson(response, 200, getWorkspaceSnapshot(state));
+          sendJson(response, 200, getWorkspaceSnapshot(state, userId));
           return;
         }
         if (request.method === "POST") {
           const body = await readJsonBody<Partial<WorkspaceSnapshot>>(request, bodyLimitBytes);
-          const result = saveWorkspaceSnapshot(state, body ?? {});
+          const result = saveWorkspaceSnapshot(state, body ?? {}, userId);
           if (stateFilePath) {
             saveServerState(stateFilePath, state);
           }
@@ -126,7 +131,7 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
           sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
           return;
         }
-        const result = callApi(state, pathname);
+        const result = callApi(state, pathname, undefined, undefined, userId);
         sendJson(response, statusFromApiResult(result), result);
         return;
       }
@@ -137,7 +142,7 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
           return;
         }
         const body = await readJsonBody<GenerationRequest>(request, bodyLimitBytes);
-        const result = callApi(state, pathname, body, request.headers["x-request-id"]?.toString());
+        const result = callApi(state, pathname, body, request.headers["x-request-id"]?.toString(), userId);
         if (!isApiError(result) && stateFilePath) {
           saveServerState(stateFilePath, state);
         }

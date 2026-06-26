@@ -19,6 +19,7 @@ export interface ServerState {
   activeProjectId?: string;
   assets: LibraryAsset[];
   prompts: PromptPreset[];
+  accounts: Record<string, AccountWorkspace>;
   submittedRequestIds: Set<string>;
 }
 
@@ -26,6 +27,8 @@ export type WorkspaceSnapshot = Pick<
   Workspace,
   "profile" | "projects" | "activeProjectId" | "history" | "assets" | "prompts" | "modelRegistry"
 >;
+
+export type AccountWorkspace = Omit<WorkspaceSnapshot, "modelRegistry">;
 
 export interface ApiError {
   status: "failed";
@@ -55,36 +58,99 @@ export function createServerState(profile: Partial<Profile> = {}): ServerState {
     activeProjectId: undefined,
     assets: [],
     prompts: workspace.prompts,
+    accounts: {},
     submittedRequestIds: new Set()
   };
 }
 
-export function getWorkspaceSnapshot(state: ServerState): WorkspaceSnapshot {
+function normalizeUserId(userId?: string) {
+  const normalized = userId?.trim().toLowerCase();
+  return normalized || undefined;
+}
+
+function accountFromState(state: ServerState): AccountWorkspace {
   return {
     profile: state.profile,
     projects: state.projects,
     activeProjectId: state.activeProjectId,
     history: state.history,
     assets: state.assets,
-    prompts: state.prompts,
+    prompts: state.prompts
+  };
+}
+
+function createAccountWorkspace(state: ServerState, userId: string): AccountWorkspace {
+  const isAdmin = userId.includes("admin");
+  const workspace = createInitialWorkspace({
+    userId,
+    designerName: isAdmin ? "Admin Ops" : userId.split("@")[0] || "Designer",
+    role: isAdmin ? "admin" : "designer",
+    creditBalance: state.profile.creditBalance,
+    creditUsed: 0
+  });
+  return {
+    profile: workspace.profile,
+    projects: [],
+    activeProjectId: undefined,
+    history: [],
+    assets: [],
+    prompts: state.prompts.length ? state.prompts : workspace.prompts
+  };
+}
+
+function getAccountWorkspace(state: ServerState, userId?: string): AccountWorkspace {
+  const normalized = normalizeUserId(userId);
+  if (!normalized) return accountFromState(state);
+  state.accounts[normalized] ??= createAccountWorkspace(state, normalized);
+  return state.accounts[normalized];
+}
+
+function saveAccountWorkspace(state: ServerState, account: AccountWorkspace, userId?: string) {
+  const normalized = normalizeUserId(userId);
+  if (!normalized) {
+    state.profile = account.profile;
+    state.projects = account.projects;
+    state.activeProjectId = account.activeProjectId;
+    state.history = account.history;
+    state.assets = account.assets;
+    state.prompts = account.prompts;
+    return;
+  }
+  state.accounts[normalized] = account;
+}
+
+function allHistory(state: ServerState) {
+  return [...state.history, ...Object.values(state.accounts).flatMap((account) => account.history)];
+}
+
+function totalCreditsUsed(state: ServerState) {
+  return state.profile.creditUsed + Object.values(state.accounts).reduce((sum, account) => sum + account.profile.creditUsed, 0);
+}
+
+export function getWorkspaceSnapshot(state: ServerState, userId?: string): WorkspaceSnapshot {
+  const account = getAccountWorkspace(state, userId);
+  return {
+    ...account,
     modelRegistry: state.models
   };
 }
 
-export function saveWorkspaceSnapshot(state: ServerState, snapshot: Partial<WorkspaceSnapshot>): WorkspaceSnapshot {
-  state.profile = snapshot.profile ?? state.profile;
-  state.projects = Array.isArray(snapshot.projects) ? snapshot.projects : state.projects;
-  if (Object.prototype.hasOwnProperty.call(snapshot, "activeProjectId")) {
-    state.activeProjectId = snapshot.activeProjectId;
-  }
-  state.history = Array.isArray(snapshot.history) ? snapshot.history : state.history;
-  state.assets = Array.isArray(snapshot.assets) ? snapshot.assets : state.assets;
-  state.prompts = Array.isArray(snapshot.prompts) ? snapshot.prompts : state.prompts;
+export function saveWorkspaceSnapshot(state: ServerState, snapshot: Partial<WorkspaceSnapshot>, userId?: string): WorkspaceSnapshot {
+  const current = getAccountWorkspace(state, userId);
+  const account: AccountWorkspace = {
+    profile: snapshot.profile ?? current.profile,
+    projects: Array.isArray(snapshot.projects) ? snapshot.projects : current.projects,
+    activeProjectId: Object.prototype.hasOwnProperty.call(snapshot, "activeProjectId") ? snapshot.activeProjectId : current.activeProjectId,
+    history: Array.isArray(snapshot.history) ? snapshot.history : current.history,
+    assets: Array.isArray(snapshot.assets) ? snapshot.assets : current.assets,
+    prompts: Array.isArray(snapshot.prompts) ? snapshot.prompts : current.prompts
+  };
+  saveAccountWorkspace(state, account, userId);
   state.models = Array.isArray(snapshot.modelRegistry) && snapshot.modelRegistry.length ? snapshot.modelRegistry : state.models;
-  return getWorkspaceSnapshot(state);
+  return getWorkspaceSnapshot(state, userId);
 }
 
-function assertRequest(state: ServerState, request: GenerationRequest, requestId?: string) {
+function assertRequest(state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) {
   if (requestId && state.submittedRequestIds.has(requestId)) {
     throw new Error("Duplicate request");
   }
@@ -99,25 +165,26 @@ function assertRequest(state: ServerState, request: GenerationRequest, requestId
     throw new Error("Output count must be between 1 and 8");
   }
   const cost = Math.max(1, model.cost) * request.outputCount;
-  if (state.profile.creditBalance < cost) {
+  const account = getAccountWorkspace(state, userId);
+  if (account.profile.creditBalance < cost) {
     throw new Error("Not enough credits");
   }
-  return { model, cost };
+  return { model, cost, account };
 }
 
-function runMockModel(state: ServerState, request: GenerationRequest, requestId?: string): GenerationResult {
-  const { model, cost } = assertRequest(state, request, requestId);
+function runMockModel(state: ServerState, request: GenerationRequest, requestId?: string, userId?: string): GenerationResult {
+  const { model, cost, account } = assertRequest(state, request, requestId, userId);
   if (requestId) {
     state.submittedRequestIds.add(requestId);
   }
-  state.profile = {
-    ...state.profile,
-    creditBalance: state.profile.creditBalance - cost,
-    creditUsed: state.profile.creditUsed + cost,
-    credits: state.profile.creditBalance - cost
+  account.profile = {
+    ...account.profile,
+    creditBalance: account.profile.creditBalance - cost,
+    creditUsed: account.profile.creditUsed + cost,
+    credits: account.profile.creditBalance - cost
   };
 
-  const historyId = `history-${state.history.length + 1}`;
+  const historyId = `history-${allHistory(state).length + 1}`;
   const entry: HistoryEntry = {
     id: historyId,
     projectId: request.projectId,
@@ -130,7 +197,8 @@ function runMockModel(state: ServerState, request: GenerationRequest, requestId?
     referenceCount: request.referenceNodeIds.length,
     createdAt: new Date().toISOString()
   };
-  state.history = [entry, ...state.history];
+  account.history = [entry, ...account.history];
+  saveAccountWorkspace(state, account, userId);
 
   return {
     status: "succeeded",
@@ -147,12 +215,15 @@ function runMockModel(state: ServerState, request: GenerationRequest, requestId?
 
 export const apiRoutes = {
   "/api/models": (state: ServerState) => state.models,
-  "/api/profile": (state: ServerState) => state.profile,
-  "/api/history": (state: ServerState) => state.history,
-  "/api/admin/audit": (state: ServerState) => state.history,
+  "/api/profile": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
+    getAccountWorkspace(state, userId).profile,
+  "/api/history": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
+    getAccountWorkspace(state, userId).history,
+  "/api/admin/audit": (state: ServerState) => allHistory(state),
   "/api/admin/usage": (state: ServerState): AdminUsageSummary => {
     const byModel = new Map<string, { modelId: string; count: number; credits: number }>();
-    for (const entry of state.history) {
+    const history = allHistory(state);
+    for (const entry of history) {
       const current = byModel.get(entry.modelId) ?? { modelId: entry.modelId, count: 0, credits: 0 };
       byModel.set(entry.modelId, {
         modelId: entry.modelId,
@@ -161,8 +232,8 @@ export const apiRoutes = {
       });
     }
     return {
-      totalCreditsUsed: state.profile.creditUsed,
-      totalHistoryEntries: state.history.length,
+      totalCreditsUsed: totalCreditsUsed(state),
+      totalHistoryEntries: history.length,
       modelUsage: Array.from(byModel.values())
     };
   },
@@ -178,21 +249,22 @@ export const apiRoutes = {
       keyLocation: "server"
     }));
   },
-  "/api/generations": (state: ServerState, request: GenerationRequest, requestId?: string) =>
-    runMockModel(state, { ...request, operation: "generate" }, requestId),
-  "/api/edits": (state: ServerState, request: GenerationRequest, requestId?: string) =>
-    runMockModel(state, { ...request, operation: "edit" }, requestId),
-  "/api/upscale": (state: ServerState, request: GenerationRequest, requestId?: string) =>
-    runMockModel(state, { ...request, operation: "upscale" }, requestId),
-  "/api/remove-bg": (state: ServerState, request: GenerationRequest, requestId?: string) =>
-    runMockModel(state, { ...request, operation: "removeBackground" }, requestId)
+  "/api/generations": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
+    runMockModel(state, { ...request, operation: "generate" }, requestId, userId),
+  "/api/edits": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
+    runMockModel(state, { ...request, operation: "edit" }, requestId, userId),
+  "/api/upscale": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
+    runMockModel(state, { ...request, operation: "upscale" }, requestId, userId),
+  "/api/remove-bg": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
+    runMockModel(state, { ...request, operation: "removeBackground" }, requestId, userId)
 };
 
 export function callApi(
   state: ServerState,
   path: keyof typeof apiRoutes,
   request?: GenerationRequest,
-  requestId?: string
+  requestId?: string,
+  userId?: string
 ) {
   try {
     const route = apiRoutes[path];
@@ -204,12 +276,12 @@ export function callApi(
       path === "/api/admin/usage" ||
       path === "/api/admin/providers"
     ) {
-      return route(state, request as GenerationRequest, requestId);
+      return route(state, request as GenerationRequest, requestId, userId);
     }
     if (!request) {
       throw new Error("Request body is required");
     }
-    return route(state, request, requestId);
+    return route(state, request, requestId, userId);
   } catch (error) {
     return {
       status: "failed",

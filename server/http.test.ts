@@ -154,6 +154,39 @@ describe("HTTP API server", () => {
     }
   });
 
+  it("isolates workspace snapshots and credits by x-user-id", async () => {
+    const aliceCreated = createProject(createInitialWorkspace({ userId: "alice@company.local", creditBalance: 10 }), "Alice collection");
+    const bobCreated = createProject(createInitialWorkspace({ userId: "bob@company.local", creditBalance: 10 }), "Bob collection");
+
+    await fetch(`${context.baseUrl}/api/workspace`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "alice@company.local" },
+      body: JSON.stringify(aliceCreated.workspace)
+    });
+    await fetch(`${context.baseUrl}/api/workspace`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "bob@company.local" },
+      body: JSON.stringify(bobCreated.workspace)
+    });
+    await fetch(`${context.baseUrl}/api/generations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "alice-http-generate", "x-user-id": "alice@company.local" },
+      body: JSON.stringify(request({ projectId: aliceCreated.project.id, outputCount: 1 }))
+    });
+
+    const aliceSnapshot = (await (await fetch(`${context.baseUrl}/api/workspace`, { headers: { "x-user-id": "alice@company.local" } })).json()) as WorkspaceSnapshot;
+    const bobSnapshot = (await (await fetch(`${context.baseUrl}/api/workspace`, { headers: { "x-user-id": "bob@company.local" } })).json()) as WorkspaceSnapshot;
+    const aliceHistory = (await (await fetch(`${context.baseUrl}/api/history`, { headers: { "x-user-id": "alice@company.local" } })).json()) as unknown[];
+    const bobHistory = (await (await fetch(`${context.baseUrl}/api/history`, { headers: { "x-user-id": "bob@company.local" } })).json()) as unknown[];
+
+    expect(aliceSnapshot.projects[0].name).toBe("Alice collection");
+    expect(bobSnapshot.projects[0].name).toBe("Bob collection");
+    expect(aliceSnapshot.profile.creditBalance).toBe(8);
+    expect(bobSnapshot.profile.creditBalance).toBe(10);
+    expect(aliceHistory).toHaveLength(1);
+    expect(bobHistory).toHaveLength(0);
+  });
+
   it("persists profile balance, history, and duplicate request ids across server restarts", async () => {
     await new Promise<void>((resolve, reject) => {
       context.server.close((error) => (error ? reject(error) : resolve()));

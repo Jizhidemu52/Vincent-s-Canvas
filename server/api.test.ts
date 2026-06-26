@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { callApi, createServerState, type ApiError } from "./api";
-import type { GenerationRequest, GenerationResult } from "../src/domain/workspace";
+import type { GenerationRequest, GenerationResult, Profile } from "../src/domain/workspace";
 import type { AdminUsageSummary, ProviderHealth } from "./api";
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
@@ -92,5 +92,27 @@ describe("backend hosted mock API", () => {
     expect(audit).toHaveLength(2);
     expect(providers.every((provider) => provider.keyLocation === "server")).toBe(true);
     expect(providers.some((provider) => provider.provider === "openai" && provider.status === "healthy")).toBe(true);
+  });
+
+  it("keeps designer credits and history isolated by user id", () => {
+    const state = createServerState({ creditBalance: 30 });
+
+    callApi(state, "/api/generations", request({ outputCount: 1 }), "alice-1", "alice@company.local");
+    callApi(state, "/api/upscale", request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }), "bob-1", "bob@company.local");
+
+    const aliceProfile = callApi(state, "/api/profile", undefined, undefined, "alice@company.local") as Profile;
+    const bobProfile = callApi(state, "/api/profile", undefined, undefined, "bob@company.local") as Profile;
+    const aliceHistory = callApi(state, "/api/history", undefined, undefined, "alice@company.local") as ReturnType<typeof createServerState>["history"];
+    const bobHistory = callApi(state, "/api/history", undefined, undefined, "bob@company.local") as ReturnType<typeof createServerState>["history"];
+    const usage = callApi(state, "/api/admin/usage") as AdminUsageSummary;
+
+    expect(aliceProfile.creditBalance).toBe(28);
+    expect(bobProfile.creditBalance).toBe(26);
+    expect(aliceHistory).toHaveLength(1);
+    expect(bobHistory).toHaveLength(1);
+    expect(aliceHistory[0].modelId).toBe("gpt-image-2-low");
+    expect(bobHistory[0].modelId).toBe("upscale-pro");
+    expect(usage.totalHistoryEntries).toBe(2);
+    expect(state.history).toHaveLength(0);
   });
 });

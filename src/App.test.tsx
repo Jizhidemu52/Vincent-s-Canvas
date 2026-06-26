@@ -161,6 +161,7 @@ describe("Designer canvas app shell", () => {
       const workspaceSaves = vi.mocked(fetch).mock.calls.filter(([url, init]) => url.toString().endsWith("/api/workspace") && init?.method === "POST");
       const latestSave = workspaceSaves[workspaceSaves.length - 1];
       expect(latestSave).toBeTruthy();
+      expect(latestSave?.[1]?.headers).toMatchObject({ "x-user-id": "admin@company.local" });
       const body = JSON.parse(String(latestSave?.[1]?.body)) as Workspace;
       expect(body.projects.length).toBeGreaterThan(0);
       expect(body.activeProjectId).toBe(body.projects[0].id);
