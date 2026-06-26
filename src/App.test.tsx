@@ -200,7 +200,7 @@ describe("Designer canvas app shell", () => {
 
     expect(screen.getByText("reference-front.jpg")).toBeInTheDocument();
     expect(screen.getByText("reference-texture.jpg")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Model" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Model GPT Image 2 Medium/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Prompts" }));
     const promptButtons = screen.getAllByRole("button", { name: /局部服装改款/i });
@@ -220,6 +220,27 @@ describe("Designer canvas app shell", () => {
     await waitFor(() => {
       expect(screen.getAllByTestId("canvas-node").length).toBeGreaterThan(nodeCount);
     });
+  });
+
+  it("opens grouped Recraft-style model menus from the prompt panel and inline image editor", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: /Model GPT Image 2 Medium/i }));
+
+    expect(screen.getByRole("listbox", { name: "Model options" })).toBeInTheDocument();
+    expect(screen.getByText("Trending models")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Nano Banana 2.*11 credits.*generate.*edit/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: /Nano Banana 2.*11 credits/i }));
+    expect(screen.getByRole("button", { name: /Model Nano Banana 2/i })).toBeInTheDocument();
+
+    await user.dblClick(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: /Inline model Nano Banana 2/i }));
+    expect(screen.getByRole("listbox", { name: "Inline model options" })).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: /Flux Pro.*6 credits/i }));
+    expect(screen.getByRole("button", { name: /Inline model Flux Pro/i })).toBeInTheDocument();
   });
 
   it("lets designers drag and resize image nodes on the infinite canvas", async () => {
@@ -338,7 +359,8 @@ describe("Designer canvas app shell", () => {
 
     await user.click(screen.getByRole("button", { name: "New project" }));
     await user.dblClick(screen.getByText("fashion-reference.jpg"));
-    await user.selectOptions(screen.getByRole("combobox", { name: "Inline model" }), "nanobanana2");
+    await user.click(screen.getByRole("button", { name: /Inline model GPT Image 2 Medium/i }));
+    await user.click(screen.getByRole("option", { name: /Nano Banana 2.*11 credits/i }));
     await user.type(screen.getByRole("textbox", { name: "Inline prompt" }), "参考这张图做一件新的刺绣背心");
     const generateButtons = screen.getAllByRole("button", { name: "Generate" });
     await user.click(generateButtons[generateButtons.length - 1]);

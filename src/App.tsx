@@ -70,6 +70,7 @@ import {
   type CanvasNode,
   type GenerationResult,
   type LibraryAsset,
+  type ModelDefinition,
   type OperationType,
   type ModuleType,
   type NodeTransform,
@@ -1329,6 +1330,73 @@ function TopToolbar({
   );
 }
 
+function ModelPicker({
+  label,
+  models,
+  value,
+  onChange,
+  compact = false
+}: {
+  label: string;
+  models: ModelDefinition[];
+  value: string;
+  onChange: (modelId: string) => void;
+  compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = models.find((model) => model.id === value) ?? models[0];
+  const groups = Array.from(new Set(models.map((model) => model.group)));
+  return (
+    <div className={`model-picker ${compact ? "compact" : ""}`} onPointerDown={(event) => event.stopPropagation()}>
+      <button
+        type="button"
+        className="model-picker-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`${label} ${selected?.name ?? value}`}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="model-provider-badge">{selected?.provider === "openai" ? "AI" : selected?.provider.slice(0, 1).toUpperCase()}</span>
+        <span>
+          <small>{label}</small>
+          <strong>{selected?.name ?? value}</strong>
+        </span>
+        <ChevronDown size={14} />
+      </button>
+      {open && (
+        <div className="model-menu" role="listbox" aria-label={`${label} options`}>
+          {groups.map((group) => (
+            <section key={group} aria-label={group}>
+              <small className="model-menu-group">{group}</small>
+              {models.filter((model) => model.group === group).map((model) => (
+                <button
+                  type="button"
+                  key={model.id}
+                  role="option"
+                  aria-selected={model.id === value}
+                  aria-label={`${model.name} ${model.cost} credits ${model.capability.join(" ")}`}
+                  className={model.id === value ? "selected" : ""}
+                  onClick={() => {
+                    onChange(model.id);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="model-provider-badge">{model.provider === "openai" ? "AI" : model.provider.slice(0, 1).toUpperCase()}</span>
+                  <span>
+                    <strong>{model.name}</strong>
+                    <small>{model.provider} · {model.capability.join(" / ")}</small>
+                  </span>
+                  <em>{model.cost} credits</em>
+                </button>
+              ))}
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PromptCard({
   workspace,
   selectedNode,
@@ -1349,7 +1417,6 @@ function PromptCard({
   onPromptInsert: (prompt: string) => void;
 }) {
   const batchInputRef = useRef<HTMLInputElement | null>(null);
-  const groups = Array.from(new Set(workspace.modelRegistry.map((model) => model.group)));
   return (
     <aside className="prompt-card">
       <div className="prompt-title">
@@ -1358,25 +1425,15 @@ function PromptCard({
         <small>H {selectedNode?.height ?? 0}</small>
         <small>r {selectedNode?.transform.rotation ?? 0}</small>
       </div>
-      <label className="model-row">
+      <div className="model-row">
         <Sparkles size={18} />
-        <span>
-          <small>Model</small>
-          <select
-            aria-label="Model"
-            value={selectedNode?.generation.modelId ?? "gpt-image-2-medium"}
-            onChange={(event) => onUpdateConfig({ modelId: event.target.value })}
-          >
-            {groups.map((group) => (
-              <optgroup key={group} label={group}>
-                {workspace.modelRegistry.filter((model) => model.group === group).map((model) => (
-                  <option key={model.id} value={model.id}>{model.name}</option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        </span>
-      </label>
+        <ModelPicker
+          label="Model"
+          models={workspace.modelRegistry}
+          value={selectedNode?.generation.modelId ?? "gpt-image-2-medium"}
+          onChange={(modelId) => onUpdateConfig({ modelId })}
+        />
+      </div>
       <label className="model-row">
         <Image size={18} />
         <span>
@@ -1705,7 +1762,6 @@ function CanvasNodeView({
   const isText = node.type === "text";
   const isModule = !isImageLike && !isText;
   const [inlineEditorOpen, setInlineEditorOpen] = useState(false);
-  const modelGroups = Array.from(new Set(workspace.modelRegistry.map((model) => model.group)));
 
   function startPointer(event: PointerEvent<HTMLDivElement>, mode: DragMode = "move") {
     if ((event.target as HTMLElement).closest(".node-port, .inline-node-editor")) return;
@@ -1750,6 +1806,7 @@ function CanvasNodeView({
   return (
     <div
       role="button"
+      aria-label={`${isImageLike ? "Image" : isText ? "Text" : "Workflow"} ${node.name}`}
       data-testid="canvas-node"
       tabIndex={0}
       className={`stage-node ${node.type} ${node.status} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""}`}
@@ -1811,7 +1868,6 @@ function CanvasNodeView({
       {selected && inlineEditorOpen && isImageLike && (
         <InlineNodeEditor
           node={node}
-          modelGroups={modelGroups}
           models={workspace.modelRegistry}
           onUpdate={(patch) =>
             onWorkspaceChange((current) =>
@@ -1839,31 +1895,24 @@ function CanvasNodeView({
 
 function InlineNodeEditor({
   node,
-  modelGroups,
   models,
   onUpdate,
   onGenerate
 }: {
   node: CanvasNode;
-  modelGroups: string[];
   models: Workspace["modelRegistry"];
   onUpdate: (patch: Partial<CanvasNode["generation"]>) => void;
   onGenerate: () => void;
 }) {
   return (
     <div className="inline-node-editor" onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
-      <label>
-        <span>Model</span>
-        <select aria-label="Inline model" value={node.generation.modelId} onChange={(event) => onUpdate({ modelId: event.target.value })}>
-          {modelGroups.map((group) => (
-            <optgroup key={group} label={group}>
-              {models.filter((model) => model.group === group).map((model) => (
-                <option key={model.id} value={model.id}>{model.name}</option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-      </label>
+      <ModelPicker
+        label="Inline model"
+        models={models}
+        value={node.generation.modelId}
+        onChange={(modelId) => onUpdate({ modelId })}
+        compact
+      />
       <textarea
         aria-label="Inline prompt"
         value={node.generation.prompt}
