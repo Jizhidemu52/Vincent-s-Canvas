@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServerState } from "./api";
+import { createServerState, type WorkspaceSnapshot } from "./api";
 import { createApiHttpServer } from "./http";
-import type { GenerationRequest, GenerationResult, Profile } from "../src/domain/workspace";
+import { addAssetToProject, createInitialWorkspace, createProject, type GenerationRequest, type GenerationResult, type Profile } from "../src/domain/workspace";
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
   return {
@@ -111,6 +111,47 @@ describe("HTTP API server", () => {
 
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("persists workspace projects and canvas nodes across server restarts", async () => {
+    await new Promise<void>((resolve, reject) => {
+      context.server.close((error) => (error ? reject(error) : resolve()));
+    });
+    const dir = mkdtempSync(join(tmpdir(), "designer-canvas-workspace-"));
+    const stateFilePath = join(dir, "server-state.json");
+    try {
+      const first = await startTestServer(stateFilePath);
+      const created = createProject(createInitialWorkspace({ userId: "designer-http", creditBalance: 80 }), "Persisted collection");
+      const workspace = addAssetToProject(created.workspace, created.project.id, {
+        name: "persisted-reference.jpg",
+        source: "/fixtures/fashion-reference.jpg",
+        width: 360,
+        height: 520
+      });
+      const saveResponse = await fetch(`${first.baseUrl}/api/workspace`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(workspace)
+      });
+      await new Promise<void>((resolve, reject) => {
+        first.server.close((error) => (error ? reject(error) : resolve()));
+      });
+
+      const second = await startTestServer(stateFilePath);
+      const snapshot = (await (await fetch(`${second.baseUrl}/api/workspace`)).json()) as WorkspaceSnapshot;
+      await new Promise<void>((resolve, reject) => {
+        second.server.close((error) => (error ? reject(error) : resolve()));
+      });
+
+      expect(saveResponse.status).toBe(200);
+      expect(snapshot.projects).toHaveLength(1);
+      expect(snapshot.activeProjectId).toBe(created.project.id);
+      expect(snapshot.projects[0].nodes.some((node) => node.name === "persisted-reference.jpg")).toBe(true);
+      expect(snapshot.profile.userId).toBe("designer-http");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      context = await startTestServer();
+    }
   });
 
   it("persists profile balance, history, and duplicate request ids across server restarts", async () => {

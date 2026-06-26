@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
-import { apiRoutes, callApi, createServerState, type ApiError, type ServerState } from "./api";
+import { apiRoutes, callApi, createServerState, getWorkspaceSnapshot, saveWorkspaceSnapshot, type ApiError, type ServerState, type WorkspaceSnapshot } from "./api";
 import { loadServerState, saveServerState } from "./storage";
 import type { GenerationRequest, GenerationResult } from "../src/domain/workspace";
 
@@ -60,7 +60,7 @@ function statusFromApiResult(result: ApiResult) {
   return isApiError(result) ? statusFromApiError(result) : 200;
 }
 
-async function readJsonBody(request: IncomingMessage, limitBytes: number) {
+async function readJsonBody<T = unknown>(request: IncomingMessage, limitBytes: number) {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -74,7 +74,7 @@ async function readJsonBody(request: IncomingMessage, limitBytes: number) {
   if (chunks.length === 0) return undefined;
   const text = Buffer.concat(chunks).toString("utf8");
   if (!text.trim()) return undefined;
-  return JSON.parse(text) as GenerationRequest;
+  return JSON.parse(text) as T;
 }
 
 function isApiPath(pathname: string): pathname is ApiPath {
@@ -89,6 +89,28 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
   return createServer(async (request, response) => {
     try {
       const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+      if (pathname === "/api/workspace") {
+        if (request.method === "OPTIONS") {
+          sendJson(response, 204);
+          return;
+        }
+        if (request.method === "GET") {
+          sendJson(response, 200, getWorkspaceSnapshot(state));
+          return;
+        }
+        if (request.method === "POST") {
+          const body = await readJsonBody<Partial<WorkspaceSnapshot>>(request, bodyLimitBytes);
+          const result = saveWorkspaceSnapshot(state, body ?? {});
+          if (stateFilePath) {
+            saveServerState(stateFilePath, state);
+          }
+          sendJson(response, 200, result);
+          return;
+        }
+        sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
+        return;
+      }
+
       if (!isApiPath(pathname)) {
         sendJson(response, 404, { status: "failed", errorMessage: "Route not found" });
         return;
@@ -114,7 +136,7 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
           sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
           return;
         }
-        const body = await readJsonBody(request, bodyLimitBytes);
+        const body = await readJsonBody<GenerationRequest>(request, bodyLimitBytes);
         const result = callApi(state, pathname, body, request.headers["x-request-id"]?.toString());
         if (!isApiError(result) && stateFilePath) {
           saveServerState(stateFilePath, state);

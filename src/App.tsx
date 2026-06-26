@@ -39,7 +39,7 @@ import {
   ZoomIn,
   ZoomOut
 } from "lucide-react";
-import { useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
 import {
   addAssetToProjectAt,
   addAssetToProject,
@@ -72,7 +72,7 @@ import {
   type Project,
   type Workspace
 } from "./domain/workspace";
-import { fetchBackendSnapshot, submitGenerationRequest } from "./services/modelApi";
+import { fetchBackendSnapshot, fetchWorkspaceSnapshot, saveWorkspaceSnapshot, submitGenerationRequest } from "./services/modelApi";
 
 const TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 const SECOND_TEST_IMAGE = "/fixtures/fashion-reference.jpg";
@@ -112,21 +112,63 @@ export default function App() {
   const [rightPanel, setRightPanel] = useState<"context" | "history" | "assets" | "prompts">("context");
   const [shapeEditDraft, setShapeEditDraft] = useState<ShapeEditDraft>(null);
   const [apiNotice, setApiNotice] = useState("Backend API ready");
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const activeProject = workspace.projects.find((project) => project.id === workspace.activeProjectId);
   const selectedNode = activeProject?.nodes.find((node) => node.id === activeProject.selectedNodeIds[0]) ?? activeProject?.nodes[0];
 
+  useEffect(() => {
+    if (view === "login" || !workspaceReady) return;
+    const saveTimer = window.setTimeout(() => {
+      void saveWorkspaceSnapshot(workspace).catch((error) => {
+        setApiNotice(error instanceof Error ? `Workspace save failed: ${error.message}` : "Workspace save failed");
+      });
+    }, 250);
+    return () => window.clearTimeout(saveTimer);
+  }, [workspace, view, workspaceReady]);
+
   function login(email: string) {
     const isAdmin = email.toLowerCase().includes("admin");
+    const identity = {
+      userId: email,
+      designerName: isAdmin ? "Admin Ops" : "Lina Zhou",
+      role: isAdmin ? ("admin" as const) : ("designer" as const)
+    };
+    setWorkspaceReady(false);
     setWorkspace((current) => ({
       ...current,
       profile: {
         ...current.profile,
-        userId: email,
-        designerName: isAdmin ? "Admin Ops" : "Lina Zhou",
-        role: isAdmin ? "admin" : "designer"
+        ...identity
       }
     }));
     setView("home");
+    void fetchWorkspaceSnapshot()
+      .then((snapshot) => {
+        setWorkspace((current) => {
+          const projects = snapshot.projects ?? current.projects;
+          const activeProjectId = projects.some((project) => project.id === snapshot.activeProjectId)
+            ? snapshot.activeProjectId
+            : projects[0]?.id;
+          return {
+            ...current,
+            projects,
+            activeProjectId,
+            history: snapshot.history ?? current.history,
+            assets: snapshot.assets ?? current.assets,
+            prompts: snapshot.prompts?.length ? snapshot.prompts : current.prompts,
+            modelRegistry: snapshot.modelRegistry?.length ? snapshot.modelRegistry : current.modelRegistry,
+            profile: {
+              ...(snapshot.profile ?? current.profile),
+              ...identity
+            }
+          };
+        });
+        setApiNotice("Workspace loaded from backend");
+      })
+      .catch((error) => {
+        setApiNotice(error instanceof Error ? `Backend workspace unavailable: ${error.message}` : "Backend workspace unavailable");
+      })
+      .finally(() => setWorkspaceReady(true));
   }
 
   function openNewProject() {

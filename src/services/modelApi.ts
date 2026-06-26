@@ -1,4 +1,4 @@
-import type { GenerationRequest, GenerationResult, HistoryEntry, ModelDefinition, Profile } from "../domain/workspace";
+import type { GenerationRequest, GenerationResult, HistoryEntry, ModelDefinition, Profile, Workspace } from "../domain/workspace";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -7,6 +7,11 @@ export interface BackendSnapshot {
   history?: HistoryEntry[];
   models?: ModelDefinition[];
 }
+
+export type WorkspaceSnapshot = Pick<
+  Workspace,
+  "profile" | "projects" | "activeProjectId" | "history" | "assets" | "prompts" | "modelRegistry"
+>;
 
 function endpointForOperation(operation: GenerationRequest["operation"]) {
   if (operation === "edit") return "/api/edits";
@@ -42,4 +47,27 @@ export async function fetchBackendSnapshot(): Promise<BackendSnapshot> {
     fetch(`${API_BASE_URL}/api/models`).then((response) => readJson<ModelDefinition[]>(response))
   ]);
   return { profile, history, models };
+}
+
+export async function fetchWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
+  const response = await fetch(`${API_BASE_URL}/api/workspace`);
+  return readJson<WorkspaceSnapshot>(response);
+}
+
+export async function saveWorkspaceSnapshot(workspace: Workspace): Promise<WorkspaceSnapshot> {
+  const snapshot: WorkspaceSnapshot = {
+    profile: workspace.profile,
+    projects: workspace.projects,
+    activeProjectId: workspace.activeProjectId,
+    history: workspace.history,
+    assets: workspace.assets,
+    prompts: workspace.prompts,
+    modelRegistry: workspace.modelRegistry
+  };
+  const response = await fetch(`${API_BASE_URL}/api/workspace`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(snapshot)
+  });
+  return readJson<WorkspaceSnapshot>(response);
 }

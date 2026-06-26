@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { createInitialWorkspace, type GenerationRequest, type HistoryEntry, type Profile, type Workspace } from "./domain/workspace";
 
-let backendProfile = {
+let backendProfile: Profile = {
   userId: "designer-lina",
   designerName: "Lina Zhou",
   role: "designer" as const,
@@ -11,7 +12,8 @@ let backendProfile = {
   creditUsed: 0,
   credits: 180
 };
-let backendHistory: Array<Record<string, unknown>> = [];
+let backendHistory: HistoryEntry[] = [];
+let backendWorkspace: Workspace = createInitialWorkspace();
 
 function jsonResponse(payload: unknown, status = 200) {
   return Promise.resolve(
@@ -32,10 +34,36 @@ beforeEach(() => {
     credits: 180
   };
   backendHistory = [];
+  backendWorkspace = {
+    ...createInitialWorkspace({ userId: "designer-lina", designerName: "Lina Zhou", creditBalance: 180, role: "designer" }),
+    history: backendHistory
+  };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString();
+      if (url.endsWith("/api/workspace")) {
+        if (init?.method === "POST") {
+          const snapshot = JSON.parse(String(init.body)) as Workspace;
+          backendWorkspace = {
+            ...backendWorkspace,
+            ...snapshot,
+            profile: snapshot.profile ?? backendWorkspace.profile,
+            history: snapshot.history ?? backendHistory
+          };
+          backendProfile = backendWorkspace.profile;
+          backendHistory = backendWorkspace.history;
+        }
+        return jsonResponse({
+          profile: backendProfile,
+          projects: backendWorkspace.projects,
+          activeProjectId: backendWorkspace.activeProjectId,
+          history: backendHistory,
+          assets: backendWorkspace.assets,
+          prompts: backendWorkspace.prompts,
+          modelRegistry: backendWorkspace.modelRegistry
+        });
+      }
       if (url.endsWith("/api/profile")) return jsonResponse(backendProfile);
       if (url.endsWith("/api/history")) return jsonResponse(backendHistory);
       if (url.endsWith("/api/models")) {
@@ -47,15 +75,7 @@ beforeEach(() => {
         ]);
       }
       if (url.endsWith("/api/generations") || url.endsWith("/api/edits") || url.endsWith("/api/upscale") || url.endsWith("/api/remove-bg")) {
-        const request = JSON.parse(String(init?.body)) as {
-          projectId: string;
-          nodeId: string;
-          modelId: string;
-          prompt: string;
-          outputCount: number;
-          referenceNodeIds: string[];
-          operation: string;
-        };
+        const request = JSON.parse(String(init?.body)) as GenerationRequest;
         const unitCost = request.modelId === "nanobanana2" ? 11 : request.modelId === "upscale-pro" ? 4 : request.modelId === "background-cleaner" ? 2 : 7;
         const creditCost = unitCost * request.outputCount;
         backendProfile = {
@@ -64,7 +84,7 @@ beforeEach(() => {
           creditUsed: backendProfile.creditUsed + creditCost,
           credits: backendProfile.creditBalance - creditCost
         };
-        const historyEntry = {
+        const historyEntry: HistoryEntry = {
           id: `history-${backendHistory.length + 1}`,
           projectId: request.projectId,
           nodeId: request.nodeId,
@@ -129,6 +149,23 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Batch mode")).toBeInTheDocument();
     expect(screen.getByText("Workflow modules")).toBeInTheDocument();
     expect(screen.getByText("fashion-reference.jpg")).toBeInTheDocument();
+  });
+
+  it("autosaves created project workspaces to the backend snapshot", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+
+    await waitFor(() => {
+      const workspaceSaves = vi.mocked(fetch).mock.calls.filter(([url, init]) => url.toString().endsWith("/api/workspace") && init?.method === "POST");
+      const latestSave = workspaceSaves[workspaceSaves.length - 1];
+      expect(latestSave).toBeTruthy();
+      const body = JSON.parse(String(latestSave?.[1]?.body)) as Workspace;
+      expect(body.projects.length).toBeGreaterThan(0);
+      expect(body.activeProjectId).toBe(body.projects[0].id);
+      expect(body.projects[0].nodes.some((node) => node.name === "fashion-reference.jpg")).toBe(true);
+    });
   });
 
   it("supports reference uploads, model prompt controls, and right dock panels after entering canvas", async () => {

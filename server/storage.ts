@@ -1,13 +1,17 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createServerState, type ServerState } from "./api";
-import type { HistoryEntry, ModelDefinition, Profile } from "../src/domain/workspace";
+import type { HistoryEntry, LibraryAsset, ModelDefinition, Profile, Project, PromptPreset } from "../src/domain/workspace";
 
 interface PersistedServerState {
   version: 1;
   profile: Profile;
   models: ModelDefinition[];
   history: HistoryEntry[];
+  projects: Project[];
+  activeProjectId?: string;
+  assets: LibraryAsset[];
+  prompts: PromptPreset[];
   submittedRequestIds: string[];
 }
 
@@ -17,6 +21,10 @@ function serializeServerState(state: ServerState): PersistedServerState {
     profile: state.profile,
     models: state.models,
     history: state.history,
+    projects: state.projects,
+    activeProjectId: state.activeProjectId,
+    assets: state.assets,
+    prompts: state.prompts,
     submittedRequestIds: Array.from(state.submittedRequestIds)
   };
 }
@@ -27,6 +35,10 @@ function hydrateServerState(data: PersistedServerState): ServerState {
     profile: data.profile,
     models: data.models?.length ? data.models : fallback.models,
     history: Array.isArray(data.history) ? data.history : [],
+    projects: Array.isArray(data.projects) ? data.projects : [],
+    activeProjectId: data.activeProjectId,
+    assets: Array.isArray(data.assets) ? data.assets : [],
+    prompts: Array.isArray(data.prompts) && data.prompts.length ? data.prompts : fallback.prompts,
     submittedRequestIds: new Set(data.submittedRequestIds ?? [])
   };
 }

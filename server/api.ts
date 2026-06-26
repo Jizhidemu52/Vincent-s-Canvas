@@ -3,16 +3,29 @@ import {
   type GenerationRequest,
   type GenerationResult,
   type HistoryEntry,
+  type LibraryAsset,
   type ModelDefinition,
-  type Profile
+  type Profile,
+  type Project,
+  type PromptPreset,
+  type Workspace
 } from "../src/domain/workspace";
 
 export interface ServerState {
   profile: Profile;
   models: ModelDefinition[];
   history: HistoryEntry[];
+  projects: Project[];
+  activeProjectId?: string;
+  assets: LibraryAsset[];
+  prompts: PromptPreset[];
   submittedRequestIds: Set<string>;
 }
+
+export type WorkspaceSnapshot = Pick<
+  Workspace,
+  "profile" | "projects" | "activeProjectId" | "history" | "assets" | "prompts" | "modelRegistry"
+>;
 
 export interface ApiError {
   status: "failed";
@@ -38,8 +51,37 @@ export function createServerState(profile: Partial<Profile> = {}): ServerState {
     profile: workspace.profile,
     models: workspace.modelRegistry,
     history: [],
+    projects: [],
+    activeProjectId: undefined,
+    assets: [],
+    prompts: workspace.prompts,
     submittedRequestIds: new Set()
   };
+}
+
+export function getWorkspaceSnapshot(state: ServerState): WorkspaceSnapshot {
+  return {
+    profile: state.profile,
+    projects: state.projects,
+    activeProjectId: state.activeProjectId,
+    history: state.history,
+    assets: state.assets,
+    prompts: state.prompts,
+    modelRegistry: state.models
+  };
+}
+
+export function saveWorkspaceSnapshot(state: ServerState, snapshot: Partial<WorkspaceSnapshot>): WorkspaceSnapshot {
+  state.profile = snapshot.profile ?? state.profile;
+  state.projects = Array.isArray(snapshot.projects) ? snapshot.projects : state.projects;
+  if (Object.prototype.hasOwnProperty.call(snapshot, "activeProjectId")) {
+    state.activeProjectId = snapshot.activeProjectId;
+  }
+  state.history = Array.isArray(snapshot.history) ? snapshot.history : state.history;
+  state.assets = Array.isArray(snapshot.assets) ? snapshot.assets : state.assets;
+  state.prompts = Array.isArray(snapshot.prompts) ? snapshot.prompts : state.prompts;
+  state.models = Array.isArray(snapshot.modelRegistry) && snapshot.modelRegistry.length ? snapshot.modelRegistry : state.models;
+  return getWorkspaceSnapshot(state);
 }
 
 function assertRequest(state: ServerState, request: GenerationRequest, requestId?: string) {
