@@ -385,6 +385,19 @@ function spendCredits(workspace: Workspace, cost: number): Workspace {
   };
 }
 
+function assetFromNode(node: CanvasNode, projectId: string): LibraryAsset {
+  const operation = typeof node.metadata.operation === "string" ? node.metadata.operation : node.operation;
+  return {
+    id: createId("asset"),
+    type: node.type === "text" ? "text" : "image",
+    title: node.name,
+    source: node.source,
+    tags: ["generated", String(operation ?? node.type)],
+    createdAt: now(),
+    metadata: { projectId, nodeId: node.id, historyId: node.metadata.historyId, operation }
+  };
+}
+
 export function createInitialWorkspace(profile: Partial<Profile> = {}): Workspace {
   const creditBalance = profile.creditBalance ?? profile.credits ?? 120;
   return {
@@ -717,7 +730,8 @@ export function applyGenerationResultToCanvas(
     ...updated,
     profile: serverState.profile ?? updated.profile,
     history: serverState.history ?? updated.history,
-    modelRegistry: serverState.models ?? updated.modelRegistry
+    modelRegistry: serverState.models ?? updated.modelRegistry,
+    assets: [...generatedNodes.map((node) => assetFromNode(node, projectId)), ...updated.assets]
   };
 }
 
@@ -728,8 +742,9 @@ export function applyBatchGenerationResultsToCanvas(
   results: GenerationResult[],
   serverState: { profile?: Profile; history?: HistoryEntry[]; models?: ModelDefinition[] } = {}
 ): Workspace {
+  let generatedNodes: CanvasNode[] = [];
   const updated = updateProject(workspace, projectId, (project) => {
-    const generatedNodes = batch.files.flatMap((file, fileIndex) => {
+    generatedNodes = batch.files.flatMap((file, fileIndex) => {
       const result = results[fileIndex];
       const outputs = result?.outputs.length
         ? result.outputs
@@ -789,7 +804,8 @@ export function applyBatchGenerationResultsToCanvas(
     ...updated,
     profile: serverState.profile ?? updated.profile,
     history: serverState.history ?? updated.history,
-    modelRegistry: serverState.models ?? updated.modelRegistry
+    modelRegistry: serverState.models ?? updated.modelRegistry,
+    assets: [...generatedNodes.map((node) => assetFromNode(node, projectId)), ...updated.assets]
   };
 }
 

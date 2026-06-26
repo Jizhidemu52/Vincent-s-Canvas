@@ -3,6 +3,7 @@ import {
   addAssetToProject,
   addAssetToProjectAt,
   addGenerationTargetFrame,
+  applyGenerationResultToCanvas,
   applyImageOperation,
   connectWorkflowNode,
   commitShapeEdit,
@@ -126,6 +127,40 @@ describe("designer canvas workspace behavior", () => {
       prompt: "make the sleeve satin with soft highlights",
       modelId: "nano-banana",
       outputCount: 2
+    });
+  });
+
+  it("collects backend generation outputs into the asset library", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 10 }), "Generated assets");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "vest.png",
+      source: "vest-source",
+      width: 640,
+      height: 800
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const request = {
+      projectId: project.id,
+      nodeId: source.id,
+      modelId: "gpt-image-2-medium",
+      prompt: "make a new embroidered vest",
+      referenceNodeIds: [source.id],
+      outputCount: 1,
+      operation: "generate" as const
+    };
+    const updated = applyGenerationResultToCanvas(withAsset, project.id, source.id, request, {
+      status: "succeeded",
+      historyId: "history-asset",
+      creditCost: 7,
+      outputs: [{ name: "backend vest.jpg", source: "mock://generate/vest/1", width: 1024, height: 1024 }]
+    });
+
+    expect(updated.projects[0].nodes.some((node) => node.name === "backend vest.jpg")).toBe(true);
+    expect(updated.assets[0]).toMatchObject({
+      title: "backend vest.jpg",
+      type: "image",
+      tags: ["generated", "generate"],
+      metadata: { projectId: project.id, historyId: "history-asset", operation: "generate" }
     });
   });
 

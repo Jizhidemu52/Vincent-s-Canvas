@@ -204,6 +204,10 @@ describe("Designer canvas app shell", () => {
     expect(screen.getAllByText(/credits/i).length).toBeGreaterThan(0);
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/remove-bg"));
     expect(calls).toHaveLength(3);
+
+    await user.click(screen.getByRole("button", { name: "Assets" }));
+    expect(screen.getByText("My assets")).toBeInTheDocument();
+    expect(screen.getAllByText("backend result 1.jpg").length).toBeGreaterThan(0);
   });
 
   it("opens admin monitoring for an admin session", async () => {
