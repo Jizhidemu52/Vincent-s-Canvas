@@ -15,7 +15,8 @@ import {
   mergeReferenceSelection,
   runBatchQueue,
   runGeneration,
-  runWorkflowChain
+  runWorkflowChain,
+  saveNodeAsAsset
 } from "./workspace";
 
 describe("designer canvas workspace behavior", () => {
@@ -160,7 +161,24 @@ describe("designer canvas workspace behavior", () => {
       title: "backend vest.jpg",
       type: "image",
       tags: ["generated", "generate"],
-      metadata: { projectId: project.id, historyId: "history-asset", operation: "generate" }
+      metadata: { projectId: project.id, historyId: "history-asset", operation: "generate", width: 1024, height: 1024 }
+    });
+  });
+
+  it("keeps saved asset dimensions for reuse on the canvas", () => {
+    const { workspace, project } = createProject(createInitialWorkspace(), "Reusable assets");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "look-reference.png",
+      source: "look-source",
+      width: 720,
+      height: 960
+    });
+    const node = withAsset.projects[0].nodes[0];
+    const saved = saveNodeAsAsset(withAsset, project.id, node.id);
+
+    expect(saved.assets[0]).toMatchObject({
+      title: "look-reference.png",
+      metadata: { projectId: project.id, nodeId: node.id, width: 720, height: 960 }
     });
   });
 

@@ -394,7 +394,7 @@ function assetFromNode(node: CanvasNode, projectId: string): LibraryAsset {
     source: node.source,
     tags: ["generated", String(operation ?? node.type)],
     createdAt: now(),
-    metadata: { projectId, nodeId: node.id, historyId: node.metadata.historyId, operation }
+    metadata: { projectId, nodeId: node.id, historyId: node.metadata.historyId, operation, width: node.width, height: node.height }
   };
 }
 
@@ -1142,7 +1142,7 @@ export function saveNodeAsAsset(workspace: Workspace, projectId: string, nodeId:
     source: node.source,
     tags: node.type === "text" ? ["prompt"] : ["canvas"],
     createdAt: now(),
-    metadata: { projectId, nodeId }
+    metadata: { projectId, nodeId, width: node.width, height: node.height }
   };
   return { ...workspace, assets: [asset, ...workspace.assets] };
 }

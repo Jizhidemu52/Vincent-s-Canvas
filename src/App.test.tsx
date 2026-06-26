@@ -207,7 +207,11 @@ describe("Designer canvas app shell", () => {
 
     await user.click(screen.getByRole("button", { name: "Assets" }));
     expect(screen.getByText("My assets")).toBeInTheDocument();
-    expect(screen.getAllByText("backend result 1.jpg").length).toBeGreaterThan(0);
+    const existingCanvasNodes = screen.getAllByTestId("canvas-node").length;
+    await user.click(screen.getAllByRole("button", { name: /backend result 1\.jpg.*Use in canvas/i })[0]);
+    await waitFor(() => {
+      expect(screen.getAllByTestId("canvas-node").length).toBeGreaterThan(existingCanvasNodes);
+    });
   });
 
   it("opens admin monitoring for an admin session", async () => {

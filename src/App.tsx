@@ -66,6 +66,7 @@ import {
   type BatchImport,
   type CanvasNode,
   type GenerationResult,
+  type LibraryAsset,
   type OperationType,
   type ModuleType,
   type NodeTransform,
@@ -505,6 +506,24 @@ export default function App() {
     setRightPanel("assets");
   }
 
+  function insertAssetIntoCanvas(asset: LibraryAsset) {
+    if (!activeProject) return;
+    if (asset.type === "text") {
+      setWorkspace((current) => addTextNode(current, activeProject.id, asset.source, 620, 360));
+      return;
+    }
+    const width = typeof asset.metadata?.width === "number" ? asset.metadata.width : 320;
+    const height = typeof asset.metadata?.height === "number" ? asset.metadata.height : 320;
+    setWorkspace((current) =>
+      addAssetToProject(current, activeProject.id, {
+        name: asset.title,
+        source: asset.source,
+        width,
+        height
+      })
+    );
+  }
+
   if (view === "canvas" && activeProject) {
     return (
       <CanvasView
@@ -533,6 +552,7 @@ export default function App() {
         onRemoveBg={() => runImageOperation("removeBackground")}
         onShapeEdit={shapeEdit}
         onSaveAsset={saveAsset}
+        onInsertAsset={insertAssetIntoCanvas}
         onAddTargetFrame={() => setWorkspace((current) => addGenerationTargetFrame(current, activeProject.id))}
       />
     );
@@ -927,6 +947,7 @@ function CanvasView({
   onRemoveBg,
   onShapeEdit,
   onSaveAsset,
+  onInsertAsset,
   onAddTargetFrame
 }: {
   workspace: Workspace;
@@ -954,6 +975,7 @@ function CanvasView({
   onRemoveBg: () => void;
   onShapeEdit: () => void;
   onSaveAsset: () => void;
+  onInsertAsset: (asset: LibraryAsset) => void;
   onAddTargetFrame: () => void;
 }) {
   const stats = useMemo(
@@ -1014,6 +1036,7 @@ function CanvasView({
           onPanel={onRightPanel}
           onAddModule={onAddModule}
           onPromptInsert={(prompt) => onUpdateConfig({ prompt })}
+          onAssetInsert={onInsertAsset}
         />
         <ShapeEditDialog
           draft={shapeEditDraft}
@@ -1498,6 +1521,7 @@ function CanvasNodeView({
   return (
     <div
       role="button"
+      data-testid="canvas-node"
       tabIndex={0}
       className={`stage-node ${node.type} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""}`}
       style={{ left: node.x, top: node.y, width: node.width, minHeight: node.height }}
@@ -1767,7 +1791,8 @@ function RightDock({
   stats,
   onPanel,
   onAddModule,
-  onPromptInsert
+  onPromptInsert,
+  onAssetInsert
 }: {
   workspace: Workspace;
   project: Project;
@@ -1776,6 +1801,7 @@ function RightDock({
   onPanel: (panel: "context" | "history" | "assets" | "prompts") => void;
   onAddModule: (moduleType: ModuleType) => void;
   onPromptInsert: (prompt: string) => void;
+  onAssetInsert: (asset: LibraryAsset) => void;
 }) {
   return (
     <aside className="context-dock">
@@ -1815,10 +1841,10 @@ function RightDock({
         <div className="dock-list">
           <strong>My assets</strong>
           {workspace.assets.length ? workspace.assets.map((asset) => (
-            <article key={asset.id}>
+            <button type="button" key={asset.id} onClick={() => onAssetInsert(asset)}>
               <b>{asset.title}</b>
-              <span>{asset.type}</span>
-            </article>
+              <span>{asset.type} · Use in canvas</span>
+            </button>
           )) : <small>Save a selected node to collect it here</small>}
         </div>
       )}
