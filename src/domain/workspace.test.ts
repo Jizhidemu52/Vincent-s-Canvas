@@ -16,7 +16,9 @@ import {
   runBatchQueue,
   runGeneration,
   runWorkflowChain,
-  saveNodeAsAsset
+  saveNodeAsAsset,
+  savePromptPreset,
+  deletePromptPreset
 } from "./workspace";
 
 describe("designer canvas workspace behavior", () => {
@@ -180,6 +182,28 @@ describe("designer canvas workspace behavior", () => {
       title: "look-reference.png",
       metadata: { projectId: project.id, nodeId: node.id, width: 720, height: 960 }
     });
+  });
+
+  it("saves designer prompts into the reusable prompt library and can remove them", () => {
+    const workspace = createInitialWorkspace();
+    const saved = savePromptPreset(workspace, {
+      prompt: "Generate a clean embroidered vest concept from the selected references.",
+      tags: ["Designer", "Vest", "designer"]
+    });
+
+    expect(saved.prompts[0]).toMatchObject({
+      title: "Generate a clean embroidered vest concept...",
+      prompt: "Generate a clean embroidered vest concept from the selected references.",
+      tags: ["designer", "vest"],
+      source: "designer"
+    });
+
+    const removed = deletePromptPreset(saved, saved.prompts[0].id);
+    expect(removed.prompts.some((prompt) => prompt.id === saved.prompts[0].id)).toBe(false);
+  });
+
+  it("rejects empty prompt library saves", () => {
+    expect(() => savePromptPreset(createInitialWorkspace(), { prompt: "   " })).toThrow("Prompt is required");
   });
 
   it("creates editable derivatives from toolbar operations and confirmed shape edits", () => {

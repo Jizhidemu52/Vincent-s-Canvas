@@ -222,6 +222,30 @@ describe("Designer canvas app shell", () => {
     });
   });
 
+  it("lets designers save, search, insert, and delete prompt presets from the canvas dock", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const promptBox = screen.getByPlaceholderText(/\[TARGET\]/);
+    await user.clear(promptBox);
+    await user.type(promptBox, "Create a pleated silk vest with tiny tonal embroidery and clean studio lighting.");
+
+    await user.click(screen.getByRole("button", { name: "Prompts" }));
+    await user.click(screen.getByRole("button", { name: "Save current prompt" }));
+
+    expect(screen.getByText("Prompt saved to library")).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "Search prompts" }), "pleated silk");
+    expect(screen.getByRole("button", { name: /Prompt note prompt.*pleated silk/i })).toBeInTheDocument();
+
+    await user.clear(promptBox);
+    await user.click(screen.getByRole("button", { name: /Prompt note prompt.*pleated silk/i }));
+    expect(promptBox).toHaveValue("Create a pleated silk vest with tiny tonal embroidery and clean studio lighting.");
+
+    await user.click(screen.getByRole("button", { name: "Delete prompt Prompt note prompt" }));
+    expect(screen.queryByRole("button", { name: /Prompt note prompt.*pleated silk/i })).not.toBeInTheDocument();
+  });
+
   it("runs batch mode and writes visible generation history", async () => {
     const user = userEvent.setup();
     await login(user);

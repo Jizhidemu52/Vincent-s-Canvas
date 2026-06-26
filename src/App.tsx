@@ -53,12 +53,14 @@ import {
   createInitialWorkspace,
   createProject,
   createWorkflowModuleFromSelection,
+  deletePromptPreset,
   deleteSelectedNodes,
   importBatchFolder,
   mergeReferenceSelection,
   redoProject,
   runBatchQueue,
   saveNodeAsAsset,
+  savePromptPreset,
   selectNodes,
   undoProject,
   updateNodeTransform,
@@ -510,6 +512,30 @@ export default function App() {
     setRightPanel("assets");
   }
 
+  function saveSelectedPrompt() {
+    if (!selectedNode) return;
+    const prompt = selectedNode.generation.prompt.trim();
+    if (!prompt) {
+      setApiNotice("Prompt is required before saving to library");
+      return;
+    }
+    setWorkspace((current) =>
+      savePromptPreset(current, {
+        title: `${selectedNode.name} prompt`,
+        prompt,
+        tags: ["designer", selectedNode.generation.modelId]
+      })
+    );
+    setRightPanel("prompts");
+    setApiNotice("Prompt saved to library");
+  }
+
+  function deletePrompt(promptId: string) {
+    setWorkspace((current) => deletePromptPreset(current, promptId));
+    setRightPanel("prompts");
+    setApiNotice("Prompt removed from library");
+  }
+
   function insertAssetIntoCanvas(asset: LibraryAsset) {
     if (!activeProject) return;
     if (asset.type === "text") {
@@ -579,6 +605,8 @@ export default function App() {
         onRemoveBg={() => runImageOperation("removeBackground")}
         onShapeEdit={shapeEdit}
         onSaveAsset={saveAsset}
+        onSavePrompt={saveSelectedPrompt}
+        onDeletePrompt={deletePrompt}
         onInsertAsset={insertAssetIntoCanvas}
         onAddTargetFrame={() => setWorkspace((current) => addGenerationTargetFrame(current, activeProject.id))}
       />
@@ -1047,6 +1075,8 @@ function CanvasView({
   onRemoveBg,
   onShapeEdit,
   onSaveAsset,
+  onSavePrompt,
+  onDeletePrompt,
   onInsertAsset,
   onAddTargetFrame
 }: {
@@ -1076,6 +1106,8 @@ function CanvasView({
   onRemoveBg: () => void;
   onShapeEdit: () => void;
   onSaveAsset: () => void;
+  onSavePrompt: () => void;
+  onDeletePrompt: (promptId: string) => void;
   onInsertAsset: (asset: LibraryAsset) => void;
   onAddTargetFrame: () => void;
 }) {
@@ -1134,11 +1166,14 @@ function CanvasView({
         <RightDock
           workspace={workspace}
           project={project}
+          selectedNode={selectedNode}
           panel={rightPanel}
           stats={stats}
           onPanel={onRightPanel}
           onAddModule={onAddModule}
           onPromptInsert={(prompt) => onUpdateConfig({ prompt })}
+          onSavePrompt={onSavePrompt}
+          onPromptDelete={onDeletePrompt}
           onAssetInsert={onInsertAsset}
           onAssistantNote={onAssistantNote}
         />
@@ -1952,24 +1987,38 @@ function ShapeEditDialog({
 function RightDock({
   workspace,
   project,
+  selectedNode,
   panel,
   stats,
   onPanel,
   onAddModule,
   onPromptInsert,
+  onSavePrompt,
+  onPromptDelete,
   onAssetInsert,
   onAssistantNote
 }: {
   workspace: Workspace;
   project: Project;
+  selectedNode?: CanvasNode;
   panel: RightPanel;
   stats: { images: number; texts: number; modules: number };
   onPanel: (panel: RightPanel) => void;
   onAddModule: (moduleType: ModuleType) => void;
   onPromptInsert: (prompt: string) => void;
+  onSavePrompt: () => void;
+  onPromptDelete: (promptId: string) => void;
   onAssetInsert: (asset: LibraryAsset) => void;
   onAssistantNote: (content: string) => void;
 }) {
+  const [promptSearch, setPromptSearch] = useState("");
+  const normalizedPromptSearch = promptSearch.trim().toLowerCase();
+  const filteredPrompts = normalizedPromptSearch
+    ? workspace.prompts.filter((prompt) => {
+        const haystack = `${prompt.title} ${prompt.prompt} ${prompt.tags.join(" ")}`.toLowerCase();
+        return haystack.includes(normalizedPromptSearch);
+      })
+    : workspace.prompts;
   const assistantCards = [
     {
       title: "Two-reference concept",
@@ -2034,12 +2083,34 @@ function RightDock({
       {panel === "prompts" && (
         <div className="dock-list">
           <strong>Prompt library</strong>
-          {workspace.prompts.map((prompt) => (
-            <button type="button" key={prompt.id} onClick={() => onPromptInsert(prompt.prompt)}>
-              <b>{prompt.title}</b>
-              <span>{prompt.tags.join(", ")}</span>
+          <div className="prompt-library-tools">
+            <label>
+              <Search size={13} />
+              <input
+                aria-label="Search prompts"
+                value={promptSearch}
+                onChange={(event) => setPromptSearch(event.target.value)}
+                placeholder="Search prompt library"
+              />
+            </label>
+            <button type="button" onClick={onSavePrompt} disabled={!selectedNode?.generation.prompt.trim()}>
+              Save current prompt
             </button>
-          ))}
+          </div>
+          {filteredPrompts.length ? filteredPrompts.map((prompt) => (
+            <article className="prompt-preset-row" key={prompt.id}>
+              <button type="button" className="prompt-preset-main" onClick={() => onPromptInsert(prompt.prompt)}>
+                <b>{prompt.title}</b>
+                <span>{prompt.tags.join(", ")}</span>
+                <small>{prompt.prompt}</small>
+              </button>
+              {prompt.source === "designer" && (
+                <button type="button" className="prompt-delete" aria-label={`Delete prompt ${prompt.title}`} onClick={() => onPromptDelete(prompt.id)}>
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </article>
+          )) : <small>No prompts match this search</small>}
         </div>
       )}
       {panel === "assistant" && (

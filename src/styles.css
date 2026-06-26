@@ -1398,6 +1398,74 @@ button {
   line-height: 1.35;
 }
 
+.prompt-library-tools {
+  display: grid;
+  gap: 7px;
+}
+
+.prompt-library-tools label {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e2e2e2;
+  border-radius: 7px;
+  background: #fff;
+  padding: 7px;
+}
+
+.prompt-library-tools input {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  outline: 0;
+}
+
+.prompt-library-tools button {
+  border: 0;
+  background: #111;
+  color: white;
+  font-weight: 800;
+  text-align: center;
+}
+
+.prompt-library-tools button:disabled {
+  cursor: not-allowed;
+  background: #d1d1d1;
+}
+
+.dock-list .prompt-preset-row {
+  position: relative;
+  grid-template-columns: 1fr 30px;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+}
+
+.dock-list .prompt-preset-main {
+  min-width: 0;
+}
+
+.dock-list .prompt-preset-main small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #686868;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.dock-list .prompt-delete {
+  display: inline-grid;
+  width: 30px;
+  min-height: 100%;
+  place-items: center;
+  padding: 0;
+  color: #9a3535;
+  text-align: center;
+}
+
 .dock-footer {
   display: grid;
   grid-template-columns: 16px 1fr;

@@ -1146,3 +1146,35 @@ export function saveNodeAsAsset(workspace: Workspace, projectId: string, nodeId:
   };
   return { ...workspace, assets: [asset, ...workspace.assets] };
 }
+
+function promptTitleFrom(content: string) {
+  const firstLine = content.trim().split(/\r?\n/)[0] ?? "Saved prompt";
+  if (!firstLine) return "Saved prompt";
+  if (firstLine.length <= 42) return firstLine;
+  const truncated = firstLine.slice(0, 42).replace(/\s+\S*$/, "").trim();
+  return `${truncated || firstLine.slice(0, 39).trim()}...`;
+}
+
+export function savePromptPreset(
+  workspace: Workspace,
+  input: { title?: string; prompt: string; tags?: string[]; source?: PromptPreset["source"] }
+): Workspace {
+  const prompt = input.prompt.trim();
+  if (!prompt) throw new Error("Prompt is required");
+  const title = input.title?.trim() || promptTitleFrom(prompt);
+  const tags = (input.tags?.length ? input.tags : ["designer"])
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean);
+  const preset: PromptPreset = {
+    id: createId("prompt"),
+    title,
+    prompt,
+    tags: Array.from(new Set(tags)),
+    source: input.source ?? "designer"
+  };
+  return { ...workspace, prompts: [preset, ...workspace.prompts] };
+}
+
+export function deletePromptPreset(workspace: Workspace, promptId: string): Workspace {
+  return { ...workspace, prompts: workspace.prompts.filter((prompt) => prompt.id !== promptId) };
+}
