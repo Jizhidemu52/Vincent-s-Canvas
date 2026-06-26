@@ -1,7 +1,101 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+
+let backendProfile = {
+  userId: "designer-lina",
+  designerName: "Lina Zhou",
+  role: "designer" as const,
+  creditBalance: 180,
+  creditUsed: 0,
+  credits: 180
+};
+let backendHistory: Array<Record<string, unknown>> = [];
+
+function jsonResponse(payload: unknown, status = 200) {
+  return Promise.resolve(
+    new Response(JSON.stringify(payload), {
+      status,
+      headers: { "content-type": "application/json" }
+    })
+  );
+}
+
+beforeEach(() => {
+  backendProfile = {
+    userId: "designer-lina",
+    designerName: "Lina Zhou",
+    role: "designer",
+    creditBalance: 180,
+    creditUsed: 0,
+    credits: 180
+  };
+  backendHistory = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith("/api/profile")) return jsonResponse(backendProfile);
+      if (url.endsWith("/api/history")) return jsonResponse(backendHistory);
+      if (url.endsWith("/api/models")) {
+        return jsonResponse([
+          { id: "gpt-image-2-medium", name: "GPT Image 2 Medium", provider: "openai", group: "Trending models", capability: ["generate", "edit"], cost: 7 },
+          { id: "nanobanana2", name: "Nano Banana 2", provider: "nanobanana", group: "Trending models", capability: ["generate", "edit"], cost: 11 },
+          { id: "background-cleaner", name: "Remove Background", provider: "internal", group: "Operations", capability: ["removeBackground"], cost: 2 }
+        ]);
+      }
+      if (url.endsWith("/api/generations") || url.endsWith("/api/edits") || url.endsWith("/api/upscale") || url.endsWith("/api/remove-bg")) {
+        const request = JSON.parse(String(init?.body)) as {
+          projectId: string;
+          nodeId: string;
+          modelId: string;
+          prompt: string;
+          outputCount: number;
+          referenceNodeIds: string[];
+          operation: string;
+        };
+        const unitCost = request.modelId === "nanobanana2" ? 11 : request.modelId === "background-cleaner" ? 2 : 7;
+        const creditCost = unitCost * request.outputCount;
+        backendProfile = {
+          ...backendProfile,
+          creditBalance: backendProfile.creditBalance - creditCost,
+          creditUsed: backendProfile.creditUsed + creditCost,
+          credits: backendProfile.creditBalance - creditCost
+        };
+        const historyEntry = {
+          id: `history-${backendHistory.length + 1}`,
+          projectId: request.projectId,
+          nodeId: request.nodeId,
+          prompt: request.prompt,
+          modelId: request.modelId,
+          outputCount: request.outputCount,
+          creditCost,
+          operation: request.operation,
+          referenceCount: request.referenceNodeIds.length,
+          createdAt: new Date().toISOString()
+        };
+        backendHistory = [historyEntry, ...backendHistory];
+        return jsonResponse({
+          status: "succeeded",
+          creditCost,
+          historyId: historyEntry.id,
+          outputs: Array.from({ length: request.outputCount }, (_, index) => ({
+            name: `backend result ${index + 1}.jpg`,
+            source: `mock://${request.operation}/${request.nodeId}/${index + 1}`,
+            width: 1024,
+            height: 1024
+          }))
+        });
+      }
+      return jsonResponse({ status: "failed", errorMessage: "Route not found" }, 404);
+    })
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 async function login(user: ReturnType<typeof userEvent.setup>) {
   render(<App />);
@@ -93,10 +187,11 @@ describe("Designer canvas app shell", () => {
     const generateButtons = screen.getAllByRole("button", { name: "Generate" });
     await user.click(generateButtons[generateButtons.length - 1]);
 
-    expect(screen.getByText("fashion-reference.jpg result 1")).toBeInTheDocument();
+    expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "History" }));
     expect(screen.getByText(/nanobanana2/i)).toBeInTheDocument();
     expect(screen.getAllByText(/参考这张图做一件新的刺绣背心/).length).toBeGreaterThan(0);
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/generations$/), expect.objectContaining({ method: "POST" }));
   });
 
   it("confirms mask edits, creates target frames, and keeps them visible on canvas", async () => {
@@ -130,11 +225,11 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "History" }));
     expect(screen.getByRole("region", { name: "History management" })).toBeInTheDocument();
     expect(screen.getByText(/生成一款带盘扣的黑色马甲/)).toBeInTheDocument();
-    expect(screen.getByText("fashion-reference.jpg result 1")).toBeInTheDocument();
+    expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Profile" }));
     expect(screen.getByRole("region", { name: "Profile credit management" })).toBeInTheDocument();
     expect(screen.getByText("Credit balance")).toBeInTheDocument();
-    expect(screen.getByText("-1")).toBeInTheDocument();
+    expect(screen.getAllByText("173").length).toBeGreaterThan(0);
   });
 });

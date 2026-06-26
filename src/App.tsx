@@ -45,6 +45,7 @@ import {
   addAssetToProject,
   addTextNode,
   addGenerationTargetFrame,
+  applyGenerationResultToCanvas,
   applyImageOperation,
   commitShapeEdit,
   configureNodeGeneration,
@@ -57,7 +58,6 @@ import {
   mergeReferenceSelection,
   redoProject,
   runBatchQueue,
-  runGeneration,
   runWorkflowChain,
   saveNodeAsAsset,
   selectNodes,
@@ -65,11 +65,13 @@ import {
   updateNodeTransform,
   updateViewport,
   type CanvasNode,
+  type OperationType,
   type ModuleType,
   type NodeTransform,
   type Project,
   type Workspace
 } from "./domain/workspace";
+import { fetchBackendSnapshot, submitGenerationRequest } from "./services/modelApi";
 
 const TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 const SECOND_TEST_IMAGE = "/fixtures/fashion-reference.jpg";
@@ -92,11 +94,23 @@ function createWorkspace() {
   return createInitialWorkspace({ userId: "designer-lina", designerName: "Lina Zhou", creditBalance: 180, role: "designer" });
 }
 
+function operationForNode(node: CanvasNode): OperationType {
+  if (node.operation) return node.operation;
+  if (node.moduleType === "upscale") return "upscale";
+  if (node.moduleType === "removeBackground") return "removeBackground";
+  if (node.moduleType === "edit") return "edit";
+  if (node.type === "upscale") return "upscale";
+  if (node.type === "removeBg") return "removeBackground";
+  if (node.type === "edit") return "edit";
+  return "generate";
+}
+
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => createWorkspace());
   const [view, setView] = useState<ViewMode>("login");
   const [rightPanel, setRightPanel] = useState<"context" | "history" | "assets" | "prompts">("context");
   const [shapeEditDraft, setShapeEditDraft] = useState<ShapeEditDraft>(null);
+  const [apiNotice, setApiNotice] = useState("Backend API ready");
   const activeProject = workspace.projects.find((project) => project.id === workspace.activeProjectId);
   const selectedNode = activeProject?.nodes.find((node) => node.id === activeProject.selectedNodeIds[0]) ?? activeProject?.nodes[0];
 
@@ -168,9 +182,39 @@ export default function App() {
     });
   }
 
+  async function generateNodeThroughApi(nodeId?: string) {
+    if (!activeProject) return;
+    const projectId = activeProject.id;
+    const source = activeProject.nodes.find((node) => node.id === (nodeId ?? selectedNode?.id));
+    if (!source) return;
+    const operation = operationForNode(source);
+    if (!source.generation.prompt.trim() && operation !== "upscale" && operation !== "removeBackground") {
+      setApiNotice("Prompt is required before sending to backend");
+      return;
+    }
+    const request = {
+      projectId,
+      nodeId: source.id,
+      modelId: source.generation.modelId,
+      prompt: source.generation.prompt,
+      referenceNodeIds: source.references.length ? source.references : source.type === "imageGroup" ? source.references : [source.id],
+      outputCount: source.generation.outputCount,
+      operation
+    };
+    try {
+      setApiNotice("Running backend model request...");
+      const result = await submitGenerationRequest(request);
+      const serverState = await fetchBackendSnapshot();
+      setWorkspace((current) => applyGenerationResultToCanvas(current, projectId, source.id, request, result, serverState));
+      setRightPanel("history");
+      setApiNotice(`Backend ${operation} succeeded, ${result.creditCost} credits used`);
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Backend request failed");
+    }
+  }
+
   function runSelectedGeneration() {
-    if (!activeProject || !selectedNode) return;
-    setWorkspace((current) => runGeneration(current, activeProject.id, selectedNode.id));
+    void generateNodeThroughApi();
   }
 
   function addWorkflowModule(moduleType: ModuleType) {
@@ -277,6 +321,7 @@ export default function App() {
         workspace={workspace}
         project={activeProject}
         selectedNode={selectedNode}
+        apiNotice={apiNotice}
         rightPanel={rightPanel}
         onBack={() => setView("home")}
         onRightPanel={setRightPanel}
@@ -288,6 +333,7 @@ export default function App() {
         onUpdateConfig={updateSelectedConfig}
         onImportImages={importImagePair}
         onGenerate={runSelectedGeneration}
+        onGenerateNode={(nodeId) => void generateNodeThroughApi(nodeId)}
         onBatch={runBatch}
         onWorkflow={runWorkflow}
         onAddModule={addWorkflowModule}
@@ -669,6 +715,7 @@ function CanvasView({
   workspace,
   project,
   selectedNode,
+  apiNotice,
   rightPanel,
   shapeEditDraft,
   onBack,
@@ -680,6 +727,7 @@ function CanvasView({
   onUpdateConfig,
   onImportImages,
   onGenerate,
+  onGenerateNode,
   onBatch,
   onWorkflow,
   onAddModule,
@@ -694,6 +742,7 @@ function CanvasView({
   workspace: Workspace;
   project: Project;
   selectedNode?: CanvasNode;
+  apiNotice: string;
   rightPanel: "context" | "history" | "assets" | "prompts";
   shapeEditDraft: ShapeEditDraft;
   onBack: () => void;
@@ -705,6 +754,7 @@ function CanvasView({
   onUpdateConfig: (patch: Partial<CanvasNode["generation"]>) => void;
   onImportImages: () => void;
   onGenerate: () => void;
+  onGenerateNode: (nodeId: string) => void;
   onBatch: () => void;
   onWorkflow: () => void;
   onAddModule: (moduleType: ModuleType) => void;
@@ -743,6 +793,7 @@ function CanvasView({
         <PromptCard
           workspace={workspace}
           selectedNode={selectedNode}
+          apiNotice={apiNotice}
           onUpdateConfig={onUpdateConfig}
           onGenerate={onGenerate}
           onBatch={onBatch}
@@ -755,6 +806,7 @@ function CanvasView({
           selectedNode={selectedNode}
           onWorkspaceChange={onWorkspaceChange}
           onConnectModule={onConnectModule}
+          onGenerateNode={onGenerateNode}
         />
         <NodeToolbar
           selectedNode={selectedNode}
@@ -906,6 +958,7 @@ function TopToolbar({
 function PromptCard({
   workspace,
   selectedNode,
+  apiNotice,
   onUpdateConfig,
   onGenerate,
   onBatch,
@@ -914,6 +967,7 @@ function PromptCard({
 }: {
   workspace: Workspace;
   selectedNode?: CanvasNode;
+  apiNotice: string;
   onUpdateConfig: (patch: Partial<CanvasNode["generation"]>) => void;
   onGenerate: () => void;
   onBatch: () => void;
@@ -984,6 +1038,7 @@ function PromptCard({
         />
       </div>
       <button type="button" className="generate-button" onClick={onGenerate}>Generate</button>
+      <small className="api-notice" aria-live="polite">{apiNotice}</small>
       <button type="button" className="secondary-button" onClick={onBatch}>Batch mode</button>
       <button type="button" className="secondary-button" onClick={() => batchInputRef.current?.click()}>
         <Upload size={13} /> Import folder
@@ -1007,13 +1062,15 @@ function CanvasStage({
   project,
   selectedNode,
   onWorkspaceChange,
-  onConnectModule
+  onConnectModule,
+  onGenerateNode
 }: {
   workspace: Workspace;
   project: Project;
   selectedNode?: CanvasNode;
   onWorkspaceChange: (updater: (workspace: Workspace) => Workspace) => void;
   onConnectModule: (moduleType: ModuleType) => void;
+  onGenerateNode: (nodeId: string) => void;
 }) {
   const stageRef = useRef<HTMLElement | null>(null);
   const [lasso, setLasso] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -1162,6 +1219,7 @@ function CanvasStage({
             onSelect={selectNode}
             onWorkspaceChange={onWorkspaceChange}
             onConnectModule={onConnectModule}
+            onGenerateNode={onGenerateNode}
             workspace={workspace}
           />
         ))}
@@ -1181,6 +1239,7 @@ function CanvasNodeView({
   onSelect,
   onWorkspaceChange,
   onConnectModule,
+  onGenerateNode,
   workspace
 }: {
   projectId: string;
@@ -1190,6 +1249,7 @@ function CanvasNodeView({
   onSelect: (id: string, append: boolean) => void;
   onWorkspaceChange: (updater: (workspace: Workspace) => Workspace) => void;
   onConnectModule: (moduleType: ModuleType) => void;
+  onGenerateNode: (nodeId: string) => void;
   workspace: Workspace;
 }) {
   const isImageLike =
@@ -1315,7 +1375,7 @@ function CanvasNodeView({
               })
             )
           }
-          onGenerate={() => onWorkspaceChange((current) => runGeneration(current, projectId, node.id))}
+          onGenerate={() => onGenerateNode(node.id)}
         />
       )}
       <span className="node-port input" />

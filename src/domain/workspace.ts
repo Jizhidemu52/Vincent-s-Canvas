@@ -652,6 +652,75 @@ export function runGeneration(workspace: Workspace, projectId: string, nodeId: s
   };
 }
 
+export function applyGenerationResultToCanvas(
+  workspace: Workspace,
+  projectId: string,
+  nodeId: string,
+  request: GenerationRequest,
+  result: GenerationResult,
+  serverState: { profile?: Profile; history?: HistoryEntry[]; models?: ModelDefinition[] } = {}
+): Workspace {
+  const project = findProject(workspace, projectId);
+  const source = findNode(project, nodeId);
+  const references = request.referenceNodeIds.length
+    ? request.referenceNodeIds
+    : source.type === "imageGroup"
+      ? source.references
+      : source.references.length
+        ? source.references
+        : [source.id];
+  const outputs = result.outputs.length
+    ? result.outputs
+    : Array.from({ length: request.outputCount }, (_, index) => ({
+        name: `${source.name} result ${index + 1}`,
+        source: `${source.source || "generated"}#api-result-${index + 1}`,
+        width: source.width,
+        height: source.height
+      }));
+  const generatedNodes = outputs.map((output, index) => {
+    const position = placeNextTo(source, index + 1);
+    const outputSource = output.source.startsWith("mock://") ? `${source.source || "generated"}#${result.historyId}-${index + 1}` : output.source;
+    return createNode({
+      type: "image",
+      kind: "generated",
+      name: output.name || `${source.name} result ${index + 1}`,
+      source: outputSource,
+      x: position.x,
+      y: position.y,
+      width: output.width || source.width,
+      height: output.height || source.height,
+      generation: {
+        ...source.generation,
+        prompt: request.prompt,
+        modelId: request.modelId,
+        outputCount: request.outputCount,
+        entryPoint: source.generation.entryPoint
+      },
+      parentId: source.id,
+      references,
+      metadata: {
+        historyId: result.historyId,
+        operation: request.operation,
+        creditCost: result.creditCost,
+        remoteSource: output.source
+      }
+    });
+  });
+  const updated = updateProject(workspace, projectId, (item) =>
+    withUndo(item, {
+      nodes: [...item.nodes, ...generatedNodes],
+      connections: [...item.connections, ...generatedNodes.map((node) => connect(source.id, node.id, "out", "in"))],
+      selectedNodeIds: generatedNodes.map((node) => node.id)
+    })
+  );
+  return {
+    ...updated,
+    profile: serverState.profile ?? updated.profile,
+    history: serverState.history ?? updated.history,
+    modelRegistry: serverState.models ?? updated.modelRegistry
+  };
+}
+
 export function applyImageOperation(
   workspace: Workspace,
   projectId: string,

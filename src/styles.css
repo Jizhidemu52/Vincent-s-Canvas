@@ -796,6 +796,13 @@ button {
   outline: 0;
 }
 
+.api-notice {
+  display: block;
+  min-height: 18px;
+  color: #666;
+  line-height: 1.35;
+}
+
 .quick-prompts {
   display: grid;
   gap: 6px;
