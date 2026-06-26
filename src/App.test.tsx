@@ -247,10 +247,13 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "rectangle" }));
     await user.click(screen.getByRole("button", { name: "Confirm edit" }));
     expect(screen.getByText("fashion-reference.jpg mask edit")).toBeInTheDocument();
+    expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
+    expect(screen.getByText("Backend mask edit succeeded, 7 credits used")).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/edits$/), expect.objectContaining({ method: "POST" }));
 
     await user.click(screen.getByRole("button", { name: /Target frame/i }));
     expect(screen.getByText("Generation target frame")).toBeInTheDocument();
-    expect(screen.getByText("gpt-image-2-medium")).toBeInTheDocument();
+    expect(screen.getAllByText("gpt-image-2-medium").length).toBeGreaterThan(0);
   });
 
   it("runs toolbar upscale through the backend operation API", async () => {

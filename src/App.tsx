@@ -466,15 +466,38 @@ export default function App() {
     });
   }
 
-  function confirmShapeEdit() {
+  async function confirmShapeEdit() {
     if (!activeProject || !shapeEditDraft) return;
+    const projectId = activeProject.id;
+    const source = activeProject.nodes.find((node) => node.id === shapeEditDraft.nodeId);
+    if (!source) return;
+    const editDraft = shapeEditDraft;
     setWorkspace((current) =>
-      commitShapeEdit(current, activeProject.id, shapeEditDraft.nodeId, {
-        shape: shapeEditDraft.shape,
-        prompt: shapeEditDraft.prompt
+      commitShapeEdit(current, projectId, editDraft.nodeId, {
+        shape: editDraft.shape,
+        prompt: editDraft.prompt
       })
     );
     setShapeEditDraft(null);
+    const request = {
+      projectId,
+      nodeId: source.id,
+      modelId: source.generation.modelId,
+      prompt: editDraft.prompt,
+      referenceNodeIds: source.references.length ? source.references : [source.id],
+      outputCount: 1,
+      operation: "edit" as OperationType
+    };
+    try {
+      setApiNotice("Running backend mask edit...");
+      const result = await submitGenerationRequest(request, activeUserId);
+      const serverState = await fetchBackendSnapshot(activeUserId);
+      setWorkspace((current) => applyGenerationResultToCanvas(current, projectId, source.id, request, result, serverState));
+      setRightPanel("history");
+      setApiNotice(`Backend mask edit succeeded, ${result.creditCost} credits used`);
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Backend mask edit failed");
+    }
   }
   function saveAsset() {
     if (!activeProject || !selectedNode) return;
