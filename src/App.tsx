@@ -56,6 +56,7 @@ import {
   deletePromptPreset,
   deleteSelectedNodes,
   importBatchFolder,
+  markNodeRunState,
   mergeReferenceSelection,
   redoProject,
   runBatchQueue,
@@ -260,13 +261,18 @@ export default function App() {
     };
     try {
       setApiNotice("Running backend model request...");
+      setWorkspace((current) => markNodeRunState(current, projectId, source.id, "running"));
       const result = await submitGenerationRequest(request, activeUserId);
       const serverState = await fetchBackendSnapshot(activeUserId);
-      setWorkspace((current) => applyGenerationResultToCanvas(current, projectId, source.id, request, result, serverState));
+      setWorkspace((current) =>
+        applyGenerationResultToCanvas(markNodeRunState(current, projectId, source.id, "done"), projectId, source.id, request, result, serverState)
+      );
       setRightPanel("history");
       setApiNotice(`Backend ${operation} succeeded, ${result.creditCost} credits used`);
     } catch (error) {
-      setApiNotice(error instanceof Error ? error.message : "Backend request failed");
+      const message = error instanceof Error ? error.message : "Backend request failed";
+      setWorkspace((current) => markNodeRunState(current, projectId, source.id, "error", message));
+      setApiNotice(message);
     }
   }
 
@@ -327,6 +333,7 @@ export default function App() {
     let cursorId = selectedNode.id;
     const visited = new Set<string>();
     let executed = 0;
+    let runningNodeId: string | undefined;
     try {
       setApiNotice("Running backend workflow chain...");
       while (!visited.has(cursorId)) {
@@ -355,16 +362,24 @@ export default function App() {
           outputCount: nextNode.generation.outputCount,
           operation
         };
+        runningNodeId = nextNode.id;
+        setWorkspace((current) => markNodeRunState(current, projectId, nextNode.id, "running"));
         const result = await submitGenerationRequest(request, activeUserId);
         const serverState = await fetchBackendSnapshot(activeUserId);
-        setWorkspace((current) => applyGenerationResultToCanvas(current, projectId, nextNode.id, request, result, serverState));
+        setWorkspace((current) =>
+          applyGenerationResultToCanvas(markNodeRunState(current, projectId, nextNode.id, "done"), projectId, nextNode.id, request, result, serverState)
+        );
         executed += 1;
         cursorId = nextNode.id;
       }
       setRightPanel("history");
       setApiNotice(executed ? `Backend workflow completed ${executed} module${executed > 1 ? "s" : ""}` : "No downstream workflow modules");
     } catch (error) {
-      setApiNotice(error instanceof Error ? error.message : "Backend workflow failed");
+      const message = error instanceof Error ? error.message : "Backend workflow failed";
+      if (runningNodeId) {
+        setWorkspace((current) => markNodeRunState(current, projectId, runningNodeId!, "error", message));
+      }
+      setApiNotice(message);
     }
   }
 
@@ -497,13 +512,18 @@ export default function App() {
     };
     try {
       setApiNotice("Running backend mask edit...");
+      setWorkspace((current) => markNodeRunState(current, projectId, source.id, "running"));
       const result = await submitGenerationRequest(request, activeUserId);
       const serverState = await fetchBackendSnapshot(activeUserId);
-      setWorkspace((current) => applyGenerationResultToCanvas(current, projectId, source.id, request, result, serverState));
+      setWorkspace((current) =>
+        applyGenerationResultToCanvas(markNodeRunState(current, projectId, source.id, "done"), projectId, source.id, request, result, serverState)
+      );
       setRightPanel("history");
       setApiNotice(`Backend mask edit succeeded, ${result.creditCost} credits used`);
     } catch (error) {
-      setApiNotice(error instanceof Error ? error.message : "Backend mask edit failed");
+      const message = error instanceof Error ? error.message : "Backend mask edit failed";
+      setWorkspace((current) => markNodeRunState(current, projectId, source.id, "error", message));
+      setApiNotice(message);
     }
   }
   function saveAsset() {
@@ -1732,7 +1752,7 @@ function CanvasNodeView({
       role="button"
       data-testid="canvas-node"
       tabIndex={0}
-      className={`stage-node ${node.type} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""}`}
+      className={`stage-node ${node.type} ${node.status} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""}`}
       style={{ left: node.x, top: node.y, width: node.width, minHeight: node.height }}
       onPointerDown={(event) => startPointer(event)}
       onDoubleClick={(event) => {
@@ -1742,10 +1762,14 @@ function CanvasNodeView({
       }}
     >
       <span className="node-label">{isImageLike ? "Image" : isText ? "Text" : node.moduleType ?? node.type}</span>
+      {node.status === "running" && <span className="node-status running">Running</span>}
+      {node.status === "done" && <span className="node-status done">Done</span>}
+      {node.status === "error" && <span className="node-status error">Error</span>}
       {isImageLike && node.type !== "imageGroup" && (
         <>
           <img src={node.source} alt={node.name} style={{ width: node.width, height: node.height }} />
           <strong className="stage-node-name">{node.name}</strong>
+          {node.status === "error" && <small className="node-error-message">{node.errorMessage}</small>}
           <div className="thumb-strip">
             <span>ORIGINAL</span>
             <img src={node.source} alt="" />
@@ -1772,6 +1796,7 @@ function CanvasNodeView({
           <strong>{node.metadata.targetFrame ? node.name : node.moduleType ?? node.type}</strong>
           <small>{node.generation.modelId}</small>
           <span>{node.references.length} refs</span>
+          {node.status === "error" && <em>{node.errorMessage}</em>}
         </div>
       )}
       {selected && <SelectionHandles width={node.width} height={node.height} />}

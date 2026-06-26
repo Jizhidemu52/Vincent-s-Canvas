@@ -12,12 +12,14 @@ import {
   createProject,
   createWorkflowModuleFromSelection,
   importBatchFolder,
+  markNodeRunState,
   mergeReferenceSelection,
   runBatchQueue,
   runGeneration,
   runWorkflowChain,
   saveNodeAsAsset,
   savePromptPreset,
+  selectNodes,
   deletePromptPreset
 } from "./workspace";
 
@@ -55,6 +57,47 @@ describe("designer canvas workspace behavior", () => {
     expect(configured.projects[0].nodes[0].generation.modelId).toBe("flux-pro");
     expect(configured.projects[0].nodes[0].generation.outputCount).toBe(3);
     expect(configured.projects[0].nodes[0].generation.entryPoint).toBe("inline");
+  });
+
+  it("keeps backend run state visible after normal canvas selection changes", () => {
+    const { workspace, project } = createProject(createInitialWorkspace(), "Run state feedback");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "vest.png",
+      source: "vest-source",
+      width: 512,
+      height: 640
+    });
+    const withSecondAsset = addAssetToProject(withAsset, project.id, {
+      name: "texture.png",
+      source: "texture-source",
+      width: 300,
+      height: 300
+    });
+    const [source, texture] = withSecondAsset.projects[0].nodes;
+    const undoCount = withSecondAsset.projects[0].undoStack.length;
+
+    const running = markNodeRunState(withSecondAsset, project.id, source.id, "running");
+    expect(running.projects[0].nodes[0]).toMatchObject({
+      status: "running",
+      metadata: { runStatus: "running" }
+    });
+    expect(running.projects[0].undoStack).toHaveLength(undoCount);
+
+    const failed = markNodeRunState(running, project.id, source.id, "error", "Provider offline");
+    expect(failed.projects[0].nodes[0]).toMatchObject({
+      status: "error",
+      errorMessage: "Provider offline",
+      metadata: { runStatus: "error", errorMessage: "Provider offline" }
+    });
+
+    const selectedOtherNode = selectNodes(failed, project.id, [texture.id]);
+    expect(selectedOtherNode.projects[0].nodes[0].status).toBe("error");
+    expect(selectedOtherNode.projects[0].nodes[0].errorMessage).toBe("Provider offline");
+    expect(selectedOtherNode.projects[0].nodes[1].status).toBe("selected");
+
+    const reset = markNodeRunState(selectedOtherNode, project.id, source.id, "idle");
+    expect(reset.projects[0].nodes[0].status).toBe("idle");
+    expect(reset.projects[0].nodes[0].errorMessage).toBeUndefined();
   });
 
   it("places dropped images at the canvas pointer location", () => {

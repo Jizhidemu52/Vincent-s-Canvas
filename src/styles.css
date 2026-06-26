@@ -1015,6 +1015,74 @@ button {
   box-shadow: 0 0 0 4px rgba(49, 209, 194, 0.16);
 }
 
+.stage-node.running > img,
+.stage-node.running .workflow-box,
+.stage-node.running .text-node,
+.stage-node.running .reference-group-node {
+  box-shadow: 0 0 0 4px rgba(38, 201, 183, 0.18);
+}
+
+.stage-node.error > img,
+.stage-node.error .workflow-box,
+.stage-node.error .text-node,
+.stage-node.error .reference-group-node {
+  outline: 2px solid #e05252;
+}
+
+.node-status {
+  position: absolute;
+  right: 8px;
+  top: 25px;
+  z-index: 20;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.node-status.running {
+  color: #0d9184;
+}
+
+.node-status.running::before {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border: 2px solid #8ee7dd;
+  border-top-color: #0d9184;
+  border-radius: 50%;
+  content: "";
+  animation: node-spin 0.8s linear infinite;
+}
+
+.node-status.done {
+  color: #247a38;
+}
+
+.node-status.error {
+  color: #c33b3b;
+}
+
+.node-error-message,
+.workflow-box em {
+  display: block;
+  margin-top: 6px;
+  color: #c33b3b;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+@keyframes node-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .handle {
   position: absolute;
   width: 7px;

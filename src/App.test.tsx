@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -222,6 +222,46 @@ describe("Designer canvas app shell", () => {
     });
   });
 
+  it("lets designers drag and resize image nodes on the infinite canvas", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const imageNode = screen.getByRole("button", { name: /Image fashion-reference\.jpg/i });
+    const dispatchPointer = (target: EventTarget, type: string, clientX: number, clientY: number) => {
+      target.dispatchEvent(
+        new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX,
+          clientY
+        })
+      );
+    };
+    const initialLeft = Number.parseInt(imageNode.style.left, 10);
+    const initialTop = Number.parseInt(imageNode.style.top, 10);
+    const initialWidth = Number.parseInt(imageNode.style.width, 10);
+
+    await act(async () => {
+      dispatchPointer(imageNode, "pointerdown", 700, 220);
+      dispatchPointer(window, "pointermove", 748, 260);
+      dispatchPointer(window, "pointerup", 748, 260);
+    });
+    await waitFor(() => {
+      expect(imageNode).toHaveStyle({ left: `${initialLeft + 48}px`, top: `${initialTop + 40}px` });
+    });
+
+    const resizeHandle = screen.getByLabelText("Resize image");
+    await act(async () => {
+      dispatchPointer(resizeHandle, "pointerdown", 1000, 650);
+      dispatchPointer(window, "pointermove", 1060, 710);
+      dispatchPointer(window, "pointerup", 1060, 710);
+    });
+    await waitFor(() => {
+      expect(imageNode).toHaveStyle({ width: `${initialWidth + 60}px` });
+    });
+  });
+
   it("lets designers save, search, insert, and delete prompt presets from the canvas dock", async () => {
     const user = userEvent.setup();
     await login(user);
@@ -304,10 +344,34 @@ describe("Designer canvas app shell", () => {
     await user.click(generateButtons[generateButtons.length - 1]);
 
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "History" }));
     expect(screen.getByText(/nanobanana2/i)).toBeInTheDocument();
     expect(screen.getAllByText(/参考这张图做一件新的刺绣背心/).length).toBeGreaterThan(0);
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/generations$/), expect.objectContaining({ method: "POST" }));
+  });
+
+  it("keeps a failed backend generation visible on the source canvas node", async () => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation();
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith("/api/generations")) {
+        return jsonResponse({ status: "failed", errorMessage: "Provider unavailable" }, 500);
+      }
+      return originalFetch?.(input, init) ?? jsonResponse({ status: "failed", errorMessage: "Route not found" }, 404);
+    });
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.dblClick(screen.getByText("fashion-reference.jpg"));
+    await user.type(screen.getByRole("textbox", { name: "Inline prompt" }), "Make a new embroidered vest");
+    const generateButtons = screen.getAllByRole("button", { name: "Generate" });
+    await user.click(generateButtons[generateButtons.length - 1]);
+
+    expect(await screen.findByText("Error")).toBeInTheDocument();
+    expect(screen.getAllByText("Provider unavailable").length).toBeGreaterThan(0);
+    expect(screen.queryByText("backend result 1.jpg")).not.toBeInTheDocument();
   });
 
   it("confirms mask edits, creates target frames, and keeps them visible on canvas", async () => {

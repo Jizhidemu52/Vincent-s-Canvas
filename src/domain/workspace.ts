@@ -536,13 +536,43 @@ export function updateViewport(workspace: Workspace, projectId: string, patch: P
   return updateProject(workspace, projectId, (project) => withUndo(project, { viewport: { ...project.viewport, ...patch } }));
 }
 
+export function markNodeRunState(
+  workspace: Workspace,
+  projectId: string,
+  nodeId: string,
+  status: Extract<NodeStatus, "running" | "done" | "error" | "idle">,
+  errorMessage?: string
+): Workspace {
+  return updateProject(workspace, projectId, (project) => ({
+    ...project,
+    nodes: project.nodes.map((node) =>
+      node.id === nodeId
+        ? {
+            ...node,
+            status,
+            errorMessage: status === "error" ? errorMessage || "Backend request failed" : undefined,
+            metadata: {
+              ...node.metadata,
+              runStatus: status,
+              errorMessage: status === "error" ? errorMessage || "Backend request failed" : undefined
+            }
+          }
+        : node
+    ),
+    updatedAt: now()
+  }));
+}
+
 export function selectNodes(workspace: Workspace, projectId: string, nodeIds: string[], append = false): Workspace {
   return updateProject(workspace, projectId, (project) => {
     const selected = append ? Array.from(new Set([...project.selectedNodeIds, ...nodeIds])) : nodeIds;
     return {
       ...project,
       selectedNodeIds: selected,
-      nodes: project.nodes.map((node) => ({ ...node, status: selected.includes(node.id) ? "selected" : "idle" }))
+      nodes: project.nodes.map((node) => {
+        const hasRunState = node.status === "running" || node.status === "done" || node.status === "error";
+        return hasRunState ? node : { ...node, status: selected.includes(node.id) ? "selected" : "idle" };
+      })
     };
   });
 }
