@@ -188,6 +188,16 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "Context" }));
     expect(screen.getByText("Generate node")).toBeInTheDocument();
     expect(screen.getByText("Workflow modules")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Assistant" }));
+    expect(screen.getByText("Two-reference concept")).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Use as prompt" })[0]);
+    expect((screen.getByPlaceholderText(/\[TARGET\]/) as HTMLTextAreaElement).value).toContain("Use the selected references");
+    const nodeCount = screen.getAllByTestId("canvas-node").length;
+    await user.click(screen.getAllByRole("button", { name: "Add note node" })[0]);
+    await waitFor(() => {
+      expect(screen.getAllByTestId("canvas-node").length).toBeGreaterThan(nodeCount);
+    });
   });
 
   it("runs batch mode and writes visible generation history", async () => {

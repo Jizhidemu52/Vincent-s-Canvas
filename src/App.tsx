@@ -82,6 +82,7 @@ type ViewMode = "login" | "home" | "canvas" | "admin";
 type DragMode = "move" | "resize";
 type ShapeEditDraft = { nodeId: string; shape: "ellipse" | "rectangle" | "freehand"; prompt: string } | null;
 type HomeSection = "Projects" | "History" | "Profile";
+type RightPanel = "context" | "history" | "assets" | "prompts" | "assistant";
 
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -110,7 +111,7 @@ function operationForNode(node: CanvasNode): OperationType {
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => createWorkspace());
   const [view, setView] = useState<ViewMode>("login");
-  const [rightPanel, setRightPanel] = useState<"context" | "history" | "assets" | "prompts">("context");
+  const [rightPanel, setRightPanel] = useState<RightPanel>("context");
   const [shapeEditDraft, setShapeEditDraft] = useState<ShapeEditDraft>(null);
   const [apiNotice, setApiNotice] = useState("Backend API ready");
   const [workspaceReady, setWorkspaceReady] = useState(false);
@@ -524,6 +525,11 @@ export default function App() {
     );
   }
 
+  function insertAssistantNote(content: string) {
+    if (!activeProject) return;
+    setWorkspace((current) => addTextNode(current, activeProject.id, content, 760, 260));
+  }
+
   if (view === "canvas" && activeProject) {
     return (
       <CanvasView
@@ -548,6 +554,7 @@ export default function App() {
         onAddModule={addWorkflowModule}
         onConnectModule={connectSelectionToNewModule}
         onGroupReferences={groupReferences}
+        onAssistantNote={insertAssistantNote}
         onUpscale={() => runImageOperation("upscale")}
         onRemoveBg={() => runImageOperation("removeBackground")}
         onShapeEdit={shapeEdit}
@@ -943,6 +950,7 @@ function CanvasView({
   onAddModule,
   onConnectModule,
   onGroupReferences,
+  onAssistantNote,
   onUpscale,
   onRemoveBg,
   onShapeEdit,
@@ -954,10 +962,10 @@ function CanvasView({
   project: Project;
   selectedNode?: CanvasNode;
   apiNotice: string;
-  rightPanel: "context" | "history" | "assets" | "prompts";
+  rightPanel: RightPanel;
   shapeEditDraft: ShapeEditDraft;
   onBack: () => void;
-  onRightPanel: (panel: "context" | "history" | "assets" | "prompts") => void;
+  onRightPanel: (panel: RightPanel) => void;
   onWorkspaceChange: (updater: (workspace: Workspace) => Workspace) => void;
   onShapeEditDraft: (draft: ShapeEditDraft) => void;
   onConfirmShapeEdit: () => void;
@@ -971,6 +979,7 @@ function CanvasView({
   onAddModule: (moduleType: ModuleType) => void;
   onConnectModule: (moduleType: ModuleType) => void;
   onGroupReferences: () => void;
+  onAssistantNote: (content: string) => void;
   onUpscale: () => void;
   onRemoveBg: () => void;
   onShapeEdit: () => void;
@@ -1037,6 +1046,7 @@ function CanvasView({
           onAddModule={onAddModule}
           onPromptInsert={(prompt) => onUpdateConfig({ prompt })}
           onAssetInsert={onInsertAsset}
+          onAssistantNote={onAssistantNote}
         />
         <ShapeEditDialog
           draft={shapeEditDraft}
@@ -1792,17 +1802,34 @@ function RightDock({
   onPanel,
   onAddModule,
   onPromptInsert,
-  onAssetInsert
+  onAssetInsert,
+  onAssistantNote
 }: {
   workspace: Workspace;
   project: Project;
-  panel: "context" | "history" | "assets" | "prompts";
+  panel: RightPanel;
   stats: { images: number; texts: number; modules: number };
-  onPanel: (panel: "context" | "history" | "assets" | "prompts") => void;
+  onPanel: (panel: RightPanel) => void;
   onAddModule: (moduleType: ModuleType) => void;
   onPromptInsert: (prompt: string) => void;
   onAssetInsert: (asset: LibraryAsset) => void;
+  onAssistantNote: (content: string) => void;
 }) {
+  const assistantCards = [
+    {
+      title: "Two-reference concept",
+      prompt: "Use the selected references as a combined design context. Keep the silhouette readable, borrow the strongest material/detail cues, and generate a new fashion item for the same collection."
+    },
+    {
+      title: "Edit then upscale chain",
+      prompt: "First make a controlled local edit while preserving pose, lighting, and background. Then upscale the approved result with clean garment edges and visible textile texture."
+    },
+    {
+      title: "Batch cleanup brief",
+      prompt: "Apply one consistent cleanup direction to every imported image: remove background distractions, keep garment proportions unchanged, preserve fabric texture, and return production-ready cutouts."
+    }
+  ];
+
   return (
     <aside className="context-dock">
       <div className="dock-tabs">
@@ -1810,6 +1837,7 @@ function RightDock({
         <button type="button" aria-label="History" className={panel === "history" ? "active" : ""} onClick={() => onPanel("history")} title="History"><Clock3 size={15} /></button>
         <button type="button" aria-label="Assets" className={panel === "assets" ? "active" : ""} onClick={() => onPanel("assets")} title="Assets"><Database size={15} /></button>
         <button type="button" aria-label="Prompts" className={panel === "prompts" ? "active" : ""} onClick={() => onPanel("prompts")} title="Prompts"><BookOpenText size={15} /></button>
+        <button type="button" aria-label="Assistant" className={panel === "assistant" ? "active" : ""} onClick={() => onPanel("assistant")} title="Assistant"><Sparkles size={15} /></button>
       </div>
       {panel === "context" && (
         <>
@@ -1856,6 +1884,22 @@ function RightDock({
               <b>{prompt.title}</b>
               <span>{prompt.tags.join(", ")}</span>
             </button>
+          ))}
+        </div>
+      )}
+      {panel === "assistant" && (
+        <div className="dock-list">
+          <strong>Assistant</strong>
+          <small>{project.name} · {stats.images} references · {stats.modules} modules</small>
+          {assistantCards.map((card) => (
+            <article key={card.title}>
+              <b>{card.title}</b>
+              <p>{card.prompt}</p>
+              <div className="dock-actions compact">
+                <button type="button" onClick={() => onPromptInsert(card.prompt)}>Use as prompt</button>
+                <button type="button" onClick={() => onAssistantNote(card.prompt)}>Add note node</button>
+              </div>
+            </article>
           ))}
         </div>
       )}
