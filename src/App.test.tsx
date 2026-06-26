@@ -42,6 +42,7 @@ beforeEach(() => {
         return jsonResponse([
           { id: "gpt-image-2-medium", name: "GPT Image 2 Medium", provider: "openai", group: "Trending models", capability: ["generate", "edit"], cost: 7 },
           { id: "nanobanana2", name: "Nano Banana 2", provider: "nanobanana", group: "Trending models", capability: ["generate", "edit"], cost: 11 },
+          { id: "upscale-pro", name: "Creative Upscale", provider: "internal", group: "Operations", capability: ["upscale"], cost: 4 },
           { id: "background-cleaner", name: "Remove Background", provider: "internal", group: "Operations", capability: ["removeBackground"], cost: 2 }
         ]);
       }
@@ -55,7 +56,7 @@ beforeEach(() => {
           referenceNodeIds: string[];
           operation: string;
         };
-        const unitCost = request.modelId === "nanobanana2" ? 11 : request.modelId === "background-cleaner" ? 2 : 7;
+        const unitCost = request.modelId === "nanobanana2" ? 11 : request.modelId === "upscale-pro" ? 4 : request.modelId === "background-cleaner" ? 2 : 7;
         const creditCost = unitCost * request.outputCount;
         backendProfile = {
           ...backendProfile,
@@ -158,10 +159,13 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "New project" }));
     await user.type(screen.getByPlaceholderText(/\[TARGET\]/), "统一去背并保持服装边缘清晰");
     await user.click(screen.getByRole("button", { name: "Batch mode" }));
+    expect((await screen.findAllByText("backend result 1.jpg")).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "History" }));
 
-    expect(screen.getByText(/background-cleaner/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/background-cleaner/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/credits/i).length).toBeGreaterThan(0);
+    const calls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/remove-bg"));
+    expect(calls).toHaveLength(3);
   });
 
   it("opens admin monitoring for an admin session", async () => {
@@ -209,6 +213,19 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: /Target frame/i }));
     expect(screen.getByText("Generation target frame")).toBeInTheDocument();
     expect(screen.getByText("gpt-image-2-medium")).toBeInTheDocument();
+  });
+
+  it("runs toolbar upscale through the backend operation API", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: "Upscale" }));
+
+    expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
+    expect(screen.getByText("Backend upscale succeeded, 4 credits used")).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/upscale$/), expect.objectContaining({ method: "POST" }));
   });
 
   it("shows generation records and credit usage in the home history and profile views", async () => {

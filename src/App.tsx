@@ -45,8 +45,8 @@ import {
   addAssetToProject,
   addTextNode,
   addGenerationTargetFrame,
+  applyBatchGenerationResultsToCanvas,
   applyGenerationResultToCanvas,
-  applyImageOperation,
   commitShapeEdit,
   configureNodeGeneration,
   copyPasteSelectedNodes,
@@ -64,7 +64,9 @@ import {
   undoProject,
   updateNodeTransform,
   updateViewport,
+  type BatchImport,
   type CanvasNode,
+  type GenerationResult,
   type OperationType,
   type ModuleType,
   type NodeTransform,
@@ -182,23 +184,29 @@ export default function App() {
     });
   }
 
-  async function generateNodeThroughApi(nodeId?: string) {
+  async function generateNodeThroughApi(
+    nodeId?: string,
+    overrides: Partial<Pick<CanvasNode["generation"], "modelId" | "prompt" | "outputCount">> & { operation?: OperationType } = {}
+  ) {
     if (!activeProject) return;
     const projectId = activeProject.id;
     const source = activeProject.nodes.find((node) => node.id === (nodeId ?? selectedNode?.id));
     if (!source) return;
-    const operation = operationForNode(source);
-    if (!source.generation.prompt.trim() && operation !== "upscale" && operation !== "removeBackground") {
+    const operation = overrides.operation ?? operationForNode(source);
+    const prompt = overrides.prompt ?? source.generation.prompt;
+    const modelId = overrides.modelId ?? source.generation.modelId;
+    const outputCount = overrides.outputCount ?? source.generation.outputCount;
+    if (!prompt.trim() && operation !== "upscale" && operation !== "removeBackground") {
       setApiNotice("Prompt is required before sending to backend");
       return;
     }
     const request = {
       projectId,
       nodeId: source.id,
-      modelId: source.generation.modelId,
-      prompt: source.generation.prompt,
+      modelId,
+      prompt,
       referenceNodeIds: source.references.length ? source.references : source.type === "imageGroup" ? source.references : [source.id],
-      outputCount: source.generation.outputCount,
+      outputCount,
       operation
     };
     try {
@@ -215,6 +223,19 @@ export default function App() {
 
   function runSelectedGeneration() {
     void generateNodeThroughApi();
+  }
+
+  function runImageOperation(operation: "upscale" | "removeBackground") {
+    if (!selectedNode) return;
+    void generateNodeThroughApi(selectedNode.id, {
+      operation,
+      modelId: operation === "upscale" ? "upscale-pro" : "background-cleaner",
+      prompt:
+        operation === "upscale"
+          ? "Upscale this image while preserving garment construction, embroidery, fabric texture and clean product lighting."
+          : "",
+      outputCount: 1
+    });
   }
 
   function addWorkflowModule(moduleType: ModuleType) {
@@ -290,6 +311,62 @@ export default function App() {
       return runBatchQueue(queued, activeProject.id);
     });
   }
+
+  async function runBackendBatch(files?: FileList | null) {
+    if (!activeProject) return;
+    const projectId = activeProject.id;
+    const imageFiles = Array.from(files ?? []).filter((file) => file.type.startsWith("image/"));
+    const prompt = selectedNode?.generation.prompt.trim() || "Apply the same clean product-image treatment to each image while preserving garment shape and fabric details.";
+    const outputCount = selectedNode?.generation.outputCount || 1;
+    const batch: BatchImport = imageFiles.length
+      ? {
+          folderName: "imported-folder",
+          prompt,
+          modelId: selectedNode?.generation.modelId || "background-cleaner",
+          outputCount,
+          files: await Promise.all(
+            imageFiles.map(async (file) => ({
+              name: file.name,
+              source: await readFileAsDataUrl(file),
+              width: 240,
+              height: 320
+            }))
+          )
+        }
+      : {
+          folderName: "sample-folder",
+          prompt,
+          modelId: "background-cleaner",
+          outputCount,
+          files: [
+            { name: "look-01.jpg", source: TEST_IMAGE, width: 240, height: 320 },
+            { name: "look-02.jpg", source: TEST_IMAGE, width: 240, height: 320 },
+            { name: "look-03.jpg", source: TEST_IMAGE, width: 240, height: 320 }
+          ]
+        };
+    try {
+      setApiNotice(`Running backend batch for ${batch.files.length} images...`);
+      const results: GenerationResult[] = [];
+      for (const [index, file] of batch.files.entries()) {
+        const result = await submitGenerationRequest({
+          projectId,
+          nodeId: `batch-${file.name}-${index + 1}`,
+          modelId: batch.modelId,
+          prompt: batch.prompt,
+          referenceNodeIds: [file.name],
+          outputCount: batch.outputCount,
+          operation: batch.modelId === "background-cleaner" ? "removeBackground" : "generate"
+        });
+        results.push(result);
+      }
+      const serverState = await fetchBackendSnapshot();
+      setWorkspace((current) => applyBatchGenerationResultsToCanvas(current, projectId, batch, results, serverState));
+      setRightPanel("history");
+      setApiNotice(`Backend batch completed for ${batch.files.length} images`);
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Backend batch failed");
+    }
+  }
   function shapeEdit() {
     if (!activeProject || !selectedNode) return;
     setShapeEditDraft({
@@ -334,13 +411,13 @@ export default function App() {
         onImportImages={importImagePair}
         onGenerate={runSelectedGeneration}
         onGenerateNode={(nodeId) => void generateNodeThroughApi(nodeId)}
-        onBatch={runBatch}
+        onBatch={runBackendBatch}
         onWorkflow={runWorkflow}
         onAddModule={addWorkflowModule}
         onConnectModule={connectSelectionToNewModule}
         onGroupReferences={groupReferences}
-        onUpscale={() => setWorkspace((current) => applyImageOperation(current, activeProject.id, selectedNode!.id, "upscale"))}
-        onRemoveBg={() => setWorkspace((current) => applyImageOperation(current, activeProject.id, selectedNode!.id, "removeBackground"))}
+        onUpscale={() => runImageOperation("upscale")}
+        onRemoveBg={() => runImageOperation("removeBackground")}
         onShapeEdit={shapeEdit}
         onSaveAsset={saveAsset}
         onAddTargetFrame={() => setWorkspace((current) => addGenerationTargetFrame(current, activeProject.id))}

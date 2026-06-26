@@ -721,6 +721,78 @@ export function applyGenerationResultToCanvas(
   };
 }
 
+export function applyBatchGenerationResultsToCanvas(
+  workspace: Workspace,
+  projectId: string,
+  batch: BatchImport,
+  results: GenerationResult[],
+  serverState: { profile?: Profile; history?: HistoryEntry[]; models?: ModelDefinition[] } = {}
+): Workspace {
+  const updated = updateProject(workspace, projectId, (project) => {
+    const generatedNodes = batch.files.flatMap((file, fileIndex) => {
+      const result = results[fileIndex];
+      const outputs = result?.outputs.length
+        ? result.outputs
+        : Array.from({ length: batch.outputCount }, (_, outputIndex) => ({
+            name: `${file.name} batch result ${outputIndex + 1}`,
+            source: `${file.source}#batch-${fileIndex + 1}-${outputIndex + 1}`,
+            width: file.width,
+            height: file.height
+          }));
+      return outputs.map((output, outputIndex) =>
+        createNode({
+          type: "batch",
+          kind: "generated",
+          name: output.name || `${file.name} batch result ${outputIndex + 1}`,
+          source: output.source.startsWith("mock://") ? `${file.source}#batch-${fileIndex + 1}-${outputIndex + 1}` : output.source,
+          x: 620 + fileIndex * 150 + outputIndex * 24,
+          y: 720 + outputIndex * 28,
+          width: output.width || file.width,
+          height: output.height || file.height,
+          generation: {
+            prompt: batch.prompt,
+            modelId: batch.modelId,
+            outputCount: batch.outputCount,
+            entryPoint: "workflow"
+          },
+          references: [file.name],
+          metadata: {
+            folderName: batch.folderName,
+            sourceFile: file.name,
+            historyId: result?.historyId,
+            creditCost: result?.creditCost,
+            remoteSource: output.source
+          }
+        })
+      );
+    });
+    return withUndo(project, {
+      batchConfig: {
+        folderName: batch.folderName,
+        prompt: batch.prompt,
+        modelId: batch.modelId,
+        outputCount: batch.outputCount
+      },
+      batchQueue: batch.files.map((file) => ({
+        id: createId("batch"),
+        name: file.name,
+        source: file.source,
+        width: file.width,
+        height: file.height,
+        status: "done"
+      })),
+      nodes: [...project.nodes, ...generatedNodes],
+      selectedNodeIds: generatedNodes.map((node) => node.id)
+    });
+  });
+  return {
+    ...updated,
+    profile: serverState.profile ?? updated.profile,
+    history: serverState.history ?? updated.history,
+    modelRegistry: serverState.models ?? updated.modelRegistry
+  };
+}
+
 export function applyImageOperation(
   workspace: Workspace,
   projectId: string,
