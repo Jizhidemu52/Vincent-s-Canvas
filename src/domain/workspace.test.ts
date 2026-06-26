@@ -81,6 +81,26 @@ describe("designer canvas workspace behavior", () => {
     });
   });
 
+  it("places imported reference images side by side instead of overlapping", () => {
+    const { workspace, project } = createProject(createInitialWorkspace(), "Reference layout");
+    const first = addAssetToProject(workspace, project.id, {
+      name: "front.png",
+      source: "front",
+      width: 360,
+      height: 520
+    });
+    const second = addAssetToProject(first, project.id, {
+      name: "texture.png",
+      source: "texture",
+      width: 360,
+      height: 520
+    });
+    const [front, texture] = second.projects[0].nodes;
+
+    expect(texture.x - front.x).toBeGreaterThanOrEqual(front.width);
+    expect(texture.y).toBe(front.y);
+  });
+
   it("adds a generation target frame connected to the selected upstream node", () => {
     const { workspace, project } = createProject(createInitialWorkspace(), "Target frame");
     const withAsset = addAssetToProject(workspace, project.id, {
@@ -320,6 +340,38 @@ describe("designer canvas workspace behavior", () => {
       referenceCount: 2,
       modelId: "fashion-concept"
     });
+  });
+
+  it("connects multiple selected image references directly to one workflow module", () => {
+    const { workspace, project } = createProject(createInitialWorkspace(), "Direct multi reference");
+    const first = addAssetToProject(workspace, project.id, {
+      name: "front.png",
+      source: "front",
+      width: 500,
+      height: 700
+    });
+    const second = addAssetToProject(first, project.id, {
+      name: "texture.png",
+      source: "texture",
+      width: 500,
+      height: 700
+    });
+    const [front, texture] = second.projects[0].nodes;
+
+    const withModule = createWorkflowModuleFromSelection(second, project.id, [front.id, texture.id], {
+      moduleType: "generate",
+      prompt: "Use both references as one design context",
+      modelId: "gpt-image-2-medium"
+    });
+    const module = withModule.projects[0].nodes.find((node) => node.moduleType === "generate")!;
+
+    expect(module.references).toEqual([front.id, texture.id]);
+    expect(withModule.projects[0].connections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fromNodeId: front.id, toNodeId: module.id }),
+        expect.objectContaining({ fromNodeId: texture.id, toNodeId: module.id })
+      ])
+    );
   });
 
   it("rejects empty prompts before spending credits", () => {

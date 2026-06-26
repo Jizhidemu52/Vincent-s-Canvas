@@ -415,6 +415,36 @@ describe("Designer canvas app shell", () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/upscale$/), expect.objectContaining({ method: "POST" }));
   });
 
+  it("keeps multi-selected images as shared references when dragging a workflow port", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Upload images/i }));
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.keyboard("{Shift>}");
+    await user.click(screen.getByText("reference-front.jpg"));
+    await user.keyboard("{/Shift}");
+    await waitFor(() => {
+      expect(document.querySelectorAll(".stage-node.selected")).toHaveLength(2);
+    });
+
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from fashion-reference.jpg"));
+    fireEvent.pointerUp(window);
+
+    expect(screen.getByText("2 references selected")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Generate new design from references/i }));
+    expect(screen.getByText("2 refs")).toBeInTheDocument();
+
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: /Run workflow/i }));
+    await screen.findByText("Backend workflow completed 1 module");
+
+    const generationCall = vi.mocked(fetch).mock.calls.find(([url]) => url.toString().endsWith("/api/generations"));
+    const request = JSON.parse(String(generationCall?.[1]?.body)) as GenerationRequest;
+    expect(request.referenceNodeIds).toHaveLength(2);
+  });
+
   it("shows generation records and credit usage in the home history and profile views", async () => {
     const user = userEvent.setup();
     await login(user);

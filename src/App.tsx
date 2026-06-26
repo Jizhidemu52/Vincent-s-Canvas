@@ -1428,7 +1428,7 @@ function CanvasStage({
 }) {
   const stageRef = useRef<HTMLElement | null>(null);
   const [lasso, setLasso] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [modulePicker, setModulePicker] = useState<{ nodeId: string; x: number; y: number } | null>(null);
+  const [modulePicker, setModulePicker] = useState<{ nodeId: string; sourceIds: string[]; x: number; y: number } | null>(null);
   const selectedIds = project.selectedNodeIds;
   const selectedSet = new Set(selectedIds);
 
@@ -1459,9 +1459,23 @@ function CanvasStage({
     onWorkspaceChange((current) => selectNodes(current, project.id, [id], append));
   }
 
+  function canReferenceNode(node: CanvasNode) {
+    return node.type === "image" || node.type === "imageGroup" || node.type === "batch" || node.kind === "generated" || node.kind === "operation" || node.kind === "edit";
+  }
+
   function openModulePicker(node: CanvasNode) {
-    selectNode(node.id, false);
-    setModulePicker({ nodeId: node.id, x: node.x + node.width + 38, y: node.y + 8 });
+    const selectedReferenceIds =
+      project.selectedNodeIds.includes(node.id)
+        ? project.selectedNodeIds.filter((id) => {
+            const selected = project.nodes.find((item) => item.id === id);
+            return selected ? canReferenceNode(selected) : false;
+          })
+        : [];
+    const sourceIds = selectedReferenceIds.length > 1 ? selectedReferenceIds : [node.id];
+    if (!project.selectedNodeIds.includes(node.id) || sourceIds.length === 1) {
+      onWorkspaceChange((current) => selectNodes(current, project.id, sourceIds));
+    }
+    setModulePicker({ nodeId: node.id, sourceIds, x: node.x + node.width + 38, y: node.y + 8 });
   }
 
   function panCanvas(event: PointerEvent<HTMLElement>) {
@@ -1588,8 +1602,9 @@ function CanvasStage({
           <WorkflowModulePicker
             x={modulePicker.x}
             y={modulePicker.y}
+            referenceCount={modulePicker.sourceIds.length}
             onPick={(moduleType) => {
-              onConnectModule(moduleType, [modulePicker.nodeId]);
+              onConnectModule(moduleType, modulePicker.sourceIds);
               setModulePicker(null);
             }}
             onCancel={() => setModulePicker(null)}
@@ -1606,11 +1621,13 @@ function CanvasStage({
 function WorkflowModulePicker({
   x,
   y,
+  referenceCount,
   onPick,
   onCancel
 }: {
   x: number;
   y: number;
+  referenceCount: number;
   onPick: (moduleType: ModuleType) => void;
   onCancel: () => void;
 }) {
@@ -1625,6 +1642,7 @@ function WorkflowModulePicker({
   return (
     <div className="workflow-picker" style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()}>
       <strong>Choose module</strong>
+      <small>{referenceCount} reference{referenceCount > 1 ? "s" : ""} selected</small>
       {options.map((option) => (
         <button type="button" key={option.type} onClick={() => onPick(option.type)}>
           <b>{option.label}</b>
@@ -1702,7 +1720,6 @@ function CanvasNodeView({
   function startWire(event: PointerEvent<HTMLSpanElement>) {
     event.stopPropagation();
     event.preventDefault();
-    onSelect(node.id, false);
     const handleUp = () => {
       onOpenModulePicker(node);
       window.removeEventListener("pointerup", handleUp);
@@ -1718,7 +1735,6 @@ function CanvasNodeView({
       className={`stage-node ${node.type} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""}`}
       style={{ left: node.x, top: node.y, width: node.width, minHeight: node.height }}
       onPointerDown={(event) => startPointer(event)}
-      onClick={(event) => onSelect(node.id, event.shiftKey || event.ctrlKey || event.metaKey)}
       onDoubleClick={(event) => {
         event.stopPropagation();
         onSelect(node.id, false);

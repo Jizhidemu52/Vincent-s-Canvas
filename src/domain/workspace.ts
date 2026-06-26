@@ -463,13 +463,16 @@ export function createProject(workspace: Workspace, name: string) {
 
 export function addAssetToProjectAt(workspace: Workspace, projectId: string, asset: AssetInput, x?: number, y?: number): Workspace {
   return updateProject(workspace, projectId, (project) => {
+    const imageIndex = project.nodes.filter((node) => node.type === "image" || node.type === "imageGroup" || node.type === "batch").length;
+    const column = imageIndex % 4;
+    const row = Math.floor(imageIndex / 4);
     const node = createNode({
       type: "image",
       kind: "upload",
       name: asset.name,
       source: asset.source,
-      x: x ?? 640 + project.nodes.length * 82,
-      y: y ?? 90 + project.nodes.length * 36,
+      x: x ?? 640 + column * 430,
+      y: y ?? 90 + row * 560,
       width: asset.width,
       height: asset.height,
       metadata: { originalWidth: asset.width, originalHeight: asset.height }
