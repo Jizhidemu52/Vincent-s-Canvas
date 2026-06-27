@@ -374,7 +374,7 @@ describe("designer canvas workspace behavior", () => {
   });
 
   it("pulls a workflow module from an image and runs chained edit then upscale steps", () => {
-    const { workspace, project } = createProject(createInitialWorkspace({ credits: 6 }), "Workflow chain");
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 12 }), "Workflow chain");
     const withAsset = addAssetToProject(workspace, project.id, {
       name: "coat.png",
       source: "coat-source",
@@ -385,7 +385,7 @@ describe("designer canvas workspace behavior", () => {
     const editModule = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
       moduleType: "edit",
       prompt: "add a detachable hood",
-      modelId: "style-edit"
+      modelId: "gpt-image-2-medium"
     });
     const editNode = editModule.projects[0].nodes.find((node) => node.kind === "workflow" && node.moduleType === "edit");
     const upscaleModule = createWorkflowModuleFromSelection(editModule, project.id, [editNode!.id], {
@@ -417,7 +417,7 @@ describe("designer canvas workspace behavior", () => {
         operation: history!.operation
       });
     }
-    expect(executed.profile.credits).toBe(4);
+    expect(executed.profile.credits).toBe(1);
   });
 
   it("builds an auditable workflow execution plan before running chained image operations", () => {
@@ -457,6 +457,36 @@ describe("designer canvas workspace behavior", () => {
     expect(plan.issues).toEqual([]);
   });
 
+  it("spends the configured model credits when running workflow chains", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Priced workflow chain");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat.png",
+      source: "coat-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const editModule = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "edit",
+      prompt: "add a detachable hood",
+      modelId: "gpt-image-2-medium"
+    });
+    const editNode = editModule.projects[0].nodes.find((node) => node.moduleType === "edit")!;
+    const upscaleModule = createWorkflowModuleFromSelection(editModule, project.id, [editNode.id], {
+      moduleType: "upscale",
+      prompt: "preserve fabric texture while enlarging",
+      modelId: "upscale-pro"
+    });
+
+    const executed = runWorkflowChain(upscaleModule, project.id, source.id);
+
+    expect(executed.profile.credits).toBe(9);
+    expect(executed.profile.creditUsed).toBe(11);
+    expect(executed.history.map((entry) => entry.creditCost)).toEqual([4, 7]);
+    const generatedOutputs = executed.projects[0].nodes.filter((node) => node.kind === "generated");
+    expect(generatedOutputs.map((node) => node.metadata.creditCost)).toEqual([7, 4]);
+  });
+
   it("blocks workflow execution plans when a model does not support the node operation", () => {
     const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Capability gated workflow");
     const withAsset = addAssetToProject(workspace, project.id, {
@@ -486,6 +516,33 @@ describe("designer canvas workspace behavior", () => {
         })
       ])
     );
+  });
+
+  it("rejects workflow execution with missing or unsupported models before spending credits", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Runtime capability gate");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat.png",
+      source: "coat-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const unsupportedUpscale = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "upscale",
+      prompt: "preserve fabric texture while enlarging",
+      modelId: "gpt-image-2-medium"
+    });
+    const missingModel = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "edit",
+      prompt: "add a detachable hood",
+      modelId: "retired-style-model"
+    });
+
+    expect(() => runWorkflowChain(unsupportedUpscale, project.id, source.id)).toThrow("Model gpt-image-2-medium does not support upscale");
+    expect(() => runWorkflowChain(missingModel, project.id, source.id)).toThrow("Model not found");
+    expect(withAsset.profile.credits).toBe(40);
+    expect(unsupportedUpscale.profile.credits).toBe(40);
+    expect(missingModel.profile.credits).toBe(40);
   });
 
   it("blocks workflow execution plans with missing prompts or cycles before credits are spent", () => {
@@ -525,7 +582,7 @@ describe("designer canvas workspace behavior", () => {
   });
 
   it("groups multiple uploaded reference images and connects them to one generation module", () => {
-    const { workspace, project } = createProject(createInitialWorkspace({ credits: 4 }), "Two reference dress");
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 8 }), "Two reference dress");
     const first = addAssetToProject(workspace, project.id, {
       name: "front.png",
       source: "front",
@@ -545,7 +602,7 @@ describe("designer canvas workspace behavior", () => {
     const withGenerationModule = createWorkflowModuleFromSelection(grouped, project.id, [groupNode.id], {
       moduleType: "generate",
       prompt: "参考图一图二做一款新的连衣裙",
-      modelId: "fashion-concept"
+      modelId: "flux-pro"
     });
     const executed = runWorkflowChain(withGenerationModule, project.id, groupNode.id);
 
@@ -557,7 +614,7 @@ describe("designer canvas workspace behavior", () => {
     expect(executed.history[0]).toMatchObject({
       prompt: "参考图一图二做一款新的连衣裙",
       referenceCount: 2,
-      modelId: "fashion-concept"
+      modelId: "flux-pro"
     });
   });
 

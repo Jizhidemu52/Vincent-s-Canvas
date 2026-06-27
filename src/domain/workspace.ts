@@ -1287,8 +1287,13 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
   if (!moduleNode.generation.prompt.trim()) throw new Error("Prompt is required");
   const historyId = createId("history");
   const operation = operationForModuleNode(moduleNode);
-  const creditCost = moduleNode.generation.outputCount;
-  const charged = spendCredits(workspace, moduleNode.generation.outputCount);
+  const model = workspace.modelRegistry.find((item) => item.id === moduleNode.generation.modelId);
+  if (!model) throw new Error("Model not found");
+  if (!model.capability.includes(operation as ModuleType)) {
+    throw new Error(`Model ${model.id} does not support ${operation}`);
+  }
+  const creditCost = model.cost * moduleNode.generation.outputCount;
+  const charged = spendCredits(workspace, creditCost);
   const updated = updateProject(charged, projectId, (project) => {
     const generatedNode = createNode({
       type: "image",
