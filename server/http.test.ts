@@ -113,6 +113,28 @@ describe("HTTP API server", () => {
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
   });
 
+  it("accepts workspace snapshots that include externally dropped image data URLs", async () => {
+    const created = createProject(createInitialWorkspace({ userId: "designer-large-image", creditBalance: 80 }), "Dropped image save");
+    const largeImageDataUrl = `data:image/png;base64,${"a".repeat(1_200_000)}`;
+    const workspace = addAssetToProject(created.workspace, created.project.id, {
+      name: "large-dropped-reference.png",
+      source: largeImageDataUrl,
+      width: 360,
+      height: 520
+    });
+
+    const saveResponse = await fetch(`${context.baseUrl}/api/workspace`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "designer-large-image" },
+      body: JSON.stringify(workspace)
+    });
+    const snapshot = (await saveResponse.json()) as WorkspaceSnapshot;
+
+    expect(saveResponse.status).toBe(200);
+    expect(snapshot.projects[0].nodes.some((node) => node.name === "large-dropped-reference.png")).toBe(true);
+    expect(snapshot.projects[0].nodes.some((node) => node.source === largeImageDataUrl)).toBe(true);
+  });
+
   it("persists workspace projects and canvas nodes across server restarts", async () => {
     await new Promise<void>((resolve, reject) => {
       context.server.close((error) => (error ? reject(error) : resolve()));

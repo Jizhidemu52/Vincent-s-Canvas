@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -281,6 +281,52 @@ describe("Designer canvas app shell", () => {
     await waitFor(() => {
       expect(imageNode).toHaveStyle({ width: `${initialWidth + 60}px` });
     });
+  });
+
+  it("imports externally dropped image files onto the canvas at the drop point", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const stage = screen.getByRole("region", { name: "Infinite canvas" });
+    const front = new File(["front reference"], "dropped-front.png", { type: "image/png" });
+    const texture = new File(["texture reference"], "dropped-texture.png", { type: "image/png" });
+
+    fireEvent.dragOver(stage, {
+      dataTransfer: { files: [front, texture], dropEffect: "move" }
+    });
+    const dropEvent = createEvent.drop(stage, {
+      dataTransfer: { files: [front, texture], dropEffect: "copy" }
+    });
+    Object.defineProperties(dropEvent, {
+      clientX: { value: 320 },
+      clientY: { value: 280 }
+    });
+    fireEvent(stage, dropEvent);
+
+    expect(await screen.findByText("dropped-front.png")).toBeInTheDocument();
+    expect(await screen.findByText("dropped-texture.png")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Image dropped-front.png" })).toHaveStyle({ left: "320px", top: "280px" });
+    expect(screen.getByRole("button", { name: "Image dropped-texture.png" })).toHaveStyle({ left: "356px", top: "316px" });
+    expect(document.querySelector(".stage-node.selected")).toHaveTextContent("dropped-texture.png");
+  });
+
+  it("pastes image files into the active canvas as new selectable image nodes", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const stage = screen.getByRole("region", { name: "Infinite canvas" });
+    const pasted = new File(["pasted reference"], "pasted-look.png", { type: "image/png" });
+
+    stage.focus();
+    fireEvent.paste(stage, {
+      clipboardData: { files: [pasted] }
+    });
+
+    expect(await screen.findByText("pasted-look.png")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Image pasted-look.png" })).toHaveStyle({ left: "640px", top: "360px" });
+    expect(document.querySelector(".stage-node.selected")).toHaveTextContent("pasted-look.png");
   });
 
   it("lets designers save, search, insert, and delete prompt presets from the canvas dock", async () => {

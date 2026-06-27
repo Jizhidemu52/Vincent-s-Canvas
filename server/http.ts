@@ -29,6 +29,7 @@ const readOnlyRoutes = new Set<ApiPath>([
 ]);
 
 const writeRoutes = new Set<ApiPath>(["/api/generations", "/api/edits", "/api/upscale", "/api/remove-bg"]);
+const DEFAULT_BODY_LIMIT_BYTES = 25_000_000;
 
 export interface ApiHttpServerOptions {
   state?: ServerState;
@@ -99,7 +100,7 @@ function isApiPath(pathname: string): pathname is ApiPath {
 export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server {
   const stateFilePath = options.stateFilePath;
   const state = options.state ?? (stateFilePath ? loadServerState(stateFilePath) : createServerState());
-  const bodyLimitBytes = options.bodyLimitBytes ?? 1_000_000;
+  const bodyLimitBytes = options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
 
   return createServer(async (request, response) => {
     try {
