@@ -700,6 +700,11 @@ describe("Designer canvas app shell", () => {
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
     expect(await screen.findByText("history-1 · 11 credits")).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Context" }));
+    expect(screen.getByText("Selected node task")).toBeInTheDocument();
+    expect(screen.getByText("history-1")).toBeInTheDocument();
+    expect(screen.getByText("generate / nanobanana2")).toBeInTheDocument();
+    expect(screen.getByText("11 credits · 1 output")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "History" }));
     expect(screen.getByText(/nanobanana2/i)).toBeInTheDocument();
     expect(screen.getAllByText(/参考这张图做一件新的刺绣背心/).length).toBeGreaterThan(0);

@@ -1719,6 +1719,29 @@ button {
   line-height: 1.35;
 }
 
+.node-task-card {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 2px;
+  padding: 10px;
+  border: 1px solid rgba(18, 24, 38, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.node-task-card span,
+.node-task-card small {
+  color: #5f6875;
+  font-size: 12px;
+}
+
+.node-task-card p {
+  margin: 0;
+  color: #424955;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .workflow-plan {
   display: grid;
   gap: 8px;

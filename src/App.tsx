@@ -2547,6 +2547,20 @@ function RightDock({
     () => (selectedNode ? buildWorkflowExecutionPlan(workspace, project.id, selectedNode.id) : undefined),
     [workspace, project.id, selectedNode?.id]
   );
+  const selectedHistoryId = typeof selectedNode?.metadata.historyId === "string" ? selectedNode.metadata.historyId : undefined;
+  const selectedHistory = selectedHistoryId ? workspace.history.find((entry) => entry.id === selectedHistoryId) : undefined;
+  const selectedOperation =
+    selectedHistory?.operation ??
+    (typeof selectedNode?.metadata.operation === "string" ? selectedNode.metadata.operation : selectedNode?.operation);
+  const selectedCreditCost =
+    selectedHistory?.creditCost ?? (typeof selectedNode?.metadata.creditCost === "number" ? selectedNode.metadata.creditCost : undefined);
+  const selectedOutputCount = selectedHistory?.outputCount ?? selectedNode?.generation.outputCount ?? 1;
+  const selectedPrompt =
+    selectedHistory?.prompt ??
+    (typeof selectedNode?.metadata.prompt === "string" ? selectedNode.metadata.prompt : selectedNode?.generation.prompt);
+  const selectedModelId =
+    selectedHistory?.modelId ??
+    (typeof selectedNode?.metadata.modelId === "string" ? selectedNode.metadata.modelId : selectedNode?.generation.modelId);
   const assistantCards = [
     {
       title: "Two-reference concept",
@@ -2582,6 +2596,17 @@ function RightDock({
             <button type="button" onClick={() => onAddModule("edit")}><Wand2 size={13} /> Edit node</button>
             <button type="button" onClick={() => onAddModule("upscale")}><Maximize2 size={13} /> Upscale node</button>
           </div>
+          {selectedNode && (
+            <section className="node-task-card" aria-label="Selected node task">
+              <strong>Selected node task</strong>
+              {selectedHistoryId ? <span>{selectedHistoryId}</span> : <small>No linked history yet</small>}
+              {selectedOperation && selectedModelId ? <span>{selectedOperation} / {selectedModelId}</span> : null}
+              {selectedCreditCost !== undefined ? (
+                <span>{selectedCreditCost} credits · {selectedOutputCount} output{selectedOutputCount === 1 ? "" : "s"}</span>
+              ) : null}
+              {selectedPrompt?.trim() ? <p>{selectedPrompt}</p> : null}
+            </section>
+          )}
           {workflowPlan && (
             <div className={`workflow-plan ${workflowPlan.status}`} aria-label="Workflow execution plan">
               <div className="workflow-plan-header">
