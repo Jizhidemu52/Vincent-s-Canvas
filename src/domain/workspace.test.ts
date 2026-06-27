@@ -23,6 +23,7 @@ import {
   selectNodes,
   deletePromptPreset
 } from "./workspace";
+import type { ModelDefinition } from "./workspace";
 
 describe("designer canvas workspace behavior", () => {
   it("creates isolated projects and tracks designer credits", () => {
@@ -335,6 +336,41 @@ describe("designer canvas workspace behavior", () => {
       creditCost: 6,
       operation: "removeBackground"
     });
+  });
+
+  it("rejects batch processing with unregistered or non-executable models before spending credits", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 8 }), "Invalid batch model");
+    const queued = importBatchFolder(workspace, project.id, {
+      folderName: "raw trims",
+      prompt: "process every image",
+      modelId: "missing-model",
+      outputCount: 1,
+      files: [{ name: "a.png", source: "a", width: 300, height: 300 }]
+    });
+    const uploadOnlyModel: ModelDefinition = {
+      id: "upload-only",
+      name: "Upload Only",
+      provider: "internal",
+      group: "Operations",
+      capability: ["upload"],
+      cost: 3
+    };
+    const uploadOnly = {
+      ...queued,
+      modelRegistry: [...queued.modelRegistry, uploadOnlyModel]
+    };
+    const uploadOnlyQueued = importBatchFolder(uploadOnly, project.id, {
+      folderName: "raw trims",
+      prompt: "process every image",
+      modelId: "upload-only",
+      outputCount: 1,
+      files: [{ name: "b.png", source: "b", width: 300, height: 300 }]
+    });
+
+    expect(() => runBatchQueue(queued, project.id)).toThrow("Model not found");
+    expect(() => runBatchQueue(uploadOnlyQueued, project.id)).toThrow("Model upload-only does not support batch operations");
+    expect(queued.profile.credits).toBe(8);
+    expect(uploadOnlyQueued.profile.credits).toBe(8);
   });
 
   it("pulls a workflow module from an image and runs chained edit then upscale steps", () => {

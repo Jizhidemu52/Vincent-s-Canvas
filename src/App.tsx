@@ -168,6 +168,18 @@ function operationForNode(node: CanvasNode): OperationType {
   return "generate";
 }
 
+function operationForBatchModel(models: ModelDefinition[], modelId: string, preferredOperation?: OperationType): OperationType {
+  const model = models.find((item) => item.id === modelId);
+  if (preferredOperation && model?.capability.includes(preferredOperation as ModuleType)) {
+    return preferredOperation;
+  }
+  if (model?.capability.includes("generate")) return "generate";
+  if (model?.capability.includes("removeBackground")) return "removeBackground";
+  if (model?.capability.includes("upscale")) return "upscale";
+  if (model?.capability.includes("edit")) return "edit";
+  return "generate";
+}
+
 function isCanvasImageNode(node?: CanvasNode) {
   return Boolean(
     node &&
@@ -556,6 +568,7 @@ export default function App() {
     try {
       setApiNotice(`Running backend batch for ${batch.files.length} images...`);
       const outcomes: BatchGenerationOutcome[] = [];
+      const operation = operationForBatchModel(workspace.modelRegistry, batch.modelId, selectedNode ? operationForNode(selectedNode) : undefined);
       for (const [index, file] of batch.files.entries()) {
         try {
           const result = await submitGenerationRequest({
@@ -565,7 +578,7 @@ export default function App() {
             prompt: batch.prompt,
             referenceNodeIds: [file.name],
             outputCount: batch.outputCount,
-            operation: batch.modelId === "background-cleaner" ? "removeBackground" : "generate"
+            operation
           }, activeUserId);
           outcomes.push({ result });
         } catch (error) {

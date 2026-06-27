@@ -764,6 +764,29 @@ describe("Designer canvas app shell", () => {
     expect(screen.getAllByRole("button", { name: /backend result 1\.jpg.*Use in canvas/i }).length).toBeGreaterThanOrEqual(2);
   });
 
+  it("routes imported batch folders through the selected operation model", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Upscale node" }));
+    const folderInput = screen.getByLabelText("Batch folder input");
+    const first = new File(["front look"], "upscale-front.png", { type: "image/png" });
+    const second = new File(["back look"], "upscale-back.png", { type: "image/png" });
+
+    await user.upload(folderInput, [first, second]);
+
+    expect(await screen.findByText("Backend batch completed for 2 images")).toBeInTheDocument();
+    const upscaleCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/upscale"));
+    const generationCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
+    const requests = upscaleCalls.map(([, init]) => JSON.parse(String(init?.body)) as GenerationRequest);
+
+    expect(upscaleCalls).toHaveLength(2);
+    expect(generationCalls).toHaveLength(0);
+    expect(requests.map((request) => request.operation)).toEqual(["upscale", "upscale"]);
+    expect(requests.every((request) => request.modelId === "upscale-pro")).toBe(true);
+  });
+
   it("keeps processing a batch when one imported image fails", async () => {
     const originalFetch = vi.mocked(fetch).getMockImplementation();
     vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {

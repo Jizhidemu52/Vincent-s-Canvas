@@ -428,13 +428,12 @@ function operationForModuleNode(node: CanvasNode): OperationType {
   return "generate";
 }
 
-function defaultOperationForModel(model?: ModelDefinition): OperationType {
-  if (!model) return "generate";
+function defaultOperationForModel(model: ModelDefinition): OperationType | undefined {
   if (model.capability.includes("generate")) return "generate";
   if (model.capability.includes("removeBackground")) return "removeBackground";
   if (model.capability.includes("upscale")) return "upscale";
   if (model.capability.includes("edit")) return "edit";
-  return "generate";
+  return undefined;
 }
 
 function isExecutableWorkflowNode(node: CanvasNode) {
@@ -1060,9 +1059,11 @@ export function runBatchQueue(workspace: Workspace, projectId: string): Workspac
   if (!project.batchConfig) throw new Error("Batch configuration is required");
   if (!project.batchConfig.prompt.trim()) throw new Error("Prompt is required");
   const model = workspace.modelRegistry.find((item) => item.id === project.batchConfig!.modelId);
-  const totalOutputs = project.batchQueue.length * project.batchConfig.outputCount;
-  const creditCost = (model?.cost ?? 1) * totalOutputs;
+  if (!model) throw new Error("Model not found");
   const operation = defaultOperationForModel(model);
+  if (!operation) throw new Error(`Model ${model.id} does not support batch operations`);
+  const totalOutputs = project.batchQueue.length * project.batchConfig.outputCount;
+  const creditCost = model.cost * totalOutputs;
   const charged = spendCredits(workspace, creditCost);
   const generatedNodes = project.batchQueue.map((item, index) => {
     const originalNode = project.nodes.find(
