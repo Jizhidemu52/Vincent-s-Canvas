@@ -276,6 +276,12 @@ function isAdminUser(state: ServerState, userId?: string) {
   return account.profile.role === "admin" || Boolean(normalizeUserId(userId)?.includes("admin"));
 }
 
+function assertAdminUser(state: ServerState, userId?: string) {
+  if (!isAdminUser(state, userId)) {
+    throw new Error("Admin role required");
+  }
+}
+
 const modelGroups: ModelDefinition["group"][] = ["Trending models", "Image", "Edit", "Operations"];
 const modelCapabilities: ModuleType[] = ["generate", "edit", "upscale", "removeBackground"];
 
@@ -311,9 +317,7 @@ function normalizeModelCapability(capability: unknown): ModuleType[] {
 
 export function adjustAccountCredits(state: ServerState, request: Partial<CreditAdjustmentRequest>, adminUserId?: string): Profile | ApiError {
   try {
-    if (!isAdminUser(state, adminUserId)) {
-      throw new Error("Admin role required");
-    }
+    assertAdminUser(state, adminUserId);
     const targetUserId = normalizeUserId(request.targetUserId);
     if (!targetUserId) {
       throw new Error("Target user is required");
@@ -356,9 +360,7 @@ export function adjustAccountCredits(state: ServerState, request: Partial<Credit
 
 export function setAccountCreditLimit(state: ServerState, request: Partial<CreditLimitRequest>, adminUserId?: string): Profile | ApiError {
   try {
-    if (!isAdminUser(state, adminUserId)) {
-      throw new Error("Admin role required");
-    }
+    assertAdminUser(state, adminUserId);
     const targetUserId = normalizeUserId(request.targetUserId);
     if (!targetUserId) {
       throw new Error("Target user is required");
@@ -395,9 +397,7 @@ export function setAccountCreditLimit(state: ServerState, request: Partial<Credi
 
 export function configureModelPricing(state: ServerState, request: Partial<ModelPricingRequest>, adminUserId?: string): ModelDefinition | ApiError {
   try {
-    if (!isAdminUser(state, adminUserId)) {
-      throw new Error("Admin role required");
-    }
+    assertAdminUser(state, adminUserId);
     const modelId = request.modelId?.trim();
     if (!modelId) {
       throw new Error("Model is required");
@@ -428,9 +428,7 @@ export function configureModelPricing(state: ServerState, request: Partial<Model
 
 export function configureModelRegistry(state: ServerState, request: Partial<ModelRegistryRequest>, adminUserId?: string): ModelDefinition | ApiError {
   try {
-    if (!isAdminUser(state, adminUserId)) {
-      throw new Error("Admin role required");
-    }
+    assertAdminUser(state, adminUserId);
     const modelId = request.modelId?.trim();
     if (!modelId) {
       throw new Error("Model is required");
@@ -488,9 +486,7 @@ export function configureProviderSettings(
   adminUserId?: string
 ): ProviderHealth | ApiError {
   try {
-    if (!isAdminUser(state, adminUserId)) {
-      throw new Error("Admin role required");
-    }
+    assertAdminUser(state, adminUserId);
     const provider = request.provider;
     if (!provider || !providerNames.includes(provider)) {
       throw new Error("Provider is required");
@@ -683,8 +679,12 @@ export const apiRoutes = {
     getAccountWorkspace(state, userId).profile,
   "/api/history": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
     getAccountWorkspace(state, userId).history,
-  "/api/admin/audit": (state: ServerState) => allAdminAudit(state),
-  "/api/admin/usage": (state: ServerState): AdminUsageSummary => {
+  "/api/admin/audit": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) => {
+    assertAdminUser(state, userId);
+    return allAdminAudit(state);
+  },
+  "/api/admin/usage": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string): AdminUsageSummary => {
+    assertAdminUser(state, userId);
     const byModel = new Map<string, { modelId: string; count: number; credits: number }>();
     const history = allHistory(state);
     for (const entry of history) {
@@ -703,7 +703,10 @@ export const apiRoutes = {
   },
   "/api/admin/accounts": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
     listAdminAccounts(state, userId),
-  "/api/admin/providers": (state: ServerState): ProviderHealth[] => getProviderHealth(state.models, state.providerSettings),
+  "/api/admin/providers": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string): ProviderHealth[] => {
+    assertAdminUser(state, userId);
+    return getProviderHealth(state.models, state.providerSettings);
+  },
   "/api/generations": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
     runModel(state, { ...request, operation: "generate" }, requestId, userId),
   "/api/edits": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>

@@ -113,9 +113,9 @@ describe("backend hosted mock API", () => {
     callApi(state, "/api/generations", request({ outputCount: 1 }), "usage-1");
     callApi(state, "/api/upscale", request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }), "usage-2");
 
-    const usage = callApi(state, "/api/admin/usage") as AdminUsageSummary;
-    const audit = callApi(state, "/api/admin/audit") as ReturnType<typeof createServerState>["history"];
-    const providers = callApi(state, "/api/admin/providers") as ProviderHealth[];
+    const usage = callApi(state, "/api/admin/usage", undefined, undefined, "admin@company.local") as AdminUsageSummary;
+    const audit = callApi(state, "/api/admin/audit", undefined, undefined, "admin@company.local") as ReturnType<typeof createServerState>["history"];
+    const providers = callApi(state, "/api/admin/providers", undefined, undefined, "admin@company.local") as ProviderHealth[];
 
     expect(usage.totalCreditsUsed).toBeGreaterThan(0);
     expect(usage.modelUsage.some((item) => item.modelId === "gpt-image-2-low")).toBe(true);
@@ -125,6 +125,19 @@ describe("backend hosted mock API", () => {
     expect(providers.some((provider) => provider.provider === "openai" && provider.adapterId === "openai-image-adapter")).toBe(true);
     expect(providers.some((provider) => provider.provider === "openai" && provider.missingSecrets.includes("OPENAI_API_KEY"))).toBe(true);
     expect(JSON.stringify(providers)).not.toContain("sk-");
+  });
+
+  it("rejects non-admin reads of team usage, audit, and provider status", () => {
+    const state = createServerState({ creditBalance: 30 });
+    callApi(state, "/api/generations", request({ outputCount: 1 }), "admin-read-guard", "alice@company.local");
+
+    const usage = callApi(state, "/api/admin/usage", undefined, undefined, "designer@company.local") as ApiError;
+    const audit = callApi(state, "/api/admin/audit", undefined, undefined, "designer@company.local") as ApiError;
+    const providers = callApi(state, "/api/admin/providers", undefined, undefined, "designer@company.local") as ApiError;
+
+    expect(usage).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+    expect(audit).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+    expect(providers).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
   });
 
   it("adds designer and project context to admin audit history", () => {
@@ -152,7 +165,7 @@ describe("backend hosted mock API", () => {
     const bobProfile = callApi(state, "/api/profile", undefined, undefined, "bob@company.local") as Profile;
     const aliceHistory = callApi(state, "/api/history", undefined, undefined, "alice@company.local") as ReturnType<typeof createServerState>["history"];
     const bobHistory = callApi(state, "/api/history", undefined, undefined, "bob@company.local") as ReturnType<typeof createServerState>["history"];
-    const usage = callApi(state, "/api/admin/usage") as AdminUsageSummary;
+    const usage = callApi(state, "/api/admin/usage", undefined, undefined, "admin@company.local") as AdminUsageSummary;
 
     expect(aliceProfile.creditBalance).toBe(28);
     expect(bobProfile.creditBalance).toBe(26);

@@ -407,6 +407,31 @@ describe("HTTP API server", () => {
     expect(await unauthorizedResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
   });
 
+  it("rejects non-admin reads of admin usage, audit, and provider status over HTTP", async () => {
+    await fetch(`${context.baseUrl}/api/generations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "alice@company.local", "x-request-id": "http-admin-read-guard" },
+      body: JSON.stringify(request({ outputCount: 1 }))
+    });
+
+    const usageResponse = await fetch(`${context.baseUrl}/api/admin/usage`, {
+      headers: { "x-user-id": "designer@company.local" }
+    });
+    const auditResponse = await fetch(`${context.baseUrl}/api/admin/audit`, {
+      headers: { "x-user-id": "designer@company.local" }
+    });
+    const providersResponse = await fetch(`${context.baseUrl}/api/admin/providers`, {
+      headers: { "x-user-id": "designer@company.local" }
+    });
+
+    expect(usageResponse.status).toBe(400);
+    expect(await usageResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+    expect(auditResponse.status).toBe(400);
+    expect(await auditResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+    expect(providersResponse.status).toBe(400);
+    expect(await providersResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+  });
+
   it("persists profile balance, history, and duplicate request ids across server restarts", async () => {
     await new Promise<void>((resolve, reject) => {
       context.server.close((error) => (error ? reject(error) : resolve()));
