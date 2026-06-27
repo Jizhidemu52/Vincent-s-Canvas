@@ -337,10 +337,15 @@ button {
   color: inherit;
 }
 
-.project-card-delete {
+.project-card-actions {
   position: absolute;
   top: 8px;
   right: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.project-card-icon {
   display: grid;
   width: 32px;
   height: 32px;
@@ -351,9 +356,43 @@ button {
   color: #444;
 }
 
-.project-card-delete:hover {
+.project-card-icon:hover {
   border-color: #c8c8c8;
   color: #111;
+}
+
+.project-rename-form {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 6px;
+  display: grid;
+  grid-template-columns: 1fr 34px;
+  gap: 6px;
+  align-items: center;
+  padding-right: 4px;
+  background: rgba(247, 247, 244, 0.96);
+}
+
+.project-rename-form input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid #d2d2ce;
+  border-radius: 7px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  color: #111;
+}
+
+.project-rename-form button {
+  display: grid;
+  height: 34px;
+  place-items: center;
+  border: 1px solid #111;
+  border-radius: 7px;
+  background: #111;
+  color: #fff;
 }
 
 .project-thumb {

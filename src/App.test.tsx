@@ -652,6 +652,30 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("fashion-reference.jpg")).toBeInTheDocument();
   });
 
+  it("lets designers rename one project without changing other project canvases", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Projects" }));
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Projects" }));
+
+    await user.click(screen.getByRole("button", { name: "Rename project Untitled 1" }));
+    const renameInput = screen.getByRole("textbox", { name: "Project name for Untitled 1" });
+    await user.clear(renameInput);
+    await user.type(renameInput, "Holiday capsule shoot");
+    await user.click(screen.getByRole("button", { name: "Save project name for Untitled 1" }));
+
+    expect(screen.getByRole("button", { name: "Open project Holiday capsule shoot" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open project Untitled 2" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open project Untitled 1" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open project Holiday capsule shoot" }));
+    expect(screen.getByText("Holiday capsule shoot")).toBeInTheDocument();
+    expect(screen.getByText("fashion-reference.jpg")).toBeInTheDocument();
+  });
+
   it("autosaves created project workspaces to the backend snapshot", async () => {
     const user = userEvent.setup();
     await login(user);

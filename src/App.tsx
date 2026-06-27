@@ -3,6 +3,7 @@ import {
   BadgeDollarSign,
   BookOpenText,
   BoxSelect,
+  Check,
   ChevronDown,
   CircleDashed,
   Clock3,
@@ -23,6 +24,7 @@ import {
   MousePointer2,
   Network,
   PanelRight,
+  Pencil,
   Play,
   Plus,
   RotateCcw,
@@ -324,6 +326,18 @@ export default function App() {
       const activeProjectId = current.activeProjectId === projectId ? projects[0]?.id : current.activeProjectId;
       return { ...current, projects, activeProjectId };
     });
+  }
+
+  function renameProject(projectId: string, name: string) {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    setWorkspace((current) => ({
+      ...current,
+      projects: current.projects.map((project) =>
+        project.id === projectId ? { ...project, name: trimmedName, updatedAt: new Date().toISOString() } : project
+      ),
+      history: current.history.map((entry) => (entry.projectId === projectId ? { ...entry, projectName: trimmedName } : entry))
+    }));
   }
 
   function updateSelectedConfig(patch: Partial<CanvasNode["generation"]>) {
@@ -853,7 +867,7 @@ export default function App() {
     return <LoginView onLogin={login} />;
   }
 
-  return <HomeView workspace={workspace} onCreateProject={openNewProject} onOpenProject={openProject} onDeleteProject={deleteProject} onAdmin={() => setView("admin")} />;
+  return <HomeView workspace={workspace} onCreateProject={openNewProject} onOpenProject={openProject} onRenameProject={renameProject} onDeleteProject={deleteProject} onAdmin={() => setView("admin")} />;
 }
 
 function LoginView({ onLogin }: { onLogin: (email: string) => void }) {
@@ -896,12 +910,14 @@ function HomeView({
   workspace,
   onCreateProject,
   onOpenProject,
+  onRenameProject,
   onDeleteProject,
   onAdmin
 }: {
   workspace: Workspace;
   onCreateProject: () => void;
   onOpenProject: (projectId: string, target?: OpenProjectTarget) => void;
+  onRenameProject: (projectId: string, name: string) => void;
   onDeleteProject: (projectId: string) => void;
   onAdmin: () => void;
 }) {
@@ -930,7 +946,7 @@ function HomeView({
             <small>{workspace.profile.creditUsed} credits used</small>
           </div>
         </div>
-        {activeSection === "Projects" && <ProjectsPanel projects={projectCards} onCreateProject={onCreateProject} onOpenProject={onOpenProject} onDeleteProject={onDeleteProject} />}
+        {activeSection === "Projects" && <ProjectsPanel projects={projectCards} onCreateProject={onCreateProject} onOpenProject={onOpenProject} onRenameProject={onRenameProject} onDeleteProject={onDeleteProject} />}
         {activeSection === "History" && <HistoryPanel workspace={workspace} onOpenProject={onOpenProject} />}
         {activeSection === "Profile" && <ProfilePanel workspace={workspace} />}
       </section>
@@ -942,13 +958,30 @@ function ProjectsPanel({
   projects,
   onCreateProject,
   onOpenProject,
+  onRenameProject,
   onDeleteProject
 }: {
   projects: Project[];
   onCreateProject: () => void;
   onOpenProject: (projectId: string, target?: OpenProjectTarget) => void;
+  onRenameProject: (projectId: string, name: string) => void;
   onDeleteProject: (projectId: string) => void;
 }) {
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [draftProjectName, setDraftProjectName] = useState("");
+
+  function startRename(project: Project) {
+    setEditingProjectId(project.id);
+    setDraftProjectName(project.name);
+  }
+
+  function saveRename(event: FormEvent<HTMLFormElement>, project: Project) {
+    event.preventDefault();
+    onRenameProject(project.id, draftProjectName);
+    setEditingProjectId(null);
+    setDraftProjectName("");
+  }
+
   return (
     <>
       <div className="home-filters">
@@ -972,9 +1005,26 @@ function ProjectsPanel({
               <strong>{project.name}</strong>
               <small>{project.nodes.length} nodes · modified just now</small>
             </button>
-            <button type="button" className="project-card-delete" aria-label={`Delete project ${project.name}`} onClick={() => onDeleteProject(project.id)}>
-              <Trash2 size={14} />
-            </button>
+            {editingProjectId === project.id ? (
+              <form className="project-rename-form" onSubmit={(event) => saveRename(event, project)}>
+                <input
+                  aria-label={`Project name for ${project.name}`}
+                  value={draftProjectName}
+                  onChange={(event) => setDraftProjectName(event.target.value)}
+                />
+                <button type="submit" aria-label={`Save project name for ${project.name}`}>
+                  <Check size={14} />
+                </button>
+              </form>
+            ) : null}
+            <div className="project-card-actions">
+              <button type="button" className="project-card-icon" aria-label={`Rename project ${project.name}`} onClick={() => startRename(project)}>
+                <Pencil size={14} />
+              </button>
+              <button type="button" className="project-card-icon" aria-label={`Delete project ${project.name}`} onClick={() => onDeleteProject(project.id)}>
+                <Trash2 size={14} />
+              </button>
+            </div>
           </article>
         ))}
         {!projects.length && (
