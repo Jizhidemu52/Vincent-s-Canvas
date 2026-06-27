@@ -318,7 +318,16 @@ describe("designer canvas workspace behavior", () => {
 
     expect(processed.projects[0].batchQueue).toHaveLength(3);
     expect(processed.projects[0].batchQueue.every((item) => item.status === "done")).toBe(true);
+    expect(processed.projects[0].nodes.filter((node) => node.metadata.batchOriginal)).toHaveLength(3);
     expect(processed.projects[0].nodes.filter((node) => node.kind === "generated")).toHaveLength(3);
+    expect(processed.projects[0].connections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fromNodeId: processed.projects[0].nodes.find((node) => node.name === "a.png")!.id,
+          toNodeId: processed.projects[0].nodes.find((node) => node.name === "a.png batch result")!.id
+        })
+      ])
+    );
     expect(processed.profile.credits).toBe(5);
   });
 

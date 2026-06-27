@@ -578,6 +578,8 @@ describe("Designer canvas app shell", () => {
     await user.upload(folderInput, [first, second]);
 
     expect(await screen.findByText("Backend batch completed for 2 images")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Image folder-front\.png/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Image folder-back\.png/i })).toBeInTheDocument();
     expect((await screen.findAllByText("backend result 1.jpg")).length).toBeGreaterThanOrEqual(2);
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
     expect(calls).toHaveLength(2);
@@ -618,9 +620,11 @@ describe("Designer canvas app shell", () => {
 
     expect(await screen.findByText("Backend batch completed for 1 of 2 images; 1 failed")).toBeInTheDocument();
     expect((await screen.findAllByText("backend result 1.jpg")).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole("button", { name: /Image folder-front\.png/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Image folder-back\.png/i })).toBeInTheDocument();
     expect(screen.getByText("Batch queue")).toBeInTheDocument();
-    expect(screen.getByText("folder-front.png")).toBeInTheDocument();
-    expect(screen.getByText("folder-back.png")).toBeInTheDocument();
+    expect(screen.getAllByText("folder-front.png").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("folder-back.png").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Provider rejected folder-back.png")).toBeInTheDocument();
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
     expect(calls).toHaveLength(2);
