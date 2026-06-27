@@ -464,6 +464,65 @@ describe("HTTP API server", () => {
     expect(await unauthorizedResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
   });
 
+  it("persists failed provider jobs across server restarts without charging credits", async () => {
+    await new Promise<void>((resolve, reject) => {
+      context.server.close((error) => (error ? reject(error) : resolve()));
+    });
+    const dir = mkdtempSync(join(tmpdir(), "designer-canvas-api-failed-jobs-"));
+    const stateFilePath = join(dir, "server-state.json");
+    try {
+      const first = await startTestServer(stateFilePath);
+      const workspace = createInitialWorkspace({ userId: "alice@company.local", creditBalance: 20 });
+      const brokenModel = {
+        id: "broken-provider-model",
+        name: "Broken Provider Model",
+        provider: "retired-provider",
+        group: "Image",
+        capability: ["generate"],
+        cost: 5
+      };
+      await fetch(`${first.baseUrl}/api/workspace`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-user-id": "alice@company.local" },
+        body: JSON.stringify({ ...workspace, modelRegistry: [...workspace.modelRegistry, brokenModel] })
+      });
+      const failed = await fetch(`${first.baseUrl}/api/generations`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-request-id": "failed-provider-http", "x-user-id": "alice@company.local" },
+        body: JSON.stringify(request({ modelId: "broken-provider-model", outputCount: 1 }))
+      });
+      await new Promise<void>((resolve, reject) => {
+        first.server.close((error) => (error ? reject(error) : resolve()));
+      });
+
+      const second = await startTestServer(stateFilePath);
+      const profile = (await (await fetch(`${second.baseUrl}/api/profile`, { headers: { "x-user-id": "alice@company.local" } })).json()) as Profile;
+      const history = (await (await fetch(`${second.baseUrl}/api/history`, { headers: { "x-user-id": "alice@company.local" } })).json()) as unknown[];
+      const jobs = (await (await fetch(`${second.baseUrl}/api/admin/jobs`, { headers: { "x-user-id": "admin@company.local" } })).json()) as Array<Record<string, unknown>>;
+      await new Promise<void>((resolve, reject) => {
+        second.server.close((error) => (error ? reject(error) : resolve()));
+      });
+
+      expect(failed.status).toBe(400);
+      expect(profile.creditBalance).toBe(120);
+      expect(history).toHaveLength(0);
+      expect(jobs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            userId: "alice@company.local",
+            modelId: "broken-provider-model",
+            status: "failed",
+            creditCost: 0,
+            errorMessage: "Provider adapter not configured for retired-provider"
+          })
+        ])
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      context = await startTestServer();
+    }
+  });
+
   it("persists profile balance, history, and duplicate request ids across server restarts", async () => {
     await new Promise<void>((resolve, reject) => {
       context.server.close((error) => (error ? reject(error) : resolve()));

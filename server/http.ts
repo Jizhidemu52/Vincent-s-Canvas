@@ -261,8 +261,9 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
           return;
         }
         const body = await readJsonBody<GenerationRequest>(request, bodyLimitBytes);
+        const generationJobCount = state.generationJobs.length;
         const result = callApi(state, pathname, body, request.headers["x-request-id"]?.toString(), userId);
-        if (!isApiError(result) && stateFilePath) {
+        if (stateFilePath && (!isApiError(result) || state.generationJobs.length !== generationJobCount)) {
           saveServerState(stateFilePath, state);
         }
         sendJson(response, statusFromApiResult(result), result);
