@@ -3,6 +3,7 @@ import {
   type GenerationRequest,
   type GenerationResult,
   type HistoryEntry,
+  type AssetInput,
   type LibraryAsset,
   type ModelDefinition,
   type ModuleType,
@@ -32,6 +33,7 @@ export interface ServerState {
   submittedRequestIds: Set<string>;
   providerSettings: ProviderRuntimeSettingsMap;
   adminAudit: AdminAuditEntry[];
+  generationJobs: GenerationJob[];
 }
 
 export type WorkspaceSnapshot = Pick<
@@ -109,6 +111,28 @@ export interface AdminAuditEntry {
   metadata?: Record<string, unknown>;
 }
 
+export interface GenerationJob {
+  id: string;
+  historyId?: string;
+  requestId?: string;
+  userId: string;
+  designerName?: string;
+  projectId: string;
+  projectName?: string;
+  nodeId: string;
+  modelId: string;
+  operation: GenerationRequest["operation"];
+  status: GenerationResult["status"];
+  prompt: string;
+  outputCount: number;
+  creditCost: number;
+  referenceCount: number;
+  outputs: AssetInput[];
+  createdAt: string;
+  updatedAt: string;
+  errorMessage?: string;
+}
+
 export interface AdminUsageSummary {
   totalCreditsUsed: number;
   totalHistoryEntries: number;
@@ -144,7 +168,8 @@ export function createServerState(profile: Partial<Profile> = {}): ServerState {
     accounts: {},
     submittedRequestIds: new Set(),
     providerSettings: {},
-    adminAudit: []
+    adminAudit: [],
+    generationJobs: []
   };
 }
 
@@ -270,6 +295,18 @@ function allAdminAudit(state: ServerState) {
   return [...state.adminAudit, ...allHistory(state).map(adminAuditFromHistory)].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt)
   );
+}
+
+function listGenerationJobs(state: ServerState, adminUserId?: string): GenerationJob[] | ApiError {
+  try {
+    assertAdminUser(state, adminUserId);
+    return [...state.generationJobs].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  } catch (error) {
+    return {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Unknown server error"
+    };
+  }
 }
 
 function totalCreditsUsed(state: ServerState) {
@@ -647,6 +684,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
   const result = runProviderModel(request, model, historyId, cost);
   const projectName = account.projects.find((project) => project.id === request.projectId)?.name;
   const duplicateKey = scopedRequestId(requestId, userId);
+  const createdAt = new Date().toISOString();
 
   if (duplicateKey) {
     state.submittedRequestIds.add(duplicateKey);
@@ -672,9 +710,33 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
     operation: request.operation,
     referenceCount: request.referenceNodeIds.length,
     outputs: result.outputs,
-    createdAt: new Date().toISOString()
+    createdAt
   };
   account.history = [entry, ...account.history];
+  state.generationJobs = [
+    {
+      id: `job-${historyId}`,
+      historyId,
+      requestId: duplicateKey,
+      userId: account.profile.userId,
+      designerName: account.profile.designerName,
+      projectId: request.projectId,
+      projectName,
+      nodeId: request.nodeId,
+      modelId: request.modelId,
+      operation: request.operation,
+      status: result.status,
+      prompt: request.prompt,
+      outputCount: request.outputCount,
+      creditCost: cost,
+      referenceCount: request.referenceNodeIds.length,
+      outputs: result.outputs,
+      createdAt,
+      updatedAt: createdAt,
+      errorMessage: result.errorMessage
+    },
+    ...state.generationJobs
+  ];
   saveAccountWorkspace(state, account, userId);
 
   return result;
@@ -710,6 +772,8 @@ export const apiRoutes = {
   },
   "/api/admin/accounts": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
     listAdminAccounts(state, userId),
+  "/api/admin/jobs": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
+    listGenerationJobs(state, userId),
   "/api/admin/providers": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string): ProviderHealth[] => {
     assertAdminUser(state, userId);
     return getProviderHealth(state.models, state.providerSettings);
@@ -740,6 +804,7 @@ export function callApi(
       path === "/api/admin/audit" ||
       path === "/api/admin/usage" ||
       path === "/api/admin/accounts" ||
+      path === "/api/admin/jobs" ||
       path === "/api/admin/providers"
     ) {
       return route(state, request as GenerationRequest, requestId, userId);

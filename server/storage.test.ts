@@ -61,6 +61,7 @@ describe("server database storage", () => {
         .all()
         .map((row) => String(row.name));
       const historyCount = db.prepare("select count(*) as count from generation_history").get() as { count: number };
+      const jobCount = db.prepare("select count(*) as count from generation_jobs").get() as { count: number };
       db.close();
 
       expect(tables).toEqual(
@@ -80,6 +81,7 @@ describe("server database storage", () => {
         ])
       );
       expect(historyCount.count).toBe(1);
+      expect(jobCount.count).toBe(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

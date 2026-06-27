@@ -21,6 +21,7 @@ let backendAdminUsage: {
   totalHistoryEntries: number;
   modelUsage: Array<{ modelId: string; count: number; credits: number }>;
 };
+let backendAdminJobs: Array<Record<string, unknown>> = [];
 let backendAccounts: Array<{
   userId: string;
   designerName: string;
@@ -105,6 +106,40 @@ beforeEach(() => {
       { modelId: "upscale-pro", count: 1, credits: 4 }
     ]
   };
+  backendAdminJobs = [
+    {
+      id: "job-history-alice-1",
+      historyId: "audit-alice-1",
+      userId: "alice@company.local",
+      designerName: "Alice Designer",
+      projectId: "alice-campaign",
+      projectName: "Alice campaign",
+      nodeId: "alice-node-1",
+      modelId: "gpt-image-2-medium",
+      operation: "generate",
+      status: "succeeded",
+      outputCount: 2,
+      creditCost: 14,
+      referenceCount: 1,
+      createdAt: "2026-06-28T02:10:00.000Z"
+    },
+    {
+      id: "job-history-bob-1",
+      historyId: "audit-bob-1",
+      userId: "bob@company.local",
+      designerName: "Bob Designer",
+      projectId: "bob-upscale",
+      projectName: "Bob upscale",
+      nodeId: "bob-node-1",
+      modelId: "upscale-pro",
+      operation: "upscale",
+      status: "succeeded",
+      outputCount: 1,
+      creditCost: 4,
+      referenceCount: 1,
+      createdAt: "2026-06-28T02:05:00.000Z"
+    }
+  ];
   backendAccounts = [
     {
       userId: "admin@company.local",
@@ -432,6 +467,14 @@ beforeEach(() => {
           return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
         }
         return jsonResponse(backendAdminAudit);
+      }
+      if (url.endsWith("/api/admin/jobs")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        return jsonResponse(backendAdminJobs);
       }
       if (url.endsWith("/api/profile")) return jsonResponse(backendProfile);
       if (url.endsWith("/api/history")) return jsonResponse(backendHistory);
@@ -842,6 +885,11 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Credit management")).toBeInTheDocument();
     expect(await screen.findByText("Team accounts")).toBeInTheDocument();
     expect(screen.getByText("Model usage")).toBeInTheDocument();
+    expect(screen.getByText("Generation jobs")).toBeInTheDocument();
+    expect(screen.getByText("Alice Designer · generate")).toBeInTheDocument();
+    expect(screen.getByText("succeeded · 14 credits · 2 outputs")).toBeInTheDocument();
+    expect(screen.getByText("Bob Designer · upscale")).toBeInTheDocument();
+    expect(screen.getByText("succeeded · 4 credits · 1 output")).toBeInTheDocument();
     expect(screen.getByText("Admin audit")).toBeInTheDocument();
     expect(screen.getByText("24")).toBeInTheDocument();
     expect(screen.getByText("3 history entries")).toBeInTheDocument();

@@ -81,6 +81,27 @@ export interface AdminUsageSummary {
   modelUsage: Array<{ modelId: string; count: number; credits: number }>;
 }
 
+export interface AdminGenerationJob {
+  id: string;
+  historyId?: string;
+  requestId?: string;
+  userId: string;
+  designerName?: string;
+  projectId: string;
+  projectName?: string;
+  nodeId: string;
+  modelId: string;
+  operation: OperationType;
+  status: GenerationResult["status"];
+  prompt: string;
+  outputCount: number;
+  creditCost: number;
+  referenceCount: number;
+  createdAt: string;
+  updatedAt: string;
+  errorMessage?: string;
+}
+
 export interface AdminAuditEntry {
   id: string;
   eventType?: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings";
@@ -233,6 +254,11 @@ export async function fetchAdminAccounts(adminUserId?: string): Promise<AdminAcc
 export async function fetchAdminUsage(adminUserId?: string): Promise<AdminUsageSummary> {
   const response = await fetch(`${API_BASE_URL}/api/admin/usage`, { headers: userHeaders(adminUserId) });
   return readJson<AdminUsageSummary>(response);
+}
+
+export async function fetchAdminJobs(adminUserId?: string): Promise<AdminGenerationJob[]> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/jobs`, { headers: userHeaders(adminUserId) });
+  return readJson<AdminGenerationJob[]>(response);
 }
 
 export async function fetchAdminAudit(adminUserId?: string): Promise<AdminAuditEntry[]> {

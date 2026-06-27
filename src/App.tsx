@@ -89,6 +89,7 @@ import {
   configureAdminProviderSettings,
   fetchAdminAccounts,
   fetchAdminAudit,
+  fetchAdminJobs,
   fetchAdminUsage,
   fetchBackendSnapshot,
   fetchProviderHealth,
@@ -98,6 +99,7 @@ import {
   submitGenerationRequest,
   type AdminAccountSummary,
   type AdminAuditEntry,
+  type AdminGenerationJob,
   type AdminUsageSummary,
   type ProviderHealth,
   type ModelRegistryRequest,
@@ -1161,6 +1163,7 @@ function AdminView({
   const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
   const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([]);
   const [adminUsage, setAdminUsage] = useState<AdminUsageSummary | null>(null);
+  const [adminJobs, setAdminJobs] = useState<AdminGenerationJob[]>([]);
   const [adminAudit, setAdminAudit] = useState<AdminAuditEntry[]>(workspace.history.map(historyEntryToAuditEntry));
   const providers = workspace.modelRegistry.reduce<Record<string, number>>((memo, model) => {
     memo[model.provider] = (memo[model.provider] ?? 0) + 1;
@@ -1201,11 +1204,12 @@ function AdminView({
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([fetchAdminUsage(activeUserId), fetchAdminAudit(activeUserId)])
-      .then(([usage, audit]) => {
+    void Promise.all([fetchAdminUsage(activeUserId), fetchAdminAudit(activeUserId), fetchAdminJobs(activeUserId)])
+      .then(([usage, audit, jobs]) => {
         if (!cancelled) {
           setAdminUsage(usage);
           setAdminAudit(audit);
+          setAdminJobs(jobs);
         }
       })
       .catch((error) => {
@@ -1557,6 +1561,23 @@ function AdminView({
               ))
             ) : (
               <p>No model usage yet. Completed image jobs will appear here.</p>
+            )}
+          </article>
+          <article className="admin-card">
+            <h2>Generation jobs</h2>
+            {adminJobs.length ? (
+              adminJobs.slice(0, 8).map((job) => (
+                <div className="admin-row" key={job.id}>
+                  <span>{job.designerName ?? job.userId} · {job.operation}</span>
+                  <strong>
+                    {job.status} · {job.creditCost} credits · {job.outputCount} output{job.outputCount === 1 ? "" : "s"}
+                  </strong>
+                  <small>{job.projectName ?? job.projectId} / {job.modelId}</small>
+                  <small>{job.historyId ?? job.id}</small>
+                </div>
+              ))
+            ) : (
+              <p>No generation jobs yet. Completed or failed provider tasks will appear here.</p>
             )}
           </article>
           <article className="admin-card">

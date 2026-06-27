@@ -34,6 +34,7 @@ const readOnlyRoutes = new Set<ApiPath>([
   "/api/admin/audit",
   "/api/admin/usage",
   "/api/admin/accounts",
+  "/api/admin/jobs",
   "/api/admin/providers"
 ]);
 

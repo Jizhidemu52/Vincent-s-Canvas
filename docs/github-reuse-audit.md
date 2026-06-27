@@ -40,4 +40,5 @@ The current repository already includes:
 - Batch import and processing.
 - Backend-hosted provider registry, profile/history, admin credit adjustment, provider health, and persistence.
 - Admin credit limits and model pricing controls.
+- Admin generation job logs with designer, model, operation, status, cost, and project context.
 - SQLite-backed platform tables for accounts, credit ledger, projects, nodes, connections, assets, generation history/jobs, model configs, audit logs, and idempotency requests.

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
-import { createServerState, type AccountWorkspace, type AdminAuditEntry, type ServerState } from "./api";
+import { createServerState, type AccountWorkspace, type AdminAuditEntry, type GenerationJob, type ServerState } from "./api";
 import type { ProviderRuntimeSettingsMap } from "./providers";
 import type { HistoryEntry, LibraryAsset, ModelDefinition, Profile, Project, PromptPreset } from "../src/domain/workspace";
 
@@ -18,6 +18,7 @@ interface PersistedServerState {
   submittedRequestIds: string[];
   providerSettings?: ProviderRuntimeSettingsMap;
   adminAudit?: AdminAuditEntry[];
+  generationJobs?: GenerationJob[];
 }
 
 function serializeServerState(state: ServerState): PersistedServerState {
@@ -33,7 +34,8 @@ function serializeServerState(state: ServerState): PersistedServerState {
     accounts: state.accounts,
     submittedRequestIds: Array.from(state.submittedRequestIds),
     providerSettings: state.providerSettings,
-    adminAudit: state.adminAudit
+    adminAudit: state.adminAudit,
+    generationJobs: state.generationJobs
   };
 }
 
@@ -50,7 +52,8 @@ function hydrateServerState(data: PersistedServerState): ServerState {
     accounts: data.accounts ?? {},
     submittedRequestIds: new Set(data.submittedRequestIds ?? []),
     providerSettings: data.providerSettings ?? {},
-    adminAudit: data.adminAudit ?? []
+    adminAudit: data.adminAudit ?? [],
+    generationJobs: data.generationJobs ?? []
   };
 }
 
@@ -264,9 +267,11 @@ function saveDatabaseState(filePath: string, state: ServerState) {
       for (const history of account.history) {
         insertHistory.run(history.id, userId, history.projectId, history.nodeId, history.modelId, history.creditCost, history.createdAt, JSON.stringify(history));
         insertLedger.run(history.id, userId, history.modelId, history.projectId, history.nodeId, history.creditCost, history.createdAt);
-        insertJob.run(history.id, userId, history.projectId, history.nodeId, history.modelId, history.operation ?? "generate", "succeeded", JSON.stringify(history));
         insertAudit.run(history.id, userId, "generation", history.createdAt, JSON.stringify(history));
       }
+    }
+    for (const job of state.generationJobs) {
+      insertJob.run(job.id, job.userId, job.projectId, job.nodeId, job.modelId, job.operation, job.status, JSON.stringify(job));
     }
     for (const audit of state.adminAudit) {
       insertAudit.run(audit.id, audit.actorUserId ?? "system", audit.eventType, audit.createdAt, JSON.stringify(audit));
