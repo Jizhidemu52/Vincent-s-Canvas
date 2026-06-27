@@ -1208,7 +1208,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("dialog", { name: "Mask edit confirmation" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    await user.click(screen.getByRole("button", { name: /Remove bg/i }));
+    await user.click(screen.getByRole("button", { name: "Remove bg" }));
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
     expect(screen.getByText("Backend removeBackground succeeded, 2 credits used")).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/remove-bg$/), expect.objectContaining({ method: "POST" }));
@@ -1290,6 +1290,26 @@ describe("Designer canvas app shell", () => {
     });
     expect(screen.getByRole("button", { name: /Workflow batch module/i })).toBeInTheDocument();
     expect(screen.getAllByText("batch").length).toBeGreaterThan(0);
+  });
+
+  it("exposes all first-pass workflow node shortcuts in the context dock", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+
+    expect(screen.getByRole("button", { name: "Generate node" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit node" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upscale node" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove BG node" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Batch node" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload Reference node" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Remove BG node" }));
+
+    expect(await screen.findByRole("button", { name: /Workflow removeBackground module/i })).toBeInTheDocument();
+    expect(screen.getByText("background-cleaner")).toBeInTheDocument();
   });
 
   it("chains workflow modules from module output ports and runs them in order", async () => {

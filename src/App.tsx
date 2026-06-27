@@ -185,6 +185,7 @@ function operationForNode(node: CanvasNode): OperationType {
 function defaultPromptForModule(moduleType: ModuleType) {
   if (moduleType === "upscale") return "Upscale while preserving garment texture, embroidery, and clean product edges.";
   if (moduleType === "edit") return "Make a controlled local fashion edit while preserving pose and garment structure.";
+  if (moduleType === "removeBackground") return "Remove the background and keep clean product edges for internal design review.";
   if (moduleType === "batch") return "Apply one consistent edit brief to every selected reference image.";
   return "Generate a new fashion design from the upstream references and prompt.";
 }
@@ -419,7 +420,12 @@ export default function App() {
       const resolvedSourceIds = candidateSourceIds.filter((id) => project.nodes.some((node) => node.id === id));
       if (!resolvedSourceIds.length) return current;
       const firstSource = project.nodes.find((node) => node.id === resolvedSourceIds[0]);
-      const modelId = moduleType === "upscale" ? "upscale-pro" : firstSource?.generation.modelId || "gpt-image-2-medium";
+      const modelId =
+        moduleType === "upscale"
+          ? "upscale-pro"
+          : moduleType === "removeBackground"
+            ? "background-cleaner"
+            : firstSource?.generation.modelId || "gpt-image-2-medium";
       return createWorkflowModuleFromSelection(current, projectId, resolvedSourceIds, {
         moduleType,
         prompt,
@@ -2993,7 +2999,9 @@ function RightDock({
             <button type="button" onClick={() => onAddModule("generate")}><Plus size={13} /> Generate node</button>
             <button type="button" onClick={() => onAddModule("edit")}><Wand2 size={13} /> Edit node</button>
             <button type="button" onClick={() => onAddModule("upscale")}><Maximize2 size={13} /> Upscale node</button>
+            <button type="button" onClick={() => onAddModule("removeBackground")}><Scissors size={13} /> Remove BG node</button>
             <button type="button" onClick={() => onAddModule("batch")}><Upload size={13} /> Batch node</button>
+            <button type="button" onClick={() => onAddModule("upload")}><ImagePlus size={13} /> Upload Reference node</button>
           </div>
           {selectedNode && (
             <section className="node-task-card" aria-label="Selected node task">
