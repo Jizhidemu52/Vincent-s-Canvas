@@ -108,6 +108,7 @@ export interface BatchItem {
   width: number;
   height: number;
   status: "queued" | "processing" | "done" | "error";
+  errorMessage?: string;
 }
 
 export interface BatchQueue {
@@ -149,6 +150,11 @@ export interface GenerationResult {
   outputs: AssetInput[];
   creditCost: number;
   historyId: string;
+  errorMessage?: string;
+}
+
+export interface BatchGenerationOutcome {
+  result?: GenerationResult;
   errorMessage?: string;
 }
 
@@ -831,21 +837,14 @@ export function applyBatchGenerationResultsToCanvas(
   workspace: Workspace,
   projectId: string,
   batch: BatchImport,
-  results: GenerationResult[],
+  outcomes: BatchGenerationOutcome[],
   serverState: { profile?: Profile; history?: HistoryEntry[]; models?: ModelDefinition[] } = {}
 ): Workspace {
   let generatedNodes: CanvasNode[] = [];
   const updated = updateProject(workspace, projectId, (project) => {
     generatedNodes = batch.files.flatMap((file, fileIndex) => {
-      const result = results[fileIndex];
-      const outputs = result?.outputs.length
-        ? result.outputs
-        : Array.from({ length: batch.outputCount }, (_, outputIndex) => ({
-            name: `${file.name} batch result ${outputIndex + 1}`,
-            source: `${file.source}#batch-${fileIndex + 1}-${outputIndex + 1}`,
-            width: file.width,
-            height: file.height
-          }));
+      const result = outcomes[fileIndex]?.result;
+      const outputs = result?.outputs.length ? result.outputs : [];
       return outputs.map((output, outputIndex) =>
         createNode({
           type: "batch",
@@ -880,13 +879,14 @@ export function applyBatchGenerationResultsToCanvas(
         modelId: batch.modelId,
         outputCount: batch.outputCount
       },
-      batchQueue: batch.files.map((file) => ({
+      batchQueue: batch.files.map((file, fileIndex) => ({
         id: createId("batch"),
         name: file.name,
         source: file.source,
         width: file.width,
         height: file.height,
-        status: "done"
+        status: outcomes[fileIndex]?.result ? "done" : "error",
+        errorMessage: outcomes[fileIndex]?.errorMessage
       })),
       nodes: [...project.nodes, ...generatedNodes],
       selectedNodeIds: generatedNodes.map((node) => node.id)

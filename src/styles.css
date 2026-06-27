@@ -1666,6 +1666,41 @@ button {
   text-align: left;
 }
 
+.batch-queue-log {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #e4e4e4;
+  border-radius: 7px;
+  background: #fff;
+  padding: 8px;
+}
+
+.batch-queue-item {
+  border-color: #ededed;
+  background: #fff;
+}
+
+.batch-queue-item em {
+  justify-self: start;
+  border-radius: 999px;
+  background: #ededed;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.batch-queue-item.error em {
+  background: #ffe8e8;
+  color: #9a1f1f;
+}
+
+.batch-queue-item.done em {
+  background: #e7f7ef;
+  color: #1f7a4b;
+}
+
 .dock-list p {
   margin: 0;
   color: #666;

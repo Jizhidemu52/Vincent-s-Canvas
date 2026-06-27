@@ -124,10 +124,16 @@ beforeEach(() => {
       if (url.endsWith("/api/workspace")) {
         if (init?.method === "POST") {
           const snapshot = JSON.parse(String(init.body)) as Workspace;
+          const incomingProfile = snapshot.profile ?? backendWorkspace.profile;
           backendWorkspace = {
             ...backendWorkspace,
             ...snapshot,
-            profile: snapshot.profile ?? backendWorkspace.profile,
+            profile: {
+              ...backendProfile,
+              userId: incomingProfile.userId,
+              designerName: incomingProfile.designerName,
+              role: incomingProfile.role
+            },
             history: snapshot.history ?? backendHistory
           };
           backendProfile = backendWorkspace.profile;
@@ -577,6 +583,43 @@ describe("Designer canvas app shell", () => {
     expect(screen.getAllByText(/Apply one consistent showroom cleanup/i).length).toBeGreaterThanOrEqual(2);
     await user.click(screen.getByRole("button", { name: "Assets" }));
     expect(screen.getAllByRole("button", { name: /backend result 1\.jpg.*Use in canvas/i }).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps processing a batch when one imported image fails", async () => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation();
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith("/api/generations")) {
+        const request = JSON.parse(String(init?.body)) as GenerationRequest;
+        if (request.referenceNodeIds[0] === "folder-back.png") {
+          return jsonResponse({ status: "failed", errorMessage: "Provider rejected folder-back.png" }, 500);
+        }
+      }
+      return originalFetch?.(input, init) ?? jsonResponse({ status: "failed", errorMessage: "Route not found" }, 404);
+    });
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const promptBox = screen.getByPlaceholderText(/\[TARGET\]/);
+    await user.clear(promptBox);
+    await user.type(promptBox, "Apply one consistent showroom cleanup to every imported garment image.");
+    const folderInput = screen.getByLabelText("Batch folder input");
+    const first = new File(["front look"], "folder-front.png", { type: "image/png" });
+    const second = new File(["back look"], "folder-back.png", { type: "image/png" });
+
+    await user.upload(folderInput, [first, second]);
+
+    expect(await screen.findByText("Backend batch completed for 1 of 2 images; 1 failed")).toBeInTheDocument();
+    expect((await screen.findAllByText("backend result 1.jpg")).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Batch queue")).toBeInTheDocument();
+    expect(screen.getByText("folder-front.png")).toBeInTheDocument();
+    expect(screen.getByText("folder-back.png")).toBeInTheDocument();
+    expect(screen.getByText("Provider rejected folder-back.png")).toBeInTheDocument();
+    const calls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
+    expect(calls).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(screen.getAllByText(/Apply one consistent showroom cleanup/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it("opens admin monitoring for an admin session", async () => {

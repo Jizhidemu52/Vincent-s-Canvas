@@ -67,6 +67,7 @@ import {
   undoProject,
   updateNodeTransform,
   updateViewport,
+  type BatchGenerationOutcome,
   type BatchImport,
   type CanvasNode,
   type GenerationResult,
@@ -507,23 +508,29 @@ export default function App() {
         };
     try {
       setApiNotice(`Running backend batch for ${batch.files.length} images...`);
-      const results: GenerationResult[] = [];
+      const outcomes: BatchGenerationOutcome[] = [];
       for (const [index, file] of batch.files.entries()) {
-        const result = await submitGenerationRequest({
-          projectId,
-          nodeId: `batch-${file.name}-${index + 1}`,
-          modelId: batch.modelId,
-          prompt: batch.prompt,
-          referenceNodeIds: [file.name],
-          outputCount: batch.outputCount,
-          operation: batch.modelId === "background-cleaner" ? "removeBackground" : "generate"
-        }, activeUserId);
-        results.push(result);
+        try {
+          const result = await submitGenerationRequest({
+            projectId,
+            nodeId: `batch-${file.name}-${index + 1}`,
+            modelId: batch.modelId,
+            prompt: batch.prompt,
+            referenceNodeIds: [file.name],
+            outputCount: batch.outputCount,
+            operation: batch.modelId === "background-cleaner" ? "removeBackground" : "generate"
+          }, activeUserId);
+          outcomes.push({ result });
+        } catch (error) {
+          outcomes.push({ errorMessage: error instanceof Error ? error.message : "Batch item failed" });
+        }
       }
       const serverState = await fetchBackendSnapshot(activeUserId);
-      setWorkspace((current) => applyBatchGenerationResultsToCanvas(current, projectId, batch, results, serverState));
+      setWorkspace((current) => applyBatchGenerationResultsToCanvas(current, projectId, batch, outcomes, serverState));
       setRightPanel("history");
-      setApiNotice(`Backend batch completed for ${batch.files.length} images`);
+      const succeeded = outcomes.filter((outcome) => outcome.result).length;
+      const failed = outcomes.length - succeeded;
+      setApiNotice(failed ? `Backend batch completed for ${succeeded} of ${batch.files.length} images; ${failed} failed` : `Backend batch completed for ${batch.files.length} images`);
     } catch (error) {
       setApiNotice(error instanceof Error ? error.message : "Backend batch failed");
     }
@@ -2600,6 +2607,18 @@ function RightDock({
       {panel === "history" && (
         <div className="dock-list">
           <strong>History</strong>
+          {project.batchQueue.length ? (
+            <section className="batch-queue-log" aria-label="Batch queue">
+              <b>Batch queue</b>
+              {project.batchQueue.map((item) => (
+                <article key={item.id} className={`batch-queue-item ${item.status}`}>
+                  <span>{item.name}</span>
+                  <em>{item.status}</em>
+                  {item.errorMessage ? <small>{item.errorMessage}</small> : null}
+                </article>
+              ))}
+            </section>
+          ) : null}
           {workspace.history.length ? workspace.history.map((item) => (
             <article key={item.id}>
               <b>{item.modelId}</b>
