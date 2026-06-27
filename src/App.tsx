@@ -84,6 +84,8 @@ import {
   adjustDesignerCredits,
   configureAdminModelPricing,
   fetchAdminAccounts,
+  fetchAdminAudit,
+  fetchAdminUsage,
   fetchBackendSnapshot,
   fetchProviderHealth,
   fetchWorkspaceSnapshot,
@@ -91,6 +93,7 @@ import {
   setDesignerCreditLimit,
   submitGenerationRequest,
   type AdminAccountSummary,
+  type AdminUsageSummary,
   type ProviderHealth
 } from "./services/modelApi";
 
@@ -1023,10 +1026,13 @@ function AdminView({
   const [isAdjusting, setIsAdjusting] = useState(false);
   const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
   const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([]);
+  const [adminUsage, setAdminUsage] = useState<AdminUsageSummary | null>(null);
+  const [adminAudit, setAdminAudit] = useState(workspace.history);
   const providers = workspace.modelRegistry.reduce<Record<string, number>>((memo, model) => {
     memo[model.provider] = (memo[model.provider] ?? 0) + 1;
     return memo;
   }, {});
+  const visibleAdminAudit = adminAudit.length ? adminAudit : workspace.history;
 
   useEffect(() => {
     let cancelled = false;
@@ -1050,6 +1056,23 @@ function AdminView({
       })
       .catch((error) => {
         if (!cancelled) setCreditNotice(error instanceof Error ? error.message : "Account list unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([fetchAdminUsage(activeUserId), fetchAdminAudit(activeUserId)])
+      .then(([usage, audit]) => {
+        if (!cancelled) {
+          setAdminUsage(usage);
+          setAdminAudit(audit);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setCreditNotice(error instanceof Error ? error.message : "Admin usage unavailable");
       });
     return () => {
       cancelled = true;
@@ -1132,8 +1155,8 @@ function AdminView({
         <section className="admin-metrics">
           <MetricCard label="Projects" value={workspace.projects.length} detail="active canvas workspaces" />
           <MetricCard label="Canvas nodes" value={totalNodes} detail={`${totalConnections} workflow links`} />
-          <MetricCard label="Credits used" value={workspace.profile.creditUsed} detail={`${workspace.profile.creditBalance} remaining`} />
-          <MetricCard label="Running jobs" value={runningJobs} detail={`${workspace.history.length} history entries`} />
+          <MetricCard label="Credits used" value={adminUsage?.totalCreditsUsed ?? workspace.profile.creditUsed} detail={`${workspace.profile.creditBalance} remaining`} />
+          <MetricCard label="Running jobs" value={runningJobs} detail={`${adminUsage?.totalHistoryEntries ?? workspace.history.length} history entries`} />
         </section>
         <section className="admin-grid">
           <article className="admin-card team-accounts-card">
@@ -1184,9 +1207,23 @@ function AdminView({
             ))}
           </article>
           <article className="admin-card">
-            <h2>Recent audit</h2>
-            {workspace.history.length ? (
-              workspace.history.slice(0, 6).map((entry) => (
+            <h2>Model usage</h2>
+            {adminUsage?.modelUsage.length ? (
+              adminUsage.modelUsage.map((usage) => (
+                <div className="admin-row" key={usage.modelId}>
+                  <span>{usage.modelId}</span>
+                  <strong>{usage.credits} credits / {usage.count} outputs</strong>
+                  <small>team-wide model consumption</small>
+                </div>
+              ))
+            ) : (
+              <p>No model usage yet. Completed image jobs will appear here.</p>
+            )}
+          </article>
+          <article className="admin-card">
+            <h2>Admin audit</h2>
+            {visibleAdminAudit.length ? (
+              visibleAdminAudit.slice(0, 6).map((entry) => (
                 <div className="admin-row" key={entry.id}>
                   <span>{entry.modelId}</span>
                   <strong>{entry.creditCost} credits</strong>

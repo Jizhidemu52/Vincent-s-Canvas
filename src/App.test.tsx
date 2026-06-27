@@ -14,6 +14,12 @@ let backendProfile: Profile = {
 };
 let backendHistory: HistoryEntry[] = [];
 let backendWorkspace: Workspace = createInitialWorkspace();
+let backendAdminAudit: HistoryEntry[] = [];
+let backendAdminUsage: {
+  totalCreditsUsed: number;
+  totalHistoryEntries: number;
+  modelUsage: Array<{ modelId: string; count: number; credits: number }>;
+};
 let backendAccounts: Array<{
   userId: string;
   designerName: string;
@@ -50,6 +56,40 @@ beforeEach(() => {
   backendWorkspace = {
     ...createInitialWorkspace({ userId: "designer-lina", designerName: "Lina Zhou", creditBalance: 180, role: "designer" }),
     history: backendHistory
+  };
+  backendAdminAudit = [
+    {
+      id: "audit-alice-1",
+      projectId: "alice-campaign",
+      nodeId: "alice-node-1",
+      prompt: "Alice campaign cleanup",
+      modelId: "gpt-image-2-medium",
+      outputCount: 2,
+      creditCost: 14,
+      operation: "generate",
+      referenceCount: 1,
+      createdAt: "2026-06-28T02:10:00.000Z"
+    },
+    {
+      id: "audit-bob-1",
+      projectId: "bob-upscale",
+      nodeId: "bob-node-1",
+      prompt: "Bob upscale pass",
+      modelId: "upscale-pro",
+      outputCount: 1,
+      creditCost: 4,
+      operation: "upscale",
+      referenceCount: 1,
+      createdAt: "2026-06-28T02:05:00.000Z"
+    }
+  ];
+  backendAdminUsage = {
+    totalCreditsUsed: 24,
+    totalHistoryEntries: 3,
+    modelUsage: [
+      { modelId: "gpt-image-2-medium", count: 2, credits: 14 },
+      { modelId: "upscale-pro", count: 1, credits: 4 }
+    ]
   };
   backendAccounts = [
     {
@@ -172,6 +212,22 @@ beforeEach(() => {
           return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
         }
         return jsonResponse(backendAccounts);
+      }
+      if (url.endsWith("/api/admin/usage")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        return jsonResponse(backendAdminUsage);
+      }
+      if (url.endsWith("/api/admin/audit")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        return jsonResponse(backendAdminAudit);
       }
       if (url.endsWith("/api/profile")) return jsonResponse(backendProfile);
       if (url.endsWith("/api/history")) return jsonResponse(backendHistory);
@@ -536,6 +592,15 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Server only")).toBeInTheDocument();
     expect(screen.getByText("Credit management")).toBeInTheDocument();
     expect(await screen.findByText("Team accounts")).toBeInTheDocument();
+    expect(screen.getByText("Model usage")).toBeInTheDocument();
+    expect(screen.getByText("Admin audit")).toBeInTheDocument();
+    expect(screen.getByText("24")).toBeInTheDocument();
+    expect(screen.getByText("3 history entries")).toBeInTheDocument();
+    expect(screen.getAllByText("gpt-image-2-medium").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("14 credits / 2 outputs")).toBeInTheDocument();
+    expect(screen.getAllByText("upscale-pro").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Alice campaign cleanup")).toBeInTheDocument();
+    expect(screen.getByText("Bob upscale pass")).toBeInTheDocument();
     expect(screen.getByText("alice@company.local")).toBeInTheDocument();
     expect(screen.getByText("Alice Designer")).toBeInTheDocument();
     expect(screen.getByText("88 remaining")).toBeInTheDocument();

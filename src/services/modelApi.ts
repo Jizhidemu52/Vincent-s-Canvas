@@ -55,6 +55,12 @@ export interface AdminAccountSummary {
   lastActivityAt?: string;
 }
 
+export interface AdminUsageSummary {
+  totalCreditsUsed: number;
+  totalHistoryEntries: number;
+  modelUsage: Array<{ modelId: string; count: number; credits: number }>;
+}
+
 export type WorkspaceSnapshot = Pick<
   Workspace,
   "profile" | "projects" | "activeProjectId" | "history" | "assets" | "prompts" | "modelRegistry"
@@ -160,4 +166,14 @@ export async function fetchProviderHealth(adminUserId?: string): Promise<Provide
 export async function fetchAdminAccounts(adminUserId?: string): Promise<AdminAccountSummary[]> {
   const response = await fetch(`${API_BASE_URL}/api/admin/accounts`, { headers: userHeaders(adminUserId) });
   return readJson<AdminAccountSummary[]>(response);
+}
+
+export async function fetchAdminUsage(adminUserId?: string): Promise<AdminUsageSummary> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/usage`, { headers: userHeaders(adminUserId) });
+  return readJson<AdminUsageSummary>(response);
+}
+
+export async function fetchAdminAudit(adminUserId?: string): Promise<HistoryEntry[]> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/audit`, { headers: userHeaders(adminUserId) });
+  return readJson<HistoryEntry[]>(response);
 }
