@@ -7,6 +7,7 @@ import {
   callApi,
   configureProviderSettings,
   configureModelPricing,
+  configureModelRegistry,
   createServerState,
   getWorkspaceSnapshot,
   saveWorkspaceSnapshot,
@@ -15,6 +16,7 @@ import {
   type CreditAdjustmentRequest,
   type CreditLimitRequest,
   type ModelPricingRequest,
+  type ModelRegistryRequest,
   type ProviderSettingsRequest,
   type ServerState,
   type WorkspaceSnapshot
@@ -189,6 +191,24 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
         }
         const body = await readJsonBody<Partial<ModelPricingRequest>>(request, bodyLimitBytes);
         const result = configureModelPricing(state, body ?? {}, userId);
+        if (!isApiError(result) && stateFilePath) {
+          saveServerState(stateFilePath, state);
+        }
+        sendJson(response, statusFromApiResult(result), result);
+        return;
+      }
+
+      if (pathname === "/api/admin/models") {
+        if (request.method === "OPTIONS") {
+          sendJson(response, 204);
+          return;
+        }
+        if (request.method !== "POST") {
+          sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
+          return;
+        }
+        const body = await readJsonBody<Partial<ModelRegistryRequest>>(request, bodyLimitBytes);
+        const result = configureModelRegistry(state, body ?? {}, userId);
         if (!isApiError(result) && stateFilePath) {
           saveServerState(stateFilePath, state);
         }

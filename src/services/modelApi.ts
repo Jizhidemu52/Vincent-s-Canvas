@@ -27,6 +27,17 @@ export interface ModelPricingRequest {
   currency?: ModelDefinition["currency"];
 }
 
+export interface ModelRegistryRequest {
+  modelId: string;
+  name: string;
+  provider: ModelDefinition["provider"];
+  group: ModelDefinition["group"];
+  capability: ModelDefinition["capability"];
+  cost: number;
+  priceCents?: number;
+  currency?: ModelDefinition["currency"];
+}
+
 export interface ProviderSettingsRequest {
   provider: ModelDefinition["provider"];
   mode: "mock" | "live-ready";
@@ -72,7 +83,7 @@ export interface AdminUsageSummary {
 
 export interface AdminAuditEntry {
   id: string;
-  eventType?: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "provider-settings";
+  eventType?: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings";
   actorUserId?: string;
   userId?: string;
   targetUserId?: string;
@@ -184,6 +195,15 @@ export async function setDesignerCreditLimit(request: CreditLimitRequest, adminU
 
 export async function configureAdminModelPricing(request: ModelPricingRequest, adminUserId?: string): Promise<ModelDefinition> {
   const response = await fetch(`${API_BASE_URL}/api/admin/model-pricing`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...userHeaders(adminUserId) },
+    body: JSON.stringify(request)
+  });
+  return readJson<ModelDefinition>(response);
+}
+
+export async function configureAdminModelRegistry(request: ModelRegistryRequest, adminUserId?: string): Promise<ModelDefinition> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/models`, {
     method: "POST",
     headers: { "content-type": "application/json", ...userHeaders(adminUserId) },
     body: JSON.stringify(request)

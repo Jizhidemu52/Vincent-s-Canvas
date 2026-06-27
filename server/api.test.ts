@@ -3,6 +3,7 @@ import {
   adjustAccountCredits,
   callApi,
   configureModelPricing,
+  configureModelRegistry,
   configureProviderSettings,
   listAdminAccounts,
   saveWorkspaceSnapshot,
@@ -254,6 +255,85 @@ describe("backend hosted mock API", () => {
     expect(result.creditCost).toBe(10);
     expect(profile.creditBalance).toBe(20);
     expect(models.find((model) => model.id === "gpt-image-2-low")).toMatchObject({ cost: 5, priceCents: 250, currency: "CNY" });
+  });
+
+  it("lets admins register provider models used by later generations", () => {
+    const state = createServerState({ creditBalance: 40 });
+
+    const registered = configureModelRegistry(
+      state,
+      {
+        modelId: "custom-fashion-v1",
+        name: "Custom Fashion V1",
+        provider: "runninghub",
+        group: "Image",
+        capability: ["generate", "edit"],
+        cost: 6,
+        priceCents: 399,
+        currency: "CNY"
+      },
+      "admin@company.local"
+    ) as ModelDefinition;
+    const result = callApi(
+      state,
+      "/api/generations",
+      request({ modelId: "custom-fashion-v1", outputCount: 2 }),
+      "custom-fashion-generation"
+    ) as GenerationResult;
+    const models = callApi(state, "/api/models") as ModelDefinition[];
+    const audit = callApi(state, "/api/admin/audit", undefined, undefined, "admin@company.local") as AdminAuditEntry[];
+
+    expect(registered).toMatchObject({
+      id: "custom-fashion-v1",
+      name: "Custom Fashion V1",
+      provider: "runninghub",
+      capability: ["generate", "edit"],
+      cost: 6,
+      priceCents: 399,
+      currency: "CNY"
+    });
+    expect(result.creditCost).toBe(12);
+    expect(models.find((model) => model.id === "custom-fashion-v1")).toMatchObject({ provider: "runninghub", cost: 6 });
+    expect(audit).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventType: "model-registry", modelId: "custom-fashion-v1", provider: "runninghub" })
+      ])
+    );
+  });
+
+  it("rejects unauthorized or invalid model registry changes without dirty side effects", () => {
+    const state = createServerState({ creditBalance: 30 });
+
+    const unauthorized = configureModelRegistry(
+      state,
+      {
+        modelId: "designer-model",
+        name: "Designer Model",
+        provider: "openai",
+        group: "Image",
+        capability: ["generate"],
+        cost: 4
+      },
+      "designer@company.local"
+    ) as ApiError;
+    const invalidCapability = configureModelRegistry(
+      state,
+      {
+        modelId: "bad-capability",
+        name: "Bad Capability",
+        provider: "openai",
+        group: "Image",
+        capability: ["download" as never],
+        cost: 4
+      },
+      "admin@company.local"
+    ) as ApiError;
+    const models = callApi(state, "/api/models") as ModelDefinition[];
+
+    expect(unauthorized).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+    expect(invalidCapability).toMatchObject({ status: "failed", errorMessage: "Model capability must contain supported operations" });
+    expect(models.some((model) => model.id === "designer-model" || model.id === "bad-capability")).toBe(false);
+    expect(state.adminAudit).toHaveLength(0);
   });
 
   it("lets admins configure provider runtime settings without exposing secrets", () => {

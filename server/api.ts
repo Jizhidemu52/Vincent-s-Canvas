@@ -5,6 +5,7 @@ import {
   type HistoryEntry,
   type LibraryAsset,
   type ModelDefinition,
+  type ModuleType,
   type Profile,
   type Project,
   type PromptPreset,
@@ -64,6 +65,17 @@ export interface ModelPricingRequest {
   currency?: ModelDefinition["currency"];
 }
 
+export interface ModelRegistryRequest {
+  modelId: string;
+  name: string;
+  provider: ProviderName;
+  group: ModelDefinition["group"];
+  capability: ModuleType[];
+  cost: number;
+  priceCents?: number;
+  currency?: ModelDefinition["currency"];
+}
+
 export interface ProviderSettingsRequest {
   provider: ProviderName;
   mode?: ProviderHealth["mode"];
@@ -74,7 +86,7 @@ export interface ProviderSettingsRequest {
 
 export interface AdminAuditEntry {
   id: string;
-  eventType: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "provider-settings";
+  eventType: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings";
   actorUserId?: string;
   userId?: string;
   targetUserId?: string;
@@ -264,6 +276,39 @@ function isAdminUser(state: ServerState, userId?: string) {
   return account.profile.role === "admin" || Boolean(normalizeUserId(userId)?.includes("admin"));
 }
 
+const modelGroups: ModelDefinition["group"][] = ["Trending models", "Image", "Edit", "Operations"];
+const modelCapabilities: ModuleType[] = ["generate", "edit", "upscale", "removeBackground"];
+
+function normalizeModelPrice(
+  request: Pick<Partial<ModelRegistryRequest>, "cost" | "priceCents" | "currency">,
+  current?: Pick<ModelDefinition, "priceCents" | "currency">
+) {
+  const cost = Number(request.cost);
+  if (!Number.isInteger(cost) || cost < 1 || cost > 10_000) {
+    throw new Error("Model cost must be an integer between 1 and 10000");
+  }
+  const priceCents = request.priceCents === undefined ? current?.priceCents : Number(request.priceCents);
+  if (priceCents !== undefined && (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > 10_000_000)) {
+    throw new Error("Model price must be a non-negative integer amount in cents");
+  }
+  const currency = request.currency ?? current?.currency ?? "CNY";
+  if (currency !== "CNY" && currency !== "USD") {
+    throw new Error("Currency must be CNY or USD");
+  }
+  return { cost, priceCents, currency };
+}
+
+function normalizeModelCapability(capability: unknown): ModuleType[] {
+  if (!Array.isArray(capability)) {
+    throw new Error("Model capability must contain supported operations");
+  }
+  const normalized = Array.from(new Set(capability.map((item) => String(item).trim()).filter(Boolean)));
+  if (!normalized.length || normalized.some((item): item is string => !modelCapabilities.includes(item as ModuleType))) {
+    throw new Error("Model capability must contain supported operations");
+  }
+  return normalized as ModuleType[];
+}
+
 export function adjustAccountCredits(state: ServerState, request: Partial<CreditAdjustmentRequest>, adminUserId?: string): Profile | ApiError {
   try {
     if (!isAdminUser(state, adminUserId)) {
@@ -361,18 +406,7 @@ export function configureModelPricing(state: ServerState, request: Partial<Model
     if (!model) {
       throw new Error("Model not found");
     }
-    const cost = Number(request.cost);
-    if (!Number.isInteger(cost) || cost < 1 || cost > 10_000) {
-      throw new Error("Model cost must be an integer between 1 and 10000");
-    }
-    const priceCents = request.priceCents === undefined ? model.priceCents : Number(request.priceCents);
-    if (priceCents !== undefined && (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > 10_000_000)) {
-      throw new Error("Model price must be a non-negative integer amount in cents");
-    }
-    const currency = request.currency ?? model.currency ?? "CNY";
-    if (currency !== "CNY" && currency !== "USD") {
-      throw new Error("Currency must be CNY or USD");
-    }
+    const { cost, priceCents, currency } = normalizeModelPrice(request, model);
     const updated = { ...model, cost, priceCents, currency };
     state.models = state.models.map((item) => (item.id === modelId ? updated : item));
     recordAdminAudit(state, {
@@ -384,6 +418,62 @@ export function configureModelPricing(state: ServerState, request: Partial<Model
       metadata: { priceCents, currency }
     });
     return updated;
+  } catch (error) {
+    return {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Unknown server error"
+    };
+  }
+}
+
+export function configureModelRegistry(state: ServerState, request: Partial<ModelRegistryRequest>, adminUserId?: string): ModelDefinition | ApiError {
+  try {
+    if (!isAdminUser(state, adminUserId)) {
+      throw new Error("Admin role required");
+    }
+    const modelId = request.modelId?.trim();
+    if (!modelId) {
+      throw new Error("Model is required");
+    }
+    if (!/^[a-z0-9][a-z0-9._-]{1,79}$/i.test(modelId)) {
+      throw new Error("Model id must be 2-80 letters, numbers, dots, underscores or hyphens");
+    }
+    const name = request.name?.trim();
+    if (!name || name.length > 80) {
+      throw new Error("Model name is required and must be 80 characters or fewer");
+    }
+    const provider = request.provider;
+    if (!provider || !providerNames.includes(provider)) {
+      throw new Error("Provider is required");
+    }
+    const group = request.group;
+    if (!group || !modelGroups.includes(group)) {
+      throw new Error("Model group is required");
+    }
+    const existing = state.models.find((item) => item.id === modelId);
+    const capability = normalizeModelCapability(request.capability);
+    const { cost, priceCents, currency } = normalizeModelPrice(request, existing);
+    const model: ModelDefinition = {
+      id: modelId,
+      name,
+      provider,
+      group,
+      capability,
+      cost,
+      priceCents,
+      currency
+    };
+    state.models = existing ? state.models.map((item) => (item.id === modelId ? model : item)) : [...state.models, model];
+    recordAdminAudit(state, {
+      eventType: "model-registry",
+      actorUserId: normalizeUserId(adminUserId),
+      modelId,
+      provider,
+      creditCost: cost,
+      summary: `${existing ? "Updated" : "Registered"} ${modelId} for ${provider} with ${capability.join(", ")}`,
+      metadata: { name, group, capability, priceCents, currency }
+    });
+    return model;
   } catch (error) {
     return {
       status: "failed",

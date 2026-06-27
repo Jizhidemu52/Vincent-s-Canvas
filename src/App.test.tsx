@@ -2,8 +2,8 @@ import { act, createEvent, fireEvent, render, screen, waitFor } from "@testing-l
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { createInitialWorkspace, type GenerationRequest, type HistoryEntry, type Profile, type Workspace } from "./domain/workspace";
-import type { AdminAuditEntry } from "./services/modelApi";
+import { createInitialWorkspace, type GenerationRequest, type HistoryEntry, type ModelDefinition, type Profile, type Workspace } from "./domain/workspace";
+import type { AdminAuditEntry, ProviderHealth } from "./services/modelApi";
 
 let backendProfile: Profile = {
   userId: "designer-lina",
@@ -34,7 +34,7 @@ let backendAccounts: Array<{
   assetCount: number;
   lastActivityAt?: string;
 }> = [];
-let backendProviderHealth: Array<Record<string, unknown>> = [];
+let backendProviderHealth: ProviderHealth[] = [];
 
 function jsonResponse(payload: unknown, status = 200) {
   return Promise.resolve(
@@ -303,6 +303,63 @@ beforeEach(() => {
         ];
         return jsonResponse(updated);
       }
+      if (url.endsWith("/api/admin/models")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        const request = JSON.parse(String(init?.body)) as {
+          modelId: string;
+          name: string;
+          provider: ModelDefinition["provider"];
+          group: ModelDefinition["group"];
+          capability: ModelDefinition["capability"];
+          cost: number;
+          priceCents?: number;
+          currency?: "CNY" | "USD";
+        };
+        if (!request.capability.length) {
+          return jsonResponse({ status: "failed", errorMessage: "Model capability must contain supported operations" }, 400);
+        }
+        const registered: ModelDefinition = {
+          id: request.modelId,
+          name: request.name,
+          provider: request.provider,
+          group: request.group,
+          capability: request.capability,
+          cost: request.cost,
+          priceCents: request.priceCents,
+          currency: request.currency
+        };
+        backendWorkspace = {
+          ...backendWorkspace,
+          modelRegistry: backendWorkspace.modelRegistry.some((model) => model.id === registered.id)
+            ? backendWorkspace.modelRegistry.map((model) => (model.id === registered.id ? registered : model))
+            : [...backendWorkspace.modelRegistry, registered]
+        };
+        backendAdminAudit = [
+          {
+            id: `admin-model-${backendAdminAudit.length + 1}`,
+            eventType: "model-registry",
+            actorUserId: adminUserId,
+            provider: request.provider,
+            prompt: `${request.modelId} registered for ${request.provider}`,
+            summary: `${request.modelId} registered for ${request.provider}`,
+            projectId: "admin",
+            nodeId: "admin-model",
+            modelId: request.modelId,
+            outputCount: 0,
+            creditCost: request.cost,
+            createdAt: new Date().toISOString()
+          } as HistoryEntry,
+          ...backendAdminAudit
+        ];
+        backendProviderHealth = backendProviderHealth.map((provider) =>
+          provider.provider === request.provider ? { ...provider, modelCount: provider.modelCount + 1 } : provider
+        );
+        return jsonResponse(registered);
+      }
       if (url.endsWith("/api/admin/provider-settings")) {
         const headers = init?.headers as Record<string, string> | undefined;
         const adminUserId = headers?.["x-user-id"] ?? "";
@@ -310,13 +367,13 @@ beforeEach(() => {
           return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
         }
         const request = JSON.parse(String(init?.body)) as {
-          provider: string;
+          provider: ModelDefinition["provider"];
           mode: "mock" | "live-ready";
           endpointUrl?: string;
           secretName?: string;
           secretValue?: string;
         };
-        const configured = {
+        const configured: ProviderHealth = {
           provider: request.provider,
           status: "healthy",
           modelCount: backendProviderHealth.find((provider) => provider.provider === request.provider)?.modelCount ?? 0,
@@ -379,12 +436,7 @@ beforeEach(() => {
       if (url.endsWith("/api/profile")) return jsonResponse(backendProfile);
       if (url.endsWith("/api/history")) return jsonResponse(backendHistory);
       if (url.endsWith("/api/models")) {
-        return jsonResponse([
-          { id: "gpt-image-2-medium", name: "GPT Image 2 Medium", provider: "openai", group: "Trending models", capability: ["generate", "edit"], cost: 7 },
-          { id: "nanobanana2", name: "Nano Banana 2", provider: "nanobanana", group: "Trending models", capability: ["generate", "edit"], cost: 11 },
-          { id: "upscale-pro", name: "Creative Upscale", provider: "internal", group: "Operations", capability: ["upscale"], cost: 4 },
-          { id: "background-cleaner", name: "Remove Background", provider: "internal", group: "Operations", capability: ["removeBackground"], cost: 2 }
-        ]);
+        return jsonResponse(backendWorkspace.modelRegistry);
       }
       if (url.endsWith("/api/admin/providers")) {
         return jsonResponse(backendProviderHealth);
@@ -792,6 +844,14 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "Update model pricing" }));
     expect(await screen.findByText("GPT Image 2 Medium now costs 9 credits per output")).toBeInTheDocument();
     expect(screen.getByLabelText("Configured model pricing")).toHaveTextContent("9 credits / 4.50 CNY");
+
+    expect(screen.getByText("Model registry")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Register model" }));
+    expect(await screen.findByText("Custom Fashion V1 registered for runninghub")).toBeInTheDocument();
+    expect(screen.getByLabelText("Registered model registry")).toHaveTextContent("Custom Fashion V1: runninghub / generate + edit / 6 credits");
+    expect(screen.getByRole("combobox", { name: "Pricing model" })).toHaveValue("custom-fashion-v1");
+    expect(screen.getByText(/model-registry/i)).toBeInTheDocument();
+    expect(screen.getByText(/custom-fashion-v1 registered for runninghub/i)).toBeInTheDocument();
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Provider to configure" }), "openai");
     await user.selectOptions(screen.getByRole("combobox", { name: "Provider mode" }), "live-ready");

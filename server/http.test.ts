@@ -281,6 +281,57 @@ describe("HTTP API server", () => {
     expect(models.find((model) => model.id === "gpt-image-2-low")).toMatchObject({ cost: 5, priceCents: 250, currency: "CNY" });
   });
 
+  it("allows admins to register provider models over HTTP and rejects invalid callers", async () => {
+    const modelRequest = {
+      modelId: "http-fashion-v1",
+      name: "HTTP Fashion V1",
+      provider: "runninghub",
+      group: "Image",
+      capability: ["generate", "edit"],
+      cost: 6,
+      priceCents: 399,
+      currency: "CNY"
+    };
+    const registeredResponse = await fetch(`${context.baseUrl}/api/admin/models`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify(modelRequest)
+    });
+    const unauthorizedResponse = await fetch(`${context.baseUrl}/api/admin/models`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "designer@company.local" },
+      body: JSON.stringify({ ...modelRequest, modelId: "designer-model" })
+    });
+    const invalidResponse = await fetch(`${context.baseUrl}/api/admin/models`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ ...modelRequest, modelId: "bad-capability", capability: ["download"] })
+    });
+    const generationResponse = await fetch(`${context.baseUrl}/api/generations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "http-custom-model-generation" },
+      body: JSON.stringify(request({ modelId: "http-fashion-v1", outputCount: 1 }))
+    });
+    const models = (await (await fetch(`${context.baseUrl}/api/models`)).json()) as Array<Record<string, unknown>>;
+    const audit = (await (await fetch(`${context.baseUrl}/api/admin/audit`, { headers: { "x-user-id": "admin@company.local" } })).json()) as Array<Record<string, unknown>>;
+
+    expect(registeredResponse.status).toBe(200);
+    expect(await registeredResponse.json()).toMatchObject({ id: "http-fashion-v1", provider: "runninghub", cost: 6, priceCents: 399 });
+    expect(unauthorizedResponse.status).toBe(400);
+    expect(await unauthorizedResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+    expect(invalidResponse.status).toBe(400);
+    expect(await invalidResponse.json()).toMatchObject({ status: "failed", errorMessage: "Model capability must contain supported operations" });
+    expect(generationResponse.status).toBe(200);
+    expect(await generationResponse.json()).toMatchObject({ creditCost: 6 });
+    expect(models.find((model) => model.id === "http-fashion-v1")).toMatchObject({ provider: "runninghub", capability: ["generate", "edit"] });
+    expect(models.some((model) => model.id === "designer-model" || model.id === "bad-capability")).toBe(false);
+    expect(audit).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventType: "model-registry", modelId: "http-fashion-v1", provider: "runninghub" })
+      ])
+    );
+  });
+
   it("allows admins to configure provider settings over HTTP without leaking secrets", async () => {
     const configuredResponse = await fetch(`${context.baseUrl}/api/admin/provider-settings`, {
       method: "POST",

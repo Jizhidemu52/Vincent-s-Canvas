@@ -740,6 +740,30 @@ button {
   font-weight: 800;
 }
 
+.admin-checkbox-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-checkbox-group label {
+  min-height: 34px;
+  border: 1px solid #dadada;
+  border-radius: 7px;
+  padding: 7px 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: #fff;
+  color: #222;
+  font-size: 12px;
+}
+
+.admin-checkbox-group input {
+  width: 14px;
+  height: 14px;
+}
+
 .admin-credit-form input,
 .admin-credit-form select {
   width: 100%;

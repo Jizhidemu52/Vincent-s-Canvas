@@ -85,6 +85,7 @@ import {
 import {
   adjustDesignerCredits,
   configureAdminModelPricing,
+  configureAdminModelRegistry,
   configureAdminProviderSettings,
   fetchAdminAccounts,
   fetchAdminAudit,
@@ -99,6 +100,7 @@ import {
   type AdminAuditEntry,
   type AdminUsageSummary,
   type ProviderHealth,
+  type ModelRegistryRequest,
   type ProviderSettingsRequest
 } from "./services/modelApi";
 
@@ -730,6 +732,21 @@ export default function App() {
     return updatedModel;
   }
 
+  async function updateModelRegistry(request: ModelRegistryRequest) {
+    const updatedModel = await configureAdminModelRegistry(request, activeUserId);
+    setWorkspace((current) => {
+      const exists = current.modelRegistry.some((model) => model.id === updatedModel.id);
+      return {
+        ...current,
+        modelRegistry: exists
+          ? current.modelRegistry.map((model) => (model.id === updatedModel.id ? updatedModel : model))
+          : [...current.modelRegistry, updatedModel]
+      };
+    });
+    setApiNotice(`Model registered: ${updatedModel.name}`);
+    return updatedModel;
+  }
+
   async function updateProviderSettings(request: ProviderSettingsRequest) {
     const provider = await configureAdminProviderSettings(request, activeUserId);
     setApiNotice(`Provider ${provider.provider} updated to ${provider.mode}`);
@@ -783,6 +800,7 @@ export default function App() {
         onAdjustCredits={adjustCredits}
         onSetCreditLimit={setCreditLimit}
         onUpdateModelPricing={updateModelPricing}
+        onUpdateModelRegistry={updateModelRegistry}
         onConfigureProvider={updateProviderSettings}
       />
     );
@@ -1086,6 +1104,7 @@ function AdminView({
   onAdjustCredits,
   onSetCreditLimit,
   onUpdateModelPricing,
+  onUpdateModelRegistry,
   onConfigureProvider
 }: {
   workspace: Workspace;
@@ -1095,6 +1114,7 @@ function AdminView({
   onAdjustCredits: (targetUserId: string, delta: number, reason: string) => Promise<Profile>;
   onSetCreditLimit: (targetUserId: string, creditLimit: number, reason: string) => Promise<Profile>;
   onUpdateModelPricing: (modelId: string, cost: number, priceCents: number, currency: ModelDefinition["currency"]) => Promise<ModelDefinition>;
+  onUpdateModelRegistry: (request: ModelRegistryRequest) => Promise<ModelDefinition>;
   onConfigureProvider: (request: ProviderSettingsRequest) => Promise<ProviderHealth>;
 }) {
   const totalNodes = workspace.projects.reduce((sum, project) => sum + project.nodes.length, 0);
@@ -1110,6 +1130,14 @@ function AdminView({
   const [modelCost, setModelCost] = useState(String(selectedPricingModel?.cost ?? 1));
   const [modelPriceCents, setModelPriceCents] = useState(String(selectedPricingModel?.priceCents ?? 0));
   const [modelCurrency, setModelCurrency] = useState<ModelDefinition["currency"]>(selectedPricingModel?.currency ?? "CNY");
+  const [registryModelId, setRegistryModelId] = useState("custom-fashion-v1");
+  const [registryModelName, setRegistryModelName] = useState("Custom Fashion V1");
+  const [registryProvider, setRegistryProvider] = useState<ModelDefinition["provider"]>("runninghub");
+  const [registryGroup, setRegistryGroup] = useState<ModelDefinition["group"]>("Image");
+  const [registryCapabilities, setRegistryCapabilities] = useState<ModuleType[]>(["generate", "edit"]);
+  const [registryCost, setRegistryCost] = useState("6");
+  const [registryPriceCents, setRegistryPriceCents] = useState("399");
+  const [registryCurrency, setRegistryCurrency] = useState<ModelDefinition["currency"]>("CNY");
   const [providerId, setProviderId] = useState<ModelDefinition["provider"]>(workspace.modelRegistry[0]?.provider ?? "openai");
   const [providerMode, setProviderMode] = useState<ProviderHealth["mode"]>("mock");
   const [providerEndpointUrl, setProviderEndpointUrl] = useState("");
@@ -1126,6 +1154,8 @@ function AdminView({
     return memo;
   }, {});
   const configurableProviders = Array.from(new Set(["openai", "nanobanana", "runninghub", "comfyui", "internal", ...workspace.modelRegistry.map((model) => model.provider)])) as ModelDefinition["provider"][];
+  const modelGroupOptions: ModelDefinition["group"][] = ["Trending models", "Image", "Edit", "Operations"];
+  const modelCapabilityOptions: ModuleType[] = ["generate", "edit", "upscale", "removeBackground"];
   const visibleAdminAudit = adminAudit.length ? adminAudit : workspace.history.map(historyEntryToAuditEntry);
 
   useEffect(() => {
@@ -1238,6 +1268,39 @@ function AdminView({
       setCreditNotice(`${model.name} now costs ${model.cost} credits per output`);
     } catch (error) {
       setCreditNotice(error instanceof Error ? error.message : "Model pricing update failed");
+    } finally {
+      setIsAdjusting(false);
+    }
+  }
+
+  function toggleRegistryCapability(capability: ModuleType) {
+    setRegistryCapabilities((current) =>
+      current.includes(capability) ? current.filter((item) => item !== capability) : [...current, capability]
+    );
+  }
+
+  async function submitModelRegistry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsAdjusting(true);
+    try {
+      const model = await onUpdateModelRegistry({
+        modelId: registryModelId,
+        name: registryModelName,
+        provider: registryProvider,
+        group: registryGroup,
+        capability: registryCapabilities,
+        cost: Number(registryCost),
+        priceCents: Number(registryPriceCents),
+        currency: registryCurrency
+      });
+      setPricingModelId(model.id);
+      setModelCost(String(model.cost));
+      setModelPriceCents(String(model.priceCents ?? 0));
+      setModelCurrency(model.currency ?? "CNY");
+      await refreshAdminAudit();
+      setCreditNotice(`${model.name} registered for ${model.provider}`);
+    } catch (error) {
+      setCreditNotice(error instanceof Error ? error.message : "Model registration failed");
     } finally {
       setIsAdjusting(false);
     }
@@ -1391,6 +1454,83 @@ function AdminView({
                 Update provider
               </button>
             </form>
+          </article>
+          <article className="admin-card">
+            <h2>Model registry</h2>
+            <form className="admin-credit-form" onSubmit={submitModelRegistry}>
+              <label>
+                <span>Model ID</span>
+                <input aria-label="Registry model ID" value={registryModelId} onChange={(event) => setRegistryModelId(event.target.value)} />
+              </label>
+              <label>
+                <span>Model name</span>
+                <input aria-label="Registry model name" value={registryModelName} onChange={(event) => setRegistryModelName(event.target.value)} />
+              </label>
+              <label>
+                <span>Provider</span>
+                <select aria-label="Registry provider" value={registryProvider} onChange={(event) => setRegistryProvider(event.target.value as ModelDefinition["provider"])}>
+                  {configurableProviders.map((provider) => (
+                    <option key={provider} value={provider}>
+                      {provider}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Group</span>
+                <select aria-label="Registry group" value={registryGroup} onChange={(event) => setRegistryGroup(event.target.value as ModelDefinition["group"])}>
+                  {modelGroupOptions.map((group) => (
+                    <option key={group} value={group}>
+                      {group}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="admin-checkbox-group" aria-label="Registry capabilities">
+                {modelCapabilityOptions.map((capability) => (
+                  <label key={capability}>
+                    <input
+                      type="checkbox"
+                      checked={registryCapabilities.includes(capability)}
+                      onChange={() => toggleRegistryCapability(capability)}
+                    />
+                    <span>{capability}</span>
+                  </label>
+                ))}
+              </div>
+              <label>
+                <span>Credits per output</span>
+                <input aria-label="Registry model credit cost" type="number" min={1} step={1} value={registryCost} onChange={(event) => setRegistryCost(event.target.value)} />
+              </label>
+              <label>
+                <span>Price cents</span>
+                <input
+                  aria-label="Registry model price cents"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={registryPriceCents}
+                  onChange={(event) => setRegistryPriceCents(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Currency</span>
+                <select aria-label="Registry model currency" value={registryCurrency} onChange={(event) => setRegistryCurrency(event.target.value as ModelDefinition["currency"])}>
+                  <option value="CNY">CNY</option>
+                  <option value="USD">USD</option>
+                </select>
+              </label>
+              <button type="submit" className="generate-button" disabled={isAdjusting}>
+                Register model
+              </button>
+            </form>
+            <div className="admin-price-list" aria-label="Registered model registry">
+              {workspace.modelRegistry.slice(-6).map((model) => (
+                <small key={model.id}>
+                  {model.name}: {model.provider} / {model.capability.join(" + ")} / {model.cost} credits
+                </small>
+              ))}
+            </div>
           </article>
           <article className="admin-card">
             <h2>Model usage</h2>
