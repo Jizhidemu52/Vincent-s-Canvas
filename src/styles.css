@@ -319,10 +319,40 @@ button {
 }
 
 .project-card {
+  position: relative;
   min-height: 220px;
   border: 0;
   background: transparent;
   text-align: left;
+  color: #111;
+}
+
+.project-card-main {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+}
+
+.project-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid #ddd;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #444;
+}
+
+.project-card-delete:hover {
+  border-color: #c8c8c8;
   color: #111;
 }
 

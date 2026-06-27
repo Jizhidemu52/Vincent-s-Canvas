@@ -630,6 +630,28 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("fashion-reference.jpg")).toBeInTheDocument();
   });
 
+  it("lets designers delete one project without removing other project canvases", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Projects" }));
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Projects" }));
+
+    expect(screen.getByRole("button", { name: "Open project Untitled 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open project Untitled 2" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete project Untitled 1" }));
+
+    expect(screen.queryByRole("button", { name: "Open project Untitled 1" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open project Untitled 2" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open project Untitled 2" }));
+    expect(screen.getByText("Context panel")).toBeInTheDocument();
+    expect(screen.getByText("fashion-reference.jpg")).toBeInTheDocument();
+  });
+
   it("autosaves created project workspaces to the backend snapshot", async () => {
     const user = userEvent.setup();
     await login(user);

@@ -318,6 +318,14 @@ export default function App() {
     setView("canvas");
   }
 
+  function deleteProject(projectId: string) {
+    setWorkspace((current) => {
+      const projects = current.projects.filter((project) => project.id !== projectId);
+      const activeProjectId = current.activeProjectId === projectId ? projects[0]?.id : current.activeProjectId;
+      return { ...current, projects, activeProjectId };
+    });
+  }
+
   function updateSelectedConfig(patch: Partial<CanvasNode["generation"]>) {
     if (!activeProject || !selectedNode) return;
     setWorkspace((current) =>
@@ -845,7 +853,7 @@ export default function App() {
     return <LoginView onLogin={login} />;
   }
 
-  return <HomeView workspace={workspace} onCreateProject={openNewProject} onOpenProject={openProject} onAdmin={() => setView("admin")} />;
+  return <HomeView workspace={workspace} onCreateProject={openNewProject} onOpenProject={openProject} onDeleteProject={deleteProject} onAdmin={() => setView("admin")} />;
 }
 
 function LoginView({ onLogin }: { onLogin: (email: string) => void }) {
@@ -888,11 +896,13 @@ function HomeView({
   workspace,
   onCreateProject,
   onOpenProject,
+  onDeleteProject,
   onAdmin
 }: {
   workspace: Workspace;
   onCreateProject: () => void;
   onOpenProject: (projectId: string, target?: OpenProjectTarget) => void;
+  onDeleteProject: (projectId: string) => void;
   onAdmin: () => void;
 }) {
   const [activeSection, setActiveSection] = useState<HomeSection>("Projects");
@@ -920,7 +930,7 @@ function HomeView({
             <small>{workspace.profile.creditUsed} credits used</small>
           </div>
         </div>
-        {activeSection === "Projects" && <ProjectsPanel projects={projectCards} onCreateProject={onCreateProject} onOpenProject={onOpenProject} />}
+        {activeSection === "Projects" && <ProjectsPanel projects={projectCards} onCreateProject={onCreateProject} onOpenProject={onOpenProject} onDeleteProject={onDeleteProject} />}
         {activeSection === "History" && <HistoryPanel workspace={workspace} onOpenProject={onOpenProject} />}
         {activeSection === "Profile" && <ProfilePanel workspace={workspace} />}
       </section>
@@ -931,11 +941,13 @@ function HomeView({
 function ProjectsPanel({
   projects,
   onCreateProject,
-  onOpenProject
+  onOpenProject,
+  onDeleteProject
 }: {
   projects: Project[];
   onCreateProject: () => void;
   onOpenProject: (projectId: string, target?: OpenProjectTarget) => void;
+  onDeleteProject: (projectId: string) => void;
 }) {
   return (
     <>
@@ -952,13 +964,18 @@ function ProjectsPanel({
           <strong>Create new project</strong>
         </button>
         {projects.map((project) => (
-          <button type="button" className="project-card" key={project.id} onClick={() => onOpenProject(project.id)}>
-            <div className="project-thumb">
-              {project.nodes[0]?.source ? <img src={project.nodes[0].source} alt="" /> : <span>No images</span>}
-            </div>
-            <strong>{project.name}</strong>
-            <small>{project.nodes.length} nodes · modified just now</small>
-          </button>
+          <article className="project-card managed-project-card" key={project.id}>
+            <button type="button" className="project-card-main" aria-label={`Open project ${project.name}`} onClick={() => onOpenProject(project.id)}>
+              <div className="project-thumb">
+                {project.nodes[0]?.source ? <img src={project.nodes[0].source} alt="" /> : <span>No images</span>}
+              </div>
+              <strong>{project.name}</strong>
+              <small>{project.nodes.length} nodes · modified just now</small>
+            </button>
+            <button type="button" className="project-card-delete" aria-label={`Delete project ${project.name}`} onClick={() => onDeleteProject(project.id)}>
+              <Trash2 size={14} />
+            </button>
+          </article>
         ))}
         {!projects.length && (
           <article className="project-card empty-project-card">
