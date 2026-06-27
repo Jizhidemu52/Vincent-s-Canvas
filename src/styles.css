@@ -1438,6 +1438,8 @@ button {
   min-height: 280px;
   border-radius: 8px;
   background: #f0f0f0;
+  cursor: crosshair;
+  touch-action: none;
 }
 
 .shape-preview img {
@@ -1448,12 +1450,10 @@ button {
 
 .shape-overlay {
   position: absolute;
-  left: 28%;
-  top: 24%;
-  width: 44%;
-  height: 38%;
   border: 3px solid #21c9b6;
   background: rgba(33, 201, 182, 0.12);
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.16);
+  pointer-events: none;
 }
 
 .shape-overlay.ellipse {
@@ -1472,6 +1472,24 @@ button {
 .shape-panel {
   display: grid;
   gap: 10px;
+}
+
+.shape-panel > small,
+.mask-coordinates {
+  color: #747474;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.mask-size-control {
+  display: grid;
+  gap: 6px;
+}
+
+.mask-size-control span {
+  color: #444;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .shape-panel textarea {

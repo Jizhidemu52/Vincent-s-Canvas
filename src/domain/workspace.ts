@@ -50,6 +50,13 @@ export interface GenerationConfig {
   quality?: string;
 }
 
+export interface MaskSelection {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface CanvasNode {
   id: string;
   type: NodeType;
@@ -133,6 +140,7 @@ export interface GenerationRequest {
   referenceNodeIds: string[];
   outputCount: number;
   operation: OperationType;
+  mask?: MaskSelection;
 }
 
 export interface GenerationResult {
@@ -883,7 +891,7 @@ export function commitShapeEdit(
   workspace: Workspace,
   projectId: string,
   nodeId: string,
-  edit: { shape: "ellipse" | "rectangle" | "freehand"; prompt: string }
+  edit: { shape: "ellipse" | "rectangle" | "freehand"; prompt: string; mask?: MaskSelection }
 ): Workspace {
   return updateProject(workspace, projectId, (project) => {
     const source = findNode(project, nodeId);
@@ -900,7 +908,7 @@ export function commitShapeEdit(
       width: source.width,
       height: source.height,
       generation: { prompt: edit.prompt, modelId: source.generation.modelId, entryPoint: "workflow" },
-      metadata: { editShape: edit.shape }
+      metadata: { editShape: edit.shape, mask: edit.mask }
     });
     editNode.editShape = edit.shape;
     return withUndo(project, {

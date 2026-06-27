@@ -70,6 +70,7 @@ import {
   type CanvasNode,
   type GenerationResult,
   type LibraryAsset,
+  type MaskSelection,
   type ModelDefinition,
   type OperationType,
   type ModuleType,
@@ -85,9 +86,10 @@ const SECOND_TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 
 type ViewMode = "login" | "home" | "canvas" | "admin";
 type DragMode = "move" | "resize";
-type ShapeEditDraft = { nodeId: string; shape: "ellipse" | "rectangle" | "freehand"; prompt: string } | null;
+type ShapeEditDraft = { nodeId: string; shape: "ellipse" | "rectangle" | "freehand"; prompt: string; mask?: MaskSelection } | null;
 type HomeSection = "Projects" | "History" | "Profile";
 type RightPanel = "context" | "history" | "assets" | "prompts" | "assistant";
+const DEFAULT_MASK_SELECTION: MaskSelection = { x: 28, y: 24, width: 44, height: 38 };
 
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -111,6 +113,18 @@ function operationForNode(node: CanvasNode): OperationType {
   if (node.type === "removeBg") return "removeBackground";
   if (node.type === "edit") return "edit";
   return "generate";
+}
+
+function isCanvasImageNode(node?: CanvasNode) {
+  return Boolean(
+    node &&
+      (node.type === "image" ||
+        node.type === "imageGroup" ||
+        node.type === "batch" ||
+        node.kind === "generated" ||
+        node.kind === "operation" ||
+        node.kind === "edit")
+  );
 }
 
 export default function App() {
@@ -282,8 +296,9 @@ export default function App() {
   }
 
   function runImageOperation(operation: "upscale" | "removeBackground") {
-    if (!selectedNode) return;
-    void generateNodeThroughApi(selectedNode.id, {
+    const imageNode = isCanvasImageNode(selectedNode) ? selectedNode : undefined;
+    if (!imageNode) return;
+    void generateNodeThroughApi(imageNode.id, {
       operation,
       modelId: operation === "upscale" ? "upscale-pro" : "background-cleaner",
       prompt:
@@ -481,9 +496,11 @@ export default function App() {
     }
   }
   function shapeEdit() {
-    if (!activeProject || !selectedNode) return;
+    if (!activeProject) return;
+    const imageNode = isCanvasImageNode(selectedNode) ? selectedNode : activeProject.nodes.find(isCanvasImageNode);
+    if (!imageNode) return;
     setShapeEditDraft({
-      nodeId: selectedNode.id,
+      nodeId: imageNode.id,
       shape: "ellipse",
       prompt: "只在圈选区域增加精细刺绣花型，保持其他区域不变。"
     });
@@ -498,7 +515,8 @@ export default function App() {
     setWorkspace((current) =>
       commitShapeEdit(current, projectId, editDraft.nodeId, {
         shape: editDraft.shape,
-        prompt: editDraft.prompt
+        prompt: editDraft.prompt,
+        mask: editDraft.mask ?? DEFAULT_MASK_SELECTION
       })
     );
     setShapeEditDraft(null);
@@ -509,7 +527,8 @@ export default function App() {
       prompt: editDraft.prompt,
       referenceNodeIds: source.references.length ? source.references : [source.id],
       outputCount: 1,
-      operation: "edit" as OperationType
+      operation: "edit" as OperationType,
+      mask: editDraft.mask ?? DEFAULT_MASK_SELECTION
     };
     try {
       setApiNotice("Running backend mask edit...");
@@ -1140,6 +1159,7 @@ function CanvasView({
     }),
     [project.nodes]
   );
+  const selectedImageNode = isCanvasImageNode(selectedNode) ? selectedNode : undefined;
 
   return (
     <main className="canvas-app">
@@ -1176,13 +1196,13 @@ function CanvasView({
           onGenerateNode={onGenerateNode}
         />
         <NodeToolbar
-          selectedNode={selectedNode}
+          selectedNode={selectedImageNode}
           onUpscale={onUpscale}
           onRemoveBg={onRemoveBg}
           onShapeEdit={onShapeEdit}
           onSaveAsset={onSaveAsset}
           onGroupReferences={onGroupReferences}
-          onDownload={() => downloadCanvasNode(selectedNode)}
+          onDownload={() => downloadCanvasNode(selectedImageNode)}
         />
         <RightDock
           workspace={workspace}
@@ -2038,14 +2058,63 @@ function ShapeEditDialog({
 }) {
   if (!draft || !node) return null;
   const shapes: Array<NonNullable<ShapeEditDraft>["shape"]> = ["ellipse", "rectangle", "freehand"];
+  const mask = draft.mask ?? DEFAULT_MASK_SELECTION;
+  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+  const updateMaskCenter = (event: PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const centerX = ((event.clientX - rect.left) / rect.width) * 100;
+    const centerY = ((event.clientY - rect.top) / rect.height) * 100;
+    const nextMask = {
+      ...mask,
+      x: Math.round(clamp(centerX - mask.width / 2, 0, 100 - mask.width)),
+      y: Math.round(clamp(centerY - mask.height / 2, 0, 100 - mask.height))
+    };
+    onDraft({ ...draft, mask: nextMask });
+  };
+  const updateMaskSize = (size: number) => {
+    const width = clamp(size, 18, 78);
+    const height = clamp(Math.round(size * 0.86), 16, 70);
+    const centerX = mask.x + mask.width / 2;
+    const centerY = mask.y + mask.height / 2;
+    onDraft({
+      ...draft,
+      mask: {
+        x: Math.round(clamp(centerX - width / 2, 0, 100 - width)),
+        y: Math.round(clamp(centerY - height / 2, 0, 100 - height)),
+        width,
+        height
+      }
+    });
+  };
   return (
     <div className="shape-dialog" role="dialog" aria-label="Mask edit confirmation">
-      <div className="shape-preview">
+      <div
+        className="shape-preview"
+        role="application"
+        aria-label="Mask placement preview"
+        onPointerDown={(event) => {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          updateMaskCenter(event);
+        }}
+        onPointerMove={(event) => {
+          if (event.buttons === 1) updateMaskCenter(event);
+        }}
+      >
         <img src={node.source} alt={node.name} />
-        <span className={`shape-overlay ${draft.shape}`} />
+        <span
+          className={`shape-overlay ${draft.shape}`}
+          style={{
+            left: `${mask.x}%`,
+            top: `${mask.y}%`,
+            width: `${mask.width}%`,
+            height: `${mask.height}%`
+          }}
+        />
       </div>
       <div className="shape-panel">
         <strong>Confirm mask edit</strong>
+        <small>Click or drag on the preview to position the edit mask.</small>
         <div className="shape-options" aria-label="Mask shape">
           {shapes.map((shape) => (
             <button
@@ -2058,6 +2127,20 @@ function ShapeEditDialog({
             </button>
           ))}
         </div>
+        <label className="mask-size-control">
+          <span>Mask size</span>
+          <input
+            aria-label="Mask size"
+            type="range"
+            min={18}
+            max={78}
+            value={mask.width}
+            onChange={(event) => updateMaskSize(Number(event.target.value))}
+          />
+        </label>
+        <output className="mask-coordinates" aria-label="Mask coordinates">
+          x {mask.x} · y {mask.y} · w {mask.width} · h {mask.height}
+        </output>
         <textarea
           aria-label="Mask edit prompt"
           value={draft.prompt}

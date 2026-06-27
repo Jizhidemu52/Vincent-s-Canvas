@@ -281,12 +281,14 @@ describe("designer canvas workspace behavior", () => {
     const upscaled = applyImageOperation(withAsset, project.id, source.id, "upscale");
     const edited = commitShapeEdit(upscaled, project.id, source.id, {
       shape: "ellipse",
-      prompt: "paint a circular floral patch on the pocket"
+      prompt: "paint a circular floral patch on the pocket",
+      mask: { x: 18, y: 22, width: 42, height: 36 }
     });
 
     expect(edited.projects[0].nodes).toHaveLength(3);
     expect(edited.projects[0].nodes[1]).toMatchObject({ kind: "operation", operation: "upscale", references: [source.id] });
     expect(edited.projects[0].nodes[2]).toMatchObject({ kind: "edit", editShape: "ellipse", references: [source.id] });
+    expect(edited.projects[0].nodes[2].metadata.mask).toEqual({ x: 18, y: 22, width: 42, height: 36 });
     expect(edited.projects[0].nodes[2].source).toContain("#shape-edit");
     expect(edited.projects[0].nodes[2].x).toBeGreaterThan(source.x);
   });
