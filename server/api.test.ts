@@ -323,6 +323,21 @@ describe("backend hosted mock API", () => {
     });
   });
 
+  it("keeps stale workspace snapshots from overwriting server-owned model pricing", () => {
+    const state = createServerState({ userId: "admin@company.local", role: "admin", creditBalance: 30 });
+    configureModelPricing(state, { modelId: "gpt-image-2-low", cost: 9, priceCents: 450, currency: "CNY" }, "admin@company.local");
+    const staleWorkspace = createInitialWorkspace({ userId: "alice@company.local", designerName: "Alice Designer", creditBalance: 30 });
+
+    saveWorkspaceSnapshot(state, staleWorkspace, "alice@company.local");
+
+    const models = callApi(state, "/api/models") as ModelDefinition[];
+    expect(models.find((model) => model.id === "gpt-image-2-low")).toMatchObject({
+      cost: 9,
+      priceCents: 450,
+      currency: "CNY"
+    });
+  });
+
   it("lets admins cap designer credits and rejects adjustments above the limit", () => {
     const state = createServerState({ creditBalance: 30 });
 

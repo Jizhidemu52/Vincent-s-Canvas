@@ -680,7 +680,6 @@ export function saveWorkspaceSnapshot(state: ServerState, snapshot: Partial<Work
     prompts: Array.isArray(snapshot.prompts) ? snapshot.prompts : current.prompts
   };
   saveAccountWorkspace(state, account, userId);
-  state.models = Array.isArray(snapshot.modelRegistry) && snapshot.modelRegistry.length ? snapshot.modelRegistry : state.models;
   return getWorkspaceSnapshot(state, userId);
 }
 

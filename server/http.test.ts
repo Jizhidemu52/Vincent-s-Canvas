@@ -496,7 +496,7 @@ describe("HTTP API server", () => {
     expect(await unauthorizedResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
   });
 
-  it("persists failed provider jobs across server restarts without charging credits", async () => {
+  it("ignores workspace model registry changes across server restarts because models are server-owned", async () => {
     await new Promise<void>((resolve, reject) => {
       context.server.close((error) => (error ? reject(error) : resolve()));
     });
@@ -518,7 +518,7 @@ describe("HTTP API server", () => {
         headers: { "content-type": "application/json", "x-user-id": "alice@company.local" },
         body: JSON.stringify({ ...workspace, modelRegistry: [...workspace.modelRegistry, brokenModel] })
       });
-      const failed = await fetch(`${first.baseUrl}/api/generations`, {
+      const rejected = await fetch(`${first.baseUrl}/api/generations`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-request-id": "failed-provider-http", "x-user-id": "alice@company.local" },
         body: JSON.stringify(request({ modelId: "broken-provider-model", outputCount: 1 }))
@@ -531,24 +531,16 @@ describe("HTTP API server", () => {
       const profile = (await (await fetch(`${second.baseUrl}/api/profile`, { headers: { "x-user-id": "alice@company.local" } })).json()) as Profile;
       const history = (await (await fetch(`${second.baseUrl}/api/history`, { headers: { "x-user-id": "alice@company.local" } })).json()) as unknown[];
       const jobs = (await (await fetch(`${second.baseUrl}/api/admin/jobs`, { headers: { "x-user-id": "admin@company.local" } })).json()) as Array<Record<string, unknown>>;
+      const models = (await (await fetch(`${second.baseUrl}/api/models`)).json()) as Array<Record<string, unknown>>;
       await new Promise<void>((resolve, reject) => {
         second.server.close((error) => (error ? reject(error) : resolve()));
       });
 
-      expect(failed.status).toBe(400);
+      expect(rejected.status).toBe(404);
       expect(profile.creditBalance).toBe(120);
       expect(history).toHaveLength(0);
-      expect(jobs).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            userId: "alice@company.local",
-            modelId: "broken-provider-model",
-            status: "failed",
-            creditCost: 0,
-            errorMessage: "Provider adapter not configured for retired-provider"
-          })
-        ])
-      );
+      expect(jobs.some((job) => job.modelId === "broken-provider-model")).toBe(false);
+      expect(models.some((model) => model.id === "broken-provider-model")).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
       context = await startTestServer();
