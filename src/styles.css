@@ -1178,6 +1178,18 @@ button {
   white-space: nowrap;
 }
 
+.node-task-trace {
+  display: block;
+  max-width: 100%;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #6f7885;
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .node-label {
   display: block;
   margin-bottom: 5px;

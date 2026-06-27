@@ -718,6 +718,7 @@ export function runGeneration(workspace: Workspace, projectId: string, nodeId: s
   const source = findNode(project, nodeId);
   if (!source.generation.prompt.trim()) throw new Error("Prompt is required");
   const cost = source.generation.outputCount;
+  const historyId = createId("history");
   const charged = spendCredits(workspace, cost);
 
   const generatedNodes = Array.from({ length: source.generation.outputCount }, (_, index) => {
@@ -734,7 +735,13 @@ export function runGeneration(workspace: Workspace, projectId: string, nodeId: s
       generation: source.generation,
       parentId: source.id,
       references: source.type === "imageGroup" ? source.references : source.references.length ? source.references : [source.id],
-      metadata: { prompt: source.generation.prompt, modelId: source.generation.modelId }
+      metadata: {
+        historyId,
+        operation: "generate",
+        creditCost: cost,
+        prompt: source.generation.prompt,
+        modelId: source.generation.modelId
+      }
     });
   });
 
@@ -750,7 +757,7 @@ export function runGeneration(workspace: Workspace, projectId: string, nodeId: s
     ...updated,
     history: [
       {
-        id: createId("history"),
+        id: historyId,
         projectId,
         nodeId,
         prompt: source.generation.prompt,
@@ -1203,6 +1210,9 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
 
 function executeModule(workspace: Workspace, projectId: string, moduleNode: CanvasNode): Workspace {
   if (!moduleNode.generation.prompt.trim()) throw new Error("Prompt is required");
+  const historyId = createId("history");
+  const operation = operationForModuleNode(moduleNode);
+  const creditCost = moduleNode.generation.outputCount;
   const charged = spendCredits(workspace, moduleNode.generation.outputCount);
   const updated = updateProject(charged, projectId, (project) => {
     const generatedNode = createNode({
@@ -1217,7 +1227,14 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
       width: 420,
       height: 420,
       generation: moduleNode.generation,
-      metadata: { moduleType: moduleNode.moduleType }
+      metadata: {
+        historyId,
+        moduleType: moduleNode.moduleType,
+        operation,
+        creditCost,
+        prompt: moduleNode.generation.prompt,
+        modelId: moduleNode.generation.modelId
+      }
     });
     return withUndo(project, {
       nodes: [...project.nodes, generatedNode],
@@ -1229,14 +1246,14 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
     ...updated,
     history: [
       {
-        id: createId("history"),
+        id: historyId,
         projectId,
         nodeId: moduleNode.id,
         prompt: moduleNode.generation.prompt,
         modelId: moduleNode.generation.modelId,
         outputCount: moduleNode.generation.outputCount,
-        creditCost: moduleNode.generation.outputCount,
-        operation: moduleNode.operation,
+        creditCost,
+        operation,
         moduleType: moduleNode.moduleType,
         referenceCount: moduleNode.references.length,
         createdAt: now()

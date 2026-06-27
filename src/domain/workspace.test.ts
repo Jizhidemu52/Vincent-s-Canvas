@@ -189,6 +189,13 @@ describe("designer canvas workspace behavior", () => {
     expect(generated.projects[0].nodes).toHaveLength(3);
     expect(generated.projects[0].nodes.slice(1).every((item) => item.kind === "generated")).toBe(true);
     expect(generated.projects[0].nodes[1].x).toBeGreaterThan(node.x);
+    expect(generated.projects[0].nodes[1].metadata).toMatchObject({
+      historyId: generated.history[0].id,
+      creditCost: 2,
+      operation: "generate",
+      prompt: "make the sleeve satin with soft highlights",
+      modelId: "nano-banana"
+    });
     expect(generated.history[0]).toMatchObject({
       projectId: project.id,
       prompt: "make the sleeve satin with soft highlights",
@@ -348,6 +355,17 @@ describe("designer canvas workspace behavior", () => {
     );
     expect(executed.projects[0].nodes.filter((node) => node.kind === "generated")).toHaveLength(2);
     expect(executed.history.map((entry) => entry.moduleType)).toEqual(["upscale", "edit"]);
+    const generatedOutputs = executed.projects[0].nodes.filter((node) => node.kind === "generated");
+    for (const output of generatedOutputs) {
+      const history = executed.history.find((entry) => entry.nodeId === output.parentId);
+      expect(history).toBeDefined();
+      expect(output.metadata).toMatchObject({
+        historyId: history!.id,
+        creditCost: history!.creditCost,
+        moduleType: history!.moduleType,
+        operation: history!.operation
+      });
+    }
     expect(executed.profile.credits).toBe(4);
   });
 

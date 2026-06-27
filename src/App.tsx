@@ -2124,6 +2124,11 @@ function CanvasNodeView({
     node.kind === "edit";
   const isText = node.type === "text";
   const isModule = !isImageLike && !isText;
+  const nodeHistoryId = typeof node.metadata.historyId === "string" ? node.metadata.historyId : "";
+  const nodeCreditCost = typeof node.metadata.creditCost === "number" ? node.metadata.creditCost : undefined;
+  const nodeTaskLabel = nodeHistoryId
+    ? `${nodeHistoryId}${nodeCreditCost !== undefined ? ` · ${nodeCreditCost} credits` : ""}`
+    : "";
   const [inlineEditorOpen, setInlineEditorOpen] = useState(false);
 
   function startPointer(event: PointerEvent<HTMLDivElement>, mode: DragMode = "move") {
@@ -2190,6 +2195,7 @@ function CanvasNodeView({
         <>
           <img src={node.source} alt={node.name} style={{ width: node.width, height: node.height }} />
           <strong className="stage-node-name">{node.name}</strong>
+          {nodeTaskLabel && <small className="node-task-trace">{nodeTaskLabel}</small>}
           {node.status === "error" && <small className="node-error-message">{node.errorMessage}</small>}
           <div className="thumb-strip">
             <span>ORIGINAL</span>
@@ -2216,6 +2222,7 @@ function CanvasNodeView({
           <Network size={20} />
           <strong>{node.metadata.targetFrame ? node.name : node.moduleType ?? node.type}</strong>
           <small>{node.generation.modelId}</small>
+          {nodeTaskLabel && <small className="node-task-trace">{nodeTaskLabel}</small>}
           <span>{node.references.length} refs</span>
           {node.status === "error" && <em>{node.errorMessage}</em>}
         </div>
