@@ -43,7 +43,7 @@ describe("provider adapters", () => {
 
     expect(health[0]).toMatchObject({
       provider: "openai",
-      status: "healthy",
+      status: "degraded",
       modelCount: 1,
       keyLocation: "server",
       mode: "mock",
@@ -64,6 +64,7 @@ describe("provider adapters", () => {
 
     expect(health).toMatchObject({
       provider: "openai",
+      status: "healthy",
       mode: "live-ready",
       secretConfigured: true,
       keyLocation: "server"

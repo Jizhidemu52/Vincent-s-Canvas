@@ -1398,7 +1398,7 @@ function AdminView({
             {providerHealth.map((provider) => (
               <div className="admin-row" key={provider.provider}>
                 <span>{provider.provider}</span>
-                <strong>{provider.mode}</strong>
+                <strong>{provider.status} / {provider.mode}</strong>
                 <small>
                   {provider.modelCount} models · {provider.adapterId} ·{" "}
                   {provider.secretConfigured ? `configured: ${provider.configuredSecrets.join(", ") || "server internal"}` : `missing: ${provider.missingSecrets.join(" or ")}`}

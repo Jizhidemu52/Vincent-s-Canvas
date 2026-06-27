@@ -138,7 +138,7 @@ describe("backend hosted mock API", () => {
     expect(usage.modelUsage.some((item) => item.modelId === "gpt-image-2-low")).toBe(true);
     expect(audit).toHaveLength(2);
     expect(providers.every((provider) => provider.keyLocation === "server")).toBe(true);
-    expect(providers.some((provider) => provider.provider === "openai" && provider.status === "healthy")).toBe(true);
+    expect(providers.some((provider) => provider.provider === "openai" && provider.status === "degraded")).toBe(true);
     expect(providers.some((provider) => provider.provider === "openai" && provider.adapterId === "openai-image-adapter")).toBe(true);
     expect(providers.some((provider) => provider.provider === "openai" && provider.missingSecrets.includes("OPENAI_API_KEY"))).toBe(true);
     expect(JSON.stringify(providers)).not.toContain("sk-");

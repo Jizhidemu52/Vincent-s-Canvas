@@ -169,7 +169,7 @@ beforeEach(() => {
   backendProviderHealth = [
     {
       provider: "openai",
-      status: "healthy",
+      status: "degraded",
       modelCount: 1,
       keyLocation: "server",
       mode: "mock",
@@ -879,6 +879,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Model providers")).toBeInTheDocument();
     expect(await screen.findByText(/openai-image-adapter/i)).toBeInTheDocument();
     expect(screen.getByText(/missing: OPENAI_API_KEY/i)).toBeInTheDocument();
+    expect(screen.getByText(/degraded/i)).toBeInTheDocument();
     expect(screen.getByText("Access policy")).toBeInTheDocument();
     expect(screen.getByText("Server only")).toBeInTheDocument();
     expect(screen.getByText("Provider configuration")).toBeInTheDocument();

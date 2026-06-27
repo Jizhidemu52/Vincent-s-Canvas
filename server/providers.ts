@@ -138,9 +138,10 @@ export function getProviderHealth(models: ModelDefinition[], settings: ProviderR
     const missing = missingSecrets(provider, providerSettings);
     const secretConfigured = missing.length === 0 || Boolean(providerSettings?.secretConfigured);
     const mode = providerSettings?.mode === "mock" ? "mock" : secretConfigured ? "live-ready" : "mock";
+    const status = missing.length ? "degraded" : "healthy";
     return {
       provider,
-      status: "healthy",
+      status,
       modelCount,
       keyLocation: "server",
       mode,
