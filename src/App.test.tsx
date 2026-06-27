@@ -579,14 +579,25 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("listbox", { name: "Model options" })).toBeInTheDocument();
     expect(screen.getByText("Trending models")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Nano Banana 2.*11 credits.*generate.*edit/i })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Creative Upscale/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Remove Background/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: /Nano Banana 2.*11 credits/i }));
     expect(screen.getByRole("button", { name: /Model Nano Banana 2/i })).toBeInTheDocument();
 
     await user.dblClick(screen.getByText("fashion-reference.jpg"));
     await user.click(screen.getByRole("button", { name: /Inline model Nano Banana 2/i }));
     expect(screen.getByRole("listbox", { name: "Inline model options" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Creative Upscale/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: /Flux Pro.*6 credits/i }));
     expect(screen.getByRole("button", { name: /Inline model Flux Pro/i })).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from fashion-reference.jpg"));
+    fireEvent.pointerUp(window);
+    await user.click(screen.getByRole("button", { name: /Upscale clean high-res output/i }));
+    await user.click(screen.getByRole("button", { name: /Model Creative Upscale/i }));
+    expect(screen.getByRole("listbox", { name: "Model options" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Creative Upscale.*4 credits.*upscale/i })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /GPT Image 2 Medium/i })).not.toBeInTheDocument();
   });
 
   it("lets designers drag and resize image nodes on the infinite canvas", async () => {

@@ -2010,17 +2010,20 @@ function ModelPicker({
   models,
   value,
   onChange,
+  operation,
   compact = false
 }: {
   label: string;
   models: ModelDefinition[];
   value: string;
   onChange: (modelId: string) => void;
+  operation?: OperationType;
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const selected = models.find((model) => model.id === value) ?? models[0];
-  const groups = Array.from(new Set(models.map((model) => model.group)));
+  const visibleModels = operation ? models.filter((model) => model.capability.includes(operation as ModuleType)) : models;
+  const selected = visibleModels.find((model) => model.id === value) ?? models.find((model) => model.id === value) ?? visibleModels[0] ?? models[0];
+  const groups = Array.from(new Set(visibleModels.map((model) => model.group)));
   return (
     <div className={`model-picker ${compact ? "compact" : ""}`} onPointerDown={(event) => event.stopPropagation()}>
       <button
@@ -2043,7 +2046,7 @@ function ModelPicker({
           {groups.map((group) => (
             <section key={group} aria-label={group}>
               <small className="model-menu-group">{group}</small>
-              {models.filter((model) => model.group === group).map((model) => (
+              {visibleModels.filter((model) => model.group === group).map((model) => (
                 <button
                   type="button"
                   key={model.id}
@@ -2106,6 +2109,7 @@ function PromptCard({
           label="Model"
           models={workspace.modelRegistry}
           value={selectedNode?.generation.modelId ?? "gpt-image-2-medium"}
+          operation={selectedNode ? operationForNode(selectedNode) : "generate"}
           onChange={(modelId) => onUpdateConfig({ modelId })}
         />
       </div>
@@ -2593,6 +2597,7 @@ function InlineNodeEditor({
         label="Inline model"
         models={models}
         value={node.generation.modelId}
+        operation={operationForNode(node)}
         onChange={(modelId) => onUpdate({ modelId })}
         compact
       />
