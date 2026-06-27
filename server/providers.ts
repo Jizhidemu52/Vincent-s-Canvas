@@ -8,6 +8,7 @@ export interface ProviderHealth {
   modelCount: number;
   keyLocation: "server";
   mode: "mock" | "live-ready";
+  endpointUrl?: string;
   secretConfigured: boolean;
   adapterId: string;
   requiredSecrets: string[];
@@ -15,6 +16,16 @@ export interface ProviderHealth {
   missingSecrets: string[];
   supportedOperations: OperationType[];
 }
+
+export interface ProviderRuntimeSettings {
+  mode?: ProviderHealth["mode"];
+  endpointUrl?: string;
+  configuredSecrets?: string[];
+  secretConfigured?: boolean;
+  updatedAt?: string;
+}
+
+export type ProviderRuntimeSettingsMap = Partial<Record<ProviderName, ProviderRuntimeSettings>>;
 
 export interface ProviderAdapter {
   provider: ProviderName;
@@ -55,13 +66,16 @@ const providerConfigs: Record<ProviderName, ProviderConfig> = {
   }
 };
 
-function configuredSecrets(provider: ProviderName) {
-  return providerConfigs[provider].requiredSecrets.filter((name) => Boolean(process.env[name]?.trim()));
+export const providerNames = Object.keys(providerConfigs) as ProviderName[];
+
+function configuredSecrets(provider: ProviderName, settings?: ProviderRuntimeSettings) {
+  const envSecrets = providerConfigs[provider].requiredSecrets.filter((name) => Boolean(process.env[name]?.trim()));
+  return Array.from(new Set([...(settings?.configuredSecrets ?? []), ...envSecrets]));
 }
 
-function missingSecrets(provider: ProviderName) {
+function missingSecrets(provider: ProviderName, settings?: ProviderRuntimeSettings) {
   const config = providerConfigs[provider];
-  if (config.requiredSecrets.length === 0 || configuredSecrets(provider).length > 0) return [];
+  if (config.requiredSecrets.length === 0 || configuredSecrets(provider, settings).length > 0 || settings?.secretConfigured) return [];
   return config.requiredSecrets;
 }
 
@@ -107,22 +121,30 @@ export function runProviderModel(request: GenerationRequest, model: ModelDefinit
   return adapter.execute(request, model, historyId, creditCost);
 }
 
-export function getProviderHealth(models: ModelDefinition[]): ProviderHealth[] {
+export function getProviderHealth(models: ModelDefinition[], settings: ProviderRuntimeSettingsMap = {}): ProviderHealth[] {
   const counts = new Map<ProviderName, number>();
   for (const model of models) {
     counts.set(model.provider, (counts.get(model.provider) ?? 0) + 1);
   }
+  for (const provider of Object.keys(settings) as ProviderName[]) {
+    if (providerNames.includes(provider) && !counts.has(provider)) {
+      counts.set(provider, 0);
+    }
+  }
   return Array.from(counts.entries()).map(([provider, modelCount]) => {
     const config = providerConfigs[provider];
-    const configured = configuredSecrets(provider);
-    const missing = missingSecrets(provider);
-    const secretConfigured = missing.length === 0;
+    const providerSettings = settings[provider];
+    const configured = configuredSecrets(provider, providerSettings);
+    const missing = missingSecrets(provider, providerSettings);
+    const secretConfigured = missing.length === 0 || Boolean(providerSettings?.secretConfigured);
+    const mode = providerSettings?.mode === "mock" ? "mock" : secretConfigured ? "live-ready" : "mock";
     return {
       provider,
       status: "healthy",
       modelCount,
       keyLocation: "server",
-      mode: secretConfigured ? "live-ready" : "mock",
+      mode,
+      endpointUrl: providerSettings?.endpointUrl,
       secretConfigured,
       adapterId: config.adapterId,
       requiredSecrets: config.requiredSecrets,

@@ -84,6 +84,7 @@ import {
 import {
   adjustDesignerCredits,
   configureAdminModelPricing,
+  configureAdminProviderSettings,
   fetchAdminAccounts,
   fetchAdminAudit,
   fetchAdminUsage,
@@ -95,7 +96,8 @@ import {
   submitGenerationRequest,
   type AdminAccountSummary,
   type AdminUsageSummary,
-  type ProviderHealth
+  type ProviderHealth,
+  type ProviderSettingsRequest
 } from "./services/modelApi";
 
 const TEST_IMAGE = "/fixtures/fashion-reference.jpg";
@@ -697,6 +699,12 @@ export default function App() {
     return updatedModel;
   }
 
+  async function updateProviderSettings(request: ProviderSettingsRequest) {
+    const provider = await configureAdminProviderSettings(request, activeUserId);
+    setApiNotice(`Provider ${provider.provider} updated to ${provider.mode}`);
+    return provider;
+  }
+
   if (view === "canvas" && activeProject) {
     return (
       <CanvasView
@@ -744,6 +752,7 @@ export default function App() {
         onAdjustCredits={adjustCredits}
         onSetCreditLimit={setCreditLimit}
         onUpdateModelPricing={updateModelPricing}
+        onConfigureProvider={updateProviderSettings}
       />
     );
   }
@@ -1045,7 +1054,8 @@ function AdminView({
   onBack,
   onAdjustCredits,
   onSetCreditLimit,
-  onUpdateModelPricing
+  onUpdateModelPricing,
+  onConfigureProvider
 }: {
   workspace: Workspace;
   activeUserId?: string;
@@ -1054,6 +1064,7 @@ function AdminView({
   onAdjustCredits: (targetUserId: string, delta: number, reason: string) => Promise<Profile>;
   onSetCreditLimit: (targetUserId: string, creditLimit: number, reason: string) => Promise<Profile>;
   onUpdateModelPricing: (modelId: string, cost: number, priceCents: number, currency: ModelDefinition["currency"]) => Promise<ModelDefinition>;
+  onConfigureProvider: (request: ProviderSettingsRequest) => Promise<ProviderHealth>;
 }) {
   const totalNodes = workspace.projects.reduce((sum, project) => sum + project.nodes.length, 0);
   const totalConnections = workspace.projects.reduce((sum, project) => sum + project.connections.length, 0);
@@ -1068,6 +1079,11 @@ function AdminView({
   const [modelCost, setModelCost] = useState(String(selectedPricingModel?.cost ?? 1));
   const [modelPriceCents, setModelPriceCents] = useState(String(selectedPricingModel?.priceCents ?? 0));
   const [modelCurrency, setModelCurrency] = useState<ModelDefinition["currency"]>(selectedPricingModel?.currency ?? "CNY");
+  const [providerId, setProviderId] = useState<ModelDefinition["provider"]>(workspace.modelRegistry[0]?.provider ?? "openai");
+  const [providerMode, setProviderMode] = useState<ProviderHealth["mode"]>("mock");
+  const [providerEndpointUrl, setProviderEndpointUrl] = useState("");
+  const [providerSecretName, setProviderSecretName] = useState("OPENAI_API_KEY");
+  const [providerSecretValue, setProviderSecretValue] = useState("");
   const [creditNotice, setCreditNotice] = useState(notice);
   const [isAdjusting, setIsAdjusting] = useState(false);
   const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
@@ -1078,6 +1094,7 @@ function AdminView({
     memo[model.provider] = (memo[model.provider] ?? 0) + 1;
     return memo;
   }, {});
+  const configurableProviders = Array.from(new Set(["openai", "nanobanana", "runninghub", "comfyui", "internal", ...workspace.modelRegistry.map((model) => model.provider)])) as ModelDefinition["provider"][];
   const visibleAdminAudit = adminAudit.length ? adminAudit : workspace.history;
 
   useEffect(() => {
@@ -1187,6 +1204,30 @@ function AdminView({
     }
   }
 
+  async function submitProviderSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsAdjusting(true);
+    try {
+      const provider = await onConfigureProvider({
+        provider: providerId,
+        mode: providerMode,
+        endpointUrl: providerEndpointUrl || undefined,
+        secretName: providerSecretName || undefined,
+        secretValue: providerSecretValue || undefined
+      });
+      setProviderHealth((current) => {
+        const exists = current.some((item) => item.provider === provider.provider);
+        return exists ? current.map((item) => (item.provider === provider.provider ? provider : item)) : [...current, provider];
+      });
+      setProviderSecretValue("");
+      setCreditNotice(`${provider.provider} provider set to ${provider.mode}`);
+    } catch (error) {
+      setCreditNotice(error instanceof Error ? error.message : "Provider update failed");
+    } finally {
+      setIsAdjusting(false);
+    }
+  }
+
   return (
     <main className="admin-shell">
       <SideNav workspace={workspace} active="Profile" onAdmin={onBack} />
@@ -1251,6 +1292,65 @@ function AdminView({
                 <small>healthy · backend hosted</small>
               </div>
             ))}
+          </article>
+          <article className="admin-card">
+            <h2>Provider configuration</h2>
+            <form className="admin-credit-form" onSubmit={submitProviderSettings}>
+              <label>
+                <span>Provider</span>
+                <select
+                  aria-label="Provider to configure"
+                  value={providerId}
+                  onChange={(event) => {
+                    const nextProvider = event.target.value as ModelDefinition["provider"];
+                    const health = providerHealth.find((item) => item.provider === nextProvider);
+                    setProviderId(nextProvider);
+                    setProviderMode(health?.mode ?? "mock");
+                    setProviderEndpointUrl(health?.endpointUrl ?? "");
+                    setProviderSecretName(health?.requiredSecrets[0] ?? "");
+                  }}
+                >
+                  {configurableProviders.map((provider) => (
+                    <option key={provider} value={provider}>
+                      {provider}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Mode</span>
+                <select aria-label="Provider mode" value={providerMode} onChange={(event) => setProviderMode(event.target.value as ProviderHealth["mode"])}>
+                  <option value="mock">Mock</option>
+                  <option value="live-ready">Live ready</option>
+                </select>
+              </label>
+              <label>
+                <span>Endpoint URL</span>
+                <input
+                  aria-label="Provider endpoint URL"
+                  value={providerEndpointUrl}
+                  onChange={(event) => setProviderEndpointUrl(event.target.value)}
+                  placeholder="https://api.provider.com/v1/images"
+                />
+              </label>
+              <label>
+                <span>Secret name</span>
+                <input aria-label="Provider secret name" value={providerSecretName} onChange={(event) => setProviderSecretName(event.target.value)} />
+              </label>
+              <label>
+                <span>Secret value</span>
+                <input
+                  aria-label="Provider secret value"
+                  type="password"
+                  value={providerSecretValue}
+                  onChange={(event) => setProviderSecretValue(event.target.value)}
+                  placeholder="Stored only on backend"
+                />
+              </label>
+              <button type="submit" className="generate-button" disabled={isAdjusting}>
+                Update provider
+              </button>
+            </form>
           </article>
           <article className="admin-card">
             <h2>Model usage</h2>

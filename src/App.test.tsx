@@ -33,6 +33,7 @@ let backendAccounts: Array<{
   assetCount: number;
   lastActivityAt?: string;
 }> = [];
+let backendProviderHealth: Array<Record<string, unknown>> = [];
 
 function jsonResponse(payload: unknown, status = 200) {
   return Promise.resolve(
@@ -121,6 +122,34 @@ beforeEach(() => {
       historyCount: 5,
       assetCount: 7,
       lastActivityAt: "2026-06-28T02:00:00.000Z"
+    }
+  ];
+  backendProviderHealth = [
+    {
+      provider: "openai",
+      status: "healthy",
+      modelCount: 1,
+      keyLocation: "server",
+      mode: "mock",
+      secretConfigured: false,
+      adapterId: "openai-image-adapter",
+      requiredSecrets: ["OPENAI_API_KEY"],
+      configuredSecrets: [],
+      missingSecrets: ["OPENAI_API_KEY"],
+      supportedOperations: ["generate", "edit"]
+    },
+    {
+      provider: "internal",
+      status: "healthy",
+      modelCount: 2,
+      keyLocation: "server",
+      mode: "live-ready",
+      secretConfigured: true,
+      adapterId: "internal-operations-adapter",
+      requiredSecrets: [],
+      configuredSecrets: [],
+      missingSecrets: [],
+      supportedOperations: ["upscale", "removeBackground"]
     }
   ];
   vi.stubGlobal(
@@ -217,6 +246,38 @@ beforeEach(() => {
         } as Workspace;
         return jsonResponse(updated);
       }
+      if (url.endsWith("/api/admin/provider-settings")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        const request = JSON.parse(String(init?.body)) as {
+          provider: string;
+          mode: "mock" | "live-ready";
+          endpointUrl?: string;
+          secretName?: string;
+          secretValue?: string;
+        };
+        const configured = {
+          provider: request.provider,
+          status: "healthy",
+          modelCount: backendProviderHealth.find((provider) => provider.provider === request.provider)?.modelCount ?? 0,
+          keyLocation: "server",
+          mode: request.mode,
+          endpointUrl: request.endpointUrl,
+          secretConfigured: Boolean(request.secretValue),
+          adapterId: `${request.provider}-adapter`,
+          requiredSecrets: request.secretName ? [request.secretName] : [],
+          configuredSecrets: request.secretName && request.secretValue ? [request.secretName] : [],
+          missingSecrets: request.secretName && request.secretValue ? [] : request.secretName ? [request.secretName] : [],
+          supportedOperations: ["generate", "edit"]
+        };
+        backendProviderHealth = backendProviderHealth.some((provider) => provider.provider === request.provider)
+          ? backendProviderHealth.map((provider) => (provider.provider === request.provider ? configured : provider))
+          : [...backendProviderHealth, configured];
+        return jsonResponse(configured);
+      }
       if (url.endsWith("/api/admin/accounts")) {
         const headers = init?.headers as Record<string, string> | undefined;
         const adminUserId = headers?.["x-user-id"] ?? "";
@@ -252,34 +313,7 @@ beforeEach(() => {
         ]);
       }
       if (url.endsWith("/api/admin/providers")) {
-        return jsonResponse([
-          {
-            provider: "openai",
-            status: "healthy",
-            modelCount: 1,
-            keyLocation: "server",
-            mode: "mock",
-            secretConfigured: false,
-            adapterId: "openai-image-adapter",
-            requiredSecrets: ["OPENAI_API_KEY"],
-            configuredSecrets: [],
-            missingSecrets: ["OPENAI_API_KEY"],
-            supportedOperations: ["generate", "edit"]
-          },
-          {
-            provider: "internal",
-            status: "healthy",
-            modelCount: 2,
-            keyLocation: "server",
-            mode: "live-ready",
-            secretConfigured: true,
-            adapterId: "internal-operations-adapter",
-            requiredSecrets: [],
-            configuredSecrets: [],
-            missingSecrets: [],
-            supportedOperations: ["upscale", "removeBackground"]
-          }
-        ]);
+        return jsonResponse(backendProviderHealth);
       }
       if (url.endsWith("/api/generations") || url.endsWith("/api/edits") || url.endsWith("/api/upscale") || url.endsWith("/api/remove-bg")) {
         const request = JSON.parse(String(init?.body)) as GenerationRequest;
@@ -644,6 +678,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText(/missing: OPENAI_API_KEY/i)).toBeInTheDocument();
     expect(screen.getByText("Access policy")).toBeInTheDocument();
     expect(screen.getByText("Server only")).toBeInTheDocument();
+    expect(screen.getByText("Provider configuration")).toBeInTheDocument();
     expect(screen.getByText("Credit management")).toBeInTheDocument();
     expect(await screen.findByText("Team accounts")).toBeInTheDocument();
     expect(screen.getByText("Model usage")).toBeInTheDocument();
@@ -683,6 +718,17 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "Update model pricing" }));
     expect(await screen.findByText("GPT Image 2 Medium now costs 9 credits per output")).toBeInTheDocument();
     expect(screen.getByLabelText("Configured model pricing")).toHaveTextContent("9 credits / 4.50 CNY");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Provider to configure" }), "openai");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Provider mode" }), "live-ready");
+    await user.type(screen.getByRole("textbox", { name: "Provider endpoint URL" }), "https://api.openai.example/v1/images");
+    await user.clear(screen.getByRole("textbox", { name: "Provider secret name" }));
+    await user.type(screen.getByRole("textbox", { name: "Provider secret name" }), "OPENAI_API_KEY");
+    await user.type(screen.getByLabelText("Provider secret value"), "sk-ui-secret");
+    await user.click(screen.getByRole("button", { name: "Update provider" }));
+    expect(await screen.findByText("openai provider set to live-ready")).toBeInTheDocument();
+    expect(screen.getByText(/configured: OPENAI_API_KEY/i)).toBeInTheDocument();
+    expect(screen.queryByText("sk-ui-secret")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Back to projects" }));
     await user.click(screen.getByRole("button", { name: "Profile" }));

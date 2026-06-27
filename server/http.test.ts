@@ -260,6 +260,49 @@ describe("HTTP API server", () => {
     expect(models.find((model) => model.id === "gpt-image-2-low")).toMatchObject({ cost: 5, priceCents: 250, currency: "CNY" });
   });
 
+  it("allows admins to configure provider settings over HTTP without leaking secrets", async () => {
+    const configuredResponse = await fetch(`${context.baseUrl}/api/admin/provider-settings`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({
+        provider: "openai",
+        mode: "live-ready",
+        endpointUrl: "https://api.openai.example/v1/images",
+        secretName: "OPENAI_API_KEY",
+        secretValue: "sk-http-secret"
+      })
+    });
+    const unauthorizedResponse = await fetch(`${context.baseUrl}/api/admin/provider-settings`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "designer@company.local" },
+      body: JSON.stringify({ provider: "runninghub", mode: "live-ready", secretName: "RUNNINGHUB_API_KEY", secretValue: "rh-secret" })
+    });
+    const providersResponse = await fetch(`${context.baseUrl}/api/admin/providers`, {
+      headers: { "x-user-id": "admin@company.local" }
+    });
+    const configured = (await configuredResponse.json()) as Record<string, unknown>;
+    const providers = (await providersResponse.json()) as Array<Record<string, unknown>>;
+
+    expect(configuredResponse.status).toBe(200);
+    expect(configured).toMatchObject({
+      provider: "openai",
+      mode: "live-ready",
+      secretConfigured: true,
+      endpointUrl: "https://api.openai.example/v1/images",
+      configuredSecrets: ["OPENAI_API_KEY"]
+    });
+    expect(providers.find((provider) => provider.provider === "openai")).toMatchObject({
+      mode: "live-ready",
+      secretConfigured: true,
+      configuredSecrets: ["OPENAI_API_KEY"],
+      missingSecrets: []
+    });
+    expect(JSON.stringify(configured)).not.toContain("sk-http-secret");
+    expect(JSON.stringify(providers)).not.toContain("sk-http-secret");
+    expect(unauthorizedResponse.status).toBe(400);
+    expect(await unauthorizedResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+  });
+
   it("lists designer accounts over HTTP for admins only", async () => {
     await fetch(`${context.baseUrl}/api/generations`, {
       method: "POST",

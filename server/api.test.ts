@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { adjustAccountCredits, callApi, configureModelPricing, listAdminAccounts, saveWorkspaceSnapshot, setAccountCreditLimit, createServerState, type ApiError } from "./api";
+import {
+  adjustAccountCredits,
+  callApi,
+  configureModelPricing,
+  configureProviderSettings,
+  listAdminAccounts,
+  saveWorkspaceSnapshot,
+  setAccountCreditLimit,
+  createServerState,
+  type ApiError
+} from "./api";
 import { createInitialWorkspace, createProject } from "../src/domain/workspace";
 import type { GenerationRequest, GenerationResult, ModelDefinition, Profile } from "../src/domain/workspace";
 import type { AdminAccountSummary, AdminUsageSummary, ProviderHealth } from "./api";
@@ -227,6 +237,45 @@ describe("backend hosted mock API", () => {
     expect(result.creditCost).toBe(10);
     expect(profile.creditBalance).toBe(20);
     expect(models.find((model) => model.id === "gpt-image-2-low")).toMatchObject({ cost: 5, priceCents: 250, currency: "CNY" });
+  });
+
+  it("lets admins configure provider runtime settings without exposing secrets", () => {
+    const state = createServerState({ userId: "admin@company.local", role: "admin", creditBalance: 30 });
+
+    const configured = configureProviderSettings(
+      state,
+      {
+        provider: "openai",
+        mode: "live-ready",
+        endpointUrl: "https://api.openai.example/v1/images",
+        secretName: "OPENAI_API_KEY",
+        secretValue: "sk-admin-secret"
+      },
+      "admin@company.local"
+    ) as ProviderHealth;
+    const health = callApi(state, "/api/admin/providers", undefined, undefined, "admin@company.local") as ProviderHealth[];
+    const unauthorized = configureProviderSettings(
+      state,
+      { provider: "runninghub", mode: "live-ready", secretName: "RUNNINGHUB_API_KEY", secretValue: "rh-secret" },
+      "designer@company.local"
+    ) as ApiError;
+
+    expect(configured).toMatchObject({
+      provider: "openai",
+      mode: "live-ready",
+      secretConfigured: true,
+      endpointUrl: "https://api.openai.example/v1/images",
+      configuredSecrets: ["OPENAI_API_KEY"]
+    });
+    expect(health.find((provider) => provider.provider === "openai")).toMatchObject({
+      mode: "live-ready",
+      secretConfigured: true,
+      configuredSecrets: ["OPENAI_API_KEY"],
+      missingSecrets: []
+    });
+    expect(unauthorized).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+    expect(JSON.stringify(configured)).not.toContain("sk-admin-secret");
+    expect(JSON.stringify(state.providerSettings)).not.toContain("sk-admin-secret");
   });
 
   it("rejects unauthorized or invalid credit adjustments without dirty side effects", () => {

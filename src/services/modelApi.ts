@@ -27,12 +27,21 @@ export interface ModelPricingRequest {
   currency?: ModelDefinition["currency"];
 }
 
+export interface ProviderSettingsRequest {
+  provider: ModelDefinition["provider"];
+  mode: "mock" | "live-ready";
+  endpointUrl?: string;
+  secretName?: string;
+  secretValue?: string;
+}
+
 export interface ProviderHealth {
   provider: ModelDefinition["provider"];
   status: "healthy" | "degraded";
   modelCount: number;
   keyLocation: "server";
   mode: "mock" | "live-ready";
+  endpointUrl?: string;
   secretConfigured: boolean;
   adapterId: string;
   requiredSecrets: string[];
@@ -156,6 +165,15 @@ export async function configureAdminModelPricing(request: ModelPricingRequest, a
     body: JSON.stringify(request)
   });
   return readJson<ModelDefinition>(response);
+}
+
+export async function configureAdminProviderSettings(request: ProviderSettingsRequest, adminUserId?: string): Promise<ProviderHealth> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/provider-settings`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...userHeaders(adminUserId) },
+    body: JSON.stringify(request)
+  });
+  return readJson<ProviderHealth>(response);
 }
 
 export async function fetchProviderHealth(adminUserId?: string): Promise<ProviderHealth[]> {

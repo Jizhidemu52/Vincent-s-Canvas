@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { createServerState, type AccountWorkspace, type ServerState } from "./api";
+import type { ProviderRuntimeSettingsMap } from "./providers";
 import type { HistoryEntry, LibraryAsset, ModelDefinition, Profile, Project, PromptPreset } from "../src/domain/workspace";
 
 interface PersistedServerState {
@@ -15,6 +16,7 @@ interface PersistedServerState {
   prompts: PromptPreset[];
   accounts?: Record<string, AccountWorkspace>;
   submittedRequestIds: string[];
+  providerSettings?: ProviderRuntimeSettingsMap;
 }
 
 function serializeServerState(state: ServerState): PersistedServerState {
@@ -28,7 +30,8 @@ function serializeServerState(state: ServerState): PersistedServerState {
     assets: state.assets,
     prompts: state.prompts,
     accounts: state.accounts,
-    submittedRequestIds: Array.from(state.submittedRequestIds)
+    submittedRequestIds: Array.from(state.submittedRequestIds),
+    providerSettings: state.providerSettings
   };
 }
 
@@ -43,7 +46,8 @@ function hydrateServerState(data: PersistedServerState): ServerState {
     assets: Array.isArray(data.assets) ? data.assets : [],
     prompts: Array.isArray(data.prompts) && data.prompts.length ? data.prompts : fallback.prompts,
     accounts: data.accounts ?? {},
-    submittedRequestIds: new Set(data.submittedRequestIds ?? [])
+    submittedRequestIds: new Set(data.submittedRequestIds ?? []),
+    providerSettings: data.providerSettings ?? {}
   };
 }
 

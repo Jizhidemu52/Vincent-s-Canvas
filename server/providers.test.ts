@@ -71,6 +71,27 @@ describe("provider adapters", () => {
     expect(JSON.stringify(health)).not.toContain("sk-test-secret");
   });
 
+  it("uses admin provider settings without exposing stored secret values", () => {
+    const [health] = getProviderHealth([openAiModel], {
+      openai: {
+        mode: "live-ready",
+        endpointUrl: "https://api.openai.example/v1/images",
+        configuredSecrets: ["OPENAI_API_KEY"],
+        secretConfigured: true
+      }
+    });
+
+    expect(health).toMatchObject({
+      provider: "openai",
+      mode: "live-ready",
+      secretConfigured: true,
+      endpointUrl: "https://api.openai.example/v1/images",
+      configuredSecrets: ["OPENAI_API_KEY"],
+      missingSecrets: []
+    });
+    expect(JSON.stringify(health)).not.toContain("sk-admin-secret");
+  });
+
   it("supports provider secret aliases without requiring every alias to be configured", () => {
     vi.stubEnv("NANO_BANANA_API_KEY", "nano-secret");
 

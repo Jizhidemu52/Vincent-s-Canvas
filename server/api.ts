@@ -10,7 +10,14 @@ import {
   type PromptPreset,
   type Workspace
 } from "../src/domain/workspace";
-import { getProviderHealth, runProviderModel, type ProviderHealth } from "./providers";
+import {
+  getProviderHealth,
+  providerNames,
+  runProviderModel,
+  type ProviderHealth,
+  type ProviderName,
+  type ProviderRuntimeSettingsMap
+} from "./providers";
 
 export interface ServerState {
   profile: Profile;
@@ -22,6 +29,7 @@ export interface ServerState {
   prompts: PromptPreset[];
   accounts: Record<string, AccountWorkspace>;
   submittedRequestIds: Set<string>;
+  providerSettings: ProviderRuntimeSettingsMap;
 }
 
 export type WorkspaceSnapshot = Pick<
@@ -53,6 +61,14 @@ export interface ModelPricingRequest {
   cost: number;
   priceCents?: number;
   currency?: ModelDefinition["currency"];
+}
+
+export interface ProviderSettingsRequest {
+  provider: ProviderName;
+  mode?: ProviderHealth["mode"];
+  endpointUrl?: string;
+  secretName?: string;
+  secretValue?: string;
 }
 
 export interface AdminUsageSummary {
@@ -88,7 +104,8 @@ export function createServerState(profile: Partial<Profile> = {}): ServerState {
     assets: [],
     prompts: workspace.prompts,
     accounts: {},
-    submittedRequestIds: new Set()
+    submittedRequestIds: new Set(),
+    providerSettings: {}
   };
 }
 
@@ -274,6 +291,61 @@ export function configureModelPricing(state: ServerState, request: Partial<Model
   }
 }
 
+export function configureProviderSettings(
+  state: ServerState,
+  request: Partial<ProviderSettingsRequest>,
+  adminUserId?: string
+): ProviderHealth | ApiError {
+  try {
+    if (!isAdminUser(state, adminUserId)) {
+      throw new Error("Admin role required");
+    }
+    const provider = request.provider;
+    if (!provider || !providerNames.includes(provider)) {
+      throw new Error("Provider is required");
+    }
+    const mode = request.mode ?? "mock";
+    if (mode !== "mock" && mode !== "live-ready") {
+      throw new Error("Provider mode must be mock or live-ready");
+    }
+    const endpointUrl = request.endpointUrl?.trim();
+    if (endpointUrl) {
+      try {
+        const parsed = new URL(endpointUrl);
+        if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+          throw new Error("Provider endpoint must be an http or https URL");
+        }
+      } catch {
+        throw new Error("Provider endpoint must be a valid URL");
+      }
+    }
+    const secretName = request.secretName?.trim();
+    const secretValue = request.secretValue?.trim();
+    if (secretValue && !secretName) {
+      throw new Error("Secret name is required when setting a provider secret");
+    }
+    const existing = state.providerSettings[provider] ?? {};
+    const configuredSecrets = secretValue && secretName ? Array.from(new Set([...(existing.configuredSecrets ?? []), secretName])) : existing.configuredSecrets ?? [];
+    state.providerSettings = {
+      ...state.providerSettings,
+      [provider]: {
+        ...existing,
+        mode,
+        endpointUrl: endpointUrl || undefined,
+        configuredSecrets,
+        secretConfigured: configuredSecrets.length > 0 || Boolean(existing.secretConfigured),
+        updatedAt: new Date().toISOString()
+      }
+    };
+    return getProviderHealth(state.models, state.providerSettings).find((item) => item.provider === provider)!;
+  } catch (error) {
+    return {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Unknown server error"
+    };
+  }
+}
+
 function summarizeAccount(account: AccountWorkspace): AdminAccountSummary {
   return {
     userId: account.profile.userId,
@@ -424,7 +496,7 @@ export const apiRoutes = {
   },
   "/api/admin/accounts": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
     listAdminAccounts(state, userId),
-  "/api/admin/providers": (state: ServerState): ProviderHealth[] => getProviderHealth(state.models),
+  "/api/admin/providers": (state: ServerState): ProviderHealth[] => getProviderHealth(state.models, state.providerSettings),
   "/api/generations": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
     runModel(state, { ...request, operation: "generate" }, requestId, userId),
   "/api/edits": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
