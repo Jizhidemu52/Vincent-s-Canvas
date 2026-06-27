@@ -30,6 +30,7 @@ export interface ServerState {
   accounts: Record<string, AccountWorkspace>;
   submittedRequestIds: Set<string>;
   providerSettings: ProviderRuntimeSettingsMap;
+  adminAudit: AdminAuditEntry[];
 }
 
 export type WorkspaceSnapshot = Pick<
@@ -71,6 +72,31 @@ export interface ProviderSettingsRequest {
   secretValue?: string;
 }
 
+export interface AdminAuditEntry {
+  id: string;
+  eventType: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "provider-settings";
+  actorUserId?: string;
+  userId?: string;
+  targetUserId?: string;
+  designerName?: string;
+  projectId?: string;
+  projectName?: string;
+  nodeId?: string;
+  modelId?: string;
+  provider?: ProviderName;
+  prompt?: string;
+  operation?: string;
+  outputCount?: number;
+  creditCost?: number;
+  creditDelta?: number;
+  creditBalance?: number;
+  creditLimit?: number;
+  referenceCount?: number;
+  summary: string;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface AdminUsageSummary {
   totalCreditsUsed: number;
   totalHistoryEntries: number;
@@ -105,7 +131,8 @@ export function createServerState(profile: Partial<Profile> = {}): ServerState {
     prompts: workspace.prompts,
     accounts: {},
     submittedRequestIds: new Set(),
-    providerSettings: {}
+    providerSettings: {},
+    adminAudit: []
   };
 }
 
@@ -180,6 +207,54 @@ function allHistory(state: ServerState) {
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+function auditId(state: ServerState, eventType: AdminAuditEntry["eventType"]) {
+  return `audit-${eventType}-${Date.now()}-${state.adminAudit.length + 1}`;
+}
+
+function recordAdminAudit(
+  state: ServerState,
+  entry: Omit<AdminAuditEntry, "id" | "createdAt"> & { id?: string; createdAt?: string }
+) {
+  state.adminAudit = [
+    {
+      ...entry,
+      id: entry.id ?? auditId(state, entry.eventType),
+      createdAt: entry.createdAt ?? new Date().toISOString()
+    },
+    ...state.adminAudit
+  ];
+}
+
+function adminAuditFromHistory(entry: HistoryEntry): AdminAuditEntry {
+  const actor = entry.designerName ?? entry.userId ?? "Designer";
+  return {
+    id: entry.id,
+    eventType: "generation",
+    actorUserId: entry.userId,
+    userId: entry.userId,
+    targetUserId: entry.userId,
+    designerName: entry.designerName,
+    projectId: entry.projectId,
+    projectName: entry.projectName,
+    nodeId: entry.nodeId,
+    modelId: entry.modelId,
+    prompt: entry.prompt,
+    operation: entry.operation,
+    outputCount: entry.outputCount,
+    creditCost: entry.creditCost,
+    referenceCount: entry.referenceCount,
+    summary: `${actor} generated ${entry.outputCount} output${entry.outputCount === 1 ? "" : "s"} with ${entry.modelId}`,
+    createdAt: entry.createdAt,
+    metadata: { operation: entry.operation, outputs: entry.outputs }
+  };
+}
+
+function allAdminAudit(state: ServerState) {
+  return [...state.adminAudit, ...allHistory(state).map(adminAuditFromHistory)].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt)
+  );
+}
+
 function totalCreditsUsed(state: ServerState) {
   return state.profile.creditUsed + Object.values(state.accounts).reduce((sum, account) => sum + account.profile.creditUsed, 0);
 }
@@ -216,6 +291,15 @@ export function adjustAccountCredits(state: ServerState, request: Partial<Credit
       credits: nextBalance
     };
     saveAccountWorkspace(state, account, targetUserId);
+    recordAdminAudit(state, {
+      eventType: "credit-adjustment",
+      actorUserId: normalizeUserId(adminUserId),
+      targetUserId,
+      creditDelta: delta,
+      creditBalance: nextBalance,
+      summary: `Adjusted ${targetUserId} by ${delta} credits${request.reason ? `: ${request.reason}` : ""}`,
+      metadata: { reason: request.reason }
+    });
     return account.profile;
   } catch (error) {
     return {
@@ -246,6 +330,15 @@ export function setAccountCreditLimit(state: ServerState, request: Partial<Credi
       credits: Math.min(account.profile.creditBalance, creditLimit)
     };
     saveAccountWorkspace(state, account, targetUserId);
+    recordAdminAudit(state, {
+      eventType: "credit-limit",
+      actorUserId: normalizeUserId(adminUserId),
+      targetUserId,
+      creditLimit,
+      creditBalance: account.profile.creditBalance,
+      summary: `Set ${targetUserId} credit limit to ${creditLimit}${request.reason ? `: ${request.reason}` : ""}`,
+      metadata: { reason: request.reason }
+    });
     return account.profile;
   } catch (error) {
     return {
@@ -282,6 +375,14 @@ export function configureModelPricing(state: ServerState, request: Partial<Model
     }
     const updated = { ...model, cost, priceCents, currency };
     state.models = state.models.map((item) => (item.id === modelId ? updated : item));
+    recordAdminAudit(state, {
+      eventType: "model-pricing",
+      actorUserId: normalizeUserId(adminUserId),
+      modelId,
+      creditCost: cost,
+      summary: `Set ${modelId} pricing to ${cost} credits${priceCents !== undefined ? ` / ${priceCents} ${currency}` : ""}`,
+      metadata: { priceCents, currency }
+    });
     return updated;
   } catch (error) {
     return {
@@ -337,7 +438,20 @@ export function configureProviderSettings(
         updatedAt: new Date().toISOString()
       }
     };
-    return getProviderHealth(state.models, state.providerSettings).find((item) => item.provider === provider)!;
+    const health = getProviderHealth(state.models, state.providerSettings).find((item) => item.provider === provider)!;
+    recordAdminAudit(state, {
+      eventType: "provider-settings",
+      actorUserId: normalizeUserId(adminUserId),
+      provider,
+      summary: `${provider} provider set to ${health.mode}; configured ${health.configuredSecrets.join(", ") || "no secret"}`,
+      metadata: {
+        mode: health.mode,
+        endpointUrl: health.endpointUrl,
+        configuredSecrets: health.configuredSecrets,
+        missingSecrets: health.missingSecrets
+      }
+    });
+    return health;
   } catch (error) {
     return {
       status: "failed",
@@ -476,7 +590,7 @@ export const apiRoutes = {
     getAccountWorkspace(state, userId).profile,
   "/api/history": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
     getAccountWorkspace(state, userId).history,
-  "/api/admin/audit": (state: ServerState) => allHistory(state),
+  "/api/admin/audit": (state: ServerState) => allAdminAudit(state),
   "/api/admin/usage": (state: ServerState): AdminUsageSummary => {
     const byModel = new Map<string, { modelId: string; count: number; credits: number }>();
     const history = allHistory(state);

@@ -70,6 +70,30 @@ export interface AdminUsageSummary {
   modelUsage: Array<{ modelId: string; count: number; credits: number }>;
 }
 
+export interface AdminAuditEntry {
+  id: string;
+  eventType?: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "provider-settings";
+  actorUserId?: string;
+  userId?: string;
+  targetUserId?: string;
+  designerName?: string;
+  projectId?: string;
+  projectName?: string;
+  nodeId?: string;
+  modelId?: string;
+  provider?: ModelDefinition["provider"];
+  prompt?: string;
+  operation?: OperationType;
+  outputCount?: number;
+  creditCost?: number;
+  creditDelta?: number;
+  creditBalance?: number;
+  creditLimit?: number;
+  referenceCount?: number;
+  summary?: string;
+  createdAt: string;
+}
+
 export type WorkspaceSnapshot = Pick<
   Workspace,
   "profile" | "projects" | "activeProjectId" | "history" | "assets" | "prompts" | "modelRegistry"
@@ -191,7 +215,7 @@ export async function fetchAdminUsage(adminUserId?: string): Promise<AdminUsageS
   return readJson<AdminUsageSummary>(response);
 }
 
-export async function fetchAdminAudit(adminUserId?: string): Promise<HistoryEntry[]> {
+export async function fetchAdminAudit(adminUserId?: string): Promise<AdminAuditEntry[]> {
   const response = await fetch(`${API_BASE_URL}/api/admin/audit`, { headers: userHeaders(adminUserId) });
-  return readJson<HistoryEntry[]>(response);
+  return readJson<AdminAuditEntry[]>(response);
 }

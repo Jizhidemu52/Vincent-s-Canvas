@@ -12,7 +12,7 @@ import {
 } from "./api";
 import { createInitialWorkspace, createProject } from "../src/domain/workspace";
 import type { GenerationRequest, GenerationResult, ModelDefinition, Profile } from "../src/domain/workspace";
-import type { AdminAccountSummary, AdminUsageSummary, ProviderHealth } from "./api";
+import type { AdminAccountSummary, AdminAuditEntry, AdminUsageSummary, ProviderHealth } from "./api";
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
   return {
@@ -276,6 +276,58 @@ describe("backend hosted mock API", () => {
     expect(unauthorized).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
     expect(JSON.stringify(configured)).not.toContain("sk-admin-secret");
     expect(JSON.stringify(state.providerSettings)).not.toContain("sk-admin-secret");
+  });
+
+  it("writes admin account, pricing, and provider changes into audit without secret values", () => {
+    const state = createServerState({ userId: "admin@company.local", role: "admin", creditBalance: 30 });
+
+    adjustAccountCredits(state, { targetUserId: "alice@company.local", delta: 15, reason: "monthly allocation" }, "admin@company.local");
+    setAccountCreditLimit(state, { targetUserId: "alice@company.local", creditLimit: 80, reason: "team cap" }, "admin@company.local");
+    configureModelPricing(state, { modelId: "gpt-image-2-low", cost: 5, priceCents: 250, currency: "CNY" }, "admin@company.local");
+    configureProviderSettings(
+      state,
+      {
+        provider: "openai",
+        mode: "live-ready",
+        endpointUrl: "https://api.openai.example/v1/images",
+        secretName: "OPENAI_API_KEY",
+        secretValue: "sk-admin-secret"
+      },
+      "admin@company.local"
+    );
+    adjustAccountCredits(state, { targetUserId: "bob@company.local", delta: 5 }, "designer@company.local");
+
+    const audit = callApi(state, "/api/admin/audit", undefined, undefined, "admin@company.local") as AdminAuditEntry[];
+
+    expect(audit).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "credit-adjustment",
+          actorUserId: "admin@company.local",
+          targetUserId: "alice@company.local",
+          creditDelta: 15,
+          summary: expect.stringContaining("monthly allocation")
+        }),
+        expect.objectContaining({
+          eventType: "credit-limit",
+          targetUserId: "alice@company.local",
+          creditLimit: 80
+        }),
+        expect.objectContaining({
+          eventType: "model-pricing",
+          modelId: "gpt-image-2-low",
+          creditCost: 5
+        }),
+        expect.objectContaining({
+          eventType: "provider-settings",
+          provider: "openai",
+          summary: expect.stringContaining("OPENAI_API_KEY")
+        })
+      ])
+    );
+    expect(audit.filter((entry) => entry.eventType !== "generation")).toHaveLength(4);
+    expect(JSON.stringify(audit)).not.toContain("sk-admin-secret");
+    expect(JSON.stringify(audit)).not.toContain("bob@company.local");
   });
 
   it("rejects unauthorized or invalid credit adjustments without dirty side effects", () => {

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { createInitialWorkspace, type GenerationRequest, type HistoryEntry, type Profile, type Workspace } from "./domain/workspace";
+import type { AdminAuditEntry } from "./services/modelApi";
 
 let backendProfile: Profile = {
   userId: "designer-lina",
@@ -14,7 +15,7 @@ let backendProfile: Profile = {
 };
 let backendHistory: HistoryEntry[] = [];
 let backendWorkspace: Workspace = createInitialWorkspace();
-let backendAdminAudit: HistoryEntry[] = [];
+let backendAdminAudit: AdminAuditEntry[] = [];
 let backendAdminUsage: {
   totalCreditsUsed: number;
   totalHistoryEntries: number;
@@ -67,11 +68,14 @@ beforeEach(() => {
       modelId: "gpt-image-2-medium",
       outputCount: 2,
       creditCost: 14,
+      eventType: "generation",
       operation: "generate",
       referenceCount: 1,
       userId: "alice@company.local",
+      actorUserId: "alice@company.local",
       designerName: "Alice Designer",
       projectName: "Alice campaign",
+      summary: "Alice Designer generated 2 outputs with gpt-image-2-medium",
       createdAt: "2026-06-28T02:10:00.000Z"
     },
     {
@@ -82,11 +86,14 @@ beforeEach(() => {
       modelId: "upscale-pro",
       outputCount: 1,
       creditCost: 4,
+      eventType: "generation",
       operation: "upscale",
       referenceCount: 1,
       userId: "bob@company.local",
+      actorUserId: "bob@company.local",
       designerName: "Bob Designer",
       projectName: "Bob upscale",
+      summary: "Bob Designer generated 1 output with upscale-pro",
       createdAt: "2026-06-28T02:05:00.000Z"
     }
   ];
@@ -204,6 +211,23 @@ beforeEach(() => {
           credits: nextBalance
         };
         backendWorkspace = { ...backendWorkspace, profile: backendProfile };
+        backendAdminAudit = [
+          {
+            id: `admin-credit-${backendAdminAudit.length + 1}`,
+            eventType: "credit-adjustment",
+            actorUserId: adminUserId,
+            targetUserId: request.targetUserId,
+            prompt: `Credit adjustment ${request.delta}: ${request.reason ?? ""}`,
+            summary: `Adjusted ${request.targetUserId} by ${request.delta} credits`,
+            projectId: "admin",
+            nodeId: "admin-credit",
+            modelId: "admin",
+            outputCount: 0,
+            creditCost: 0,
+            createdAt: new Date().toISOString()
+          } as HistoryEntry,
+          ...backendAdminAudit
+        ];
         return jsonResponse(backendProfile);
       }
       if (url.endsWith("/api/admin/credit-limit")) {
@@ -224,6 +248,23 @@ beforeEach(() => {
           creditLimit: limit
         };
         backendWorkspace = { ...backendWorkspace, profile: backendProfile };
+        backendAdminAudit = [
+          {
+            id: `admin-limit-${backendAdminAudit.length + 1}`,
+            eventType: "credit-limit",
+            actorUserId: adminUserId,
+            targetUserId: request.targetUserId,
+            prompt: `Credit limit set to ${limit}: ${request.reason ?? ""}`,
+            summary: `Set ${request.targetUserId} limit to ${limit}`,
+            projectId: "admin",
+            nodeId: "admin-limit",
+            modelId: "admin",
+            outputCount: 0,
+            creditCost: 0,
+            createdAt: new Date().toISOString()
+          } as HistoryEntry,
+          ...backendAdminAudit
+        ];
         return jsonResponse(backendProfile);
       }
       if (url.endsWith("/api/admin/model-pricing")) {
@@ -244,6 +285,22 @@ beforeEach(() => {
           ...backendWorkspace,
           modelRegistry: backendWorkspace.modelRegistry.map((model) => (model.id === request.modelId ? updated : model))
         } as Workspace;
+        backendAdminAudit = [
+          {
+            id: `admin-pricing-${backendAdminAudit.length + 1}`,
+            eventType: "model-pricing",
+            actorUserId: adminUserId,
+            prompt: `${request.modelId} now costs ${request.cost} credits`,
+            summary: `${request.modelId} pricing set to ${request.cost} credits`,
+            projectId: "admin",
+            nodeId: "admin-pricing",
+            modelId: request.modelId,
+            outputCount: 0,
+            creditCost: request.cost,
+            createdAt: new Date().toISOString()
+          } as HistoryEntry,
+          ...backendAdminAudit
+        ];
         return jsonResponse(updated);
       }
       if (url.endsWith("/api/admin/provider-settings")) {
@@ -276,6 +333,23 @@ beforeEach(() => {
         backendProviderHealth = backendProviderHealth.some((provider) => provider.provider === request.provider)
           ? backendProviderHealth.map((provider) => (provider.provider === request.provider ? configured : provider))
           : [...backendProviderHealth, configured];
+        backendAdminAudit = [
+          {
+            id: `admin-provider-${backendAdminAudit.length + 1}`,
+            eventType: "provider-settings",
+            actorUserId: adminUserId,
+            provider: request.provider,
+            prompt: `${request.provider} provider set to ${request.mode}; secret ${request.secretName ?? "not set"}`,
+            summary: `${request.provider} provider set to ${request.mode}; configured ${request.secretName ?? "no secret"}`,
+            projectId: "admin",
+            nodeId: "admin-provider",
+            modelId: "admin",
+            outputCount: 0,
+            creditCost: 0,
+            createdAt: new Date().toISOString()
+          } as HistoryEntry,
+          ...backendAdminAudit
+        ];
         return jsonResponse(configured);
       }
       if (url.endsWith("/api/admin/accounts")) {
@@ -729,6 +803,10 @@ describe("Designer canvas app shell", () => {
     expect(await screen.findByText("openai provider set to live-ready")).toBeInTheDocument();
     expect(screen.getByText(/configured: OPENAI_API_KEY/i)).toBeInTheDocument();
     expect(screen.queryByText("sk-ui-secret")).not.toBeInTheDocument();
+    expect(screen.getByText(/provider-settings/i)).toBeInTheDocument();
+    expect(screen.getByText(/openai provider set to live-ready; configured OPENAI_API_KEY/i)).toBeInTheDocument();
+    expect(screen.getByText(/model-pricing/i)).toBeInTheDocument();
+    expect(screen.getByText(/credit-adjustment/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Back to projects" }));
     await user.click(screen.getByRole("button", { name: "Profile" }));

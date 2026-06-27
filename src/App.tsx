@@ -71,6 +71,7 @@ import {
   type BatchImport,
   type CanvasNode,
   type GenerationResult,
+  type HistoryEntry,
   type LibraryAsset,
   type MaskSelection,
   type ModelDefinition,
@@ -95,6 +96,7 @@ import {
   setDesignerCreditLimit,
   submitGenerationRequest,
   type AdminAccountSummary,
+  type AdminAuditEntry,
   type AdminUsageSummary,
   type ProviderHealth,
   type ProviderSettingsRequest
@@ -118,6 +120,35 @@ function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+function historyEntryToAuditEntry(entry: HistoryEntry): AdminAuditEntry {
+  return {
+    ...entry,
+    eventType: "generation",
+    actorUserId: entry.userId,
+    targetUserId: entry.userId,
+    summary: `${entry.designerName ?? entry.userId ?? "Designer"} generated ${entry.outputCount} output${entry.outputCount === 1 ? "" : "s"} with ${entry.modelId}`
+  };
+}
+
+function auditPrimaryMetric(entry: AdminAuditEntry) {
+  if (entry.eventType === "credit-adjustment") return `${entry.creditDelta} credits`;
+  if (entry.eventType === "credit-limit") return `limit ${entry.creditLimit}`;
+  if (entry.eventType === "model-pricing") return `${entry.creditCost} credits/output`;
+  if (entry.eventType === "provider-settings") return entry.provider ?? "provider";
+  return `${entry.creditCost ?? 0} credits`;
+}
+
+function auditContext(entry: AdminAuditEntry) {
+  if ((entry.eventType ?? "generation") === "generation") {
+    return [entry.designerName ?? entry.actorUserId ?? entry.userId, entry.projectName ?? entry.projectId].filter(Boolean).join(" · ");
+  }
+  return [entry.actorUserId ?? entry.designerName, entry.targetUserId, entry.projectName ?? entry.projectId ?? entry.modelId].filter(Boolean).join(" / ");
+}
+
+function auditDescription(entry: AdminAuditEntry) {
+  return (entry.eventType ?? "generation") === "generation" ? entry.prompt : entry.summary ?? entry.prompt;
 }
 
 function createWorkspace() {
@@ -1089,13 +1120,13 @@ function AdminView({
   const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
   const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([]);
   const [adminUsage, setAdminUsage] = useState<AdminUsageSummary | null>(null);
-  const [adminAudit, setAdminAudit] = useState(workspace.history);
+  const [adminAudit, setAdminAudit] = useState<AdminAuditEntry[]>(workspace.history.map(historyEntryToAuditEntry));
   const providers = workspace.modelRegistry.reduce<Record<string, number>>((memo, model) => {
     memo[model.provider] = (memo[model.provider] ?? 0) + 1;
     return memo;
   }, {});
   const configurableProviders = Array.from(new Set(["openai", "nanobanana", "runninghub", "comfyui", "internal", ...workspace.modelRegistry.map((model) => model.provider)])) as ModelDefinition["provider"][];
-  const visibleAdminAudit = adminAudit.length ? adminAudit : workspace.history;
+  const visibleAdminAudit = adminAudit.length ? adminAudit : workspace.history.map(historyEntryToAuditEntry);
 
   useEffect(() => {
     let cancelled = false;
@@ -1163,12 +1194,18 @@ function AdminView({
     });
   }
 
+  async function refreshAdminAudit() {
+    const audit = await fetchAdminAudit(activeUserId);
+    setAdminAudit(audit);
+  }
+
   async function submitCreditAdjustment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsAdjusting(true);
     try {
       const profile = await onAdjustCredits(targetUserId, Number(creditDelta), creditReason);
       syncAccountRow(profile);
+      await refreshAdminAudit();
       setCreditNotice(`${profile.designerName} now has ${profile.creditBalance} credits`);
     } catch (error) {
       setCreditNotice(error instanceof Error ? error.message : "Credit adjustment failed");
@@ -1183,6 +1220,7 @@ function AdminView({
     try {
       const profile = await onSetCreditLimit(targetUserId, Number(creditLimit), limitReason);
       syncAccountRow(profile);
+      await refreshAdminAudit();
       setCreditNotice(`${profile.designerName} credit limit set to ${profile.creditLimit}`);
     } catch (error) {
       setCreditNotice(error instanceof Error ? error.message : "Credit limit update failed");
@@ -1196,6 +1234,7 @@ function AdminView({
     setIsAdjusting(true);
     try {
       const model = await onUpdateModelPricing(pricingModelId, Number(modelCost), Number(modelPriceCents), modelCurrency);
+      await refreshAdminAudit();
       setCreditNotice(`${model.name} now costs ${model.cost} credits per output`);
     } catch (error) {
       setCreditNotice(error instanceof Error ? error.message : "Model pricing update failed");
@@ -1219,6 +1258,7 @@ function AdminView({
         const exists = current.some((item) => item.provider === provider.provider);
         return exists ? current.map((item) => (item.provider === provider.provider ? provider : item)) : [...current, provider];
       });
+      await refreshAdminAudit();
       setProviderSecretValue("");
       setCreditNotice(`${provider.provider} provider set to ${provider.mode}`);
     } catch (error) {
@@ -1371,10 +1411,10 @@ function AdminView({
             {visibleAdminAudit.length ? (
               visibleAdminAudit.slice(0, 6).map((entry) => (
                 <div className="admin-row" key={entry.id}>
-                  <span>{entry.modelId}</span>
-                  <strong>{entry.creditCost} credits</strong>
-                  <small>{[entry.designerName ?? entry.userId, entry.projectName ?? entry.projectId].filter(Boolean).join(" · ")}</small>
-                  <small>{entry.prompt}</small>
+                  <span>{entry.eventType ?? "generation"}</span>
+                  <strong>{auditPrimaryMetric(entry)}</strong>
+                  <small>{auditContext(entry)}</small>
+                  <small>{auditDescription(entry)}</small>
                 </div>
               ))
             ) : (

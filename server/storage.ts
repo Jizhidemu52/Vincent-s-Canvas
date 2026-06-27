@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
-import { createServerState, type AccountWorkspace, type ServerState } from "./api";
+import { createServerState, type AccountWorkspace, type AdminAuditEntry, type ServerState } from "./api";
 import type { ProviderRuntimeSettingsMap } from "./providers";
 import type { HistoryEntry, LibraryAsset, ModelDefinition, Profile, Project, PromptPreset } from "../src/domain/workspace";
 
@@ -17,6 +17,7 @@ interface PersistedServerState {
   accounts?: Record<string, AccountWorkspace>;
   submittedRequestIds: string[];
   providerSettings?: ProviderRuntimeSettingsMap;
+  adminAudit?: AdminAuditEntry[];
 }
 
 function serializeServerState(state: ServerState): PersistedServerState {
@@ -31,7 +32,8 @@ function serializeServerState(state: ServerState): PersistedServerState {
     prompts: state.prompts,
     accounts: state.accounts,
     submittedRequestIds: Array.from(state.submittedRequestIds),
-    providerSettings: state.providerSettings
+    providerSettings: state.providerSettings,
+    adminAudit: state.adminAudit
   };
 }
 
@@ -47,7 +49,8 @@ function hydrateServerState(data: PersistedServerState): ServerState {
     prompts: Array.isArray(data.prompts) && data.prompts.length ? data.prompts : fallback.prompts,
     accounts: data.accounts ?? {},
     submittedRequestIds: new Set(data.submittedRequestIds ?? []),
-    providerSettings: data.providerSettings ?? {}
+    providerSettings: data.providerSettings ?? {},
+    adminAudit: data.adminAudit ?? []
   };
 }
 
@@ -264,6 +267,9 @@ function saveDatabaseState(filePath: string, state: ServerState) {
         insertJob.run(history.id, userId, history.projectId, history.nodeId, history.modelId, history.operation ?? "generate", "succeeded", JSON.stringify(history));
         insertAudit.run(history.id, userId, "generation", history.createdAt, JSON.stringify(history));
       }
+    }
+    for (const audit of state.adminAudit) {
+      insertAudit.run(audit.id, audit.actorUserId ?? "system", audit.eventType, audit.createdAt, JSON.stringify(audit));
     }
 
     const insertModel = db.prepare(
