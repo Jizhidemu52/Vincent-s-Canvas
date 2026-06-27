@@ -106,6 +106,7 @@ type DragMode = "move" | "resize";
 type ShapeEditDraft = { nodeId: string; shape: "ellipse" | "rectangle" | "freehand"; prompt: string; mask?: MaskSelection } | null;
 type HomeSection = "Projects" | "History" | "Profile";
 type RightPanel = "context" | "history" | "assets" | "prompts" | "assistant";
+type OpenProjectTarget = { nodeId?: string; historyId?: string };
 const DEFAULT_MASK_SELECTION: MaskSelection = { x: 28, y: 24, width: 44, height: 38 };
 
 function readFileAsDataUrl(file: File) {
@@ -232,8 +233,19 @@ export default function App() {
     });
     setView("canvas");
   }
-  function openProject(projectId: string) {
-    setWorkspace((current) => ({ ...current, activeProjectId: projectId }));
+  function openProject(projectId: string, target?: OpenProjectTarget) {
+    setWorkspace((current) => {
+      const active = { ...current, activeProjectId: projectId };
+      const project = active.projects.find((item) => item.id === projectId);
+      const targetNodeId =
+        target?.historyId && project
+          ? project.nodes.find((node) => node.metadata.historyId === target.historyId)?.id ?? target.nodeId
+          : target?.nodeId;
+      return targetNodeId && project?.nodes.some((node) => node.id === targetNodeId) ? selectNodes(active, projectId, [targetNodeId]) : active;
+    });
+    if (target?.historyId || target?.nodeId) {
+      setRightPanel("context");
+    }
     setView("canvas");
   }
 
@@ -787,7 +799,7 @@ function HomeView({
 }: {
   workspace: Workspace;
   onCreateProject: () => void;
-  onOpenProject: (projectId: string) => void;
+  onOpenProject: (projectId: string, target?: OpenProjectTarget) => void;
   onAdmin: () => void;
 }) {
   const [activeSection, setActiveSection] = useState<HomeSection>("Projects");
@@ -830,7 +842,7 @@ function ProjectsPanel({
 }: {
   projects: Project[];
   onCreateProject: () => void;
-  onOpenProject: (projectId: string) => void;
+  onOpenProject: (projectId: string, target?: OpenProjectTarget) => void;
 }) {
   return (
     <>
@@ -867,12 +879,18 @@ function ProjectsPanel({
   );
 }
 
-function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOpenProject: (projectId: string) => void }) {
+function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOpenProject: (projectId: string, target?: OpenProjectTarget) => void }) {
   const generatedNodes = workspace.projects.flatMap((project) =>
     project.nodes
       .filter((node) => node.kind === "generated" || node.kind === "edit" || node.kind === "operation")
       .map((node) => ({ project, node }))
   );
+  function sourceForHistoryOutput(entryId: string, outputName: string, remoteSource: string) {
+    const match = generatedNodes.find(
+      ({ node }) => node.metadata.historyId === entryId && (node.metadata.remoteSource === remoteSource || node.name === outputName)
+    );
+    return match?.node.source ?? remoteSource;
+  }
   return (
     <section className="home-section" aria-label="History management">
       <div className="section-heading">
@@ -897,11 +915,15 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
                   {entry.outputs?.length ? (
                     <div className="history-output-strip" aria-label={`History outputs for ${entry.id}`}>
                       {entry.outputs.map((output) => (
-                        <img key={`${entry.id}-${output.name}-${output.source}`} src={output.source} alt={`History output ${output.name}`} />
+                        <img
+                          key={`${entry.id}-${output.name}-${output.source}`}
+                          src={sourceForHistoryOutput(entry.id, output.name, output.source)}
+                          alt={`History output ${output.name}`}
+                        />
                       ))}
                     </div>
                   ) : null}
-                  <button type="button" onClick={() => project && onOpenProject(project.id)} disabled={!project}>
+                  <button type="button" onClick={() => project && onOpenProject(project.id, { historyId: entry.id, nodeId: entry.nodeId })} disabled={!project}>
                     Open project
                   </button>
                 </article>
@@ -917,7 +939,17 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
         <div className="history-gallery" aria-label="Generated image gallery">
           {generatedNodes.length ? (
             generatedNodes.slice(0, 12).map(({ project, node }) => (
-              <button type="button" key={node.id} className="history-thumb" onClick={() => onOpenProject(project.id)}>
+              <button
+                type="button"
+                key={node.id}
+                className="history-thumb"
+                onClick={() =>
+                  onOpenProject(project.id, {
+                    nodeId: node.id,
+                    historyId: typeof node.metadata.historyId === "string" ? node.metadata.historyId : undefined
+                  })
+                }
+              >
                 <img src={node.source} alt="" />
                 <strong>{node.name}</strong>
                 <small>{project.name}</small>

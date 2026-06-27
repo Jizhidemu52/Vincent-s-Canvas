@@ -957,14 +957,23 @@ describe("Designer canvas app shell", () => {
     await user.type(screen.getByRole("textbox", { name: "Inline prompt" }), "生成一款带盘扣的黑色马甲");
     const generateButtons = screen.getAllByRole("button", { name: "Generate" });
     await user.click(generateButtons[generateButtons.length - 1]);
+    await screen.findByText("backend result 1.jpg");
+    await user.click(screen.getByText("fashion-reference.jpg"));
     await user.click(screen.getByRole("button", { name: "Projects" }));
 
     await user.click(screen.getByRole("button", { name: "History" }));
     expect(screen.getByRole("region", { name: "History management" })).toBeInTheDocument();
     expect(screen.getByText(/生成一款带盘扣的黑色马甲/)).toBeInTheDocument();
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "History output backend result 1.jpg" })).toBeInTheDocument();
+    const historyOutput = screen.getByRole("img", { name: "History output backend result 1.jpg" }) as HTMLImageElement;
+    expect(historyOutput).toBeInTheDocument();
+    expect(historyOutput.src).not.toMatch(/^mock:/);
+    await user.click(screen.getByRole("button", { name: "Open project" }));
+    expect(screen.getByText("Selected node task")).toBeInTheDocument();
+    expect(screen.getByText("history-1")).toBeInTheDocument();
+    expect(screen.getByText("generate / gpt-image-2-medium")).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "Projects" }));
     await user.click(screen.getByRole("button", { name: "Profile" }));
     expect(screen.getByRole("region", { name: "Profile credit management" })).toBeInTheDocument();
     expect(screen.getByText("Credit balance")).toBeInTheDocument();
