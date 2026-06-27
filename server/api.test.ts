@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { adjustAccountCredits, callApi, configureModelPricing, listAdminAccounts, saveWorkspaceSnapshot, setAccountCreditLimit, createServerState, type ApiError } from "./api";
+import { createInitialWorkspace, createProject } from "../src/domain/workspace";
 import type { GenerationRequest, GenerationResult, ModelDefinition, Profile } from "../src/domain/workspace";
 import type { AdminAccountSummary, AdminUsageSummary, ProviderHealth } from "./api";
 
@@ -96,6 +97,21 @@ describe("backend hosted mock API", () => {
     expect(providers.some((provider) => provider.provider === "openai" && provider.adapterId === "openai-image-adapter")).toBe(true);
     expect(providers.some((provider) => provider.provider === "openai" && provider.missingSecrets.includes("OPENAI_API_KEY"))).toBe(true);
     expect(JSON.stringify(providers)).not.toContain("sk-");
+  });
+
+  it("adds designer and project context to admin audit history", () => {
+    const state = createServerState({ userId: "admin@company.local", role: "admin", creditBalance: 30 });
+    const created = createProject(createInitialWorkspace({ userId: "alice@company.local", designerName: "Alice Designer", creditBalance: 30 }), "Alice launch board");
+    saveWorkspaceSnapshot(state, created.workspace, "alice@company.local");
+
+    callApi(state, "/api/generations", request({ projectId: created.project.id, outputCount: 1 }), "alice-context-1", "alice@company.local");
+
+    const audit = callApi(state, "/api/admin/audit", undefined, undefined, "admin@company.local") as ReturnType<typeof createServerState>["history"];
+    expect(audit[0]).toMatchObject({
+      userId: "alice@company.local",
+      designerName: "Alice Designer",
+      projectName: "Alice launch board"
+    });
   });
 
   it("keeps designer credits and history isolated by user id", () => {

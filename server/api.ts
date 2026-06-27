@@ -148,8 +148,19 @@ function saveAccountWorkspace(state: ServerState, account: AccountWorkspace, use
   state.accounts[normalized] = account;
 }
 
+function historyWithAccountContext(account: AccountWorkspace): HistoryEntry[] {
+  return account.history.map((entry) => ({
+    ...entry,
+    userId: entry.userId ?? account.profile.userId,
+    designerName: entry.designerName ?? account.profile.designerName,
+    projectName: entry.projectName ?? account.projects.find((project) => project.id === entry.projectId)?.name ?? entry.projectId
+  }));
+}
+
 function allHistory(state: ServerState) {
-  return [...state.history, ...Object.values(state.accounts).flatMap((account) => account.history)];
+  return [accountFromState(state), ...Object.values(state.accounts)]
+    .flatMap(historyWithAccountContext)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
 function totalCreditsUsed(state: ServerState) {
@@ -353,6 +364,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
   const { model, cost, account } = assertRequest(state, request, requestId, userId);
   const historyId = `history-${allHistory(state).length + 1}`;
   const result = runProviderModel(request, model, historyId, cost);
+  const projectName = account.projects.find((project) => project.id === request.projectId)?.name;
 
   if (requestId) {
     state.submittedRequestIds.add(requestId);
@@ -367,11 +379,14 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
   const entry: HistoryEntry = {
     id: historyId,
     projectId: request.projectId,
+    projectName,
     nodeId: request.nodeId,
     prompt: request.prompt,
     modelId: request.modelId,
     outputCount: request.outputCount,
     creditCost: cost,
+    userId: account.profile.userId,
+    designerName: account.profile.designerName,
     operation: request.operation,
     referenceCount: request.referenceNodeIds.length,
     outputs: result.outputs,

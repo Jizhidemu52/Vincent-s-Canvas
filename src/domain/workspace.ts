@@ -161,11 +161,14 @@ export interface BatchGenerationOutcome {
 export interface HistoryEntry {
   id: string;
   projectId: string;
+  projectName?: string;
   nodeId: string;
   prompt: string;
   modelId: string;
   outputCount: number;
   creditCost: number;
+  userId?: string;
+  designerName?: string;
   operation?: OperationType;
   moduleType?: ModuleType;
   referenceCount?: number;

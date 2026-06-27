@@ -1241,6 +1241,7 @@ function AdminView({
                 <div className="admin-row" key={entry.id}>
                   <span>{entry.modelId}</span>
                   <strong>{entry.creditCost} credits</strong>
+                  <small>{[entry.designerName ?? entry.userId, entry.projectName ?? entry.projectId].filter(Boolean).join(" · ")}</small>
                   <small>{entry.prompt}</small>
                 </div>
               ))

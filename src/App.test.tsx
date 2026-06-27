@@ -68,6 +68,9 @@ beforeEach(() => {
       creditCost: 14,
       operation: "generate",
       referenceCount: 1,
+      userId: "alice@company.local",
+      designerName: "Alice Designer",
+      projectName: "Alice campaign",
       createdAt: "2026-06-28T02:10:00.000Z"
     },
     {
@@ -80,6 +83,9 @@ beforeEach(() => {
       creditCost: 4,
       operation: "upscale",
       referenceCount: 1,
+      userId: "bob@company.local",
+      designerName: "Bob Designer",
+      projectName: "Bob upscale",
       createdAt: "2026-06-28T02:05:00.000Z"
     }
   ];
@@ -644,7 +650,9 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("14 credits / 2 outputs")).toBeInTheDocument();
     expect(screen.getAllByText("upscale-pro").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Alice campaign cleanup")).toBeInTheDocument();
+    expect(screen.getByText("Alice Designer · Alice campaign")).toBeInTheDocument();
     expect(screen.getByText("Bob upscale pass")).toBeInTheDocument();
+    expect(screen.getByText("Bob Designer · Bob upscale")).toBeInTheDocument();
     expect(screen.getByText("alice@company.local")).toBeInTheDocument();
     expect(screen.getByText("Alice Designer")).toBeInTheDocument();
     expect(screen.getByText("88 remaining")).toBeInTheDocument();
