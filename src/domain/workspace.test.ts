@@ -328,7 +328,13 @@ describe("designer canvas workspace behavior", () => {
         })
       ])
     );
-    expect(processed.profile.credits).toBe(5);
+    expect(processed.profile.credits).toBe(2);
+    expect(processed.history[0]).toMatchObject({
+      modelId: "background-cleaner",
+      outputCount: 3,
+      creditCost: 6,
+      operation: "removeBackground"
+    });
   });
 
   it("pulls a workflow module from an image and runs chained edit then upscale steps", () => {

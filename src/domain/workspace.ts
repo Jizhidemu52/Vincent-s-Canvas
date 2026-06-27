@@ -428,6 +428,15 @@ function operationForModuleNode(node: CanvasNode): OperationType {
   return "generate";
 }
 
+function defaultOperationForModel(model?: ModelDefinition): OperationType {
+  if (!model) return "generate";
+  if (model.capability.includes("generate")) return "generate";
+  if (model.capability.includes("removeBackground")) return "removeBackground";
+  if (model.capability.includes("upscale")) return "upscale";
+  if (model.capability.includes("edit")) return "edit";
+  return "generate";
+}
+
 function isExecutableWorkflowNode(node: CanvasNode) {
   return node.kind === "workflow" || node.type === "config" || node.type === "edit" || node.type === "upscale" || node.type === "removeBg";
 }
@@ -1050,7 +1059,10 @@ export function runBatchQueue(workspace: Workspace, projectId: string): Workspac
   const project = findProject(workspace, projectId);
   if (!project.batchConfig) throw new Error("Batch configuration is required");
   if (!project.batchConfig.prompt.trim()) throw new Error("Prompt is required");
-  const creditCost = project.batchQueue.length * project.batchConfig.outputCount;
+  const model = workspace.modelRegistry.find((item) => item.id === project.batchConfig!.modelId);
+  const totalOutputs = project.batchQueue.length * project.batchConfig.outputCount;
+  const creditCost = (model?.cost ?? 1) * totalOutputs;
+  const operation = defaultOperationForModel(model);
   const charged = spendCredits(workspace, creditCost);
   const generatedNodes = project.batchQueue.map((item, index) => {
     const originalNode = project.nodes.find(
@@ -1077,7 +1089,8 @@ export function runBatchQueue(workspace: Workspace, projectId: string): Workspac
       references: originalNode ? [originalNode.id] : [item.name],
       metadata: {
         folderName: project.batchConfig!.folderName,
-        sourceFile: item.name
+        sourceFile: item.name,
+        operation
       }
     });
   });
@@ -1099,9 +1112,9 @@ export function runBatchQueue(workspace: Workspace, projectId: string): Workspac
         nodeId: project.batchQueue[0]?.id ?? projectId,
         prompt: project.batchConfig.prompt,
         modelId: project.batchConfig.modelId,
-        outputCount: creditCost,
+        outputCount: totalOutputs,
         creditCost,
-        operation: "generate",
+        operation,
         createdAt: now()
       },
       ...updated.history
