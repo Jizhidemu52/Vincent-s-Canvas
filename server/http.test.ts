@@ -75,6 +75,27 @@ describe("HTTP API server", () => {
     expect(history).toHaveLength(1);
   });
 
+  it("rejects unsupported model operations over HTTP without charging credits", async () => {
+    const response = await fetch(`${context.baseUrl}/api/upscale`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "http-unsupported-upscale" },
+      body: JSON.stringify(request({ modelId: "gpt-image-2-low", prompt: "", operation: "upscale", outputCount: 1 }))
+    });
+    const profile = (await (await fetch(`${context.baseUrl}/api/profile`)).json()) as Profile;
+    const history = (await (await fetch(`${context.baseUrl}/api/history`)).json()) as unknown[];
+    const retryWithSupportedModel = await fetch(`${context.baseUrl}/api/upscale`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "http-unsupported-upscale" },
+      body: JSON.stringify(request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }))
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ status: "failed", errorMessage: "Model gpt-image-2-low does not support upscale" });
+    expect(profile.creditBalance).toBe(10);
+    expect(history).toHaveLength(0);
+    expect(retryWithSupportedModel.status).toBe(200);
+  });
+
   it("rejects duplicate submissions without double charging", async () => {
     const init = {
       method: "POST",

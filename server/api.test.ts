@@ -79,6 +79,23 @@ describe("backend hosted mock API", () => {
     expect(state.history).toHaveLength(0);
   });
 
+  it("rejects models that do not support the requested operation before charging credits", () => {
+    const state = createServerState({ creditBalance: 30 });
+
+    const result = callApi(
+      state,
+      "/api/upscale",
+      request({ modelId: "gpt-image-2-low", prompt: "", operation: "upscale", outputCount: 1 }),
+      "unsupported-upscale"
+    ) as ApiError;
+    const profile = callApi(state, "/api/profile") as Profile;
+
+    expect(result).toMatchObject({ status: "failed", errorMessage: "Model gpt-image-2-low does not support upscale" });
+    expect(profile.creditBalance).toBe(30);
+    expect(state.history).toHaveLength(0);
+    expect(state.submittedRequestIds.has("unsupported-upscale")).toBe(false);
+  });
+
   it("rejects duplicate submissions without double charging", () => {
     const state = createServerState({ creditBalance: 30 });
 

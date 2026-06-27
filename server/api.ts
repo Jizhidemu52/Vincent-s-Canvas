@@ -535,6 +535,9 @@ function assertRequest(state: ServerState, request: GenerationRequest, requestId
   if (!model) {
     throw new Error("Model not found");
   }
+  if (!model.capability.some((capability) => capability === request.operation)) {
+    throw new Error(`Model ${model.id} does not support ${request.operation}`);
+  }
   if (request.outputCount < 1 || request.outputCount > 8) {
     throw new Error("Output count must be between 1 and 8");
   }
