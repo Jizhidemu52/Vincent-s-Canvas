@@ -169,6 +169,12 @@ function formatEstimatedSpend(priceCents?: number, currency?: string) {
   return money ? `${money} estimated spend` : "No price configured";
 }
 
+function formatActivityMinute(timestamp?: string) {
+  if (!timestamp) return "No activity yet";
+  const match = timestamp.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  return match ? `${match[1]} ${match[2]}` : timestamp;
+}
+
 function createWorkspace() {
   return createInitialWorkspace({ userId: "designer-lina", designerName: "Lina Zhou", creditBalance: 180, role: "designer" });
 }
@@ -1477,6 +1483,7 @@ function AdminView({
                     <small>
                       {account.projectCount} projects / {account.historyCount} history / {account.assetCount} assets
                     </small>
+                    <small>Last active {formatActivityMinute(account.lastActivityAt)}</small>
                     <em>{account.role}</em>
                   </div>
                 ))}

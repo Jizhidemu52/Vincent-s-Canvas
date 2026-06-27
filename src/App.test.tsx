@@ -1087,6 +1087,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("88 remaining")).toBeInTheDocument();
     expect(screen.getByText("12 used / limit 120")).toBeInTheDocument();
     expect(screen.getByText("2 projects / 5 history / 7 assets")).toBeInTheDocument();
+    expect(screen.getByText("Last active 2026-06-28 02:00")).toBeInTheDocument();
 
     await user.clear(screen.getByRole("spinbutton", { name: "Credit delta" }));
     await user.type(screen.getByRole("spinbutton", { name: "Credit delta" }), "20");
