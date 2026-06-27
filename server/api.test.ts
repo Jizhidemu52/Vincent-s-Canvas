@@ -165,16 +165,26 @@ describe("backend hosted mock API", () => {
 
   it("reports admin usage, audit, and provider health without exposing secrets", () => {
     const state = createServerState({ creditBalance: 30 });
+    configureModelPricing(state, { modelId: "gpt-image-2-low", cost: 2, priceCents: 150, currency: "CNY" }, "admin@company.local");
+    configureModelPricing(state, { modelId: "upscale-pro", cost: 4, priceCents: 320, currency: "CNY" }, "admin@company.local");
     callApi(state, "/api/generations", request({ outputCount: 1 }), "usage-1");
     callApi(state, "/api/upscale", request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }), "usage-2");
 
     const usage = callApi(state, "/api/admin/usage", undefined, undefined, "admin@company.local") as AdminUsageSummary;
-    const audit = callApi(state, "/api/admin/audit", undefined, undefined, "admin@company.local") as ReturnType<typeof createServerState>["history"];
+    const audit = callApi(state, "/api/admin/audit", undefined, undefined, "admin@company.local") as AdminAuditEntry[];
     const providers = callApi(state, "/api/admin/providers", undefined, undefined, "admin@company.local") as ProviderHealth[];
 
     expect(usage.totalCreditsUsed).toBeGreaterThan(0);
     expect(usage.modelUsage.some((item) => item.modelId === "gpt-image-2-low")).toBe(true);
-    expect(audit).toHaveLength(2);
+    expect(usage.totalPriceCents).toBe(470);
+    expect(usage.currency).toBe("CNY");
+    expect(usage.modelUsage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ modelId: "gpt-image-2-low", priceCents: 150, currency: "CNY" }),
+        expect.objectContaining({ modelId: "upscale-pro", priceCents: 320, currency: "CNY" })
+      ])
+    );
+    expect(audit.filter((entry) => (entry.eventType ?? "generation") === "generation")).toHaveLength(2);
     expect(providers.every((provider) => provider.keyLocation === "server")).toBe(true);
     expect(providers.some((provider) => provider.provider === "openai" && provider.status === "degraded")).toBe(true);
     expect(providers.some((provider) => provider.provider === "openai" && provider.adapterId === "openai-image-adapter")).toBe(true);

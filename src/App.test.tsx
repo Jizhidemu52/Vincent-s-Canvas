@@ -19,7 +19,9 @@ let backendAdminAudit: AdminAuditEntry[] = [];
 let backendAdminUsage: {
   totalCreditsUsed: number;
   totalHistoryEntries: number;
-  modelUsage: Array<{ modelId: string; count: number; credits: number }>;
+  totalPriceCents?: number;
+  currency?: "CNY" | "USD";
+  modelUsage: Array<{ modelId: string; count: number; credits: number; priceCents?: number; currency?: "CNY" | "USD" }>;
 };
 let backendAdminJobs: Array<Record<string, unknown>> = [];
 let backendAccounts: Array<{
@@ -101,9 +103,11 @@ beforeEach(() => {
   backendAdminUsage = {
     totalCreditsUsed: 24,
     totalHistoryEntries: 3,
+    totalPriceCents: 860,
+    currency: "CNY",
     modelUsage: [
-      { modelId: "gpt-image-2-medium", count: 2, credits: 14 },
-      { modelId: "upscale-pro", count: 1, credits: 4 }
+      { modelId: "gpt-image-2-medium", count: 2, credits: 14, priceCents: 620, currency: "CNY" },
+      { modelId: "upscale-pro", count: 1, credits: 4, priceCents: 240, currency: "CNY" }
     ]
   };
   backendAdminJobs = [
@@ -917,7 +921,9 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("3 history entries")).toBeInTheDocument();
     expect(screen.getAllByText("gpt-image-2-medium").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("14 credits / 2 outputs")).toBeInTheDocument();
+    expect(screen.getByText("6.20 CNY estimated spend")).toBeInTheDocument();
     expect(screen.getAllByText("upscale-pro").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("2.40 CNY estimated spend")).toBeInTheDocument();
     expect(screen.getByText("Alice campaign cleanup")).toBeInTheDocument();
     expect(screen.getByText("Alice Designer · Alice campaign")).toBeInTheDocument();
     expect(screen.getByText("Bob upscale pass")).toBeInTheDocument();

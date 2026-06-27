@@ -78,7 +78,9 @@ export interface AdminAccountSummary {
 export interface AdminUsageSummary {
   totalCreditsUsed: number;
   totalHistoryEntries: number;
-  modelUsage: Array<{ modelId: string; count: number; credits: number }>;
+  totalPriceCents?: number;
+  currency?: ModelDefinition["currency"] | "mixed";
+  modelUsage: Array<{ modelId: string; count: number; credits: number; priceCents?: number; currency?: ModelDefinition["currency"] }>;
 }
 
 export interface AdminGenerationJob {

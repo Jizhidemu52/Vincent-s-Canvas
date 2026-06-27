@@ -136,7 +136,9 @@ export interface GenerationJob {
 export interface AdminUsageSummary {
   totalCreditsUsed: number;
   totalHistoryEntries: number;
-  modelUsage: Array<{ modelId: string; count: number; credits: number }>;
+  totalPriceCents?: number;
+  currency?: ModelDefinition["currency"] | "mixed";
+  modelUsage: Array<{ modelId: string; count: number; credits: number; priceCents?: number; currency?: ModelDefinition["currency"] }>;
 }
 
 export interface AdminAccountSummary {
@@ -785,19 +787,36 @@ export const apiRoutes = {
   },
   "/api/admin/usage": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string): AdminUsageSummary => {
     assertAdminUser(state, userId);
-    const byModel = new Map<string, { modelId: string; count: number; credits: number }>();
+    const byModel = new Map<string, { modelId: string; count: number; credits: number; priceCents?: number; currency?: ModelDefinition["currency"] }>();
     const history = allHistory(state);
+    let totalPriceCents = 0;
+    let pricedEntries = 0;
+    const currencies = new Set<ModelDefinition["currency"]>();
     for (const entry of history) {
+      const model = state.models.find((item) => item.id === entry.modelId);
+      const entryPriceCents = model?.priceCents === undefined ? undefined : model.priceCents * entry.outputCount;
+      const currency = model?.currency ?? "CNY";
       const current = byModel.get(entry.modelId) ?? { modelId: entry.modelId, count: 0, credits: 0 };
+      if (entryPriceCents !== undefined) {
+        totalPriceCents += entryPriceCents;
+        pricedEntries += 1;
+        currencies.add(currency);
+      }
+      const nextPriceCents =
+        current.priceCents === undefined && entryPriceCents === undefined ? undefined : (current.priceCents ?? 0) + (entryPriceCents ?? 0);
       byModel.set(entry.modelId, {
         modelId: entry.modelId,
         count: current.count + entry.outputCount,
-        credits: current.credits + entry.creditCost
+        credits: current.credits + entry.creditCost,
+        priceCents: nextPriceCents,
+        currency: current.currency ?? (nextPriceCents === undefined ? undefined : currency)
       });
     }
     return {
       totalCreditsUsed: totalCreditsUsed(state),
       totalHistoryEntries: history.length,
+      totalPriceCents: pricedEntries ? totalPriceCents : undefined,
+      currency: currencies.size > 1 ? "mixed" : Array.from(currencies)[0],
       modelUsage: Array.from(byModel.values())
     };
   },

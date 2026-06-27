@@ -155,6 +155,16 @@ function auditDescription(entry: AdminAuditEntry) {
   return (entry.eventType ?? "generation") === "generation" ? entry.prompt : entry.summary ?? entry.prompt;
 }
 
+function formatMoneyCents(priceCents?: number, currency?: string) {
+  if (priceCents === undefined) return undefined;
+  return `${(priceCents / 100).toFixed(2)} ${currency ?? "CNY"}`;
+}
+
+function formatEstimatedSpend(priceCents?: number, currency?: string) {
+  const money = formatMoneyCents(priceCents, currency);
+  return money ? `${money} estimated spend` : "No price configured";
+}
+
 function createWorkspace() {
   return createInitialWorkspace({ userId: "designer-lina", designerName: "Lina Zhou", creditBalance: 180, role: "designer" });
 }
@@ -1165,6 +1175,7 @@ function AdminView({
   const [adminUsage, setAdminUsage] = useState<AdminUsageSummary | null>(null);
   const [adminJobs, setAdminJobs] = useState<AdminGenerationJob[]>([]);
   const [adminAudit, setAdminAudit] = useState<AdminAuditEntry[]>(workspace.history.map(historyEntryToAuditEntry));
+  const estimatedSpend = formatMoneyCents(adminUsage?.totalPriceCents, adminUsage?.currency);
   const providers = workspace.modelRegistry.reduce<Record<string, number>>((memo, model) => {
     memo[model.provider] = (memo[model.provider] ?? 0) + 1;
     return memo;
@@ -1364,6 +1375,7 @@ function AdminView({
           <MetricCard label="Canvas nodes" value={totalNodes} detail={`${totalConnections} workflow links`} />
           <MetricCard label="Credits used" value={adminUsage?.totalCreditsUsed ?? workspace.profile.creditUsed} detail={`${workspace.profile.creditBalance} remaining`} />
           <MetricCard label="Running jobs" value={runningJobs} detail={`${adminUsage?.totalHistoryEntries ?? workspace.history.length} history entries`} />
+          <MetricCard label="Estimated spend" value={estimatedSpend ?? "Not priced"} detail="from configured model prices" />
         </section>
         <section className="admin-grid">
           <article className="admin-card team-accounts-card">
@@ -1556,7 +1568,7 @@ function AdminView({
                 <div className="admin-row" key={usage.modelId}>
                   <span>{usage.modelId}</span>
                   <strong>{usage.credits} credits / {usage.count} outputs</strong>
-                  <small>team-wide model consumption</small>
+                  <small>{formatEstimatedSpend(usage.priceCents, usage.currency)}</small>
                 </div>
               ))
             ) : (
@@ -1742,7 +1754,7 @@ function AdminView({
   );
 }
 
-function MetricCard({ label, value, detail }: { label: string; value: number; detail: string }) {
+function MetricCard({ label, value, detail }: { label: string; value: number | string; detail: string }) {
   return (
     <article className="metric-card">
       <span>{label}</span>
