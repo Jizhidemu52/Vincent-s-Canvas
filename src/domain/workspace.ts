@@ -163,6 +163,7 @@ export interface HistoryEntry {
   operation?: OperationType;
   moduleType?: ModuleType;
   referenceCount?: number;
+  outputs?: AssetInput[];
   createdAt: string;
 }
 

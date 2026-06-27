@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adjustAccountCredits, callApi, configureModelPricing, listAdminAccounts, setAccountCreditLimit, createServerState, type ApiError } from "./api";
+import { adjustAccountCredits, callApi, configureModelPricing, listAdminAccounts, saveWorkspaceSnapshot, setAccountCreditLimit, createServerState, type ApiError } from "./api";
 import type { GenerationRequest, GenerationResult, ModelDefinition, Profile } from "../src/domain/workspace";
 import type { AdminAccountSummary, AdminUsageSummary, ProviderHealth } from "./api";
 
@@ -43,7 +43,8 @@ describe("backend hosted mock API", () => {
       nodeId: "node-1",
       modelId: "gpt-image-2-low",
       outputCount: 2,
-      creditCost: 4
+      creditCost: 4,
+      outputs: result.outputs
     });
   });
 
@@ -132,6 +133,20 @@ describe("backend hosted mock API", () => {
     expect(adjusted.creditBalance).toBe(45);
     expect(aliceProfile.creditBalance).toBe(45);
     expect(aliceProfile.creditUsed).toBe(0);
+  });
+
+  it("keeps stale workspace snapshots from overwriting server-owned credit balances", () => {
+    const state = createServerState({ userId: "admin@company.local", role: "admin", creditBalance: 180 });
+    adjustAccountCredits(state, { targetUserId: "admin@company.local", delta: 20 }, "admin@company.local");
+
+    const staleSnapshot = {
+      ...state,
+      profile: { ...state.profile, creditBalance: 180, credits: 180, creditUsed: 0 }
+    };
+    const saved = saveWorkspaceSnapshot(state, staleSnapshot, "admin@company.local");
+
+    expect(saved.profile.creditBalance).toBe(200);
+    expect(saved.profile.credits).toBe(200);
   });
 
   it("lets admins cap designer credits and rejects adjustments above the limit", () => {

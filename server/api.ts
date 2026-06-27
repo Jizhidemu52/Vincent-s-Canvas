@@ -308,8 +308,14 @@ export function getWorkspaceSnapshot(state: ServerState, userId?: string): Works
 
 export function saveWorkspaceSnapshot(state: ServerState, snapshot: Partial<WorkspaceSnapshot>, userId?: string): WorkspaceSnapshot {
   const current = getAccountWorkspace(state, userId);
+  const incomingProfile = snapshot.profile;
   const account: AccountWorkspace = {
-    profile: snapshot.profile ?? current.profile,
+    profile: {
+      ...current.profile,
+      userId: incomingProfile?.userId ?? current.profile.userId,
+      designerName: incomingProfile?.designerName ?? current.profile.designerName,
+      role: incomingProfile?.role ?? current.profile.role
+    },
     projects: Array.isArray(snapshot.projects) ? snapshot.projects : current.projects,
     activeProjectId: Object.prototype.hasOwnProperty.call(snapshot, "activeProjectId") ? snapshot.activeProjectId : current.activeProjectId,
     history: Array.isArray(snapshot.history) ? snapshot.history : current.history,
@@ -345,6 +351,9 @@ function assertRequest(state: ServerState, request: GenerationRequest, requestId
 
 function runModel(state: ServerState, request: GenerationRequest, requestId?: string, userId?: string): GenerationResult {
   const { model, cost, account } = assertRequest(state, request, requestId, userId);
+  const historyId = `history-${allHistory(state).length + 1}`;
+  const result = runProviderModel(request, model, historyId, cost);
+
   if (requestId) {
     state.submittedRequestIds.add(requestId);
   }
@@ -355,7 +364,6 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
     credits: account.profile.creditBalance - cost
   };
 
-  const historyId = `history-${allHistory(state).length + 1}`;
   const entry: HistoryEntry = {
     id: historyId,
     projectId: request.projectId,
@@ -366,12 +374,13 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
     creditCost: cost,
     operation: request.operation,
     referenceCount: request.referenceNodeIds.length,
+    outputs: result.outputs,
     createdAt: new Date().toISOString()
   };
   account.history = [entry, ...account.history];
   saveAccountWorkspace(state, account, userId);
 
-  return runProviderModel(request, model, historyId, cost);
+  return result;
 }
 
 export const apiRoutes = {

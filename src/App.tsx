@@ -887,6 +887,13 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
                     <small>{entry.creditCost} credits · {entry.outputCount} output · {entry.referenceCount ?? 0} refs</small>
                   </div>
                   <p>{entry.prompt}</p>
+                  {entry.outputs?.length ? (
+                    <div className="history-output-strip" aria-label={`History outputs for ${entry.id}`}>
+                      {entry.outputs.map((output) => (
+                        <img key={`${entry.id}-${output.name}-${output.source}`} src={output.source} alt={`History output ${output.name}`} />
+                      ))}
+                    </div>
+                  ) : null}
                   <button type="button" onClick={() => project && onOpenProject(project.id)} disabled={!project}>
                     Open project
                   </button>

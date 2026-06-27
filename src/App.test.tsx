@@ -289,19 +289,20 @@ beforeEach(() => {
           creditCost,
           operation: request.operation,
           referenceCount: request.referenceNodeIds.length,
-          createdAt: new Date().toISOString()
-        };
-        backendHistory = [historyEntry, ...backendHistory];
-        return jsonResponse({
-          status: "succeeded",
-          creditCost,
-          historyId: historyEntry.id,
+          createdAt: new Date().toISOString(),
           outputs: Array.from({ length: request.outputCount }, (_, index) => ({
             name: `backend result ${index + 1}.jpg`,
             source: `mock://${request.operation}/${request.nodeId}/${index + 1}`,
             width: 1024,
             height: 1024
           }))
+        };
+        backendHistory = [historyEntry, ...backendHistory];
+        return jsonResponse({
+          status: "succeeded",
+          creditCost,
+          historyId: historyEntry.id,
+          outputs: historyEntry.outputs
         });
       }
       return jsonResponse({ status: "failed", errorMessage: "Route not found" }, 404);
@@ -905,6 +906,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("region", { name: "History management" })).toBeInTheDocument();
     expect(screen.getByText(/生成一款带盘扣的黑色马甲/)).toBeInTheDocument();
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "History output backend result 1.jpg" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Profile" }));
     expect(screen.getByRole("region", { name: "Profile credit management" })).toBeInTheDocument();

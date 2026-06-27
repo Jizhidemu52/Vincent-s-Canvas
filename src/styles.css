@@ -461,6 +461,23 @@ button {
   font-weight: 800;
 }
 
+.history-output-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.history-output-strip img {
+  width: 52px;
+  height: 52px;
+  border: 1px solid #dedede;
+  border-radius: 7px;
+  background: #fff;
+  object-fit: cover;
+}
+
 .empty-history {
   border: 1px dashed #cfcfcf;
   border-radius: 8px;
