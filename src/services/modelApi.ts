@@ -135,6 +135,8 @@ export type WorkspaceSnapshot = Pick<
   "profile" | "projects" | "activeProjectId" | "history" | "assets" | "prompts" | "modelRegistry"
 >;
 
+type WorkspaceSaveSnapshot = Omit<WorkspaceSnapshot, "modelRegistry">;
+
 function endpointForOperation(operation: GenerationRequest["operation"]) {
   if (operation === "edit") return "/api/edits";
   if (operation === "upscale") return "/api/upscale";
@@ -183,14 +185,13 @@ export async function fetchWorkspaceSnapshot(userId?: string): Promise<Workspace
 }
 
 export async function saveWorkspaceSnapshot(workspace: Workspace, userId?: string): Promise<WorkspaceSnapshot> {
-  const snapshot: WorkspaceSnapshot = {
+  const snapshot: WorkspaceSaveSnapshot = {
     profile: workspace.profile,
     projects: workspace.projects,
     activeProjectId: workspace.activeProjectId,
     history: workspace.history,
     assets: workspace.assets,
-    prompts: workspace.prompts,
-    modelRegistry: workspace.modelRegistry
+    prompts: workspace.prompts
   };
   const response = await fetch(`${API_BASE_URL}/api/workspace`, {
     method: "POST",

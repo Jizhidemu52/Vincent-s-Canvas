@@ -687,10 +687,11 @@ describe("Designer canvas app shell", () => {
       const latestSave = workspaceSaves[workspaceSaves.length - 1];
       expect(latestSave).toBeTruthy();
       expect(latestSave?.[1]?.headers).toMatchObject({ "x-user-id": "admin@company.local" });
-      const body = JSON.parse(String(latestSave?.[1]?.body)) as Workspace;
-      expect(body.projects.length).toBeGreaterThan(0);
-      expect(body.activeProjectId).toBe(body.projects[0].id);
-      expect(body.projects[0].nodes.some((node) => node.name === "fashion-reference.jpg")).toBe(true);
+      const body = JSON.parse(String(latestSave?.[1]?.body)) as Partial<Workspace>;
+      expect(body.projects?.length).toBeGreaterThan(0);
+      expect(body.activeProjectId).toBe(body.projects?.[0].id);
+      expect(body.projects?.[0].nodes.some((node) => node.name === "fashion-reference.jpg")).toBe(true);
+      expect(body).not.toHaveProperty("modelRegistry");
     });
   });
 
