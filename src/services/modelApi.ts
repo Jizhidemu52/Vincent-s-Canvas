@@ -1,4 +1,4 @@
-import type { GenerationRequest, GenerationResult, HistoryEntry, ModelDefinition, Profile, Workspace } from "../domain/workspace";
+import type { GenerationRequest, GenerationResult, HistoryEntry, ModelDefinition, OperationType, Profile, Workspace } from "../domain/workspace";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -12,6 +12,20 @@ export interface CreditAdjustmentRequest {
   targetUserId: string;
   delta: number;
   reason?: string;
+}
+
+export interface ProviderHealth {
+  provider: ModelDefinition["provider"];
+  status: "healthy" | "degraded";
+  modelCount: number;
+  keyLocation: "server";
+  mode: "mock" | "live-ready";
+  secretConfigured: boolean;
+  adapterId: string;
+  requiredSecrets: string[];
+  configuredSecrets: string[];
+  missingSecrets: string[];
+  supportedOperations: OperationType[];
 }
 
 export type WorkspaceSnapshot = Pick<
@@ -91,4 +105,9 @@ export async function adjustDesignerCredits(request: CreditAdjustmentRequest, ad
     body: JSON.stringify(request)
   });
   return readJson<Profile>(response);
+}
+
+export async function fetchProviderHealth(adminUserId?: string): Promise<ProviderHealth[]> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/providers`, { headers: userHeaders(adminUserId) });
+  return readJson<ProviderHealth[]>(response);
 }

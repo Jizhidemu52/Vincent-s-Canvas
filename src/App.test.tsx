@@ -96,6 +96,36 @@ beforeEach(() => {
           { id: "background-cleaner", name: "Remove Background", provider: "internal", group: "Operations", capability: ["removeBackground"], cost: 2 }
         ]);
       }
+      if (url.endsWith("/api/admin/providers")) {
+        return jsonResponse([
+          {
+            provider: "openai",
+            status: "healthy",
+            modelCount: 1,
+            keyLocation: "server",
+            mode: "mock",
+            secretConfigured: false,
+            adapterId: "openai-image-adapter",
+            requiredSecrets: ["OPENAI_API_KEY"],
+            configuredSecrets: [],
+            missingSecrets: ["OPENAI_API_KEY"],
+            supportedOperations: ["generate", "edit"]
+          },
+          {
+            provider: "internal",
+            status: "healthy",
+            modelCount: 2,
+            keyLocation: "server",
+            mode: "live-ready",
+            secretConfigured: true,
+            adapterId: "internal-operations-adapter",
+            requiredSecrets: [],
+            configuredSecrets: [],
+            missingSecrets: [],
+            supportedOperations: ["upscale", "removeBackground"]
+          }
+        ]);
+      }
       if (url.endsWith("/api/generations") || url.endsWith("/api/edits") || url.endsWith("/api/upscale") || url.endsWith("/api/remove-bg")) {
         const request = JSON.parse(String(init?.body)) as GenerationRequest;
         const unitCost = request.modelId === "nanobanana2" ? 11 : request.modelId === "upscale-pro" ? 4 : request.modelId === "background-cleaner" ? 2 : 7;
@@ -413,6 +443,8 @@ describe("Designer canvas app shell", () => {
 
     expect(screen.getByRole("heading", { name: "Admin monitoring" })).toBeInTheDocument();
     expect(screen.getByText("Model providers")).toBeInTheDocument();
+    expect(await screen.findByText(/openai-image-adapter/i)).toBeInTheDocument();
+    expect(screen.getByText(/missing: OPENAI_API_KEY/i)).toBeInTheDocument();
     expect(screen.getByText("Access policy")).toBeInTheDocument();
     expect(screen.getByText("Server only")).toBeInTheDocument();
     expect(screen.getByText("Credit management")).toBeInTheDocument();

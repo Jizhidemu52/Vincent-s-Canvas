@@ -79,7 +79,15 @@ import {
   type Project,
   type Workspace
 } from "./domain/workspace";
-import { adjustDesignerCredits, fetchBackendSnapshot, fetchWorkspaceSnapshot, saveWorkspaceSnapshot, submitGenerationRequest } from "./services/modelApi";
+import {
+  adjustDesignerCredits,
+  fetchBackendSnapshot,
+  fetchProviderHealth,
+  fetchWorkspaceSnapshot,
+  saveWorkspaceSnapshot,
+  submitGenerationRequest,
+  type ProviderHealth
+} from "./services/modelApi";
 
 const TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 const SECOND_TEST_IMAGE = "/fixtures/fashion-reference.jpg";
@@ -654,7 +662,7 @@ export default function App() {
   }
 
   if (view === "admin") {
-    return <AdminView workspace={workspace} notice={apiNotice} onBack={() => setView("home")} onAdjustCredits={adjustCredits} />;
+    return <AdminView workspace={workspace} activeUserId={activeUserId} notice={apiNotice} onBack={() => setView("home")} onAdjustCredits={adjustCredits} />;
   }
 
   if (view === "login") {
@@ -920,11 +928,13 @@ function ProfilePanel({ workspace }: { workspace: Workspace }) {
 
 function AdminView({
   workspace,
+  activeUserId,
   notice,
   onBack,
   onAdjustCredits
 }: {
   workspace: Workspace;
+  activeUserId?: string;
   notice: string;
   onBack: () => void;
   onAdjustCredits: (targetUserId: string, delta: number, reason: string) => Promise<Profile>;
@@ -937,10 +947,25 @@ function AdminView({
   const [creditReason, setCreditReason] = useState("Monthly design allocation");
   const [creditNotice, setCreditNotice] = useState(notice);
   const [isAdjusting, setIsAdjusting] = useState(false);
+  const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
   const providers = workspace.modelRegistry.reduce<Record<string, number>>((memo, model) => {
     memo[model.provider] = (memo[model.provider] ?? 0) + 1;
     return memo;
   }, {});
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchProviderHealth(activeUserId)
+      .then((health) => {
+        if (!cancelled) setProviderHealth(health);
+      })
+      .catch((error) => {
+        if (!cancelled) setCreditNotice(error instanceof Error ? error.message : "Provider health unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUserId]);
 
   async function submitCreditAdjustment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -975,7 +1000,17 @@ function AdminView({
         <section className="admin-grid">
           <article className="admin-card">
             <h2>Model providers</h2>
-            {Object.entries(providers).map(([provider, count]) => (
+            {providerHealth.map((provider) => (
+              <div className="admin-row" key={provider.provider}>
+                <span>{provider.provider}</span>
+                <strong>{provider.mode}</strong>
+                <small>
+                  {provider.modelCount} models · {provider.adapterId} ·{" "}
+                  {provider.secretConfigured ? `configured: ${provider.configuredSecrets.join(", ") || "server internal"}` : `missing: ${provider.missingSecrets.join(" or ")}`}
+                </small>
+              </div>
+            ))}
+            {!providerHealth.length && Object.entries(providers).map(([provider, count]) => (
               <div className="admin-row" key={provider}>
                 <span>{provider}</span>
                 <strong>{count} models</strong>

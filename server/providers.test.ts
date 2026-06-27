@@ -11,6 +11,15 @@ const openAiModel: ModelDefinition = {
   cost: 2
 };
 
+const nanoBananaModel: ModelDefinition = {
+  id: "nanobanana2",
+  name: "Nano Banana 2",
+  provider: "nanobanana",
+  group: "Trending models",
+  capability: ["generate", "edit"],
+  cost: 11
+};
+
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
   return {
     projectId: "project-provider",
@@ -32,17 +41,20 @@ describe("provider adapters", () => {
   it("reports server-hosted mock mode without exposing secrets", () => {
     const health = getProviderHealth([openAiModel]);
 
-    expect(health).toEqual([
-      {
-        provider: "openai",
-        status: "healthy",
-        modelCount: 1,
-        keyLocation: "server",
-        mode: "mock",
-        secretConfigured: false
-      }
-    ]);
-    expect(JSON.stringify(health)).not.toContain("OPENAI_API_KEY");
+    expect(health[0]).toMatchObject({
+      provider: "openai",
+      status: "healthy",
+      modelCount: 1,
+      keyLocation: "server",
+      mode: "mock",
+      secretConfigured: false,
+      adapterId: "openai-image-adapter",
+      requiredSecrets: ["OPENAI_API_KEY"],
+      configuredSecrets: [],
+      missingSecrets: ["OPENAI_API_KEY"],
+      supportedOperations: ["generate", "edit"]
+    });
+    expect(JSON.stringify(health)).not.toContain("apiKey");
   });
 
   it("switches provider health to live-ready when the server has a key", () => {
@@ -57,6 +69,22 @@ describe("provider adapters", () => {
       keyLocation: "server"
     });
     expect(JSON.stringify(health)).not.toContain("sk-test-secret");
+  });
+
+  it("supports provider secret aliases without requiring every alias to be configured", () => {
+    vi.stubEnv("NANO_BANANA_API_KEY", "nano-secret");
+
+    const [health] = getProviderHealth([nanoBananaModel]);
+
+    expect(health).toMatchObject({
+      provider: "nanobanana",
+      mode: "live-ready",
+      secretConfigured: true,
+      configuredSecrets: ["NANO_BANANA_API_KEY"],
+      missingSecrets: []
+    });
+    expect(health.requiredSecrets).toEqual(["NANOBANANA_API_KEY", "NANO_BANANA_API_KEY"]);
+    expect(JSON.stringify(health)).not.toContain("nano-secret");
   });
 
   it("runs model requests through the provider adapter result contract", () => {

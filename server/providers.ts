@@ -1,4 +1,4 @@
-import type { GenerationRequest, GenerationResult, ModelDefinition } from "../src/domain/workspace";
+import type { GenerationRequest, GenerationResult, ModelDefinition, OperationType } from "../src/domain/workspace";
 
 export type ProviderName = ModelDefinition["provider"];
 
@@ -9,6 +9,11 @@ export interface ProviderHealth {
   keyLocation: "server";
   mode: "mock" | "live-ready";
   secretConfigured: boolean;
+  adapterId: string;
+  requiredSecrets: string[];
+  configuredSecrets: string[];
+  missingSecrets: string[];
+  supportedOperations: OperationType[];
 }
 
 export interface ProviderAdapter {
@@ -16,17 +21,48 @@ export interface ProviderAdapter {
   execute(request: GenerationRequest, model: ModelDefinition, historyId: string, creditCost: number): GenerationResult;
 }
 
-const providerSecretNames: Record<ProviderName, string[]> = {
-  openai: ["OPENAI_API_KEY"],
-  nanobanana: ["NANOBANANA_API_KEY", "NANO_BANANA_API_KEY"],
-  comfyui: ["COMFYUI_API_URL", "COMFYUI_API_KEY"],
-  runninghub: ["RUNNINGHUB_API_KEY"],
-  internal: []
+interface ProviderConfig {
+  adapterId: string;
+  requiredSecrets: string[];
+  supportedOperations: OperationType[];
+}
+
+const providerConfigs: Record<ProviderName, ProviderConfig> = {
+  openai: {
+    adapterId: "openai-image-adapter",
+    requiredSecrets: ["OPENAI_API_KEY"],
+    supportedOperations: ["generate", "edit"]
+  },
+  nanobanana: {
+    adapterId: "nanobanana-image-adapter",
+    requiredSecrets: ["NANOBANANA_API_KEY", "NANO_BANANA_API_KEY"],
+    supportedOperations: ["generate", "edit"]
+  },
+  comfyui: {
+    adapterId: "comfyui-workflow-adapter",
+    requiredSecrets: ["COMFYUI_API_URL"],
+    supportedOperations: ["generate", "edit", "upscale", "removeBackground"]
+  },
+  runninghub: {
+    adapterId: "runninghub-workflow-adapter",
+    requiredSecrets: ["RUNNINGHUB_API_KEY"],
+    supportedOperations: ["generate", "edit", "upscale", "removeBackground"]
+  },
+  internal: {
+    adapterId: "internal-operations-adapter",
+    requiredSecrets: [],
+    supportedOperations: ["generate", "edit", "upscale", "removeBackground"]
+  }
 };
 
-function hasServerSecret(provider: ProviderName) {
-  const names = providerSecretNames[provider];
-  return names.length === 0 || names.some((name) => Boolean(process.env[name]?.trim()));
+function configuredSecrets(provider: ProviderName) {
+  return providerConfigs[provider].requiredSecrets.filter((name) => Boolean(process.env[name]?.trim()));
+}
+
+function missingSecrets(provider: ProviderName) {
+  const config = providerConfigs[provider];
+  if (config.requiredSecrets.length === 0 || configuredSecrets(provider).length > 0) return [];
+  return config.requiredSecrets;
 }
 
 function sizeForOperation(operation: GenerationRequest["operation"]) {
@@ -77,14 +113,22 @@ export function getProviderHealth(models: ModelDefinition[]): ProviderHealth[] {
     counts.set(model.provider, (counts.get(model.provider) ?? 0) + 1);
   }
   return Array.from(counts.entries()).map(([provider, modelCount]) => {
-    const secretConfigured = hasServerSecret(provider);
+    const config = providerConfigs[provider];
+    const configured = configuredSecrets(provider);
+    const missing = missingSecrets(provider);
+    const secretConfigured = missing.length === 0;
     return {
       provider,
       status: "healthy",
       modelCount,
       keyLocation: "server",
       mode: secretConfigured ? "live-ready" : "mock",
-      secretConfigured
+      secretConfigured,
+      adapterId: config.adapterId,
+      requiredSecrets: config.requiredSecrets,
+      configuredSecrets: configured,
+      missingSecrets: missing,
+      supportedOperations: config.supportedOperations
     };
   });
 }
