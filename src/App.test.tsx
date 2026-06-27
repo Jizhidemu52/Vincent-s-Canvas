@@ -751,6 +751,39 @@ describe("Designer canvas app shell", () => {
     });
   });
 
+  it("lets designers copy, delete, undo, and redo selected image nodes", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const imageNode = screen.getByRole("button", { name: /Image fashion-reference\.jpg/i });
+    await user.click(imageNode);
+    const initialNodeCount = screen.getAllByTestId("canvas-node").length;
+    const initialLeft = Number.parseInt(imageNode.style.left, 10);
+    const initialTop = Number.parseInt(imageNode.style.top, 10);
+
+    await user.click(screen.getByRole("button", { name: "Copy/Paste" }));
+
+    const copiedNode = await screen.findByRole("button", { name: /Image fashion-reference\.jpg copy/i });
+    expect(screen.getAllByTestId("canvas-node")).toHaveLength(initialNodeCount + 1);
+    expect(copiedNode).toHaveStyle({ left: `${initialLeft + 42}px`, top: `${initialTop + 42}px` });
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Image fashion-reference\.jpg copy/i })).not.toBeInTheDocument();
+    });
+    expect(screen.getAllByTestId("canvas-node")).toHaveLength(initialNodeCount);
+
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+    expect(await screen.findByRole("button", { name: /Image fashion-reference\.jpg copy/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Redo" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Image fashion-reference\.jpg copy/i })).not.toBeInTheDocument();
+    });
+  });
+
   it("imports externally dropped image files onto the canvas at the drop point", async () => {
     const user = userEvent.setup();
     await login(user);
@@ -1179,6 +1212,28 @@ describe("Designer canvas app shell", () => {
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
     expect(screen.getByText("Backend removeBackground succeeded, 2 credits used")).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/remove-bg$/), expect.objectContaining({ method: "POST" }));
+  });
+
+  it("saves a selected image node to the asset library and inserts it back onto the canvas", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    const initialNodeCount = screen.getAllByTestId("canvas-node").length;
+
+    await user.click(screen.getByRole("button", { name: "Save asset" }));
+
+    expect(screen.getByText("My assets")).toBeInTheDocument();
+    const savedAsset = screen.getByRole("button", { name: /fashion-reference\.jpg.*Use in canvas/i });
+    expect(savedAsset).toBeInTheDocument();
+
+    await user.click(savedAsset);
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("canvas-node")).toHaveLength(initialNodeCount + 1);
+    });
+    expect(screen.getAllByRole("button", { name: /Image fashion-reference\.jpg/i }).length).toBeGreaterThan(1);
   });
 
   it("runs workflow modules through backend APIs", async () => {
