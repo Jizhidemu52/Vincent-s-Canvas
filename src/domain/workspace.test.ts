@@ -415,6 +415,37 @@ describe("designer canvas workspace behavior", () => {
     expect(plan.issues).toEqual([]);
   });
 
+  it("blocks workflow execution plans when a model does not support the node operation", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Capability gated workflow");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat.png",
+      source: "coat-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const invalidUpscale = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "upscale",
+      prompt: "preserve fabric texture while enlarging",
+      modelId: "gpt-image-2-medium"
+    });
+    const upscaleNode = invalidUpscale.projects[0].nodes.find((node) => node.moduleType === "upscale")!;
+
+    const plan = buildWorkflowExecutionPlan(invalidUpscale, project.id, source.id);
+
+    expect(plan.status).toBe("blocked");
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          nodeId: upscaleNode.id,
+          severity: "error",
+          message: "Model gpt-image-2-medium does not support upscale"
+        })
+      ])
+    );
+  });
+
   it("blocks workflow execution plans with missing prompts or cycles before credits are spent", () => {
     const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Broken workflow plan");
     const withAsset = addAssetToProject(workspace, project.id, {

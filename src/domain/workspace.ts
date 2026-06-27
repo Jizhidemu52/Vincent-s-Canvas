@@ -1233,8 +1233,11 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
 
     const referenceNodeIds = nextNode.references.length ? nextNode.references : [cursorId];
     const model = workspace.modelRegistry.find((item) => item.id === nextNode.generation.modelId);
+    const operation = operationForModuleNode(nextNode);
     if (!model) {
       issues.push({ nodeId: nextNode.id, severity: "warning", message: "Model is not registered" });
+    } else if (!model.capability.includes(operation as ModuleType)) {
+      issues.push({ nodeId: nextNode.id, severity: "error", message: `Model ${model.id} does not support ${operation}` });
     }
     if (!nextNode.generation.prompt.trim()) {
       issues.push({ nodeId: nextNode.id, severity: "error", message: "Prompt is required" });
@@ -1244,7 +1247,7 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
       nodeId: nextNode.id,
       name: nextNode.name,
       moduleType: nextNode.moduleType,
-      operation: operationForModuleNode(nextNode),
+      operation,
       modelId: nextNode.generation.modelId,
       prompt: nextNode.generation.prompt,
       outputCount: nextNode.generation.outputCount,
