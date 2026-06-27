@@ -22,6 +22,7 @@ export interface Profile {
   creditBalance: number;
   creditUsed: number;
   credits: number;
+  creditLimit?: number;
 }
 
 export interface NodePort {
@@ -165,6 +166,33 @@ export interface HistoryEntry {
   createdAt: string;
 }
 
+export interface WorkflowPlanIssue {
+  nodeId?: string;
+  severity: "warning" | "error";
+  message: string;
+}
+
+export interface WorkflowPlanStep {
+  nodeId: string;
+  name: string;
+  moduleType?: ModuleType;
+  operation: OperationType;
+  modelId: string;
+  prompt: string;
+  outputCount: number;
+  referenceNodeIds: string[];
+  referenceCount: number;
+  estimatedCreditCost: number;
+}
+
+export interface WorkflowExecutionPlan {
+  status: "ready" | "blocked" | "empty";
+  startNodeId: string;
+  steps: WorkflowPlanStep[];
+  issues: WorkflowPlanIssue[];
+  totalEstimatedCredits: number;
+}
+
 export interface LibraryAsset {
   id: string;
   type: "image" | "text";
@@ -211,6 +239,8 @@ export interface ModelDefinition {
   group: "Trending models" | "Image" | "Edit" | "Operations";
   capability: ModuleType[];
   cost: number;
+  priceCents?: number;
+  currency?: "CNY" | "USD";
 }
 
 export interface Workspace {
@@ -377,6 +407,21 @@ function connect(fromNodeId: string, toNodeId: string, fromPort = "out", toPort 
   };
 }
 
+function operationForModuleNode(node: CanvasNode): OperationType {
+  if (node.operation) return node.operation;
+  if (node.moduleType === "upscale") return "upscale";
+  if (node.moduleType === "removeBackground") return "removeBackground";
+  if (node.moduleType === "edit") return "edit";
+  if (node.type === "upscale") return "upscale";
+  if (node.type === "removeBg") return "removeBackground";
+  if (node.type === "edit") return "edit";
+  return "generate";
+}
+
+function isExecutableWorkflowNode(node: CanvasNode) {
+  return node.kind === "workflow" || node.type === "config" || node.type === "edit" || node.type === "upscale" || node.type === "removeBg";
+}
+
 function placeNextTo(node: CanvasNode, index = 1) {
   return {
     x: node.x + node.width + 120 * index,
@@ -420,7 +465,8 @@ export function createInitialWorkspace(profile: Partial<Profile> = {}): Workspac
       role: profile.role ?? "designer",
       creditBalance,
       creditUsed: profile.creditUsed ?? 0,
-      credits: creditBalance
+      credits: creditBalance,
+      creditLimit: profile.creditLimit
     },
     projects: [],
     history: [],
@@ -1083,6 +1129,72 @@ export function createWorkflowModuleFromSelection(
       selectedNodeIds: [moduleNode.id]
     });
   });
+}
+
+export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: string, startNodeId: string): WorkflowExecutionPlan {
+  const project = findProject(workspace, projectId);
+  findNode(project, startNodeId);
+  const steps: WorkflowPlanStep[] = [];
+  const issues: WorkflowPlanIssue[] = [];
+  const visited = new Set<string>([startNodeId]);
+  let cursorId = startNodeId;
+
+  while (true) {
+    const outgoing = project.connections.filter((connection) => connection.fromNodeId === cursorId);
+    if (!outgoing.length) break;
+    if (outgoing.length > 1) {
+      issues.push({
+        nodeId: cursorId,
+        severity: "warning",
+        message: "Multiple downstream connections found; the first connection will run"
+      });
+    }
+
+    const nextNode = findNode(project, outgoing[0].toNodeId);
+    if (visited.has(nextNode.id)) {
+      issues.push({ nodeId: nextNode.id, severity: "error", message: "Workflow cycle detected" });
+      break;
+    }
+    visited.add(nextNode.id);
+
+    if (!isExecutableWorkflowNode(nextNode)) {
+      cursorId = nextNode.id;
+      continue;
+    }
+
+    const referenceNodeIds = nextNode.references.length ? nextNode.references : [cursorId];
+    const model = workspace.modelRegistry.find((item) => item.id === nextNode.generation.modelId);
+    if (!model) {
+      issues.push({ nodeId: nextNode.id, severity: "warning", message: "Model is not registered" });
+    }
+    if (!nextNode.generation.prompt.trim()) {
+      issues.push({ nodeId: nextNode.id, severity: "error", message: "Prompt is required" });
+    }
+    const unitCost = model?.cost ?? 1;
+    steps.push({
+      nodeId: nextNode.id,
+      name: nextNode.name,
+      moduleType: nextNode.moduleType,
+      operation: operationForModuleNode(nextNode),
+      modelId: nextNode.generation.modelId,
+      prompt: nextNode.generation.prompt,
+      outputCount: nextNode.generation.outputCount,
+      referenceNodeIds,
+      referenceCount: referenceNodeIds.length,
+      estimatedCreditCost: unitCost * nextNode.generation.outputCount
+    });
+    cursorId = nextNode.id;
+  }
+
+  const hasErrors = issues.some((issue) => issue.severity === "error");
+  const totalEstimatedCredits = steps.reduce((sum, step) => sum + step.estimatedCreditCost, 0);
+  return {
+    status: hasErrors ? "blocked" : steps.length ? "ready" : "empty",
+    startNodeId,
+    steps,
+    issues,
+    totalEstimatedCredits
+  };
 }
 
 function executeModule(workspace: Workspace, projectId: string, moduleNode: CanvasNode): Workspace {

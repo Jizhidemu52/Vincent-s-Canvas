@@ -5,11 +5,15 @@ import {
   adjustAccountCredits,
   apiRoutes,
   callApi,
+  configureModelPricing,
   createServerState,
   getWorkspaceSnapshot,
   saveWorkspaceSnapshot,
+  setAccountCreditLimit,
   type ApiError,
   type CreditAdjustmentRequest,
+  type CreditLimitRequest,
+  type ModelPricingRequest,
   type ServerState,
   type WorkspaceSnapshot
 } from "./api";
@@ -17,7 +21,7 @@ import { loadServerState, saveServerState } from "./storage";
 import type { GenerationRequest, GenerationResult } from "../src/domain/workspace";
 
 type ApiPath = keyof typeof apiRoutes;
-type ApiResult = ReturnType<(typeof apiRoutes)[ApiPath]> | ApiError;
+type ApiResult = ReturnType<(typeof apiRoutes)[ApiPath]> | ApiError | unknown;
 
 const readOnlyRoutes = new Set<ApiPath>([
   "/api/models",
@@ -25,6 +29,7 @@ const readOnlyRoutes = new Set<ApiPath>([
   "/api/history",
   "/api/admin/audit",
   "/api/admin/usage",
+  "/api/admin/accounts",
   "/api/admin/providers"
 ]);
 
@@ -68,11 +73,18 @@ function statusFromApiError(error: ApiError) {
   return 400;
 }
 
-function isApiError(result: ApiResult): result is ApiError {
-  return "errorMessage" in result && result.status === "failed" && !("outputs" in result);
+function isApiError(result: unknown): result is ApiError {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    "errorMessage" in result &&
+    "status" in result &&
+    result.status === "failed" &&
+    !("outputs" in result)
+  );
 }
 
-function statusFromApiResult(result: ApiResult) {
+function statusFromApiResult(result: unknown) {
   return isApiError(result) ? statusFromApiError(result) : 200;
 }
 
@@ -139,6 +151,42 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
         }
         const body = await readJsonBody<Partial<CreditAdjustmentRequest>>(request, bodyLimitBytes);
         const result = adjustAccountCredits(state, body ?? {}, userId);
+        if (!isApiError(result) && stateFilePath) {
+          saveServerState(stateFilePath, state);
+        }
+        sendJson(response, statusFromApiResult(result), result);
+        return;
+      }
+
+      if (pathname === "/api/admin/credit-limit") {
+        if (request.method === "OPTIONS") {
+          sendJson(response, 204);
+          return;
+        }
+        if (request.method !== "POST") {
+          sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
+          return;
+        }
+        const body = await readJsonBody<Partial<CreditLimitRequest>>(request, bodyLimitBytes);
+        const result = setAccountCreditLimit(state, body ?? {}, userId);
+        if (!isApiError(result) && stateFilePath) {
+          saveServerState(stateFilePath, state);
+        }
+        sendJson(response, statusFromApiResult(result), result);
+        return;
+      }
+
+      if (pathname === "/api/admin/model-pricing") {
+        if (request.method === "OPTIONS") {
+          sendJson(response, 204);
+          return;
+        }
+        if (request.method !== "POST") {
+          sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
+          return;
+        }
+        const body = await readJsonBody<Partial<ModelPricingRequest>>(request, bodyLimitBytes);
+        const result = configureModelPricing(state, body ?? {}, userId);
         if (!isApiError(result) && stateFilePath) {
           saveServerState(stateFilePath, state);
         }

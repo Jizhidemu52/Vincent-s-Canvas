@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { adjustAccountCredits, callApi, createServerState, type ApiError } from "./api";
-import type { GenerationRequest, GenerationResult, Profile } from "../src/domain/workspace";
-import type { AdminUsageSummary, ProviderHealth } from "./api";
+import { adjustAccountCredits, callApi, configureModelPricing, listAdminAccounts, setAccountCreditLimit, createServerState, type ApiError } from "./api";
+import type { GenerationRequest, GenerationResult, ModelDefinition, Profile } from "../src/domain/workspace";
+import type { AdminAccountSummary, AdminUsageSummary, ProviderHealth } from "./api";
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
   return {
@@ -132,6 +132,70 @@ describe("backend hosted mock API", () => {
     expect(adjusted.creditBalance).toBe(45);
     expect(aliceProfile.creditBalance).toBe(45);
     expect(aliceProfile.creditUsed).toBe(0);
+  });
+
+  it("lets admins cap designer credits and rejects adjustments above the limit", () => {
+    const state = createServerState({ creditBalance: 30 });
+
+    const limited = setAccountCreditLimit(
+      state,
+      { targetUserId: "alice@company.local", creditLimit: 40, reason: "trial designer cap" },
+      "admin@company.local"
+    ) as Profile;
+    const overLimit = adjustAccountCredits(state, { targetUserId: "alice@company.local", delta: 20 }, "admin@company.local") as ApiError;
+    const withinLimit = adjustAccountCredits(state, { targetUserId: "alice@company.local", delta: 10 }, "admin@company.local") as Profile;
+
+    expect(limited.creditLimit).toBe(40);
+    expect(overLimit).toMatchObject({ status: "failed", errorMessage: "Credit balance cannot exceed assigned limit" });
+    expect(withinLimit.creditBalance).toBe(40);
+    expect(withinLimit.creditLimit).toBe(40);
+  });
+
+  it("lets admins list all designer accounts with balances, usage, limits, and activity", () => {
+    const state = createServerState({ userId: "admin@company.local", designerName: "Admin Ops", role: "admin", creditBalance: 100 });
+
+    callApi(state, "/api/generations", request({ outputCount: 1 }), "alice-admin-list", "alice@company.local");
+    setAccountCreditLimit(state, { targetUserId: "alice@company.local", creditLimit: 45 }, "admin@company.local");
+    adjustAccountCredits(state, { targetUserId: "bob@company.local", delta: 12 }, "admin@company.local");
+
+    const accounts = listAdminAccounts(state, "admin@company.local") as AdminAccountSummary[];
+    const unauthorized = listAdminAccounts(state, "designer@company.local") as ApiError;
+
+    expect(accounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ userId: "admin@company.local", designerName: "Admin Ops", role: "admin", creditBalance: 100, projectCount: 0 }),
+        expect.objectContaining({
+          userId: "alice@company.local",
+          designerName: "alice",
+          role: "designer",
+          creditBalance: 45,
+          creditUsed: 2,
+          creditLimit: 45,
+          historyCount: 1
+        }),
+        expect.objectContaining({ userId: "bob@company.local", role: "designer", creditBalance: 112, creditUsed: 0, historyCount: 0 })
+      ])
+    );
+    expect(accounts.map((account) => account.userId)).toEqual(["admin@company.local", "alice@company.local", "bob@company.local"]);
+    expect(unauthorized).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+  });
+
+  it("lets admins configure model credit cost and displayed money price used for later generations", () => {
+    const state = createServerState({ creditBalance: 30 });
+
+    const priced = configureModelPricing(
+      state,
+      { modelId: "gpt-image-2-low", cost: 5, priceCents: 250, currency: "CNY" },
+      "admin@company.local"
+    ) as ModelDefinition;
+    const result = callApi(state, "/api/generations", request({ outputCount: 2 }), "priced-generation") as GenerationResult;
+    const profile = callApi(state, "/api/profile") as Profile;
+    const models = callApi(state, "/api/models") as ModelDefinition[];
+
+    expect(priced).toMatchObject({ id: "gpt-image-2-low", cost: 5, priceCents: 250, currency: "CNY" });
+    expect(result.creditCost).toBe(10);
+    expect(profile.creditBalance).toBe(20);
+    expect(models.find((model) => model.id === "gpt-image-2-low")).toMatchObject({ cost: 5, priceCents: 250, currency: "CNY" });
   });
 
   it("rejects unauthorized or invalid credit adjustments without dirty side effects", () => {

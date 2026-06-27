@@ -664,6 +664,49 @@ button {
   padding-top: 0;
 }
 
+.team-accounts-card {
+  grid-column: span 2;
+}
+
+.admin-account-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-account-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.4fr) minmax(130px, 0.9fr) minmax(150px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid #ececec;
+  padding: 10px 0;
+}
+
+.admin-account-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.admin-account-row div {
+  display: grid;
+  gap: 2px;
+}
+
+.admin-account-row span,
+.admin-account-row small {
+  color: #767676;
+}
+
+.admin-account-row em {
+  border-radius: 999px;
+  background: #f0f0f0;
+  padding: 4px 8px;
+  color: #555;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+}
+
 .admin-credit-form {
   display: grid;
   gap: 10px;
@@ -680,15 +723,25 @@ button {
   font-weight: 800;
 }
 
-.admin-credit-form input {
+.admin-credit-form input,
+.admin-credit-form select {
   width: 100%;
   border: 1px solid #dadada;
   border-radius: 7px;
   padding: 9px 10px;
   font: inherit;
+  background: #fff;
 }
 
 .admin-credit-form small {
+  color: #666;
+  line-height: 1.35;
+}
+
+.admin-price-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
   color: #666;
   line-height: 1.35;
 }
@@ -1177,6 +1230,10 @@ button {
   color: #247a38;
 }
 
+.node-status.ready {
+  color: #4f5b6b;
+}
+
 .node-status.error {
   color: #c33b3b;
 }
@@ -1596,6 +1653,56 @@ button {
   margin: 0;
   color: #666;
   line-height: 1.35;
+}
+
+.workflow-plan {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 2px;
+  padding: 10px;
+  border: 1px solid rgba(18, 24, 38, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.workflow-plan.blocked {
+  border-color: rgba(214, 78, 78, 0.34);
+  background: rgba(255, 246, 246, 0.84);
+}
+
+.workflow-plan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workflow-plan-header small {
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.workflow-plan-step {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(18, 24, 38, 0.04);
+}
+
+.workflow-plan-step b {
+  font-size: 12px;
+}
+
+.workflow-plan-issue {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(18, 24, 38, 0.06);
+}
+
+.workflow-plan-issue.error {
+  color: #9f2f2f;
+  background: rgba(214, 78, 78, 0.12);
 }
 
 .prompt-library-tools {

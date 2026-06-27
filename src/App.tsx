@@ -47,6 +47,7 @@ import {
   addGenerationTargetFrame,
   applyBatchGenerationResultsToCanvas,
   applyGenerationResultToCanvas,
+  buildWorkflowExecutionPlan,
   commitShapeEdit,
   configureNodeGeneration,
   copyPasteSelectedNodes,
@@ -81,11 +82,15 @@ import {
 } from "./domain/workspace";
 import {
   adjustDesignerCredits,
+  configureAdminModelPricing,
+  fetchAdminAccounts,
   fetchBackendSnapshot,
   fetchProviderHealth,
   fetchWorkspaceSnapshot,
   saveWorkspaceSnapshot,
+  setDesignerCreditLimit,
   submitGenerationRequest,
+  type AdminAccountSummary,
   type ProviderHealth
 } from "./services/modelApi";
 
@@ -361,6 +366,16 @@ export default function App() {
   async function runWorkflowThroughApi() {
     if (!activeProject || !selectedNode) return;
     const projectId = activeProject.id;
+    const plan = buildWorkflowExecutionPlan(workspace, projectId, selectedNode.id);
+    const blockingIssue = plan.issues.find((issue) => issue.severity === "error");
+    if (blockingIssue) {
+      setApiNotice(`Workflow plan blocked: ${blockingIssue.message}`);
+      return;
+    }
+    if (!plan.steps.length) {
+      setApiNotice("No downstream workflow modules");
+      return;
+    }
     let cursorId = selectedNode.id;
     const visited = new Set<string>();
     let executed = 0;
@@ -623,12 +638,41 @@ export default function App() {
           ...current.profile,
           creditBalance: updatedProfile.creditBalance,
           credits: updatedProfile.credits,
-          creditUsed: updatedProfile.creditUsed
+          creditUsed: updatedProfile.creditUsed,
+          creditLimit: updatedProfile.creditLimit
         }
       }));
     }
     setApiNotice(`Credits updated for ${updatedProfile.userId}: ${updatedProfile.creditBalance} remaining`);
     return updatedProfile;
+  }
+
+  async function setCreditLimit(targetUserId: string, creditLimit: number, reason: string) {
+    const updatedProfile = await setDesignerCreditLimit({ targetUserId, creditLimit, reason }, activeUserId);
+    if (updatedProfile.userId === activeUserId) {
+      setWorkspace((current) => ({
+        ...current,
+        profile: {
+          ...current.profile,
+          creditBalance: updatedProfile.creditBalance,
+          credits: updatedProfile.credits,
+          creditUsed: updatedProfile.creditUsed,
+          creditLimit: updatedProfile.creditLimit
+        }
+      }));
+    }
+    setApiNotice(`Credit limit updated for ${updatedProfile.userId}: ${updatedProfile.creditLimit ?? "unlimited"}`);
+    return updatedProfile;
+  }
+
+  async function updateModelPricing(modelId: string, cost: number, priceCents: number, currency: ModelDefinition["currency"]) {
+    const updatedModel = await configureAdminModelPricing({ modelId, cost, priceCents, currency }, activeUserId);
+    setWorkspace((current) => ({
+      ...current,
+      modelRegistry: current.modelRegistry.map((model) => (model.id === updatedModel.id ? updatedModel : model))
+    }));
+    setApiNotice(`Model pricing updated for ${updatedModel.name}: ${updatedModel.cost} credits`);
+    return updatedModel;
   }
 
   if (view === "canvas" && activeProject) {
@@ -669,7 +713,17 @@ export default function App() {
   }
 
   if (view === "admin") {
-    return <AdminView workspace={workspace} activeUserId={activeUserId} notice={apiNotice} onBack={() => setView("home")} onAdjustCredits={adjustCredits} />;
+    return (
+      <AdminView
+        workspace={workspace}
+        activeUserId={activeUserId}
+        notice={apiNotice}
+        onBack={() => setView("home")}
+        onAdjustCredits={adjustCredits}
+        onSetCreditLimit={setCreditLimit}
+        onUpdateModelPricing={updateModelPricing}
+      />
+    );
   }
 
   if (view === "login") {
@@ -885,7 +939,9 @@ function ProfilePanel({ workspace }: { workspace: Workspace }) {
         <article className="profile-card credit-card">
           <span>Credit balance</span>
           <strong>{workspace.profile.creditBalance}</strong>
-          <small>{workspace.profile.creditUsed} credits used</small>
+          <small>
+            {workspace.profile.creditUsed} credits used 路 limit {workspace.profile.creditLimit ?? "not set"}
+          </small>
           <div className="credit-meter"><i style={{ width: `${usagePercent}%` }} /></div>
         </article>
         <article className="profile-card">
@@ -938,13 +994,17 @@ function AdminView({
   activeUserId,
   notice,
   onBack,
-  onAdjustCredits
+  onAdjustCredits,
+  onSetCreditLimit,
+  onUpdateModelPricing
 }: {
   workspace: Workspace;
   activeUserId?: string;
   notice: string;
   onBack: () => void;
   onAdjustCredits: (targetUserId: string, delta: number, reason: string) => Promise<Profile>;
+  onSetCreditLimit: (targetUserId: string, creditLimit: number, reason: string) => Promise<Profile>;
+  onUpdateModelPricing: (modelId: string, cost: number, priceCents: number, currency: ModelDefinition["currency"]) => Promise<ModelDefinition>;
 }) {
   const totalNodes = workspace.projects.reduce((sum, project) => sum + project.nodes.length, 0);
   const totalConnections = workspace.projects.reduce((sum, project) => sum + project.connections.length, 0);
@@ -952,9 +1012,17 @@ function AdminView({
   const [targetUserId, setTargetUserId] = useState(workspace.profile.userId);
   const [creditDelta, setCreditDelta] = useState("20");
   const [creditReason, setCreditReason] = useState("Monthly design allocation");
+  const [creditLimit, setCreditLimitValue] = useState(String(workspace.profile.creditLimit ?? workspace.profile.creditBalance));
+  const [limitReason, setLimitReason] = useState("Monthly designer cap");
+  const [pricingModelId, setPricingModelId] = useState(workspace.modelRegistry[0]?.id ?? "");
+  const selectedPricingModel = workspace.modelRegistry.find((model) => model.id === pricingModelId) ?? workspace.modelRegistry[0];
+  const [modelCost, setModelCost] = useState(String(selectedPricingModel?.cost ?? 1));
+  const [modelPriceCents, setModelPriceCents] = useState(String(selectedPricingModel?.priceCents ?? 0));
+  const [modelCurrency, setModelCurrency] = useState<ModelDefinition["currency"]>(selectedPricingModel?.currency ?? "CNY");
   const [creditNotice, setCreditNotice] = useState(notice);
   const [isAdjusting, setIsAdjusting] = useState(false);
   const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
+  const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([]);
   const providers = workspace.modelRegistry.reduce<Record<string, number>>((memo, model) => {
     memo[model.provider] = (memo[model.provider] ?? 0) + 1;
     return memo;
@@ -974,14 +1042,77 @@ function AdminView({
     };
   }, [activeUserId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAdminAccounts(activeUserId)
+      .then((accounts) => {
+        if (!cancelled) setAdminAccounts(accounts);
+      })
+      .catch((error) => {
+        if (!cancelled) setCreditNotice(error instanceof Error ? error.message : "Account list unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUserId]);
+
+  function syncAccountRow(profile: Profile) {
+    setAdminAccounts((current) => {
+      const nextAccount: AdminAccountSummary = {
+        userId: profile.userId,
+        designerName: profile.designerName,
+        role: profile.role,
+        creditBalance: profile.creditBalance,
+        creditUsed: profile.creditUsed,
+        credits: profile.credits,
+        creditLimit: profile.creditLimit,
+        projectCount: current.find((account) => account.userId === profile.userId)?.projectCount ?? 0,
+        historyCount: current.find((account) => account.userId === profile.userId)?.historyCount ?? 0,
+        assetCount: current.find((account) => account.userId === profile.userId)?.assetCount ?? 0,
+        lastActivityAt: current.find((account) => account.userId === profile.userId)?.lastActivityAt
+      };
+      const exists = current.some((account) => account.userId === profile.userId);
+      const updated = exists ? current.map((account) => (account.userId === profile.userId ? nextAccount : account)) : [...current, nextAccount];
+      return updated.sort((left, right) => left.userId.localeCompare(right.userId));
+    });
+  }
+
   async function submitCreditAdjustment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsAdjusting(true);
     try {
       const profile = await onAdjustCredits(targetUserId, Number(creditDelta), creditReason);
+      syncAccountRow(profile);
       setCreditNotice(`${profile.designerName} now has ${profile.creditBalance} credits`);
     } catch (error) {
       setCreditNotice(error instanceof Error ? error.message : "Credit adjustment failed");
+    } finally {
+      setIsAdjusting(false);
+    }
+  }
+
+  async function submitCreditLimit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsAdjusting(true);
+    try {
+      const profile = await onSetCreditLimit(targetUserId, Number(creditLimit), limitReason);
+      syncAccountRow(profile);
+      setCreditNotice(`${profile.designerName} credit limit set to ${profile.creditLimit}`);
+    } catch (error) {
+      setCreditNotice(error instanceof Error ? error.message : "Credit limit update failed");
+    } finally {
+      setIsAdjusting(false);
+    }
+  }
+
+  async function submitModelPricing(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsAdjusting(true);
+    try {
+      const model = await onUpdateModelPricing(pricingModelId, Number(modelCost), Number(modelPriceCents), modelCurrency);
+      setCreditNotice(`${model.name} now costs ${model.cost} credits per output`);
+    } catch (error) {
+      setCreditNotice(error instanceof Error ? error.message : "Model pricing update failed");
     } finally {
       setIsAdjusting(false);
     }
@@ -1005,6 +1136,33 @@ function AdminView({
           <MetricCard label="Running jobs" value={runningJobs} detail={`${workspace.history.length} history entries`} />
         </section>
         <section className="admin-grid">
+          <article className="admin-card team-accounts-card">
+            <h2>Team accounts</h2>
+            {adminAccounts.length ? (
+              <div className="admin-account-list" aria-label="Team account list">
+                {adminAccounts.map((account) => (
+                  <div className="admin-account-row" key={account.userId}>
+                    <div>
+                      <strong>{account.designerName}</strong>
+                      <span>{account.userId}</span>
+                    </div>
+                    <div>
+                      <b>{account.creditBalance} remaining</b>
+                      <small>
+                        {account.creditUsed} used / limit {account.creditLimit ?? "not set"}
+                      </small>
+                    </div>
+                    <small>
+                      {account.projectCount} projects / {account.historyCount} history / {account.assetCount} assets
+                    </small>
+                    <em>{account.role}</em>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p>No designer accounts loaded yet.</p>
+            )}
+          </article>
           <article className="admin-card">
             <h2>Model providers</h2>
             {providerHealth.map((provider) => (
@@ -1049,7 +1207,9 @@ function AdminView({
             <div className="admin-row">
               <span>Role</span>
               <strong>{workspace.profile.role}</strong>
-              <small>{workspace.profile.userId}</small>
+              <small>
+                {workspace.profile.userId} 路 limit {workspace.profile.creditLimit ?? "not set"}
+              </small>
             </div>
           </article>
           <article className="admin-card">
@@ -1087,6 +1247,95 @@ function AdminView({
               </button>
               <small aria-live="polite">{creditNotice}</small>
             </form>
+          </article>
+          <article className="admin-card">
+            <h2>Designer credit limit</h2>
+            <form className="admin-credit-form" onSubmit={submitCreditLimit}>
+              <label>
+                <span>Designer account</span>
+                <input
+                  aria-label="Limit designer account"
+                  value={targetUserId}
+                  onChange={(event) => setTargetUserId(event.target.value)}
+                  placeholder="designer@company.local"
+                />
+              </label>
+              <label>
+                <span>Maximum credits</span>
+                <input
+                  aria-label="Credit limit"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={creditLimit}
+                  onChange={(event) => setCreditLimitValue(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Reason</span>
+                <input aria-label="Credit limit reason" value={limitReason} onChange={(event) => setLimitReason(event.target.value)} />
+              </label>
+              <button type="submit" className="generate-button" disabled={isAdjusting}>
+                Set credit limit
+              </button>
+            </form>
+          </article>
+          <article className="admin-card">
+            <h2>Model pricing</h2>
+            <form className="admin-credit-form" onSubmit={submitModelPricing}>
+              <label>
+                <span>Model</span>
+                <select
+                  aria-label="Pricing model"
+                  value={pricingModelId}
+                  onChange={(event) => {
+                    const model = workspace.modelRegistry.find((item) => item.id === event.target.value);
+                    setPricingModelId(event.target.value);
+                    setModelCost(String(model?.cost ?? 1));
+                    setModelPriceCents(String(model?.priceCents ?? 0));
+                    setModelCurrency(model?.currency ?? "CNY");
+                  }}
+                >
+                  {workspace.modelRegistry.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Credits per output</span>
+                <input aria-label="Model credit cost" type="number" min={1} step={1} value={modelCost} onChange={(event) => setModelCost(event.target.value)} />
+              </label>
+              <label>
+                <span>Price cents</span>
+                <input
+                  aria-label="Model price cents"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={modelPriceCents}
+                  onChange={(event) => setModelPriceCents(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Currency</span>
+                <select aria-label="Model currency" value={modelCurrency} onChange={(event) => setModelCurrency(event.target.value as ModelDefinition["currency"])}>
+                  <option value="CNY">CNY</option>
+                  <option value="USD">USD</option>
+                </select>
+              </label>
+              <button type="submit" className="generate-button" disabled={isAdjusting}>
+                Update model pricing
+              </button>
+            </form>
+            <div className="admin-price-list" aria-label="Configured model pricing">
+              {workspace.modelRegistry.slice(0, 5).map((model) => (
+                <small key={model.id}>
+                  {model.name}: {model.cost} credits{model.priceCents !== undefined ? ` / ${(model.priceCents / 100).toFixed(2)} ${model.currency ?? "CNY"}` : ""}
+                </small>
+              ))}
+            </div>
           </article>
         </section>
       </section>
@@ -1881,6 +2130,7 @@ function CanvasNodeView({
       }}
     >
       <span className="node-label">{isImageLike ? "Image" : isText ? "Text" : node.moduleType ?? node.type}</span>
+      {isModule && node.status === "idle" && <span className="node-status ready">Ready</span>}
       {node.status === "running" && <span className="node-status running">Running</span>}
       {node.status === "done" && <span className="node-status done">Done</span>}
       {node.status === "error" && <span className="node-status error">Error</span>}
@@ -2234,6 +2484,10 @@ function RightDock({
         return haystack.includes(normalizedPromptSearch);
       })
     : workspace.prompts;
+  const workflowPlan = useMemo(
+    () => (selectedNode ? buildWorkflowExecutionPlan(workspace, project.id, selectedNode.id) : undefined),
+    [workspace, project.id, selectedNode?.id]
+  );
   const assistantCards = [
     {
       title: "Two-reference concept",
@@ -2269,6 +2523,33 @@ function RightDock({
             <button type="button" onClick={() => onAddModule("edit")}><Wand2 size={13} /> Edit node</button>
             <button type="button" onClick={() => onAddModule("upscale")}><Maximize2 size={13} /> Upscale node</button>
           </div>
+          {workflowPlan && (
+            <div className={`workflow-plan ${workflowPlan.status}`} aria-label="Workflow execution plan">
+              <div className="workflow-plan-header">
+                <strong>Workflow plan</strong>
+                <small>{workflowPlan.status}</small>
+              </div>
+              <span>{workflowPlan.steps.length} executable steps</span>
+              <span>Estimated {workflowPlan.totalEstimatedCredits} credits</span>
+              {workflowPlan.steps.length ? (
+                workflowPlan.steps.map((step, index) => (
+                  <article className="workflow-plan-step" key={step.nodeId}>
+                    <b>{index + 1}. {step.name}</b>
+                    <small>
+                      {step.operation} / {step.modelId} / {step.referenceCount} refs
+                    </small>
+                  </article>
+                ))
+              ) : (
+                <small>No downstream workflow modules</small>
+              )}
+              {workflowPlan.issues.map((issue, index) => (
+                <small className={`workflow-plan-issue ${issue.severity}`} key={`${issue.nodeId ?? "plan"}-${issue.message}-${index}`}>
+                  {issue.severity}: {issue.message}
+                </small>
+              ))}
+            </div>
+          )}
           <small>Workflow modules</small>
         </>
       )}

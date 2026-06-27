@@ -14,6 +14,19 @@ export interface CreditAdjustmentRequest {
   reason?: string;
 }
 
+export interface CreditLimitRequest {
+  targetUserId: string;
+  creditLimit: number;
+  reason?: string;
+}
+
+export interface ModelPricingRequest {
+  modelId: string;
+  cost: number;
+  priceCents?: number;
+  currency?: ModelDefinition["currency"];
+}
+
 export interface ProviderHealth {
   provider: ModelDefinition["provider"];
   status: "healthy" | "degraded";
@@ -26,6 +39,20 @@ export interface ProviderHealth {
   configuredSecrets: string[];
   missingSecrets: string[];
   supportedOperations: OperationType[];
+}
+
+export interface AdminAccountSummary {
+  userId: string;
+  designerName: string;
+  role: Profile["role"];
+  creditBalance: number;
+  creditUsed: number;
+  credits: number;
+  creditLimit?: number;
+  projectCount: number;
+  historyCount: number;
+  assetCount: number;
+  lastActivityAt?: string;
 }
 
 export type WorkspaceSnapshot = Pick<
@@ -107,7 +134,30 @@ export async function adjustDesignerCredits(request: CreditAdjustmentRequest, ad
   return readJson<Profile>(response);
 }
 
+export async function setDesignerCreditLimit(request: CreditLimitRequest, adminUserId?: string): Promise<Profile> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/credit-limit`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...userHeaders(adminUserId) },
+    body: JSON.stringify(request)
+  });
+  return readJson<Profile>(response);
+}
+
+export async function configureAdminModelPricing(request: ModelPricingRequest, adminUserId?: string): Promise<ModelDefinition> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/model-pricing`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...userHeaders(adminUserId) },
+    body: JSON.stringify(request)
+  });
+  return readJson<ModelDefinition>(response);
+}
+
 export async function fetchProviderHealth(adminUserId?: string): Promise<ProviderHealth[]> {
   const response = await fetch(`${API_BASE_URL}/api/admin/providers`, { headers: userHeaders(adminUserId) });
   return readJson<ProviderHealth[]>(response);
+}
+
+export async function fetchAdminAccounts(adminUserId?: string): Promise<AdminAccountSummary[]> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/accounts`, { headers: userHeaders(adminUserId) });
+  return readJson<AdminAccountSummary[]>(response);
 }

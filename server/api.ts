@@ -42,10 +42,37 @@ export interface CreditAdjustmentRequest {
   reason?: string;
 }
 
+export interface CreditLimitRequest {
+  targetUserId: string;
+  creditLimit: number;
+  reason?: string;
+}
+
+export interface ModelPricingRequest {
+  modelId: string;
+  cost: number;
+  priceCents?: number;
+  currency?: ModelDefinition["currency"];
+}
+
 export interface AdminUsageSummary {
   totalCreditsUsed: number;
   totalHistoryEntries: number;
   modelUsage: Array<{ modelId: string; count: number; credits: number }>;
+}
+
+export interface AdminAccountSummary {
+  userId: string;
+  designerName: string;
+  role: Profile["role"];
+  creditBalance: number;
+  creditUsed: number;
+  credits: number;
+  creditLimit?: number;
+  projectCount: number;
+  historyCount: number;
+  assetCount: number;
+  lastActivityAt?: string;
 }
 
 export type { ProviderHealth } from "./providers";
@@ -152,6 +179,9 @@ export function adjustAccountCredits(state: ServerState, request: Partial<Credit
     if (nextBalance < 0) {
       throw new Error("Credit balance cannot be negative");
     }
+    if (account.profile.creditLimit !== undefined && nextBalance > account.profile.creditLimit) {
+      throw new Error("Credit balance cannot exceed assigned limit");
+    }
     account.profile = {
       ...account.profile,
       creditBalance: nextBalance,
@@ -159,6 +189,107 @@ export function adjustAccountCredits(state: ServerState, request: Partial<Credit
     };
     saveAccountWorkspace(state, account, targetUserId);
     return account.profile;
+  } catch (error) {
+    return {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Unknown server error"
+    };
+  }
+}
+
+export function setAccountCreditLimit(state: ServerState, request: Partial<CreditLimitRequest>, adminUserId?: string): Profile | ApiError {
+  try {
+    if (!isAdminUser(state, adminUserId)) {
+      throw new Error("Admin role required");
+    }
+    const targetUserId = normalizeUserId(request.targetUserId);
+    if (!targetUserId) {
+      throw new Error("Target user is required");
+    }
+    const creditLimit = Number(request.creditLimit);
+    if (!Number.isInteger(creditLimit) || creditLimit < 0 || creditLimit > 100_000) {
+      throw new Error("Credit limit must be an integer between 0 and 100000");
+    }
+    const account = getAccountWorkspace(state, targetUserId);
+    account.profile = {
+      ...account.profile,
+      creditLimit,
+      creditBalance: Math.min(account.profile.creditBalance, creditLimit),
+      credits: Math.min(account.profile.creditBalance, creditLimit)
+    };
+    saveAccountWorkspace(state, account, targetUserId);
+    return account.profile;
+  } catch (error) {
+    return {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Unknown server error"
+    };
+  }
+}
+
+export function configureModelPricing(state: ServerState, request: Partial<ModelPricingRequest>, adminUserId?: string): ModelDefinition | ApiError {
+  try {
+    if (!isAdminUser(state, adminUserId)) {
+      throw new Error("Admin role required");
+    }
+    const modelId = request.modelId?.trim();
+    if (!modelId) {
+      throw new Error("Model is required");
+    }
+    const model = state.models.find((item) => item.id === modelId);
+    if (!model) {
+      throw new Error("Model not found");
+    }
+    const cost = Number(request.cost);
+    if (!Number.isInteger(cost) || cost < 1 || cost > 10_000) {
+      throw new Error("Model cost must be an integer between 1 and 10000");
+    }
+    const priceCents = request.priceCents === undefined ? model.priceCents : Number(request.priceCents);
+    if (priceCents !== undefined && (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > 10_000_000)) {
+      throw new Error("Model price must be a non-negative integer amount in cents");
+    }
+    const currency = request.currency ?? model.currency ?? "CNY";
+    if (currency !== "CNY" && currency !== "USD") {
+      throw new Error("Currency must be CNY or USD");
+    }
+    const updated = { ...model, cost, priceCents, currency };
+    state.models = state.models.map((item) => (item.id === modelId ? updated : item));
+    return updated;
+  } catch (error) {
+    return {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Unknown server error"
+    };
+  }
+}
+
+function summarizeAccount(account: AccountWorkspace): AdminAccountSummary {
+  return {
+    userId: account.profile.userId,
+    designerName: account.profile.designerName,
+    role: account.profile.role,
+    creditBalance: account.profile.creditBalance,
+    creditUsed: account.profile.creditUsed,
+    credits: account.profile.credits,
+    creditLimit: account.profile.creditLimit,
+    projectCount: account.projects.length,
+    historyCount: account.history.length,
+    assetCount: account.assets.length,
+    lastActivityAt: account.history[0]?.createdAt
+  };
+}
+
+export function listAdminAccounts(state: ServerState, adminUserId?: string): AdminAccountSummary[] | ApiError {
+  try {
+    if (!isAdminUser(state, adminUserId)) {
+      throw new Error("Admin role required");
+    }
+    const accounts = [accountFromState(state), ...Object.values(state.accounts)].map(summarizeAccount);
+    const unique = new Map<string, AdminAccountSummary>();
+    for (const account of accounts) {
+      unique.set(account.userId.toLowerCase(), account);
+    }
+    return Array.from(unique.values()).sort((left, right) => left.userId.localeCompare(right.userId));
   } catch (error) {
     return {
       status: "failed",
@@ -267,6 +398,8 @@ export const apiRoutes = {
       modelUsage: Array.from(byModel.values())
     };
   },
+  "/api/admin/accounts": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
+    listAdminAccounts(state, userId),
   "/api/admin/providers": (state: ServerState): ProviderHealth[] => getProviderHealth(state.models),
   "/api/generations": (state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) =>
     runModel(state, { ...request, operation: "generate" }, requestId, userId),
@@ -293,6 +426,7 @@ export function callApi(
       path === "/api/history" ||
       path === "/api/admin/audit" ||
       path === "/api/admin/usage" ||
+      path === "/api/admin/accounts" ||
       path === "/api/admin/providers"
     ) {
       return route(state, request as GenerationRequest, requestId, userId);

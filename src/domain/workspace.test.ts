@@ -5,6 +5,7 @@ import {
   addGenerationTargetFrame,
   applyGenerationResultToCanvas,
   applyImageOperation,
+  buildWorkflowExecutionPlan,
   connectWorkflowNode,
   commitShapeEdit,
   configureNodeGeneration,
@@ -348,6 +349,79 @@ describe("designer canvas workspace behavior", () => {
     expect(executed.projects[0].nodes.filter((node) => node.kind === "generated")).toHaveLength(2);
     expect(executed.history.map((entry) => entry.moduleType)).toEqual(["upscale", "edit"]);
     expect(executed.profile.credits).toBe(4);
+  });
+
+  it("builds an auditable workflow execution plan before running chained image operations", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Workflow plan");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat.png",
+      source: "coat-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const editModule = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "edit",
+      prompt: "add a detachable hood",
+      modelId: "gpt-image-2-medium"
+    });
+    const editNode = editModule.projects[0].nodes.find((node) => node.moduleType === "edit")!;
+    const upscaleModule = createWorkflowModuleFromSelection(editModule, project.id, [editNode.id], {
+      moduleType: "upscale",
+      prompt: "preserve fabric texture while enlarging",
+      modelId: "upscale-pro"
+    });
+    const upscaleNode = upscaleModule.projects[0].nodes.find((node) => node.moduleType === "upscale")!;
+    const removeBgModule = createWorkflowModuleFromSelection(upscaleModule, project.id, [upscaleNode.id], {
+      moduleType: "removeBackground",
+      prompt: "remove the studio background and keep transparent edges",
+      modelId: "background-cleaner"
+    });
+
+    const plan = buildWorkflowExecutionPlan(removeBgModule, project.id, source.id);
+
+    expect(plan.status).toBe("ready");
+    expect(plan.steps.map((step) => step.moduleType)).toEqual(["edit", "upscale", "removeBackground"]);
+    expect(plan.steps.map((step) => step.operation)).toEqual(["edit", "upscale", "removeBackground"]);
+    expect(plan.steps.map((step) => step.referenceNodeIds)).toEqual([[source.id], [editNode.id], [upscaleNode.id]]);
+    expect(plan.totalEstimatedCredits).toBe(13);
+    expect(plan.issues).toEqual([]);
+  });
+
+  it("blocks workflow execution plans with missing prompts or cycles before credits are spent", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Broken workflow plan");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat.png",
+      source: "coat-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const editModule = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "edit",
+      prompt: "   ",
+      modelId: "gpt-image-2-medium"
+    });
+    const editNode = editModule.projects[0].nodes.find((node) => node.moduleType === "edit")!;
+    const upscaleModule = createWorkflowModuleFromSelection(editModule, project.id, [editNode.id], {
+      moduleType: "upscale",
+      prompt: "preserve fabric texture while enlarging",
+      modelId: "upscale-pro"
+    });
+    const upscaleNode = upscaleModule.projects[0].nodes.find((node) => node.moduleType === "upscale")!;
+    const cyclic = connectWorkflowNode(upscaleModule, project.id, upscaleNode.id, editNode.id);
+
+    const plan = buildWorkflowExecutionPlan(cyclic, project.id, source.id);
+
+    expect(plan.status).toBe("blocked");
+    expect(plan.steps).toHaveLength(2);
+    expect(plan.totalEstimatedCredits).toBe(11);
+    expect(plan.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ nodeId: editNode.id, severity: "error", message: "Prompt is required" }),
+        expect.objectContaining({ nodeId: editNode.id, severity: "error", message: "Workflow cycle detected" })
+      ])
+    );
   });
 
   it("groups multiple uploaded reference images and connects them to one generation module", () => {

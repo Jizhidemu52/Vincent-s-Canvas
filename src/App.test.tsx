@@ -14,6 +14,19 @@ let backendProfile: Profile = {
 };
 let backendHistory: HistoryEntry[] = [];
 let backendWorkspace: Workspace = createInitialWorkspace();
+let backendAccounts: Array<{
+  userId: string;
+  designerName: string;
+  role: Profile["role"];
+  creditBalance: number;
+  creditUsed: number;
+  credits: number;
+  creditLimit?: number;
+  projectCount: number;
+  historyCount: number;
+  assetCount: number;
+  lastActivityAt?: string;
+}> = [];
 
 function jsonResponse(payload: unknown, status = 200) {
   return Promise.resolve(
@@ -38,6 +51,32 @@ beforeEach(() => {
     ...createInitialWorkspace({ userId: "designer-lina", designerName: "Lina Zhou", creditBalance: 180, role: "designer" }),
     history: backendHistory
   };
+  backendAccounts = [
+    {
+      userId: "admin@company.local",
+      designerName: "Admin Ops",
+      role: "admin",
+      creditBalance: 180,
+      creditUsed: 0,
+      credits: 180,
+      projectCount: 0,
+      historyCount: 0,
+      assetCount: 0
+    },
+    {
+      userId: "alice@company.local",
+      designerName: "Alice Designer",
+      role: "designer",
+      creditBalance: 88,
+      creditUsed: 12,
+      credits: 88,
+      creditLimit: 120,
+      projectCount: 2,
+      historyCount: 5,
+      assetCount: 7,
+      lastActivityAt: "2026-06-28T02:00:00.000Z"
+    }
+  ];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -85,6 +124,54 @@ beforeEach(() => {
         };
         backendWorkspace = { ...backendWorkspace, profile: backendProfile };
         return jsonResponse(backendProfile);
+      }
+      if (url.endsWith("/api/admin/credit-limit")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        const request = JSON.parse(String(init?.body)) as { targetUserId: string; creditLimit: number; reason?: string };
+        const limit = Number(request.creditLimit);
+        backendProfile = {
+          ...backendProfile,
+          userId: request.targetUserId,
+          designerName: request.targetUserId.includes("admin") ? "Admin Ops" : request.targetUserId.split("@")[0],
+          role: request.targetUserId.includes("admin") ? "admin" : "designer",
+          creditBalance: Math.min(backendProfile.creditBalance, limit),
+          credits: Math.min(backendProfile.creditBalance, limit),
+          creditLimit: limit
+        };
+        backendWorkspace = { ...backendWorkspace, profile: backendProfile };
+        return jsonResponse(backendProfile);
+      }
+      if (url.endsWith("/api/admin/model-pricing")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        const request = JSON.parse(String(init?.body)) as { modelId: string; cost: number; priceCents?: number; currency?: "CNY" | "USD" };
+        const current = backendWorkspace.modelRegistry.find((model) => model.id === request.modelId);
+        const updated = {
+          ...(current ?? { id: request.modelId, name: request.modelId, provider: "internal", group: "Image", capability: ["generate"] }),
+          cost: request.cost,
+          priceCents: request.priceCents,
+          currency: request.currency
+        };
+        backendWorkspace = {
+          ...backendWorkspace,
+          modelRegistry: backendWorkspace.modelRegistry.map((model) => (model.id === request.modelId ? updated : model))
+        } as Workspace;
+        return jsonResponse(updated);
+      }
+      if (url.endsWith("/api/admin/accounts")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        return jsonResponse(backendAccounts);
       }
       if (url.endsWith("/api/profile")) return jsonResponse(backendProfile);
       if (url.endsWith("/api/history")) return jsonResponse(backendHistory);
@@ -448,12 +535,34 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Access policy")).toBeInTheDocument();
     expect(screen.getByText("Server only")).toBeInTheDocument();
     expect(screen.getByText("Credit management")).toBeInTheDocument();
+    expect(await screen.findByText("Team accounts")).toBeInTheDocument();
+    expect(screen.getByText("alice@company.local")).toBeInTheDocument();
+    expect(screen.getByText("Alice Designer")).toBeInTheDocument();
+    expect(screen.getByText("88 remaining")).toBeInTheDocument();
+    expect(screen.getByText("12 used / limit 120")).toBeInTheDocument();
+    expect(screen.getByText("2 projects / 5 history / 7 assets")).toBeInTheDocument();
 
     await user.clear(screen.getByRole("spinbutton", { name: "Credit delta" }));
     await user.type(screen.getByRole("spinbutton", { name: "Credit delta" }), "20");
     await user.click(screen.getByRole("button", { name: "Update credits" }));
 
     expect(await screen.findByText("Admin Ops now has 200 credits")).toBeInTheDocument();
+    expect(screen.getByText("Designer credit limit")).toBeInTheDocument();
+    await user.clear(screen.getByRole("spinbutton", { name: "Credit limit" }));
+    await user.type(screen.getByRole("spinbutton", { name: "Credit limit" }), "210");
+    await user.click(screen.getByRole("button", { name: "Set credit limit" }));
+    expect(await screen.findByText("Admin Ops credit limit set to 210")).toBeInTheDocument();
+
+    expect(screen.getByText("Model pricing")).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Pricing model" }), "gpt-image-2-medium");
+    await user.clear(screen.getByRole("spinbutton", { name: "Model credit cost" }));
+    await user.type(screen.getByRole("spinbutton", { name: "Model credit cost" }), "9");
+    await user.clear(screen.getByRole("spinbutton", { name: "Model price cents" }));
+    await user.type(screen.getByRole("spinbutton", { name: "Model price cents" }), "450");
+    await user.click(screen.getByRole("button", { name: "Update model pricing" }));
+    expect(await screen.findByText("GPT Image 2 Medium now costs 9 credits per output")).toBeInTheDocument();
+    expect(screen.getByLabelText("Configured model pricing")).toHaveTextContent("9 credits / 4.50 CNY");
+
     await user.click(screen.getByRole("button", { name: "Back to projects" }));
     await user.click(screen.getByRole("button", { name: "Profile" }));
     expect(screen.getByRole("region", { name: "Profile credit management" })).toHaveTextContent("200");
@@ -637,6 +746,53 @@ describe("Designer canvas app shell", () => {
     expect(editCalls).toHaveLength(1);
     expect(upscaleCalls).toHaveLength(1);
     expect(editModule).toHaveTextContent("Done");
+  });
+
+  it("shows an auditable workflow plan before designers run a node chain", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from fashion-reference.jpg"));
+    fireEvent.pointerUp(window);
+    await user.click(screen.getByRole("button", { name: /Edit controlled image edit/i }));
+    const editModule = await screen.findByRole("button", { name: /Workflow edit module/i });
+
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from edit module"));
+    fireEvent.pointerUp(window);
+    await user.click(screen.getByRole("button", { name: /Upscale clean high-res output/i }));
+
+    await user.click(screen.getByText("fashion-reference.jpg"));
+
+    expect(screen.getByText("Workflow plan")).toBeInTheDocument();
+    expect(screen.getByText("2 executable steps")).toBeInTheDocument();
+    expect(screen.getByText("Estimated 11 credits")).toBeInTheDocument();
+    expect(screen.getByText(/1\. edit module/)).toBeInTheDocument();
+    expect(screen.getByText(/2\. upscale module/)).toBeInTheDocument();
+    expect(editModule).toHaveTextContent("Ready");
+  });
+
+  it("blocks backend workflow submission when the preflight plan has errors", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from fashion-reference.jpg"));
+    fireEvent.pointerUp(window);
+    await user.click(screen.getByRole("button", { name: /Edit controlled image edit/i }));
+
+    const promptInput = document.querySelector(".prompt-text") as HTMLTextAreaElement;
+    fireEvent.change(promptInput, { target: { value: "   " } });
+    await user.click(screen.getByText("fashion-reference.jpg"));
+
+    expect(screen.getByText("blocked")).toBeInTheDocument();
+    expect(screen.getByText("error: Prompt is required")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Run workflow/i }));
+
+    expect(await screen.findByText("Workflow plan blocked: Prompt is required")).toBeInTheDocument();
+    const editCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/edits"));
+    expect(editCalls).toHaveLength(0);
   });
 
   it("keeps multi-selected images as shared references when dragging a workflow port", async () => {

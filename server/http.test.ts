@@ -232,6 +232,66 @@ describe("HTTP API server", () => {
     expect(afterUnauthorized.creditBalance).toBe(35);
   });
 
+  it("allows admins to set designer credit limits and model pricing over HTTP", async () => {
+    const limitResponse = await fetch(`${context.baseUrl}/api/admin/credit-limit`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ targetUserId: "alice@company.local", creditLimit: 12, reason: "trial cap" })
+    });
+    const limited = (await limitResponse.json()) as Profile;
+    const overLimitResponse = await fetch(`${context.baseUrl}/api/admin/credits`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ targetUserId: "alice@company.local", delta: 5 })
+    });
+    const pricingResponse = await fetch(`${context.baseUrl}/api/admin/model-pricing`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ modelId: "gpt-image-2-low", cost: 5, priceCents: 250, currency: "CNY" })
+    });
+    const models = (await (await fetch(`${context.baseUrl}/api/models`)).json()) as Array<Record<string, unknown>>;
+
+    expect(limitResponse.status).toBe(200);
+    expect(limited).toMatchObject({ userId: "alice@company.local", creditBalance: 10, creditLimit: 12 });
+    expect(overLimitResponse.status).toBe(400);
+    expect(await overLimitResponse.json()).toMatchObject({ status: "failed", errorMessage: "Credit balance cannot exceed assigned limit" });
+    expect(pricingResponse.status).toBe(200);
+    expect(await pricingResponse.json()).toMatchObject({ id: "gpt-image-2-low", cost: 5, priceCents: 250, currency: "CNY" });
+    expect(models.find((model) => model.id === "gpt-image-2-low")).toMatchObject({ cost: 5, priceCents: 250, currency: "CNY" });
+  });
+
+  it("lists designer accounts over HTTP for admins only", async () => {
+    await fetch(`${context.baseUrl}/api/generations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "alice@company.local", "x-request-id": "http-admin-accounts-alice" },
+      body: JSON.stringify(request({ outputCount: 1 }))
+    });
+    await fetch(`${context.baseUrl}/api/admin/credits`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ targetUserId: "bob@company.local", delta: 12 })
+    });
+
+    const accountsResponse = await fetch(`${context.baseUrl}/api/admin/accounts`, {
+      headers: { "x-user-id": "admin@company.local" }
+    });
+    const unauthorizedResponse = await fetch(`${context.baseUrl}/api/admin/accounts`, {
+      headers: { "x-user-id": "designer@company.local" }
+    });
+    const accounts = (await accountsResponse.json()) as Array<Record<string, unknown>>;
+
+    expect(accountsResponse.status).toBe(200);
+    expect(accounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ userId: "admin@company.local", role: "admin" }),
+        expect.objectContaining({ userId: "alice@company.local", creditBalance: 8, creditUsed: 2, historyCount: 1 }),
+        expect.objectContaining({ userId: "bob@company.local", creditBalance: 22, creditUsed: 0, historyCount: 0 })
+      ])
+    );
+    expect(unauthorizedResponse.status).toBe(400);
+    expect(await unauthorizedResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+  });
+
   it("persists profile balance, history, and duplicate request ids across server restarts", async () => {
     await new Promise<void>((resolve, reject) => {
       context.server.close((error) => (error ? reject(error) : resolve()));
