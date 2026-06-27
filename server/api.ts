@@ -671,7 +671,7 @@ export function saveWorkspaceSnapshot(state: ServerState, snapshot: Partial<Work
       ...current.profile,
       userId: incomingProfile?.userId ?? current.profile.userId,
       designerName: incomingProfile?.designerName ?? current.profile.designerName,
-      role: incomingProfile?.role ?? current.profile.role
+      role: current.profile.role
     },
     projects: Array.isArray(snapshot.projects) ? snapshot.projects : current.projects,
     activeProjectId: Object.prototype.hasOwnProperty.call(snapshot, "activeProjectId") ? snapshot.activeProjectId : current.activeProjectId,

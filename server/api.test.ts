@@ -301,6 +301,26 @@ describe("backend hosted mock API", () => {
     expect(saved.profile.credits).toBe(200);
   });
 
+  it("keeps workspace snapshots from escalating designer roles", () => {
+    const state = createServerState({ userId: "admin@company.local", role: "admin", creditBalance: 30 });
+    const designerWorkspace = createInitialWorkspace({
+      userId: "alice@company.local",
+      designerName: "Alice Designer",
+      role: "designer",
+      creditBalance: 30
+    });
+
+    const saved = saveWorkspaceSnapshot(
+      state,
+      { ...designerWorkspace, profile: { ...designerWorkspace.profile, role: "admin" } },
+      "alice@company.local"
+    );
+    const adminAccounts = listAdminAccounts(state, "alice@company.local") as ApiError;
+
+    expect(saved.profile.role).toBe("designer");
+    expect(adminAccounts).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+  });
+
   it("keeps stale workspace snapshots from deleting server-owned generation history", () => {
     const state = createServerState({ userId: "admin@company.local", role: "admin", creditBalance: 30 });
     const created = createProject(createInitialWorkspace({ userId: "alice@company.local", designerName: "Alice Designer", creditBalance: 30 }), "Alice board");
