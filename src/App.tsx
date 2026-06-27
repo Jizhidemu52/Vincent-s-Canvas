@@ -1573,6 +1573,7 @@ function AdminView({
                     {job.status} · {job.creditCost} credits · {job.outputCount} output{job.outputCount === 1 ? "" : "s"}
                   </strong>
                   <small>{job.projectName ?? job.projectId} / {job.modelId}</small>
+                  {job.errorMessage && <small>{job.errorMessage}</small>}
                   <small>{job.historyId ?? job.id}</small>
                 </div>
               ))

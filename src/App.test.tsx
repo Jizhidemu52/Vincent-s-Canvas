@@ -138,6 +138,24 @@ beforeEach(() => {
       creditCost: 4,
       referenceCount: 1,
       createdAt: "2026-06-28T02:05:00.000Z"
+    },
+    {
+      id: "job-history-cara-failed-1",
+      historyId: "history-cara-failed-1",
+      userId: "cara@company.local",
+      designerName: "Cara Designer",
+      projectId: "cara-provider",
+      projectName: "Cara provider test",
+      nodeId: "cara-node-1",
+      modelId: "broken-provider-model",
+      operation: "generate",
+      status: "failed",
+      outputCount: 1,
+      creditCost: 0,
+      referenceCount: 1,
+      errorMessage: "Provider adapter not configured for retired-provider",
+      createdAt: "2026-06-28T02:00:00.000Z",
+      updatedAt: "2026-06-28T02:00:00.000Z"
     }
   ];
   backendAccounts = [
@@ -891,6 +909,9 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("succeeded · 14 credits · 2 outputs")).toBeInTheDocument();
     expect(screen.getByText("Bob Designer · upscale")).toBeInTheDocument();
     expect(screen.getByText("succeeded · 4 credits · 1 output")).toBeInTheDocument();
+    expect(screen.getByText("Cara Designer · generate")).toBeInTheDocument();
+    expect(screen.getByText("failed · 0 credits · 1 output")).toBeInTheDocument();
+    expect(screen.getByText("Provider adapter not configured for retired-provider")).toBeInTheDocument();
     expect(screen.getByText("Admin audit")).toBeInTheDocument();
     expect(screen.getByText("24")).toBeInTheDocument();
     expect(screen.getByText("3 history entries")).toBeInTheDocument();
