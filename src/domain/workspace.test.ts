@@ -19,6 +19,7 @@ import {
   runWorkflowChain,
   saveNodeAsAsset,
   savePromptPreset,
+  selectNodeVariant,
   selectNodes,
   deletePromptPreset
 } from "./workspace";
@@ -57,6 +58,23 @@ describe("designer canvas workspace behavior", () => {
     expect(configured.projects[0].nodes[0].generation.modelId).toBe("flux-pro");
     expect(configured.projects[0].nodes[0].generation.outputCount).toBe(3);
     expect(configured.projects[0].nodes[0].generation.entryPoint).toBe("inline");
+  });
+
+  it("stores the selected image方案 on the canvas node metadata", () => {
+    const { workspace, project } = createProject(createInitialWorkspace(), "方案 choice");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "vest.png",
+      source: "vest-source",
+      width: 512,
+      height: 640
+    });
+
+    const node = withAsset.projects[0].nodes[0];
+    const selected = selectNodeVariant(withAsset, project.id, node.id, 2);
+
+    expect(selected.projects[0].nodes[0].metadata.selectedVariant).toBe(2);
+    expect(selected.projects[0].nodes[0].x).toBe(node.x);
+    expect(selected.projects[0].nodes[0].y).toBe(node.y);
   });
 
   it("keeps backend run state visible after normal canvas selection changes", () => {

@@ -1097,6 +1097,52 @@ button {
   background: white;
 }
 
+.thumb-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.thumb-strip > span {
+  border-radius: 4px;
+  background: #111;
+  color: white;
+  padding: 3px 5px;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.variant-option {
+  display: grid;
+  gap: 3px;
+  width: 48px;
+  border: 1px solid #dadada;
+  border-radius: 5px;
+  background: white;
+  padding: 3px;
+  color: #666;
+  cursor: pointer;
+  text-align: center;
+}
+
+.variant-option:hover,
+.variant-option.active {
+  border-color: #21c9b6;
+  box-shadow: 0 0 0 2px rgba(33, 201, 182, 0.16);
+}
+
+.variant-option img {
+  width: 40px;
+  height: 32px;
+  border-radius: 3px;
+}
+
+.variant-option small {
+  font-size: 9px;
+  line-height: 1;
+}
+
 .stage-node-name {
   display: block;
   max-width: 100%;

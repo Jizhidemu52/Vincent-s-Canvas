@@ -62,6 +62,7 @@ import {
   runBatchQueue,
   saveNodeAsAsset,
   savePromptPreset,
+  selectNodeVariant,
   selectNodes,
   undoProject,
   updateNodeTransform,
@@ -1105,19 +1106,33 @@ function MetricCard({ label, value, detail }: { label: string; value: number; de
 }
 
 function exportProjectPackage(workspace: Workspace, project: Project) {
+  const projectHistory = workspace.history.filter((entry) => entry.projectId === project.id);
+  const packageName = project.name.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-").toLowerCase() || "canvas-project";
   const payload = {
+    version: 1,
+    type: "vincent-canvas-project-package",
     project,
+    profile: workspace.profile,
     assets: workspace.assets,
     prompts: workspace.prompts,
-    history: workspace.history.filter((entry) => entry.projectId === project.id),
+    history: projectHistory,
     models: workspace.modelRegistry.map(({ id, name, provider, group, capability }) => ({ id, name, provider, group, capability })),
+    summary: {
+      nodeCount: project.nodes.length,
+      connectionCount: project.connections.length,
+      assetCount: workspace.assets.length,
+      promptCount: workspace.prompts.length,
+      historyCount: projectHistory.length,
+      creditBalance: workspace.profile.creditBalance,
+      creditUsed: workspace.profile.creditUsed
+    },
     exportedAt: new Date().toISOString()
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${project.name.replace(/\s+/g, "-").toLowerCase()}-canvas-package.json`;
+  link.download = `${packageName}-canvas-package.json`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -1824,9 +1839,10 @@ function CanvasNodeView({
   const isText = node.type === "text";
   const isModule = !isImageLike && !isText;
   const [inlineEditorOpen, setInlineEditorOpen] = useState(false);
+  const selectedVariant = typeof node.metadata.selectedVariant === "number" ? node.metadata.selectedVariant : 1;
 
   function startPointer(event: PointerEvent<HTMLDivElement>, mode: DragMode = "move") {
-    if ((event.target as HTMLElement).closest(".node-port, .inline-node-editor")) return;
+    if ((event.target as HTMLElement).closest(".node-port, .inline-node-editor, .thumb-strip")) return;
     event.preventDefault();
     event.stopPropagation();
     onSelect(node.id, event.shiftKey || event.ctrlKey || event.metaKey);
@@ -1853,6 +1869,11 @@ function CanvasNodeView({
 
   function patchTransform(patch: Partial<NodeTransform>) {
     onWorkspaceChange((current) => updateNodeTransform(current, projectId, node.id, patch));
+  }
+
+  function chooseVariant(variantIndex: number) {
+    onSelect(node.id, false);
+    onWorkspaceChange((current) => selectNodeVariant(current, projectId, node.id, variantIndex));
   }
 
   function startWire(event: PointerEvent<HTMLSpanElement>) {
@@ -1889,10 +1910,24 @@ function CanvasNodeView({
           <img src={node.source} alt={node.name} style={{ width: node.width, height: node.height }} />
           <strong className="stage-node-name">{node.name}</strong>
           {node.status === "error" && <small className="node-error-message">{node.errorMessage}</small>}
-          <div className="thumb-strip">
+          <div className="thumb-strip" aria-label={`${node.name}方案选择`} onPointerDown={(event) => event.stopPropagation()}>
             <span>ORIGINAL</span>
-            <img src={node.source} alt="" />
-            <img src={node.source} alt="" />
+            {[1, 2].map((variantIndex) => (
+              <button
+                type="button"
+                key={variantIndex}
+                className={`variant-option ${selectedVariant === variantIndex ? "active" : ""}`}
+                aria-label={`选择${node.name}方案${variantIndex}`}
+                aria-pressed={selectedVariant === variantIndex}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  chooseVariant(variantIndex);
+                }}
+              >
+                <img src={node.source} alt="" />
+                <small>方案 {variantIndex}</small>
+              </button>
+            ))}
           </div>
         </>
       )}

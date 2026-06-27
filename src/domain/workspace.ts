@@ -544,6 +544,23 @@ export function updateNodeTransform(
   );
 }
 
+export function selectNodeVariant(workspace: Workspace, projectId: string, nodeId: string, variantIndex: number): Workspace {
+  return updateProject(workspace, projectId, (project) => ({
+    ...project,
+    nodes: project.nodes.map((node) =>
+      node.id === nodeId
+        ? {
+            ...node,
+            metadata: {
+              ...node.metadata,
+              selectedVariant: variantIndex
+            }
+          }
+        : node
+    )
+  }));
+}
+
 export function updateViewport(workspace: Workspace, projectId: string, patch: Partial<Viewport>): Workspace {
   return updateProject(workspace, projectId, (project) => withUndo(project, { viewport: { ...project.viewport, ...patch } }));
 }

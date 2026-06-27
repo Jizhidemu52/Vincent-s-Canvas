@@ -313,6 +313,27 @@ describe("Designer canvas app shell", () => {
     });
   });
 
+  it("lets designers click the two image方案 thumbnails without starting a drag", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const imageNode = screen.getByRole("button", { name: /Image fashion-reference\.jpg/i });
+    const initialLeft = imageNode.style.left;
+    const initialTop = imageNode.style.top;
+    const optionOne = screen.getByRole("button", { name: "选择fashion-reference.jpg方案1" });
+    const optionTwo = screen.getByRole("button", { name: "选择fashion-reference.jpg方案2" });
+
+    expect(optionOne).toHaveAttribute("aria-pressed", "true");
+    expect(optionTwo).toHaveAttribute("aria-pressed", "false");
+    await user.click(optionTwo);
+
+    expect(optionTwo).toHaveAttribute("aria-pressed", "true");
+    expect(optionOne).toHaveAttribute("aria-pressed", "false");
+    expect(imageNode).toHaveStyle({ left: initialLeft, top: initialTop });
+    expect(document.querySelector(".stage-node.selected")).toHaveTextContent("fashion-reference.jpg");
+  });
+
   it("imports externally dropped image files onto the canvas at the drop point", async () => {
     const user = userEvent.setup();
     await login(user);
@@ -477,6 +498,89 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText(/nanobanana2/i)).toBeInTheDocument();
     expect(screen.getAllByText(/参考这张图做一件新的刺绣背心/).length).toBeGreaterThan(0);
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/generations$/), expect.objectContaining({ method: "POST" }));
+  });
+
+  it("exports the active project as a management package with nodes, history, assets, prompts, and profile", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    const createdBlobs: Blob[] = [];
+    let exportedText = "";
+    const OriginalBlob = globalThis.Blob;
+    class CapturedBlob extends OriginalBlob {
+      constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+        exportedText = parts?.map((part) => (typeof part === "string" ? part : "")).join("") ?? "";
+        super(parts, options);
+      }
+    }
+    vi.stubGlobal("Blob", CapturedBlob);
+    const originalCreateObjectUrl = URL.createObjectURL;
+    const originalRevokeObjectUrl = URL.revokeObjectURL;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn((blob: Blob) => {
+        createdBlobs.push(blob);
+        return "blob:canvas-project-package";
+      })
+    });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+
+    let downloadAnchor: HTMLAnchorElement | undefined;
+    const createElement = document.createElement.bind(document);
+    const createElementSpy = vi.spyOn(document, "createElement").mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+      const element = createElement(tagName, options);
+      if (tagName === "a") {
+        downloadAnchor = element as HTMLAnchorElement;
+        vi.spyOn(downloadAnchor, "click").mockImplementation(() => undefined);
+      }
+      return element;
+    });
+
+    try {
+      await user.click(screen.getByRole("button", { name: "New project" }));
+      await user.dblClick(screen.getByText("fashion-reference.jpg"));
+      await user.type(screen.getByRole("textbox", { name: "Inline prompt" }), "Export this embroidered vest concept for the internal archive.");
+      const generateButtons = screen.getAllByRole("button", { name: "Generate" });
+      await user.click(generateButtons[generateButtons.length - 1]);
+      expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /Export package/i }));
+
+      expect(downloadAnchor?.download).toMatch(/untitled-\d+-canvas-package\.json/);
+      expect(createdBlobs).toHaveLength(1);
+      const payload = JSON.parse(exportedText) as {
+        version: number;
+        type: string;
+        project: { nodes: unknown[]; connections: unknown[] };
+        profile: Profile;
+        assets: unknown[];
+        prompts: unknown[];
+        history: HistoryEntry[];
+        summary: Record<string, number>;
+      };
+      expect(payload.version).toBe(1);
+      expect(payload.type).toBe("vincent-canvas-project-package");
+      expect(payload.profile.designerName).toBe("Lina Zhou");
+      expect(payload.project.nodes.length).toBeGreaterThanOrEqual(3);
+      expect(payload.history).toHaveLength(1);
+      expect(payload.assets).toHaveLength(1);
+      expect(payload.prompts.length).toBeGreaterThan(0);
+      expect(payload.summary).toMatchObject({
+        nodeCount: payload.project.nodes.length,
+        connectionCount: payload.project.connections.length,
+        assetCount: payload.assets.length,
+        promptCount: payload.prompts.length,
+        historyCount: payload.history.length,
+        creditBalance: 173,
+        creditUsed: 7
+      });
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:canvas-project-package");
+    } finally {
+      createElementSpy.mockRestore();
+      vi.unstubAllGlobals();
+      Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreateObjectUrl });
+      Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevokeObjectUrl });
+    }
   });
 
   it("keeps a failed backend generation visible on the source canvas node", async () => {
