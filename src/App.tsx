@@ -1058,7 +1058,8 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
 }
 
 function ProfilePanel({ workspace }: { workspace: Workspace }) {
-  const usagePercent = Math.min(100, Math.round((workspace.profile.creditUsed / Math.max(1, workspace.profile.creditUsed + workspace.profile.creditBalance)) * 100));
+  const creditUsageBase = workspace.profile.creditLimit ?? workspace.profile.creditUsed + workspace.profile.creditBalance;
+  const usagePercent = Math.min(100, Math.round((workspace.profile.creditUsed / Math.max(1, creditUsageBase)) * 100));
   const modelSpend = workspace.history.reduce<Record<string, number>>((memo, entry) => {
     memo[entry.modelId] = (memo[entry.modelId] ?? 0) + entry.creditCost;
     return memo;

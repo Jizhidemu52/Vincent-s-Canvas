@@ -1446,4 +1446,22 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Credit balance")).toBeInTheDocument();
     expect(screen.getAllByText("173").length).toBeGreaterThan(0);
   });
+
+  it("calculates profile credit usage against the assigned credit limit", async () => {
+    backendProfile = {
+      ...backendProfile,
+      creditBalance: 88,
+      credits: 88,
+      creditUsed: 12,
+      creditLimit: 120
+    };
+    backendWorkspace = { ...backendWorkspace, profile: backendProfile };
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "Profile" }));
+
+    expect(screen.getByText(/12 credits used.*limit 120/)).toBeInTheDocument();
+    expect(document.querySelector(".credit-meter i")).toHaveStyle({ width: "10%" });
+  });
 });
