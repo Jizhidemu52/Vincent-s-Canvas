@@ -12,7 +12,7 @@ import {
   type ApiError
 } from "./api";
 import { createInitialWorkspace, createProject } from "../src/domain/workspace";
-import type { GenerationRequest, GenerationResult, ModelDefinition, Profile } from "../src/domain/workspace";
+import type { GenerationRequest, GenerationResult, HistoryEntry, ModelDefinition, Profile } from "../src/domain/workspace";
 import type { AdminAccountSummary, AdminAuditEntry, AdminUsageSummary, ProviderHealth } from "./api";
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
@@ -299,6 +299,28 @@ describe("backend hosted mock API", () => {
 
     expect(saved.profile.creditBalance).toBe(200);
     expect(saved.profile.credits).toBe(200);
+  });
+
+  it("keeps stale workspace snapshots from deleting server-owned generation history", () => {
+    const state = createServerState({ userId: "admin@company.local", role: "admin", creditBalance: 30 });
+    const created = createProject(createInitialWorkspace({ userId: "alice@company.local", designerName: "Alice Designer", creditBalance: 30 }), "Alice board");
+    saveWorkspaceSnapshot(state, created.workspace, "alice@company.local");
+    callApi(state, "/api/generations", request({ projectId: created.project.id, outputCount: 1 }), "alice-history-preserve", "alice@company.local");
+
+    const staleSnapshot = {
+      ...created.workspace,
+      history: []
+    };
+    const saved = saveWorkspaceSnapshot(state, staleSnapshot, "alice@company.local");
+    const history = callApi(state, "/api/history", undefined, undefined, "alice@company.local") as HistoryEntry[];
+
+    expect(saved.history).toHaveLength(1);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      projectId: created.project.id,
+      modelId: "gpt-image-2-low",
+      creditCost: 2
+    });
   });
 
   it("lets admins cap designer credits and rejects adjustments above the limit", () => {

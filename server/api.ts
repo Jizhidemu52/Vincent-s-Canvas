@@ -652,6 +652,17 @@ export function getWorkspaceSnapshot(state: ServerState, userId?: string): Works
   };
 }
 
+function mergeServerHistory(current: HistoryEntry[], incoming?: HistoryEntry[]) {
+  if (!Array.isArray(incoming)) return current;
+  const byId = new Map(current.map((entry) => [entry.id, entry]));
+  for (const entry of incoming) {
+    if (!byId.has(entry.id)) {
+      byId.set(entry.id, entry);
+    }
+  }
+  return Array.from(byId.values()).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
 export function saveWorkspaceSnapshot(state: ServerState, snapshot: Partial<WorkspaceSnapshot>, userId?: string): WorkspaceSnapshot {
   const current = getAccountWorkspace(state, userId);
   const incomingProfile = snapshot.profile;
@@ -664,7 +675,7 @@ export function saveWorkspaceSnapshot(state: ServerState, snapshot: Partial<Work
     },
     projects: Array.isArray(snapshot.projects) ? snapshot.projects : current.projects,
     activeProjectId: Object.prototype.hasOwnProperty.call(snapshot, "activeProjectId") ? snapshot.activeProjectId : current.activeProjectId,
-    history: Array.isArray(snapshot.history) ? snapshot.history : current.history,
+    history: mergeServerHistory(current.history, snapshot.history),
     assets: Array.isArray(snapshot.assets) ? snapshot.assets : current.assets,
     prompts: Array.isArray(snapshot.prompts) ? snapshot.prompts : current.prompts
   };
