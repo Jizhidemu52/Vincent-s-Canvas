@@ -321,6 +321,28 @@ describe("backend hosted mock API", () => {
     expect(adminAccounts).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
   });
 
+  it("keeps workspace snapshots from spoofing the authenticated user id", () => {
+    const state = createServerState({ userId: "admin@company.local", role: "admin", creditBalance: 30 });
+    const aliceWorkspace = createInitialWorkspace({
+      userId: "alice@company.local",
+      designerName: "Alice Designer",
+      role: "designer",
+      creditBalance: 30
+    });
+
+    const saved = saveWorkspaceSnapshot(
+      state,
+      { ...aliceWorkspace, profile: { ...aliceWorkspace.profile, userId: "bob@company.local" } },
+      "alice@company.local"
+    );
+    const aliceProfile = callApi(state, "/api/profile", undefined, undefined, "alice@company.local") as Profile;
+    const bobProfile = callApi(state, "/api/profile", undefined, undefined, "bob@company.local") as Profile;
+
+    expect(saved.profile.userId).toBe("alice@company.local");
+    expect(aliceProfile.userId).toBe("alice@company.local");
+    expect(bobProfile.userId).toBe("bob@company.local");
+  });
+
   it("keeps stale workspace snapshots from deleting server-owned generation history", () => {
     const state = createServerState({ userId: "admin@company.local", role: "admin", creditBalance: 30 });
     const created = createProject(createInitialWorkspace({ userId: "alice@company.local", designerName: "Alice Designer", creditBalance: 30 }), "Alice board");

@@ -666,10 +666,11 @@ function mergeServerHistory(current: HistoryEntry[], incoming?: HistoryEntry[]) 
 export function saveWorkspaceSnapshot(state: ServerState, snapshot: Partial<WorkspaceSnapshot>, userId?: string): WorkspaceSnapshot {
   const current = getAccountWorkspace(state, userId);
   const incomingProfile = snapshot.profile;
+  const authenticatedUserId = normalizeUserId(userId);
   const account: AccountWorkspace = {
     profile: {
       ...current.profile,
-      userId: incomingProfile?.userId ?? current.profile.userId,
+      userId: authenticatedUserId ?? incomingProfile?.userId ?? current.profile.userId,
       designerName: incomingProfile?.designerName ?? current.profile.designerName,
       role: current.profile.role
     },
