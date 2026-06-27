@@ -1347,7 +1347,7 @@ button {
 
 .workflow-picker {
   position: absolute;
-  z-index: 16;
+  z-index: 30;
   display: grid;
   width: 190px;
   gap: 6px;

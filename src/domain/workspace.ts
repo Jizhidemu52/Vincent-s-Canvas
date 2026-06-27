@@ -227,7 +227,11 @@ let idCounter = 0;
 
 function createId(prefix: string) {
   idCounter += 1;
-  return `${prefix}-${idCounter}`;
+  const randomPart =
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10);
+  return `${prefix}-${Date.now().toString(36)}-${idCounter.toString(36)}-${randomPart}`;
 }
 
 function now() {

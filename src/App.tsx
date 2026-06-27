@@ -318,23 +318,30 @@ export default function App() {
   }
 
   function addWorkflowModule(moduleType: ModuleType, sourceNodeIds?: string[]) {
-    if (!activeProject || !selectedNode) return;
-    const resolvedSourceIds = sourceNodeIds?.length ? sourceNodeIds : activeProject.selectedNodeIds.length ? activeProject.selectedNodeIds : [selectedNode.id];
-    const firstSource = activeProject.nodes.find((node) => node.id === resolvedSourceIds[0]) ?? selectedNode;
+    if (!activeProject) return;
+    const projectId = activeProject.id;
+    const fallbackSourceId = sourceNodeIds?.[0] ?? activeProject.selectedNodeIds[0] ?? selectedNode?.id;
+    if (!fallbackSourceId) return;
     const prompt =
       moduleType === "upscale"
         ? "高清放大，保留服装纤维、刺绣和边缘细节。"
         : moduleType === "edit"
           ? "在保持模特姿势和版型不变的前提下，做局部款式编辑。"
           : "参考上游图片和文本，生成新的服装设计方案。";
-    const modelId = moduleType === "upscale" ? "upscale-pro" : firstSource.generation.modelId || "gpt-image-2-medium";
-    setWorkspace((current) =>
-      createWorkflowModuleFromSelection(current, activeProject.id, resolvedSourceIds, {
+    setWorkspace((current) => {
+      const project = current.projects.find((item) => item.id === projectId);
+      if (!project) return current;
+      const candidateSourceIds = sourceNodeIds?.length ? sourceNodeIds : project.selectedNodeIds.length ? project.selectedNodeIds : [fallbackSourceId];
+      const resolvedSourceIds = candidateSourceIds.filter((id) => project.nodes.some((node) => node.id === id));
+      if (!resolvedSourceIds.length) return current;
+      const firstSource = project.nodes.find((node) => node.id === resolvedSourceIds[0]);
+      const modelId = moduleType === "upscale" ? "upscale-pro" : firstSource?.generation.modelId || "gpt-image-2-medium";
+      return createWorkflowModuleFromSelection(current, projectId, resolvedSourceIds, {
         moduleType,
         prompt,
         modelId
-      })
-    );
+      });
+    });
   }
   function connectSelectionToNewModule(moduleType: ModuleType, sourceNodeIds?: string[]) {
     addWorkflowModule(moduleType, sourceNodeIds);
@@ -1730,19 +1737,19 @@ function CanvasStage({
             workspace={workspace}
           />
         ))}
-        {modulePicker && (
-          <WorkflowModulePicker
-            x={modulePicker.x}
-            y={modulePicker.y}
-            referenceCount={modulePicker.sourceIds.length}
-            onPick={(moduleType) => {
-              onConnectModule(moduleType, modulePicker.sourceIds);
-              setModulePicker(null);
-            }}
-            onCancel={() => setModulePicker(null)}
-          />
-        )}
       </div>
+      {modulePicker && (
+        <WorkflowModulePicker
+          x={modulePicker.x * project.viewport.zoom + project.viewport.x}
+          y={modulePicker.y * project.viewport.zoom + project.viewport.y}
+          referenceCount={modulePicker.sourceIds.length}
+          onPick={(moduleType) => {
+            onConnectModule(moduleType, modulePicker.sourceIds);
+            setModulePicker(null);
+          }}
+          onCancel={() => setModulePicker(null)}
+        />
+      )}
       {lasso && <div className="lasso" style={lasso} />}
       <ZoomControls workspace={workspace} project={project} onWorkspaceChange={onWorkspaceChange} />
       {project.viewport.minimapOpen && <MiniMap project={project} />}

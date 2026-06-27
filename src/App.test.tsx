@@ -613,6 +613,32 @@ describe("Designer canvas app shell", () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/upscale$/), expect.objectContaining({ method: "POST" }));
   });
 
+  it("chains workflow modules from module output ports and runs them in order", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from fashion-reference.jpg"));
+    fireEvent.pointerUp(window);
+    await user.click(screen.getByRole("button", { name: /Edit controlled image edit/i }));
+    const editModule = await screen.findByRole("button", { name: /Workflow edit module/i });
+
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from edit module"));
+    fireEvent.pointerUp(window);
+    await user.click(screen.getByRole("button", { name: /Upscale clean high-res output/i }));
+    expect(await screen.findByRole("button", { name: /Workflow upscale module/i })).toBeInTheDocument();
+
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: /Run workflow/i }));
+
+    expect(await screen.findByText("Backend workflow completed 2 modules")).toBeInTheDocument();
+    const editCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/edits"));
+    const upscaleCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/upscale"));
+    expect(editCalls).toHaveLength(1);
+    expect(upscaleCalls).toHaveLength(1);
+    expect(editModule).toHaveTextContent("Done");
+  });
+
   it("keeps multi-selected images as shared references when dragging a workflow port", async () => {
     const user = userEvent.setup();
     await login(user);
