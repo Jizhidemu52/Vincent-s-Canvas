@@ -97,6 +97,44 @@ describe("backend hosted mock API", () => {
     expect(state.submittedRequestIds.has("unsupported-upscale")).toBe(false);
   });
 
+  it("records provider execution failures as failed jobs without charging credits or writing history", () => {
+    const state = createServerState({ creditBalance: 30 });
+    state.models = [
+      ...state.models,
+      {
+        id: "broken-provider-model",
+        name: "Broken Provider Model",
+        provider: "retired-provider" as never,
+        group: "Image",
+        capability: ["generate"],
+        cost: 5
+      }
+    ];
+
+    const result = callApi(
+      state,
+      "/api/generations",
+      request({ modelId: "broken-provider-model", outputCount: 1 }),
+      "provider-failure",
+      "alice@company.local"
+    ) as ApiError;
+    const profile = callApi(state, "/api/profile", undefined, undefined, "alice@company.local") as Profile;
+    const jobs = callApi(state, "/api/admin/jobs", undefined, undefined, "admin@company.local") as ReturnType<typeof createServerState>["generationJobs"];
+
+    expect(result).toMatchObject({ status: "failed", errorMessage: "Provider adapter not configured for retired-provider" });
+    expect(profile.creditBalance).toBe(30);
+    expect(callApi(state, "/api/history", undefined, undefined, "alice@company.local")).toHaveLength(0);
+    expect(state.submittedRequestIds.has("alice@company.local:provider-failure")).toBe(false);
+    expect(jobs[0]).toMatchObject({
+      userId: "alice@company.local",
+      modelId: "broken-provider-model",
+      operation: "generate",
+      status: "failed",
+      creditCost: 0,
+      errorMessage: "Provider adapter not configured for retired-provider"
+    });
+  });
+
   it("rejects duplicate submissions without double charging", () => {
     const state = createServerState({ creditBalance: 30 });
 

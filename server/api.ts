@@ -681,10 +681,41 @@ function assertRequest(state: ServerState, request: GenerationRequest, requestId
 function runModel(state: ServerState, request: GenerationRequest, requestId?: string, userId?: string): GenerationResult {
   const { model, cost, account } = assertRequest(state, request, requestId, userId);
   const historyId = `history-${allHistory(state).length + 1}`;
-  const result = runProviderModel(request, model, historyId, cost);
   const projectName = account.projects.find((project) => project.id === request.projectId)?.name;
   const duplicateKey = scopedRequestId(requestId, userId);
   const createdAt = new Date().toISOString();
+  let result: GenerationResult;
+
+  try {
+    result = runProviderModel(request, model, historyId, cost);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Provider execution failed";
+    state.generationJobs = [
+      {
+        id: `job-${historyId}`,
+        historyId,
+        requestId: duplicateKey,
+        userId: account.profile.userId,
+        designerName: account.profile.designerName,
+        projectId: request.projectId,
+        projectName,
+        nodeId: request.nodeId,
+        modelId: request.modelId,
+        operation: request.operation,
+        status: "failed",
+        prompt: request.prompt,
+        outputCount: request.outputCount,
+        creditCost: 0,
+        referenceCount: request.referenceNodeIds.length,
+        outputs: [],
+        createdAt,
+        updatedAt: createdAt,
+        errorMessage
+      },
+      ...state.generationJobs
+    ];
+    throw error;
+  }
 
   if (duplicateKey) {
     state.submittedRequestIds.add(duplicateKey);
