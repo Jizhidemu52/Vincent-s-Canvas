@@ -182,6 +182,13 @@ function operationForNode(node: CanvasNode): OperationType {
   return "generate";
 }
 
+function defaultPromptForModule(moduleType: ModuleType) {
+  if (moduleType === "upscale") return "Upscale while preserving garment texture, embroidery, and clean product edges.";
+  if (moduleType === "edit") return "Make a controlled local fashion edit while preserving pose and garment structure.";
+  if (moduleType === "batch") return "Apply one consistent edit brief to every selected reference image.";
+  return "Generate a new fashion design from the upstream references and prompt.";
+}
+
 function operationForBatchModel(models: ModelDefinition[], modelId: string, preferredOperation?: OperationType): OperationType {
   const model = models.find((item) => item.id === modelId);
   if (preferredOperation && model?.capability.includes(preferredOperation as ModuleType)) {
@@ -404,12 +411,7 @@ export default function App() {
     const projectId = activeProject.id;
     const fallbackSourceId = sourceNodeIds?.[0] ?? activeProject.selectedNodeIds[0] ?? selectedNode?.id;
     if (!fallbackSourceId) return;
-    const prompt =
-      moduleType === "upscale"
-        ? "高清放大，保留服装纤维、刺绣和边缘细节。"
-        : moduleType === "edit"
-          ? "在保持模特姿势和版型不变的前提下，做局部款式编辑。"
-          : "参考上游图片和文本，生成新的服装设计方案。";
+    const prompt = defaultPromptForModule(moduleType);
     setWorkspace((current) => {
       const project = current.projects.find((item) => item.id === projectId);
       if (!project) return current;
@@ -2468,6 +2470,7 @@ function WorkflowModulePicker({
     { type: "edit", label: "Edit", detail: "controlled image edit" },
     { type: "upscale", label: "Upscale", detail: "clean high-res output" },
     { type: "removeBackground", label: "Remove BG", detail: "cutout for product use" },
+    { type: "batch", label: "Batch", detail: "same brief across selected images" },
     { type: "upload", label: "Upload/ref", detail: "reference handoff node" }
   ];
 
@@ -2507,15 +2510,17 @@ function CanvasNodeView({
   onGenerateNode: (nodeId: string) => void;
   workspace: Workspace;
 }) {
+  const isWorkflowNode = node.kind === "workflow";
   const isImageLike =
-    node.type === "image" ||
-    node.type === "batch" ||
-    node.type === "imageGroup" ||
-    node.kind === "generated" ||
-    node.kind === "operation" ||
-    node.kind === "edit";
+    !isWorkflowNode &&
+    (node.type === "image" ||
+      node.type === "batch" ||
+      node.type === "imageGroup" ||
+      node.kind === "generated" ||
+      node.kind === "operation" ||
+      node.kind === "edit");
   const isText = node.type === "text";
-  const isModule = !isImageLike && !isText;
+  const isModule = isWorkflowNode || (!isImageLike && !isText);
   const nodeHistoryId = typeof node.metadata.historyId === "string" ? node.metadata.historyId : "";
   const nodeCreditCost = typeof node.metadata.creditCost === "number" ? node.metadata.creditCost : undefined;
   const nodeTaskLabel = nodeHistoryId
@@ -2988,6 +2993,7 @@ function RightDock({
             <button type="button" onClick={() => onAddModule("generate")}><Plus size={13} /> Generate node</button>
             <button type="button" onClick={() => onAddModule("edit")}><Wand2 size={13} /> Edit node</button>
             <button type="button" onClick={() => onAddModule("upscale")}><Maximize2 size={13} /> Upscale node</button>
+            <button type="button" onClick={() => onAddModule("batch")}><Upload size={13} /> Batch node</button>
           </div>
           {selectedNode && (
             <section className="node-task-card" aria-label="Selected node task">

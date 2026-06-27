@@ -12,7 +12,7 @@ export type NodeType =
 export type NodeKind = "upload" | "generated" | "operation" | "edit" | "workflow" | "referenceGroup";
 export type NodeStatus = "idle" | "selected" | "running" | "done" | "error";
 export type OperationType = "generate" | "edit" | "upscale" | "removeBackground" | "crop" | "duplicate" | "download";
-export type ModuleType = "upload" | "edit" | "upscale" | "removeBackground" | "generate";
+export type ModuleType = "upload" | "edit" | "upscale" | "removeBackground" | "generate" | "batch";
 export type PortType = "image" | "text" | "config" | "result";
 
 export interface Profile {

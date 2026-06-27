@@ -875,6 +875,29 @@ describe("Designer canvas app shell", () => {
     expect(screen.getAllByRole("button", { name: /backend result 1\.jpg.*Use in canvas/i }).length).toBeGreaterThanOrEqual(2);
   });
 
+  it("uses prompt panel batch settings before any image is selected", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const promptBox = screen.getByPlaceholderText(/\[TARGET\]/);
+    await user.clear(promptBox);
+    await user.type(promptBox, "Run three variations for every imported flat lay.");
+    fireEvent.change(screen.getByRole("slider", { name: "Output count" }), { target: { value: "3" } });
+    const folderInput = screen.getByLabelText("Batch folder input");
+    const first = new File(["front look"], "batch-three-front.png", { type: "image/png" });
+    const second = new File(["back look"], "batch-three-back.png", { type: "image/png" });
+
+    await user.upload(folderInput, [first, second]);
+
+    expect(await screen.findByText("Backend batch completed for 2 images")).toBeInTheDocument();
+    const calls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
+    const requests = calls.map(([, init]) => JSON.parse(String(init?.body)) as GenerationRequest);
+    expect(calls).toHaveLength(2);
+    expect(requests.every((request) => request.prompt === "Run three variations for every imported flat lay.")).toBe(true);
+    expect(requests.every((request) => request.outputCount === 3)).toBe(true);
+  });
+
   it("routes imported batch folders through the selected operation model", async () => {
     const user = userEvent.setup();
     await login(user);
@@ -1193,6 +1216,25 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: /Run workflow/i }));
     expect(await screen.findByText("Backend workflow completed 1 module")).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/upscale$/), expect.objectContaining({ method: "POST" }));
+  });
+
+  it("offers a batch workflow module from image output ports", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const initialNodeCount = screen.getAllByTestId("canvas-node").length;
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from fashion-reference.jpg"));
+    fireEvent.pointerUp(window);
+
+    expect(screen.getByText("Choose module")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Batch same brief across selected images/i }));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("canvas-node").length).toBeGreaterThan(initialNodeCount);
+    });
+    expect(screen.getByRole("button", { name: /Workflow batch module/i })).toBeInTheDocument();
+    expect(screen.getAllByText("batch").length).toBeGreaterThan(0);
   });
 
   it("chains workflow modules from module output ports and runs them in order", async () => {

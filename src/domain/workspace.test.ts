@@ -650,6 +650,46 @@ describe("designer canvas workspace behavior", () => {
     );
   });
 
+  it("creates an executable batch workflow node from multiple selected image references", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Batch workflow node");
+    const first = addAssetToProject(workspace, project.id, {
+      name: "front.png",
+      source: "front",
+      width: 500,
+      height: 700
+    });
+    const second = addAssetToProject(first, project.id, {
+      name: "back.png",
+      source: "back",
+      width: 500,
+      height: 700
+    });
+    const [front, back] = second.projects[0].nodes;
+
+    const withBatch = createWorkflowModuleFromSelection(second, project.id, [front.id, back.id], {
+      moduleType: "batch",
+      prompt: "Apply one consistent edit brief to every selected reference.",
+      modelId: "gpt-image-2-medium"
+    });
+    const batchNode = withBatch.projects[0].nodes.find((node) => node.moduleType === "batch")!;
+    const plan = buildWorkflowExecutionPlan(withBatch, project.id, front.id);
+    const executed = runWorkflowChain(withBatch, project.id, front.id);
+
+    expect(batchNode).toMatchObject({ type: "batch", kind: "workflow", references: [front.id, back.id] });
+    expect(plan.steps[0]).toMatchObject({
+      moduleType: "batch",
+      operation: "generate",
+      referenceNodeIds: [front.id, back.id],
+      referenceCount: 2
+    });
+    expect(executed.history[0]).toMatchObject({
+      moduleType: "batch",
+      operation: "generate",
+      referenceCount: 2,
+      modelId: "gpt-image-2-medium"
+    });
+  });
+
   it("rejects empty prompts before spending credits", () => {
     const { workspace, project } = createProject(createInitialWorkspace({ credits: 2 }), "Guard rails");
     const withAsset = addAssetToProject(workspace, project.id, {
