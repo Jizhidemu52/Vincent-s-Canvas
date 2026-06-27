@@ -347,6 +347,31 @@ describe("backend hosted mock API", () => {
     expect(unauthorized).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
   });
 
+  it("uses project workspace updates as admin account activity before any generation history exists", () => {
+    const state = createServerState({ userId: "admin@company.local", designerName: "Admin Ops", role: "admin", creditBalance: 100 });
+    const created = createProject(
+      createInitialWorkspace({ userId: "designer-projects@company.local", designerName: "Project Designer", creditBalance: 40 }),
+      "Holiday capsule"
+    );
+    const projectUpdatedAt = "2026-06-28T09:30:00.000Z";
+    const workspace = {
+      ...created.workspace,
+      projects: [{ ...created.project, updatedAt: projectUpdatedAt }]
+    };
+
+    saveWorkspaceSnapshot(state, workspace, "designer-projects@company.local");
+
+    const accounts = listAdminAccounts(state, "admin@company.local") as AdminAccountSummary[];
+    const designerAccount = accounts.find((account) => account.userId === "designer-projects@company.local");
+
+    expect(designerAccount).toMatchObject({
+      designerName: "Project Designer",
+      projectCount: 1,
+      historyCount: 0,
+      lastActivityAt: projectUpdatedAt
+    });
+  });
+
   it("lets admins configure model credit cost and displayed money price used for later generations", () => {
     const state = createServerState({ creditBalance: 30 });
 

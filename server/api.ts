@@ -602,6 +602,13 @@ export function configureProviderSettings(
   }
 }
 
+function latestAccountActivity(account: AccountWorkspace) {
+  const activity = [...account.history.map((entry) => entry.createdAt), ...account.projects.map((project) => project.updatedAt)]
+    .filter(Boolean)
+    .sort();
+  return activity[activity.length - 1];
+}
+
 function summarizeAccount(account: AccountWorkspace): AdminAccountSummary {
   return {
     userId: account.profile.userId,
@@ -614,7 +621,7 @@ function summarizeAccount(account: AccountWorkspace): AdminAccountSummary {
     projectCount: account.projects.length,
     historyCount: account.history.length,
     assetCount: account.assets.length,
-    lastActivityAt: account.history[0]?.createdAt
+    lastActivityAt: latestAccountActivity(account)
   };
 }
 
