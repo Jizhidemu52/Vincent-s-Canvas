@@ -108,6 +108,23 @@ describe("backend hosted mock API", () => {
     expect(state.history).toHaveLength(1);
   });
 
+  it("scopes duplicate request protection by designer account", () => {
+    const state = createServerState({ creditBalance: 30 });
+
+    const alice = callApi(state, "/api/generations", request({ outputCount: 1 }), "shared-client-id", "alice@company.local") as GenerationResult;
+    const bob = callApi(state, "/api/generations", request({ outputCount: 1 }), "shared-client-id", "bob@company.local") as GenerationResult;
+
+    const aliceProfile = callApi(state, "/api/profile", undefined, undefined, "alice@company.local") as Profile;
+    const bobProfile = callApi(state, "/api/profile", undefined, undefined, "bob@company.local") as Profile;
+
+    expect(alice.status).toBe("succeeded");
+    expect(bob.status).toBe("succeeded");
+    expect(aliceProfile.creditBalance).toBe(28);
+    expect(bobProfile.creditBalance).toBe(28);
+    expect(callApi(state, "/api/history", undefined, undefined, "alice@company.local")).toHaveLength(1);
+    expect(callApi(state, "/api/history", undefined, undefined, "bob@company.local")).toHaveLength(1);
+  });
+
   it("reports admin usage, audit, and provider health without exposing secrets", () => {
     const state = createServerState({ creditBalance: 30 });
     callApi(state, "/api/generations", request({ outputCount: 1 }), "usage-1");

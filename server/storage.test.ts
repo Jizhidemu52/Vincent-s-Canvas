@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { callApi, createServerState } from "./api";
 import { loadServerState, saveServerState } from "./storage";
-import type { GenerationRequest, Profile } from "../src/domain/workspace";
+import type { GenerationRequest, GenerationResult, Profile } from "../src/domain/workspace";
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
   return {
@@ -32,10 +32,14 @@ describe("server database storage", () => {
       const restored = loadServerState(databasePath);
       const restoredProfile = callApi(restored, "/api/profile", undefined, undefined, "designer@company.local") as Profile;
       const duplicate = callApi(restored, "/api/generations", request(), "sqlite-request-1", "designer@company.local") as { errorMessage: string };
+      const otherDesigner = callApi(restored, "/api/generations", request(), "sqlite-request-1", "other@company.local") as GenerationResult;
+      const otherProfile = callApi(restored, "/api/profile", undefined, undefined, "other@company.local") as Profile;
 
       expect(existsSync(databasePath)).toBe(true);
       expect(restoredProfile.creditBalance).toBe(28);
       expect(duplicate.errorMessage).toBe("Duplicate request");
+      expect(otherDesigner.status).toBe("succeeded");
+      expect(otherProfile.creditBalance).toBe(28);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -153,6 +153,11 @@ function normalizeUserId(userId?: string) {
   return normalized || undefined;
 }
 
+function scopedRequestId(requestId?: string, userId?: string) {
+  if (!requestId) return undefined;
+  return `${normalizeUserId(userId) ?? "default"}:${requestId}`;
+}
+
 function accountFromState(state: ServerState): AccountWorkspace {
   return {
     profile: state.profile,
@@ -611,7 +616,8 @@ export function saveWorkspaceSnapshot(state: ServerState, snapshot: Partial<Work
 }
 
 function assertRequest(state: ServerState, request: GenerationRequest, requestId?: string, userId?: string) {
-  if (requestId && state.submittedRequestIds.has(requestId)) {
+  const duplicateKey = scopedRequestId(requestId, userId);
+  if (duplicateKey && state.submittedRequestIds.has(duplicateKey)) {
     throw new Error("Duplicate request");
   }
   if (!request.prompt.trim() && request.operation !== "upscale" && request.operation !== "removeBackground") {
@@ -640,9 +646,10 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
   const historyId = `history-${allHistory(state).length + 1}`;
   const result = runProviderModel(request, model, historyId, cost);
   const projectName = account.projects.find((project) => project.id === request.projectId)?.name;
+  const duplicateKey = scopedRequestId(requestId, userId);
 
-  if (requestId) {
-    state.submittedRequestIds.add(requestId);
+  if (duplicateKey) {
+    state.submittedRequestIds.add(duplicateKey);
   }
   account.profile = {
     ...account.profile,
