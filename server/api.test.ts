@@ -220,6 +220,36 @@ describe("backend hosted mock API", () => {
     });
   });
 
+  it("exposes team generation history with outputs only to admins", () => {
+    const state = createServerState({ creditBalance: 30 });
+    callApi(state, "/api/generations", request({ outputCount: 1 }), "team-history-alice", "alice@company.local");
+    callApi(state, "/api/upscale", request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }), "team-history-bob", "bob@company.local");
+
+    const history = callApi(state, "/api/admin/history", undefined, undefined, "admin@company.local") as ReturnType<typeof createServerState>["history"];
+    const unauthorized = callApi(state, "/api/admin/history", undefined, undefined, "designer@company.local") as ApiError;
+
+    expect(history).toHaveLength(2);
+    expect(history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          userId: "alice@company.local",
+          designerName: "alice",
+          modelId: "gpt-image-2-low",
+          outputCount: 1,
+          outputs: expect.arrayContaining([expect.objectContaining({ source: "mock://openai/generate/node-1/1" })])
+        }),
+        expect.objectContaining({
+          userId: "bob@company.local",
+          designerName: "bob",
+          modelId: "upscale-pro",
+          outputCount: 1,
+          outputs: expect.arrayContaining([expect.objectContaining({ source: "mock://internal/upscale/node-1/1" })])
+        })
+      ])
+    );
+    expect(unauthorized).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+  });
+
   it("keeps designer credits and history isolated by user id", () => {
     const state = createServerState({ creditBalance: 30 });
 

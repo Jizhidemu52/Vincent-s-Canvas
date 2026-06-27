@@ -31,6 +31,7 @@ const readOnlyRoutes = new Set<ApiPath>([
   "/api/models",
   "/api/profile",
   "/api/history",
+  "/api/admin/history",
   "/api/admin/audit",
   "/api/admin/usage",
   "/api/admin/accounts",

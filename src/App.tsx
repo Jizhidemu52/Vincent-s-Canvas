@@ -89,6 +89,7 @@ import {
   configureAdminProviderSettings,
   fetchAdminAccounts,
   fetchAdminAudit,
+  fetchAdminHistory,
   fetchAdminJobs,
   fetchAdminUsage,
   fetchBackendSnapshot,
@@ -99,6 +100,7 @@ import {
   submitGenerationRequest,
   type AdminAccountSummary,
   type AdminAuditEntry,
+  type AdminHistoryEntry,
   type AdminGenerationJob,
   type AdminUsageSummary,
   type ProviderHealth,
@@ -1174,6 +1176,7 @@ function AdminView({
   const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([]);
   const [adminUsage, setAdminUsage] = useState<AdminUsageSummary | null>(null);
   const [adminJobs, setAdminJobs] = useState<AdminGenerationJob[]>([]);
+  const [adminHistory, setAdminHistory] = useState<AdminHistoryEntry[]>([]);
   const [adminAudit, setAdminAudit] = useState<AdminAuditEntry[]>(workspace.history.map(historyEntryToAuditEntry));
   const estimatedSpend = formatMoneyCents(adminUsage?.totalPriceCents, adminUsage?.currency);
   const providers = workspace.modelRegistry.reduce<Record<string, number>>((memo, model) => {
@@ -1215,12 +1218,13 @@ function AdminView({
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([fetchAdminUsage(activeUserId), fetchAdminAudit(activeUserId), fetchAdminJobs(activeUserId)])
-      .then(([usage, audit, jobs]) => {
+    void Promise.all([fetchAdminUsage(activeUserId), fetchAdminAudit(activeUserId), fetchAdminJobs(activeUserId), fetchAdminHistory(activeUserId)])
+      .then(([usage, audit, jobs, history]) => {
         if (!cancelled) {
           setAdminUsage(usage);
           setAdminAudit(audit);
           setAdminJobs(jobs);
+          setAdminHistory(history);
         }
       })
       .catch((error) => {
@@ -1591,6 +1595,31 @@ function AdminView({
               ))
             ) : (
               <p>No generation jobs yet. Completed or failed provider tasks will appear here.</p>
+            )}
+          </article>
+          <article className="admin-card">
+            <h2>Team history</h2>
+            {adminHistory.length ? (
+              adminHistory.slice(0, 6).map((entry) => (
+                <div className="admin-row" key={entry.id}>
+                  <span>{entry.designerName ?? entry.userId} · {entry.projectName ?? entry.projectId} · {entry.modelId}</span>
+                  <strong>
+                    {entry.creditCost} credits · {entry.outputCount} output{entry.outputCount === 1 ? "" : "s"}
+                  </strong>
+                  <small>{entry.prompt}</small>
+                  {entry.outputs?.length ? (
+                    <div className="history-output-strip" aria-label={`Team history outputs for ${entry.id}`}>
+                      {entry.outputs.slice(0, 4).map((output) => (
+                        <img key={`${entry.id}-${output.name}`} src={output.source} alt={`Team history output ${output.name}`} />
+                      ))}
+                    </div>
+                  ) : (
+                    <small>No output thumbnails recorded</small>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p>No team generation history yet. Designer outputs will appear here.</p>
             )}
           </article>
           <article className="admin-card">

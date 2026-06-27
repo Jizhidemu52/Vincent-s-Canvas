@@ -464,6 +464,38 @@ describe("HTTP API server", () => {
     expect(await unauthorizedResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
   });
 
+  it("exposes team generation history with thumbnails only to admins over HTTP", async () => {
+    await fetch(`${context.baseUrl}/api/generations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "team-history-http-alice", "x-user-id": "alice@company.local" },
+      body: JSON.stringify(request({ outputCount: 1 }))
+    });
+    await fetch(`${context.baseUrl}/api/upscale`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "team-history-http-bob", "x-user-id": "bob@company.local" },
+      body: JSON.stringify(request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }))
+    });
+
+    const historyResponse = await fetch(`${context.baseUrl}/api/admin/history`, {
+      headers: { "x-user-id": "admin@company.local" }
+    });
+    const unauthorizedResponse = await fetch(`${context.baseUrl}/api/admin/history`, {
+      headers: { "x-user-id": "designer@company.local" }
+    });
+
+    expect(historyResponse.status).toBe(200);
+    const history = (await historyResponse.json()) as Array<Record<string, unknown>>;
+    expect(history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ userId: "alice@company.local", modelId: "gpt-image-2-low", outputCount: 1 }),
+        expect.objectContaining({ userId: "bob@company.local", modelId: "upscale-pro", outputCount: 1 })
+      ])
+    );
+    expect(JSON.stringify(history)).toContain("mock://openai/generate");
+    expect(unauthorizedResponse.status).toBe(400);
+    expect(await unauthorizedResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+  });
+
   it("persists failed provider jobs across server restarts without charging credits", async () => {
     await new Promise<void>((resolve, reject) => {
       context.server.close((error) => (error ? reject(error) : resolve()));

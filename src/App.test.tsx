@@ -16,6 +16,7 @@ let backendProfile: Profile = {
 let backendHistory: HistoryEntry[] = [];
 let backendWorkspace: Workspace = createInitialWorkspace();
 let backendAdminAudit: AdminAuditEntry[] = [];
+let backendAdminHistory: HistoryEntry[] = [];
 let backendAdminUsage: {
   totalCreditsUsed: number;
   totalHistoryEntries: number;
@@ -62,6 +63,43 @@ beforeEach(() => {
     ...createInitialWorkspace({ userId: "designer-lina", designerName: "Lina Zhou", creditBalance: 180, role: "designer" }),
     history: backendHistory
   };
+  backendAdminHistory = [
+    {
+      id: "history-alice-team-1",
+      projectId: "alice-campaign",
+      projectName: "Alice campaign",
+      nodeId: "alice-node-1",
+      prompt: "Alice campaign cleanup",
+      modelId: "gpt-image-2-medium",
+      outputCount: 2,
+      creditCost: 14,
+      operation: "generate",
+      referenceCount: 1,
+      userId: "alice@company.local",
+      designerName: "Alice Designer",
+      createdAt: "2026-06-28T02:10:00.000Z",
+      outputs: [
+        { name: "alice-cleanup-1.jpg", source: "/fixtures/alice-cleanup-1.jpg", width: 1024, height: 1024 },
+        { name: "alice-cleanup-2.jpg", source: "/fixtures/alice-cleanup-2.jpg", width: 1024, height: 1024 }
+      ]
+    },
+    {
+      id: "history-bob-team-1",
+      projectId: "bob-upscale",
+      projectName: "Bob upscale",
+      nodeId: "bob-node-1",
+      prompt: "Bob upscale pass",
+      modelId: "upscale-pro",
+      outputCount: 1,
+      creditCost: 4,
+      operation: "upscale",
+      referenceCount: 1,
+      userId: "bob@company.local",
+      designerName: "Bob Designer",
+      createdAt: "2026-06-28T02:05:00.000Z",
+      outputs: [{ name: "bob-upscale-1.jpg", source: "/fixtures/bob-upscale-1.jpg", width: 1024, height: 1024 }]
+    }
+  ];
   backendAdminAudit = [
     {
       id: "audit-alice-1",
@@ -489,6 +527,14 @@ beforeEach(() => {
           return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
         }
         return jsonResponse(backendAdminAudit);
+      }
+      if (url.endsWith("/api/admin/history")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        return jsonResponse(backendAdminHistory);
       }
       if (url.endsWith("/api/admin/jobs")) {
         const headers = init?.headers as Record<string, string> | undefined;
@@ -924,10 +970,16 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("6.20 CNY estimated spend")).toBeInTheDocument();
     expect(screen.getAllByText("upscale-pro").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("2.40 CNY estimated spend")).toBeInTheDocument();
-    expect(screen.getByText("Alice campaign cleanup")).toBeInTheDocument();
+    expect(screen.getAllByText("Alice campaign cleanup").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Alice Designer · Alice campaign")).toBeInTheDocument();
-    expect(screen.getByText("Bob upscale pass")).toBeInTheDocument();
+    expect(screen.getAllByText("Bob upscale pass").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Bob Designer · Bob upscale")).toBeInTheDocument();
+    expect(screen.getByText("Team history")).toBeInTheDocument();
+    expect(screen.getByText("Alice Designer · Alice campaign · gpt-image-2-medium")).toBeInTheDocument();
+    expect(screen.getByText("14 credits · 2 outputs")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).toBeInTheDocument();
+    expect(screen.getByText("Bob Designer · Bob upscale · upscale-pro")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
     expect(screen.getByText("alice@company.local")).toBeInTheDocument();
     expect(screen.getByText("Alice Designer")).toBeInTheDocument();
     expect(screen.getByText("88 remaining")).toBeInTheDocument();

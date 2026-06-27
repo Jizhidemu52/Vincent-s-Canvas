@@ -104,6 +104,8 @@ export interface AdminGenerationJob {
   errorMessage?: string;
 }
 
+export type AdminHistoryEntry = HistoryEntry;
+
 export interface AdminAuditEntry {
   id: string;
   eventType?: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings";
@@ -261,6 +263,11 @@ export async function fetchAdminUsage(adminUserId?: string): Promise<AdminUsageS
 export async function fetchAdminJobs(adminUserId?: string): Promise<AdminGenerationJob[]> {
   const response = await fetch(`${API_BASE_URL}/api/admin/jobs`, { headers: userHeaders(adminUserId) });
   return readJson<AdminGenerationJob[]>(response);
+}
+
+export async function fetchAdminHistory(adminUserId?: string): Promise<AdminHistoryEntry[]> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/history`, { headers: userHeaders(adminUserId) });
+  return readJson<AdminHistoryEntry[]>(response);
 }
 
 export async function fetchAdminAudit(adminUserId?: string): Promise<AdminAuditEntry[]> {

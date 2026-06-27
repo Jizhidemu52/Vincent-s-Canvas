@@ -311,6 +311,18 @@ function listGenerationJobs(state: ServerState, adminUserId?: string): Generatio
   }
 }
 
+function listAdminHistory(state: ServerState, adminUserId?: string): HistoryEntry[] | ApiError {
+  try {
+    assertAdminUser(state, adminUserId);
+    return allHistory(state);
+  } catch (error) {
+    return {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Unknown server error"
+    };
+  }
+}
+
 function totalCreditsUsed(state: ServerState) {
   return state.profile.creditUsed + Object.values(state.accounts).reduce((sum, account) => sum + account.profile.creditUsed, 0);
 }
@@ -781,6 +793,8 @@ export const apiRoutes = {
     getAccountWorkspace(state, userId).profile,
   "/api/history": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
     getAccountWorkspace(state, userId).history,
+  "/api/admin/history": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
+    listAdminHistory(state, userId),
   "/api/admin/audit": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) => {
     assertAdminUser(state, userId);
     return allAdminAudit(state);
@@ -851,6 +865,7 @@ export function callApi(
       path === "/api/models" ||
       path === "/api/profile" ||
       path === "/api/history" ||
+      path === "/api/admin/history" ||
       path === "/api/admin/audit" ||
       path === "/api/admin/usage" ||
       path === "/api/admin/accounts" ||
