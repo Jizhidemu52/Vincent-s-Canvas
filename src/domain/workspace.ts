@@ -1294,6 +1294,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
   }
   const creditCost = model.cost * moduleNode.generation.outputCount;
   const charged = spendCredits(workspace, creditCost);
+  let generatedOutput: AssetInput | undefined;
   const updated = updateProject(charged, projectId, (project) => {
     const generatedNode = createNode({
       type: "image",
@@ -1316,8 +1317,38 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
         modelId: moduleNode.generation.modelId
       }
     });
+    generatedOutput = {
+      name: generatedNode.name,
+      source: generatedNode.source,
+      width: generatedNode.width,
+      height: generatedNode.height
+    };
+    const inputNodeIds = moduleNode.references.length
+      ? moduleNode.references
+      : project.connections.filter((connection) => connection.toNodeId === moduleNode.id).map((connection) => connection.fromNodeId);
     return withUndo(project, {
-      nodes: [...project.nodes, generatedNode],
+      nodes: [
+        ...project.nodes.map((node) =>
+          node.id === moduleNode.id
+            ? {
+                ...node,
+                status: "done" as NodeStatus,
+                metadata: {
+                  ...node.metadata,
+                  runStatus: "done",
+                  inputNodeIds,
+                  outputNodeIds: [...(Array.isArray(node.metadata.outputNodeIds) ? node.metadata.outputNodeIds : []), generatedNode.id],
+                  historyId,
+                  creditCost,
+                  operation,
+                  modelId: moduleNode.generation.modelId,
+                  prompt: moduleNode.generation.prompt
+                }
+              }
+            : node
+        ),
+        generatedNode
+      ],
       connections: [...project.connections, connect(moduleNode.id, generatedNode.id, "result", "in")],
       selectedNodeIds: [generatedNode.id]
     });
@@ -1336,6 +1367,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
         operation,
         moduleType: moduleNode.moduleType,
         referenceCount: moduleNode.references.length,
+        outputs: generatedOutput ? [generatedOutput] : [],
         createdAt: now()
       },
       ...updated.history

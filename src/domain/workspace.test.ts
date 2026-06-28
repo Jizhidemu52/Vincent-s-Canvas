@@ -420,6 +420,49 @@ describe("designer canvas workspace behavior", () => {
     expect(executed.profile.credits).toBe(1);
   });
 
+  it("stores workflow node inputs, outputs, status, and history after execution", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Workflow audit trail");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "jacket.png",
+      source: "jacket-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const withEditModule = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "edit",
+      prompt: "replace buttons with brushed metal buttons",
+      modelId: "gpt-image-2-medium"
+    });
+    const editNode = withEditModule.projects[0].nodes.find((node) => node.moduleType === "edit")!;
+
+    const executed = runWorkflowChain(withEditModule, project.id, source.id);
+    const executedProject = executed.projects[0];
+    const executedEditNode = executedProject.nodes.find((node) => node.id === editNode.id)!;
+    const output = executedProject.nodes.find((node) => node.parentId === editNode.id && node.kind === "generated")!;
+    const history = executed.history.find((entry) => entry.nodeId === editNode.id)!;
+
+    expect(executedEditNode.status).toBe("done");
+    expect(executedEditNode.metadata).toMatchObject({
+      runStatus: "done",
+      inputNodeIds: [source.id],
+      outputNodeIds: [output.id],
+      historyId: history.id,
+      creditCost: history.creditCost,
+      operation: "edit",
+      modelId: "gpt-image-2-medium",
+      prompt: "replace buttons with brushed metal buttons"
+    });
+    expect(history.outputs).toEqual([
+      expect.objectContaining({
+        name: output.name,
+        source: output.source,
+        width: output.width,
+        height: output.height
+      })
+    ]);
+  });
+
   it("builds an auditable workflow execution plan before running chained image operations", () => {
     const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Workflow plan");
     const withAsset = addAssetToProject(workspace, project.id, {
