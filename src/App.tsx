@@ -2021,6 +2021,9 @@ function AdminView({
                 <button type="button" className="secondary-button" onClick={() => exportAdminTeamHistory(visibleAdminHistory, adminHistoryUserFilter)}>
                   <Download size={14} /> Export team history
                 </button>
+                <button type="button" className="secondary-button" onClick={() => exportAdminTeamHistoryCsv(visibleAdminHistory, adminHistoryUserFilter)}>
+                  <Download size={14} /> Export team history CSV
+                </button>
               </div>
             ) : null}
             {visibleAdminHistory.length ? (
@@ -2252,6 +2255,49 @@ function exportAdminTeamHistory(entries: AdminHistoryEntry[], filterUserId: stri
   link.download = `team-history-${safeFileName(filterUserId === "all" ? "all-designers" : filterUserId)}.json`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function exportAdminTeamHistoryCsv(entries: AdminHistoryEntry[], filterUserId: string) {
+  const headers = [
+    "designerName",
+    "userId",
+    "projectName",
+    "modelId",
+    "operation",
+    "outputCount",
+    "creditCost",
+    "priceCents",
+    "currency",
+    "prompt",
+    "outputSources",
+    "createdAt"
+  ];
+  const rows = entries.map((entry) => [
+    entry.designerName ?? "",
+    entry.userId ?? "",
+    entry.projectName ?? entry.projectId,
+    entry.modelId,
+    entry.operation ?? "",
+    String(entry.outputCount),
+    String(entry.creditCost),
+    entry.priceCents === undefined ? "" : String(entry.priceCents),
+    entry.currency ?? "",
+    entry.prompt,
+    entry.outputs?.map((output) => output.source).join(" | ") ?? "",
+    entry.createdAt
+  ]);
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `team-history-${safeFileName(filterUserId === "all" ? "all-designers" : filterUserId)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value: string) {
+  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
 function safeFileName(value: string) {

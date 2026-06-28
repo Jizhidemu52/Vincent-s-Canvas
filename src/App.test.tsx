@@ -1540,6 +1540,65 @@ describe("Designer canvas app shell", () => {
     }
   });
 
+  it("exports the filtered admin team history as CSV for finance review", async () => {
+    backendAdminHistory = backendAdminHistory.map((entry) =>
+      entry.userId === "bob@company.local"
+        ? { ...entry, prompt: "Bob upscale pass, preserve edges\nSecond line" }
+        : entry
+    );
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: /Admin monitoring/i }));
+    await screen.findByText("Team history");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team history designer filter" }), "bob@company.local");
+
+    let exportAnchor: HTMLAnchorElement | undefined;
+    let exportedBlob: Blob | undefined;
+    const createElement = document.createElement.bind(document);
+    const createElementSpy = vi.spyOn(document, "createElement").mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+      const element = createElement(tagName, options);
+      if (tagName === "a") {
+        exportAnchor = element as HTMLAnchorElement;
+        vi.spyOn(exportAnchor, "click").mockImplementation(() => undefined);
+      }
+      return element;
+    });
+    const previousCreateObjectURL = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const previousRevokeObjectURL = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn((blob: Blob) => {
+        exportedBlob = blob;
+        return "blob:team-history-csv-export";
+      })
+    });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+
+    try {
+      await user.click(screen.getByRole("button", { name: "Export team history CSV" }));
+      const exportedText = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(exportedBlob!);
+      });
+
+      expect(exportAnchor?.download).toBe("team-history-bob-company-local.csv");
+      expect(exportedBlob?.type).toBe("text/csv;charset=utf-8");
+      expect(exportedText).toContain("designerName,userId,projectName,modelId,operation,outputCount,creditCost,priceCents,currency,prompt,outputSources,createdAt");
+      expect(exportedText).toContain('"Bob upscale pass, preserve edges\nSecond line"');
+      expect(exportedText).toContain("/fixtures/bob-upscale-1.jpg");
+      expect(exportedText).not.toContain("Alice campaign cleanup");
+    } finally {
+      createElementSpy.mockRestore();
+      if (previousCreateObjectURL) Object.defineProperty(URL, "createObjectURL", previousCreateObjectURL);
+      else delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+      if (previousRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", previousRevokeObjectURL);
+      else delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
+    }
+  });
+
   it("supports the image node inline model/prompt entry and generation loop", async () => {
     const user = userEvent.setup();
     await login(user);
