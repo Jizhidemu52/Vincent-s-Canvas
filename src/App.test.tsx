@@ -1969,6 +1969,44 @@ describe("Designer canvas app shell", () => {
     expect(screen.getAllByText("173").length).toBeGreaterThan(0);
   });
 
+  it("filters home history records by project", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.dblClick(screen.getByText("fashion-reference.jpg"));
+    await user.type(screen.getByRole("textbox", { name: "Inline prompt" }), "first project embroidery concept");
+    let generateButtons = screen.getAllByRole("button", { name: "Generate" });
+    await user.click(generateButtons[generateButtons.length - 1]);
+    await screen.findByText("backend result 1.jpg");
+
+    await user.click(screen.getByRole("button", { name: "Projects" }));
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.dblClick(screen.getByText("fashion-reference.jpg"));
+    await user.type(screen.getByRole("textbox", { name: "Inline prompt" }), "second project cutout direction");
+    generateButtons = screen.getAllByRole("button", { name: "Generate" });
+    await user.click(generateButtons[generateButtons.length - 1]);
+    await screen.findByText("backend result 1.jpg");
+
+    await user.click(screen.getByRole("button", { name: "Projects" }));
+    await user.click(screen.getByRole("button", { name: "History" }));
+
+    expect(screen.getByText("first project embroidery concept")).toBeInTheDocument();
+    expect(screen.getByText("second project cutout direction")).toBeInTheDocument();
+
+    const projectFilter = screen.getByRole("combobox", { name: "History project filter" });
+    await user.selectOptions(projectFilter, screen.getByRole("option", { name: "Untitled 1" }));
+
+    expect(screen.getByText("first project embroidery concept")).toBeInTheDocument();
+    expect(screen.queryByText("second project cutout direction")).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 2 records")).toBeInTheDocument();
+
+    await user.selectOptions(projectFilter, "all");
+
+    expect(screen.getByText("first project embroidery concept")).toBeInTheDocument();
+    expect(screen.getByText("second project cutout direction")).toBeInTheDocument();
+  });
+
   it("calculates profile credit usage against the assigned credit limit", async () => {
     backendProfile = {
       ...backendProfile,

@@ -1241,11 +1241,23 @@ function ProjectsPanel({
 }
 
 function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOpenProject: (projectId: string, target?: OpenProjectTarget) => void }) {
+  const [projectFilter, setProjectFilter] = useState("all");
   const generatedNodes = workspace.projects.flatMap((project) =>
     project.nodes
       .filter((node) => node.kind === "generated" || node.kind === "edit" || node.kind === "operation")
       .map((node) => ({ project, node }))
   );
+  const historyProjectOptions = Array.from(
+    new Map(
+      workspace.history.map((entry) => {
+        const project = workspace.projects.find((item) => item.id === entry.projectId);
+        return [entry.projectId, project?.name ?? entry.projectName ?? entry.projectId] as const;
+      })
+    ).entries()
+  );
+  const visibleHistory = projectFilter === "all" ? workspace.history : workspace.history.filter((entry) => entry.projectId === projectFilter);
+  const visibleGeneratedNodes =
+    projectFilter === "all" ? generatedNodes : generatedNodes.filter(({ project }) => project.id === projectFilter);
   function sourceForHistoryOutput(entryId: string, outputName: string, remoteSource: string) {
     const match = generatedNodes.find(
       ({ node }) => node.metadata.historyId === entryId && (node.metadata.remoteSource === remoteSource || node.name === outputName)
@@ -1259,12 +1271,25 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
           <h2>History</h2>
           <p>Designer generation records, model usage, credit cost, project source and reusable outputs.</p>
         </div>
-        <span>{workspace.history.length} records</span>
+        <span>{projectFilter === "all" ? `${workspace.history.length} records` : `${visibleHistory.length} of ${workspace.history.length} records`}</span>
       </div>
+      {historyProjectOptions.length ? (
+        <label className="history-project-filter">
+          <span>Project</span>
+          <select aria-label="History project filter" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
+            <option value="all">All projects</option>
+            {historyProjectOptions.map(([projectId, projectName]) => (
+              <option key={projectId} value={projectId}>
+                {projectName}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <div className="history-layout">
         <div className="history-records">
-          {workspace.history.length ? (
-            workspace.history.map((entry) => {
+          {visibleHistory.length ? (
+            visibleHistory.map((entry) => {
               const project = workspace.projects.find((item) => item.id === entry.projectId);
               return (
                 <article className="history-record" key={entry.id}>
@@ -1298,8 +1323,8 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
           )}
         </div>
         <div className="history-gallery" aria-label="Generated image gallery">
-          {generatedNodes.length ? (
-            generatedNodes.slice(0, 12).map(({ project, node }) => (
+          {visibleGeneratedNodes.length ? (
+            visibleGeneratedNodes.slice(0, 12).map(({ project, node }) => (
               <button
                 type="button"
                 key={node.id}

@@ -530,6 +530,25 @@ button {
   font-weight: 800;
 }
 
+.history-project-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  margin-bottom: 12px;
+  color: #666;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.history-project-filter select {
+  border: 1px solid #d8d8d8;
+  border-radius: 7px;
+  background: #fff;
+  padding: 7px 10px;
+  font: inherit;
+}
+
 .history-output-strip {
   display: flex;
   flex-wrap: wrap;

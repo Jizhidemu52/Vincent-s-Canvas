@@ -46,6 +46,7 @@ The current repository already includes:
 - Admin credit limits and model pricing controls.
 - Admin generation job logs with designer, model, operation, status, cost, and project context.
 - Hero-inspired admin team history filtering and filtered JSON export for audit handoff.
+- Hero-inspired designer history project filtering for project-level generation traceability.
 - SQLite-backed platform tables for accounts, credit ledger, projects, nodes, connections, assets, generation history/jobs, model configs, audit logs, and idempotency requests.
 
 ## 2026-06-28 Source Audit
@@ -89,7 +90,7 @@ Local inspection notes:
 | Batch workflow behavior and partial failure tests | `T8mars/T8-penguin-canvas` | `BatchProcessorNode.tsx`, `batchProcessor.ts`, `tests/batchProcessor.test.ts` | Adapted lightweight retry/progress/cancel semantics, backend stop-on-failure submission, and concurrency-limited batch runner into current batch queue on 2026-06-28; deeper async worker persistence and pause/resume remain later. |
 | RunningHub/ComfyUI provider adapters | `T8mars/T8-penguin-canvas`, `hero8152/Infinite-Canvas` | T8 backend provider files; hero settings/workflow JSON | Adapted first-pass OpenAI/NanoBanana image payload, RunningHub/ComfyUI workflow payload mapping, live HTTP submission, polling, output normalization, HTTP generation routing by provider mode, provider progress snapshots, node-level provider progress metadata and context display, provider-specific error normalization, NanoBanana base64 outputs, nested workflow asset outputs, and partial-success item error reporting on 2026-06-28; next step is deeper provider-specific fixtures and real async worker persistence. |
 | API/provider settings UI | `hero8152/Infinite-Canvas` | `static/js/api-settings.js`, `static/js/comfyui-settings.js`, related HTML | Reuse field set and connection-test ideas, but keep secrets server-side in this product. |
-| History bulk management | `hero8152/Infinite-Canvas` | `static/js/history-bulk-manager.js` | Adapted filtered admin team history export on 2026-06-28 so managers can hand off designer-specific audit JSON; bulk selection, CSV export, and delete/archive operations remain later. |
+| History bulk management | `hero8152/Infinite-Canvas` | `static/js/history-bulk-manager.js` | Adapted filtered admin team history export and designer-side project history filtering on 2026-06-28 so managers and designers can trace generation records by account/project; bulk selection, CSV export, and delete/archive operations remain later. |
 
 ## Next Reuse-First Implementation Order
 
