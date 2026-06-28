@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { callApi, createServerState } from "./api";
+import { callApi, configureModelPricing, createServerState } from "./api";
 import { loadServerState, saveServerState } from "./storage";
 import type { GenerationRequest, GenerationResult, Profile } from "../src/domain/workspace";
 
@@ -51,18 +51,29 @@ describe("server database storage", () => {
     const databasePath = join(dir, "server-state.sqlite");
     try {
       const state = createServerState({ creditBalance: 30 });
+      configureModelPricing(state, { modelId: "gpt-image-2-low", cost: 2, priceCents: 150, currency: "CNY" }, "admin@company.local");
       callApi(state, "/api/generations", request(), "sqlite-request-2");
 
       saveServerState(databasePath, state);
 
       const db = new DatabaseSync(databasePath, { readOnly: true });
-      const tables = db
-        .prepare("select name from sqlite_master where type = 'table' order by name")
-        .all()
-        .map((row) => String(row.name));
-      const historyCount = db.prepare("select count(*) as count from generation_history").get() as { count: number };
-      const jobCount = db.prepare("select count(*) as count from generation_jobs").get() as { count: number };
-      db.close();
+      let tables: string[];
+      let historyCount: { count: number };
+      let jobCount: { count: number };
+      let historyBilling: { price_cents: number; currency: string };
+      let ledgerBilling: { price_cents: number; currency: string };
+      try {
+        tables = db
+          .prepare("select name from sqlite_master where type = 'table' order by name")
+          .all()
+          .map((row) => String(row.name));
+        historyCount = db.prepare("select count(*) as count from generation_history").get() as { count: number };
+        jobCount = db.prepare("select count(*) as count from generation_jobs").get() as { count: number };
+        historyBilling = db.prepare("select price_cents, currency from generation_history").get() as { price_cents: number; currency: string };
+        ledgerBilling = db.prepare("select price_cents, currency from credit_ledger").get() as { price_cents: number; currency: string };
+      } finally {
+        db.close();
+      }
 
       expect(tables).toEqual(
         expect.arrayContaining([
@@ -82,6 +93,8 @@ describe("server database storage", () => {
       );
       expect(historyCount.count).toBe(1);
       expect(jobCount.count).toBe(1);
+      expect(historyBilling).toEqual({ price_cents: 150, currency: "CNY" });
+      expect(ledgerBilling).toEqual({ price_cents: 150, currency: "CNY" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

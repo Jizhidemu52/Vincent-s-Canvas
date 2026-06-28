@@ -91,6 +91,8 @@ function createDatabaseSchema(db: ReturnType<typeof openDatabase>) {
       project_id text not null,
       node_id text not null,
       credit_cost integer not null,
+      price_cents integer,
+      currency text,
       created_at text not null
     );
     create table if not exists projects (
@@ -148,6 +150,8 @@ function createDatabaseSchema(db: ReturnType<typeof openDatabase>) {
       node_id text not null,
       model_id text not null,
       credit_cost integer not null,
+      price_cents integer,
+      currency text,
       created_at text not null,
       history_json text not null
     );
@@ -232,10 +236,10 @@ function saveDatabaseState(filePath: string, state: ServerState) {
     );
     const insertAsset = db.prepare("insert into assets (id, user_id, title, type, asset_json) values (?, ?, ?, ?, ?)");
     const insertHistory = db.prepare(
-      "insert into generation_history (id, user_id, project_id, node_id, model_id, credit_cost, created_at, history_json) values (?, ?, ?, ?, ?, ?, ?, ?)"
+      "insert into generation_history (id, user_id, project_id, node_id, model_id, credit_cost, price_cents, currency, created_at, history_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     const insertLedger = db.prepare(
-      "insert into credit_ledger (id, user_id, model_id, project_id, node_id, credit_cost, created_at) values (?, ?, ?, ?, ?, ?, ?)"
+      "insert into credit_ledger (id, user_id, model_id, project_id, node_id, credit_cost, price_cents, currency, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     const insertJob = db.prepare(
       "insert into generation_jobs (id, user_id, project_id, node_id, model_id, operation, status, job_json) values (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -265,8 +269,29 @@ function saveDatabaseState(filePath: string, state: ServerState) {
         insertAsset.run(asset.id, userId, asset.title, asset.type, JSON.stringify(asset));
       }
       for (const history of account.history) {
-        insertHistory.run(history.id, userId, history.projectId, history.nodeId, history.modelId, history.creditCost, history.createdAt, JSON.stringify(history));
-        insertLedger.run(history.id, userId, history.modelId, history.projectId, history.nodeId, history.creditCost, history.createdAt);
+        insertHistory.run(
+          history.id,
+          userId,
+          history.projectId,
+          history.nodeId,
+          history.modelId,
+          history.creditCost,
+          history.priceCents ?? null,
+          history.currency ?? null,
+          history.createdAt,
+          JSON.stringify(history)
+        );
+        insertLedger.run(
+          history.id,
+          userId,
+          history.modelId,
+          history.projectId,
+          history.nodeId,
+          history.creditCost,
+          history.priceCents ?? null,
+          history.currency ?? null,
+          history.createdAt
+        );
         insertAudit.run(history.id, userId, "generation", history.createdAt, JSON.stringify(history));
       }
     }
