@@ -627,6 +627,45 @@ describe("designer canvas workspace behavior", () => {
     expect(generatedOutputs.map((node) => node.metadata.creditCost)).toEqual([7, 4]);
   });
 
+  it("executes remove background workflow nodes and records their outputs", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Remove BG workflow");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat.png",
+      source: "coat-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const removeBgModule = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "removeBackground",
+      prompt: "remove the studio background and keep transparent edges",
+      modelId: "background-cleaner"
+    });
+    const removeBgNode = removeBgModule.projects[0].nodes.find((node) => node.moduleType === "removeBackground")!;
+
+    const executed = runWorkflowChain(removeBgModule, project.id, source.id);
+
+    expect(executed.profile.credits).toBe(18);
+    expect(executed.profile.creditUsed).toBe(2);
+    expect(executed.history[0]).toMatchObject({
+      nodeId: removeBgNode.id,
+      operation: "removeBackground",
+      moduleType: "removeBackground",
+      modelId: "background-cleaner",
+      creditCost: 2
+    });
+    const executedProject = executed.projects[0];
+    const executedRemoveBgNode = executedProject.nodes.find((node) => node.id === removeBgNode.id)!;
+    const generatedOutput = executedProject.nodes.find((node) => node.kind === "generated" && node.parentId === removeBgNode.id)!;
+    expect(executedRemoveBgNode.status).toBe("done");
+    expect(executedRemoveBgNode.metadata).toMatchObject({
+      runStatus: "done",
+      operation: "removeBackground",
+      outputNodeIds: [generatedOutput.id]
+    });
+    expect(executedProject.connections).toEqual(expect.arrayContaining([expect.objectContaining({ fromNodeId: removeBgNode.id, toNodeId: generatedOutput.id })]));
+  });
+
   it("blocks workflow execution plans when a model does not support the node operation", () => {
     const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Capability gated workflow");
     const withAsset = addAssetToProject(workspace, project.id, {
