@@ -534,6 +534,49 @@ export function findNode(project: Project, nodeId: string) {
   return node;
 }
 
+function defaultOutputPort(node: CanvasNode) {
+  const port = node.outputs.find((item) => item.id === "out") ?? node.outputs[0];
+  if (!port) throw new Error(`Node ${node.name} has no output ports`);
+  return port;
+}
+
+function defaultInputPort(node: CanvasNode) {
+  const port = node.inputs.find((item) => item.id === "image") ?? node.inputs.find((item) => item.id === "in") ?? node.inputs[0];
+  if (!port) throw new Error(`Node ${node.name} has no input ports`);
+  return port;
+}
+
+function findOutputPort(node: CanvasNode, portId?: string) {
+  const port = portId ? node.outputs.find((item) => item.id === portId) : defaultOutputPort(node);
+  if (!port) throw new Error(`Output port ${portId} not found on ${node.name}`);
+  return port;
+}
+
+function findInputPort(node: CanvasNode, portId?: string) {
+  const port = portId ? node.inputs.find((item) => item.id === portId) : defaultInputPort(node);
+  if (!port) throw new Error(`Input port ${portId} not found on ${node.name}`);
+  return port;
+}
+
+function portsAreCompatible(output: NodePort, input: NodePort) {
+  return output.type === input.type || (output.type === "result" && input.type === "image");
+}
+
+function findCompatibleInputPort(node: CanvasNode, output: NodePort) {
+  const input = node.inputs.find((item) => portsAreCompatible(output, item));
+  if (!input) throw new Error(`Cannot connect ${output.type} output to ${node.name}`);
+  return input;
+}
+
+function resolveWorkflowConnectionPorts(fromNode: CanvasNode, toNode: CanvasNode, fromPort?: string, toPort?: string) {
+  const output = findOutputPort(fromNode, fromPort);
+  const input = toPort ? findInputPort(toNode, toPort) : findCompatibleInputPort(toNode, output);
+  if (!portsAreCompatible(output, input)) {
+    throw new Error(`Cannot connect ${output.type} output to ${input.type} input`);
+  }
+  return { output, input };
+}
+
 function connect(fromNodeId: string, toNodeId: string, fromPort = "out", toPort = "image"): Connection {
   return {
     id: createId("connection"),
@@ -1407,14 +1450,15 @@ export function connectWorkflowNode(
   projectId: string,
   from: string,
   to: string,
-  fromPort = "out",
-  toPort = "image"
+  fromPort?: string,
+  toPort?: string
 ): Workspace {
   return updateProject(workspace, projectId, (project) => {
-    findNode(project, from);
-    findNode(project, to);
+    const fromNode = findNode(project, from);
+    const toNode = findNode(project, to);
+    const ports = resolveWorkflowConnectionPorts(fromNode, toNode, fromPort, toPort);
     const exists = project.connections.some((connection) => connection.fromNodeId === from && connection.toNodeId === to);
-    return exists ? project : withUndo(project, { connections: [...project.connections, connect(from, to, fromPort, toPort)] });
+    return exists ? project : withUndo(project, { connections: [...project.connections, connect(from, to, ports.output.id, ports.input.id)] });
   });
 }
 
@@ -1456,9 +1500,19 @@ export function createWorkflowModuleFromSelection(
 ): Workspace {
   return updateProject(workspace, projectId, (project) => {
     const sources = sourceIds.map((id) => findNode(project, id));
-    const anchor = sources[sources.length - 1];
     const definition = getWorkflowModuleDefinition(config.moduleType);
-    const references = sources.flatMap((node) => (node.type === "imageGroup" ? node.references : [node.id]));
+    const compatibleSources = sources.filter((node) => {
+      const output = defaultOutputPort(node);
+      return definition.inputPorts.some((input) => portsAreCompatible(output, input));
+    });
+    if (!compatibleSources.length) throw new Error(`No compatible sources for ${config.moduleType} module`);
+    const anchor = compatibleSources[compatibleSources.length - 1];
+    const imageInput: NodePort = { id: "image", type: "image", label: "Image" };
+    const references = compatibleSources.flatMap((node) => {
+      const output = defaultOutputPort(node);
+      if (!portsAreCompatible(output, imageInput)) return [];
+      return node.type === "imageGroup" ? node.references : [node.id];
+    });
     const moduleNode = createNode({
       type: definition.nodeType,
       kind: "workflow",
@@ -1478,9 +1532,13 @@ export function createWorkflowModuleFromSelection(
         entryPoint: "workflow"
       }
     });
+    const moduleConnections = compatibleSources.map((source) => {
+      const ports = resolveWorkflowConnectionPorts(source, moduleNode);
+      return connect(source.id, moduleNode.id, ports.output.id, ports.input.id);
+    });
     return withUndo(project, {
       nodes: [...project.nodes, moduleNode],
-      connections: [...project.connections, ...sourceIds.map((id) => connect(id, moduleNode.id))],
+      connections: [...project.connections, ...moduleConnections],
       selectedNodeIds: [moduleNode.id]
     });
   });

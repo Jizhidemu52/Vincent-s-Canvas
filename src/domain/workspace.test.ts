@@ -3,6 +3,7 @@ import {
   addAssetToProject,
   addAssetToProjectAt,
   addGenerationTargetFrame,
+  addTextNode,
   applyBatchGenerationResultsToCanvas,
   applyGenerationResultToCanvas,
   buildRetryBatchFromFailures,
@@ -183,6 +184,112 @@ describe("designer canvas workspace behavior", () => {
     expect(editNode.outputs).toEqual(editDefinition.outputPorts);
     expect(batchNode.inputs).toEqual(batchDefinition.inputPorts);
     expect(batchNode.outputs).toEqual(batchDefinition.outputPorts);
+  });
+
+  it("uses registered ports when chaining workflow modules", () => {
+    const { workspace, project } = createProject(createInitialWorkspace(), "Registered port chain");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "front.png",
+      source: "front",
+      width: 500,
+      height: 700
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const withEdit = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "edit",
+      prompt: "Change trim color",
+      modelId: "gpt-image-2-medium"
+    });
+    const editNode = withEdit.projects[0].nodes.find((node) => node.moduleType === "edit")!;
+    const withUpscale = createWorkflowModuleFromSelection(withEdit, project.id, [editNode.id], {
+      moduleType: "upscale",
+      prompt: "Upscale the edited result",
+      modelId: "upscale-pro"
+    });
+
+    expect(withUpscale.projects[0].connections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fromNodeId: source.id, toNodeId: editNode.id, fromPort: "out", toPort: "image" }),
+        expect.objectContaining({ fromNodeId: editNode.id, fromPort: "result", toPort: "image" })
+      ])
+    );
+  });
+
+  it("rejects incompatible manual workflow port connections", () => {
+    const { workspace, project } = createProject(createInitialWorkspace(), "Port compatibility");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "front.png",
+      source: "front",
+      width: 500,
+      height: 700
+    });
+    const withPrompt = addTextNode(withAsset, project.id, "Use this prompt as text context");
+    const imageNode = withPrompt.projects[0].nodes.find((node) => node.type === "image")!;
+    const textNode = withPrompt.projects[0].nodes.find((node) => node.type === "text")!;
+    const withEdit = createWorkflowModuleFromSelection(withPrompt, project.id, [imageNode.id], {
+      moduleType: "edit",
+      prompt: "Change trim color",
+      modelId: "gpt-image-2-medium"
+    });
+    const editNode = withEdit.projects[0].nodes.find((node) => node.moduleType === "edit")!;
+
+    expect(() => connectWorkflowNode(withEdit, project.id, textNode.id, editNode.id, "out", "image")).toThrow(
+      "Cannot connect text output to image input"
+    );
+    expect(withEdit.projects[0].connections.some((connection) => connection.fromNodeId === textNode.id && connection.toNodeId === editNode.id)).toBe(false);
+  });
+
+  it("routes mixed image and text sources to compatible module input ports", () => {
+    const { workspace, project } = createProject(createInitialWorkspace(), "Mixed source ports");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "front.png",
+      source: "front",
+      width: 500,
+      height: 700
+    });
+    const withPrompt = addTextNode(withAsset, project.id, "Use a soft showroom cleanup prompt");
+    const imageNode = withPrompt.projects[0].nodes.find((node) => node.type === "image")!;
+    const textNode = withPrompt.projects[0].nodes.find((node) => node.type === "text")!;
+
+    const withEdit = createWorkflowModuleFromSelection(withPrompt, project.id, [imageNode.id, textNode.id], {
+      moduleType: "edit",
+      prompt: "Change trim color",
+      modelId: "gpt-image-2-medium"
+    });
+    const editNode = withEdit.projects[0].nodes.find((node) => node.moduleType === "edit")!;
+
+    expect(withEdit.projects[0].connections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fromNodeId: imageNode.id, toNodeId: editNode.id, fromPort: "out", toPort: "image" }),
+        expect.objectContaining({ fromNodeId: textNode.id, toNodeId: editNode.id, fromPort: "out", toPort: "text" })
+      ])
+    );
+  });
+
+  it("skips incompatible optional sources when creating image-only workflow modules", () => {
+    const { workspace, project } = createProject(createInitialWorkspace(), "Image only mixed selection");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "front.png",
+      source: "front",
+      width: 500,
+      height: 700
+    });
+    const withPrompt = addTextNode(withAsset, project.id, "Text prompt that should not feed upscale");
+    const imageNode = withPrompt.projects[0].nodes.find((node) => node.type === "image")!;
+    const textNode = withPrompt.projects[0].nodes.find((node) => node.type === "text")!;
+
+    const withUpscale = createWorkflowModuleFromSelection(withPrompt, project.id, [imageNode.id, textNode.id], {
+      moduleType: "upscale",
+      prompt: "Upscale only image references",
+      modelId: "upscale-pro"
+    });
+    const upscaleNode = withUpscale.projects[0].nodes.find((node) => node.moduleType === "upscale")!;
+
+    expect(withUpscale.projects[0].connections).toEqual(
+      expect.arrayContaining([expect.objectContaining({ fromNodeId: imageNode.id, toNodeId: upscaleNode.id, fromPort: "out", toPort: "image" })])
+    );
+    expect(withUpscale.projects[0].connections.some((connection) => connection.fromNodeId === textNode.id && connection.toNodeId === upscaleNode.id)).toBe(false);
+    expect(upscaleNode.references).toEqual([imageNode.id]);
   });
 
   it("builds backend generation requests from workflow registry definitions", () => {

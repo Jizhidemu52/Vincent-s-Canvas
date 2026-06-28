@@ -224,6 +224,13 @@ function operationForBatchModel(models: ModelDefinition[], modelId: string, pref
   return "generate";
 }
 
+function nodeCanFeedModule(node: CanvasNode, moduleType: ModuleType) {
+  const definition = getWorkflowModuleDefinition(moduleType);
+  const output = node.outputs.find((port) => port.id === "out") ?? node.outputs[0];
+  if (!output) return false;
+  return definition.inputPorts.some((input) => input.type === output.type || (output.type === "result" && input.type === "image"));
+}
+
 function isCanvasImageNode(node?: CanvasNode) {
   return Boolean(
     node &&
@@ -460,8 +467,15 @@ export default function App() {
       const project = current.projects.find((item) => item.id === projectId);
       if (!project) return current;
       const candidateSourceIds = sourceNodeIds?.length ? sourceNodeIds : project.selectedNodeIds.length ? project.selectedNodeIds : [fallbackSourceId];
-      const resolvedSourceIds = candidateSourceIds.filter((id) => project.nodes.some((node) => node.id === id));
-      if (!resolvedSourceIds.length) return current;
+      const resolvedSourceIds = candidateSourceIds.filter((id) => {
+        const node = project.nodes.find((item) => item.id === id);
+        return node ? nodeCanFeedModule(node, moduleType) : false;
+      });
+      if (!resolvedSourceIds.length) {
+        const fallbackNode = project.nodes.find((node) => nodeCanFeedModule(node, moduleType));
+        if (!fallbackNode) return current;
+        resolvedSourceIds.push(fallbackNode.id);
+      }
       const firstSource = project.nodes.find((node) => node.id === resolvedSourceIds[0]);
       const operationModel = workspace.modelRegistry.find((model) => model.capability.includes(definition.operation as ModuleType));
       const shouldUseOperationModel = definition.operation === "upscale" || definition.operation === "removeBackground";
