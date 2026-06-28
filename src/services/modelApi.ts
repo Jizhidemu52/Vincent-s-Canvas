@@ -123,6 +123,7 @@ export interface AdminGenerationJob {
   priceCents?: number;
   currency?: ModelDefinition["currency"];
   referenceCount: number;
+  batchSettings?: GenerationRequest["batchSettings"];
   outputs?: AssetInput[];
   createdAt: string;
   updatedAt: string;

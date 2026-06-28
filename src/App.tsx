@@ -58,6 +58,7 @@ import {
   cancelBatchQueue,
   commitShapeEdit,
   configureNodeGeneration,
+  configureNodeMetadata,
   connectWorkflowNode,
   copyPasteSelectedNodes,
   createInitialWorkspace,
@@ -78,6 +79,7 @@ import {
   getWorkflowModuleDefinition,
   type BatchGenerationOutcome,
   type BatchImport,
+  type BatchFailurePolicy,
   type CanvasNode,
   type GenerationResult,
   type HistoryEntry,
@@ -150,6 +152,10 @@ function readFileAsDataUrl(file: File) {
 }
 
 function clampOutputCount(value: number) {
+  return Math.min(8, Math.max(1, Number.isFinite(value) ? Math.round(value) : 1));
+}
+
+function clampBatchConcurrency(value: number) {
   return Math.min(8, Math.max(1, Number.isFinite(value) ? Math.round(value) : 1));
 }
 
@@ -446,6 +452,11 @@ export default function App() {
         ...patch
       })
     );
+  }
+
+  function updateSelectedMetadata(patch: Record<string, unknown>) {
+    if (!activeProject || !selectedNode) return;
+    setWorkspace((current) => configureNodeMetadata(current, activeProject.id, selectedNode.id, patch));
   }
 
   function importImagePair() {
@@ -949,6 +960,7 @@ export default function App() {
         onConfirmShapeEdit={confirmShapeEdit}
         onCancelShapeEdit={() => setShapeEditDraft(null)}
         onUpdateConfig={updateSelectedConfig}
+        onUpdateMetadata={updateSelectedMetadata}
         onImportImages={importImagePair}
         onGenerate={runSelectedGeneration}
         onGenerateNode={(nodeId) => void generateNodeThroughApi(nodeId)}
@@ -2112,6 +2124,7 @@ function CanvasView({
   onConfirmShapeEdit,
   onCancelShapeEdit,
   onUpdateConfig,
+  onUpdateMetadata,
   onImportImages,
   onGenerate,
   onGenerateNode,
@@ -2146,6 +2159,7 @@ function CanvasView({
   onConfirmShapeEdit: () => void;
   onCancelShapeEdit: () => void;
   onUpdateConfig: (patch: Partial<CanvasNode["generation"]>) => void;
+  onUpdateMetadata: (patch: Record<string, unknown>) => void;
   onImportImages: () => void;
   onGenerate: () => void;
   onGenerateNode: (nodeId: string) => void;
@@ -2198,6 +2212,7 @@ function CanvasView({
           selectedNode={selectedNode}
           apiNotice={apiNotice}
           onUpdateConfig={onUpdateConfig}
+          onUpdateMetadata={onUpdateMetadata}
           onGenerate={onGenerate}
           onBatch={onBatch}
           onBatchFiles={onBatch}
@@ -2444,6 +2459,7 @@ function PromptCard({
   selectedNode,
   apiNotice,
   onUpdateConfig,
+  onUpdateMetadata,
   onGenerate,
   onBatch,
   onBatchFiles,
@@ -2453,12 +2469,17 @@ function PromptCard({
   selectedNode?: CanvasNode;
   apiNotice: string;
   onUpdateConfig: (patch: Partial<CanvasNode["generation"]>) => void;
+  onUpdateMetadata: (patch: Record<string, unknown>) => void;
   onGenerate: () => void;
   onBatch: () => void;
   onBatchFiles: (files: FileList | null) => void;
   onPromptInsert: (prompt: string) => void;
 }) {
   const batchInputRef = useRef<HTMLInputElement | null>(null);
+  const isSettingsNode = selectedNode?.type === "config";
+  const selectedBatchConcurrency =
+    typeof selectedNode?.metadata.batchConcurrency === "number" ? selectedNode.metadata.batchConcurrency : 1;
+  const selectedFailurePolicy: BatchFailurePolicy = selectedNode?.metadata.failurePolicy === "stop" ? "stop" : "continue";
   return (
     <aside className="prompt-card">
       <div className="prompt-title">
@@ -2521,6 +2542,32 @@ function PromptCard({
         />
       </div>
       <button type="button" className="generate-button" onClick={onGenerate}>Generate</button>
+      {isSettingsNode ? (
+        <div className="settings-fields" aria-label="Workflow batch settings">
+          <label>
+            <span>Batch concurrency</span>
+            <input
+              aria-label="Batch concurrency"
+              type="number"
+              min={1}
+              max={8}
+              value={selectedBatchConcurrency}
+              onChange={(event) => onUpdateMetadata({ batchConcurrency: clampBatchConcurrency(Number(event.target.value)) })}
+            />
+          </label>
+          <label>
+            <span>Batch failure policy</span>
+            <select
+              aria-label="Batch failure policy"
+              value={selectedFailurePolicy}
+              onChange={(event) => onUpdateMetadata({ failurePolicy: event.target.value as BatchFailurePolicy })}
+            >
+              <option value="continue">Continue on failure</option>
+              <option value="stop">Stop on failure</option>
+            </select>
+          </label>
+        </div>
+      ) : null}
       <small className="api-notice" aria-live="polite">{apiNotice}</small>
       <button type="button" className="secondary-button" onClick={onBatch}>Batch mode</button>
       <button type="button" className="secondary-button" onClick={() => batchInputRef.current?.click()}>
@@ -3331,6 +3378,10 @@ function RightDock({
   const selectedModelId =
     selectedHistory?.modelId ??
     (typeof selectedNode?.metadata.modelId === "string" ? selectedNode.metadata.modelId : selectedNode?.generation.modelId);
+  const selectedBatchConcurrency =
+    typeof selectedNode?.metadata.batchConcurrency === "number" ? selectedNode.metadata.batchConcurrency : undefined;
+  const selectedFailurePolicy =
+    selectedNode?.metadata.failurePolicy === "stop" ? "stop" : selectedNode?.metadata.failurePolicy === "continue" ? "continue" : undefined;
   const batchSummary = summarizeBatchQueue(project.batchQueue);
   const hasRetryableBatchItems = project.batchQueue.some((item) => item.status === "error" || item.status === "cancelled");
   const hasCancellableBatchItems = project.batchQueue.some((item) => item.status === "queued" || item.status === "processing");
@@ -3384,6 +3435,11 @@ function RightDock({
               {selectedOperation && selectedModelId ? <span>{selectedOperation} / {selectedModelId}</span> : null}
               {selectedCreditCost !== undefined ? (
                 <span>{selectedCreditCost} credits · {selectedOutputCount} output{selectedOutputCount === 1 ? "" : "s"}</span>
+              ) : null}
+              {selectedBatchConcurrency || selectedFailurePolicy ? (
+                <span>
+                  Batch: {selectedBatchConcurrency ?? 1} concurrent / {selectedFailurePolicy === "stop" ? "stop on failure" : "continue on failure"}
+                </span>
               ) : null}
               {selectedNode.inputs.length ? <span>Inputs: {selectedNode.inputs.map((port) => port.label).join(", ")}</span> : null}
               {selectedNode.outputs.length ? <span>Outputs: {selectedNode.outputs.map((port) => port.label).join(", ")}</span> : null}

@@ -448,6 +448,52 @@ describe("designer canvas workspace behavior", () => {
     });
   });
 
+  it("uses connected config input ports as batch execution settings", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Typed batch config input");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "batch-shoe.png",
+      source: "batch-shoe-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const withBatch = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "batch",
+      prompt: "Apply the same cleanup settings to this batch.",
+      modelId: "gpt-image-2-medium"
+    });
+    const batchNode = withBatch.projects[0].nodes.find((node) => node.moduleType === "batch")!;
+    const withConfig = addConfigNode(withBatch, project.id, {
+      outputCount: 2,
+      batchConcurrency: 3,
+      failurePolicy: "continue"
+    });
+    const configNode = withConfig.projects[0].nodes.find((node) => node.type === "config" && node.outputs[0]?.type === "config")!;
+    const connected = connectWorkflowNode(withConfig, project.id, configNode.id, batchNode.id, "out", "config");
+
+    const plan = buildWorkflowExecutionPlan(connected, project.id, source.id);
+    const requests = buildWorkflowGenerationRequests(connected, project.id, source.id);
+    const executed = runWorkflowChain(connected, project.id, source.id);
+    const generatedNode = executed.projects[0].nodes.find((node) => node.kind === "generated")!;
+
+    expect(plan.steps[0].batchSettings).toEqual({
+      concurrency: 3,
+      failurePolicy: "continue"
+    });
+    expect(requests[0].batchSettings).toEqual({
+      concurrency: 3,
+      failurePolicy: "continue"
+    });
+    expect(generatedNode.metadata.batchSettings).toEqual({
+      concurrency: 3,
+      failurePolicy: "continue"
+    });
+    expect(executed.history[0].batchSettings).toEqual({
+      concurrency: 3,
+      failurePolicy: "continue"
+    });
+  });
+
   it("keeps backend run state visible after normal canvas selection changes", () => {
     const { workspace, project } = createProject(createInitialWorkspace(), "Run state feedback");
     const withAsset = addAssetToProject(workspace, project.id, {

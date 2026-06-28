@@ -1515,6 +1515,9 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByLabelText("Selected node task")).toHaveTextContent("Outputs: Settings");
     fireEvent.change(screen.getByLabelText("Output count value"), { target: { value: "3" } });
     expect(screen.getByText("3 images")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Batch concurrency"), { target: { value: "4" } });
+    await user.selectOptions(screen.getByLabelText("Batch failure policy"), "stop");
+    expect(screen.getByLabelText("Selected node task")).toHaveTextContent("Batch: 4 concurrent / stop on failure");
   });
 
   it("shows typed input and output ports for the selected workflow node", async () => {

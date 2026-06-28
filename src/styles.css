@@ -1170,6 +1170,30 @@ button {
   font: inherit;
 }
 
+.settings-fields {
+  display: grid;
+  gap: 7px;
+}
+
+.settings-fields label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #5f5f5f;
+}
+
+.settings-fields input,
+.settings-fields select {
+  min-width: 0;
+  border: 1px solid #d9d9d9;
+  border-radius: 7px;
+  padding: 6px 7px;
+  font: inherit;
+  background: #fff;
+}
+
 .swatch {
   width: 16px;
   height: 16px;

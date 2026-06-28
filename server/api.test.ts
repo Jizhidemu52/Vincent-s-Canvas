@@ -91,6 +91,23 @@ describe("backend hosted mock API", () => {
     });
   });
 
+  it("keeps batch workflow settings in history and admin jobs", () => {
+    const state = createServerState({ creditBalance: 30 });
+    const batchSettings = { concurrency: 3, failurePolicy: "continue" } as const;
+
+    callApi(state, "/api/generations", request({ batchSettings }), "batch-settings", "alice@company.local");
+
+    const history = callApi(state, "/api/history", undefined, undefined, "alice@company.local") as HistoryEntry[];
+    const jobs = callApi(state, "/api/admin/jobs", undefined, undefined, "admin@company.local") as ReturnType<typeof createServerState>["generationJobs"];
+
+    expect(history[0]).toMatchObject({ batchSettings });
+    expect(jobs[0]).toMatchObject({
+      userId: "alice@company.local",
+      status: "succeeded",
+      batchSettings
+    });
+  });
+
   it("rejects invalid prompt before spending credits or writing history", () => {
     const state = createServerState({ creditBalance: 30 });
 

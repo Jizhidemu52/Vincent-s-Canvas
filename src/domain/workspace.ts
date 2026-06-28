@@ -119,7 +119,15 @@ export interface BatchQueue {
   prompt: string;
   modelId: string;
   outputCount: number;
+  batchSettings?: BatchSettings;
   items: BatchItem[];
+}
+
+export type BatchFailurePolicy = "continue" | "stop";
+
+export interface BatchSettings {
+  concurrency: number;
+  failurePolicy: BatchFailurePolicy;
 }
 
 export interface AssetInput {
@@ -134,6 +142,7 @@ export interface BatchImport {
   prompt: string;
   modelId: string;
   outputCount: number;
+  batchSettings?: BatchSettings;
   files: AssetInput[];
 }
 
@@ -146,6 +155,7 @@ export interface GenerationRequest {
   outputCount: number;
   operation: OperationType;
   mask?: MaskSelection;
+  batchSettings?: BatchSettings;
 }
 
 export interface GenerationResult {
@@ -177,6 +187,7 @@ export interface HistoryEntry {
   operation?: OperationType;
   moduleType?: ModuleType;
   referenceCount?: number;
+  batchSettings?: BatchSettings;
   outputs?: AssetInput[];
   createdAt: string;
 }
@@ -195,6 +206,7 @@ export interface WorkflowPlanStep {
   modelId: string;
   prompt: string;
   outputCount: number;
+  batchSettings?: BatchSettings;
   referenceNodeIds: string[];
   referenceCount: number;
   estimatedCreditCost: number;
@@ -641,6 +653,26 @@ function outputCountFromConfigValue(value: unknown) {
   return Number.isInteger(count) && count >= 1 && count <= 8 ? count : undefined;
 }
 
+function concurrencyFromConfigValue(value: unknown) {
+  const count = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isInteger(count) && count >= 1 && count <= 8 ? count : undefined;
+}
+
+function failurePolicyFromConfigValue(value: unknown): BatchFailurePolicy | undefined {
+  return value === "continue" || value === "stop" ? value : undefined;
+}
+
+function batchSettingsFromConfig(config: Record<string, unknown>): BatchSettings | undefined {
+  const nested = metadataObject(config.batchSettings);
+  const concurrency = concurrencyFromConfigValue(config.batchConcurrency ?? nested.concurrency);
+  const failurePolicy = failurePolicyFromConfigValue(config.failurePolicy ?? nested.failurePolicy);
+  if (!concurrency && !failurePolicy) return undefined;
+  return {
+    concurrency: concurrency ?? 1,
+    failurePolicy: failurePolicy ?? "continue"
+  };
+}
+
 function connectedConfigForModule(project: Project, moduleNode: CanvasNode): Record<string, unknown> {
   const configInputPortIds = new Set(moduleNode.inputs.filter((port) => port.type === "config").map((port) => port.id));
   const configConnection = project.connections.find((connection) => connection.toNodeId === moduleNode.id && configInputPortIds.has(connection.toPort));
@@ -656,7 +688,8 @@ function connectedConfigForModule(project: Project, moduleNode: CanvasNode): Rec
 function workflowSettingsForModule(project: Project, moduleNode: CanvasNode) {
   const config = connectedConfigForModule(project, moduleNode);
   return {
-    outputCount: outputCountFromConfigValue(config.outputCount) ?? moduleNode.generation.outputCount
+    outputCount: outputCountFromConfigValue(config.outputCount) ?? moduleNode.generation.outputCount,
+    batchSettings: batchSettingsFromConfig(config)
   };
 }
 
@@ -886,7 +919,7 @@ export function addTextNode(workspace: Workspace, projectId: string, content: st
 export function addConfigNode(
   workspace: Workspace,
   projectId: string,
-  settings: { outputCount?: number; mask?: MaskSelection },
+  settings: { outputCount?: number; mask?: MaskSelection; batchSettings?: BatchSettings; batchConcurrency?: number; failurePolicy?: BatchFailurePolicy },
   x = 620,
   y = 470
 ): Workspace {
@@ -916,6 +949,33 @@ export function configureNodeGeneration(
   return updateProject(workspace, projectId, (project) =>
     withUndo(project, {
       nodes: project.nodes.map((node) => (node.id === nodeId ? { ...node, generation } : node))
+    })
+  );
+}
+
+export function configureNodeMetadata(
+  workspace: Workspace,
+  projectId: string,
+  nodeId: string,
+  metadata: Record<string, unknown>
+): Workspace {
+  return updateProject(workspace, projectId, (project) =>
+    withUndo(project, {
+      nodes: project.nodes.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              metadata: {
+                ...node.metadata,
+                ...metadata,
+                config: {
+                  ...metadataObject(node.metadata.config),
+                  ...metadata
+                }
+              }
+            }
+          : node
+      )
     })
   );
 }
@@ -1315,7 +1375,8 @@ export function applyBatchGenerationResultsToCanvas(
         folderName: batch.folderName,
         prompt: batch.prompt,
         modelId: batch.modelId,
-        outputCount: batch.outputCount
+        outputCount: batch.outputCount,
+        batchSettings: batch.batchSettings
       },
       batchQueue: Array.from(nextQueueByFile.values()),
       nodes: [
@@ -1416,7 +1477,8 @@ export function importBatchFolder(workspace: Workspace, projectId: string, batch
         folderName: batch.folderName,
         prompt: batch.prompt,
         modelId: batch.modelId,
-        outputCount: batch.outputCount
+        outputCount: batch.outputCount,
+        batchSettings: batch.batchSettings
       },
       batchQueue: batch.files.map((file) => ({
         id: createId("batch"),
@@ -1444,6 +1506,7 @@ export function buildRetryBatchFromFailures(workspace: Workspace, projectId: str
     prompt: project.batchConfig.prompt,
     modelId: project.batchConfig.modelId,
     outputCount: project.batchConfig.outputCount,
+    batchSettings: project.batchConfig.batchSettings,
     files: retryItems.map((item) => ({
       name: item.name,
       source: item.source,
@@ -1692,6 +1755,7 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
       modelId: nextNode.generation.modelId,
       prompt,
       outputCount: settings.outputCount,
+      batchSettings: settings.batchSettings,
       referenceNodeIds,
       referenceCount: referenceNodeIds.length,
       estimatedCreditCost: unitCost * settings.outputCount
@@ -1723,7 +1787,8 @@ export function buildWorkflowGenerationRequests(workspace: Workspace, projectId:
     prompt: step.prompt,
     referenceNodeIds: step.referenceNodeIds,
     outputCount: step.outputCount,
-    operation: step.operation
+    operation: step.operation,
+    batchSettings: step.batchSettings
   }));
 }
 
@@ -1762,6 +1827,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
         operation,
         creditCost,
         outputCount: settings.outputCount,
+        batchSettings: settings.batchSettings,
         prompt,
         modelId: moduleNode.generation.modelId
       }
@@ -1816,6 +1882,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
         operation,
         moduleType: moduleNode.moduleType,
         referenceCount: referenceNodeIds.length,
+        batchSettings: settings.batchSettings,
         outputs: generatedOutput ? [generatedOutput] : [],
         createdAt: now()
       },
