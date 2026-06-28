@@ -92,6 +92,7 @@ import {
   type NodePort,
   type NodeTransform,
   type Profile,
+  type ProviderProgress,
   type ProviderRequestSettings,
   type Project,
   type Workspace,
@@ -181,6 +182,18 @@ function providerSettingsFromMetadata(value: unknown): ProviderRequestSettings {
     size: typeof settings.size === "string" ? settings.size : undefined,
     quality: typeof settings.quality === "string" ? settings.quality : undefined,
     preset: typeof settings.preset === "string" ? settings.preset : undefined
+  };
+}
+
+function providerProgressFromMetadata(value: unknown): ProviderProgress | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const progress = value as Partial<ProviderProgress>;
+  return {
+    providerJobId: typeof progress.providerJobId === "string" ? progress.providerJobId : undefined,
+    status: typeof progress.status === "string" ? progress.status : undefined,
+    statusUrl: typeof progress.statusUrl === "string" ? progress.statusUrl : undefined,
+    pollAttempts: typeof progress.pollAttempts === "number" && Number.isFinite(progress.pollAttempts) ? progress.pollAttempts : 0,
+    errorMessage: typeof progress.errorMessage === "string" ? progress.errorMessage : undefined
   };
 }
 
@@ -3538,6 +3551,7 @@ function RightDock({
     selectedNode?.metadata.failurePolicy === "stop" ? "stop" : selectedNode?.metadata.failurePolicy === "continue" ? "continue" : undefined;
   const selectedMask = maskFromMetadata(selectedNode?.metadata.mask);
   const selectedProviderSettings = providerSettingsFromMetadata(selectedNode?.metadata.providerSettings);
+  const selectedProviderProgress = providerProgressFromMetadata(selectedNode?.metadata.providerProgress);
   const batchSummary = summarizeBatchQueue(project.batchQueue);
   const hasRetryableBatchItems = project.batchQueue.some((item) => item.status === "error" || item.status === "cancelled");
   const hasCancellableBatchItems = project.batchQueue.some((item) => item.status === "queued" || item.status === "processing");
@@ -3605,6 +3619,13 @@ function RightDock({
               {selectedProviderSettings.size || selectedProviderSettings.quality || selectedProviderSettings.preset ? (
                 <span>
                   Provider: {selectedProviderSettings.size ?? "auto"} / {selectedProviderSettings.quality ?? "auto"} / {selectedProviderSettings.preset ?? "default"}
+                </span>
+              ) : null}
+              {selectedProviderProgress ? (
+                <span>
+                  Provider {selectedProviderProgress.status ?? "unknown"}
+                  {selectedProviderProgress.providerJobId ? ` / ${selectedProviderProgress.providerJobId}` : ""}
+                  {` / ${selectedProviderProgress.pollAttempts} poll${selectedProviderProgress.pollAttempts === 1 ? "" : "s"}`}
                 </span>
               ) : null}
               {selectedNode.inputs.length ? <span>Inputs: {selectedNode.inputs.map((port) => port.label).join(", ")}</span> : null}

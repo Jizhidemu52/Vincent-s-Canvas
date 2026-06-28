@@ -654,6 +654,12 @@ beforeEach(() => {
           status: "succeeded",
           creditCost,
           historyId: historyEntry.id,
+          providerProgress: {
+            providerJobId: `provider-${historyEntry.id}`,
+            status: "succeeded",
+            statusUrl: `https://provider.example/jobs/provider-${historyEntry.id}`,
+            pollAttempts: 1
+          },
           outputs: historyEntry.outputs
         });
       }
@@ -1338,6 +1344,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Selected node task")).toBeInTheDocument();
     expect(screen.getByText("history-1")).toBeInTheDocument();
     expect(screen.getByText("generate / nanobanana2")).toBeInTheDocument();
+    expect(screen.getByText("Provider succeeded / provider-history-1 / 1 poll")).toBeInTheDocument();
     expect(screen.getByText("11 credits · 1 output")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "History" }));
     expect(screen.getByText(/nanobanana2/i)).toBeInTheDocument();
