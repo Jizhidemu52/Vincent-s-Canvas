@@ -12,7 +12,7 @@ import {
   type ApiError
 } from "./api";
 import { createInitialWorkspace, createProject } from "../src/domain/workspace";
-import type { GenerationRequest, GenerationResult, HistoryEntry, ModelDefinition, Profile } from "../src/domain/workspace";
+import type { GenerationRequest, GenerationResult, HistoryEntry, ModelDefinition, Profile, PromptPreset } from "../src/domain/workspace";
 import type { AdminAccountSummary, AdminAuditEntry, AdminUsageSummary, ProviderHealth } from "./api";
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
@@ -38,6 +38,37 @@ describe("backend hosted mock API", () => {
     expect(models.some((model) => model.id === "nanobanana2")).toBe(true);
     expect(models.every((model) => !("apiKey" in model))).toBe(true);
     expect(profile.creditBalance).toBe(30);
+  });
+
+  it("saves, lists, and deletes designer prompt presets by account", () => {
+    const state = createServerState();
+    const saved = callApi(
+      state,
+      "/api/prompts",
+      {
+        prompt: "Create a pleated silk blouse variation with pearl trim.",
+        tags: ["Silk", "Pleated", "silk"]
+      },
+      undefined,
+      "alice@company.local"
+    ) as PromptPreset;
+
+    expect(saved).toMatchObject({
+      prompt: "Create a pleated silk blouse variation with pearl trim.",
+      tags: ["silk", "pleated"],
+      source: "designer",
+      userId: "alice@company.local",
+      designerName: "alice"
+    });
+    expect(saved.createdAt).toEqual(expect.any(String));
+
+    const alicePrompts = callApi(state, "/api/prompts", undefined, undefined, "alice@company.local") as PromptPreset[];
+    const bobPrompts = callApi(state, "/api/prompts", undefined, undefined, "bob@company.local") as PromptPreset[];
+    expect(alicePrompts[0]).toMatchObject({ id: saved.id, userId: "alice@company.local" });
+    expect(bobPrompts.some((prompt) => prompt.id === saved.id)).toBe(false);
+
+    const deleted = callApi(state, "/api/prompts", { id: saved.id }, undefined, "alice@company.local") as PromptPreset[];
+    expect(deleted.some((prompt) => prompt.id === saved.id)).toBe(false);
   });
 
   it("generates mock outputs, deducts credits, and writes history", () => {

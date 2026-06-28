@@ -60,7 +60,6 @@ import {
   createInitialWorkspace,
   createProject,
   createWorkflowModuleFromSelection,
-  deletePromptPreset,
   deleteSelectedNodes,
   importBatchFolder,
   markNodeRunState,
@@ -68,7 +67,6 @@ import {
   redoProject,
   runBatchQueue,
   saveNodeAsAsset,
-  savePromptPreset,
   selectNodes,
   summarizeBatchQueue,
   undoProject,
@@ -104,7 +102,9 @@ import {
   fetchBackendSnapshot,
   fetchProviderHealth,
   fetchWorkspaceSnapshot,
+  deletePromptPresetRemote,
   saveWorkspaceSnapshot,
+  savePromptPresetRemote,
   setDesignerCreditLimit,
   submitGenerationRequest,
   type AdminAccountSummary,
@@ -711,28 +711,45 @@ export default function App() {
     setRightPanel("assets");
   }
 
-  function saveSelectedPrompt() {
+  async function saveSelectedPrompt() {
     if (!selectedNode) return;
     const prompt = selectedNode.generation.prompt.trim();
     if (!prompt) {
       setApiNotice("Prompt is required before saving to library");
       return;
     }
-    setWorkspace((current) =>
-      savePromptPreset(current, {
-        title: `${selectedNode.name} prompt`,
-        prompt,
-        tags: ["designer", selectedNode.generation.modelId]
-      })
-    );
-    setRightPanel("prompts");
-    setApiNotice("Prompt saved to library");
+    try {
+      const savedPrompt = await savePromptPresetRemote(
+        {
+          title: `${selectedNode.name} prompt`,
+          prompt,
+          tags: ["designer", selectedNode.generation.modelId]
+        },
+        activeUserId
+      );
+      setWorkspace((current) => ({
+        ...current,
+        prompts: [savedPrompt, ...current.prompts.filter((item) => item.id !== savedPrompt.id)]
+      }));
+      setRightPanel("prompts");
+      setApiNotice("Prompt saved to library");
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Prompt save failed");
+    }
   }
 
-  function deletePrompt(promptId: string) {
-    setWorkspace((current) => deletePromptPreset(current, promptId));
-    setRightPanel("prompts");
-    setApiNotice("Prompt removed from library");
+  async function deletePrompt(promptId: string) {
+    try {
+      const prompts = await deletePromptPresetRemote(promptId, activeUserId);
+      setWorkspace((current) => ({
+        ...current,
+        prompts
+      }));
+      setRightPanel("prompts");
+      setApiNotice("Prompt removed from library");
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Prompt delete failed");
+    }
   }
 
   function insertAssetIntoCanvas(asset: LibraryAsset) {
@@ -3283,6 +3300,7 @@ function RightDock({
               <button type="button" className="prompt-preset-main" onClick={() => onPromptInsert(prompt.prompt)}>
                 <b>{prompt.title}</b>
                 <span>{prompt.tags.join(", ")}</span>
+                {prompt.designerName ? <span>Saved by {prompt.designerName}</span> : null}
                 <small>{prompt.prompt}</small>
               </button>
               {prompt.source === "designer" && (

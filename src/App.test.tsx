@@ -301,6 +301,31 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString();
+      if (url.endsWith("/api/prompts")) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const userId = headers?.["x-user-id"] ?? backendProfile.userId;
+        if (init?.method === "POST") {
+          const request = JSON.parse(String(init?.body)) as { title?: string; prompt: string; tags?: string[] };
+          const savedPrompt = {
+            id: `prompt-backend-${backendWorkspace.prompts.length + 1}`,
+            title: request.title ?? "Saved prompt",
+            prompt: request.prompt,
+            tags: Array.from(new Set((request.tags ?? ["designer"]).map((tag) => tag.toLowerCase()))),
+            source: "designer" as const,
+            userId,
+            designerName: userId.includes("admin") ? "Admin Ops" : backendProfile.designerName,
+            createdAt: "2026-06-28T10:00:00.000Z"
+          };
+          backendWorkspace = { ...backendWorkspace, prompts: [savedPrompt, ...backendWorkspace.prompts] };
+          return jsonResponse(savedPrompt);
+        }
+        return jsonResponse(backendWorkspace.prompts);
+      }
+      if (url.includes("/api/prompts/") && init?.method === "DELETE") {
+        const promptId = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
+        backendWorkspace = { ...backendWorkspace, prompts: backendWorkspace.prompts.filter((prompt) => prompt.id !== promptId) };
+        return jsonResponse(backendWorkspace.prompts);
+      }
       if (url.endsWith("/api/workspace")) {
         if (init?.method === "POST") {
           const snapshot = JSON.parse(String(init.body)) as Workspace;
@@ -934,14 +959,27 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "Save current prompt" }));
 
     expect(screen.getByText("Prompt saved to library")).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/prompts$/),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "x-user-id": "admin@company.local" }),
+        body: expect.stringContaining("pleated silk vest")
+      })
+    );
     await user.type(screen.getByRole("textbox", { name: "Search prompts" }), "pleated silk");
     expect(screen.getByRole("button", { name: /Prompt note prompt.*pleated silk/i })).toBeInTheDocument();
+    expect(screen.getByText("Saved by Admin Ops")).toBeInTheDocument();
 
     await user.clear(promptBox);
     await user.click(screen.getByRole("button", { name: /Prompt note prompt.*pleated silk/i }));
     expect(promptBox).toHaveValue("Create a pleated silk vest with tiny tonal embroidery and clean studio lighting.");
 
     await user.click(screen.getByRole("button", { name: "Delete prompt Prompt note prompt" }));
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/prompts\/prompt-backend-\d+$/),
+      expect.objectContaining({ method: "DELETE", headers: expect.objectContaining({ "x-user-id": "admin@company.local" }) })
+    );
     expect(screen.queryByRole("button", { name: /Prompt note prompt.*pleated silk/i })).not.toBeInTheDocument();
   });
 

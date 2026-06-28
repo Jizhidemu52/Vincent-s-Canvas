@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServerState, type WorkspaceSnapshot } from "./api";
 import { createApiHttpServer } from "./http";
-import { addAssetToProject, createInitialWorkspace, createProject, type GenerationRequest, type GenerationResult, type Profile } from "../src/domain/workspace";
+import {
+  addAssetToProject,
+  createInitialWorkspace,
+  createProject,
+  type GenerationRequest,
+  type GenerationResult,
+  type Profile,
+  type PromptPreset
+} from "../src/domain/workspace";
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
   return {
@@ -56,6 +64,36 @@ describe("HTTP API server", () => {
     expect(models.some((model) => model.id === "nanobanana2")).toBe(true);
     expect(models.every((model) => !("apiKey" in model))).toBe(true);
     expect(profile.creditBalance).toBe(10);
+  });
+
+  it("manages designer prompt presets over HTTP by account", async () => {
+    const createResponse = await fetch(`${context.baseUrl}/api/prompts`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "alice@company.local" },
+      body: JSON.stringify({ prompt: "Use pleated silk, pearl trim, and showroom lighting.", tags: ["Silk", "Trim"] })
+    });
+    const saved = (await createResponse.json()) as PromptPreset;
+
+    expect(createResponse.status).toBe(200);
+    expect(saved).toMatchObject({
+      prompt: "Use pleated silk, pearl trim, and showroom lighting.",
+      tags: ["silk", "trim"],
+      userId: "alice@company.local",
+      designerName: "alice"
+    });
+
+    const alicePrompts = (await (await fetch(`${context.baseUrl}/api/prompts`, { headers: { "x-user-id": "alice@company.local" } })).json()) as PromptPreset[];
+    const bobPrompts = (await (await fetch(`${context.baseUrl}/api/prompts`, { headers: { "x-user-id": "bob@company.local" } })).json()) as PromptPreset[];
+    expect(alicePrompts.some((prompt) => prompt.id === saved.id)).toBe(true);
+    expect(bobPrompts.some((prompt) => prompt.id === saved.id)).toBe(false);
+
+    const deleteResponse = await fetch(`${context.baseUrl}/api/prompts/${saved.id}`, {
+      method: "DELETE",
+      headers: { "x-user-id": "alice@company.local" }
+    });
+    const afterDelete = (await deleteResponse.json()) as PromptPreset[];
+    expect(deleteResponse.status).toBe(200);
+    expect(afterDelete.some((prompt) => prompt.id === saved.id)).toBe(false);
   });
 
   it("handles generation over HTTP, updates credit balance, and writes history", async () => {

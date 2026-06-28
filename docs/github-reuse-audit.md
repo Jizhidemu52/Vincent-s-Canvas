@@ -40,6 +40,7 @@ The current repository already includes:
 - Typed first-pass workflow module registry for `Generate / Edit / Upscale / Remove BG / Batch / Upload Reference`.
 - Batch import and processing.
 - T8-inspired batch queue status summaries, failed-item retry batches, cancellation, and merge-safe retry results.
+- Basketikun-inspired prompt library service boundary with backend-owned designer prompt presets and attribution.
 - Backend-hosted provider registry, profile/history, admin credit adjustment, provider health, and persistence.
 - Admin credit limits and model pricing controls.
 - Admin generation job logs with designer, model, operation, status, cost, and project context.
@@ -79,7 +80,7 @@ Local inspection notes:
 
 | Target Need | Prefer Source | Candidate Modules | Decision |
 | --- | --- | --- | --- |
-| Prompt library UI and prompt detail/selection behavior | `basketikun/infinite-canvas` | `web/src/components/prompts/*`, `web/src/services/api/prompts.ts` | Adapt into current `RightDock` prompt library before expanding custom prompt UX. |
+| Prompt library UI and prompt detail/selection behavior | `basketikun/infinite-canvas` | `web/src/components/prompts/*`, `web/src/services/api/prompts.ts` | Adapted backend prompt API boundary and designer attribution on 2026-06-28; richer prompt cards/details remain later. |
 | Asset persistence/search and image storage boundaries | `basketikun/infinite-canvas` | `use-asset-store.ts`, `image-storage.ts`, `file-storage.ts`, `app-sync.ts` | Adapt storage ideas to backend-owned assets; do not keep front-end-only API keys. |
 | Workflow node registry and port typing | `T8mars/T8-penguin-canvas` | `src/config/nodeRegistry.ts`, `src/config/portTypes.ts`, node components | Use as the next source for a typed operation registry instead of expanding ad hoc module checks. |
 | Batch workflow behavior and partial failure tests | `T8mars/T8-penguin-canvas` | `BatchProcessorNode.tsx`, `batchProcessor.ts`, `tests/batchProcessor.test.ts` | Adapted lightweight retry/progress/cancel semantics into current batch queue on 2026-06-28; deeper async worker/concurrency remains later. |
@@ -91,6 +92,6 @@ Local inspection notes:
 
 1. Continue migrating the typed node operation registry inspired by T8 `nodeRegistry` and `portTypes`: the first-pass registry now exists; next step is to let the right dock shortcut buttons and backend request builders consume the same definitions fully.
 2. Extend the current T8-inspired batch queue with async worker concurrency, pause/resume, and persistent provider job progress after real provider adapters land.
-3. Adapt basketikun prompt library UI patterns into the current prompt dock, keeping server-side prompt presets and designer attribution.
+3. Expand basketikun-style prompt cards/details in the current prompt dock now that server-side prompt presets and designer attribution exist.
 4. Add RunningHub and ComfyUI live-ready provider adapters by porting T8 provider registry tests and reconciling hero workflow JSON/settings fields.
 5. Use hero history bulk management ideas for admin/team history filtering and export after real provider output storage is stable.

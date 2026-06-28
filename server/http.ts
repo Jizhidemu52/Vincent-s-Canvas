@@ -17,6 +17,7 @@ import {
   type CreditLimitRequest,
   type ModelPricingRequest,
   type ModelRegistryRequest,
+  type PromptPresetRequest,
   type ProviderSettingsRequest,
   type ServerState,
   type WorkspaceSnapshot
@@ -234,6 +235,38 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
           saveServerState(stateFilePath, state);
         }
         sendJson(response, statusFromApiResult(result), result);
+        return;
+      }
+
+      if (pathname === "/api/prompts" || pathname.startsWith("/api/prompts/")) {
+        if (request.method === "OPTIONS") {
+          sendJson(response, 204);
+          return;
+        }
+        if (request.method === "GET" && pathname === "/api/prompts") {
+          const result = callApi(state, "/api/prompts", undefined, undefined, userId);
+          sendJson(response, statusFromApiResult(result), result);
+          return;
+        }
+        if (request.method === "POST" && pathname === "/api/prompts") {
+          const body = await readJsonBody<PromptPresetRequest>(request, bodyLimitBytes);
+          const result = callApi(state, "/api/prompts", body ?? {}, undefined, userId);
+          if (!isApiError(result) && stateFilePath) {
+            saveServerState(stateFilePath, state);
+          }
+          sendJson(response, statusFromApiResult(result), result);
+          return;
+        }
+        if (request.method === "DELETE" && pathname.startsWith("/api/prompts/")) {
+          const id = decodeURIComponent(pathname.slice("/api/prompts/".length));
+          const result = callApi(state, "/api/prompts", { id }, undefined, userId);
+          if (!isApiError(result) && stateFilePath) {
+            saveServerState(stateFilePath, state);
+          }
+          sendJson(response, statusFromApiResult(result), result);
+          return;
+        }
+        sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
         return;
       }
 

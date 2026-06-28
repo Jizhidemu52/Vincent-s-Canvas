@@ -1,4 +1,14 @@
-import type { AssetInput, GenerationRequest, GenerationResult, HistoryEntry, ModelDefinition, OperationType, Profile, Workspace } from "../domain/workspace";
+import type {
+  AssetInput,
+  GenerationRequest,
+  GenerationResult,
+  HistoryEntry,
+  ModelDefinition,
+  OperationType,
+  Profile,
+  PromptPreset,
+  Workspace
+} from "../domain/workspace";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -215,6 +225,26 @@ export async function saveWorkspaceSnapshot(workspace: Workspace, userId?: strin
     body: JSON.stringify(snapshot)
   });
   return readJson<WorkspaceSnapshot>(response);
+}
+
+export async function savePromptPresetRemote(
+  request: { title?: string; prompt: string; tags?: string[] },
+  userId?: string
+): Promise<PromptPreset> {
+  const response = await fetch(`${API_BASE_URL}/api/prompts`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...userHeaders(userId) },
+    body: JSON.stringify(request)
+  });
+  return readJson<PromptPreset>(response);
+}
+
+export async function deletePromptPresetRemote(promptId: string, userId?: string): Promise<PromptPreset[]> {
+  const response = await fetch(`${API_BASE_URL}/api/prompts/${encodeURIComponent(promptId)}`, {
+    method: "DELETE",
+    headers: userHeaders(userId)
+  });
+  return readJson<PromptPreset[]>(response);
 }
 
 export async function adjustDesignerCredits(request: CreditAdjustmentRequest, adminUserId?: string): Promise<Profile> {

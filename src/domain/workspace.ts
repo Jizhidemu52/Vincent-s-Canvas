@@ -223,6 +223,9 @@ export interface PromptPreset {
   prompt: string;
   tags: string[];
   source: "internal" | "designer" | "remote";
+  userId?: string;
+  designerName?: string;
+  createdAt?: string;
 }
 
 interface ProjectSnapshot {
@@ -1697,7 +1700,10 @@ export function savePromptPreset(
     title,
     prompt,
     tags: Array.from(new Set(tags)),
-    source: input.source ?? "designer"
+    source: input.source ?? "designer",
+    userId: workspace.profile.userId,
+    designerName: workspace.profile.designerName,
+    createdAt: now()
   };
   return { ...workspace, prompts: [preset, ...workspace.prompts] };
 }

@@ -86,6 +86,13 @@ export interface ProviderSettingsRequest {
   secretValue?: string;
 }
 
+export interface PromptPresetRequest {
+  id?: string;
+  title?: string;
+  prompt?: string;
+  tags?: string[];
+}
+
 export interface AdminAuditEntry {
   id: string;
   eventType: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings";
@@ -349,6 +356,49 @@ function listAdminHistory(state: ServerState, adminUserId?: string, filterUserId
       errorMessage: error instanceof Error ? error.message : "Unknown server error"
     };
   }
+}
+
+function promptTitleFrom(prompt: string) {
+  const firstLine = prompt.split(/\r?\n/)[0]?.trim();
+  if (!firstLine) return "Saved prompt";
+  if (firstLine.length <= 42) return firstLine;
+  const truncated = firstLine.slice(0, 42).replace(/\s+\S*$/, "").trim();
+  return `${truncated || firstLine.slice(0, 39).trim()}...`;
+}
+
+function normalizePromptTags(tags?: string[]) {
+  return Array.from(
+    new Set(
+      (tags?.length ? tags : ["designer"])
+        .map((tag) => tag.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+function managePromptPresets(state: ServerState, request?: PromptPresetRequest, userId?: string): PromptPreset[] | PromptPreset {
+  const account = getAccountWorkspace(state, userId);
+  if (!request) return account.prompts;
+  if (request.id && !request.prompt) {
+    account.prompts = account.prompts.filter((prompt) => prompt.id !== request.id || (prompt.source !== "designer" && prompt.userId !== account.profile.userId));
+    saveAccountWorkspace(state, account, userId);
+    return account.prompts;
+  }
+  const prompt = request.prompt?.trim();
+  if (!prompt) throw new Error("Prompt is required");
+  const preset: PromptPreset = {
+    id: `prompt-${Date.now()}-${account.prompts.length + 1}`,
+    title: request.title?.trim() || promptTitleFrom(prompt),
+    prompt,
+    tags: normalizePromptTags(request.tags),
+    source: "designer",
+    userId: account.profile.userId,
+    designerName: account.profile.designerName,
+    createdAt: new Date().toISOString()
+  };
+  account.prompts = [preset, ...account.prompts];
+  saveAccountWorkspace(state, account, userId);
+  return preset;
 }
 
 function totalCreditsUsed(state: ServerState) {
@@ -843,6 +893,8 @@ export const apiRoutes = {
     getAccountWorkspace(state, userId).profile,
   "/api/history": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
     getAccountWorkspace(state, userId).history,
+  "/api/prompts": (state: ServerState, request?: PromptPresetRequest, _requestId?: string, userId?: string) =>
+    managePromptPresets(state, request, userId),
   "/api/admin/history": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
     listAdminHistory(state, userId),
   "/api/admin/audit": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) => {
@@ -922,7 +974,7 @@ export const apiRoutes = {
 export function callApi(
   state: ServerState,
   path: keyof typeof apiRoutes,
-  request?: GenerationRequest,
+  request?: GenerationRequest | PromptPresetRequest,
   requestId?: string,
   userId?: string,
   query?: ApiQuery
@@ -930,6 +982,9 @@ export function callApi(
   try {
     if (path === "/api/admin/history") {
       return listAdminHistory(state, userId, query?.userId);
+    }
+    if (path === "/api/prompts") {
+      return managePromptPresets(state, request as PromptPresetRequest | undefined, userId);
     }
     const route = apiRoutes[path];
     if (
@@ -947,7 +1002,7 @@ export function callApi(
     if (!request) {
       throw new Error("Request body is required");
     }
-    return route(state, request, requestId, userId);
+    return route(state, request as GenerationRequest, requestId, userId);
   } catch (error) {
     return {
       status: "failed",
