@@ -56,6 +56,7 @@ import {
   cancelBatchQueue,
   commitShapeEdit,
   configureNodeGeneration,
+  connectWorkflowNode,
   copyPasteSelectedNodes,
   createInitialWorkspace,
   createProject,
@@ -259,6 +260,12 @@ function nodeCanAcceptConnection(source?: CanvasNode, target?: CanvasNode, sourc
   return target.inputs.some((input) => nodePortsAreCompatible(output, input));
 }
 
+function nodeInputCanAcceptConnection(source: CanvasNode | undefined, target: CanvasNode | undefined, inputPortId: string, sourcePortId?: string) {
+  if (!source || !target || source.id === target.id) return false;
+  const input = target.inputs.find((port) => port.id === inputPortId);
+  return nodePortsAreCompatible(defaultNodeOutputPort(source, sourcePortId), input);
+}
+
 function portConnectionClass(source: CanvasNode | undefined, target: CanvasNode, input: NodePort, sourcePortId?: string) {
   if (!source || source.id === target.id) return "";
   return nodePortsAreCompatible(defaultNodeOutputPort(source, sourcePortId), input) ? "port-compatible" : "port-incompatible";
@@ -266,6 +273,27 @@ function portConnectionClass(source: CanvasNode | undefined, target: CanvasNode,
 
 function portPosition(index: number, total: number) {
   return `${((index + 1) / (total + 1)) * 100}%`;
+}
+
+function inputPortElementFromPointer(event: globalThis.PointerEvent) {
+  const hitElement =
+    typeof document.elementFromPoint === "function"
+      ? document.elementFromPoint(event.clientX, event.clientY)
+      : event.target instanceof Element
+        ? event.target
+        : null;
+  const directTarget = hitElement?.closest<HTMLElement>("[data-node-input-port]");
+  if (directTarget) return directTarget;
+  const hitPadding = 8;
+  return Array.from(document.querySelectorAll<HTMLElement>("[data-node-input-port]")).find((port) => {
+    const rect = port.getBoundingClientRect();
+    return (
+      event.clientX >= rect.left - hitPadding &&
+      event.clientX <= rect.right + hitPadding &&
+      event.clientY >= rect.top - hitPadding &&
+      event.clientY <= rect.bottom + hitPadding
+    );
+  }) ?? null;
 }
 
 function isCanvasImageNode(node?: CanvasNode) {
@@ -2506,6 +2534,7 @@ function CanvasStage({
   const [lasso, setLasso] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [modulePicker, setModulePicker] = useState<{ nodeId: string; sourceIds: string[]; x: number; y: number } | null>(null);
   const [connectionSource, setConnectionSource] = useState<{ nodeId: string; portId?: string } | null>(null);
+  const connectionSourceRef = useRef<{ nodeId: string; portId?: string } | null>(null);
   const selectedIds = project.selectedNodeIds;
   const selectedSet = new Set(selectedIds);
   const connectionSourceNode = connectionSource ? project.nodes.find((node) => node.id === connectionSource.nodeId) : undefined;
@@ -2557,12 +2586,28 @@ function CanvasStage({
   }
 
   function startConnectionDrag(node: CanvasNode, portId?: string) {
-    setConnectionSource({ nodeId: node.id, portId });
+    const source = { nodeId: node.id, portId };
+    connectionSourceRef.current = source;
+    setConnectionSource(source);
     setModulePicker(null);
   }
 
-  function finishConnectionDrag(node: CanvasNode) {
+  function finishConnectionDrag(node: CanvasNode, dropTarget?: { nodeId: string; portId: string }) {
+    const source = connectionSourceRef.current;
+    connectionSourceRef.current = null;
     setConnectionSource(null);
+    if (!source) return;
+    if (dropTarget) {
+      const sourceNode = project.nodes.find((item) => item.id === source.nodeId);
+      const targetNode = project.nodes.find((item) => item.id === dropTarget.nodeId);
+      if (nodeInputCanAcceptConnection(sourceNode, targetNode, dropTarget.portId, source.portId)) {
+        setModulePicker(null);
+        onWorkspaceChange((current) =>
+          connectWorkflowNode(current, project.id, source.nodeId, dropTarget.nodeId, source.portId, dropTarget.portId)
+        );
+      }
+      return;
+    }
     openModulePicker(node);
   }
 
@@ -2780,7 +2825,7 @@ function CanvasNodeView({
   onSelect: (id: string, append: boolean) => void;
   onWorkspaceChange: (updater: (workspace: Workspace) => Workspace) => void;
   onStartConnectionDrag: (node: CanvasNode, portId?: string) => void;
-  onFinishConnectionDrag: (node: CanvasNode) => void;
+  onFinishConnectionDrag: (node: CanvasNode, dropTarget?: { nodeId: string; portId: string }) => void;
   onGenerateNode: (nodeId: string) => void;
   workspace: Workspace;
 }) {
@@ -2836,8 +2881,14 @@ function CanvasNodeView({
     event.stopPropagation();
     event.preventDefault();
     onStartConnectionDrag(node, portId);
-    const handleUp = () => {
-      onFinishConnectionDrag(node);
+    const handleUp = (upEvent: globalThis.PointerEvent) => {
+      const target = inputPortElementFromPointer(upEvent);
+      onFinishConnectionDrag(
+        node,
+        target?.dataset.nodeId && target.dataset.portId
+          ? { nodeId: target.dataset.nodeId, portId: target.dataset.portId }
+          : undefined
+      );
       window.removeEventListener("pointerup", handleUp);
     };
     window.addEventListener("pointerup", handleUp);
@@ -2930,6 +2981,9 @@ function CanvasNodeView({
           className={`node-port input ${portConnectionClass(connectionSourceNode, node, port, connectionSourcePortId)}`}
           style={{ top: portPosition(index, node.inputs.length) }}
           aria-label={`${port.label} input port on ${node.name}`}
+          data-node-input-port="true"
+          data-node-id={node.id}
+          data-port-id={port.id}
           title={`${port.label} input`}
         />
       ))}

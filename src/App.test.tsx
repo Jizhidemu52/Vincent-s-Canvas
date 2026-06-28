@@ -1569,6 +1569,67 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByLabelText("Prompt input port on generate module")).not.toHaveClass("port-compatible");
   });
 
+  it("connects a dragged output to a specific compatible input port", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    await user.click(screen.getByRole("button", { name: "Generate node" }));
+    await screen.findByRole("button", { name: /Workflow generate module/i });
+    const initialWireCount = document.querySelectorAll(".stage-wires path").length;
+
+    const promptInputPort = screen.getByLabelText("Prompt input port on generate module");
+    const promptPortRect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute("aria-label") === "Prompt input port on generate module") {
+        return {
+          x: 90,
+          y: 90,
+          left: 90,
+          top: 90,
+          right: 110,
+          bottom: 110,
+          width: 20,
+          height: 20,
+          toJSON: () => ({})
+        } as DOMRect;
+      }
+      return {
+        x: 1000,
+        y: 1000,
+        left: 1000,
+        top: 1000,
+        right: 1010,
+        bottom: 1010,
+        width: 10,
+        height: 10,
+        toJSON: () => ({})
+      } as DOMRect;
+    });
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => document.body)
+    });
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from Prompt note"));
+    fireEvent(window, new MouseEvent("pointerup", { clientX: 100, clientY: 100, bubbles: true }));
+    promptPortRect.mockRestore();
+    if (originalElementFromPoint) {
+      Object.defineProperty(document, "elementFromPoint", {
+        configurable: true,
+        value: originalElementFromPoint
+      });
+    } else {
+      delete (document as unknown as Record<string, unknown>).elementFromPoint;
+    }
+
+    expect(screen.queryByText("Choose module")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.querySelectorAll(".stage-wires path")).toHaveLength(initialWireCount + 1);
+    });
+    expect(promptInputPort).not.toHaveClass("port-compatible");
+  });
+
   it("chains workflow modules from module output ports and runs them in order", async () => {
     const user = userEvent.setup();
     await login(user);
