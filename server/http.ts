@@ -5,6 +5,7 @@ import {
   adjustAccountCredits,
   apiRoutes,
   callApi,
+  callApiAsync,
   configureProviderSettings,
   configureModelPricing,
   configureModelRegistry,
@@ -23,6 +24,7 @@ import {
   type WorkspaceSnapshot
 } from "./api";
 import { loadServerState, saveServerState } from "./storage";
+import type { ProviderFetchInit, ProviderFetchResponse } from "./providers";
 import type { GenerationRequest, GenerationResult } from "../src/domain/workspace";
 
 type ApiPath = keyof typeof apiRoutes;
@@ -47,6 +49,8 @@ export interface ApiHttpServerOptions {
   state?: ServerState;
   stateFilePath?: string;
   bodyLimitBytes?: number;
+  providerFetchJson?: (url: string, init: ProviderFetchInit) => Promise<ProviderFetchResponse>;
+  resolveProviderSecret?: (name: string) => string | undefined;
 }
 
 export interface StartApiServerOptions extends ApiHttpServerOptions {
@@ -116,10 +120,35 @@ function isApiPath(pathname: string): pathname is ApiPath {
   return pathname in apiRoutes;
 }
 
+async function defaultProviderFetchJson(url: string, init: ProviderFetchInit): Promise<ProviderFetchResponse> {
+  const response = await fetch(url, {
+    method: init.method,
+    headers: init.headers,
+    body: init.body
+  });
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    body = {};
+  }
+  return {
+    ok: response.ok,
+    status: response.status,
+    body
+  };
+}
+
+function defaultResolveProviderSecret(name: string) {
+  return process.env[name]?.trim() || undefined;
+}
+
 export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server {
   const stateFilePath = options.stateFilePath;
   const state = options.state ?? (stateFilePath ? loadServerState(stateFilePath) : createServerState());
   const bodyLimitBytes = options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
+  const providerFetchJson = options.providerFetchJson ?? defaultProviderFetchJson;
+  const resolveProviderSecret = options.resolveProviderSecret ?? defaultResolveProviderSecret;
 
   return createServer(async (request, response) => {
     try {
@@ -299,7 +328,10 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
         }
         const body = await readJsonBody<GenerationRequest>(request, bodyLimitBytes);
         const generationJobCount = state.generationJobs.length;
-        const result = callApi(state, pathname, body, request.headers["x-request-id"]?.toString(), userId);
+        const result = await callApiAsync(state, pathname, body, request.headers["x-request-id"]?.toString(), userId, {
+          fetchJson: providerFetchJson,
+          resolveSecret: resolveProviderSecret
+        });
         if (stateFilePath && (!isApiError(result) || state.generationJobs.length !== generationJobCount)) {
           saveServerState(stateFilePath, state);
         }

@@ -113,6 +113,112 @@ describe("HTTP API server", () => {
     expect(history).toHaveLength(1);
   });
 
+  it("routes live-ready provider generations through the live execution boundary over HTTP", async () => {
+    const fetchCalls: Array<{ url: string; body?: string }> = [];
+    const state = createServerState({ creditBalance: 10 });
+    const server = createApiHttpServer({
+      state,
+      resolveProviderSecret: (name) => (name === "OPENAI_API_KEY" ? "sk-http-live" : undefined),
+      providerFetchJson: async (url, init) => {
+        fetchCalls.push({ url, body: init.body });
+        return {
+          ok: true,
+          status: 200,
+          body: { data: [{ url: "https://cdn.example/http-live.png", width: 1536, height: 1024 }] }
+        };
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Test server failed to bind a port");
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      await fetch(`${baseUrl}/api/admin/provider-settings`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+        body: JSON.stringify({
+          provider: "openai",
+          mode: "live-ready",
+          endpointUrl: "https://api.openai.example/v1/images",
+          secretName: "OPENAI_API_KEY",
+          secretValue: "sk-admin-secret"
+        })
+      });
+      const response = await fetch(`${baseUrl}/api/generations`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-request-id": "http-live-provider", "x-user-id": "alice@company.local" },
+        body: JSON.stringify(request({ outputCount: 1, providerSettings: { size: "1536x1024", quality: "high" } }))
+      });
+      const result = (await response.json()) as GenerationResult;
+      const profile = (await (await fetch(`${baseUrl}/api/profile`, { headers: { "x-user-id": "alice@company.local" } })).json()) as Profile;
+      const jobs = (await (await fetch(`${baseUrl}/api/admin/jobs`, { headers: { "x-user-id": "admin@company.local" } })).json()) as Array<Record<string, unknown>>;
+
+      expect(response.status).toBe(200);
+      expect(fetchCalls).toHaveLength(1);
+      expect(fetchCalls[0].url).toBe("https://api.openai.example/v1/images");
+      expect(JSON.parse(fetchCalls[0].body ?? "{}")).toMatchObject({ model: "gpt-image-2-low", n: 1, size: "1536x1024", quality: "high" });
+      expect(result.outputs[0]).toMatchObject({ source: "https://cdn.example/http-live.png", width: 1536, height: 1024 });
+      expect(profile.creditBalance).toBe(8);
+      expect(jobs[0]).toMatchObject({ status: "succeeded", providerPayload: { endpointUrl: "https://api.openai.example/v1/images" } });
+      expect(JSON.stringify(jobs[0])).not.toContain("sk-admin-secret");
+      expect(JSON.stringify(jobs[0])).not.toContain("sk-http-live");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("records live provider failures over HTTP without charging or writing history", async () => {
+    const state = createServerState({ creditBalance: 10 });
+    const server = createApiHttpServer({
+      state,
+      resolveProviderSecret: (name) => (name === "OPENAI_API_KEY" ? "sk-http-live" : undefined),
+      providerFetchJson: async () => ({
+        ok: false,
+        status: 503,
+        body: { errorMessage: "Provider unavailable" }
+      })
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Test server failed to bind a port");
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      await fetch(`${baseUrl}/api/admin/provider-settings`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+        body: JSON.stringify({
+          provider: "openai",
+          mode: "live-ready",
+          endpointUrl: "https://api.openai.example/v1/images",
+          secretName: "OPENAI_API_KEY",
+          secretValue: "sk-admin-secret"
+        })
+      });
+      const response = await fetch(`${baseUrl}/api/generations`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-request-id": "http-live-provider-fail", "x-user-id": "alice@company.local" },
+        body: JSON.stringify(request({ outputCount: 1 }))
+      });
+      const profile = (await (await fetch(`${baseUrl}/api/profile`, { headers: { "x-user-id": "alice@company.local" } })).json()) as Profile;
+      const history = (await (await fetch(`${baseUrl}/api/history`, { headers: { "x-user-id": "alice@company.local" } })).json()) as unknown[];
+      const jobs = (await (await fetch(`${baseUrl}/api/admin/jobs`, { headers: { "x-user-id": "admin@company.local" } })).json()) as Array<Record<string, unknown>>;
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ status: "failed", errorMessage: "Provider unavailable" });
+      expect(profile.creditBalance).toBe(10);
+      expect(history).toHaveLength(0);
+      expect(jobs[0]).toMatchObject({ status: "failed", creditCost: 0, errorMessage: "Provider unavailable" });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("rejects unsupported model operations over HTTP without charging credits", async () => {
     const response = await fetch(`${context.baseUrl}/api/upscale`, {
       method: "POST",

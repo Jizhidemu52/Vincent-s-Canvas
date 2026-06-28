@@ -14,9 +14,11 @@ import {
 } from "../src/domain/workspace";
 import {
   buildProviderPayload,
+  executeLiveProviderPayload,
   getProviderHealth,
   providerNames,
   runProviderModel,
+  type LiveProviderExecutionOptions,
   type ProviderHealth,
   type ProviderName,
   type ProviderPayload,
@@ -905,6 +907,132 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
   return result;
 }
 
+async function runModelAsync(
+  state: ServerState,
+  request: GenerationRequest,
+  requestId?: string,
+  userId?: string,
+  liveProviderOptions?: LiveProviderExecutionOptions
+): Promise<GenerationResult> {
+  const { model, cost, account } = assertRequest(state, request, requestId, userId);
+  const historyId = `history-${allHistory(state).length + 1}`;
+  const projectName = account.projects.find((project) => project.id === request.projectId)?.name;
+  const duplicateKey = scopedRequestId(requestId, userId);
+  const createdAt = new Date().toISOString();
+  const providerRuntimeSettings = state.providerSettings[model.provider];
+  const providerPayload = buildProviderPayload(request, model, providerRuntimeSettings);
+  let result: GenerationResult;
+
+  try {
+    result =
+      providerRuntimeSettings?.mode === "live-ready"
+        ? await executeLiveProviderPayload(providerPayload, request, model, historyId, cost, liveProviderOptions ?? {
+            fetchJson: async () => {
+              throw new Error(`Live provider executor is not configured for ${model.provider}`);
+            },
+            resolveSecret: () => undefined
+          })
+        : runProviderModel(request, model, historyId, cost, state.providerSettings);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Provider execution failed";
+    state.generationJobs = [
+      {
+        id: `job-${historyId}`,
+        historyId,
+        requestId: duplicateKey,
+        userId: account.profile.userId,
+        designerName: account.profile.designerName,
+        projectId: request.projectId,
+        projectName,
+        nodeId: request.nodeId,
+        modelId: request.modelId,
+        operation: request.operation,
+        status: "failed",
+        prompt: request.prompt,
+        outputCount: request.outputCount,
+        creditCost: 0,
+        referenceCount: request.referenceNodeIds.length,
+        mask: request.mask,
+        batchSettings: request.batchSettings,
+        providerSettings: request.providerSettings,
+        providerPayload,
+        outputs: [],
+        createdAt,
+        updatedAt: createdAt,
+        errorMessage
+      },
+      ...state.generationJobs
+    ];
+    throw error;
+  }
+
+  if (duplicateKey) {
+    state.submittedRequestIds.add(duplicateKey);
+  }
+  account.profile = {
+    ...account.profile,
+    creditBalance: account.profile.creditBalance - cost,
+    creditUsed: account.profile.creditUsed + cost,
+    credits: account.profile.creditBalance - cost
+  };
+
+  const entry: HistoryEntry = {
+    id: historyId,
+    projectId: request.projectId,
+    projectName,
+    nodeId: request.nodeId,
+    prompt: request.prompt,
+    modelId: request.modelId,
+    outputCount: request.outputCount,
+    creditCost: cost,
+    priceCents: model.priceCents,
+    currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
+    userId: account.profile.userId,
+    designerName: account.profile.designerName,
+    operation: request.operation,
+    referenceCount: request.referenceNodeIds.length,
+    mask: request.mask,
+    batchSettings: request.batchSettings,
+    providerSettings: request.providerSettings,
+    outputs: result.outputs,
+    createdAt
+  };
+  account.history = [entry, ...account.history];
+  state.generationJobs = [
+    {
+      id: `job-${historyId}`,
+      historyId,
+      requestId: duplicateKey,
+      userId: account.profile.userId,
+      designerName: account.profile.designerName,
+      projectId: request.projectId,
+      projectName,
+      nodeId: request.nodeId,
+      modelId: request.modelId,
+      operation: request.operation,
+      status: result.status,
+      prompt: request.prompt,
+      outputCount: request.outputCount,
+      creditCost: cost,
+      priceCents: model.priceCents === undefined ? undefined : model.priceCents * request.outputCount,
+      currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
+      referenceCount: request.referenceNodeIds.length,
+      mask: request.mask,
+      batchSettings: request.batchSettings,
+      providerSettings: request.providerSettings,
+      providerPayload,
+      outputs: result.outputs,
+      createdAt,
+      updatedAt: createdAt,
+      errorMessage: result.errorMessage
+    },
+    ...state.generationJobs
+  ];
+  saveAccountWorkspace(state, account, userId);
+
+  return result;
+}
+
 export const apiRoutes = {
   "/api/models": (state: ServerState) => state.models,
   "/api/profile": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
@@ -1021,6 +1149,39 @@ export function callApi(
       throw new Error("Request body is required");
     }
     return route(state, request as GenerationRequest, requestId, userId);
+  } catch (error) {
+    return {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Unknown server error"
+    } satisfies ApiError;
+  }
+}
+
+export async function callApiAsync(
+  state: ServerState,
+  path: keyof typeof apiRoutes,
+  request?: GenerationRequest,
+  requestId?: string,
+  userId?: string,
+  liveProviderOptions?: LiveProviderExecutionOptions
+) {
+  try {
+    if (!request) {
+      throw new Error("Request body is required");
+    }
+    if (path === "/api/generations") {
+      return await runModelAsync(state, { ...request, operation: "generate" }, requestId, userId, liveProviderOptions);
+    }
+    if (path === "/api/edits") {
+      return await runModelAsync(state, { ...request, operation: "edit" }, requestId, userId, liveProviderOptions);
+    }
+    if (path === "/api/upscale") {
+      return await runModelAsync(state, { ...request, operation: "upscale" }, requestId, userId, liveProviderOptions);
+    }
+    if (path === "/api/remove-bg") {
+      return await runModelAsync(state, { ...request, operation: "removeBackground" }, requestId, userId, liveProviderOptions);
+    }
+    return callApi(state, path, request, requestId, userId);
   } catch (error) {
     return {
       status: "failed",
