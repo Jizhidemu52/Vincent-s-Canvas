@@ -92,6 +92,7 @@ import {
   type NodePort,
   type NodeTransform,
   type Profile,
+  type PromptPreset,
   type ProviderProgress,
   type ProviderRequestSettings,
   type Project,
@@ -2399,6 +2400,31 @@ function SideNav({
   );
 }
 
+function PromptPresetDetail({
+  prompt,
+  onUse,
+  onAddNote
+}: {
+  prompt: PromptPreset;
+  onUse: () => void;
+  onAddNote: () => void;
+}) {
+  return (
+    <section className="prompt-preset-detail" aria-label="Prompt preset detail">
+      <div>
+        <strong>{prompt.title}</strong>
+        <small>{prompt.tags.join(", ") || "untagged"}</small>
+      </div>
+      {prompt.designerName ? <span>Saved by {prompt.designerName}</span> : null}
+      <p>{prompt.prompt}</p>
+      <div className="dock-actions compact">
+        <button type="button" onClick={onUse}>Use detailed prompt</button>
+        <button type="button" onClick={onAddNote}>Add detailed prompt note</button>
+      </div>
+    </section>
+  );
+}
+
 function TopToolbar({
   onBack,
   onImportImages,
@@ -3536,6 +3562,7 @@ function RightDock({
   onCancelBatch: () => void;
 }) {
   const [promptSearch, setPromptSearch] = useState("");
+  const [selectedPromptPresetId, setSelectedPromptPresetId] = useState<string | null>(null);
   const normalizedPromptSearch = promptSearch.trim().toLowerCase();
   const filteredPrompts = normalizedPromptSearch
     ? workspace.prompts.filter((prompt) => {
@@ -3543,6 +3570,7 @@ function RightDock({
         return haystack.includes(normalizedPromptSearch);
       })
     : workspace.prompts;
+  const selectedPromptPreset = workspace.prompts.find((prompt) => prompt.id === selectedPromptPresetId) ?? null;
   const workflowPlan = useMemo(
     () => (selectedNode ? buildWorkflowExecutionPlan(workspace, project.id, selectedNode.id) : undefined),
     [workspace, project.id, selectedNode?.id]
@@ -3743,13 +3771,22 @@ function RightDock({
               Save current prompt
             </button>
           </div>
-          {filteredPrompts.length ? filteredPrompts.map((prompt) => (
+          {filteredPrompts.length ? filteredPrompts.map((prompt, index) => (
             <article className="prompt-preset-row" key={prompt.id}>
               <button type="button" className="prompt-preset-main" onClick={() => onPromptInsert(prompt.prompt)}>
                 <b>{prompt.title}</b>
                 <span>{prompt.tags.join(", ")}</span>
                 {prompt.designerName ? <span>Saved by {prompt.designerName}</span> : null}
                 <small>{prompt.prompt}</small>
+              </button>
+              <button
+                type="button"
+                className="prompt-detail-button"
+                aria-label={`View prompt details ${index + 1}`}
+                title={`View details for ${prompt.title}`}
+                onClick={() => setSelectedPromptPresetId(prompt.id)}
+              >
+                <PanelRight size={13} />
               </button>
               {prompt.source === "designer" && (
                 <button type="button" className="prompt-delete" aria-label={`Delete prompt ${prompt.title}`} onClick={() => onPromptDelete(prompt.id)}>
@@ -3758,6 +3795,13 @@ function RightDock({
               )}
             </article>
           )) : <small>No prompts match this search</small>}
+          {selectedPromptPreset && (
+            <PromptPresetDetail
+              prompt={selectedPromptPreset}
+              onUse={() => onPromptInsert(selectedPromptPreset.prompt)}
+              onAddNote={() => onAssistantNote(selectedPromptPreset.prompt)}
+            />
+          )}
         </div>
       )}
       {panel === "assistant" && (

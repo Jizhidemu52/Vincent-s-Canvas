@@ -2032,7 +2032,7 @@ button {
 
 .dock-list .prompt-preset-row {
   position: relative;
-  grid-template-columns: 1fr 30px;
+  grid-template-columns: 1fr 30px 30px;
   gap: 6px;
   padding: 0;
   background: transparent;
@@ -2051,14 +2051,45 @@ button {
   -webkit-line-clamp: 2;
 }
 
+.dock-list .prompt-detail-button,
 .dock-list .prompt-delete {
   display: inline-grid;
   width: 30px;
   min-height: 100%;
   place-items: center;
   padding: 0;
-  color: #9a3535;
+  color: #555;
   text-align: center;
+}
+
+.dock-list .prompt-delete {
+  color: #9a3535;
+}
+
+.prompt-preset-detail {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #dcdcdc;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.prompt-preset-detail div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.prompt-preset-detail small,
+.prompt-preset-detail span {
+  color: #777;
+  font-size: 11px;
+}
+
+.prompt-preset-detail p {
+  margin: 0;
+  color: #2f2f2f;
+  line-height: 1.45;
 }
 
 .dock-footer {

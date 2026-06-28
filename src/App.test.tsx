@@ -1005,6 +1005,30 @@ describe("Designer canvas app shell", () => {
     expect(screen.queryByRole("button", { name: /Prompt note prompt.*pleated silk/i })).not.toBeInTheDocument();
   });
 
+  it("shows prompt preset details and turns a preset into a canvas note", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Prompts" }));
+
+    await user.click(screen.getByRole("button", { name: "View prompt details 1" }));
+    expect(screen.getByRole("region", { name: "Prompt preset detail" })).toHaveTextContent("局部服装改款");
+
+    const promptBox = screen.getByPlaceholderText(/\[TARGET\]/);
+    await user.clear(promptBox);
+    await user.click(screen.getByRole("button", { name: "Use detailed prompt" }));
+    expect((promptBox as HTMLTextAreaElement).value).toMatch(/只修改选区内/);
+
+    const initialTextNodes = screen.getAllByRole("button", { name: /Text Prompt note/i }).length;
+    await user.click(screen.getByRole("button", { name: "Add detailed prompt note" }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: /Text Prompt note/i })).toHaveLength(initialTextNodes + 1);
+    });
+    expect(screen.getAllByText(/只修改选区内/).length).toBeGreaterThan(1);
+  });
+
   it("runs batch mode and writes visible generation history", async () => {
     const user = userEvent.setup();
     await login(user);
