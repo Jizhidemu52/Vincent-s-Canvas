@@ -321,6 +321,19 @@ beforeEach(() => {
         }
         return jsonResponse(backendWorkspace.prompts);
       }
+      if (url.includes("/api/prompts/") && init?.method === "PATCH") {
+        const promptId = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
+        const request = JSON.parse(String(init?.body)) as { tags?: string[] };
+        backendWorkspace = {
+          ...backendWorkspace,
+          prompts: backendWorkspace.prompts.map((prompt) =>
+            prompt.id === promptId
+              ? { ...prompt, tags: Array.from(new Set((request.tags ?? prompt.tags).map((tag) => tag.toLowerCase()))) }
+              : prompt
+          )
+        };
+        return jsonResponse(backendWorkspace.prompts.find((prompt) => prompt.id === promptId));
+      }
       if (url.includes("/api/prompts/") && init?.method === "DELETE") {
         const promptId = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
         backendWorkspace = { ...backendWorkspace, prompts: backendWorkspace.prompts.filter((prompt) => prompt.id !== promptId) };
@@ -782,8 +795,8 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("button", { name: /Model GPT Image 2 Medium/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Prompts" }));
-    const promptButtons = screen.getAllByRole("button", { name: /局部服装改款/i });
-    await user.click(promptButtons[promptButtons.length - 1]);
+    const promptLibrary = screen.getByText("Prompt library").closest(".dock-list") as HTMLElement;
+    await user.click(promptLibrary.querySelector(".prompt-preset-main") as HTMLElement);
     expect(screen.getByPlaceholderText(/\[TARGET\]/)).toHaveValue("只修改选区内的服装细节，保持模特姿势、背景、光线和版型不变。");
 
     await user.click(screen.getByRole("button", { name: "Context" }));
@@ -1053,6 +1066,47 @@ describe("Designer canvas app shell", () => {
     expect(within(promptLibrary).queryByText("Editorial silk cleanup")).not.toBeInTheDocument();
     expect(within(promptLibrary).getByText("Ecommerce background cleanup")).toBeInTheDocument();
     expect(within(promptLibrary).getByText("1 prompt tagged ecommerce")).toBeInTheDocument();
+  });
+
+  it("lets designers favorite prompt presets and persist the reusable tag", async () => {
+    backendWorkspace = {
+      ...backendWorkspace,
+      prompts: [
+        {
+          id: "prompt-ecommerce-cleanup",
+          title: "Ecommerce background cleanup",
+          prompt: "Remove clutter and keep ecommerce product edges crisp.",
+          tags: ["ecommerce"],
+          source: "designer",
+          userId: "admin@company.local",
+          designerName: "Admin Ops",
+          createdAt: "2026-06-28T10:05:00.000Z"
+        }
+      ]
+    };
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Prompts" }));
+
+    const promptLibrary = screen.getByText("Prompt library").closest(".dock-list") as HTMLElement;
+    await user.click(within(promptLibrary).getByRole("button", { name: "Add prompt favorite Ecommerce background cleanup" }));
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/prompts\/prompt-ecommerce-cleanup$/),
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ tags: ["favorite", "ecommerce"] })
+      })
+    );
+    expect(within(promptLibrary).getByRole("button", { name: "Remove prompt favorite Ecommerce background cleanup" })).toBeInTheDocument();
+    expect(within(promptLibrary).getByText("favorite, ecommerce")).toBeInTheDocument();
+
+    await user.click(within(promptLibrary).getByRole("button", { name: "Show favorite prompts" }));
+
+    expect(within(promptLibrary).getByText("Ecommerce background cleanup")).toBeInTheDocument();
+    expect(within(promptLibrary).getByText("1 favorite prompt")).toBeInTheDocument();
   });
 
   it("shows prompt preset details and turns a preset into a canvas note", async () => {

@@ -389,6 +389,17 @@ function normalizePromptTags(tags?: string[]) {
 function managePromptPresets(state: ServerState, request?: PromptPresetRequest, userId?: string): PromptPreset[] | PromptPreset {
   const account = getAccountWorkspace(state, userId);
   if (!request) return account.prompts;
+  if (request.id && request.tags) {
+    let updatedPrompt: PromptPreset | undefined;
+    account.prompts = account.prompts.map((prompt) => {
+      if (prompt.id !== request.id) return prompt;
+      updatedPrompt = { ...prompt, tags: normalizePromptTags(request.tags) };
+      return updatedPrompt;
+    });
+    if (!updatedPrompt) throw new Error("Prompt not found");
+    saveAccountWorkspace(state, account, userId);
+    return updatedPrompt;
+  }
   if (request.id && !request.prompt) {
     account.prompts = account.prompts.filter((prompt) => prompt.id !== request.id || (prompt.source !== "designer" && prompt.userId !== account.profile.userId));
     saveAccountWorkspace(state, account, userId);

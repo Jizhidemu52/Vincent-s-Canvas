@@ -71,6 +71,39 @@ describe("backend hosted mock API", () => {
     expect(deleted.some((prompt) => prompt.id === saved.id)).toBe(false);
   });
 
+  it("updates reusable prompt tags without deleting the prompt", () => {
+    const state = createServerState();
+    const saved = callApi(
+      state,
+      "/api/prompts",
+      {
+        prompt: "Create a clean ecommerce backdrop for the handbag.",
+        tags: ["ecommerce"]
+      },
+      undefined,
+      "alice@company.local"
+    ) as PromptPreset;
+
+    const updated = callApi(
+      state,
+      "/api/prompts",
+      {
+        id: saved.id,
+        tags: ["ecommerce", "favorite", "Favorite"]
+      },
+      undefined,
+      "alice@company.local"
+    ) as PromptPreset;
+    const alicePrompts = callApi(state, "/api/prompts", undefined, undefined, "alice@company.local") as PromptPreset[];
+
+    expect(updated).toMatchObject({
+      id: saved.id,
+      prompt: "Create a clean ecommerce backdrop for the handbag.",
+      tags: ["ecommerce", "favorite"]
+    });
+    expect(alicePrompts.find((prompt) => prompt.id === saved.id)).toMatchObject({ tags: ["ecommerce", "favorite"] });
+  });
+
   it("generates mock outputs, deducts credits, and writes history", () => {
     const state = createServerState({ creditBalance: 30 });
 

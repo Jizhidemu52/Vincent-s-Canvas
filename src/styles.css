@@ -2100,7 +2100,7 @@ button {
 
 .dock-list .prompt-preset-row {
   position: relative;
-  grid-template-columns: 1fr 30px 30px;
+  grid-template-columns: 1fr 30px 30px 30px;
   gap: 6px;
   padding: 0;
   background: transparent;
@@ -2119,6 +2119,7 @@ button {
   -webkit-line-clamp: 2;
 }
 
+.dock-list .prompt-favorite,
 .dock-list .prompt-detail-button,
 .dock-list .prompt-delete {
   display: inline-grid;
@@ -2128,6 +2129,10 @@ button {
   padding: 0;
   color: #555;
   text-align: center;
+}
+
+.dock-list .prompt-favorite.active {
+  color: #bf3b65;
 }
 
 .dock-list .prompt-delete {

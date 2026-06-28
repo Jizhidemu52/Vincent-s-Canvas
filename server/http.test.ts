@@ -87,6 +87,15 @@ describe("HTTP API server", () => {
     expect(alicePrompts.some((prompt) => prompt.id === saved.id)).toBe(true);
     expect(bobPrompts.some((prompt) => prompt.id === saved.id)).toBe(false);
 
+    const updateResponse = await fetch(`${context.baseUrl}/api/prompts/${saved.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-user-id": "alice@company.local" },
+      body: JSON.stringify({ tags: ["silk", "trim", "favorite"] })
+    });
+    const updated = (await updateResponse.json()) as PromptPreset;
+    expect(updateResponse.status).toBe(200);
+    expect(updated).toMatchObject({ id: saved.id, tags: ["silk", "trim", "favorite"] });
+
     const deleteResponse = await fetch(`${context.baseUrl}/api/prompts/${saved.id}`, {
       method: "DELETE",
       headers: { "x-user-id": "alice@company.local" }

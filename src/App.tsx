@@ -117,6 +117,7 @@ import {
   savePromptPresetRemote,
   setDesignerCreditLimit,
   submitGenerationRequest,
+  updatePromptPresetTagsRemote,
   type AdminAccountSummary,
   type AdminAuditEntry,
   type AdminHistoryEntry,
@@ -917,6 +918,24 @@ export default function App() {
     }
   }
 
+  async function togglePromptFavorite(prompt: PromptPreset) {
+    const isFavorite = prompt.tags.includes("favorite");
+    const nextTags = isFavorite
+      ? prompt.tags.filter((tag) => tag !== "favorite")
+      : ["favorite", ...prompt.tags.filter((tag) => tag !== "favorite")];
+    try {
+      const updatedPrompt = await updatePromptPresetTagsRemote(prompt.id, nextTags, activeUserId);
+      setWorkspace((current) => ({
+        ...current,
+        prompts: current.prompts.map((item) => (item.id === updatedPrompt.id ? updatedPrompt : item))
+      }));
+      setRightPanel("prompts");
+      setApiNotice(isFavorite ? "Prompt removed from favorites" : "Prompt added to favorites");
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Prompt favorite update failed");
+    }
+  }
+
   function insertAssetIntoCanvas(asset: LibraryAsset) {
     if (!activeProject) return;
     if (asset.type === "text") {
@@ -1042,6 +1061,7 @@ export default function App() {
         onSaveAsset={saveAsset}
         onSavePrompt={saveSelectedPrompt}
         onDeletePrompt={deletePrompt}
+        onPromptFavorite={togglePromptFavorite}
         onInsertAsset={insertAssetIntoCanvas}
         onAddTargetFrame={() => setWorkspace((current) => addGenerationTargetFrame(current, activeProject.id))}
       />
@@ -2263,6 +2283,7 @@ function CanvasView({
   onSaveAsset,
   onSavePrompt,
   onDeletePrompt,
+  onPromptFavorite,
   onInsertAsset,
   onAddTargetFrame
 }: {
@@ -2298,6 +2319,7 @@ function CanvasView({
   onSaveAsset: () => void;
   onSavePrompt: () => void;
   onDeletePrompt: (promptId: string) => void;
+  onPromptFavorite: (prompt: PromptPreset) => void;
   onInsertAsset: (asset: LibraryAsset) => void;
   onAddTargetFrame: () => void;
 }) {
@@ -2367,6 +2389,7 @@ function CanvasView({
           onPromptInsert={(prompt) => onUpdateConfig({ prompt })}
           onSavePrompt={onSavePrompt}
           onPromptDelete={onDeletePrompt}
+          onPromptFavorite={onPromptFavorite}
           onAssetInsert={onInsertAsset}
           onAssistantNote={onAssistantNote}
           onRetryBatch={onRetryBatch}
@@ -3595,6 +3618,7 @@ function RightDock({
   onPromptInsert,
   onSavePrompt,
   onPromptDelete,
+  onPromptFavorite,
   onAssetInsert,
   onAssistantNote,
   onRetryBatch,
@@ -3611,6 +3635,7 @@ function RightDock({
   onPromptInsert: (prompt: string) => void;
   onSavePrompt: () => void;
   onPromptDelete: (promptId: string) => void;
+  onPromptFavorite: (prompt: PromptPreset) => void;
   onAssetInsert: (asset: LibraryAsset) => void;
   onAssistantNote: (content: string) => void;
   onRetryBatch: () => void;
@@ -4000,6 +4025,15 @@ function RightDock({
                 <span>{prompt.tags.join(", ")}</span>
                 {prompt.designerName ? <span>Saved by {prompt.designerName}</span> : null}
                 <small>{prompt.prompt}</small>
+              </button>
+              <button
+                type="button"
+                className={`prompt-favorite ${prompt.tags.includes("favorite") ? "active" : ""}`}
+                aria-label={`${prompt.tags.includes("favorite") ? "Remove" : "Add"} prompt favorite ${prompt.title}`}
+                title={`${prompt.tags.includes("favorite") ? "Remove from" : "Add to"} favorites`}
+                onClick={() => onPromptFavorite(prompt)}
+              >
+                <Heart size={13} fill={prompt.tags.includes("favorite") ? "currentColor" : "none"} />
               </button>
               <button
                 type="button"

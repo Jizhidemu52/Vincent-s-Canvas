@@ -252,6 +252,15 @@ export async function deletePromptPresetRemote(promptId: string, userId?: string
   return readJson<PromptPreset[]>(response);
 }
 
+export async function updatePromptPresetTagsRemote(promptId: string, tags: string[], userId?: string): Promise<PromptPreset> {
+  const response = await fetch(`${API_BASE_URL}/api/prompts/${encodeURIComponent(promptId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...userHeaders(userId) },
+    body: JSON.stringify({ tags })
+  });
+  return readJson<PromptPreset>(response);
+}
+
 export async function adjustDesignerCredits(request: CreditAdjustmentRequest, adminUserId?: string): Promise<Profile> {
   const response = await fetch(`${API_BASE_URL}/api/admin/credits`, {
     method: "POST",

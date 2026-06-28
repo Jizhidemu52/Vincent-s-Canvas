@@ -61,7 +61,7 @@ export interface StartApiServerOptions extends ApiHttpServerOptions {
 function corsHeaders() {
   return {
     "access-control-allow-headers": "content-type,x-request-id,x-user-id",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "access-control-allow-origin": "*",
     "cache-control": "no-store",
     "content-type": "application/json; charset=utf-8"
@@ -289,6 +289,16 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
         if (request.method === "DELETE" && pathname.startsWith("/api/prompts/")) {
           const id = decodeURIComponent(pathname.slice("/api/prompts/".length));
           const result = callApi(state, "/api/prompts", { id }, undefined, userId);
+          if (!isApiError(result) && stateFilePath) {
+            saveServerState(stateFilePath, state);
+          }
+          sendJson(response, statusFromApiResult(result), result);
+          return;
+        }
+        if (request.method === "PATCH" && pathname.startsWith("/api/prompts/")) {
+          const id = decodeURIComponent(pathname.slice("/api/prompts/".length));
+          const body = await readJsonBody<PromptPresetRequest>(request, bodyLimitBytes);
+          const result = callApi(state, "/api/prompts", { ...(body ?? {}), id }, undefined, userId);
           if (!isApiError(result) && stateFilePath) {
             saveServerState(stateFilePath, state);
           }
