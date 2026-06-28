@@ -2392,6 +2392,26 @@ describe("Designer canvas app shell", () => {
     expect(screen.getAllByText("173").length).toBeGreaterThan(0);
   });
 
+  it("opens a clicked home history output thumbnail on its generated canvas node", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.dblClick(screen.getByText("fashion-reference.jpg"));
+    await user.type(screen.getByRole("textbox", { name: "Inline prompt" }), "open this generated image from history");
+    const generateButtons = screen.getAllByRole("button", { name: "Generate" });
+    await user.click(generateButtons[generateButtons.length - 1]);
+    await screen.findByText("backend result 1.jpg");
+
+    await user.click(screen.getByRole("button", { name: "Projects" }));
+    await user.click(screen.getByRole("button", { name: "History" }));
+    await user.click(screen.getByRole("button", { name: "Open history output backend result 1.jpg" }));
+
+    const selectedCanvasNode = document.querySelector(".stage-node.selected") as HTMLElement | null;
+    expect(selectedCanvasNode).toBeTruthy();
+    expect(within(selectedCanvasNode!).getByText("backend result 1.jpg")).toBeInTheDocument();
+  });
+
   it("filters home history records by project", async () => {
     const user = userEvent.setup();
     await login(user);

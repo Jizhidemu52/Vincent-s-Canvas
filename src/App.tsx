@@ -491,9 +491,11 @@ export default function App() {
       const active = { ...current, activeProjectId: projectId };
       const project = active.projects.find((item) => item.id === projectId);
       const targetNodeId =
-        target?.historyId && project
-          ? project.nodes.find((node) => node.metadata.historyId === target.historyId)?.id ?? target.nodeId
-          : target?.nodeId;
+        target?.nodeId && project?.nodes.some((node) => node.id === target.nodeId)
+          ? target.nodeId
+          : target?.historyId && project
+            ? project.nodes.find((node) => node.metadata.historyId === target.historyId)?.id
+            : undefined;
       return targetNodeId && project?.nodes.some((node) => node.id === targetNodeId) ? selectNodes(active, projectId, [targetNodeId]) : active;
     });
     if (target?.historyId || target?.nodeId) {
@@ -1347,11 +1349,13 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
   const visibleHistory = projectFilter === "all" ? workspace.history : workspace.history.filter((entry) => entry.projectId === projectFilter);
   const visibleGeneratedNodes =
     projectFilter === "all" ? generatedNodes : generatedNodes.filter(({ project }) => project.id === projectFilter);
-  function sourceForHistoryOutput(entryId: string, outputName: string, remoteSource: string) {
-    const match = generatedNodes.find(
+  function nodeForHistoryOutput(entryId: string, outputName: string, remoteSource: string) {
+    return generatedNodes.find(
       ({ node }) => node.metadata.historyId === entryId && (node.metadata.remoteSource === remoteSource || node.name === outputName)
     );
-    return match?.node.source ?? remoteSource;
+  }
+  function sourceForHistoryOutput(entryId: string, outputName: string, remoteSource: string) {
+    return nodeForHistoryOutput(entryId, outputName, remoteSource)?.node.source ?? remoteSource;
   }
   return (
     <section className="home-section" aria-label="History management">
@@ -1389,13 +1393,25 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
                   <p>{entry.prompt}</p>
                   {entry.outputs?.length ? (
                     <div className="history-output-strip" aria-label={`History outputs for ${entry.id}`}>
-                      {entry.outputs.map((output) => (
-                        <img
-                          key={`${entry.id}-${output.name}-${output.source}`}
-                          src={sourceForHistoryOutput(entry.id, output.name, output.source)}
-                          alt={`History output ${output.name}`}
-                        />
-                      ))}
+                      {entry.outputs.map((output) => {
+                        const outputMatch = nodeForHistoryOutput(entry.id, output.name, output.source);
+                        return (
+                          <button
+                            type="button"
+                            key={`${entry.id}-${output.name}-${output.source}`}
+                            className="history-output-button"
+                            aria-label={`Open history output ${output.name}`}
+                            onClick={() =>
+                              outputMatch
+                                ? onOpenProject(outputMatch.project.id, { historyId: entry.id, nodeId: outputMatch.node.id })
+                                : project && onOpenProject(project.id, { historyId: entry.id, nodeId: entry.nodeId })
+                            }
+                            disabled={!outputMatch && !project}
+                          >
+                            <img src={sourceForHistoryOutput(entry.id, output.name, output.source)} alt={`History output ${output.name}`} />
+                          </button>
+                        );
+                      })}
                     </div>
                   ) : null}
                   <button type="button" onClick={() => project && onOpenProject(project.id, { historyId: entry.id, nodeId: entry.nodeId })} disabled={!project}>
