@@ -184,33 +184,98 @@ function numberValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function recordItems(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return value.map(objectValue).filter((item) => Object.keys(item).length > 0);
+}
+
+function nestedOutputItems(value: unknown): Array<Record<string, unknown>> | undefined {
+  const directItems = recordItems(value);
+  if (directItems) return directItems;
+  const object = objectValue(value);
+  if (!Object.keys(object).length) return undefined;
+  const candidates = [object.outputs, object.data, object.images, object.result, object.assets];
+  for (const candidate of candidates) {
+    const nestedItems = nestedOutputItems(candidate);
+    if (nestedItems) return nestedItems;
+  }
+  return undefined;
+}
+
 function outputItems(body: unknown) {
   const object = objectValue(body);
-  const candidates = [object.outputs, object.data, object.images, object.result];
+  const candidates = [object.outputs, object.data, object.images, object.result, object.assets];
   for (const candidate of candidates) {
-    if (Array.isArray(candidate)) return candidate.map(objectValue).filter((item) => Object.keys(item).length > 0);
+    const items = nestedOutputItems(candidate);
+    if (items) return items;
   }
   return [];
+}
+
+function mimeExtension(mimeType: string) {
+  const subtype = /^image\/([a-z0-9.+-]+)$/i.exec(mimeType)?.[1];
+  if (!subtype) return undefined;
+  if (subtype === "jpeg" || subtype === "pjpeg") return "jpg";
+  if (subtype === "svg+xml") return "svg";
+  return subtype;
 }
 
 function outputName(model: ModelDefinition, index: number, source: string, item: Record<string, unknown>) {
   const explicitName = stringValue(item.name ?? item.filename ?? item.fileName);
   if (explicitName) return explicitName;
+  const dataMime = /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(source)?.[1];
+  const dataExtension = dataMime ? mimeExtension(dataMime) : undefined;
+  if (dataExtension) return `${model.name} output ${index + 1}.${dataExtension}`;
   const extensionMatch = /(\.[a-z0-9]+)(?:[?#].*)?$/i.exec(source);
   return `${model.name} output ${index + 1}${extensionMatch?.[1] ?? ".jpg"}`;
 }
 
+function base64OutputSource(item: Record<string, unknown>) {
+  const base64 = stringValue(item.b64_json ?? item.base64 ?? item.base64Data);
+  if (!base64) return undefined;
+  const mime = stringValue(item.mimeType ?? item.mime_type ?? item.contentType ?? item.content_type) ?? "image/png";
+  return `data:${mime};base64,${base64}`;
+}
+
+function outputSource(item: Record<string, unknown>) {
+  return (
+    stringValue(
+      item.source ??
+        item.url ??
+        item.imageUrl ??
+        item.image_url ??
+        item.outputUrl ??
+        item.output_url ??
+        item.fileUrl ??
+        item.file_url ??
+        item.downloadUrl ??
+        item.download_url ??
+        item.assetUrl ??
+        item.asset_url ??
+        item.uri ??
+        item.image
+    ) ?? base64OutputSource(item)
+  );
+}
+
+function outputItemFailed(item: Record<string, unknown>) {
+  const status = providerStatus(item);
+  return status === "failed" || status === "error";
+}
+
 function normalizeProviderOutputs(body: unknown, request: GenerationRequest, model: ModelDefinition) {
   const dimensions = dimensionsForRequest(request);
-  return outputItems(body).map((item, index) => {
-    const source = stringValue(item.source ?? item.url ?? item.imageUrl ?? item.outputUrl ?? item.uri) ?? `provider://${model.provider}/${request.nodeId}/${index + 1}`;
-    return {
-      name: outputName(model, index, source, item),
-      source,
-      width: numberValue(item.width) ?? dimensions.width,
-      height: numberValue(item.height) ?? dimensions.height
-    };
-  });
+  return outputItems(body)
+    .filter((item) => !outputItemFailed(item))
+    .map((item, index) => {
+      const source = outputSource(item) ?? `provider://${model.provider}/${request.nodeId}/${index + 1}`;
+      return {
+        name: outputName(model, index, source, item),
+        source,
+        width: numberValue(item.width) ?? dimensions.width,
+        height: numberValue(item.height) ?? dimensions.height
+      };
+    });
 }
 
 function providerStatus(body: unknown) {
@@ -240,6 +305,16 @@ function providerErrorMessage(body: unknown) {
     messageWithCode(stringValue(detail.message), stringValue(detail.code)) ??
     messageWithCode(stringValue(firstArrayError.message), stringValue(firstArrayError.code))
   );
+}
+
+function providerOutputItemErrorMessage(body: unknown) {
+  for (const item of outputItems(body)) {
+    if (outputItemFailed(item)) {
+      const message = providerErrorMessage(item);
+      if (message) return message;
+    }
+  }
+  return undefined;
 }
 
 function providerJobId(body: unknown) {
@@ -310,7 +385,8 @@ export async function executeLiveProviderPayload(
     const outputs = normalizeProviderOutputs(body, request, model);
     const status = providerStatus(body);
     if (outputs.length || status === "succeeded" || status === "complete" || status === "completed") {
-      progress = mergeProgress(body, { ...progress, status: "succeeded" });
+      const itemErrorMessage = providerOutputItemErrorMessage(body);
+      progress = mergeProgress(body, { ...progress, status: "succeeded", errorMessage: itemErrorMessage ?? progress.errorMessage });
       publishProgress(options, progress);
       return {
         status: "succeeded",
@@ -321,9 +397,10 @@ export async function executeLiveProviderPayload(
       };
     }
     if (status === "failed" || status === "error") {
-      progress = mergeProgress(body, { ...progress, status: "failed", errorMessage: providerErrorMessage(body) });
+      const errorMessage = providerErrorMessage(body) ?? providerOutputItemErrorMessage(body);
+      progress = mergeProgress(body, { ...progress, status: "failed", errorMessage });
       publishProgress(options, progress);
-      throw new Error(providerErrorMessage(body) ?? "Provider execution failed");
+      throw new Error(errorMessage ?? "Provider execution failed");
     }
     const statusUrl = providerStatusUrl(body);
     if (!statusUrl) break;

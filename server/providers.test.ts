@@ -328,6 +328,133 @@ describe("provider adapters", () => {
     });
   });
 
+  it("normalizes NanoBanana base64 image outputs", async () => {
+    const providerRequest = request({
+      modelId: nanoBananaModel.id,
+      outputCount: 1,
+      providerSettings: { size: "768x1024", quality: "high" }
+    });
+    const payload = buildProviderPayload(providerRequest, nanoBananaModel, {
+      mode: "live-ready",
+      endpointUrl: "https://nanobanana.example/v1/images",
+      configuredSecrets: ["NANO_BANANA_API_KEY"],
+      secretConfigured: true
+    });
+
+    const result = await executeLiveProviderPayload(payload, providerRequest, nanoBananaModel, "history-live-nano", 11, {
+      resolveSecret: (name) => (name === "NANO_BANANA_API_KEY" ? "nano-live-secret" : undefined),
+      fetchJson: async () => ({
+        ok: true,
+        status: 200,
+        body: {
+          status: "succeeded",
+          images: [
+            {
+              b64_json: "iVBORw0KGgoAAAANSUhEUgAAAAE=",
+              mimeType: "image/png",
+              width: 768,
+              height: 1024
+            }
+          ]
+        }
+      })
+    });
+
+    expect(result.outputs).toEqual([
+      {
+        name: "Nano Banana 2 output 1.png",
+        source: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAE=",
+        width: 768,
+        height: 1024
+      }
+    ]);
+    expect(JSON.stringify(result)).not.toContain("nano-live-secret");
+  });
+
+  it("normalizes nested workflow result outputs with provider asset url fields", async () => {
+    const providerRequest = request({
+      modelId: runningHubModel.id,
+      operation: "edit",
+      outputCount: 1,
+      referenceNodeIds: ["original-node"],
+      providerSettings: { size: "1280x1280" }
+    });
+    const payload = buildProviderPayload(providerRequest, runningHubModel, {
+      mode: "live-ready",
+      endpointUrl: "https://comfy.example/api/workflows",
+      configuredSecrets: ["COMFYUI_API_KEY"],
+      secretConfigured: true
+    });
+
+    const result = await executeLiveProviderPayload(payload, providerRequest, runningHubModel, "history-comfy-nested", 8, {
+      resolveSecret: (name) => (name === "COMFYUI_API_KEY" ? "comfy-live-secret" : undefined),
+      fetchJson: async () => ({
+        ok: true,
+        status: 200,
+        body: {
+          status: "succeeded",
+          result: {
+            outputs: [
+              {
+                file_url: "https://cdn.example/comfy/final.webp",
+                width: 1280,
+                height: 1280,
+                filename: "final.webp"
+              }
+            ]
+          }
+        }
+      })
+    });
+
+    expect(result.outputs).toEqual([
+      {
+        name: "final.webp",
+        source: "https://cdn.example/comfy/final.webp",
+        width: 1280,
+        height: 1280
+      }
+    ]);
+  });
+
+  it("keeps successful outputs visible when a provider reports an item failure", async () => {
+    const providerRequest = request({ modelId: runningHubModel.id, outputCount: 2 });
+    const payload = buildProviderPayload(providerRequest, runningHubModel, {
+      mode: "live-ready",
+      endpointUrl: "https://runninghub.example/api/run",
+      configuredSecrets: ["RUNNINGHUB_API_KEY"],
+      secretConfigured: true
+    });
+
+    const result = await executeLiveProviderPayload(payload, providerRequest, runningHubModel, "history-rh-partial", 8, {
+      resolveSecret: (name) => (name === "RUNNINGHUB_API_KEY" ? "rh-live-secret" : undefined),
+      fetchJson: async () => ({
+        ok: true,
+        status: 200,
+        body: {
+          status: "succeeded",
+          outputs: [
+            { url: "https://cdn.example/runninghub/ok.png", width: 1024, height: 1024 },
+            { status: "failed", error: { message: "Second output blocked", code: "SAFETY" } }
+          ]
+        }
+      })
+    });
+
+    expect(result.outputs).toEqual([
+      {
+        name: "RunningHub Fashion Workflow output 1.png",
+        source: "https://cdn.example/runninghub/ok.png",
+        width: 1024,
+        height: 1024
+      }
+    ]);
+    expect(result.providerProgress).toMatchObject({
+      status: "succeeded",
+      errorMessage: "Second output blocked (SAFETY)"
+    });
+  });
+
   it("rejects live provider execution before HTTP when configured secrets are missing", async () => {
     const providerRequest = request();
     const payload = buildProviderPayload(providerRequest, openAiModel, {
