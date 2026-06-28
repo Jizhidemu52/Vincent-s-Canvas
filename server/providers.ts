@@ -146,6 +146,38 @@ function imageProviderBody(request: GenerationRequest, model: ModelDefinition) {
 }
 
 function workflowProviderBody(request: GenerationRequest, model: ModelDefinition) {
+  const settings = request.providerSettings;
+  if (model.provider === "runninghub" && (settings?.webappId || settings?.nodeInfoList?.length)) {
+    return compactObject({
+      webappId: settings.webappId ?? model.id,
+      nodeInfoList: settings.nodeInfoList ?? [],
+      taskType: settings.taskType ?? "ASYNC",
+      instanceType: settings.instanceType,
+      inputs: compactObject({
+        prompt: request.prompt,
+        references: request.referenceNodeIds,
+        outputCount: request.outputCount,
+        providerSettings: request.providerSettings,
+        mask: request.mask,
+        batchSettings: request.batchSettings
+      })
+    });
+  }
+  if (model.provider === "comfyui" && settings?.workflow) {
+    return compactObject({
+      workflow: settings.workflow,
+      addMetadata: settings.addMetadata ?? true,
+      instanceType: settings.instanceType,
+      inputs: compactObject({
+        prompt: request.prompt,
+        references: request.referenceNodeIds,
+        outputCount: request.outputCount,
+        providerSettings: request.providerSettings,
+        mask: request.mask,
+        batchSettings: request.batchSettings
+      })
+    });
+  }
   return {
     workflowId: model.id,
     operation: request.operation,
@@ -178,6 +210,12 @@ function objectValue(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function stringLikeValue(value: unknown) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
 }
 
 function numberValue(value: unknown) {
@@ -280,6 +318,13 @@ function normalizeProviderOutputs(body: unknown, request: GenerationRequest, mod
 
 function providerStatus(body: unknown) {
   const object = objectValue(body);
+  const code = numberValue(object.code);
+  if (code === 0) {
+    return providerJobId(body) && !outputItems(body).length ? "running" : "succeeded";
+  }
+  if (code === 804) return "running";
+  if (code === 813) return "queued";
+  if (code === 805) return "failed";
   return stringValue(object.status ?? object.state)?.toLowerCase();
 }
 
@@ -299,11 +344,13 @@ function providerErrorMessage(body: unknown) {
   const detail = objectValue(object.detail);
   const firstArrayError = Array.isArray(object.errors) ? objectValue(object.errors[0]) : {};
   return (
-    messageWithCode(stringValue(object.errorMessage), stringValue(object.code)) ??
-    messageWithCode(stringValue(object.message), stringValue(object.code)) ??
-    messageWithCode(stringValue(nestedError.message), stringValue(nestedError.code)) ??
-    messageWithCode(stringValue(detail.message), stringValue(detail.code)) ??
-    messageWithCode(stringValue(firstArrayError.message), stringValue(firstArrayError.code))
+    messageWithCode(stringValue(object.errorMessage), stringLikeValue(object.code)) ??
+    messageWithCode(stringValue(object.failedReason), stringLikeValue(object.code)) ??
+    messageWithCode(stringValue(object.msg), stringLikeValue(object.code)) ??
+    messageWithCode(stringValue(object.message), stringLikeValue(object.code)) ??
+    messageWithCode(stringValue(nestedError.message), stringLikeValue(nestedError.code)) ??
+    messageWithCode(stringValue(detail.message), stringLikeValue(detail.code)) ??
+    messageWithCode(stringValue(firstArrayError.message), stringLikeValue(firstArrayError.code))
   );
 }
 
@@ -319,7 +366,8 @@ function providerOutputItemErrorMessage(body: unknown) {
 
 function providerJobId(body: unknown) {
   const object = objectValue(body);
-  return stringValue(object.providerJobId ?? object.jobId ?? object.id ?? object.taskId);
+  const data = objectValue(object.data);
+  return stringValue(object.providerJobId ?? object.jobId ?? object.id ?? object.taskId ?? data.taskId);
 }
 
 function mergeProgress(body: unknown, current: ProviderProgress): ProviderProgress {
@@ -354,6 +402,53 @@ function resolvePayloadSecret(payload: ProviderPayload, options: LiveProviderExe
   return undefined;
 }
 
+function isRunningHubAiAppPayload(payload: ProviderPayload) {
+  const body = objectValue(payload.body);
+  return payload.provider === "runninghub" && Boolean(stringValue(body.webappId));
+}
+
+function runningHubOutputsUrl(endpointUrl?: string) {
+  if (!endpointUrl) return undefined;
+  try {
+    const url = new URL(endpointUrl);
+    url.pathname = "/task/openapi/outputs";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function providerPollUrl(body: unknown, payload: ProviderPayload) {
+  return providerStatusUrl(body) ?? (isRunningHubAiAppPayload(payload) && providerJobId(body) ? runningHubOutputsUrl(payload.endpointUrl) : undefined);
+}
+
+function submitBodyForPayload(payload: ProviderPayload, secret?: string) {
+  return isRunningHubAiAppPayload(payload) && secret ? { ...payload.body, apiKey: secret } : payload.body;
+}
+
+function headersForPayload(payload: ProviderPayload, secret?: string) {
+  return compactObject({
+    "Content-Type": "application/json",
+    Authorization: secret && !isRunningHubAiAppPayload(payload) ? `Bearer ${secret}` : undefined
+  }) as Record<string, string>;
+}
+
+function pollInitForPayload(payload: ProviderPayload, body: unknown, headers: Record<string, string>, secret?: string): ProviderFetchInit {
+  if (isRunningHubAiAppPayload(payload)) {
+    return {
+      method: "POST",
+      headers,
+      body: JSON.stringify(compactObject({ apiKey: secret, taskId: providerJobId(body) }))
+    };
+  }
+  return {
+    method: "GET",
+    headers
+  };
+}
+
 export async function executeLiveProviderPayload(
   payload: ProviderPayload,
   request: GenerationRequest,
@@ -366,19 +461,17 @@ export async function executeLiveProviderPayload(
     throw new Error(`Provider endpoint is not configured for ${payload.provider}`);
   }
   const secret = resolvePayloadSecret(payload, options);
-  const headers = compactObject({
-    "Content-Type": "application/json",
-    Authorization: secret ? `Bearer ${secret}` : undefined
-  }) as Record<string, string>;
+  const headers = headersForPayload(payload, secret);
   let progress: ProviderProgress = { status: "submitting", pollAttempts: 0 };
   let body = assertProviderResponse(
     await options.fetchJson(payload.endpointUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify(payload.body)
+      body: JSON.stringify(submitBodyForPayload(payload, secret))
     })
   );
   progress = mergeProgress(body, { ...progress, status: providerStatus(body) ?? "submitted" });
+  progress = { ...progress, statusUrl: providerPollUrl(body, payload) ?? progress.statusUrl };
   publishProgress(options, progress);
   const maxPollAttempts = options.maxPollAttempts ?? 5;
   for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
@@ -402,17 +495,13 @@ export async function executeLiveProviderPayload(
       publishProgress(options, progress);
       throw new Error(errorMessage ?? "Provider execution failed");
     }
-    const statusUrl = providerStatusUrl(body);
+    const statusUrl = providerPollUrl(body, payload);
     if (!statusUrl) break;
     if (options.pollDelay) await options.pollDelay();
     progress = { ...progress, pollAttempts: progress.pollAttempts + 1, statusUrl };
-    body = assertProviderResponse(
-      await options.fetchJson(statusUrl, {
-        method: "GET",
-        headers
-      })
-    );
+    body = assertProviderResponse(await options.fetchJson(statusUrl, pollInitForPayload(payload, body, headers, secret)));
     progress = mergeProgress(body, progress);
+    progress = { ...progress, statusUrl: providerPollUrl(body, payload) ?? progress.statusUrl };
     publishProgress(options, progress);
   }
   progress = { ...progress, status: "timed_out", errorMessage: `Provider ${payload.provider} did not return outputs` };

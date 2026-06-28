@@ -328,6 +328,96 @@ describe("provider adapters", () => {
     });
   });
 
+  it("executes RunningHub AI app payloads with body apiKey and POST output polling", async () => {
+    const providerRequest = request({
+      modelId: runningHubModel.id,
+      operation: "edit",
+      outputCount: 1,
+      referenceNodeIds: ["uploaded-reference"],
+      providerSettings: {
+        size: "1024x1536",
+        webappId: "rh-webapp-7788",
+        taskType: "ASYNC",
+        instanceType: "plus",
+        nodeInfoList: [
+          { nodeId: "3", fieldName: "prompt", fieldValue: "clean product shadow" },
+          { nodeId: "9", fieldName: "image", fieldValue: "uploaded-reference.png", valueType: "image" }
+        ]
+      }
+    });
+    const payload = buildProviderPayload(providerRequest, runningHubModel, {
+      mode: "live-ready",
+      endpointUrl: "https://www.runninghub.cn/task/openapi/ai-app/run",
+      configuredSecrets: ["RUNNINGHUB_API_KEY"],
+      secretConfigured: true
+    });
+    const fetchCalls: Array<{ url: string; init: { method?: string; headers?: Record<string, string>; body?: string } }> = [];
+
+    expect(payload.body).toMatchObject({
+      webappId: "rh-webapp-7788",
+      taskType: "ASYNC",
+      instanceType: "plus",
+      nodeInfoList: [
+        { nodeId: "3", fieldName: "prompt", fieldValue: "clean product shadow" },
+        { nodeId: "9", fieldName: "image", fieldValue: "uploaded-reference.png", valueType: "image" }
+      ]
+    });
+    expect(JSON.stringify(payload)).not.toContain("rh-live-secret");
+
+    const result = await executeLiveProviderPayload(payload, providerRequest, runningHubModel, "history-rh-ai-app", 8, {
+      maxPollAttempts: 2,
+      resolveSecret: (name) => (name === "RUNNINGHUB_API_KEY" ? "rh-live-secret" : undefined),
+      fetchJson: async (url, init) => {
+        fetchCalls.push({ url, init });
+        if (fetchCalls.length === 1) {
+          return {
+            ok: true,
+            status: 200,
+            body: { code: 0, msg: "success", data: { taskId: "rh-task-7788" } }
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          body: {
+            code: 0,
+            msg: "success",
+            data: [{ fileUrl: "https://rh-images.example/final.png", fileType: "image", width: 1024, height: 1536 }]
+          }
+        };
+      }
+    });
+
+    expect(fetchCalls).toHaveLength(2);
+    expect(fetchCalls[0]).toMatchObject({
+      url: "https://www.runninghub.cn/task/openapi/ai-app/run",
+      init: { method: "POST", headers: { "Content-Type": "application/json" } }
+    });
+    expect(fetchCalls[0].init.headers?.Authorization).toBeUndefined();
+    expect(JSON.parse(fetchCalls[0].init.body ?? "{}")).toMatchObject({
+      apiKey: "rh-live-secret",
+      webappId: "rh-webapp-7788",
+      taskType: "ASYNC",
+      instanceType: "plus"
+    });
+    expect(fetchCalls[1]).toMatchObject({
+      url: "https://www.runninghub.cn/task/openapi/outputs",
+      init: { method: "POST", headers: { "Content-Type": "application/json" } }
+    });
+    expect(JSON.parse(fetchCalls[1].init.body ?? "{}")).toEqual({ apiKey: "rh-live-secret", taskId: "rh-task-7788" });
+    expect(result).toMatchObject({
+      status: "succeeded",
+      outputs: [{ name: "RunningHub Fashion Workflow output 1.png", source: "https://rh-images.example/final.png", width: 1024, height: 1536 }],
+      providerProgress: {
+        providerJobId: "rh-task-7788",
+        status: "succeeded",
+        statusUrl: "https://www.runninghub.cn/task/openapi/outputs",
+        pollAttempts: 1
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain("rh-live-secret");
+  });
+
   it("normalizes NanoBanana base64 image outputs", async () => {
     const providerRequest = request({
       modelId: nanoBananaModel.id,

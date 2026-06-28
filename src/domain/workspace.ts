@@ -56,6 +56,17 @@ export interface ProviderRequestSettings {
   size?: string;
   quality?: string;
   preset?: string;
+  webappId?: string;
+  taskType?: "ASYNC" | "SYNC";
+  instanceType?: string;
+  nodeInfoList?: Array<{
+    nodeId: string;
+    fieldName: string;
+    fieldValue: string | number;
+    valueType?: "text" | "number" | "image" | "video" | "audio";
+  }>;
+  workflow?: Record<string, unknown>;
+  addMetadata?: boolean;
 }
 
 export interface MaskSelection {
