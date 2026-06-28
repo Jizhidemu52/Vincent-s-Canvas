@@ -1137,7 +1137,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Bob Designer · Bob upscale · upscale-pro")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
     expect(screen.getAllByText("alice@company.local").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Alice Designer")).toBeInTheDocument();
+    expect(screen.getAllByText("Alice Designer").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("88 remaining")).toBeInTheDocument();
     expect(screen.getByText("12 used / limit 120")).toBeInTheDocument();
     expect(screen.getByText("2 projects / 5 history / 7 assets")).toBeInTheDocument();
@@ -1190,6 +1190,26 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "Back to projects" }));
     await user.click(screen.getByRole("button", { name: "Profile" }));
     expect(screen.getByRole("region", { name: "Profile credit management" })).toHaveTextContent("200");
+  });
+
+  it("filters team history by designer in the admin workspace", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: /Admin monitoring/i }));
+    expect(await screen.findByText("Team history")).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Team history output alice-cleanup-1.jpg" }, { timeout: 4000 })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Team history output bob-upscale-1.jpg" }, { timeout: 4000 })).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team history designer filter" }), "bob@company.local");
+
+    expect(screen.queryByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team history designer filter" }), "all");
+
+    expect(screen.getByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
   });
 
   it("supports the image node inline model/prompt entry and generation loop", async () => {

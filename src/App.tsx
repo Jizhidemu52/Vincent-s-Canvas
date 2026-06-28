@@ -1268,6 +1268,7 @@ function AdminView({
   const [adminUsage, setAdminUsage] = useState<AdminUsageSummary | null>(null);
   const [adminJobs, setAdminJobs] = useState<AdminGenerationJob[]>([]);
   const [adminHistory, setAdminHistory] = useState<AdminHistoryEntry[]>([]);
+  const [adminHistoryUserFilter, setAdminHistoryUserFilter] = useState("all");
   const [adminAudit, setAdminAudit] = useState<AdminAuditEntry[]>(workspace.history.map(historyEntryToAuditEntry));
   const estimatedSpend = formatMoneyCents(adminUsage?.totalPriceCents, adminUsage?.currency);
   const providers = workspace.modelRegistry.reduce<Record<string, number>>((memo, model) => {
@@ -1278,6 +1279,11 @@ function AdminView({
   const modelGroupOptions: ModelDefinition["group"][] = ["Trending models", "Image", "Edit", "Operations"];
   const modelCapabilityOptions: ModuleType[] = ["generate", "edit", "upscale", "removeBackground"];
   const visibleAdminAudit = adminAudit.length ? adminAudit : workspace.history.map(historyEntryToAuditEntry);
+  const adminHistoryDesigners = Array.from(
+    new Map(adminHistory.map((entry) => [entry.userId ?? "unknown-user", entry.designerName ?? entry.userId ?? "Unknown designer"])).entries()
+  ).sort(([left], [right]) => left.localeCompare(right));
+  const visibleAdminHistory =
+    adminHistoryUserFilter === "all" ? adminHistory : adminHistory.filter((entry) => entry.userId === adminHistoryUserFilter);
 
   useEffect(() => {
     let cancelled = false;
@@ -1721,7 +1727,24 @@ function AdminView({
           <article className="admin-card">
             <h2>Team history</h2>
             {adminHistory.length ? (
-              adminHistory.slice(0, 6).map((entry) => (
+              <label className="admin-inline-filter">
+                <span>Designer</span>
+                <select
+                  aria-label="Team history designer filter"
+                  value={adminHistoryUserFilter}
+                  onChange={(event) => setAdminHistoryUserFilter(event.target.value)}
+                >
+                  <option value="all">All designers</option>
+                  {adminHistoryDesigners.map(([userId, designerName]) => (
+                    <option key={userId} value={userId}>
+                      {designerName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {visibleAdminHistory.length ? (
+              visibleAdminHistory.slice(0, 6).map((entry) => (
                 <div className="admin-row" key={entry.id}>
                   <span>{entry.designerName ?? entry.userId} · {entry.projectName ?? entry.projectId} · {entry.modelId}</span>
                   <strong>
@@ -1739,6 +1762,8 @@ function AdminView({
                   )}
                 </div>
               ))
+            ) : adminHistory.length ? (
+              <p>No team generation history matches this designer.</p>
             ) : (
               <p>No team generation history yet. Designer outputs will appear here.</p>
             )}
