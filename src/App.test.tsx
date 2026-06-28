@@ -1539,6 +1539,33 @@ describe("Designer canvas app shell", () => {
     expect(screen.queryByRole("button", { name: /Remove BG cutout for product use/i })).not.toBeInTheDocument();
   });
 
+  it("highlights compatible workflow targets while dragging a port", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    await user.click(screen.getByRole("button", { name: "Generate node" }));
+    const generateModule = await screen.findByRole("button", { name: /Workflow generate module/i });
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    await user.click(screen.getByRole("button", { name: "Upscale node" }));
+    const upscaleModule = await screen.findByRole("button", { name: /Workflow upscale module/i });
+
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from Prompt note"));
+
+    expect(screen.getByRole("button", { name: /Text Prompt note/i })).toHaveClass("connection-source");
+    expect(generateModule).toHaveClass("connection-compatible");
+    expect(upscaleModule).toHaveClass("connection-incompatible");
+    expect(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i })).toHaveClass("connection-incompatible");
+
+    fireEvent.pointerUp(window);
+
+    expect(screen.getByText("Choose module")).toBeInTheDocument();
+    expect(generateModule).not.toHaveClass("connection-compatible");
+    expect(upscaleModule).not.toHaveClass("connection-incompatible");
+    expect(screen.getByRole("button", { name: /Text Prompt note/i })).not.toHaveClass("connection-source");
+  });
+
   it("chains workflow modules from module output ports and runs them in order", async () => {
     const user = userEvent.setup();
     await login(user);

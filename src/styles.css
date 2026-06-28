@@ -1319,6 +1319,31 @@ button {
   box-shadow: 0 0 0 4px rgba(49, 209, 194, 0.16);
 }
 
+.stage-node.connection-source > img,
+.stage-node.connection-source .workflow-box,
+.stage-node.connection-source .text-node,
+.stage-node.connection-source .reference-group-node {
+  outline: 2px solid #0f766e;
+  box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.16);
+}
+
+.stage-node.connection-compatible > img,
+.stage-node.connection-compatible .workflow-box,
+.stage-node.connection-compatible .text-node,
+.stage-node.connection-compatible .reference-group-node {
+  outline: 2px solid #21c9b6;
+  box-shadow: 0 0 0 5px rgba(33, 201, 182, 0.18);
+}
+
+.stage-node.connection-incompatible {
+  opacity: 0.5;
+}
+
+.stage-node.connection-incompatible .node-port.input {
+  background: #b8b8b8;
+  box-shadow: none;
+}
+
 .stage-node.running > img,
 .stage-node.running .workflow-box,
 .stage-node.running .text-node,

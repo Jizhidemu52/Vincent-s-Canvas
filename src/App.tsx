@@ -83,6 +83,7 @@ import {
   type ModelDefinition,
   type OperationType,
   type ModuleType,
+  type NodePort,
   type NodeTransform,
   type Profile,
   type Project,
@@ -241,6 +242,21 @@ function moduleInputLabelsForSources(moduleType: ModuleType, sourceNodes: Canvas
       .map((input) => input.label);
   });
   return Array.from(new Set(labels));
+}
+
+function defaultNodeOutputPort(node: CanvasNode) {
+  return node.outputs.find((port) => port.id === "out") ?? node.outputs[0];
+}
+
+function nodePortsAreCompatible(output?: NodePort, input?: NodePort) {
+  if (!output || !input) return false;
+  return output.type === input.type || (output.type === "result" && input.type === "image");
+}
+
+function nodeCanAcceptConnection(source?: CanvasNode, target?: CanvasNode) {
+  if (!source || !target || source.id === target.id) return false;
+  const output = defaultNodeOutputPort(source);
+  return target.inputs.some((input) => nodePortsAreCompatible(output, input));
 }
 
 function isCanvasImageNode(node?: CanvasNode) {
@@ -2480,8 +2496,10 @@ function CanvasStage({
   const stageRef = useRef<HTMLElement | null>(null);
   const [lasso, setLasso] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [modulePicker, setModulePicker] = useState<{ nodeId: string; sourceIds: string[]; x: number; y: number } | null>(null);
+  const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
   const selectedIds = project.selectedNodeIds;
   const selectedSet = new Set(selectedIds);
+  const connectionSourceNode = connectionSourceId ? project.nodes.find((node) => node.id === connectionSourceId) : undefined;
 
   async function importCanvasFiles(files: FileList | File[], clientX?: number, clientY?: number) {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
@@ -2527,6 +2545,16 @@ function CanvasStage({
       onWorkspaceChange((current) => selectNodes(current, project.id, sourceIds));
     }
     setModulePicker({ nodeId: node.id, sourceIds, x: node.x + node.width + 38, y: node.y + 8 });
+  }
+
+  function startConnectionDrag(node: CanvasNode) {
+    setConnectionSourceId(node.id);
+    setModulePicker(null);
+  }
+
+  function finishConnectionDrag(node: CanvasNode) {
+    setConnectionSourceId(null);
+    openModulePicker(node);
   }
 
   function panCanvas(event: PointerEvent<HTMLElement>) {
@@ -2642,9 +2670,19 @@ function CanvasStage({
             node={node}
             selected={selectedSet.has(node.id)}
             highlighted={Boolean(selectedNode && project.connections.some((item) => (item.fromNodeId === selectedNode.id && item.toNodeId === node.id) || (item.toNodeId === selectedNode.id && item.fromNodeId === node.id)))}
+            connectionState={
+              connectionSourceId
+                ? connectionSourceId === node.id
+                  ? "source"
+                  : nodeCanAcceptConnection(connectionSourceNode, node)
+                    ? "compatible"
+                    : "incompatible"
+                : undefined
+            }
             onSelect={selectNode}
             onWorkspaceChange={onWorkspaceChange}
-            onOpenModulePicker={openModulePicker}
+            onStartConnectionDrag={startConnectionDrag}
+            onFinishConnectionDrag={finishConnectionDrag}
             onGenerateNode={onGenerateNode}
             workspace={workspace}
           />
@@ -2711,9 +2749,11 @@ function CanvasNodeView({
   node,
   selected,
   highlighted,
+  connectionState,
   onSelect,
   onWorkspaceChange,
-  onOpenModulePicker,
+  onStartConnectionDrag,
+  onFinishConnectionDrag,
   onGenerateNode,
   workspace
 }: {
@@ -2721,9 +2761,11 @@ function CanvasNodeView({
   node: CanvasNode;
   selected: boolean;
   highlighted: boolean;
+  connectionState?: "source" | "compatible" | "incompatible";
   onSelect: (id: string, append: boolean) => void;
   onWorkspaceChange: (updater: (workspace: Workspace) => Workspace) => void;
-  onOpenModulePicker: (node: CanvasNode) => void;
+  onStartConnectionDrag: (node: CanvasNode) => void;
+  onFinishConnectionDrag: (node: CanvasNode) => void;
   onGenerateNode: (nodeId: string) => void;
   workspace: Workspace;
 }) {
@@ -2778,8 +2820,9 @@ function CanvasNodeView({
   function startWire(event: PointerEvent<HTMLSpanElement>) {
     event.stopPropagation();
     event.preventDefault();
+    onStartConnectionDrag(node);
     const handleUp = () => {
-      onOpenModulePicker(node);
+      onFinishConnectionDrag(node);
       window.removeEventListener("pointerup", handleUp);
     };
     window.addEventListener("pointerup", handleUp);
@@ -2791,7 +2834,7 @@ function CanvasNodeView({
       aria-label={`${isImageLike ? "Image" : isText ? "Text" : "Workflow"} ${node.name}`}
       data-testid="canvas-node"
       tabIndex={0}
-      className={`stage-node ${node.type} ${node.status} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""}`}
+      className={`stage-node ${node.type} ${node.status} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""} ${connectionState ? `connection-${connectionState}` : ""}`}
       style={{ left: node.x, top: node.y, width: node.width, minHeight: node.height }}
       onPointerDown={(event) => startPointer(event)}
       onDoubleClick={(event) => {
