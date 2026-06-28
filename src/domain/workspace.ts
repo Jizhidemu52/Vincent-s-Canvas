@@ -14,6 +14,7 @@ export type NodeStatus = "idle" | "selected" | "running" | "done" | "error";
 export type OperationType = "generate" | "edit" | "upscale" | "removeBackground" | "crop" | "duplicate" | "download";
 export type ModuleType = "upload" | "edit" | "upscale" | "removeBackground" | "generate" | "batch";
 export type PortType = "image" | "text" | "config" | "result";
+export type GenerationApiPath = "/api/generations" | "/api/edits" | "/api/upscale" | "/api/remove-bg";
 
 export interface Profile {
   userId: string;
@@ -264,6 +265,7 @@ export interface WorkflowModuleDefinition {
   moduleType: ModuleType;
   nodeType: NodeType;
   operation: OperationType;
+  apiPath: GenerationApiPath;
   label: string;
   detail: string;
   defaultPrompt: string;
@@ -275,6 +277,7 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     moduleType: "generate",
     nodeType: "config",
     operation: "generate",
+    apiPath: "/api/generations",
     label: "Generate",
     detail: "new design from references",
     defaultPrompt: "Generate a new fashion design from the upstream references and prompt.",
@@ -284,6 +287,7 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     moduleType: "edit",
     nodeType: "edit",
     operation: "edit",
+    apiPath: "/api/edits",
     label: "Edit",
     detail: "controlled image edit",
     defaultPrompt: "Make a controlled local fashion edit while preserving pose and garment structure.",
@@ -293,6 +297,7 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     moduleType: "upscale",
     nodeType: "upscale",
     operation: "upscale",
+    apiPath: "/api/upscale",
     label: "Upscale",
     detail: "clean high-res output",
     defaultPrompt: "Upscale while preserving garment texture, embroidery, and clean product edges.",
@@ -302,6 +307,7 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     moduleType: "removeBackground",
     nodeType: "removeBg",
     operation: "removeBackground",
+    apiPath: "/api/remove-bg",
     label: "Remove BG",
     detail: "cutout for product use",
     defaultPrompt: "Remove the background and keep clean product edges for internal design review.",
@@ -311,6 +317,7 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     moduleType: "batch",
     nodeType: "batch",
     operation: "generate",
+    apiPath: "/api/generations",
     label: "Batch",
     detail: "same brief across selected images",
     defaultPrompt: "Apply one consistent edit brief to every selected reference image.",
@@ -320,6 +327,7 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     moduleType: "upload",
     nodeType: "image",
     operation: "generate",
+    apiPath: "/api/generations",
     label: "Upload Reference",
     detail: "reference handoff node",
     defaultPrompt: "Use this upload reference as an upstream image input.",
@@ -331,6 +339,12 @@ export function getWorkflowModuleDefinition(moduleType: ModuleType) {
   const definition = WORKFLOW_MODULE_REGISTRY.find((item) => item.moduleType === moduleType);
   if (!definition) throw new Error(`Workflow module ${moduleType} is not registered`);
   return definition;
+}
+
+export function getWorkflowApiPathForOperation(operation: GenerationRequest["operation"]): GenerationApiPath {
+  const definition = WORKFLOW_MODULE_REGISTRY.find((item) => item.operation === operation);
+  if (!definition) throw new Error(`Workflow operation ${operation} is not registered`);
+  return definition.apiPath;
 }
 
 export interface Workspace {

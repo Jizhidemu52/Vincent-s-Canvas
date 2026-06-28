@@ -28,6 +28,7 @@ import {
   summarizeBatchQueue,
   deletePromptPreset,
   getWorkflowModuleDefinition,
+  getWorkflowApiPathForOperation,
   WORKFLOW_MODULE_REGISTRY
 } from "./workspace";
 import type { ModelDefinition } from "./workspace";
@@ -116,6 +117,22 @@ describe("designer canvas workspace behavior", () => {
       operation: "removeBackground",
       modelId: "background-cleaner"
     });
+  });
+
+  it("keeps backend operation endpoints in the workflow registry", () => {
+    expect(WORKFLOW_MODULE_REGISTRY.map((definition) => [definition.moduleType, definition.operation, definition.apiPath])).toEqual([
+      ["generate", "generate", "/api/generations"],
+      ["edit", "edit", "/api/edits"],
+      ["upscale", "upscale", "/api/upscale"],
+      ["removeBackground", "removeBackground", "/api/remove-bg"],
+      ["batch", "generate", "/api/generations"],
+      ["upload", "generate", "/api/generations"]
+    ]);
+
+    expect(getWorkflowApiPathForOperation("generate")).toBe("/api/generations");
+    expect(getWorkflowApiPathForOperation("edit")).toBe("/api/edits");
+    expect(getWorkflowApiPathForOperation("upscale")).toBe("/api/upscale");
+    expect(getWorkflowApiPathForOperation("removeBackground")).toBe("/api/remove-bg");
   });
 
   it("builds backend generation requests from workflow registry definitions", () => {

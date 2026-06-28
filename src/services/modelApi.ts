@@ -9,6 +9,7 @@ import type {
   PromptPreset,
   Workspace
 } from "../domain/workspace";
+import { getWorkflowApiPathForOperation } from "../domain/workspace";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -163,13 +164,6 @@ export type WorkspaceSnapshot = Pick<
 
 type WorkspaceSaveSnapshot = Omit<WorkspaceSnapshot, "modelRegistry">;
 
-function endpointForOperation(operation: GenerationRequest["operation"]) {
-  if (operation === "edit") return "/api/edits";
-  if (operation === "upscale") return "/api/upscale";
-  if (operation === "removeBackground") return "/api/remove-bg";
-  return "/api/generations";
-}
-
 function userHeaders(userId?: string): Record<string, string> {
   return userId ? { "x-user-id": userId } : {};
 }
@@ -183,7 +177,7 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 export async function submitGenerationRequest(request: GenerationRequest, userId?: string): Promise<GenerationResult> {
-  const response = await fetch(`${API_BASE_URL}${endpointForOperation(request.operation)}`, {
+  const response = await fetch(`${API_BASE_URL}${getWorkflowApiPathForOperation(request.operation)}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
