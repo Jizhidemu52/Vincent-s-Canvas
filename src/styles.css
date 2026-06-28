@@ -765,6 +765,15 @@ button {
   margin-bottom: 10px;
 }
 
+.admin-selection-count {
+  border-radius: 999px;
+  background: #eef8f7;
+  padding: 5px 8px;
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .admin-row {
   display: grid;
   gap: 3px;
@@ -775,6 +784,28 @@ button {
 .admin-row:first-of-type {
   border-top: 0;
   padding-top: 0;
+}
+
+.admin-history-row {
+  grid-template-columns: 1fr;
+}
+
+.admin-history-select {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: start;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.admin-history-select input {
+  margin: 2px 0 0;
+}
+
+.admin-history-row-body {
+  display: grid;
+  gap: 3px;
+  padding-left: 26px;
 }
 
 .admin-credit-summary {
@@ -1178,6 +1209,12 @@ button {
   padding: 8px 12px;
   font-size: 13px;
   font-weight: 750;
+}
+
+.secondary-button:disabled {
+  cursor: not-allowed;
+  color: #999;
+  background: #e8e8e8;
 }
 
 .image-count {

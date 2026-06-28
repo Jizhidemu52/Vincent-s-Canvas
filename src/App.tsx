@@ -1517,6 +1517,7 @@ function AdminView({
   const [adminHistory, setAdminHistory] = useState<AdminHistoryEntry[]>([]);
   const [filteredAdminHistory, setFilteredAdminHistory] = useState<AdminHistoryEntry[] | null>(null);
   const [adminHistoryUserFilter, setAdminHistoryUserFilter] = useState("all");
+  const [selectedAdminHistoryIds, setSelectedAdminHistoryIds] = useState<string[]>([]);
   const [adminAudit, setAdminAudit] = useState<AdminAuditEntry[]>(workspace.history.map(historyEntryToAuditEntry));
   const estimatedSpend = formatMoneyCents(adminUsage?.totalPriceCents, adminUsage?.currency);
   const providers = workspace.modelRegistry.reduce<Record<string, number>>((memo, model) => {
@@ -1530,10 +1531,17 @@ function AdminView({
   const adminHistoryDesigners = Array.from(
     new Map(adminHistory.map((entry) => [entry.userId ?? "unknown-user", entry.designerName ?? entry.userId ?? "Unknown designer"])).entries()
   ).sort(([left], [right]) => left.localeCompare(right));
-  const visibleAdminHistory =
-    adminHistoryUserFilter === "all"
-      ? adminHistory
-      : filteredAdminHistory ?? adminHistory.filter((entry) => entry.userId === adminHistoryUserFilter);
+  const visibleAdminHistory = useMemo(
+    () =>
+      adminHistoryUserFilter === "all"
+        ? adminHistory
+        : filteredAdminHistory ?? adminHistory.filter((entry) => entry.userId === adminHistoryUserFilter),
+    [adminHistory, adminHistoryUserFilter, filteredAdminHistory]
+  );
+  const selectedAdminHistory = useMemo(
+    () => visibleAdminHistory.filter((entry) => selectedAdminHistoryIds.includes(entry.id)),
+    [selectedAdminHistoryIds, visibleAdminHistory]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1599,6 +1607,15 @@ function AdminView({
       cancelled = true;
     };
   }, [activeUserId, adminHistoryUserFilter]);
+
+  useEffect(() => {
+    const visibleIds = new Set(visibleAdminHistory.map((entry) => entry.id));
+    setSelectedAdminHistoryIds((current) => current.filter((id) => visibleIds.has(id)));
+  }, [visibleAdminHistory]);
+
+  function toggleAdminHistorySelection(entryId: string) {
+    setSelectedAdminHistoryIds((current) => (current.includes(entryId) ? current.filter((id) => id !== entryId) : [...current, entryId]));
+  }
 
   function syncAccountRow(profile: Profile) {
     setAdminAccounts((current) => {
@@ -2024,25 +2041,44 @@ function AdminView({
                 <button type="button" className="secondary-button" onClick={() => exportAdminTeamHistoryCsv(visibleAdminHistory, adminHistoryUserFilter)}>
                   <Download size={14} /> Export team history CSV
                 </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => exportSelectedAdminTeamHistoryCsv(selectedAdminHistory)}
+                  disabled={!selectedAdminHistory.length}
+                >
+                  <Download size={14} /> Export selected team history CSV
+                </button>
+                {selectedAdminHistory.length ? <span className="admin-selection-count">{selectedAdminHistory.length} selected</span> : null}
               </div>
             ) : null}
             {visibleAdminHistory.length ? (
               visibleAdminHistory.slice(0, 6).map((entry) => (
-                <div className="admin-row" key={entry.id}>
-                  <span>{entry.designerName ?? entry.userId} · {entry.projectName ?? entry.projectId} · {entry.modelId}</span>
-                  <strong>
-                    {entry.creditCost} credits · {entry.outputCount} output{entry.outputCount === 1 ? "" : "s"}
-                  </strong>
-                  <small>{entry.prompt}</small>
-                  {entry.outputs?.length ? (
-                    <div className="history-output-strip" aria-label={`Team history outputs for ${entry.id}`}>
-                      {entry.outputs.slice(0, 4).map((output) => (
-                        <img key={`${entry.id}-${output.name}`} src={output.source} alt={`Team history output ${output.name}`} />
-                      ))}
-                    </div>
-                  ) : (
-                    <small>No output thumbnails recorded</small>
-                  )}
+                <div className="admin-row admin-history-row" key={entry.id}>
+                  <label className="admin-history-select">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select team history ${entry.id}`}
+                      checked={selectedAdminHistoryIds.includes(entry.id)}
+                      onChange={() => toggleAdminHistorySelection(entry.id)}
+                    />
+                    <span>{entry.designerName ?? entry.userId} · {entry.projectName ?? entry.projectId} · {entry.modelId}</span>
+                  </label>
+                  <div className="admin-history-row-body">
+                    <strong>
+                      {entry.creditCost} credits · {entry.outputCount} output{entry.outputCount === 1 ? "" : "s"}
+                    </strong>
+                    <small>{entry.prompt}</small>
+                    {entry.outputs?.length ? (
+                      <div className="history-output-strip" aria-label={`Team history outputs for ${entry.id}`}>
+                        {entry.outputs.slice(0, 4).map((output) => (
+                          <img key={`${entry.id}-${output.name}`} src={output.source} alt={`Team history output ${output.name}`} />
+                        ))}
+                      </div>
+                    ) : (
+                      <small>No output thumbnails recorded</small>
+                    )}
+                  </div>
                 </div>
               ))
             ) : adminHistory.length ? (
@@ -2258,6 +2294,25 @@ function exportAdminTeamHistory(entries: AdminHistoryEntry[], filterUserId: stri
 }
 
 function exportAdminTeamHistoryCsv(entries: AdminHistoryEntry[], filterUserId: string) {
+  downloadAdminTeamHistoryCsv(entries, `team-history-${safeFileName(filterUserId === "all" ? "all-designers" : filterUserId)}.csv`);
+}
+
+function exportSelectedAdminTeamHistoryCsv(entries: AdminHistoryEntry[]) {
+  downloadAdminTeamHistoryCsv(entries, "team-history-selected.csv");
+}
+
+function downloadAdminTeamHistoryCsv(entries: AdminHistoryEntry[], fileName: string) {
+  const csv = adminTeamHistoryCsv(entries);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function adminTeamHistoryCsv(entries: AdminHistoryEntry[]) {
   const headers = [
     "designerName",
     "userId",
@@ -2286,14 +2341,7 @@ function exportAdminTeamHistoryCsv(entries: AdminHistoryEntry[], filterUserId: s
     entry.outputs?.map((output) => output.source).join(" | ") ?? "",
     entry.createdAt
   ]);
-  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `team-history-${safeFileName(filterUserId === "all" ? "all-designers" : filterUserId)}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+  return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
 function csvCell(value: string) {
