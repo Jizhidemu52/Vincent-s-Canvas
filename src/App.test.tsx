@@ -1557,6 +1557,8 @@ describe("Designer canvas app shell", () => {
     expect(generateModule).toHaveClass("connection-compatible");
     expect(upscaleModule).toHaveClass("connection-incompatible");
     expect(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i })).toHaveClass("connection-incompatible");
+    expect(screen.getByLabelText("Prompt input port on generate module")).toHaveClass("port-compatible");
+    expect(screen.getByLabelText("Images input port on generate module")).toHaveClass("port-incompatible");
 
     fireEvent.pointerUp(window);
 
@@ -1564,6 +1566,7 @@ describe("Designer canvas app shell", () => {
     expect(generateModule).not.toHaveClass("connection-compatible");
     expect(upscaleModule).not.toHaveClass("connection-incompatible");
     expect(screen.getByRole("button", { name: /Text Prompt note/i })).not.toHaveClass("connection-source");
+    expect(screen.getByLabelText("Prompt input port on generate module")).not.toHaveClass("port-compatible");
   });
 
   it("chains workflow modules from module output ports and runs them in order", async () => {

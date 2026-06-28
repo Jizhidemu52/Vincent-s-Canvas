@@ -1344,6 +1344,24 @@ button {
   box-shadow: none;
 }
 
+.node-port.port-compatible {
+  border-color: #10b981;
+  background: #d1fae5;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.18);
+}
+
+.node-port.port-incompatible {
+  border-color: #b8b8b8;
+  background: #f0f0f0;
+  box-shadow: none;
+}
+
+.node-port.port-source {
+  border-color: #0f766e;
+  background: #ccfbf1;
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.2);
+}
+
 .stage-node.running > img,
 .stage-node.running .workflow-box,
 .stage-node.running .text-node,
@@ -1442,7 +1460,6 @@ button {
 
 .node-port {
   position: absolute;
-  top: 50%;
   width: 12px;
   height: 12px;
   border: 2px solid #1dc7b4;

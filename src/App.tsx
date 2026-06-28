@@ -244,8 +244,8 @@ function moduleInputLabelsForSources(moduleType: ModuleType, sourceNodes: Canvas
   return Array.from(new Set(labels));
 }
 
-function defaultNodeOutputPort(node: CanvasNode) {
-  return node.outputs.find((port) => port.id === "out") ?? node.outputs[0];
+function defaultNodeOutputPort(node: CanvasNode, portId?: string) {
+  return (portId ? node.outputs.find((port) => port.id === portId) : undefined) ?? node.outputs.find((port) => port.id === "out") ?? node.outputs[0];
 }
 
 function nodePortsAreCompatible(output?: NodePort, input?: NodePort) {
@@ -253,10 +253,19 @@ function nodePortsAreCompatible(output?: NodePort, input?: NodePort) {
   return output.type === input.type || (output.type === "result" && input.type === "image");
 }
 
-function nodeCanAcceptConnection(source?: CanvasNode, target?: CanvasNode) {
+function nodeCanAcceptConnection(source?: CanvasNode, target?: CanvasNode, sourcePortId?: string) {
   if (!source || !target || source.id === target.id) return false;
-  const output = defaultNodeOutputPort(source);
+  const output = defaultNodeOutputPort(source, sourcePortId);
   return target.inputs.some((input) => nodePortsAreCompatible(output, input));
+}
+
+function portConnectionClass(source: CanvasNode | undefined, target: CanvasNode, input: NodePort, sourcePortId?: string) {
+  if (!source || source.id === target.id) return "";
+  return nodePortsAreCompatible(defaultNodeOutputPort(source, sourcePortId), input) ? "port-compatible" : "port-incompatible";
+}
+
+function portPosition(index: number, total: number) {
+  return `${((index + 1) / (total + 1)) * 100}%`;
 }
 
 function isCanvasImageNode(node?: CanvasNode) {
@@ -2496,10 +2505,10 @@ function CanvasStage({
   const stageRef = useRef<HTMLElement | null>(null);
   const [lasso, setLasso] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [modulePicker, setModulePicker] = useState<{ nodeId: string; sourceIds: string[]; x: number; y: number } | null>(null);
-  const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
+  const [connectionSource, setConnectionSource] = useState<{ nodeId: string; portId?: string } | null>(null);
   const selectedIds = project.selectedNodeIds;
   const selectedSet = new Set(selectedIds);
-  const connectionSourceNode = connectionSourceId ? project.nodes.find((node) => node.id === connectionSourceId) : undefined;
+  const connectionSourceNode = connectionSource ? project.nodes.find((node) => node.id === connectionSource.nodeId) : undefined;
 
   async function importCanvasFiles(files: FileList | File[], clientX?: number, clientY?: number) {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
@@ -2547,13 +2556,13 @@ function CanvasStage({
     setModulePicker({ nodeId: node.id, sourceIds, x: node.x + node.width + 38, y: node.y + 8 });
   }
 
-  function startConnectionDrag(node: CanvasNode) {
-    setConnectionSourceId(node.id);
+  function startConnectionDrag(node: CanvasNode, portId?: string) {
+    setConnectionSource({ nodeId: node.id, portId });
     setModulePicker(null);
   }
 
   function finishConnectionDrag(node: CanvasNode) {
-    setConnectionSourceId(null);
+    setConnectionSource(null);
     openModulePicker(node);
   }
 
@@ -2671,14 +2680,16 @@ function CanvasStage({
             selected={selectedSet.has(node.id)}
             highlighted={Boolean(selectedNode && project.connections.some((item) => (item.fromNodeId === selectedNode.id && item.toNodeId === node.id) || (item.toNodeId === selectedNode.id && item.fromNodeId === node.id)))}
             connectionState={
-              connectionSourceId
-                ? connectionSourceId === node.id
+              connectionSource
+                ? connectionSource.nodeId === node.id
                   ? "source"
-                  : nodeCanAcceptConnection(connectionSourceNode, node)
+                  : nodeCanAcceptConnection(connectionSourceNode, node, connectionSource.portId)
                     ? "compatible"
                     : "incompatible"
                 : undefined
             }
+            connectionSourceNode={connectionSourceNode}
+            connectionSourcePortId={connectionSource?.portId}
             onSelect={selectNode}
             onWorkspaceChange={onWorkspaceChange}
             onStartConnectionDrag={startConnectionDrag}
@@ -2750,6 +2761,8 @@ function CanvasNodeView({
   selected,
   highlighted,
   connectionState,
+  connectionSourceNode,
+  connectionSourcePortId,
   onSelect,
   onWorkspaceChange,
   onStartConnectionDrag,
@@ -2762,9 +2775,11 @@ function CanvasNodeView({
   selected: boolean;
   highlighted: boolean;
   connectionState?: "source" | "compatible" | "incompatible";
+  connectionSourceNode?: CanvasNode;
+  connectionSourcePortId?: string;
   onSelect: (id: string, append: boolean) => void;
   onWorkspaceChange: (updater: (workspace: Workspace) => Workspace) => void;
-  onStartConnectionDrag: (node: CanvasNode) => void;
+  onStartConnectionDrag: (node: CanvasNode, portId?: string) => void;
   onFinishConnectionDrag: (node: CanvasNode) => void;
   onGenerateNode: (nodeId: string) => void;
   workspace: Workspace;
@@ -2817,10 +2832,10 @@ function CanvasNodeView({
     onWorkspaceChange((current) => updateNodeTransform(current, projectId, node.id, patch));
   }
 
-  function startWire(event: PointerEvent<HTMLSpanElement>) {
+  function startWire(event: PointerEvent<HTMLSpanElement>, portId?: string) {
     event.stopPropagation();
     event.preventDefault();
-    onStartConnectionDrag(node);
+    onStartConnectionDrag(node, portId);
     const handleUp = () => {
       onFinishConnectionDrag(node);
       window.removeEventListener("pointerup", handleUp);
@@ -2909,14 +2924,26 @@ function CanvasNodeView({
           onGenerate={() => onGenerateNode(node.id)}
         />
       )}
-      <span className="node-port input" />
-      <span
-        className="node-port output"
-        data-testid={`workflow-output-port-${node.id}`}
-        aria-label={`Create workflow from ${node.name}`}
-        onPointerDown={startWire}
-        title="Drag to create workflow node"
-      />
+      {node.inputs.map((port, index) => (
+        <span
+          key={port.id}
+          className={`node-port input ${portConnectionClass(connectionSourceNode, node, port, connectionSourcePortId)}`}
+          style={{ top: portPosition(index, node.inputs.length) }}
+          aria-label={`${port.label} input port on ${node.name}`}
+          title={`${port.label} input`}
+        />
+      ))}
+      {node.outputs.map((port, index) => (
+        <span
+          key={port.id}
+          className={`node-port output ${connectionState === "source" && (!connectionSourcePortId || connectionSourcePortId === port.id) ? "port-source" : ""}`}
+          style={{ top: portPosition(index, node.outputs.length) }}
+          data-testid={index === 0 ? `workflow-output-port-${node.id}` : undefined}
+          aria-label={index === 0 ? `Create workflow from ${node.name}` : `${port.label} output port on ${node.name}`}
+          onPointerDown={(event) => startWire(event, port.id)}
+          title={`${port.label} output`}
+        />
+      ))}
     </div>
   );
 }
