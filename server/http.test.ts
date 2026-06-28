@@ -496,6 +496,28 @@ describe("HTTP API server", () => {
     expect(await unauthorizedResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
   });
 
+  it("filters team generation history by designer account over HTTP", async () => {
+    await fetch(`${context.baseUrl}/api/generations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "team-history-filter-http-alice", "x-user-id": "alice@company.local" },
+      body: JSON.stringify(request({ outputCount: 1 }))
+    });
+    await fetch(`${context.baseUrl}/api/upscale`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "team-history-filter-http-bob", "x-user-id": "bob@company.local" },
+      body: JSON.stringify(request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }))
+    });
+
+    const historyResponse = await fetch(`${context.baseUrl}/api/admin/history?userId=${encodeURIComponent("bob@company.local")}`, {
+      headers: { "x-user-id": "admin@company.local" }
+    });
+
+    expect(historyResponse.status).toBe(200);
+    const history = (await historyResponse.json()) as Array<Record<string, unknown>>;
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ userId: "bob@company.local", modelId: "upscale-pro", outputCount: 1 });
+  });
+
   it("ignores workspace model registry changes across server restarts because models are server-owned", async () => {
     await new Promise<void>((resolve, reject) => {
       context.server.close((error) => (error ? reject(error) : resolve()));

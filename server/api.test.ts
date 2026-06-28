@@ -299,6 +299,24 @@ describe("backend hosted mock API", () => {
     expect(unauthorized).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
   });
 
+  it("filters admin generation history by designer account", () => {
+    const state = createServerState({ creditBalance: 30 });
+    callApi(state, "/api/generations", request({ outputCount: 1 }), "team-history-filter-alice", "alice@company.local");
+    callApi(state, "/api/upscale", request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }), "team-history-filter-bob", "bob@company.local");
+
+    const history = callApi(
+      state,
+      "/api/admin/history",
+      undefined,
+      undefined,
+      "admin@company.local",
+      { userId: "bob@company.local" }
+    ) as ReturnType<typeof createServerState>["history"];
+
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ userId: "bob@company.local", modelId: "upscale-pro" });
+  });
+
   it("keeps designer credits and history isolated by user id", () => {
     const state = createServerState({ creditBalance: 30 });
 

@@ -571,13 +571,14 @@ beforeEach(() => {
         }
         return jsonResponse(backendAdminAudit);
       }
-      if (url.endsWith("/api/admin/history")) {
+      if (url.includes("/api/admin/history")) {
         const headers = init?.headers as Record<string, string> | undefined;
         const adminUserId = headers?.["x-user-id"] ?? "";
         if (!adminUserId.includes("admin")) {
           return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
         }
-        return jsonResponse(backendAdminHistory);
+        const filterUserId = new URL(url, "http://localhost").searchParams.get("userId");
+        return jsonResponse(filterUserId ? backendAdminHistory.filter((entry) => entry.userId === filterUserId) : backendAdminHistory);
       }
       if (url.endsWith("/api/admin/jobs")) {
         const headers = init?.headers as Record<string, string> | undefined;
@@ -1203,8 +1204,21 @@ describe("Designer canvas app shell", () => {
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Team history designer filter" }), "bob@company.local");
 
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/admin\/history\?userId=bob%40company\.local$/),
+      expect.objectContaining({ headers: expect.objectContaining({ "x-user-id": "admin@company.local" }) })
+    );
     expect(screen.queryByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team history designer filter" }), "alice@company.local");
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/admin\/history\?userId=alice%40company\.local$/),
+      expect.objectContaining({ headers: expect.objectContaining({ "x-user-id": "admin@company.local" }) })
+    );
+    expect(screen.getByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Team history output bob-upscale-1.jpg" })).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Team history designer filter" }), "all");
 

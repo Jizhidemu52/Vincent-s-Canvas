@@ -282,8 +282,9 @@ export async function fetchAdminJobs(adminUserId?: string): Promise<AdminGenerat
   return readJson<AdminGenerationJob[]>(response);
 }
 
-export async function fetchAdminHistory(adminUserId?: string): Promise<AdminHistoryEntry[]> {
-  const response = await fetch(`${API_BASE_URL}/api/admin/history`, { headers: userHeaders(adminUserId) });
+export async function fetchAdminHistory(adminUserId?: string, filterUserId?: string): Promise<AdminHistoryEntry[]> {
+  const query = filterUserId ? `?${new URLSearchParams({ userId: filterUserId }).toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/api/admin/history${query}`, { headers: userHeaders(adminUserId) });
   return readJson<AdminHistoryEntry[]>(response);
 }
 

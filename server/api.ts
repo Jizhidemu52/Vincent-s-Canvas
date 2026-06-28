@@ -333,10 +333,16 @@ function listGenerationJobs(state: ServerState, adminUserId?: string): Generatio
   }
 }
 
-function listAdminHistory(state: ServerState, adminUserId?: string): HistoryEntry[] | ApiError {
+export interface ApiQuery {
+  userId?: string;
+}
+
+function listAdminHistory(state: ServerState, adminUserId?: string, filterUserId?: string): HistoryEntry[] | ApiError {
   try {
     assertAdminUser(state, adminUserId);
-    return allHistory(state);
+    const normalizedFilter = filterUserId?.trim();
+    const history = allHistory(state);
+    return normalizedFilter ? history.filter((entry) => entry.userId === normalizedFilter) : history;
   } catch (error) {
     return {
       status: "failed",
@@ -918,15 +924,18 @@ export function callApi(
   path: keyof typeof apiRoutes,
   request?: GenerationRequest,
   requestId?: string,
-  userId?: string
+  userId?: string,
+  query?: ApiQuery
 ) {
   try {
+    if (path === "/api/admin/history") {
+      return listAdminHistory(state, userId, query?.userId);
+    }
     const route = apiRoutes[path];
     if (
       path === "/api/models" ||
       path === "/api/profile" ||
       path === "/api/history" ||
-      path === "/api/admin/history" ||
       path === "/api/admin/audit" ||
       path === "/api/admin/usage" ||
       path === "/api/admin/accounts" ||

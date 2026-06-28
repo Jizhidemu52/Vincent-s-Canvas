@@ -1268,6 +1268,7 @@ function AdminView({
   const [adminUsage, setAdminUsage] = useState<AdminUsageSummary | null>(null);
   const [adminJobs, setAdminJobs] = useState<AdminGenerationJob[]>([]);
   const [adminHistory, setAdminHistory] = useState<AdminHistoryEntry[]>([]);
+  const [filteredAdminHistory, setFilteredAdminHistory] = useState<AdminHistoryEntry[] | null>(null);
   const [adminHistoryUserFilter, setAdminHistoryUserFilter] = useState("all");
   const [adminAudit, setAdminAudit] = useState<AdminAuditEntry[]>(workspace.history.map(historyEntryToAuditEntry));
   const estimatedSpend = formatMoneyCents(adminUsage?.totalPriceCents, adminUsage?.currency);
@@ -1283,7 +1284,9 @@ function AdminView({
     new Map(adminHistory.map((entry) => [entry.userId ?? "unknown-user", entry.designerName ?? entry.userId ?? "Unknown designer"])).entries()
   ).sort(([left], [right]) => left.localeCompare(right));
   const visibleAdminHistory =
-    adminHistoryUserFilter === "all" ? adminHistory : adminHistory.filter((entry) => entry.userId === adminHistoryUserFilter);
+    adminHistoryUserFilter === "all"
+      ? adminHistory
+      : filteredAdminHistory ?? adminHistory.filter((entry) => entry.userId === adminHistoryUserFilter);
 
   useEffect(() => {
     let cancelled = false;
@@ -1331,6 +1334,24 @@ function AdminView({
       cancelled = true;
     };
   }, [activeUserId]);
+
+  useEffect(() => {
+    if (adminHistoryUserFilter === "all") {
+      setFilteredAdminHistory(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchAdminHistory(activeUserId, adminHistoryUserFilter)
+      .then((history) => {
+        if (!cancelled) setFilteredAdminHistory(history);
+      })
+      .catch((error) => {
+        if (!cancelled) setCreditNotice(error instanceof Error ? error.message : "Filtered team history unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUserId, adminHistoryUserFilter]);
 
   function syncAccountRow(profile: Profile) {
     setAdminAccounts((current) => {

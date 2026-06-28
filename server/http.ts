@@ -122,7 +122,8 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
 
   return createServer(async (request, response) => {
     try {
-      const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+      const requestUrl = new URL(request.url ?? "/", "http://localhost");
+      const pathname = requestUrl.pathname;
       const userId = userIdFromRequest(request);
       if (pathname === "/api/workspace") {
         if (request.method === "OPTIONS") {
@@ -251,7 +252,9 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
           sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
           return;
         }
-        const result = callApi(state, pathname, undefined, undefined, userId);
+        const result = callApi(state, pathname, undefined, undefined, userId, {
+          userId: requestUrl.searchParams.get("userId") ?? undefined
+        });
         sendJson(response, statusFromApiResult(result), result);
         return;
       }
