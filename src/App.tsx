@@ -51,6 +51,7 @@ import {
   applyBatchGenerationResultsToCanvas,
   applyGenerationResultToCanvas,
   buildWorkflowExecutionPlan,
+  buildWorkflowGenerationRequests,
   commitShapeEdit,
   configureNodeGeneration,
   copyPasteSelectedNodes,
@@ -498,38 +499,14 @@ export default function App() {
       setApiNotice("No downstream workflow modules");
       return;
     }
-    let cursorId = selectedNode.id;
-    const visited = new Set<string>();
+    const requests = buildWorkflowGenerationRequests(workspace, projectId, selectedNode.id);
     let executed = 0;
     let runningNodeId: string | undefined;
     try {
       setApiNotice("Running backend workflow chain...");
-      while (!visited.has(cursorId)) {
-        visited.add(cursorId);
-        const connection = activeProject.connections.find((item) => item.fromNodeId === cursorId);
-        if (!connection) break;
-        const nextNode = activeProject.nodes.find((node) => node.id === connection.toNodeId);
+      for (const request of requests) {
+        const nextNode = activeProject.nodes.find((node) => node.id === request.nodeId);
         if (!nextNode) break;
-        const isExecutable =
-          nextNode.kind === "workflow" ||
-          nextNode.type === "config" ||
-          nextNode.type === "edit" ||
-          nextNode.type === "upscale" ||
-          nextNode.type === "removeBg";
-        if (!isExecutable) {
-          cursorId = nextNode.id;
-          continue;
-        }
-        const operation = operationForNode(nextNode);
-        const request = {
-          projectId,
-          nodeId: nextNode.id,
-          modelId: nextNode.generation.modelId,
-          prompt: nextNode.generation.prompt,
-          referenceNodeIds: nextNode.references.length ? nextNode.references : [cursorId],
-          outputCount: nextNode.generation.outputCount,
-          operation
-        };
         runningNodeId = nextNode.id;
         setWorkspace((current) => markNodeRunState(current, projectId, nextNode.id, "running"));
         const result = await submitGenerationRequest(request, activeUserId);
@@ -538,7 +515,6 @@ export default function App() {
           applyGenerationResultToCanvas(markNodeRunState(current, projectId, nextNode.id, "done"), projectId, nextNode.id, request, result, serverState)
         );
         executed += 1;
-        cursorId = nextNode.id;
       }
       setRightPanel("history");
       setApiNotice(executed ? `Backend workflow completed ${executed} module${executed > 1 ? "s" : ""}` : "No downstream workflow modules");

@@ -5,6 +5,7 @@ import {
   addGenerationTargetFrame,
   applyBatchGenerationResultsToCanvas,
   applyGenerationResultToCanvas,
+  buildWorkflowGenerationRequests,
   applyImageOperation,
   buildWorkflowExecutionPlan,
   connectWorkflowNode,
@@ -111,6 +112,53 @@ describe("designer canvas workspace behavior", () => {
       moduleType: "removeBackground",
       operation: "removeBackground",
       modelId: "background-cleaner"
+    });
+  });
+
+  it("builds backend generation requests from workflow registry definitions", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Backend workflow requests");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat-front.png",
+      source: "coat-front-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const editDefinition = getWorkflowModuleDefinition("edit");
+    const editWorkspace = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "edit",
+      prompt: "Change buttons to horn toggles",
+      modelId: editDefinition.defaultModelId
+    });
+    const editNode = editWorkspace.projects[0].nodes.find((node) => node.moduleType === "edit")!;
+    const upscaleDefinition = getWorkflowModuleDefinition("upscale");
+    const upscaleWorkspace = createWorkflowModuleFromSelection(editWorkspace, project.id, [editNode.id], {
+      moduleType: "upscale",
+      prompt: upscaleDefinition.defaultPrompt,
+      modelId: upscaleDefinition.defaultModelId
+    });
+    const upscaleNode = upscaleWorkspace.projects[0].nodes.find((node) => node.moduleType === "upscale")!;
+    const removeBgDefinition = getWorkflowModuleDefinition("removeBackground");
+    const removeBgWorkspace = createWorkflowModuleFromSelection(upscaleWorkspace, project.id, [upscaleNode.id], {
+      moduleType: "removeBackground",
+      prompt: removeBgDefinition.defaultPrompt,
+      modelId: removeBgDefinition.defaultModelId
+    });
+
+    const requests = buildWorkflowGenerationRequests(removeBgWorkspace, project.id, source.id);
+
+    expect(requests.map((request) => request.operation)).toEqual(["edit", "upscale", "removeBackground"]);
+    expect(requests.map((request) => request.modelId)).toEqual([
+      editDefinition.defaultModelId,
+      upscaleDefinition.defaultModelId,
+      removeBgDefinition.defaultModelId
+    ]);
+    expect(requests.map((request) => request.referenceNodeIds)).toEqual([[source.id], [editNode.id], [upscaleNode.id]]);
+    expect(requests[0]).toMatchObject({
+      projectId: project.id,
+      nodeId: editNode.id,
+      prompt: "Change buttons to horn toggles",
+      outputCount: 1
     });
   });
 

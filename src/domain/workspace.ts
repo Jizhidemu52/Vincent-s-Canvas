@@ -1405,6 +1405,23 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
   };
 }
 
+export function buildWorkflowGenerationRequests(workspace: Workspace, projectId: string, startNodeId: string): GenerationRequest[] {
+  const plan = buildWorkflowExecutionPlan(workspace, projectId, startNodeId);
+  const blockingIssue = plan.issues.find((issue) => issue.severity === "error");
+  if (blockingIssue) {
+    throw new Error(blockingIssue.message);
+  }
+  return plan.steps.map((step) => ({
+    projectId,
+    nodeId: step.nodeId,
+    modelId: step.modelId,
+    prompt: step.prompt,
+    referenceNodeIds: step.referenceNodeIds,
+    outputCount: step.outputCount,
+    operation: step.operation
+  }));
+}
+
 function executeModule(workspace: Workspace, projectId: string, moduleNode: CanvasNode): Workspace {
   if (!moduleNode.generation.prompt.trim()) throw new Error("Prompt is required");
   const historyId = createId("history");
