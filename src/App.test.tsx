@@ -679,6 +679,15 @@ beforeEach(() => {
         const request = JSON.parse(String(init?.body)) as GenerationRequest;
         const unitCost = request.modelId === "nanobanana2" ? 11 : request.modelId === "upscale-pro" ? 4 : request.modelId === "background-cleaner" ? 2 : 7;
         const creditCost = unitCost * request.outputCount;
+        const project = backendWorkspace.projects.find((item) => item.id === request.projectId);
+        const references = request.referenceNodeIds
+          .map((referenceId) =>
+            project?.nodes.find(
+              (node) => node.id === referenceId || node.name === referenceId || (typeof node.metadata.sourceFile === "string" && node.metadata.sourceFile === referenceId)
+            )
+          )
+          .filter((node): node is NonNullable<typeof node> => Boolean(node))
+          .map((node) => ({ name: node.name, source: node.source, width: node.width, height: node.height }));
         backendProfile = {
           ...backendProfile,
           creditBalance: backendProfile.creditBalance - creditCost,
@@ -695,6 +704,7 @@ beforeEach(() => {
           creditCost,
           operation: request.operation,
           referenceCount: request.referenceNodeIds.length,
+          references,
           createdAt: new Date().toISOString(),
           outputs: Array.from({ length: request.outputCount }, (_, index) => ({
             name: `backend result ${index + 1}.jpg`,
@@ -2428,6 +2438,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("region", { name: "History management" })).toBeInTheDocument();
     expect(screen.getByText(/生成一款带盘扣的黑色马甲/)).toBeInTheDocument();
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "History original fashion-reference.jpg" })).toBeInTheDocument();
     const historyOutput = screen.getByRole("img", { name: "History output backend result 1.jpg" }) as HTMLImageElement;
     expect(historyOutput).toBeInTheDocument();
     expect(historyOutput.src).not.toMatch(/^mock:/);

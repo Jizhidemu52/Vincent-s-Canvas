@@ -154,6 +154,7 @@ export interface GenerationJob {
   priceCents?: number;
   currency?: ModelDefinition["currency"];
   referenceCount: number;
+  references?: AssetInput[];
   mask?: GenerationRequest["mask"];
   batchSettings?: GenerationRequest["batchSettings"];
   providerSettings?: GenerationRequest["providerSettings"];
@@ -902,12 +903,51 @@ function assertRequest(state: ServerState, request: GenerationRequest, requestId
   return { model, cost, account };
 }
 
+function historyReferenceAssets(account: AccountWorkspace, request: GenerationRequest): AssetInput[] {
+  const project = account.projects.find((item) => item.id === request.projectId);
+  if (!project) return [];
+  const projectNodes = project.nodes;
+  const requestedReferences = request.referenceNodeIds.length ? request.referenceNodeIds : [request.nodeId];
+  const visited = new Set<string>();
+  const references: AssetInput[] = [];
+
+  function findReferenceNode(referenceId: string) {
+    return projectNodes.find(
+      (node) =>
+        node.id === referenceId ||
+        node.name === referenceId ||
+        (typeof node.metadata.sourceFile === "string" && node.metadata.sourceFile === referenceId)
+    );
+  }
+
+  function collect(referenceId: string) {
+    const node = findReferenceNode(referenceId);
+    if (!node || visited.has(node.id)) return;
+    visited.add(node.id);
+    if (node.references.length && (node.type === "imageGroup" || node.kind === "referenceGroup")) {
+      node.references.forEach(collect);
+      return;
+    }
+    if (!node.source) return;
+    references.push({
+      name: node.name,
+      source: node.source,
+      width: node.width,
+      height: node.height
+    });
+  }
+
+  requestedReferences.forEach(collect);
+  return references;
+}
+
 function runModel(state: ServerState, request: GenerationRequest, requestId?: string, userId?: string): GenerationResult {
   const { model, cost, account } = assertRequest(state, request, requestId, userId);
   const historyId = `history-${allHistory(state).length + 1}`;
   const projectName = account.projects.find((project) => project.id === request.projectId)?.name;
   const duplicateKey = scopedRequestId(requestId, userId);
   const createdAt = new Date().toISOString();
+  const references = historyReferenceAssets(account, request);
   let result: GenerationResult;
   let providerPayload: ProviderPayload | undefined;
 
@@ -933,6 +973,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
         outputCount: request.outputCount,
         creditCost: 0,
         referenceCount: request.referenceNodeIds.length,
+        references,
         mask: request.mask,
         batchSettings: request.batchSettings,
         providerSettings: request.providerSettings,
@@ -971,6 +1012,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
     designerName: account.profile.designerName,
     operation: request.operation,
     referenceCount: request.referenceNodeIds.length,
+    references,
     mask: request.mask,
     batchSettings: request.batchSettings,
     providerSettings: request.providerSettings,
@@ -997,6 +1039,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
       priceCents: model.priceCents === undefined ? undefined : model.priceCents * request.outputCount,
       currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
       referenceCount: request.referenceNodeIds.length,
+      references,
       mask: request.mask,
       batchSettings: request.batchSettings,
       providerSettings: request.providerSettings,
@@ -1028,6 +1071,7 @@ async function runModelAsync(
   const createdAt = new Date().toISOString();
   const providerRuntimeSettings = state.providerSettings[model.provider];
   const providerPayload = buildProviderPayload(request, model, providerRuntimeSettings);
+  const references = historyReferenceAssets(account, request);
   let latestProviderProgress: ProviderProgress | undefined;
   let result: GenerationResult;
 
@@ -1066,6 +1110,7 @@ async function runModelAsync(
         outputCount: request.outputCount,
         creditCost: 0,
         referenceCount: request.referenceNodeIds.length,
+        references,
         mask: request.mask,
         batchSettings: request.batchSettings,
         providerSettings: request.providerSettings,
@@ -1106,6 +1151,7 @@ async function runModelAsync(
     designerName: account.profile.designerName,
     operation: request.operation,
     referenceCount: request.referenceNodeIds.length,
+    references,
     mask: request.mask,
     batchSettings: request.batchSettings,
     providerSettings: request.providerSettings,
@@ -1132,6 +1178,7 @@ async function runModelAsync(
       priceCents: model.priceCents === undefined ? undefined : model.priceCents * request.outputCount,
       currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
       referenceCount: request.referenceNodeIds.length,
+      references,
       mask: request.mask,
       batchSettings: request.batchSettings,
       providerSettings: request.providerSettings,

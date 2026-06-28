@@ -12,7 +12,7 @@ import {
   createServerState,
   type ApiError
 } from "./api";
-import { createInitialWorkspace, createProject } from "../src/domain/workspace";
+import { addAssetToProject, createInitialWorkspace, createProject } from "../src/domain/workspace";
 import type { GenerationRequest, GenerationResult, HistoryEntry, LibraryAsset, ModelDefinition, Profile, PromptPreset } from "../src/domain/workspace";
 import type { AdminAccountSummary, AdminAuditEntry, AdminUsageSummary, ProviderHealth } from "./api";
 
@@ -160,6 +160,33 @@ describe("backend hosted mock API", () => {
       outputCount: 2,
       creditCost: 4,
       outputs: result.outputs
+    });
+  });
+
+  it("records source reference thumbnails in generation history", () => {
+    const state = createServerState({ creditBalance: 30 });
+    const { workspace, project } = createProject(createInitialWorkspace({ userId: "alice@company.local", designerName: "Alice Designer" }), "Reference trace");
+    const withReference = addAssetToProject(workspace, project.id, {
+      name: "original-jacket.png",
+      source: "/uploads/original-jacket.png",
+      width: 640,
+      height: 800
+    });
+    const source = withReference.projects[0].nodes[0];
+    saveWorkspaceSnapshot(state, withReference, "alice@company.local");
+
+    callApi(
+      state,
+      "/api/generations",
+      request({ projectId: project.id, nodeId: source.id, referenceNodeIds: [source.id], outputCount: 1 }),
+      "reference-history",
+      "alice@company.local"
+    );
+
+    const history = callApi(state, "/api/history", undefined, undefined, "alice@company.local") as HistoryEntry[];
+    expect(history[0]).toMatchObject({
+      referenceCount: 1,
+      references: [{ name: "original-jacket.png", source: "/uploads/original-jacket.png", width: 640, height: 800 }]
     });
   });
 

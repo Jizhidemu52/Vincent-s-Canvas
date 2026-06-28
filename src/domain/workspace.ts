@@ -215,6 +215,7 @@ export interface HistoryEntry {
   operation?: OperationType;
   moduleType?: ModuleType;
   referenceCount?: number;
+  references?: AssetInput[];
   mask?: MaskSelection;
   batchSettings?: BatchSettings;
   providerSettings?: ProviderRequestSettings;
@@ -1271,6 +1272,22 @@ export function applyGenerationResultToCanvas(
       : source.references.length
         ? source.references
         : [source.id];
+  const referenceAssets = references
+    .map((referenceId) =>
+      project.nodes.find(
+        (node) =>
+          node.id === referenceId ||
+          node.name === referenceId ||
+          (typeof node.metadata.sourceFile === "string" && node.metadata.sourceFile === referenceId)
+      )
+    )
+    .filter((node): node is CanvasNode => Boolean(node?.source))
+    .map((node) => ({
+      name: node.name,
+      source: node.source,
+      width: node.width,
+      height: node.height
+    }));
   const outputs = result.outputs.length
     ? result.outputs
     : Array.from({ length: request.outputCount }, (_, index) => ({
@@ -1343,10 +1360,13 @@ export function applyGenerationResultToCanvas(
     })
   );
   const assetProject = findProject(updated, projectId);
+  const history = serverState.history?.map((entry) =>
+    entry.id === result.historyId && !entry.references?.length && referenceAssets.length ? { ...entry, references: referenceAssets } : entry
+  );
   return {
     ...updated,
     profile: serverState.profile ?? updated.profile,
-    history: serverState.history ?? updated.history,
+    history: history ?? updated.history,
     modelRegistry: serverState.models ?? updated.modelRegistry,
     assets: [...generatedNodes.map((node) => assetFromNode(node, assetProject)), ...updated.assets]
   };

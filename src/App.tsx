@@ -1479,6 +1479,14 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
                     {entry.operation ?? "generate"} · {new Date(entry.createdAt).toLocaleDateString()}
                   </small>
                   <p>{entry.prompt}</p>
+                  {entry.references?.length ? (
+                    <div className="history-reference-strip" aria-label={`History originals for ${entry.id}`}>
+                      <span>Original</span>
+                      {entry.references.map((reference) => (
+                        <img key={`${entry.id}-${reference.name}-${reference.source}`} src={reference.source} alt={`History original ${reference.name}`} />
+                      ))}
+                    </div>
+                  ) : null}
                   {entry.outputs?.length ? (
                     <div className="history-output-strip" aria-label={`History outputs for ${entry.id}`}>
                       {entry.outputs.map((output) => {

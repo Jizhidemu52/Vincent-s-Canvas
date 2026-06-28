@@ -566,6 +566,24 @@ button {
   gap: 6px;
 }
 
+.history-reference-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: #666;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.history-reference-strip img {
+  width: 46px;
+  height: 46px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
 .history-output-button {
   border: 0;
   border-radius: 7px;

@@ -124,6 +124,7 @@ export interface AdminGenerationJob {
   priceCents?: number;
   currency?: ModelDefinition["currency"];
   referenceCount: number;
+  references?: AssetInput[];
   mask?: GenerationRequest["mask"];
   batchSettings?: GenerationRequest["batchSettings"];
   providerSettings?: GenerationRequest["providerSettings"];
