@@ -167,6 +167,8 @@ export interface HistoryEntry {
   modelId: string;
   outputCount: number;
   creditCost: number;
+  priceCents?: number;
+  currency?: ModelDefinition["currency"];
   userId?: string;
   designerName?: string;
   operation?: OperationType;

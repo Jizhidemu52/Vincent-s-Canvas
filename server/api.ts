@@ -126,6 +126,8 @@ export interface GenerationJob {
   prompt: string;
   outputCount: number;
   creditCost: number;
+  priceCents?: number;
+  currency?: ModelDefinition["currency"];
   referenceCount: number;
   outputs: AssetInput[];
   createdAt: string;
@@ -768,6 +770,8 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
     modelId: request.modelId,
     outputCount: request.outputCount,
     creditCost: cost,
+    priceCents: model.priceCents,
+    currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
     userId: account.profile.userId,
     designerName: account.profile.designerName,
     operation: request.operation,
@@ -792,6 +796,8 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
       prompt: request.prompt,
       outputCount: request.outputCount,
       creditCost: cost,
+      priceCents: model.priceCents,
+      currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
       referenceCount: request.referenceNodeIds.length,
       outputs: result.outputs,
       createdAt,
@@ -826,8 +832,9 @@ export const apiRoutes = {
     const currencies = new Set<ModelDefinition["currency"]>();
     for (const entry of history) {
       const model = state.models.find((item) => item.id === entry.modelId);
-      const entryPriceCents = model?.priceCents === undefined ? undefined : model.priceCents * entry.outputCount;
-      const currency = model?.currency ?? "CNY";
+      const unitPriceCents = entry.priceCents ?? model?.priceCents;
+      const entryPriceCents = unitPriceCents === undefined ? undefined : unitPriceCents * entry.outputCount;
+      const currency = entry.currency ?? model?.currency ?? "CNY";
       const current = byModel.get(entry.modelId) ?? { modelId: entry.modelId, count: 0, credits: 0 };
       if (entryPriceCents !== undefined) {
         totalPriceCents += entryPriceCents;

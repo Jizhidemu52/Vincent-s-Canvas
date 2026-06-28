@@ -192,6 +192,22 @@ describe("backend hosted mock API", () => {
     expect(JSON.stringify(providers)).not.toContain("sk-");
   });
 
+  it("uses generation-time model prices for admin spend instead of current pricing", () => {
+    const state = createServerState({ creditBalance: 30 });
+    configureModelPricing(state, { modelId: "gpt-image-2-low", cost: 2, priceCents: 150, currency: "CNY" }, "admin@company.local");
+    callApi(state, "/api/generations", request({ outputCount: 2 }), "price-snapshot");
+    configureModelPricing(state, { modelId: "gpt-image-2-low", cost: 2, priceCents: 900, currency: "CNY" }, "admin@company.local");
+
+    const usage = callApi(state, "/api/admin/usage", undefined, undefined, "admin@company.local") as AdminUsageSummary;
+    const history = callApi(state, "/api/history") as HistoryEntry[];
+
+    expect(history[0]).toMatchObject({ priceCents: 150, currency: "CNY" });
+    expect(usage.totalPriceCents).toBe(300);
+    expect(usage.modelUsage).toEqual(
+      expect.arrayContaining([expect.objectContaining({ modelId: "gpt-image-2-low", priceCents: 300, currency: "CNY" })])
+    );
+  });
+
   it("rejects non-admin reads of team usage, audit, and provider status", () => {
     const state = createServerState({ creditBalance: 30 });
     callApi(state, "/api/generations", request({ outputCount: 1 }), "admin-read-guard", "alice@company.local");
