@@ -1152,7 +1152,7 @@ describe("Designer canvas app shell", () => {
     await user.click(generateButtons[generateButtons.length - 1]);
 
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
-    expect(await screen.findByText("history-1 · 11 credits")).toBeInTheDocument();
+    expect((await screen.findAllByText(/history-1.*11 credits/)).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Done")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Context" }));
     expect(screen.getByText("Selected node task")).toBeInTheDocument();

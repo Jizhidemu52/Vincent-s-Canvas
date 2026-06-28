@@ -859,13 +859,36 @@ export function applyGenerationResultToCanvas(
         historyId: result.historyId,
         operation: request.operation,
         creditCost: result.creditCost,
-        remoteSource: output.source
+        remoteSource: output.source,
+        prompt: request.prompt,
+        modelId: request.modelId
       }
     });
   });
   const updated = updateProject(workspace, projectId, (item) =>
     withUndo(item, {
-      nodes: [...item.nodes, ...generatedNodes],
+      nodes: [
+        ...item.nodes.map((node) =>
+          node.id === source.id
+            ? {
+                ...node,
+                status: "done" as NodeStatus,
+                metadata: {
+                  ...node.metadata,
+                  runStatus: "done",
+                  inputNodeIds: references,
+                  outputNodeIds: [...(Array.isArray(node.metadata.outputNodeIds) ? node.metadata.outputNodeIds : []), ...generatedNodes.map((output) => output.id)],
+                  historyId: result.historyId,
+                  creditCost: result.creditCost,
+                  operation: request.operation,
+                  modelId: request.modelId,
+                  prompt: request.prompt
+                }
+              }
+            : node
+        ),
+        ...generatedNodes
+      ],
       connections: [...item.connections, ...generatedNodes.map((node) => connect(source.id, node.id, "out", "in"))],
       selectedNodeIds: generatedNodes.map((node) => node.id)
     })

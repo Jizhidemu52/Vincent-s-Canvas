@@ -239,6 +239,46 @@ describe("designer canvas workspace behavior", () => {
     });
   });
 
+  it("stores backend generation task metadata on the source canvas node", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 10 }), "Backend task node");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "shirt.png",
+      source: "shirt-source",
+      width: 640,
+      height: 800
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const request = {
+      projectId: project.id,
+      nodeId: source.id,
+      modelId: "gpt-image-2-medium",
+      prompt: "make a new neckline variation",
+      referenceNodeIds: [source.id],
+      outputCount: 1,
+      operation: "edit" as const
+    };
+    const updated = applyGenerationResultToCanvas(withAsset, project.id, source.id, request, {
+      status: "succeeded",
+      historyId: "history-backend-task",
+      creditCost: 7,
+      outputs: [{ name: "backend shirt edit.jpg", source: "mock://edit/shirt/1", width: 1024, height: 1024 }]
+    });
+    const updatedSource = updated.projects[0].nodes.find((node) => node.id === source.id)!;
+    const output = updated.projects[0].nodes.find((node) => node.parentId === source.id && node.kind === "generated")!;
+
+    expect(updatedSource.status).toBe("done");
+    expect(updatedSource.metadata).toMatchObject({
+      runStatus: "done",
+      inputNodeIds: [source.id],
+      outputNodeIds: [output.id],
+      historyId: "history-backend-task",
+      creditCost: 7,
+      operation: "edit",
+      modelId: "gpt-image-2-medium",
+      prompt: "make a new neckline variation"
+    });
+  });
+
   it("keeps saved asset dimensions for reuse on the canvas", () => {
     const { workspace, project } = createProject(createInitialWorkspace(), "Reusable assets");
     const withAsset = addAssetToProject(workspace, project.id, {
