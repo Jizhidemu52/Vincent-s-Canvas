@@ -208,6 +208,9 @@ export interface HistoryEntry {
   batchSettings?: BatchSettings;
   providerSettings?: ProviderRequestSettings;
   outputs?: AssetInput[];
+  archivedAt?: string;
+  archivedBy?: string;
+  archiveReason?: string;
   createdAt: string;
 }
 

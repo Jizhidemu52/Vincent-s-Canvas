@@ -515,6 +515,45 @@ describe("backend hosted mock API", () => {
     expect(history[0]).toMatchObject({ userId: "bob@company.local", modelId: "upscale-pro" });
   });
 
+  it("archives selected admin generation history without changing credit usage", () => {
+    const state = createServerState({ creditBalance: 30 });
+    callApi(state, "/api/generations", request({ outputCount: 1 }), "team-history-archive-alice", "alice@company.local");
+    callApi(state, "/api/upscale", request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }), "team-history-archive-bob", "bob@company.local");
+    const beforeUsage = callApi(state, "/api/admin/usage", undefined, undefined, "admin@company.local") as AdminUsageSummary;
+    const allBefore = callApi(state, "/api/admin/history", undefined, undefined, "admin@company.local") as HistoryEntry[];
+    const bobHistoryId = allBefore.find((entry) => entry.userId === "bob@company.local")!.id;
+
+    const result = callApi(
+      state,
+      "/api/admin/history/archive",
+      { historyIds: [bobHistoryId], reason: "hide duplicate upscale from team review" },
+      undefined,
+      "admin@company.local"
+    ) as { archivedCount: number; history: HistoryEntry[]; auditEntry: AdminAuditEntry };
+    const visibleHistory = callApi(state, "/api/admin/history", undefined, undefined, "admin@company.local") as HistoryEntry[];
+    const bobOwnHistory = callApi(state, "/api/history", undefined, undefined, "bob@company.local") as HistoryEntry[];
+    const afterUsage = callApi(state, "/api/admin/usage", undefined, undefined, "admin@company.local") as AdminUsageSummary;
+    const audit = callApi(state, "/api/admin/audit", undefined, undefined, "admin@company.local") as AdminAuditEntry[];
+
+    expect(result.archivedCount).toBe(1);
+    expect(result.history).toHaveLength(1);
+    expect(visibleHistory).toHaveLength(1);
+    expect(visibleHistory[0]).toMatchObject({ userId: "alice@company.local" });
+    expect(bobOwnHistory[0]).toMatchObject({
+      id: bobHistoryId,
+      archivedBy: "admin@company.local",
+      archiveReason: "hide duplicate upscale from team review"
+    });
+    expect(afterUsage.totalHistoryEntries).toBe(beforeUsage.totalHistoryEntries);
+    expect(afterUsage.totalCreditsUsed).toBe(beforeUsage.totalCreditsUsed);
+    expect(audit[0]).toMatchObject({
+      eventType: "history-archive",
+      actorUserId: "admin@company.local",
+      targetUserId: "bob@company.local",
+      summary: "Archived 1 team history record"
+    });
+  });
+
   it("keeps designer credits and history isolated by user id", () => {
     const state = createServerState({ creditBalance: 30 });
 

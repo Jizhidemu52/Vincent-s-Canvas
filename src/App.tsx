@@ -112,6 +112,7 @@ import {
   fetchAdminHistory,
   fetchAdminJobs,
   fetchAdminUsage,
+  archiveAdminHistoryRemote,
   fetchBackendSnapshot,
   fetchProviderHealth,
   fetchWorkspaceSnapshot,
@@ -218,6 +219,7 @@ function auditPrimaryMetric(entry: AdminAuditEntry) {
   if (entry.eventType === "credit-limit") return `limit ${entry.creditLimit}`;
   if (entry.eventType === "model-pricing") return `${entry.creditCost} credits/output`;
   if (entry.eventType === "provider-settings") return entry.provider ?? "provider";
+  if (entry.eventType === "history-archive") return `${entry.outputCount ?? 0} archived`;
   return `${entry.creditCost ?? 0} credits`;
 }
 
@@ -1686,6 +1688,27 @@ function AdminView({
     setSelectedAdminHistoryIds((current) => (current.includes(entryId) ? current.filter((id) => id !== entryId) : [...current, entryId]));
   }
 
+  async function archiveSelectedAdminHistory() {
+    if (!selectedAdminHistoryIds.length) return;
+    setIsAdjusting(true);
+    try {
+      const result = await archiveAdminHistoryRemote(selectedAdminHistoryIds, "Archived from admin team history review", activeUserId);
+      setAdminHistory(result.history);
+      setFilteredAdminHistory((current) =>
+        current ? current.filter((entry) => !selectedAdminHistoryIds.includes(entry.id)) : current
+      );
+      setSelectedAdminHistoryIds([]);
+      if (result.auditEntry) {
+        setAdminAudit((current) => [result.auditEntry!, ...current.filter((entry) => entry.id !== result.auditEntry!.id)]);
+      }
+      setCreditNotice(`Archived ${result.archivedCount} team history record${result.archivedCount === 1 ? "" : "s"}`);
+    } catch (error) {
+      setCreditNotice(error instanceof Error ? error.message : "Team history archive failed");
+    } finally {
+      setIsAdjusting(false);
+    }
+  }
+
   function syncAccountRow(profile: Profile) {
     setAdminAccounts((current) => {
       const nextAccount: AdminAccountSummary = {
@@ -2117,6 +2140,14 @@ function AdminView({
                   disabled={!selectedAdminHistory.length}
                 >
                   <Download size={14} /> Export selected team history CSV
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={archiveSelectedAdminHistory}
+                  disabled={!selectedAdminHistory.length || isAdjusting}
+                >
+                  <Archive size={14} /> Archive selected team history
                 </button>
                 {selectedAdminHistory.length ? <span className="admin-selection-count">{selectedAdminHistory.length} selected</span> : null}
               </div>

@@ -45,7 +45,7 @@ The current repository already includes:
 - Backend-hosted provider registry, profile/history, admin credit adjustment, provider health, provider payload mapping, live-ready execution boundary, HTTP live/mock routing, provider progress snapshots, node-level provider progress metadata, selected-node provider progress display, provider error normalization, multi-provider success/partial-success output normalization, and persistence.
 - Admin credit limits and model pricing controls.
 - Admin generation job logs with designer, model, operation, status, cost, and project context.
-- Hero-inspired admin team history filtering, row selection, and filtered/selected JSON/CSV export for audit and finance handoff.
+- Hero-inspired admin team history filtering, row selection, filtered/selected JSON/CSV export, and selected-row archive for audit and finance handoff.
 - Hero-inspired designer history project filtering and output-thumbnail deep links for project-level generation traceability and continued editing.
 - SQLite-backed platform tables for accounts, credit ledger, projects, nodes, connections, assets, generation history/jobs, model configs, audit logs, and idempotency requests.
 
@@ -90,11 +90,11 @@ Local inspection notes:
 | Batch workflow behavior and partial failure tests | `T8mars/T8-penguin-canvas` | `BatchProcessorNode.tsx`, `batchProcessor.ts`, `tests/batchProcessor.test.ts` | Adapted lightweight retry/progress/cancel semantics, backend stop-on-failure submission, concurrency-limited batch runner, and pause/resume semantics into current batch queue on 2026-06-28; deeper async worker persistence remains later. |
 | RunningHub/ComfyUI provider adapters | `T8mars/T8-penguin-canvas`, `hero8152/Infinite-Canvas` | T8 backend provider files; hero settings/workflow JSON | Adapted first-pass OpenAI/NanoBanana image payload, RunningHub/ComfyUI workflow payload mapping, live HTTP submission, polling, output normalization, HTTP generation routing by provider mode, provider progress snapshots, node-level provider progress metadata and context display, provider-specific error normalization, NanoBanana base64 outputs, nested workflow asset outputs, and partial-success item error reporting on 2026-06-28; next step is deeper provider-specific fixtures and real async worker persistence. |
 | API/provider settings UI | `hero8152/Infinite-Canvas` | `static/js/api-settings.js`, `static/js/comfyui-settings.js`, related HTML | Reuse field set and connection-test ideas, but keep secrets server-side in this product. |
-| History bulk management | `hero8152/Infinite-Canvas` | `static/js/history-bulk-manager.js` | Adapted filtered admin team history JSON/CSV export, selected-row CSV export, designer-side project history filtering, and output-thumbnail deep links on 2026-06-28 so managers and designers can trace generation records by account/project and reopen generated nodes for the next edit round; delete/archive operations remain later. |
+| History bulk management | `hero8152/Infinite-Canvas` | `static/js/history-bulk-manager.js` | Adapted filtered admin team history JSON/CSV export, selected-row CSV export, selected-row soft archive with audit logging, designer-side project history filtering, and output-thumbnail deep links on 2026-06-28 so managers and designers can trace generation records by account/project, hide noisy team review rows without changing the credit ledger, and reopen generated nodes for the next edit round; hard delete remains later. |
 
 ## Next Reuse-First Implementation Order
 
 1. Extend the current T8-inspired batch queue with persistent async worker state and persistent provider job progress after live provider execution is connected.
 2. Add deeper RunningHub and ComfyUI workflow fixtures by porting T8 provider registry tests and reconciling hero workflow JSON/settings fields.
 3. Expand basketikun-style asset and prompt organization with richer preview/card metadata and deeper image storage boundaries now that asset folders/search/filtering/write-back plus prompt category/favorite filtering and favorite write-back exist.
-4. Use hero history bulk management ideas for admin/team history archive/delete operations after real provider output storage is stable.
+4. Use hero history bulk management ideas for admin/team history restore and hard-delete operations after real provider output storage is stable.

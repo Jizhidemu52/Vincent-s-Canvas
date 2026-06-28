@@ -626,6 +626,30 @@ beforeEach(() => {
         }
         return jsonResponse(backendAdminAudit);
       }
+      if (url.endsWith("/api/admin/history/archive") && init?.method === "POST") {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        const request = JSON.parse(String(init?.body)) as { historyIds?: string[]; reason?: string };
+        const ids = new Set(request.historyIds ?? []);
+        const archived = backendAdminHistory.filter((entry) => ids.has(entry.id));
+        backendAdminHistory = backendAdminHistory.filter((entry) => !ids.has(entry.id));
+        const auditEntry: AdminAuditEntry = {
+          id: `admin-history-archive-${backendAdminAudit.length + 1}`,
+          eventType: "history-archive",
+          actorUserId: adminUserId,
+          targetUserId: archived.length === 1 ? archived[0].userId : undefined,
+          prompt: request.reason,
+          summary: `Archived ${archived.length} team history record${archived.length === 1 ? "" : "s"}`,
+          outputCount: archived.length,
+          creditCost: 0,
+          createdAt: new Date().toISOString()
+        };
+        backendAdminAudit = [auditEntry, ...backendAdminAudit];
+        return jsonResponse({ archivedCount: archived.length, history: backendAdminHistory, auditEntry });
+      }
       if (url.includes("/api/admin/history")) {
         const headers = init?.headers as Record<string, string> | undefined;
         const adminUserId = headers?.["x-user-id"] ?? "";
@@ -1705,6 +1729,33 @@ describe("Designer canvas app shell", () => {
       if (previousRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", previousRevokeObjectURL);
       else delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
     }
+  });
+
+  it("archives selected admin team history rows from the default team review list", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: /Admin monitoring/i }));
+    await screen.findByText("Team history");
+    expect(screen.getByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Select team history history-bob-team-1" }));
+    await user.click(screen.getByRole("button", { name: "Archive selected team history" }));
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/admin\/history\/archive$/),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "x-user-id": "admin@company.local" }),
+        body: expect.stringContaining("history-bob-team-1")
+      })
+    );
+    expect((await screen.findAllByText("Archived 1 team history record")).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("img", { name: "Team history output bob-upscale-1.jpg" })).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).toBeInTheDocument();
+    expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
+    expect(screen.getByText(/history-archive/i)).toBeInTheDocument();
   });
 
   it("supports the image node inline model/prompt entry and generation loop", async () => {

@@ -145,7 +145,7 @@ export type AdminHistoryEntry = HistoryEntry;
 
 export interface AdminAuditEntry {
   id: string;
-  eventType?: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings";
+  eventType?: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings" | "history-archive";
   actorUserId?: string;
   userId?: string;
   targetUserId?: string;
@@ -167,6 +167,12 @@ export interface AdminAuditEntry {
   referenceCount?: number;
   summary?: string;
   createdAt: string;
+}
+
+export interface AdminHistoryArchiveResult {
+  archivedCount: number;
+  history: AdminHistoryEntry[];
+  auditEntry?: AdminAuditEntry;
 }
 
 export type WorkspaceSnapshot = Pick<
@@ -344,6 +350,15 @@ export async function fetchAdminHistory(adminUserId?: string, filterUserId?: str
   const query = filterUserId ? `?${new URLSearchParams({ userId: filterUserId }).toString()}` : "";
   const response = await fetch(`${API_BASE_URL}/api/admin/history${query}`, { headers: userHeaders(adminUserId) });
   return readJson<AdminHistoryEntry[]>(response);
+}
+
+export async function archiveAdminHistoryRemote(historyIds: string[], reason: string, adminUserId?: string): Promise<AdminHistoryArchiveResult> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/history/archive`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...userHeaders(adminUserId) },
+    body: JSON.stringify({ historyIds, reason })
+  });
+  return readJson<AdminHistoryArchiveResult>(response);
 }
 
 export async function fetchAdminAudit(adminUserId?: string): Promise<AdminAuditEntry[]> {

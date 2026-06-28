@@ -14,6 +14,7 @@ import {
   saveWorkspaceSnapshot,
   setAccountCreditLimit,
   type ApiError,
+  type AdminHistoryArchiveRequest,
   type AssetMetadataRequest,
   type CreditAdjustmentRequest,
   type CreditLimitRequest,
@@ -261,6 +262,24 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
         }
         const body = await readJsonBody<Partial<ProviderSettingsRequest>>(request, bodyLimitBytes);
         const result = configureProviderSettings(state, body ?? {}, userId);
+        if (!isApiError(result) && stateFilePath) {
+          saveServerState(stateFilePath, state);
+        }
+        sendJson(response, statusFromApiResult(result), result);
+        return;
+      }
+
+      if (pathname === "/api/admin/history/archive") {
+        if (request.method === "OPTIONS") {
+          sendJson(response, 204);
+          return;
+        }
+        if (request.method !== "POST") {
+          sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
+          return;
+        }
+        const body = await readJsonBody<AdminHistoryArchiveRequest>(request, bodyLimitBytes);
+        const result = callApi(state, "/api/admin/history/archive", body ?? {}, undefined, userId);
         if (!isApiError(result) && stateFilePath) {
           saveServerState(stateFilePath, state);
         }

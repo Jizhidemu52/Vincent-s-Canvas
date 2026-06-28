@@ -778,6 +778,54 @@ describe("HTTP API server", () => {
     expect(history[0]).toMatchObject({ userId: "bob@company.local", modelId: "upscale-pro", outputCount: 1 });
   });
 
+  it("archives selected team generation history over HTTP without changing usage totals", async () => {
+    await fetch(`${context.baseUrl}/api/generations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "team-history-archive-http-alice", "x-user-id": "alice@company.local" },
+      body: JSON.stringify(request({ outputCount: 1 }))
+    });
+    await fetch(`${context.baseUrl}/api/upscale`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "team-history-archive-http-bob", "x-user-id": "bob@company.local" },
+      body: JSON.stringify(request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }))
+    });
+    const beforeUsage = (await (
+      await fetch(`${context.baseUrl}/api/admin/usage`, { headers: { "x-user-id": "admin@company.local" } })
+    ).json()) as Record<string, unknown>;
+    const beforeHistory = (await (
+      await fetch(`${context.baseUrl}/api/admin/history`, { headers: { "x-user-id": "admin@company.local" } })
+    ).json()) as Array<Record<string, unknown>>;
+    const bobHistoryId = String(beforeHistory.find((entry) => entry.userId === "bob@company.local")!.id);
+
+    const archiveResponse = await fetch(`${context.baseUrl}/api/admin/history/archive`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ historyIds: [bobHistoryId], reason: "duplicate provider test" })
+    });
+    const archiveResult = (await archiveResponse.json()) as Record<string, unknown>;
+    const visibleHistory = (await (
+      await fetch(`${context.baseUrl}/api/admin/history`, { headers: { "x-user-id": "admin@company.local" } })
+    ).json()) as Array<Record<string, unknown>>;
+    const bobHistory = (await (
+      await fetch(`${context.baseUrl}/api/history`, { headers: { "x-user-id": "bob@company.local" } })
+    ).json()) as Array<Record<string, unknown>>;
+    const afterUsage = (await (
+      await fetch(`${context.baseUrl}/api/admin/usage`, { headers: { "x-user-id": "admin@company.local" } })
+    ).json()) as Record<string, unknown>;
+    const audit = (await (
+      await fetch(`${context.baseUrl}/api/admin/audit`, { headers: { "x-user-id": "admin@company.local" } })
+    ).json()) as Array<Record<string, unknown>>;
+
+    expect(archiveResponse.status).toBe(200);
+    expect(archiveResult).toMatchObject({ archivedCount: 1 });
+    expect(visibleHistory).toHaveLength(1);
+    expect(visibleHistory[0]).toMatchObject({ userId: "alice@company.local" });
+    expect(bobHistory[0]).toMatchObject({ id: bobHistoryId, archivedBy: "admin@company.local", archiveReason: "duplicate provider test" });
+    expect(afterUsage.totalHistoryEntries).toBe(beforeUsage.totalHistoryEntries);
+    expect(afterUsage.totalCreditsUsed).toBe(beforeUsage.totalCreditsUsed);
+    expect(audit[0]).toMatchObject({ eventType: "history-archive", summary: "Archived 1 team history record" });
+  });
+
   it("ignores workspace model registry changes across server restarts because models are server-owned", async () => {
     await new Promise<void>((resolve, reject) => {
       context.server.close((error) => (error ? reject(error) : resolve()));

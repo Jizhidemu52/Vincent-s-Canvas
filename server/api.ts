@@ -91,6 +91,11 @@ export interface ProviderSettingsRequest {
   secretValue?: string;
 }
 
+export interface AdminHistoryArchiveRequest {
+  historyIds?: string[];
+  reason?: string;
+}
+
 export interface PromptPresetRequest {
   id?: string;
   title?: string;
@@ -106,7 +111,7 @@ export interface AssetMetadataRequest {
 
 export interface AdminAuditEntry {
   id: string;
-  eventType: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings";
+  eventType: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings" | "history-archive";
   actorUserId?: string;
   userId?: string;
   targetUserId?: string;
@@ -302,14 +307,13 @@ function recordAdminAudit(
   state: ServerState,
   entry: Omit<AdminAuditEntry, "id" | "createdAt"> & { id?: string; createdAt?: string }
 ) {
-  state.adminAudit = [
-    {
-      ...entry,
-      id: entry.id ?? auditId(state, entry.eventType),
-      createdAt: entry.createdAt ?? new Date().toISOString()
-    },
-    ...state.adminAudit
-  ];
+  const recorded = {
+    ...entry,
+    id: entry.id ?? auditId(state, entry.eventType),
+    createdAt: entry.createdAt ?? new Date().toISOString()
+  };
+  state.adminAudit = [recorded, ...state.adminAudit];
+  return recorded;
 }
 
 function adminAuditFromHistory(entry: HistoryEntry): AdminAuditEntry {
@@ -364,7 +368,7 @@ function listAdminHistory(state: ServerState, adminUserId?: string, filterUserId
   try {
     assertAdminUser(state, adminUserId);
     const normalizedFilter = filterUserId?.trim();
-    const history = allHistory(state);
+    const history = allHistory(state).filter((entry) => !entry.archivedAt);
     return normalizedFilter ? history.filter((entry) => entry.userId === normalizedFilter) : history;
   } catch (error) {
     return {
@@ -372,6 +376,62 @@ function listAdminHistory(state: ServerState, adminUserId?: string, filterUserId
       errorMessage: error instanceof Error ? error.message : "Unknown server error"
     };
   }
+}
+
+function archiveAdminHistory(state: ServerState, request: AdminHistoryArchiveRequest | undefined, adminUserId?: string) {
+  assertAdminUser(state, adminUserId);
+  const historyIds = Array.from(new Set((request?.historyIds ?? []).map((id) => id.trim()).filter(Boolean)));
+  if (!historyIds.length) throw new Error("History ids are required");
+  const historyIdSet = new Set(historyIds);
+  const archivedAt = new Date().toISOString();
+  const archiveReason = request?.reason?.trim() || undefined;
+  const archivedEntries: HistoryEntry[] = [];
+  const accountEntries: Array<{ userId?: string; account: AccountWorkspace }> = [
+    { account: accountFromState(state) },
+    ...Object.entries(state.accounts).map(([userId, account]) => ({ userId, account }))
+  ];
+
+  for (const item of accountEntries) {
+    let changed = false;
+    item.account.history = item.account.history.map((entry) => {
+      if (!historyIdSet.has(entry.id) || entry.archivedAt) return entry;
+      changed = true;
+      const archived = {
+        ...entry,
+        archivedAt,
+        archivedBy: adminUserId,
+        archiveReason
+      };
+      archivedEntries.push(historyWithAccountContext({ ...item.account, history: [archived] })[0]);
+      return archived;
+    });
+    if (changed) {
+      saveAccountWorkspace(state, item.account, item.userId);
+    }
+  }
+  if (!archivedEntries.length) throw new Error("History records not found");
+
+  const affectedUsers = Array.from(new Set(archivedEntries.map((entry) => entry.userId).filter(Boolean)));
+  const auditEntry = recordAdminAudit(state, {
+    eventType: "history-archive",
+    actorUserId: adminUserId,
+    targetUserId: affectedUsers.length === 1 ? affectedUsers[0] : undefined,
+    summary: `Archived ${archivedEntries.length} team history record${archivedEntries.length === 1 ? "" : "s"}`,
+    prompt: archiveReason,
+    outputCount: archivedEntries.length,
+    creditCost: 0,
+    metadata: {
+      historyIds: archivedEntries.map((entry) => entry.id),
+      reason: archiveReason,
+      affectedUsers
+    }
+  });
+
+  return {
+    archivedCount: archivedEntries.length,
+    history: listAdminHistory(state, adminUserId),
+    auditEntry
+  };
 }
 
 function promptTitleFrom(prompt: string) {
@@ -1101,6 +1161,8 @@ export const apiRoutes = {
     manageAssets(state, request, userId),
   "/api/admin/history": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
     listAdminHistory(state, userId),
+  "/api/admin/history/archive": (state: ServerState, request?: AdminHistoryArchiveRequest, _requestId?: string, userId?: string) =>
+    archiveAdminHistory(state, request, userId),
   "/api/admin/audit": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) => {
     assertAdminUser(state, userId);
     return allAdminAudit(state);
@@ -1178,7 +1240,7 @@ export const apiRoutes = {
 export function callApi(
   state: ServerState,
   path: keyof typeof apiRoutes,
-  request?: GenerationRequest | PromptPresetRequest | AssetMetadataRequest,
+  request?: GenerationRequest | PromptPresetRequest | AssetMetadataRequest | AdminHistoryArchiveRequest,
   requestId?: string,
   userId?: string,
   query?: ApiQuery
@@ -1209,7 +1271,7 @@ export function callApi(
     if (!request) {
       throw new Error("Request body is required");
     }
-    return route(state, request as GenerationRequest, requestId, userId);
+    return route(state, request as GenerationRequest & AdminHistoryArchiveRequest, requestId, userId);
   } catch (error) {
     return {
       status: "failed",
