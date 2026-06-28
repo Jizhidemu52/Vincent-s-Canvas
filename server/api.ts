@@ -98,6 +98,12 @@ export interface PromptPresetRequest {
   tags?: string[];
 }
 
+export interface AssetMetadataRequest {
+  id?: string;
+  tags?: string[];
+  folder?: string;
+}
+
 export interface AdminAuditEntry {
   id: string;
   eventType: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings";
@@ -386,6 +392,10 @@ function normalizePromptTags(tags?: string[]) {
   );
 }
 
+function normalizeAssetTags(tags?: string[]) {
+  return Array.from(new Set((tags ?? []).map((tag) => tag.trim().toLowerCase()).filter(Boolean)));
+}
+
 function managePromptPresets(state: ServerState, request?: PromptPresetRequest, userId?: string): PromptPreset[] | PromptPreset {
   const account = getAccountWorkspace(state, userId);
   if (!request) return account.prompts;
@@ -420,6 +430,29 @@ function managePromptPresets(state: ServerState, request?: PromptPresetRequest, 
   account.prompts = [preset, ...account.prompts];
   saveAccountWorkspace(state, account, userId);
   return preset;
+}
+
+function manageAssets(state: ServerState, request?: AssetMetadataRequest, userId?: string): LibraryAsset[] | LibraryAsset {
+  const account = getAccountWorkspace(state, userId);
+  if (!request) return account.assets;
+  if (!request.id) throw new Error("Asset id is required");
+  let updatedAsset: LibraryAsset | undefined;
+  account.assets = account.assets.map((asset) => {
+    if (asset.id !== request.id) return asset;
+    const nextMetadata = {
+      ...asset.metadata,
+      ...(request.folder !== undefined ? { folder: request.folder.trim() || "Unfiled" } : {})
+    };
+    updatedAsset = {
+      ...asset,
+      tags: request.tags ? normalizeAssetTags(request.tags) : asset.tags,
+      metadata: nextMetadata
+    };
+    return updatedAsset;
+  });
+  if (!updatedAsset) throw new Error("Asset not found");
+  saveAccountWorkspace(state, account, userId);
+  return updatedAsset;
 }
 
 function totalCreditsUsed(state: ServerState) {
@@ -1064,6 +1097,8 @@ export const apiRoutes = {
     getAccountWorkspace(state, userId).history,
   "/api/prompts": (state: ServerState, request?: PromptPresetRequest, _requestId?: string, userId?: string) =>
     managePromptPresets(state, request, userId),
+  "/api/assets": (state: ServerState, request?: AssetMetadataRequest, _requestId?: string, userId?: string) =>
+    manageAssets(state, request, userId),
   "/api/admin/history": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
     listAdminHistory(state, userId),
   "/api/admin/audit": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) => {
@@ -1143,7 +1178,7 @@ export const apiRoutes = {
 export function callApi(
   state: ServerState,
   path: keyof typeof apiRoutes,
-  request?: GenerationRequest | PromptPresetRequest,
+  request?: GenerationRequest | PromptPresetRequest | AssetMetadataRequest,
   requestId?: string,
   userId?: string,
   query?: ApiQuery
@@ -1154,6 +1189,9 @@ export function callApi(
     }
     if (path === "/api/prompts") {
       return managePromptPresets(state, request as PromptPresetRequest | undefined, userId);
+    }
+    if (path === "/api/assets") {
+      return manageAssets(state, request as AssetMetadataRequest | undefined, userId);
     }
     const route = apiRoutes[path];
     if (

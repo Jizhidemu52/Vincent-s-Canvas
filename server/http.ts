@@ -14,6 +14,7 @@ import {
   saveWorkspaceSnapshot,
   setAccountCreditLimit,
   type ApiError,
+  type AssetMetadataRequest,
   type CreditAdjustmentRequest,
   type CreditLimitRequest,
   type ModelPricingRequest,
@@ -299,6 +300,30 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
           const id = decodeURIComponent(pathname.slice("/api/prompts/".length));
           const body = await readJsonBody<PromptPresetRequest>(request, bodyLimitBytes);
           const result = callApi(state, "/api/prompts", { ...(body ?? {}), id }, undefined, userId);
+          if (!isApiError(result) && stateFilePath) {
+            saveServerState(stateFilePath, state);
+          }
+          sendJson(response, statusFromApiResult(result), result);
+          return;
+        }
+        sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
+        return;
+      }
+
+      if (pathname === "/api/assets" || pathname.startsWith("/api/assets/")) {
+        if (request.method === "OPTIONS") {
+          sendJson(response, 204);
+          return;
+        }
+        if (request.method === "GET" && pathname === "/api/assets") {
+          const result = callApi(state, "/api/assets", undefined, undefined, userId);
+          sendJson(response, statusFromApiResult(result), result);
+          return;
+        }
+        if (request.method === "PATCH" && pathname.startsWith("/api/assets/")) {
+          const id = decodeURIComponent(pathname.slice("/api/assets/".length));
+          const body = await readJsonBody<AssetMetadataRequest>(request, bodyLimitBytes);
+          const result = callApi(state, "/api/assets", { ...(body ?? {}), id }, undefined, userId);
           if (!isApiError(result) && stateFilePath) {
             saveServerState(stateFilePath, state);
           }

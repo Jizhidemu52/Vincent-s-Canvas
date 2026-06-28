@@ -10,6 +10,7 @@ import {
   createProject,
   type GenerationRequest,
   type GenerationResult,
+  type LibraryAsset,
   type Profile,
   type PromptPreset
 } from "../src/domain/workspace";
@@ -103,6 +104,39 @@ describe("HTTP API server", () => {
     const afterDelete = (await deleteResponse.json()) as PromptPreset[];
     expect(deleteResponse.status).toBe(200);
     expect(afterDelete.some((prompt) => prompt.id === saved.id)).toBe(false);
+  });
+
+  it("updates reusable asset metadata over HTTP by account", async () => {
+    const asset: LibraryAsset = {
+      id: "asset-http-editorial",
+      type: "image",
+      title: "editorial-reference.jpg",
+      source: "/fixtures/fashion-reference.jpg",
+      tags: ["generated"],
+      createdAt: "2026-06-28T11:00:00.000Z",
+      metadata: { folder: "Unfiled", projectId: "project-http" }
+    };
+    await fetch(`${context.baseUrl}/api/workspace`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "alice@company.local" },
+      body: JSON.stringify({ assets: [asset] })
+    });
+
+    const updateResponse = await fetch(`${context.baseUrl}/api/assets/${asset.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-user-id": "alice@company.local" },
+      body: JSON.stringify({ tags: ["Editorial", "reference", "reference"], folder: "Campaign A" })
+    });
+    const updated = (await updateResponse.json()) as LibraryAsset;
+    const snapshot = (await (await fetch(`${context.baseUrl}/api/workspace`, { headers: { "x-user-id": "alice@company.local" } })).json()) as WorkspaceSnapshot;
+
+    expect(updateResponse.status).toBe(200);
+    expect(updated).toMatchObject({
+      id: asset.id,
+      tags: ["editorial", "reference"],
+      metadata: { folder: "Campaign A", projectId: "project-http" }
+    });
+    expect(snapshot.assets.find((item) => item.id === asset.id)).toMatchObject({ metadata: { folder: "Campaign A" } });
   });
 
   it("handles generation over HTTP, updates credit balance, and writes history", async () => {

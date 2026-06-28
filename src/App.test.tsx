@@ -339,6 +339,23 @@ beforeEach(() => {
         backendWorkspace = { ...backendWorkspace, prompts: backendWorkspace.prompts.filter((prompt) => prompt.id !== promptId) };
         return jsonResponse(backendWorkspace.prompts);
       }
+      if (url.includes("/api/assets/") && init?.method === "PATCH") {
+        const assetId = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
+        const request = JSON.parse(String(init?.body)) as { tags?: string[]; folder?: string };
+        backendWorkspace = {
+          ...backendWorkspace,
+          assets: backendWorkspace.assets.map((asset) =>
+            asset.id === assetId
+              ? {
+                  ...asset,
+                  tags: Array.from(new Set((request.tags ?? asset.tags).map((tag) => tag.trim().toLowerCase()).filter(Boolean))),
+                  metadata: { ...asset.metadata, folder: request.folder?.trim() || asset.metadata?.folder }
+                }
+              : asset
+          )
+        };
+        return jsonResponse(backendWorkspace.assets.find((asset) => asset.id === assetId));
+      }
       if (url.endsWith("/api/workspace")) {
         if (init?.method === "POST") {
           const snapshot = JSON.parse(String(init.body)) as Workspace;
@@ -1801,6 +1818,50 @@ describe("Designer canvas app shell", () => {
 
     expect(screen.getByRole("button", { name: /editorial-reference\.jpg.*Use in canvas/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /ecommerce-cutout\.png.*Use in canvas/i })).toBeInTheDocument();
+  });
+
+  it("lets designers edit saved asset folders and tags for reusable organization", async () => {
+    backendWorkspace = {
+      ...backendWorkspace,
+      assets: [
+        {
+          id: "asset-editorial",
+          type: "image",
+          title: "editorial-reference.jpg",
+          source: "/fixtures/fashion-reference.jpg",
+          tags: ["generated"],
+          createdAt: "2026-06-28T10:00:00.000Z",
+          metadata: { folder: "Unfiled" }
+        }
+      ]
+    };
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Assets" }));
+
+    await user.click(screen.getByRole("button", { name: "Edit asset metadata editorial-reference.jpg" }));
+    await user.clear(screen.getByRole("textbox", { name: "Asset folder" }));
+    await user.type(screen.getByRole("textbox", { name: "Asset folder" }), "Campaign A");
+    await user.clear(screen.getByRole("textbox", { name: "Asset tags" }));
+    await user.type(screen.getByRole("textbox", { name: "Asset tags" }), "Editorial, reference, reference");
+    await user.click(screen.getByRole("button", { name: "Save asset metadata" }));
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/assets\/asset-editorial$/),
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ tags: ["editorial", "reference"], folder: "Campaign A" })
+      })
+    );
+    expect(screen.getByText("Folder: Campaign A")).toBeInTheDocument();
+    expect(screen.getByText("editorial, reference")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Filter assets by folder Campaign A" }));
+
+    expect(screen.getByText("1 asset in folder Campaign A")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /editorial-reference\.jpg.*Use in canvas/i })).toBeInTheDocument();
   });
 
   it("runs workflow modules through backend APIs", async () => {

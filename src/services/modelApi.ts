@@ -3,6 +3,7 @@ import type {
   GenerationRequest,
   GenerationResult,
   HistoryEntry,
+  LibraryAsset,
   ModelDefinition,
   OperationType,
   Profile,
@@ -259,6 +260,19 @@ export async function updatePromptPresetTagsRemote(promptId: string, tags: strin
     body: JSON.stringify({ tags })
   });
   return readJson<PromptPreset>(response);
+}
+
+export async function updateAssetMetadataRemote(
+  assetId: string,
+  request: { tags?: string[]; folder?: string },
+  userId?: string
+): Promise<LibraryAsset> {
+  const response = await fetch(`${API_BASE_URL}/api/assets/${encodeURIComponent(assetId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...userHeaders(userId) },
+    body: JSON.stringify(request)
+  });
+  return readJson<LibraryAsset>(response);
 }
 
 export async function adjustDesignerCredits(request: CreditAdjustmentRequest, adminUserId?: string): Promise<Profile> {

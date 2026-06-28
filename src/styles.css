@@ -2098,6 +2098,66 @@ button {
   background: #d1d1d1;
 }
 
+.dock-list .asset-library-row {
+  grid-template-columns: 1fr 30px;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+}
+
+.dock-list .asset-library-main {
+  min-width: 0;
+}
+
+.dock-list .asset-edit-button {
+  display: inline-grid;
+  width: 30px;
+  min-height: 100%;
+  place-items: center;
+  padding: 0;
+  color: #555;
+  text-align: center;
+}
+
+.asset-metadata-editor {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 8px;
+  border: 1px solid #dcdcdc;
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px;
+}
+
+.asset-metadata-editor label {
+  display: grid;
+  gap: 4px;
+}
+
+.asset-metadata-editor label span {
+  color: #686868;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.asset-metadata-editor input {
+  min-width: 0;
+  border: 1px solid #dedede;
+  border-radius: 6px;
+  background: #fff;
+  padding: 7px;
+  font: inherit;
+  outline: 0;
+}
+
+.asset-metadata-editor button {
+  border: 0;
+  background: #111;
+  color: #fff;
+  font-weight: 800;
+  text-align: center;
+}
+
 .dock-list .prompt-preset-row {
   position: relative;
   grid-template-columns: 1fr 30px 30px 30px;

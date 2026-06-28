@@ -5,6 +5,7 @@ import {
   configureModelPricing,
   configureModelRegistry,
   configureProviderSettings,
+  getWorkspaceSnapshot,
   listAdminAccounts,
   saveWorkspaceSnapshot,
   setAccountCreditLimit,
@@ -12,7 +13,7 @@ import {
   type ApiError
 } from "./api";
 import { createInitialWorkspace, createProject } from "../src/domain/workspace";
-import type { GenerationRequest, GenerationResult, HistoryEntry, ModelDefinition, Profile, PromptPreset } from "../src/domain/workspace";
+import type { GenerationRequest, GenerationResult, HistoryEntry, LibraryAsset, ModelDefinition, Profile, PromptPreset } from "../src/domain/workspace";
 import type { AdminAccountSummary, AdminAuditEntry, AdminUsageSummary, ProviderHealth } from "./api";
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
@@ -102,6 +103,44 @@ describe("backend hosted mock API", () => {
       tags: ["ecommerce", "favorite"]
     });
     expect(alicePrompts.find((prompt) => prompt.id === saved.id)).toMatchObject({ tags: ["ecommerce", "favorite"] });
+  });
+
+  it("updates reusable asset metadata by account", () => {
+    const state = createServerState();
+    const asset: LibraryAsset = {
+      id: "asset-editorial-reference",
+      type: "image",
+      title: "editorial-reference.jpg",
+      source: "/fixtures/fashion-reference.jpg",
+      tags: ["generated"],
+      createdAt: "2026-06-28T11:00:00.000Z",
+      metadata: { folder: "Unfiled", projectId: "project-a" }
+    };
+    saveWorkspaceSnapshot(state, { assets: [asset] }, "alice@company.local");
+
+    const updated = callApi(
+      state,
+      "/api/assets" as never,
+      {
+        id: asset.id,
+        tags: ["Editorial", "reference", "reference"],
+        folder: "Campaign A"
+      } as never,
+      undefined,
+      "alice@company.local"
+    ) as LibraryAsset;
+    const snapshot = getWorkspaceSnapshot(state, "alice@company.local");
+
+    expect(updated).toMatchObject({
+      id: asset.id,
+      title: "editorial-reference.jpg",
+      tags: ["editorial", "reference"],
+      metadata: { folder: "Campaign A", projectId: "project-a" }
+    });
+    expect(snapshot.assets.find((item) => item.id === asset.id)).toMatchObject({
+      tags: ["editorial", "reference"],
+      metadata: { folder: "Campaign A", projectId: "project-a" }
+    });
   });
 
   it("generates mock outputs, deducts credits, and writes history", () => {

@@ -117,6 +117,7 @@ import {
   savePromptPresetRemote,
   setDesignerCreditLimit,
   submitGenerationRequest,
+  updateAssetMetadataRemote,
   updatePromptPresetTagsRemote,
   type AdminAccountSummary,
   type AdminAuditEntry,
@@ -954,6 +955,20 @@ export default function App() {
     );
   }
 
+  async function updateAssetMetadata(asset: LibraryAsset, patch: { tags: string[]; folder: string }) {
+    try {
+      const updatedAsset = await updateAssetMetadataRemote(asset.id, patch, activeUserId);
+      setWorkspace((current) => ({
+        ...current,
+        assets: current.assets.map((item) => (item.id === updatedAsset.id ? updatedAsset : item))
+      }));
+      setRightPanel("assets");
+      setApiNotice(`Asset updated: ${updatedAsset.title}`);
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Asset metadata update failed");
+    }
+  }
+
   function insertAssistantNote(content: string) {
     if (!activeProject) return;
     setWorkspace((current) => addTextNode(current, activeProject.id, content, 760, 260));
@@ -1063,6 +1078,7 @@ export default function App() {
         onDeletePrompt={deletePrompt}
         onPromptFavorite={togglePromptFavorite}
         onInsertAsset={insertAssetIntoCanvas}
+        onUpdateAsset={updateAssetMetadata}
         onAddTargetFrame={() => setWorkspace((current) => addGenerationTargetFrame(current, activeProject.id))}
       />
     );
@@ -2285,6 +2301,7 @@ function CanvasView({
   onDeletePrompt,
   onPromptFavorite,
   onInsertAsset,
+  onUpdateAsset,
   onAddTargetFrame
 }: {
   workspace: Workspace;
@@ -2321,6 +2338,7 @@ function CanvasView({
   onDeletePrompt: (promptId: string) => void;
   onPromptFavorite: (prompt: PromptPreset) => void;
   onInsertAsset: (asset: LibraryAsset) => void;
+  onUpdateAsset: (asset: LibraryAsset, patch: { tags: string[]; folder: string }) => void;
   onAddTargetFrame: () => void;
 }) {
   const stats = useMemo(
@@ -2391,6 +2409,7 @@ function CanvasView({
           onPromptDelete={onDeletePrompt}
           onPromptFavorite={onPromptFavorite}
           onAssetInsert={onInsertAsset}
+          onAssetUpdate={onUpdateAsset}
           onAssistantNote={onAssistantNote}
           onRetryBatch={onRetryBatch}
           onCancelBatch={onCancelBatch}
@@ -3606,6 +3625,10 @@ function folderNameForAsset(asset: LibraryAsset) {
   return typeof folder === "string" && folder.trim() ? folder.trim() : "Unfiled";
 }
 
+function normalizeAssetTagDraft(value: string) {
+  return Array.from(new Set(value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean)));
+}
+
 function RightDock({
   workspace,
   project,
@@ -3620,6 +3643,7 @@ function RightDock({
   onPromptDelete,
   onPromptFavorite,
   onAssetInsert,
+  onAssetUpdate,
   onAssistantNote,
   onRetryBatch,
   onCancelBatch
@@ -3637,6 +3661,7 @@ function RightDock({
   onPromptDelete: (promptId: string) => void;
   onPromptFavorite: (prompt: PromptPreset) => void;
   onAssetInsert: (asset: LibraryAsset) => void;
+  onAssetUpdate: (asset: LibraryAsset, patch: { tags: string[]; folder: string }) => void;
   onAssistantNote: (content: string) => void;
   onRetryBatch: () => void;
   onCancelBatch: () => void;
@@ -3648,6 +3673,9 @@ function RightDock({
   const [selectedPromptTag, setSelectedPromptTag] = useState<string | null>(null);
   const [selectedAssetFolder, setSelectedAssetFolder] = useState<string | null>(null);
   const [selectedAssetTag, setSelectedAssetTag] = useState<string | null>(null);
+  const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+  const [assetFolderDraft, setAssetFolderDraft] = useState("");
+  const [assetTagsDraft, setAssetTagsDraft] = useState("");
   const normalizedPromptSearch = promptSearch.trim().toLowerCase();
   const normalizedAssetSearch = assetSearch.trim().toLowerCase();
   const promptTagCounts = Array.from(
@@ -3694,6 +3722,19 @@ function RightDock({
       })
     : taggedAssets;
   const selectedPromptPreset = workspace.prompts.find((prompt) => prompt.id === selectedPromptPresetId) ?? null;
+  const startAssetEdit = (asset: LibraryAsset) => {
+    setEditingAssetId(asset.id);
+    setAssetFolderDraft(folderNameForAsset(asset));
+    setAssetTagsDraft(asset.tags.join(", "));
+  };
+  const submitAssetMetadata = (event: FormEvent<HTMLFormElement>, asset: LibraryAsset) => {
+    event.preventDefault();
+    onAssetUpdate(asset, {
+      tags: normalizeAssetTagDraft(assetTagsDraft),
+      folder: assetFolderDraft.trim() || "Unfiled"
+    });
+    setEditingAssetId(null);
+  };
   const workflowPlan = useMemo(
     () => (selectedNode ? buildWorkflowExecutionPlan(workspace, project.id, selectedNode.id) : undefined),
     [workspace, project.id, selectedNode?.id]
@@ -3936,12 +3977,44 @@ function RightDock({
             </small>
           ) : null}
           {filteredAssets.length ? filteredAssets.map((asset) => (
-            <button type="button" key={asset.id} onClick={() => onAssetInsert(asset)}>
-              <b>{asset.title}</b>
-              <small>{asset.tags.join(", ")}</small>
-              <small>Folder: {folderNameForAsset(asset)}</small>
-              <span>{asset.type} · Use in canvas</span>
-            </button>
+            <article className="asset-library-row" key={asset.id}>
+              <button type="button" className="asset-library-main" onClick={() => onAssetInsert(asset)}>
+                <b>{asset.title}</b>
+                <small>{asset.tags.join(", ")}</small>
+                <small>Folder: {folderNameForAsset(asset)}</small>
+                <span>{asset.type} - Use in canvas</span>
+              </button>
+              <button
+                type="button"
+                className="asset-edit-button"
+                aria-label={`Edit asset metadata ${asset.title}`}
+                onClick={() => startAssetEdit(asset)}
+                title="Edit asset metadata"
+              >
+                <Pencil size={13} />
+              </button>
+              {editingAssetId === asset.id ? (
+                <form className="asset-metadata-editor" onSubmit={(event) => submitAssetMetadata(event, asset)}>
+                  <label>
+                    <span>Folder</span>
+                    <input
+                      aria-label="Asset folder"
+                      value={assetFolderDraft}
+                      onChange={(event) => setAssetFolderDraft(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>Tags</span>
+                    <input
+                      aria-label="Asset tags"
+                      value={assetTagsDraft}
+                      onChange={(event) => setAssetTagsDraft(event.target.value)}
+                    />
+                  </label>
+                  <button type="submit">Save asset metadata</button>
+                </form>
+              ) : null}
+            </article>
           )) : workspace.assets.length ? (
             <small>
               {normalizedAssetSearch
