@@ -1250,6 +1250,57 @@ describe("Designer canvas app shell", () => {
     expect(requests.every((request) => request.modelId === "upscale-pro")).toBe(true);
   });
 
+  it("lets designers pause and resume a running backend batch queue", async () => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation();
+    let resolveFirstGeneration: (response: Response) => void = () => {};
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith("/api/generations")) {
+        const request = JSON.parse(String(init?.body)) as GenerationRequest;
+        if (request.referenceNodeIds[0] === "pause-front.png") {
+          return new Promise<Response>((resolve) => {
+            resolveFirstGeneration = resolve;
+          });
+        }
+      }
+      return originalFetch?.(input, init) ?? jsonResponse({ status: "failed", errorMessage: "Route not found" }, 404);
+    });
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const folderInput = screen.getByLabelText("Batch folder input");
+    const first = new File(["front look"], "pause-front.png", { type: "image/png" });
+    const second = new File(["back look"], "pause-back.png", { type: "image/png" });
+
+    await user.upload(folderInput, [first, second]);
+
+    expect(await screen.findByText("Running backend batch for 2 images...")).toBeInTheDocument();
+    expect(await screen.findByText("Batch queue")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Pause remaining batch items" }));
+
+    expect(await screen.findByText("Batch queue paused")).toBeInTheDocument();
+    expect(screen.getAllByText("paused").length).toBeGreaterThanOrEqual(1);
+
+    resolveFirstGeneration(
+      new Response(
+        JSON.stringify({
+          status: "succeeded",
+          creditCost: 2,
+          historyId: "history-pause-front",
+          outputs: [{ name: "pause-front-result.jpg", source: "mock://pause/front", width: 512, height: 512 }]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    expect(await screen.findByText("Backend batch stopped after 1 of 2 images; 0 failed; 1 skipped")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Resume paused batch items" }));
+
+    expect(await screen.findByText("Backend batch completed for 1 images")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText("done").length).toBeGreaterThanOrEqual(2));
+  });
+
   it("keeps processing a batch when one imported image fails", async () => {
     const originalFetch = vi.mocked(fetch).getMockImplementation();
     let rejectedBackOnce = false;

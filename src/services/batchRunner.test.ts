@@ -54,4 +54,32 @@ describe("batch generation runner", () => {
       { status: "cancelled", errorMessage: "Skipped after stop-on-failure" }
     ]);
   });
+
+  it("pauses scheduling new batch items and reports pending outcomes as paused", async () => {
+    const started: string[] = [];
+    let paused = false;
+    const resolvers = new Map<string, (value: string) => void>();
+
+    const run = runBatchGenerationQueue(
+      ["front", "back", "side"],
+      { concurrency: 1, failurePolicy: "continue", shouldPause: () => paused },
+      async (item) => {
+        started.push(item);
+        const value = await new Promise<string>((resolve) => resolvers.set(item, resolve));
+        return `${value}-done`;
+      }
+    );
+
+    expect(started).toEqual(["front"]);
+
+    paused = true;
+    resolvers.get("front")?.("front");
+
+    await expect(run).resolves.toEqual([
+      { result: "front-done" },
+      { status: "paused", errorMessage: "Paused by designer" },
+      { status: "paused", errorMessage: "Paused by designer" }
+    ]);
+    expect(started).toEqual(["front"]);
+  });
 });

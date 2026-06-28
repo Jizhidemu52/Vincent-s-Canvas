@@ -21,6 +21,8 @@ import {
   importBatchFolder,
   markNodeRunState,
   mergeReferenceSelection,
+  pauseBatchQueue,
+  resumeBatchQueue,
   runBatchQueue,
   runGeneration,
   runWorkflowChain,
@@ -1045,6 +1047,67 @@ describe("designer canvas workspace behavior", () => {
       status: "cancelled"
     });
     expect(cancelled.projects[0].batchQueue.every((item) => item.errorMessage === "Cancelled by designer")).toBe(true);
+  });
+
+  it("pauses and resumes remaining batch queue items without changing completed results", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Batch pause queue");
+    const batch = {
+      folderName: "raw trims",
+      prompt: "remove background and normalize lighting",
+      modelId: "background-cleaner",
+      outputCount: 1,
+      files: [
+        { name: "front.png", source: "front-source", width: 300, height: 300 },
+        { name: "back.png", source: "back-source", width: 300, height: 300 }
+      ]
+    };
+    const queued = importBatchFolder(workspace, project.id, batch);
+    const firstPass = applyBatchGenerationResultsToCanvas(queued, project.id, { ...batch, files: [batch.files[0]] }, [
+      {
+        result: {
+          status: "succeeded",
+          historyId: "history-batch-front",
+          creditCost: 2,
+          outputs: [{ name: "front-clean.png", source: "mock://batch/front/1", width: 512, height: 512 }]
+        }
+      }
+    ]);
+
+    const paused = pauseBatchQueue(firstPass, project.id);
+
+    expect(paused.projects[0].batchQueue.find((item) => item.name === "front.png")).toMatchObject({
+      status: "done",
+      attempts: 1
+    });
+    expect(paused.projects[0].batchQueue.find((item) => item.name === "back.png")).toMatchObject({
+      status: "paused",
+      errorMessage: "Paused by designer"
+    });
+    expect(summarizeBatchQueue(paused.projects[0].batchQueue)).toMatchObject({
+      total: 2,
+      queued: 0,
+      paused: 1,
+      succeeded: 1,
+      completed: 1,
+      percent: 50,
+      status: "paused"
+    });
+
+    const resumed = resumeBatchQueue(paused, project.id);
+
+    expect(resumed.projects[0].batchQueue.find((item) => item.name === "front.png")).toMatchObject({
+      status: "done",
+      attempts: 1
+    });
+    expect(resumed.projects[0].batchQueue.find((item) => item.name === "back.png")).toMatchObject({
+      status: "queued",
+      errorMessage: undefined
+    });
+    expect(summarizeBatchQueue(resumed.projects[0].batchQueue)).toMatchObject({
+      queued: 1,
+      paused: 0,
+      status: "queued"
+    });
   });
 
   it("rejects batch processing with unregistered or non-executable models before spending credits", () => {

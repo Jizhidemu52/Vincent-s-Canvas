@@ -52,6 +52,7 @@ import {
   addGenerationTargetFrame,
   applyBatchGenerationResultsToCanvas,
   applyGenerationResultToCanvas,
+  buildResumeBatchFromPaused,
   buildRetryBatchFromFailures,
   buildWorkflowExecutionPlan,
   buildWorkflowGenerationRequests,
@@ -68,7 +69,9 @@ import {
   importBatchFolder,
   markNodeRunState,
   mergeReferenceSelection,
+  pauseBatchQueue,
   redoProject,
+  resumeBatchQueue,
   runBatchQueue,
   saveNodeAsAsset,
   selectNodes,
@@ -293,6 +296,25 @@ function batchSettingsFromNode(node?: CanvasNode | null): BatchSettings | undefi
   };
 }
 
+function markBatchFileProcessing(workspace: Workspace, projectId: string, file: { name: string; source: string }): Workspace {
+  return {
+    ...workspace,
+    projects: workspace.projects.map((project) =>
+      project.id === projectId
+        ? {
+            ...project,
+            batchQueue: project.batchQueue.map((item) =>
+              item.name === file.name && item.source === file.source
+                ? { ...item, status: "processing" as const, errorMessage: undefined }
+                : item
+            ),
+            updatedAt: new Date().toISOString()
+          }
+        : project
+    )
+  };
+}
+
 function nodeCanFeedModule(node: CanvasNode, moduleType: ModuleType) {
   const definition = getWorkflowModuleDefinition(moduleType);
   const output = node.outputs.find((port) => port.id === "out") ?? node.outputs[0];
@@ -383,6 +405,7 @@ export default function App() {
   const [apiNotice, setApiNotice] = useState("Backend API ready");
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string>();
+  const batchPausedRef = useRef(false);
   const activeProject = workspace.projects.find((project) => project.id === workspace.activeProjectId);
   const selectedNode = activeProject?.nodes.find((node) => node.id === activeProject.selectedNodeIds[0]) ?? activeProject?.nodes[0];
   const activeUserId = currentUserId ?? workspace.profile.userId;
@@ -728,14 +751,20 @@ export default function App() {
     });
   }
 
-  async function submitBackendBatch(projectId: string, batch: BatchImport) {
+  async function submitBackendBatch(projectId: string, batch: BatchImport, options: { queueBeforeRun?: boolean } = {}) {
     try {
+      batchPausedRef.current = false;
+      if (options.queueBeforeRun) {
+        setWorkspace((current) => importBatchFolder(current, projectId, batch));
+        setRightPanel("history");
+      }
       setApiNotice(`Running backend batch for ${batch.files.length} images...`);
       const operation = operationForBatchModel(workspace.modelRegistry, batch.modelId, selectedNode ? operationForNode(selectedNode) : undefined);
       const outcomes: BatchGenerationOutcome[] = await runBatchGenerationQueue(
         batch.files,
-        batch.batchSettings ?? { concurrency: 1, failurePolicy: "continue" },
+        { ...(batch.batchSettings ?? { concurrency: 1, failurePolicy: "continue" }), shouldPause: () => batchPausedRef.current },
         async (file, index) => {
+          setWorkspace((current) => markBatchFileProcessing(current, projectId, file));
           const result = await submitGenerationRequest({
             projectId,
             nodeId: `batch-${file.name}-${index + 1}`,
@@ -753,7 +782,7 @@ export default function App() {
       setWorkspace((current) => applyBatchGenerationResultsToCanvas(current, projectId, batch, outcomes, serverState));
       setRightPanel("history");
       const succeeded = outcomes.filter((outcome) => outcome.result).length;
-      const skipped = outcomes.filter((outcome) => outcome.status === "cancelled").length;
+      const skipped = outcomes.filter((outcome) => outcome.status === "cancelled" || outcome.status === "paused").length;
       const failed = outcomes.length - succeeded - skipped;
       setApiNotice(
         skipped
@@ -802,7 +831,7 @@ export default function App() {
             { name: "look-03.jpg", source: TEST_IMAGE, width: 240, height: 320 }
           ]
         };
-    await submitBackendBatch(projectId, batch);
+    await submitBackendBatch(projectId, batch, { queueBeforeRun: true });
   }
 
   async function retryFailedBatch() {
@@ -817,9 +846,31 @@ export default function App() {
 
   function cancelActiveBatch() {
     if (!activeProject) return;
+    batchPausedRef.current = true;
     setWorkspace((current) => cancelBatchQueue(current, activeProject.id));
     setRightPanel("history");
     setApiNotice("Batch queue cancelled");
+  }
+
+  function pauseActiveBatch() {
+    if (!activeProject) return;
+    batchPausedRef.current = true;
+    setWorkspace((current) => pauseBatchQueue(current, activeProject.id));
+    setRightPanel("history");
+    setApiNotice("Batch queue paused");
+  }
+
+  async function resumePausedBatch() {
+    if (!activeProject) return;
+    try {
+      const batch = buildResumeBatchFromPaused(workspace, activeProject.id);
+      batchPausedRef.current = false;
+      setWorkspace((current) => resumeBatchQueue(current, activeProject.id));
+      setRightPanel("history");
+      await submitBackendBatch(activeProject.id, batch);
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "No paused batch items to resume");
+    }
   }
   function shapeEdit() {
     if (!activeProject) return;
@@ -1063,6 +1114,8 @@ export default function App() {
         onGenerateNode={(nodeId) => void generateNodeThroughApi(nodeId)}
         onBatch={runBackendBatch}
         onRetryBatch={retryFailedBatch}
+        onPauseBatch={pauseActiveBatch}
+        onResumeBatch={() => void resumePausedBatch()}
         onCancelBatch={cancelActiveBatch}
         onWorkflow={runWorkflow}
         onAddModule={addWorkflowModule}
@@ -2380,6 +2433,8 @@ function CanvasView({
   onGenerateNode,
   onBatch,
   onRetryBatch,
+  onPauseBatch,
+  onResumeBatch,
   onCancelBatch,
   onWorkflow,
   onAddModule,
@@ -2417,6 +2472,8 @@ function CanvasView({
   onGenerateNode: (nodeId: string) => void;
   onBatch: () => void;
   onRetryBatch: () => void;
+  onPauseBatch: () => void;
+  onResumeBatch: () => void;
   onCancelBatch: () => void;
   onWorkflow: () => void;
   onAddModule: (moduleType: ModuleType) => void;
@@ -2506,6 +2563,8 @@ function CanvasView({
           onAssetUpdate={onUpdateAsset}
           onAssistantNote={onAssistantNote}
           onRetryBatch={onRetryBatch}
+          onPauseBatch={onPauseBatch}
+          onResumeBatch={onResumeBatch}
           onCancelBatch={onCancelBatch}
         />
         <ShapeEditDialog
@@ -3740,6 +3799,8 @@ function RightDock({
   onAssetUpdate,
   onAssistantNote,
   onRetryBatch,
+  onPauseBatch,
+  onResumeBatch,
   onCancelBatch
 }: {
   workspace: Workspace;
@@ -3758,6 +3819,8 @@ function RightDock({
   onAssetUpdate: (asset: LibraryAsset, patch: { tags: string[]; folder: string }) => void;
   onAssistantNote: (content: string) => void;
   onRetryBatch: () => void;
+  onPauseBatch: () => void;
+  onResumeBatch: () => void;
   onCancelBatch: () => void;
 }) {
   const [promptSearch, setPromptSearch] = useState("");
@@ -3856,7 +3919,11 @@ function RightDock({
   const selectedProviderProgress = providerProgressFromMetadata(selectedNode?.metadata.providerProgress);
   const batchSummary = summarizeBatchQueue(project.batchQueue);
   const hasRetryableBatchItems = project.batchQueue.some((item) => item.status === "error" || item.status === "cancelled");
-  const hasCancellableBatchItems = project.batchQueue.some((item) => item.status === "queued" || item.status === "processing");
+  const hasPausableBatchItems = project.batchQueue.some((item) => item.status === "queued" || item.status === "processing");
+  const hasPausedBatchItems = project.batchQueue.some((item) => item.status === "paused");
+  const hasCancellableBatchItems = project.batchQueue.some(
+    (item) => item.status === "queued" || item.status === "processing" || item.status === "paused"
+  );
   const assistantCards = [
     {
       title: "Two-reference concept",
@@ -3977,6 +4044,12 @@ function RightDock({
               <div className="dock-actions compact">
                 <button type="button" aria-label="Retry failed batch items" onClick={onRetryBatch} disabled={!hasRetryableBatchItems}>
                   Retry failed
+                </button>
+                <button type="button" aria-label="Pause remaining batch items" onClick={onPauseBatch} disabled={!hasPausableBatchItems}>
+                  Pause
+                </button>
+                <button type="button" aria-label="Resume paused batch items" onClick={onResumeBatch} disabled={!hasPausedBatchItems}>
+                  Resume
                 </button>
                 <button type="button" aria-label="Cancel remaining batch items" onClick={onCancelBatch} disabled={!hasCancellableBatchItems}>
                   Cancel remaining

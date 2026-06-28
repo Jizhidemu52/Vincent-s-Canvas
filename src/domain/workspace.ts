@@ -114,7 +114,7 @@ export interface BatchItem {
   source: string;
   width: number;
   height: number;
-  status: "queued" | "processing" | "done" | "error" | "cancelled";
+  status: "queued" | "processing" | "paused" | "done" | "error" | "cancelled";
   attempts?: number;
   maxAttempts?: number;
   errorMessage?: string;
@@ -184,7 +184,7 @@ export interface ProviderProgress {
 
 export interface BatchGenerationOutcome {
   result?: GenerationResult;
-  status?: "error" | "cancelled";
+  status?: "error" | "cancelled" | "paused";
   errorMessage?: string;
 }
 
@@ -848,6 +848,7 @@ export function summarizeBatchQueue(items: BatchItem[]) {
   const total = items.length;
   const queued = items.filter((item) => item.status === "queued").length;
   const processing = items.filter((item) => item.status === "processing").length;
+  const paused = items.filter((item) => item.status === "paused").length;
   const succeeded = items.filter((item) => item.status === "done").length;
   const failed = items.filter((item) => item.status === "error").length;
   const cancelled = items.filter((item) => item.status === "cancelled").length;
@@ -860,12 +861,14 @@ export function summarizeBatchQueue(items: BatchItem[]) {
         ? "error"
         : processing
           ? "running"
+          : paused
+            ? "paused"
           : cancelled && completed === total
             ? "cancelled"
             : completed === total
               ? "succeeded"
               : "queued";
-  return { total, queued, processing, completed, succeeded, failed, cancelled, percent, status };
+  return { total, queued, processing, paused, completed, succeeded, failed, cancelled, percent, status };
 }
 
 export function createInitialWorkspace(profile: Partial<Profile> = {}): Workspace {
@@ -1403,21 +1406,22 @@ export function applyBatchGenerationResultsToCanvas(
       const outcome = outcomes[fileIndex];
       const result = outcome?.result;
       const outputNodeIds = outputIdsByOriginal.get(node.id) ?? [];
-      const failed = !result;
       const cancelled = !result && outcome?.status === "cancelled";
+      const paused = !result && outcome?.status === "paused";
+      const failed = !result && !cancelled && !paused;
       return {
         ...node,
-        status: failed ? ("error" as NodeStatus) : ("done" as NodeStatus),
+        status: failed ? ("error" as NodeStatus) : paused ? ("idle" as NodeStatus) : ("done" as NodeStatus),
         errorMessage: failed ? outcome?.errorMessage ?? "Batch item failed" : undefined,
         metadata: {
           ...node.metadata,
-          runStatus: cancelled ? "cancelled" : failed ? "error" : "done",
+          runStatus: paused ? "paused" : cancelled ? "cancelled" : failed ? "error" : "done",
           inputNodeIds: [node.id],
           outputNodeIds,
           historyId: result?.historyId,
           creditCost: result?.creditCost,
           providerProgress: result?.providerProgress,
-          errorMessage: failed ? outcome?.errorMessage ?? "Batch item failed" : undefined,
+          errorMessage: failed ? outcome?.errorMessage ?? "Batch item failed" : paused ? outcome?.errorMessage : undefined,
           prompt: batch.prompt,
           modelId: batch.modelId,
           operation
@@ -1433,6 +1437,7 @@ export function applyBatchGenerationResultsToCanvas(
       const existing = existingQueueByFile.get(key);
       const result = outcomes[fileIndex]?.result;
       const cancelled = !result && outcomes[fileIndex]?.status === "cancelled";
+      const paused = !result && outcomes[fileIndex]?.status === "paused";
       const errorMessage = outcomes[fileIndex]?.errorMessage ?? (!result ? "Batch item failed" : undefined);
       nextQueueByFile.set(key, {
         id: existing?.id ?? createId("batch"),
@@ -1440,7 +1445,7 @@ export function applyBatchGenerationResultsToCanvas(
         source: file.source,
         width: file.width,
         height: file.height,
-        status: result ? "done" : cancelled ? "cancelled" : "error",
+        status: result ? "done" : paused ? "paused" : cancelled ? "cancelled" : "error",
         attempts: (existing?.attempts ?? 0) + 1,
         maxAttempts: existing?.maxAttempts ?? 2,
         errorMessage
@@ -1593,13 +1598,55 @@ export function buildRetryBatchFromFailures(workspace: Workspace, projectId: str
   };
 }
 
+export function buildResumeBatchFromPaused(workspace: Workspace, projectId: string): BatchImport {
+  const project = findProject(workspace, projectId);
+  if (!project.batchConfig) throw new Error("Batch configuration is required");
+  const pausedItems = project.batchQueue.filter((item) => item.status === "paused");
+  if (!pausedItems.length) throw new Error("No paused batch items to resume");
+  return {
+    folderName: project.batchConfig.folderName,
+    prompt: project.batchConfig.prompt,
+    modelId: project.batchConfig.modelId,
+    outputCount: project.batchConfig.outputCount,
+    batchSettings: project.batchConfig.batchSettings,
+    files: pausedItems.map((item) => ({
+      name: item.name,
+      source: item.source,
+      width: item.width,
+      height: item.height
+    }))
+  };
+}
+
 export function cancelBatchQueue(workspace: Workspace, projectId: string): Workspace {
   return updateProject(workspace, projectId, (project) =>
     withUndo(project, {
       batchQueue: project.batchQueue.map((item) =>
-        item.status === "queued" || item.status === "processing"
+        item.status === "queued" || item.status === "processing" || item.status === "paused"
           ? { ...item, status: "cancelled" as const, errorMessage: "Cancelled by designer" }
           : item
+      )
+    })
+  );
+}
+
+export function pauseBatchQueue(workspace: Workspace, projectId: string): Workspace {
+  return updateProject(workspace, projectId, (project) =>
+    withUndo(project, {
+      batchQueue: project.batchQueue.map((item) =>
+        item.status === "queued" || item.status === "processing"
+          ? { ...item, status: "paused" as const, errorMessage: "Paused by designer" }
+          : item
+      )
+    })
+  );
+}
+
+export function resumeBatchQueue(workspace: Workspace, projectId: string): Workspace {
+  return updateProject(workspace, projectId, (project) =>
+    withUndo(project, {
+      batchQueue: project.batchQueue.map((item) =>
+        item.status === "paused" ? { ...item, status: "queued" as const, errorMessage: undefined } : item
       )
     })
   );
