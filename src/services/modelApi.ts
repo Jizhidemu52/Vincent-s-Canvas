@@ -98,6 +98,8 @@ export interface AdminGenerationJob {
   prompt: string;
   outputCount: number;
   creditCost: number;
+  priceCents?: number;
+  currency?: ModelDefinition["currency"];
   referenceCount: number;
   createdAt: string;
   updatedAt: string;

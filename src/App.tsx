@@ -1671,6 +1671,7 @@ function AdminView({
                   <strong>
                     {job.status} · {job.creditCost} credits · {job.outputCount} output{job.outputCount === 1 ? "" : "s"}
                   </strong>
+                  {job.priceCents !== undefined ? <small>Job spend {formatEstimatedSpend(job.priceCents, job.currency)}</small> : null}
                   <small>{job.projectName ?? job.projectId} / {job.modelId}</small>
                   {job.errorMessage && <small>{job.errorMessage}</small>}
                   <small>{job.historyId ?? job.id}</small>

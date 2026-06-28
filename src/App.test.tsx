@@ -162,6 +162,8 @@ beforeEach(() => {
       status: "succeeded",
       outputCount: 2,
       creditCost: 14,
+      priceCents: 620,
+      currency: "CNY",
       referenceCount: 1,
       createdAt: "2026-06-28T02:10:00.000Z"
     },
@@ -178,6 +180,8 @@ beforeEach(() => {
       status: "succeeded",
       outputCount: 1,
       creditCost: 4,
+      priceCents: 240,
+      currency: "CNY",
       referenceCount: 1,
       createdAt: "2026-06-28T02:05:00.000Z"
     },
@@ -1060,8 +1064,10 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Generation jobs")).toBeInTheDocument();
     expect(screen.getByText("Alice Designer · generate")).toBeInTheDocument();
     expect(screen.getByText("succeeded · 14 credits · 2 outputs")).toBeInTheDocument();
+    expect(screen.getByText("Job spend 6.20 CNY estimated spend")).toBeInTheDocument();
     expect(screen.getByText("Bob Designer · upscale")).toBeInTheDocument();
     expect(screen.getByText("succeeded · 4 credits · 1 output")).toBeInTheDocument();
+    expect(screen.getByText("Job spend 2.40 CNY estimated spend")).toBeInTheDocument();
     expect(screen.getByText("Cara Designer · generate")).toBeInTheDocument();
     expect(screen.getByText("failed · 0 credits · 1 output")).toBeInTheDocument();
     expect(screen.getByText("Provider adapter not configured for retired-provider")).toBeInTheDocument();
