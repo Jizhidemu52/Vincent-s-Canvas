@@ -305,6 +305,19 @@ function saveDatabaseState(filePath: string, state: ServerState) {
       });
     }
     for (const audit of state.adminAudit) {
+      if (audit.eventType === "credit-adjustment" && audit.targetUserId && audit.creditDelta !== undefined) {
+        insertLedger.run(
+          audit.id,
+          audit.targetUserId,
+          "admin-credit-adjustment",
+          "admin",
+          "admin-credit",
+          audit.creditDelta,
+          null,
+          null,
+          audit.createdAt
+        );
+      }
       insertAudit.run(audit.id, audit.actorUserId ?? "system", audit.eventType, audit.createdAt, JSON.stringify(audit));
     }
 

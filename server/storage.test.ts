@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { callApi, configureModelPricing, createServerState } from "./api";
+import { adjustAccountCredits, callApi, configureModelPricing, createServerState } from "./api";
 import { loadServerState, saveServerState } from "./storage";
 import type { GenerationRequest, GenerationResult, Profile } from "../src/domain/workspace";
 
@@ -62,6 +62,7 @@ describe("server database storage", () => {
       const state = createServerState({ creditBalance: 30 });
       configureModelPricing(state, { modelId: "gpt-image-2-low", cost: 2, priceCents: 150, currency: "CNY" }, "admin@company.local");
       callApi(state, "/api/generations", request(), "sqlite-request-2");
+      adjustAccountCredits(state, { targetUserId: "alice@company.local", delta: 25, reason: "monthly allocation" }, "admin@company.local");
 
       saveServerState(databasePath, state);
 
@@ -72,7 +73,7 @@ describe("server database storage", () => {
       let outputCount: { count: number };
       let outputRecord: { job_id: string; user_id: string; output_json: string };
       let historyBilling: { price_cents: number; currency: string };
-      let ledgerBilling: { price_cents: number; currency: string };
+      let ledgerRows: Array<{ user_id: string; model_id: string; credit_cost: number; price_cents: number | null; currency: string | null }>;
       try {
         tables = db
           .prepare("select name from sqlite_master where type = 'table' order by name")
@@ -87,7 +88,9 @@ describe("server database storage", () => {
           output_json: string;
         };
         historyBilling = db.prepare("select price_cents, currency from generation_history").get() as { price_cents: number; currency: string };
-        ledgerBilling = db.prepare("select price_cents, currency from credit_ledger").get() as { price_cents: number; currency: string };
+        ledgerRows = db
+          .prepare("select user_id, model_id, credit_cost, price_cents, currency from credit_ledger order by model_id")
+          .all() as Array<{ user_id: string; model_id: string; credit_cost: number; price_cents: number | null; currency: string | null }>;
       } finally {
         db.close();
       }
@@ -117,7 +120,12 @@ describe("server database storage", () => {
         source: "mock://openai/generate/node-sqlite/1"
       });
       expect(historyBilling).toEqual({ price_cents: 150, currency: "CNY" });
-      expect(ledgerBilling).toEqual({ price_cents: 150, currency: "CNY" });
+      expect(ledgerRows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ user_id: "alice@company.local", model_id: "admin-credit-adjustment", credit_cost: 25, price_cents: null, currency: null }),
+          expect.objectContaining({ user_id: "designer-demo", model_id: "gpt-image-2-low", credit_cost: 2, price_cents: 150, currency: "CNY" })
+        ])
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
