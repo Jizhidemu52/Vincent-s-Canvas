@@ -46,6 +46,25 @@ export interface ProviderPayload {
   body: Record<string, unknown>;
 }
 
+export interface ProviderFetchInit {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+export interface ProviderFetchResponse {
+  ok: boolean;
+  status: number;
+  body: unknown;
+}
+
+export interface LiveProviderExecutionOptions {
+  fetchJson: (url: string, init: ProviderFetchInit) => Promise<ProviderFetchResponse>;
+  resolveSecret: (name: string) => string | undefined;
+  maxPollAttempts?: number;
+  pollDelay?: () => Promise<void>;
+}
+
 interface ProviderConfig {
   adapterId: string;
   requiredSecrets: string[];
@@ -150,6 +169,127 @@ export function buildProviderPayload(request: GenerationRequest, model: ModelDef
     secretNames: configuredSecrets(model.provider, runtimeSettings),
     body: isWorkflowProvider ? workflowProviderBody(request, model) : imageProviderBody(request, model)
   };
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function outputItems(body: unknown) {
+  const object = objectValue(body);
+  const candidates = [object.outputs, object.data, object.images, object.result];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate.map(objectValue).filter((item) => Object.keys(item).length > 0);
+  }
+  return [];
+}
+
+function outputName(model: ModelDefinition, index: number, source: string, item: Record<string, unknown>) {
+  const explicitName = stringValue(item.name ?? item.filename ?? item.fileName);
+  if (explicitName) return explicitName;
+  const extensionMatch = /(\.[a-z0-9]+)(?:[?#].*)?$/i.exec(source);
+  return `${model.name} output ${index + 1}${extensionMatch?.[1] ?? ".jpg"}`;
+}
+
+function normalizeProviderOutputs(body: unknown, request: GenerationRequest, model: ModelDefinition) {
+  const dimensions = dimensionsForRequest(request);
+  return outputItems(body).map((item, index) => {
+    const source = stringValue(item.source ?? item.url ?? item.imageUrl ?? item.outputUrl ?? item.uri) ?? `provider://${model.provider}/${request.nodeId}/${index + 1}`;
+    return {
+      name: outputName(model, index, source, item),
+      source,
+      width: numberValue(item.width) ?? dimensions.width,
+      height: numberValue(item.height) ?? dimensions.height
+    };
+  });
+}
+
+function providerStatus(body: unknown) {
+  const object = objectValue(body);
+  return stringValue(object.status ?? object.state)?.toLowerCase();
+}
+
+function providerStatusUrl(body: unknown) {
+  const object = objectValue(body);
+  return stringValue(object.statusUrl ?? object.pollUrl ?? object.pollingUrl);
+}
+
+function assertProviderResponse(response: ProviderFetchResponse) {
+  if (!response.ok) {
+    const message = stringValue(objectValue(response.body).errorMessage ?? objectValue(response.body).message);
+    throw new Error(message ?? `Provider request failed with ${response.status}`);
+  }
+  return response.body;
+}
+
+function resolvePayloadSecret(payload: ProviderPayload, options: LiveProviderExecutionOptions) {
+  for (const name of payload.secretNames) {
+    const secret = options.resolveSecret(name);
+    if (secret?.trim()) return secret.trim();
+  }
+  if (payload.secretNames.length) {
+    throw new Error(`Provider secret ${payload.secretNames[0]} is not configured`);
+  }
+  return undefined;
+}
+
+export async function executeLiveProviderPayload(
+  payload: ProviderPayload,
+  request: GenerationRequest,
+  model: ModelDefinition,
+  historyId: string,
+  creditCost: number,
+  options: LiveProviderExecutionOptions
+): Promise<GenerationResult> {
+  if (!payload.endpointUrl) {
+    throw new Error(`Provider endpoint is not configured for ${payload.provider}`);
+  }
+  const secret = resolvePayloadSecret(payload, options);
+  const headers = compactObject({
+    "Content-Type": "application/json",
+    Authorization: secret ? `Bearer ${secret}` : undefined
+  }) as Record<string, string>;
+  let body = assertProviderResponse(
+    await options.fetchJson(payload.endpointUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload.body)
+    })
+  );
+  const maxPollAttempts = options.maxPollAttempts ?? 5;
+  for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
+    const outputs = normalizeProviderOutputs(body, request, model);
+    const status = providerStatus(body);
+    if (outputs.length || status === "succeeded" || status === "complete" || status === "completed") {
+      return {
+        status: "succeeded",
+        creditCost,
+        historyId,
+        outputs
+      };
+    }
+    if (status === "failed" || status === "error") {
+      throw new Error(stringValue(objectValue(body).errorMessage ?? objectValue(body).message) ?? "Provider execution failed");
+    }
+    const statusUrl = providerStatusUrl(body);
+    if (!statusUrl) break;
+    if (options.pollDelay) await options.pollDelay();
+    body = assertProviderResponse(
+      await options.fetchJson(statusUrl, {
+        method: "GET",
+        headers
+      })
+    );
+  }
+  throw new Error(`Provider ${payload.provider} did not return outputs`);
 }
 
 function mockExecute(

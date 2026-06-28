@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildProviderPayload, getProviderHealth, runProviderModel } from "./providers";
+import { buildProviderPayload, executeLiveProviderPayload, getProviderHealth, runProviderModel } from "./providers";
 import type { GenerationRequest, ModelDefinition } from "../src/domain/workspace";
 
 const openAiModel: ModelDefinition = {
@@ -211,5 +211,133 @@ describe("provider adapters", () => {
         }
       }
     });
+  });
+
+  it("submits live image provider payloads with resolved secrets and normalizes outputs", async () => {
+    const providerRequest = request({
+      outputCount: 1,
+      providerSettings: { size: "1536x1024", quality: "high", preset: "lookbook-cleanup" }
+    });
+    const payload = buildProviderPayload(providerRequest, openAiModel, {
+      mode: "live-ready",
+      endpointUrl: "https://api.openai.example/v1/images",
+      configuredSecrets: ["OPENAI_API_KEY"],
+      secretConfigured: true
+    });
+    const fetchCalls: Array<{ url: string; init: { method?: string; headers?: Record<string, string>; body?: string } }> = [];
+
+    const result = await executeLiveProviderPayload(payload, providerRequest, openAiModel, "history-live-openai", 2, {
+      resolveSecret: (name) => (name === "OPENAI_API_KEY" ? "sk-live-secret" : undefined),
+      fetchJson: async (url, init) => {
+        fetchCalls.push({ url, init });
+        return {
+          ok: true,
+          status: 200,
+          body: {
+            data: [{ url: "https://cdn.example/openai/lookbook-1.png", width: 1536, height: 1024 }]
+          }
+        };
+      }
+    });
+
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0]).toMatchObject({
+      url: "https://api.openai.example/v1/images",
+      init: {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer sk-live-secret",
+          "Content-Type": "application/json"
+        }
+      }
+    });
+    expect(JSON.parse(fetchCalls[0].init.body ?? "{}")).toMatchObject({
+      model: "gpt-image-2-low",
+      n: 1,
+      size: "1536x1024",
+      quality: "high",
+      preset: "lookbook-cleanup"
+    });
+    expect(result).toMatchObject({
+      status: "succeeded",
+      creditCost: 2,
+      historyId: "history-live-openai",
+      outputs: [
+        {
+          name: "GPT Image 2 Low output 1.png",
+          source: "https://cdn.example/openai/lookbook-1.png",
+          width: 1536,
+          height: 1024
+        }
+      ]
+    });
+    expect(JSON.stringify(result)).not.toContain("sk-live-secret");
+  });
+
+  it("polls workflow provider jobs and normalizes returned assets", async () => {
+    const providerRequest = request({
+      modelId: runningHubModel.id,
+      operation: "edit",
+      outputCount: 1,
+      referenceNodeIds: ["original-node"],
+      providerSettings: { size: "1024x1536", quality: "medium" }
+    });
+    const payload = buildProviderPayload(providerRequest, runningHubModel, {
+      mode: "live-ready",
+      endpointUrl: "https://runninghub.example/api/run",
+      configuredSecrets: ["RUNNINGHUB_API_KEY"],
+      secretConfigured: true
+    });
+    const fetchCalls: string[] = [];
+
+    const result = await executeLiveProviderPayload(payload, providerRequest, runningHubModel, "history-live-rh", 8, {
+      maxPollAttempts: 2,
+      resolveSecret: (name) => (name === "RUNNINGHUB_API_KEY" ? "rh-live-secret" : undefined),
+      fetchJson: async (url) => {
+        fetchCalls.push(url);
+        if (fetchCalls.length === 1) {
+          return {
+            ok: true,
+            status: 202,
+            body: { jobId: "rh-job-1", status: "running", statusUrl: "https://runninghub.example/api/jobs/rh-job-1" }
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          body: {
+            status: "succeeded",
+            outputs: [{ url: "https://cdn.example/runninghub/final.png", width: 1024, height: 1536, name: "final.png" }]
+          }
+        };
+      }
+    });
+
+    expect(fetchCalls).toEqual(["https://runninghub.example/api/run", "https://runninghub.example/api/jobs/rh-job-1"]);
+    expect(result).toMatchObject({
+      status: "succeeded",
+      creditCost: 8,
+      historyId: "history-live-rh",
+      outputs: [{ name: "final.png", source: "https://cdn.example/runninghub/final.png", width: 1024, height: 1536 }]
+    });
+  });
+
+  it("rejects live provider execution before HTTP when configured secrets are missing", async () => {
+    const providerRequest = request();
+    const payload = buildProviderPayload(providerRequest, openAiModel, {
+      mode: "live-ready",
+      endpointUrl: "https://api.openai.example/v1/images",
+      configuredSecrets: ["OPENAI_API_KEY"],
+      secretConfigured: true
+    });
+    const fetchJson = vi.fn();
+
+    await expect(
+      executeLiveProviderPayload(payload, providerRequest, openAiModel, "history-missing-secret", 2, {
+        resolveSecret: () => undefined,
+        fetchJson
+      })
+    ).rejects.toThrow("Provider secret OPENAI_API_KEY is not configured");
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 });
