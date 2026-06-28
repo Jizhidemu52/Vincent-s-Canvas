@@ -60,6 +60,8 @@ describe("server database storage", () => {
       let tables: string[];
       let historyCount: { count: number };
       let jobCount: { count: number };
+      let outputCount: { count: number };
+      let outputRecord: { job_id: string; user_id: string; output_json: string };
       let historyBilling: { price_cents: number; currency: string };
       let ledgerBilling: { price_cents: number; currency: string };
       try {
@@ -69,6 +71,12 @@ describe("server database storage", () => {
           .map((row) => String(row.name));
         historyCount = db.prepare("select count(*) as count from generation_history").get() as { count: number };
         jobCount = db.prepare("select count(*) as count from generation_jobs").get() as { count: number };
+        outputCount = db.prepare("select count(*) as count from generation_outputs").get() as { count: number };
+        outputRecord = db.prepare("select job_id, user_id, output_json from generation_outputs").get() as {
+          job_id: string;
+          user_id: string;
+          output_json: string;
+        };
         historyBilling = db.prepare("select price_cents, currency from generation_history").get() as { price_cents: number; currency: string };
         ledgerBilling = db.prepare("select price_cents, currency from credit_ledger").get() as { price_cents: number; currency: string };
       } finally {
@@ -93,6 +101,12 @@ describe("server database storage", () => {
       );
       expect(historyCount.count).toBe(1);
       expect(jobCount.count).toBe(1);
+      expect(outputCount.count).toBe(1);
+      expect(outputRecord).toMatchObject({ job_id: "job-history-1", user_id: "designer-demo" });
+      expect(JSON.parse(outputRecord.output_json)).toMatchObject({
+        name: "GPT Image 2 Low output 1.jpg",
+        source: "mock://openai/generate/node-sqlite/1"
+      });
       expect(historyBilling).toEqual({ price_cents: 150, currency: "CNY" });
       expect(ledgerBilling).toEqual({ price_cents: 150, currency: "CNY" });
     } finally {

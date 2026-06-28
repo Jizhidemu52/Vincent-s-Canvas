@@ -244,6 +244,9 @@ function saveDatabaseState(filePath: string, state: ServerState) {
     const insertJob = db.prepare(
       "insert into generation_jobs (id, user_id, project_id, node_id, model_id, operation, status, job_json) values (?, ?, ?, ?, ?, ?, ?, ?)"
     );
+    const insertOutput = db.prepare(
+      "insert into generation_outputs (id, job_id, user_id, output_json) values (?, ?, ?, ?)"
+    );
     const insertAudit = db.prepare("insert into audit_logs (id, user_id, event_type, created_at, event_json) values (?, ?, ?, ?, ?)");
 
     for (const { userId, account } of accountEntries(state)) {
@@ -297,6 +300,9 @@ function saveDatabaseState(filePath: string, state: ServerState) {
     }
     for (const job of state.generationJobs) {
       insertJob.run(job.id, job.userId, job.projectId, job.nodeId, job.modelId, job.operation, job.status, JSON.stringify(job));
+      job.outputs.forEach((output, index) => {
+        insertOutput.run(`${job.id}-output-${index + 1}`, job.id, job.userId, JSON.stringify(output));
+      });
     }
     for (const audit of state.adminAudit) {
       insertAudit.run(audit.id, audit.actorUserId ?? "system", audit.eventType, audit.createdAt, JSON.stringify(audit));
