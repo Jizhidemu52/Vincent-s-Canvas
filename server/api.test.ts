@@ -288,7 +288,7 @@ describe("backend hosted mock API", () => {
     expect(state.history).toHaveLength(0);
   });
 
-  it("lets admins adjust designer credit balances without exposing account state", () => {
+  it("lets admins allocate credits to a new designer account without inheriting default balances", () => {
     const state = createServerState({ creditBalance: 30 });
 
     const adjusted = adjustAccountCredits(
@@ -298,8 +298,8 @@ describe("backend hosted mock API", () => {
     ) as Profile;
     const aliceProfile = callApi(state, "/api/profile", undefined, undefined, "alice@company.local") as Profile;
 
-    expect(adjusted.creditBalance).toBe(45);
-    expect(aliceProfile.creditBalance).toBe(45);
+    expect(adjusted.creditBalance).toBe(15);
+    expect(aliceProfile.creditBalance).toBe(15);
     expect(aliceProfile.creditUsed).toBe(0);
   });
 
@@ -398,6 +398,7 @@ describe("backend hosted mock API", () => {
 
   it("lets admins cap designer credits and rejects adjustments above the limit", () => {
     const state = createServerState({ creditBalance: 30 });
+    callApi(state, "/api/profile", undefined, undefined, "alice@company.local");
 
     const limited = setAccountCreditLimit(
       state,
@@ -435,7 +436,7 @@ describe("backend hosted mock API", () => {
           creditLimit: 45,
           historyCount: 1
         }),
-        expect.objectContaining({ userId: "bob@company.local", role: "designer", creditBalance: 112, creditUsed: 0, historyCount: 0 })
+        expect.objectContaining({ userId: "bob@company.local", role: "designer", creditBalance: 12, creditUsed: 0, historyCount: 0 })
       ])
     );
     expect(accounts.map((account) => account.userId)).toEqual(["admin@company.local", "alice@company.local", "bob@company.local"]);

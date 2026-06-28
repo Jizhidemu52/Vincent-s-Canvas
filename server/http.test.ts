@@ -246,11 +246,11 @@ describe("HTTP API server", () => {
     const afterUnauthorized = (await (await fetch(`${context.baseUrl}/api/profile`, { headers: { "x-user-id": "alice@company.local" } })).json()) as Profile;
 
     expect(adjustResponse.status).toBe(200);
-    expect(adjusted.creditBalance).toBe(35);
-    expect(aliceProfile.creditBalance).toBe(35);
+    expect(adjusted.creditBalance).toBe(25);
+    expect(aliceProfile.creditBalance).toBe(25);
     expect(unauthorizedResponse.status).toBe(400);
     expect(await unauthorizedResponse.json()).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
-    expect(afterUnauthorized.creditBalance).toBe(35);
+    expect(afterUnauthorized.creditBalance).toBe(25);
   });
 
   it("allows admins to set designer credit limits and model pricing over HTTP", async () => {
@@ -263,7 +263,7 @@ describe("HTTP API server", () => {
     const overLimitResponse = await fetch(`${context.baseUrl}/api/admin/credits`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
-      body: JSON.stringify({ targetUserId: "alice@company.local", delta: 5 })
+      body: JSON.stringify({ targetUserId: "alice@company.local", delta: 13 })
     });
     const pricingResponse = await fetch(`${context.baseUrl}/api/admin/model-pricing`, {
       method: "POST",
@@ -273,7 +273,7 @@ describe("HTTP API server", () => {
     const models = (await (await fetch(`${context.baseUrl}/api/models`)).json()) as Array<Record<string, unknown>>;
 
     expect(limitResponse.status).toBe(200);
-    expect(limited).toMatchObject({ userId: "alice@company.local", creditBalance: 10, creditLimit: 12 });
+    expect(limited).toMatchObject({ userId: "alice@company.local", creditBalance: 0, creditLimit: 12 });
     expect(overLimitResponse.status).toBe(400);
     expect(await overLimitResponse.json()).toMatchObject({ status: "failed", errorMessage: "Credit balance cannot exceed assigned limit" });
     expect(pricingResponse.status).toBe(200);
@@ -400,7 +400,7 @@ describe("HTTP API server", () => {
       expect.arrayContaining([
         expect.objectContaining({ userId: "admin@company.local", role: "admin" }),
         expect.objectContaining({ userId: "alice@company.local", creditBalance: 8, creditUsed: 2, historyCount: 1 }),
-        expect.objectContaining({ userId: "bob@company.local", creditBalance: 22, creditUsed: 0, historyCount: 0 })
+        expect.objectContaining({ userId: "bob@company.local", creditBalance: 12, creditUsed: 0, historyCount: 0 })
       ])
     );
     expect(unauthorizedResponse.status).toBe(400);

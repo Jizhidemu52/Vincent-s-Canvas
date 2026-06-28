@@ -200,13 +200,13 @@ function accountFromState(state: ServerState): AccountWorkspace {
   };
 }
 
-function createAccountWorkspace(state: ServerState, userId: string): AccountWorkspace {
+function createAccountWorkspace(state: ServerState, userId: string, initialCreditBalance = state.profile.creditBalance): AccountWorkspace {
   const isAdmin = userId.includes("admin");
   const workspace = createInitialWorkspace({
     userId,
     designerName: isAdmin ? "Admin Ops" : userId.split("@")[0] || "Designer",
     role: isAdmin ? "admin" : "designer",
-    creditBalance: state.profile.creditBalance,
+    creditBalance: initialCreditBalance,
     creditUsed: 0
   });
   return {
@@ -224,6 +224,11 @@ function getAccountWorkspace(state: ServerState, userId?: string): AccountWorksp
   if (!normalized) return accountFromState(state);
   state.accounts[normalized] ??= createAccountWorkspace(state, normalized);
   return state.accounts[normalized];
+}
+
+function getAdminManagedAccountWorkspace(state: ServerState, userId: string): AccountWorkspace {
+  state.accounts[userId] ??= createAccountWorkspace(state, userId, 0);
+  return state.accounts[userId];
 }
 
 function saveAccountWorkspace(state: ServerState, account: AccountWorkspace, userId?: string) {
@@ -388,7 +393,7 @@ export function adjustAccountCredits(state: ServerState, request: Partial<Credit
     if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 10_000) {
       throw new Error("Credit delta must be a non-zero integer between -10000 and 10000");
     }
-    const account = getAccountWorkspace(state, targetUserId);
+    const account = getAdminManagedAccountWorkspace(state, targetUserId);
     const nextBalance = account.profile.creditBalance + delta;
     if (nextBalance < 0) {
       throw new Error("Credit balance cannot be negative");
@@ -431,7 +436,7 @@ export function setAccountCreditLimit(state: ServerState, request: Partial<Credi
     if (!Number.isInteger(creditLimit) || creditLimit < 0 || creditLimit > 100_000) {
       throw new Error("Credit limit must be an integer between 0 and 100000");
     }
-    const account = getAccountWorkspace(state, targetUserId);
+    const account = getAdminManagedAccountWorkspace(state, targetUserId);
     account.profile = {
       ...account.profile,
       creditLimit,
