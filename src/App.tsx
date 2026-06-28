@@ -1941,21 +1941,26 @@ function AdminView({
           <article className="admin-card">
             <h2>Team history</h2>
             {adminHistory.length ? (
-              <label className="admin-inline-filter">
-                <span>Designer</span>
-                <select
-                  aria-label="Team history designer filter"
-                  value={adminHistoryUserFilter}
-                  onChange={(event) => setAdminHistoryUserFilter(event.target.value)}
-                >
-                  <option value="all">All designers</option>
-                  {adminHistoryDesigners.map(([userId, designerName]) => (
-                    <option key={userId} value={userId}>
-                      {designerName}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="admin-history-tools">
+                <label className="admin-inline-filter">
+                  <span>Designer</span>
+                  <select
+                    aria-label="Team history designer filter"
+                    value={adminHistoryUserFilter}
+                    onChange={(event) => setAdminHistoryUserFilter(event.target.value)}
+                  >
+                    <option value="all">All designers</option>
+                    {adminHistoryDesigners.map(([userId, designerName]) => (
+                      <option key={userId} value={userId}>
+                        {designerName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button type="button" className="secondary-button" onClick={() => exportAdminTeamHistory(visibleAdminHistory, adminHistoryUserFilter)}>
+                  <Download size={14} /> Export team history
+                </button>
+              </div>
             ) : null}
             {visibleAdminHistory.length ? (
               visibleAdminHistory.slice(0, 6).map((entry) => (
@@ -2170,6 +2175,26 @@ function exportProjectPackage(workspace: Workspace, project: Project) {
   link.download = `${project.name.replace(/\s+/g, "-").toLowerCase()}-canvas-package.json`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function exportAdminTeamHistory(entries: AdminHistoryEntry[], filterUserId: string) {
+  const payload = {
+    filterUserId,
+    entryCount: entries.length,
+    entries,
+    exportedAt: new Date().toISOString()
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `team-history-${safeFileName(filterUserId === "all" ? "all-designers" : filterUserId)}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function safeFileName(value: string) {
+  return value.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "export";
 }
 
 export function downloadCanvasNode(node?: CanvasNode) {

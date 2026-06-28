@@ -1365,6 +1365,60 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
   });
 
+  it("exports the filtered admin team history for audit handoff", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: /Admin monitoring/i }));
+    await screen.findByText("Team history");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team history designer filter" }), "bob@company.local");
+
+    let exportAnchor: HTMLAnchorElement | undefined;
+    let exportedBlob: Blob | undefined;
+    const createElement = document.createElement.bind(document);
+    const createElementSpy = vi.spyOn(document, "createElement").mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+      const element = createElement(tagName, options);
+      if (tagName === "a") {
+        exportAnchor = element as HTMLAnchorElement;
+        vi.spyOn(exportAnchor, "click").mockImplementation(() => undefined);
+      }
+      return element;
+    });
+    const previousCreateObjectURL = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const previousRevokeObjectURL = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn((blob: Blob) => {
+        exportedBlob = blob;
+        return "blob:team-history-export";
+      })
+    });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+
+    try {
+      await user.click(screen.getByRole("button", { name: "Export team history" }));
+      const exportedText = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(exportedBlob!);
+      });
+      const payload = JSON.parse(exportedText) as { filterUserId: string; entries: HistoryEntry[] };
+
+      expect(exportAnchor?.download).toBe("team-history-bob-company-local.json");
+      expect(payload.filterUserId).toBe("bob@company.local");
+      expect(payload.entries).toHaveLength(1);
+      expect(payload.entries[0]).toMatchObject({ userId: "bob@company.local", projectName: "Bob upscale", modelId: "upscale-pro" });
+      expect(JSON.stringify(payload)).not.toContain("Alice campaign cleanup");
+    } finally {
+      createElementSpy.mockRestore();
+      if (previousCreateObjectURL) Object.defineProperty(URL, "createObjectURL", previousCreateObjectURL);
+      else delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+      if (previousRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", previousRevokeObjectURL);
+      else delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
+    }
+  });
+
   it("supports the image node inline model/prompt entry and generation loop", async () => {
     const user = userEvent.setup();
     await login(user);

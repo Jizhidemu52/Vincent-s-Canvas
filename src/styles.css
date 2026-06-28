@@ -738,6 +738,14 @@ button {
   font-size: 16px;
 }
 
+.admin-history-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .admin-row {
   display: grid;
   gap: 3px;
