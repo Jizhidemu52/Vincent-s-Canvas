@@ -255,6 +255,79 @@ export interface ModelDefinition {
   currency?: "CNY" | "USD";
 }
 
+export interface WorkflowModuleDefinition {
+  moduleType: ModuleType;
+  nodeType: NodeType;
+  operation: OperationType;
+  label: string;
+  detail: string;
+  defaultPrompt: string;
+  defaultModelId: string;
+}
+
+export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
+  {
+    moduleType: "generate",
+    nodeType: "config",
+    operation: "generate",
+    label: "Generate",
+    detail: "new design from references",
+    defaultPrompt: "Generate a new fashion design from the upstream references and prompt.",
+    defaultModelId: "gpt-image-2-medium"
+  },
+  {
+    moduleType: "edit",
+    nodeType: "edit",
+    operation: "edit",
+    label: "Edit",
+    detail: "controlled image edit",
+    defaultPrompt: "Make a controlled local fashion edit while preserving pose and garment structure.",
+    defaultModelId: "gpt-image-2-medium"
+  },
+  {
+    moduleType: "upscale",
+    nodeType: "upscale",
+    operation: "upscale",
+    label: "Upscale",
+    detail: "clean high-res output",
+    defaultPrompt: "Upscale while preserving garment texture, embroidery, and clean product edges.",
+    defaultModelId: "upscale-pro"
+  },
+  {
+    moduleType: "removeBackground",
+    nodeType: "removeBg",
+    operation: "removeBackground",
+    label: "Remove BG",
+    detail: "cutout for product use",
+    defaultPrompt: "Remove the background and keep clean product edges for internal design review.",
+    defaultModelId: "background-cleaner"
+  },
+  {
+    moduleType: "batch",
+    nodeType: "batch",
+    operation: "generate",
+    label: "Batch",
+    detail: "same brief across selected images",
+    defaultPrompt: "Apply one consistent edit brief to every selected reference image.",
+    defaultModelId: "gpt-image-2-medium"
+  },
+  {
+    moduleType: "upload",
+    nodeType: "image",
+    operation: "generate",
+    label: "Upload/ref",
+    detail: "reference handoff node",
+    defaultPrompt: "Use this upload reference as an upstream image input.",
+    defaultModelId: "gpt-image-2-medium"
+  }
+];
+
+export function getWorkflowModuleDefinition(moduleType: ModuleType) {
+  const definition = WORKFLOW_MODULE_REGISTRY.find((item) => item.moduleType === moduleType);
+  if (!definition) throw new Error(`Workflow module ${moduleType} is not registered`);
+  return definition;
+}
+
 export interface Workspace {
   profile: Profile;
   projects: Project[];
@@ -421,9 +494,7 @@ function connect(fromNodeId: string, toNodeId: string, fromPort = "out", toPort 
 
 function operationForModuleNode(node: CanvasNode): OperationType {
   if (node.operation) return node.operation;
-  if (node.moduleType === "upscale") return "upscale";
-  if (node.moduleType === "removeBackground") return "removeBackground";
-  if (node.moduleType === "edit") return "edit";
+  if (node.moduleType) return getWorkflowModuleDefinition(node.moduleType).operation;
   if (node.type === "upscale") return "upscale";
   if (node.type === "removeBg") return "removeBackground";
   if (node.type === "edit") return "edit";
@@ -1236,17 +1307,10 @@ export function createWorkflowModuleFromSelection(
   return updateProject(workspace, projectId, (project) => {
     const sources = sourceIds.map((id) => findNode(project, id));
     const anchor = sources[sources.length - 1];
-    const type: NodeType =
-      config.moduleType === "generate"
-        ? "config"
-        : config.moduleType === "removeBackground"
-          ? "removeBg"
-          : config.moduleType === "upload"
-            ? "image"
-            : config.moduleType;
+    const definition = getWorkflowModuleDefinition(config.moduleType);
     const references = sources.flatMap((node) => (node.type === "imageGroup" ? node.references : [node.id]));
     const moduleNode = createNode({
-      type,
+      type: definition.nodeType,
       kind: "workflow",
       name: `${config.moduleType} module`,
       source: "workflow-module",

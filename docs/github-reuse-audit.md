@@ -37,6 +37,7 @@ The current repository already includes:
 - Left-panel and inline image model/prompt generation.
 - Toolbar operations for upscale, remove background, download, save asset, magic edit, and mask edit.
 - Lightweight workflow modules and connections.
+- Typed first-pass workflow module registry for `Generate / Edit / Upscale / Remove BG / Batch / Upload Reference`.
 - Batch import and processing.
 - Backend-hosted provider registry, profile/history, admin credit adjustment, provider health, and persistence.
 - Admin credit limits and model pricing controls.
@@ -87,7 +88,7 @@ Local inspection notes:
 
 ## Next Reuse-First Implementation Order
 
-1. Migrate a typed node operation registry inspired by T8 `nodeRegistry` and `portTypes` so `Generate/Edit/Upscale/Remove BG/Batch/Upload Reference` are declared once and consumed by toolbar, picker, plan validation, and API routing.
+1. Continue migrating the typed node operation registry inspired by T8 `nodeRegistry` and `portTypes`: the first-pass registry now exists; next step is to let the right dock shortcut buttons and backend request builders consume the same definitions fully.
 2. Adapt T8 batch queue semantics for retry, cancel, and per-item progress while preserving current project canvas and credit ledger.
 3. Adapt basketikun prompt library UI patterns into the current prompt dock, keeping server-side prompt presets and designer attribution.
 4. Add RunningHub and ComfyUI live-ready provider adapters by porting T8 provider registry tests and reconciling hero workflow JSON/settings fields.

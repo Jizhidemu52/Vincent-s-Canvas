@@ -22,7 +22,9 @@ import {
   saveNodeAsAsset,
   savePromptPreset,
   selectNodes,
-  deletePromptPreset
+  deletePromptPreset,
+  getWorkflowModuleDefinition,
+  WORKFLOW_MODULE_REGISTRY
 } from "./workspace";
 import type { ModelDefinition } from "./workspace";
 
@@ -60,6 +62,56 @@ describe("designer canvas workspace behavior", () => {
     expect(configured.projects[0].nodes[0].generation.modelId).toBe("flux-pro");
     expect(configured.projects[0].nodes[0].generation.outputCount).toBe(3);
     expect(configured.projects[0].nodes[0].generation.entryPoint).toBe("inline");
+  });
+
+  it("declares first-pass workflow modules in one reusable registry", () => {
+    expect(WORKFLOW_MODULE_REGISTRY.map((definition) => definition.moduleType)).toEqual([
+      "generate",
+      "edit",
+      "upscale",
+      "removeBackground",
+      "batch",
+      "upload"
+    ]);
+
+    const removeBgDefinition = getWorkflowModuleDefinition("removeBackground");
+    expect(removeBgDefinition).toMatchObject({
+      moduleType: "removeBackground",
+      nodeType: "removeBg",
+      operation: "removeBackground",
+      label: "Remove BG",
+      defaultModelId: "background-cleaner"
+    });
+    expect(removeBgDefinition.defaultPrompt).toContain("background");
+
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Registry-backed module");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat.png",
+      source: "coat-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const withModule = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: removeBgDefinition.moduleType,
+      prompt: removeBgDefinition.defaultPrompt,
+      modelId: removeBgDefinition.defaultModelId
+    });
+    const moduleNode = withModule.projects[0].nodes.find((node) => node.moduleType === "removeBackground")!;
+    const plan = buildWorkflowExecutionPlan(withModule, project.id, source.id);
+
+    expect(moduleNode).toMatchObject({
+      type: "removeBg",
+      generation: expect.objectContaining({
+        prompt: removeBgDefinition.defaultPrompt,
+        modelId: "background-cleaner"
+      })
+    });
+    expect(plan.steps[0]).toMatchObject({
+      moduleType: "removeBackground",
+      operation: "removeBackground",
+      modelId: "background-cleaner"
+    });
   });
 
   it("keeps backend run state visible after normal canvas selection changes", () => {

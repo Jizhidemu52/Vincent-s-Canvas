@@ -69,6 +69,7 @@ import {
   undoProject,
   updateNodeTransform,
   updateViewport,
+  getWorkflowModuleDefinition,
   type BatchGenerationOutcome,
   type BatchImport,
   type CanvasNode,
@@ -82,7 +83,8 @@ import {
   type NodeTransform,
   type Profile,
   type Project,
-  type Workspace
+  type Workspace,
+  WORKFLOW_MODULE_REGISTRY
 } from "./domain/workspace";
 import {
   adjustDesignerCredits,
@@ -186,9 +188,7 @@ function createWorkspace() {
 
 function operationForNode(node: CanvasNode): OperationType {
   if (node.operation) return node.operation;
-  if (node.moduleType === "upscale") return "upscale";
-  if (node.moduleType === "removeBackground") return "removeBackground";
-  if (node.moduleType === "edit") return "edit";
+  if (node.moduleType) return getWorkflowModuleDefinition(node.moduleType).operation;
   if (node.type === "upscale") return "upscale";
   if (node.type === "removeBg") return "removeBackground";
   if (node.type === "edit") return "edit";
@@ -196,11 +196,7 @@ function operationForNode(node: CanvasNode): OperationType {
 }
 
 function defaultPromptForModule(moduleType: ModuleType) {
-  if (moduleType === "upscale") return "Upscale while preserving garment texture, embroidery, and clean product edges.";
-  if (moduleType === "edit") return "Make a controlled local fashion edit while preserving pose and garment structure.";
-  if (moduleType === "removeBackground") return "Remove the background and keep clean product edges for internal design review.";
-  if (moduleType === "batch") return "Apply one consistent edit brief to every selected reference image.";
-  return "Generate a new fashion design from the upstream references and prompt.";
+  return getWorkflowModuleDefinition(moduleType).defaultPrompt;
 }
 
 function operationForBatchModel(models: ModelDefinition[], modelId: string, preferredOperation?: OperationType): OperationType {
@@ -445,7 +441,8 @@ export default function App() {
     const projectId = activeProject.id;
     const fallbackSourceId = sourceNodeIds?.[0] ?? activeProject.selectedNodeIds[0] ?? selectedNode?.id;
     if (!fallbackSourceId) return;
-    const prompt = defaultPromptForModule(moduleType);
+    const definition = getWorkflowModuleDefinition(moduleType);
+    const prompt = definition.defaultPrompt;
     setWorkspace((current) => {
       const project = current.projects.find((item) => item.id === projectId);
       if (!project) return current;
@@ -453,12 +450,10 @@ export default function App() {
       const resolvedSourceIds = candidateSourceIds.filter((id) => project.nodes.some((node) => node.id === id));
       if (!resolvedSourceIds.length) return current;
       const firstSource = project.nodes.find((node) => node.id === resolvedSourceIds[0]);
+      const operationModel = workspace.modelRegistry.find((model) => model.capability.includes(definition.operation as ModuleType));
+      const shouldUseOperationModel = definition.operation === "upscale" || definition.operation === "removeBackground";
       const modelId =
-        moduleType === "upscale"
-          ? "upscale-pro"
-          : moduleType === "removeBackground"
-            ? "background-cleaner"
-            : firstSource?.generation.modelId || "gpt-image-2-medium";
+        shouldUseOperationModel ? operationModel?.id ?? definition.defaultModelId : firstSource?.generation.modelId ?? operationModel?.id ?? definition.defaultModelId;
       return createWorkflowModuleFromSelection(current, projectId, resolvedSourceIds, {
         moduleType,
         prompt,
@@ -2581,21 +2576,14 @@ function WorkflowModulePicker({
   onPick: (moduleType: ModuleType) => void;
   onCancel: () => void;
 }) {
-  const options: Array<{ type: ModuleType; label: string; detail: string }> = [
-    { type: "generate", label: "Generate", detail: "new design from references" },
-    { type: "edit", label: "Edit", detail: "controlled image edit" },
-    { type: "upscale", label: "Upscale", detail: "clean high-res output" },
-    { type: "removeBackground", label: "Remove BG", detail: "cutout for product use" },
-    { type: "batch", label: "Batch", detail: "same brief across selected images" },
-    { type: "upload", label: "Upload/ref", detail: "reference handoff node" }
-  ];
+  const options = WORKFLOW_MODULE_REGISTRY;
 
   return (
     <div className="workflow-picker" style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()}>
       <strong>Choose module</strong>
       <small>{referenceCount} reference{referenceCount > 1 ? "s" : ""} selected</small>
       {options.map((option) => (
-        <button type="button" key={option.type} onClick={() => onPick(option.type)}>
+        <button type="button" key={option.moduleType} onClick={() => onPick(option.moduleType)}>
           <b>{option.label}</b>
           <span>{option.detail}</span>
         </button>
