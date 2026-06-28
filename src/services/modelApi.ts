@@ -125,6 +125,7 @@ export interface AdminGenerationJob {
   referenceCount: number;
   mask?: GenerationRequest["mask"];
   batchSettings?: GenerationRequest["batchSettings"];
+  providerSettings?: GenerationRequest["providerSettings"];
   outputs?: AssetInput[];
   createdAt: string;
   updatedAt: string;

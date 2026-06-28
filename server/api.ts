@@ -140,6 +140,7 @@ export interface GenerationJob {
   referenceCount: number;
   mask?: GenerationRequest["mask"];
   batchSettings?: GenerationRequest["batchSettings"];
+  providerSettings?: GenerationRequest["providerSettings"];
   outputs: AssetInput[];
   createdAt: string;
   updatedAt: string;
@@ -821,6 +822,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
         referenceCount: request.referenceNodeIds.length,
         mask: request.mask,
         batchSettings: request.batchSettings,
+        providerSettings: request.providerSettings,
         outputs: [],
         createdAt,
         updatedAt: createdAt,
@@ -858,6 +860,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
     referenceCount: request.referenceNodeIds.length,
     mask: request.mask,
     batchSettings: request.batchSettings,
+    providerSettings: request.providerSettings,
     outputs: result.outputs,
     createdAt
   };
@@ -883,6 +886,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
       referenceCount: request.referenceNodeIds.length,
       mask: request.mask,
       batchSettings: request.batchSettings,
+      providerSettings: request.providerSettings,
       outputs: result.outputs,
       createdAt,
       updatedAt: createdAt,

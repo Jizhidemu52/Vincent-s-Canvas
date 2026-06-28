@@ -525,6 +525,40 @@ describe("designer canvas workspace behavior", () => {
     expect(executed.history[0].mask).toEqual(mask);
   });
 
+  it("uses connected config input ports as provider request settings", () => {
+    const providerSettings = { size: "1536x1024", quality: "high", preset: "lookbook-cleanup" };
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Typed provider config input");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "provider-jacket.png",
+      source: "provider-jacket-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const withGenerate = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "generate",
+      prompt: "Generate a clean ecommerce variation.",
+      modelId: "gpt-image-2-medium"
+    });
+    const generateNode = withGenerate.projects[0].nodes.find((node) => node.moduleType === "generate")!;
+    const withConfig = addConfigNode(withGenerate, project.id, {
+      outputCount: 1,
+      providerSettings
+    });
+    const configNode = withConfig.projects[0].nodes.find((node) => node.type === "config" && node.outputs[0]?.type === "config")!;
+    const connected = connectWorkflowNode(withConfig, project.id, configNode.id, generateNode.id, "out", "config");
+
+    const plan = buildWorkflowExecutionPlan(connected, project.id, source.id);
+    const requests = buildWorkflowGenerationRequests(connected, project.id, source.id);
+    const executed = runWorkflowChain(connected, project.id, source.id);
+    const generatedNode = executed.projects[0].nodes.find((node) => node.kind === "generated")!;
+
+    expect(plan.steps[0].providerSettings).toEqual(providerSettings);
+    expect(requests[0]).toMatchObject({ providerSettings });
+    expect(generatedNode.metadata.providerSettings).toEqual(providerSettings);
+    expect(executed.history[0].providerSettings).toEqual(providerSettings);
+  });
+
   it("keeps backend run state visible after normal canvas selection changes", () => {
     const { workspace, project } = createProject(createInitialWorkspace(), "Run state feedback");
     const withAsset = addAssetToProject(workspace, project.id, {

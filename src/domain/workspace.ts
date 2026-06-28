@@ -52,6 +52,12 @@ export interface GenerationConfig {
   quality?: string;
 }
 
+export interface ProviderRequestSettings {
+  size?: string;
+  quality?: string;
+  preset?: string;
+}
+
 export interface MaskSelection {
   x: number;
   y: number;
@@ -156,6 +162,7 @@ export interface GenerationRequest {
   operation: OperationType;
   mask?: MaskSelection;
   batchSettings?: BatchSettings;
+  providerSettings?: ProviderRequestSettings;
 }
 
 export interface GenerationResult {
@@ -189,6 +196,7 @@ export interface HistoryEntry {
   referenceCount?: number;
   mask?: MaskSelection;
   batchSettings?: BatchSettings;
+  providerSettings?: ProviderRequestSettings;
   outputs?: AssetInput[];
   createdAt: string;
 }
@@ -209,6 +217,7 @@ export interface WorkflowPlanStep {
   outputCount: number;
   mask?: MaskSelection;
   batchSettings?: BatchSettings;
+  providerSettings?: ProviderRequestSettings;
   referenceNodeIds: string[];
   referenceCount: number;
   estimatedCreditCost: number;
@@ -296,7 +305,8 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     apiPath: "/api/generations",
     inputPorts: [
       { id: "image", type: "image", label: "Images" },
-      { id: "text", type: "text", label: "Prompt" }
+      { id: "text", type: "text", label: "Prompt" },
+      { id: "config", type: "config", label: "Provider settings" }
     ],
     outputPorts: [{ id: "result", type: "result", label: "Generated result" }],
     label: "Generate",
@@ -686,6 +696,20 @@ function batchSettingsFromConfig(config: Record<string, unknown>): BatchSettings
   };
 }
 
+function nonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function providerSettingsFromConfig(config: Record<string, unknown>): ProviderRequestSettings | undefined {
+  const nested = metadataObject(config.providerSettings);
+  const settings: ProviderRequestSettings = {
+    size: nonEmptyString(config.providerSize ?? nested.size),
+    quality: nonEmptyString(config.providerQuality ?? nested.quality),
+    preset: nonEmptyString(config.providerPreset ?? nested.preset)
+  };
+  return settings.size || settings.quality || settings.preset ? settings : undefined;
+}
+
 function connectedConfigForModule(project: Project, moduleNode: CanvasNode): Record<string, unknown> {
   const configInputPortIds = new Set(moduleNode.inputs.filter((port) => port.type === "config").map((port) => port.id));
   const configConnection = project.connections.find((connection) => connection.toNodeId === moduleNode.id && configInputPortIds.has(connection.toPort));
@@ -703,7 +727,8 @@ function workflowSettingsForModule(project: Project, moduleNode: CanvasNode) {
   return {
     outputCount: outputCountFromConfigValue(config.outputCount) ?? moduleNode.generation.outputCount,
     mask: maskFromConfigValue(config.mask),
-    batchSettings: batchSettingsFromConfig(config)
+    batchSettings: batchSettingsFromConfig(config),
+    providerSettings: providerSettingsFromConfig(config)
   };
 }
 
@@ -933,7 +958,17 @@ export function addTextNode(workspace: Workspace, projectId: string, content: st
 export function addConfigNode(
   workspace: Workspace,
   projectId: string,
-  settings: { outputCount?: number; mask?: MaskSelection; batchSettings?: BatchSettings; batchConcurrency?: number; failurePolicy?: BatchFailurePolicy },
+  settings: {
+    outputCount?: number;
+    mask?: MaskSelection;
+    batchSettings?: BatchSettings;
+    batchConcurrency?: number;
+    failurePolicy?: BatchFailurePolicy;
+    providerSettings?: ProviderRequestSettings;
+    providerSize?: string;
+    providerQuality?: string;
+    providerPreset?: string;
+  },
   x = 620,
   y = 470
 ): Workspace {
@@ -1237,7 +1272,8 @@ export function applyGenerationResultToCanvas(
         remoteSource: output.source,
         prompt: request.prompt,
         modelId: request.modelId,
-        mask: request.mask
+        mask: request.mask,
+        providerSettings: request.providerSettings
       }
     });
   });
@@ -1772,6 +1808,7 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
       outputCount: settings.outputCount,
       mask: settings.mask,
       batchSettings: settings.batchSettings,
+      providerSettings: settings.providerSettings,
       referenceNodeIds,
       referenceCount: referenceNodeIds.length,
       estimatedCreditCost: unitCost * settings.outputCount
@@ -1805,7 +1842,8 @@ export function buildWorkflowGenerationRequests(workspace: Workspace, projectId:
     outputCount: step.outputCount,
     operation: step.operation,
     mask: step.mask,
-    batchSettings: step.batchSettings
+    batchSettings: step.batchSettings,
+    providerSettings: step.providerSettings
   }));
 }
 
@@ -1846,6 +1884,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
         outputCount: settings.outputCount,
         mask: settings.mask,
         batchSettings: settings.batchSettings,
+        providerSettings: settings.providerSettings,
         prompt,
         modelId: moduleNode.generation.modelId
       }
@@ -1902,6 +1941,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
         referenceCount: referenceNodeIds.length,
         mask: settings.mask,
         batchSettings: settings.batchSettings,
+        providerSettings: settings.providerSettings,
         outputs: generatedOutput ? [generatedOutput] : [],
         createdAt: now()
       },

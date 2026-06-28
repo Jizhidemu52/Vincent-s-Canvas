@@ -91,6 +91,7 @@ import {
   type NodePort,
   type NodeTransform,
   type Profile,
+  type ProviderRequestSettings,
   type Project,
   type Workspace,
   WORKFLOW_MODULE_REGISTRY
@@ -169,6 +170,16 @@ function maskFromMetadata(value: unknown): MaskSelection | undefined {
   return typeof mask.x === "number" && typeof mask.y === "number" && typeof mask.width === "number" && typeof mask.height === "number"
     ? { x: mask.x, y: mask.y, width: mask.width, height: mask.height }
     : undefined;
+}
+
+function providerSettingsFromMetadata(value: unknown): ProviderRequestSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const settings = value as Partial<ProviderRequestSettings>;
+  return {
+    size: typeof settings.size === "string" ? settings.size : undefined,
+    quality: typeof settings.quality === "string" ? settings.quality : undefined,
+    preset: typeof settings.preset === "string" ? settings.preset : undefined
+  };
 }
 
 function historyEntryToAuditEntry(entry: HistoryEntry): AdminAuditEntry {
@@ -2493,11 +2504,20 @@ function PromptCard({
     typeof selectedNode?.metadata.batchConcurrency === "number" ? selectedNode.metadata.batchConcurrency : 1;
   const selectedFailurePolicy: BatchFailurePolicy = selectedNode?.metadata.failurePolicy === "stop" ? "stop" : "continue";
   const selectedMask = maskFromMetadata(selectedNode?.metadata.mask) ?? DEFAULT_MASK_SELECTION;
+  const selectedProviderSettings = providerSettingsFromMetadata(selectedNode?.metadata.providerSettings);
   function updateMaskMetric(key: keyof MaskSelection, value: number) {
     onUpdateMetadata({
       mask: {
         ...selectedMask,
         [key]: clampMaskMetric(value)
+      }
+    });
+  }
+  function updateProviderSetting(key: keyof ProviderRequestSettings, value: string) {
+    onUpdateMetadata({
+      providerSettings: {
+        ...selectedProviderSettings,
+        [key]: value.trim() || undefined
       }
     });
   }
@@ -2633,6 +2653,40 @@ function PromptCard({
               />
             </label>
           </div>
+          <label>
+            <span>Provider size</span>
+            <select
+              aria-label="Provider size"
+              value={selectedProviderSettings.size ?? "1024x1024"}
+              onChange={(event) => updateProviderSetting("size", event.target.value)}
+            >
+              <option value="1024x1024">1024x1024</option>
+              <option value="1536x1024">1536x1024</option>
+              <option value="1024x1536">1024x1536</option>
+              <option value="1:1">1:1</option>
+            </select>
+          </label>
+          <label>
+            <span>Provider quality</span>
+            <select
+              aria-label="Provider quality"
+              value={selectedProviderSettings.quality ?? "auto"}
+              onChange={(event) => updateProviderSetting("quality", event.target.value)}
+            >
+              <option value="auto">Auto</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+          <label>
+            <span>Provider preset</span>
+            <input
+              aria-label="Provider preset"
+              value={selectedProviderSettings.preset ?? ""}
+              onChange={(event) => updateProviderSetting("preset", event.target.value)}
+            />
+          </label>
         </div>
       ) : null}
       <small className="api-notice" aria-live="polite">{apiNotice}</small>
@@ -3450,6 +3504,7 @@ function RightDock({
   const selectedFailurePolicy =
     selectedNode?.metadata.failurePolicy === "stop" ? "stop" : selectedNode?.metadata.failurePolicy === "continue" ? "continue" : undefined;
   const selectedMask = maskFromMetadata(selectedNode?.metadata.mask);
+  const selectedProviderSettings = providerSettingsFromMetadata(selectedNode?.metadata.providerSettings);
   const batchSummary = summarizeBatchQueue(project.batchQueue);
   const hasRetryableBatchItems = project.batchQueue.some((item) => item.status === "error" || item.status === "cancelled");
   const hasCancellableBatchItems = project.batchQueue.some((item) => item.status === "queued" || item.status === "processing");
@@ -3512,6 +3567,11 @@ function RightDock({
               {selectedMask ? (
                 <span>
                   Mask: x {selectedMask.x} / y {selectedMask.y} / w {selectedMask.width} / h {selectedMask.height}
+                </span>
+              ) : null}
+              {selectedProviderSettings.size || selectedProviderSettings.quality || selectedProviderSettings.preset ? (
+                <span>
+                  Provider: {selectedProviderSettings.size ?? "auto"} / {selectedProviderSettings.quality ?? "auto"} / {selectedProviderSettings.preset ?? "default"}
                 </span>
               ) : null}
               {selectedNode.inputs.length ? <span>Inputs: {selectedNode.inputs.map((port) => port.label).join(", ")}</span> : null}

@@ -132,6 +132,23 @@ describe("backend hosted mock API", () => {
     });
   });
 
+  it("keeps provider request settings in history and admin jobs", () => {
+    const state = createServerState({ creditBalance: 30 });
+    const providerSettings = { size: "1536x1024", quality: "high", preset: "lookbook-cleanup" };
+
+    callApi(state, "/api/generations", request({ outputCount: 1, providerSettings }), "provider-settings", "alice@company.local");
+
+    const history = callApi(state, "/api/history", undefined, undefined, "alice@company.local") as HistoryEntry[];
+    const jobs = callApi(state, "/api/admin/jobs", undefined, undefined, "admin@company.local") as ReturnType<typeof createServerState>["generationJobs"];
+
+    expect(history[0]).toMatchObject({ providerSettings });
+    expect(jobs[0]).toMatchObject({
+      userId: "alice@company.local",
+      status: "succeeded",
+      providerSettings
+    });
+  });
+
   it("rejects invalid prompt before spending credits or writing history", () => {
     const state = createServerState({ creditBalance: 30 });
 

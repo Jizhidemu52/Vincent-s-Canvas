@@ -120,4 +120,13 @@ describe("provider adapters", () => {
     expect(result.outputs).toHaveLength(2);
     expect(result.outputs[0].source).toBe("mock://openai/generate/node-provider/1");
   });
+
+  it("uses provider request size settings for mock output dimensions", () => {
+    const result = runProviderModel(request({ providerSettings: { size: "1536x1024", quality: "high" }, outputCount: 1 }), openAiModel, "history-size", 2);
+
+    expect(result.outputs[0]).toMatchObject({
+      width: 1536,
+      height: 1024
+    });
+  });
 });

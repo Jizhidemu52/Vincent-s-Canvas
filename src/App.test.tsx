@@ -1521,6 +1521,10 @@ describe("Designer canvas app shell", () => {
     fireEvent.change(screen.getByLabelText("Mask X"), { target: { value: "12" } });
     fireEvent.change(screen.getByLabelText("Mask width"), { target: { value: "46" } });
     expect(screen.getByLabelText("Selected node task")).toHaveTextContent("Mask: x 12 / y 24 / w 46 / h 38");
+    await user.selectOptions(screen.getByLabelText("Provider size"), "1536x1024");
+    await user.selectOptions(screen.getByLabelText("Provider quality"), "high");
+    fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "lookbook-cleanup" } });
+    expect(screen.getByLabelText("Selected node task")).toHaveTextContent("Provider: 1536x1024 / high / lookbook-cleanup");
   });
 
   it("shows typed input and output ports for the selected workflow node", async () => {

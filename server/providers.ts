@@ -79,12 +79,21 @@ function missingSecrets(provider: ProviderName, settings?: ProviderRuntimeSettin
   return config.requiredSecrets;
 }
 
-function sizeForOperation(operation: GenerationRequest["operation"]) {
-  return operation === "upscale" ? 2048 : 1024;
+function dimensionsForRequest(request: GenerationRequest) {
+  const size = request.providerSettings?.size;
+  const match = typeof size === "string" ? /^(\d{2,5})x(\d{2,5})$/.exec(size.trim()) : undefined;
+  if (match) {
+    return {
+      width: Number(match[1]),
+      height: Number(match[2])
+    };
+  }
+  const fallback = request.operation === "upscale" ? 2048 : 1024;
+  return { width: fallback, height: fallback };
 }
 
 function mockExecute(request: GenerationRequest, model: ModelDefinition, historyId: string, creditCost: number): GenerationResult {
-  const size = sizeForOperation(request.operation);
+  const dimensions = dimensionsForRequest(request);
   return {
     status: "succeeded",
     creditCost,
@@ -92,8 +101,8 @@ function mockExecute(request: GenerationRequest, model: ModelDefinition, history
     outputs: Array.from({ length: request.outputCount }, (_, index) => ({
       name: `${model.name} output ${index + 1}.jpg`,
       source: `mock://${model.provider}/${request.operation}/${request.nodeId}/${index + 1}`,
-      width: size,
-      height: size
+      width: dimensions.width,
+      height: dimensions.height
     }))
   };
 }
