@@ -910,6 +910,8 @@ export function applyBatchGenerationResultsToCanvas(
   serverState: { profile?: Profile; history?: HistoryEntry[]; models?: ModelDefinition[] } = {}
 ): Workspace {
   let generatedNodes: CanvasNode[] = [];
+  const model = workspace.modelRegistry.find((item) => item.id === batch.modelId);
+  const operation = model ? defaultOperationForModel(model) ?? "generate" : "generate";
   const updated = updateProject(workspace, projectId, (project) => {
     const originalNodes = createBatchOriginalNodes(
       batch,
@@ -945,10 +947,41 @@ export function applyBatchGenerationResultsToCanvas(
             sourceFile: file.name,
             historyId: result?.historyId,
             creditCost: result?.creditCost,
-            remoteSource: output.source
+            remoteSource: output.source,
+            prompt: batch.prompt,
+            modelId: batch.modelId,
+            operation
           }
         });
       });
+    });
+    const outputIdsByOriginal = new Map<string, string[]>();
+    for (const node of generatedNodes) {
+      if (!node.parentId) continue;
+      outputIdsByOriginal.set(node.parentId, [...(outputIdsByOriginal.get(node.parentId) ?? []), node.id]);
+    }
+    const auditedOriginalNodes = originalNodes.map((node, fileIndex) => {
+      const outcome = outcomes[fileIndex];
+      const result = outcome?.result;
+      const outputNodeIds = outputIdsByOriginal.get(node.id) ?? [];
+      const failed = !result;
+      return {
+        ...node,
+        status: failed ? ("error" as NodeStatus) : ("done" as NodeStatus),
+        errorMessage: failed ? outcome?.errorMessage ?? "Batch item failed" : undefined,
+        metadata: {
+          ...node.metadata,
+          runStatus: failed ? "error" : "done",
+          inputNodeIds: [node.id],
+          outputNodeIds,
+          historyId: result?.historyId,
+          creditCost: result?.creditCost,
+          errorMessage: failed ? outcome?.errorMessage ?? "Batch item failed" : undefined,
+          prompt: batch.prompt,
+          modelId: batch.modelId,
+          operation
+        }
+      };
     });
     const batchConnections = generatedNodes.flatMap((node) => (node.parentId ? [connect(node.parentId, node.id, "out", "image")] : []));
     return withUndo(project, {
@@ -967,9 +1000,9 @@ export function applyBatchGenerationResultsToCanvas(
         status: outcomes[fileIndex]?.result ? "done" : "error",
         errorMessage: outcomes[fileIndex]?.errorMessage
       })),
-      nodes: [...project.nodes, ...originalNodes, ...generatedNodes],
+      nodes: [...project.nodes, ...auditedOriginalNodes, ...generatedNodes],
       connections: [...project.connections, ...batchConnections],
-      selectedNodeIds: (generatedNodes.length ? generatedNodes : originalNodes).map((node) => node.id)
+      selectedNodeIds: (generatedNodes.length ? generatedNodes : auditedOriginalNodes).map((node) => node.id)
     });
   });
   return {

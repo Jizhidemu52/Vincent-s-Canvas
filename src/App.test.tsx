@@ -1033,7 +1033,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Batch queue")).toBeInTheDocument();
     expect(screen.getAllByText("folder-front.png").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("folder-back.png").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("Provider rejected folder-back.png")).toBeInTheDocument();
+    expect(screen.getAllByText("Provider rejected folder-back.png").length).toBeGreaterThanOrEqual(1);
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
     expect(calls).toHaveLength(2);
     await user.click(screen.getByRole("button", { name: "History" }));

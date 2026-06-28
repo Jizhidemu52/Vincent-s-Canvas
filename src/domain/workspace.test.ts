@@ -3,6 +3,7 @@ import {
   addAssetToProject,
   addAssetToProjectAt,
   addGenerationTargetFrame,
+  applyBatchGenerationResultsToCanvas,
   applyGenerationResultToCanvas,
   applyImageOperation,
   buildWorkflowExecutionPlan,
@@ -374,6 +375,62 @@ describe("designer canvas workspace behavior", () => {
       modelId: "background-cleaner",
       outputCount: 3,
       creditCost: 6,
+      operation: "removeBackground"
+    });
+  });
+
+  it("stores backend batch status and outputs on each original canvas node", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Backend batch audit");
+    const batch = {
+      folderName: "raw trims",
+      prompt: "remove background and normalize lighting",
+      modelId: "background-cleaner",
+      outputCount: 1,
+      files: [
+        { name: "front.png", source: "front-source", width: 300, height: 300 },
+        { name: "back.png", source: "back-source", width: 300, height: 300 }
+      ]
+    };
+
+    const updated = applyBatchGenerationResultsToCanvas(workspace, project.id, batch, [
+      {
+        result: {
+          status: "succeeded",
+          historyId: "history-batch-front",
+          creditCost: 2,
+          outputs: [{ name: "front-clean.png", source: "mock://batch/front/1", width: 512, height: 512 }]
+        }
+      },
+      { errorMessage: "Provider timed out" }
+    ]);
+    const originalFront = updated.projects[0].nodes.find((node) => node.name === "front.png")!;
+    const originalBack = updated.projects[0].nodes.find((node) => node.name === "back.png")!;
+    const frontOutput = updated.projects[0].nodes.find((node) => node.name === "front-clean.png")!;
+
+    expect(originalFront.status).toBe("done");
+    expect(originalFront.metadata).toMatchObject({
+      runStatus: "done",
+      outputNodeIds: [frontOutput.id],
+      historyId: "history-batch-front",
+      creditCost: 2,
+      prompt: "remove background and normalize lighting",
+      modelId: "background-cleaner",
+      operation: "removeBackground"
+    });
+    expect(originalBack.status).toBe("error");
+    expect(originalBack.metadata).toMatchObject({
+      runStatus: "error",
+      errorMessage: "Provider timed out",
+      prompt: "remove background and normalize lighting",
+      modelId: "background-cleaner",
+      operation: "removeBackground"
+    });
+    expect(frontOutput.metadata).toMatchObject({
+      sourceFile: "front.png",
+      historyId: "history-batch-front",
+      creditCost: 2,
+      prompt: "remove background and normalize lighting",
+      modelId: "background-cleaner",
       operation: "removeBackground"
     });
   });
