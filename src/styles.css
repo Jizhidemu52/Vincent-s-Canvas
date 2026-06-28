@@ -2046,12 +2046,14 @@ button {
   background: rgba(214, 78, 78, 0.12);
 }
 
-.prompt-library-tools {
+.prompt-library-tools,
+.asset-library-tools {
   display: grid;
   gap: 7px;
 }
 
-.prompt-library-tools label {
+.prompt-library-tools label,
+.asset-library-tools label {
   display: grid;
   grid-template-columns: 16px 1fr;
   align-items: center;
@@ -2062,7 +2064,8 @@ button {
   padding: 7px;
 }
 
-.prompt-library-tools input {
+.prompt-library-tools input,
+.asset-library-tools input {
   min-width: 0;
   border: 0;
   background: transparent;

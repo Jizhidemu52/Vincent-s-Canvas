@@ -3612,9 +3612,11 @@ function RightDock({
   onCancelBatch: () => void;
 }) {
   const [promptSearch, setPromptSearch] = useState("");
+  const [assetSearch, setAssetSearch] = useState("");
   const [selectedPromptPresetId, setSelectedPromptPresetId] = useState<string | null>(null);
   const [selectedAssetTag, setSelectedAssetTag] = useState<string | null>(null);
   const normalizedPromptSearch = promptSearch.trim().toLowerCase();
+  const normalizedAssetSearch = assetSearch.trim().toLowerCase();
   const filteredPrompts = normalizedPromptSearch
     ? workspace.prompts.filter((prompt) => {
         const haystack = `${prompt.title} ${prompt.prompt} ${prompt.tags.join(" ")}`.toLowerCase();
@@ -3627,7 +3629,13 @@ function RightDock({
       .reduce((counts, tag) => counts.set(tag, (counts.get(tag) ?? 0) + 1), new Map<string, number>())
       .entries()
   ).sort(([left], [right]) => left.localeCompare(right));
-  const filteredAssets = selectedAssetTag ? workspace.assets.filter((asset) => asset.tags.includes(selectedAssetTag)) : workspace.assets;
+  const taggedAssets = selectedAssetTag ? workspace.assets.filter((asset) => asset.tags.includes(selectedAssetTag)) : workspace.assets;
+  const filteredAssets = normalizedAssetSearch
+    ? taggedAssets.filter((asset) => {
+        const haystack = `${asset.title} ${asset.type} ${asset.tags.join(" ")}`.toLowerCase();
+        return haystack.includes(normalizedAssetSearch);
+      })
+    : taggedAssets;
   const selectedPromptPreset = workspace.prompts.find((prompt) => prompt.id === selectedPromptPresetId) ?? null;
   const workflowPlan = useMemo(
     () => (selectedNode ? buildWorkflowExecutionPlan(workspace, project.id, selectedNode.id) : undefined),
@@ -3804,6 +3812,17 @@ function RightDock({
       {panel === "assets" && (
         <div className="dock-list">
           <strong>My assets</strong>
+          <div className="asset-library-tools">
+            <label>
+              <Search size={13} />
+              <input
+                aria-label="Search assets"
+                value={assetSearch}
+                onChange={(event) => setAssetSearch(event.target.value)}
+                placeholder="Search assets"
+              />
+            </label>
+          </div>
           {assetTagCounts.length ? (
             <div className="asset-tag-filters" aria-label="Asset tag filters">
               {selectedAssetTag ? (
@@ -3829,13 +3848,22 @@ function RightDock({
               {filteredAssets.length} asset{filteredAssets.length === 1 ? "" : "s"} tagged {selectedAssetTag}
             </small>
           ) : null}
+          {normalizedAssetSearch ? (
+            <small>
+              {filteredAssets.length} asset{filteredAssets.length === 1 ? "" : "s"} matching {assetSearch.trim()}
+            </small>
+          ) : null}
           {filteredAssets.length ? filteredAssets.map((asset) => (
             <button type="button" key={asset.id} onClick={() => onAssetInsert(asset)}>
               <b>{asset.title}</b>
               <small>{asset.tags.join(", ")}</small>
               <span>{asset.type} · Use in canvas</span>
             </button>
-          )) : workspace.assets.length ? <small>No assets match this tag</small> : <small>Save a selected node to collect it here</small>}
+          )) : workspace.assets.length ? (
+            <small>{normalizedAssetSearch ? "No assets match this search" : "No assets match this tag"}</small>
+          ) : (
+            <small>Save a selected node to collect it here</small>
+          )}
         </div>
       )}
       {panel === "prompts" && (

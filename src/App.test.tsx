@@ -1608,6 +1608,52 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("button", { name: /cutout-result\.png.*Use in canvas/i })).toBeInTheDocument();
   });
 
+  it("searches saved assets by title and tag in the canvas dock", async () => {
+    backendWorkspace = {
+      ...backendWorkspace,
+      assets: [
+        {
+          id: "asset-edit-reference",
+          type: "image",
+          title: "embroidered-reference.jpg",
+          source: "/fixtures/fashion-reference.jpg",
+          tags: ["generated", "edit", "embroidery"],
+          createdAt: "2026-06-28T10:00:00.000Z"
+        },
+        {
+          id: "asset-remove-bg",
+          type: "image",
+          title: "cutout-result.png",
+          source: "/fixtures/fashion-reference.jpg",
+          tags: ["generated", "removebackground", "cutout"],
+          createdAt: "2026-06-28T10:05:00.000Z"
+        }
+      ]
+    };
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Assets" }));
+
+    expect(screen.getByRole("button", { name: /embroidered-reference\.jpg.*Use in canvas/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /cutout-result\.png.*Use in canvas/i })).toBeInTheDocument();
+
+    const searchAssets = screen.getByRole("textbox", { name: "Search assets" });
+    await user.type(searchAssets, "cutout");
+
+    expect(screen.queryByRole("button", { name: /embroidered-reference\.jpg.*Use in canvas/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /cutout-result\.png.*Use in canvas/i })).toBeInTheDocument();
+    expect(screen.getByText("1 asset matching cutout")).toBeInTheDocument();
+
+    await user.clear(searchAssets);
+    await user.type(searchAssets, "embroidery");
+
+    expect(screen.getByRole("button", { name: /embroidered-reference\.jpg.*Use in canvas/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /cutout-result\.png.*Use in canvas/i })).not.toBeInTheDocument();
+    expect(screen.getByText("1 asset matching embroidery")).toBeInTheDocument();
+  });
+
   it("runs workflow modules through backend APIs", async () => {
     const user = userEvent.setup();
     await login(user);
