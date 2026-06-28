@@ -1194,6 +1194,17 @@ button {
   background: #fff;
 }
 
+.mask-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mask-grid label {
+  grid-template-columns: 1fr;
+  gap: 3px;
+}
+
 .swatch {
   width: 16px;
   height: 16px;

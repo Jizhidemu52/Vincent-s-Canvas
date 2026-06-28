@@ -108,6 +108,30 @@ describe("backend hosted mock API", () => {
     });
   });
 
+  it("keeps edit masks in history and admin jobs", () => {
+    const state = createServerState({ creditBalance: 30 });
+    const mask = { x: 14, y: 16, width: 42, height: 38 };
+
+    callApi(
+      state,
+      "/api/edits",
+      request({ modelId: "nanobanana2", operation: "edit", outputCount: 1, mask }),
+      "mask-settings",
+      "alice@company.local"
+    );
+
+    const history = callApi(state, "/api/history", undefined, undefined, "alice@company.local") as HistoryEntry[];
+    const jobs = callApi(state, "/api/admin/jobs", undefined, undefined, "admin@company.local") as ReturnType<typeof createServerState>["generationJobs"];
+
+    expect(history[0]).toMatchObject({ operation: "edit", mask });
+    expect(jobs[0]).toMatchObject({
+      userId: "alice@company.local",
+      operation: "edit",
+      status: "succeeded",
+      mask
+    });
+  });
+
   it("rejects invalid prompt before spending credits or writing history", () => {
     const state = createServerState({ creditBalance: 30 });
 

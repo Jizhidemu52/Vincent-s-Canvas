@@ -494,6 +494,37 @@ describe("designer canvas workspace behavior", () => {
     });
   });
 
+  it("uses connected config input ports as edit mask settings", () => {
+    const mask = { x: 12, y: 18, width: 46, height: 34 };
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Typed mask config input");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "mask-dress.png",
+      source: "mask-dress-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const withEdit = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "edit",
+      prompt: "Replace only the selected collar area.",
+      modelId: "nanobanana2"
+    });
+    const editNode = withEdit.projects[0].nodes.find((node) => node.moduleType === "edit")!;
+    const withConfig = addConfigNode(withEdit, project.id, { outputCount: 1, mask });
+    const configNode = withConfig.projects[0].nodes.find((node) => node.type === "config" && node.outputs[0]?.type === "config")!;
+    const connected = connectWorkflowNode(withConfig, project.id, configNode.id, editNode.id, "out", "config");
+
+    const plan = buildWorkflowExecutionPlan(connected, project.id, source.id);
+    const requests = buildWorkflowGenerationRequests(connected, project.id, source.id);
+    const executed = runWorkflowChain(connected, project.id, source.id);
+    const generatedNode = executed.projects[0].nodes.find((node) => node.kind === "generated")!;
+
+    expect(plan.steps[0].mask).toEqual(mask);
+    expect(requests[0]).toMatchObject({ mask });
+    expect(generatedNode.metadata.mask).toEqual(mask);
+    expect(executed.history[0].mask).toEqual(mask);
+  });
+
   it("keeps backend run state visible after normal canvas selection changes", () => {
     const { workspace, project } = createProject(createInitialWorkspace(), "Run state feedback");
     const withAsset = addAssetToProject(workspace, project.id, {

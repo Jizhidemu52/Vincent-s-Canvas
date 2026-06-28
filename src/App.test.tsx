@@ -1518,6 +1518,9 @@ describe("Designer canvas app shell", () => {
     fireEvent.change(screen.getByLabelText("Batch concurrency"), { target: { value: "4" } });
     await user.selectOptions(screen.getByLabelText("Batch failure policy"), "stop");
     expect(screen.getByLabelText("Selected node task")).toHaveTextContent("Batch: 4 concurrent / stop on failure");
+    fireEvent.change(screen.getByLabelText("Mask X"), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText("Mask width"), { target: { value: "46" } });
+    expect(screen.getByLabelText("Selected node task")).toHaveTextContent("Mask: x 12 / y 24 / w 46 / h 38");
   });
 
   it("shows typed input and output ports for the selected workflow node", async () => {

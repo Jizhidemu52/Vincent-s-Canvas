@@ -187,6 +187,7 @@ export interface HistoryEntry {
   operation?: OperationType;
   moduleType?: ModuleType;
   referenceCount?: number;
+  mask?: MaskSelection;
   batchSettings?: BatchSettings;
   outputs?: AssetInput[];
   createdAt: string;
@@ -206,6 +207,7 @@ export interface WorkflowPlanStep {
   modelId: string;
   prompt: string;
   outputCount: number;
+  mask?: MaskSelection;
   batchSettings?: BatchSettings;
   referenceNodeIds: string[];
   referenceCount: number;
@@ -662,6 +664,17 @@ function failurePolicyFromConfigValue(value: unknown): BatchFailurePolicy | unde
   return value === "continue" || value === "stop" ? value : undefined;
 }
 
+function maskFromConfigValue(value: unknown): MaskSelection | undefined {
+  const mask = metadataObject(value);
+  const x = typeof mask.x === "number" ? mask.x : NaN;
+  const y = typeof mask.y === "number" ? mask.y : NaN;
+  const width = typeof mask.width === "number" ? mask.width : NaN;
+  const height = typeof mask.height === "number" ? mask.height : NaN;
+  if (![x, y, width, height].every(Number.isFinite)) return undefined;
+  if (x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 100 || y + height > 100) return undefined;
+  return { x, y, width, height };
+}
+
 function batchSettingsFromConfig(config: Record<string, unknown>): BatchSettings | undefined {
   const nested = metadataObject(config.batchSettings);
   const concurrency = concurrencyFromConfigValue(config.batchConcurrency ?? nested.concurrency);
@@ -689,6 +702,7 @@ function workflowSettingsForModule(project: Project, moduleNode: CanvasNode) {
   const config = connectedConfigForModule(project, moduleNode);
   return {
     outputCount: outputCountFromConfigValue(config.outputCount) ?? moduleNode.generation.outputCount,
+    mask: maskFromConfigValue(config.mask),
     batchSettings: batchSettingsFromConfig(config)
   };
 }
@@ -1222,7 +1236,8 @@ export function applyGenerationResultToCanvas(
         creditCost: result.creditCost,
         remoteSource: output.source,
         prompt: request.prompt,
-        modelId: request.modelId
+        modelId: request.modelId,
+        mask: request.mask
       }
     });
   });
@@ -1755,6 +1770,7 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
       modelId: nextNode.generation.modelId,
       prompt,
       outputCount: settings.outputCount,
+      mask: settings.mask,
       batchSettings: settings.batchSettings,
       referenceNodeIds,
       referenceCount: referenceNodeIds.length,
@@ -1788,6 +1804,7 @@ export function buildWorkflowGenerationRequests(workspace: Workspace, projectId:
     referenceNodeIds: step.referenceNodeIds,
     outputCount: step.outputCount,
     operation: step.operation,
+    mask: step.mask,
     batchSettings: step.batchSettings
   }));
 }
@@ -1827,6 +1844,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
         operation,
         creditCost,
         outputCount: settings.outputCount,
+        mask: settings.mask,
         batchSettings: settings.batchSettings,
         prompt,
         modelId: moduleNode.generation.modelId
@@ -1882,6 +1900,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
         operation,
         moduleType: moduleNode.moduleType,
         referenceCount: referenceNodeIds.length,
+        mask: settings.mask,
         batchSettings: settings.batchSettings,
         outputs: generatedOutput ? [generatedOutput] : [],
         createdAt: now()

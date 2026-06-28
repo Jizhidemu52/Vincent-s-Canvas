@@ -138,6 +138,7 @@ export interface GenerationJob {
   priceCents?: number;
   currency?: ModelDefinition["currency"];
   referenceCount: number;
+  mask?: GenerationRequest["mask"];
   batchSettings?: GenerationRequest["batchSettings"];
   outputs: AssetInput[];
   createdAt: string;
@@ -818,6 +819,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
         outputCount: request.outputCount,
         creditCost: 0,
         referenceCount: request.referenceNodeIds.length,
+        mask: request.mask,
         batchSettings: request.batchSettings,
         outputs: [],
         createdAt,
@@ -854,6 +856,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
     designerName: account.profile.designerName,
     operation: request.operation,
     referenceCount: request.referenceNodeIds.length,
+    mask: request.mask,
     batchSettings: request.batchSettings,
     outputs: result.outputs,
     createdAt
@@ -878,6 +881,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
       priceCents: model.priceCents === undefined ? undefined : model.priceCents * request.outputCount,
       currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
       referenceCount: request.referenceNodeIds.length,
+      mask: request.mask,
       batchSettings: request.batchSettings,
       outputs: result.outputs,
       createdAt,

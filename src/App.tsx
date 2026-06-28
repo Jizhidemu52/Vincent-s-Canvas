@@ -159,6 +159,18 @@ function clampBatchConcurrency(value: number) {
   return Math.min(8, Math.max(1, Number.isFinite(value) ? Math.round(value) : 1));
 }
 
+function clampMaskMetric(value: number) {
+  return Math.min(100, Math.max(0, Number.isFinite(value) ? Math.round(value) : 0));
+}
+
+function maskFromMetadata(value: unknown): MaskSelection | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const mask = value as Partial<MaskSelection>;
+  return typeof mask.x === "number" && typeof mask.y === "number" && typeof mask.width === "number" && typeof mask.height === "number"
+    ? { x: mask.x, y: mask.y, width: mask.width, height: mask.height }
+    : undefined;
+}
+
 function historyEntryToAuditEntry(entry: HistoryEntry): AdminAuditEntry {
   return {
     ...entry,
@@ -2480,6 +2492,15 @@ function PromptCard({
   const selectedBatchConcurrency =
     typeof selectedNode?.metadata.batchConcurrency === "number" ? selectedNode.metadata.batchConcurrency : 1;
   const selectedFailurePolicy: BatchFailurePolicy = selectedNode?.metadata.failurePolicy === "stop" ? "stop" : "continue";
+  const selectedMask = maskFromMetadata(selectedNode?.metadata.mask) ?? DEFAULT_MASK_SELECTION;
+  function updateMaskMetric(key: keyof MaskSelection, value: number) {
+    onUpdateMetadata({
+      mask: {
+        ...selectedMask,
+        [key]: clampMaskMetric(value)
+      }
+    });
+  }
   return (
     <aside className="prompt-card">
       <div className="prompt-title">
@@ -2566,6 +2587,52 @@ function PromptCard({
               <option value="stop">Stop on failure</option>
             </select>
           </label>
+          <div className="mask-grid" aria-label="Workflow mask settings">
+            <label>
+              <span>Mask X</span>
+              <input
+                aria-label="Mask X"
+                type="number"
+                min={0}
+                max={100}
+                value={selectedMask.x}
+                onChange={(event) => updateMaskMetric("x", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              <span>Mask Y</span>
+              <input
+                aria-label="Mask Y"
+                type="number"
+                min={0}
+                max={100}
+                value={selectedMask.y}
+                onChange={(event) => updateMaskMetric("y", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              <span>Mask width</span>
+              <input
+                aria-label="Mask width"
+                type="number"
+                min={1}
+                max={100}
+                value={selectedMask.width}
+                onChange={(event) => updateMaskMetric("width", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              <span>Mask height</span>
+              <input
+                aria-label="Mask height"
+                type="number"
+                min={1}
+                max={100}
+                value={selectedMask.height}
+                onChange={(event) => updateMaskMetric("height", Number(event.target.value))}
+              />
+            </label>
+          </div>
         </div>
       ) : null}
       <small className="api-notice" aria-live="polite">{apiNotice}</small>
@@ -3382,6 +3449,7 @@ function RightDock({
     typeof selectedNode?.metadata.batchConcurrency === "number" ? selectedNode.metadata.batchConcurrency : undefined;
   const selectedFailurePolicy =
     selectedNode?.metadata.failurePolicy === "stop" ? "stop" : selectedNode?.metadata.failurePolicy === "continue" ? "continue" : undefined;
+  const selectedMask = maskFromMetadata(selectedNode?.metadata.mask);
   const batchSummary = summarizeBatchQueue(project.batchQueue);
   const hasRetryableBatchItems = project.batchQueue.some((item) => item.status === "error" || item.status === "cancelled");
   const hasCancellableBatchItems = project.batchQueue.some((item) => item.status === "queued" || item.status === "processing");
@@ -3439,6 +3507,11 @@ function RightDock({
               {selectedBatchConcurrency || selectedFailurePolicy ? (
                 <span>
                   Batch: {selectedBatchConcurrency ?? 1} concurrent / {selectedFailurePolicy === "stop" ? "stop on failure" : "continue on failure"}
+                </span>
+              ) : null}
+              {selectedMask ? (
+                <span>
+                  Mask: x {selectedMask.x} / y {selectedMask.y} / w {selectedMask.width} / h {selectedMask.height}
                 </span>
               ) : null}
               {selectedNode.inputs.length ? <span>Inputs: {selectedNode.inputs.map((port) => port.label).join(", ")}</span> : null}
