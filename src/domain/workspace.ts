@@ -266,6 +266,8 @@ export interface WorkflowModuleDefinition {
   nodeType: NodeType;
   operation: OperationType;
   apiPath: GenerationApiPath;
+  inputPorts: NodePort[];
+  outputPorts: NodePort[];
   label: string;
   detail: string;
   defaultPrompt: string;
@@ -278,6 +280,11 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     nodeType: "config",
     operation: "generate",
     apiPath: "/api/generations",
+    inputPorts: [
+      { id: "image", type: "image", label: "Images" },
+      { id: "text", type: "text", label: "Prompt" }
+    ],
+    outputPorts: [{ id: "result", type: "result", label: "Generated result" }],
     label: "Generate",
     detail: "new design from references",
     defaultPrompt: "Generate a new fashion design from the upstream references and prompt.",
@@ -288,6 +295,12 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     nodeType: "edit",
     operation: "edit",
     apiPath: "/api/edits",
+    inputPorts: [
+      { id: "image", type: "image", label: "Image" },
+      { id: "text", type: "text", label: "Prompt" },
+      { id: "config", type: "config", label: "Mask config" }
+    ],
+    outputPorts: [{ id: "result", type: "result", label: "Edited result" }],
     label: "Edit",
     detail: "controlled image edit",
     defaultPrompt: "Make a controlled local fashion edit while preserving pose and garment structure.",
@@ -298,6 +311,8 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     nodeType: "upscale",
     operation: "upscale",
     apiPath: "/api/upscale",
+    inputPorts: [{ id: "image", type: "image", label: "Image" }],
+    outputPorts: [{ id: "result", type: "result", label: "Upscaled result" }],
     label: "Upscale",
     detail: "clean high-res output",
     defaultPrompt: "Upscale while preserving garment texture, embroidery, and clean product edges.",
@@ -308,6 +323,8 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     nodeType: "removeBg",
     operation: "removeBackground",
     apiPath: "/api/remove-bg",
+    inputPorts: [{ id: "image", type: "image", label: "Image" }],
+    outputPorts: [{ id: "result", type: "result", label: "Cutout result" }],
     label: "Remove BG",
     detail: "cutout for product use",
     defaultPrompt: "Remove the background and keep clean product edges for internal design review.",
@@ -318,6 +335,12 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     nodeType: "batch",
     operation: "generate",
     apiPath: "/api/generations",
+    inputPorts: [
+      { id: "image", type: "image", label: "Images" },
+      { id: "text", type: "text", label: "Batch prompt" },
+      { id: "config", type: "config", label: "Batch settings" }
+    ],
+    outputPorts: [{ id: "result", type: "result", label: "Batch results" }],
     label: "Batch",
     detail: "same brief across selected images",
     defaultPrompt: "Apply one consistent edit brief to every selected reference image.",
@@ -328,6 +351,8 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     nodeType: "image",
     operation: "generate",
     apiPath: "/api/generations",
+    inputPorts: [{ id: "in", type: "image", label: "Image input" }],
+    outputPorts: [{ id: "out", type: "image", label: "Reference output" }],
     label: "Upload Reference",
     detail: "reference handoff node",
     defaultPrompt: "Use this upload reference as an upstream image input.",
@@ -388,7 +413,17 @@ function defaultGeneration(overrides: Partial<GenerationConfig> = {}): Generatio
   };
 }
 
-function portsFor(type: NodeType): Pick<CanvasNode, "inputs" | "outputs"> {
+function clonePorts(ports: NodePort[]) {
+  return ports.map((port) => ({ ...port }));
+}
+
+function portsFor(type: NodeType, moduleType?: ModuleType): Pick<CanvasNode, "inputs" | "outputs"> {
+  if (moduleType) {
+    const definition = WORKFLOW_MODULE_REGISTRY.find((item) => item.moduleType === moduleType);
+    if (definition) {
+      return { inputs: clonePorts(definition.inputPorts), outputs: clonePorts(definition.outputPorts) };
+    }
+  }
   if (type === "image" || type === "text") {
     return {
       inputs: [{ id: "in", type: type === "text" ? "text" : "image", label: "Input" }],
@@ -426,7 +461,7 @@ function createNode(input: {
   parentId?: string;
   metadata?: Record<string, unknown>;
 }): CanvasNode {
-  const ports = portsFor(input.type);
+  const ports = portsFor(input.type, input.moduleType);
   const transform = {
     x: input.x,
     y: input.y,

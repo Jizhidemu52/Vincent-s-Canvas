@@ -3198,6 +3198,8 @@ function RightDock({
               {selectedCreditCost !== undefined ? (
                 <span>{selectedCreditCost} credits · {selectedOutputCount} output{selectedOutputCount === 1 ? "" : "s"}</span>
               ) : null}
+              {selectedNode.inputs.length ? <span>Inputs: {selectedNode.inputs.map((port) => port.label).join(", ")}</span> : null}
+              {selectedNode.outputs.length ? <span>Outputs: {selectedNode.outputs.map((port) => port.label).join(", ")}</span> : null}
               {selectedPrompt?.trim() ? <p>{selectedPrompt}</p> : null}
             </section>
           )}

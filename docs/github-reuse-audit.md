@@ -37,7 +37,7 @@ The current repository already includes:
 - Left-panel and inline image model/prompt generation.
 - Toolbar operations for upscale, remove background, download, save asset, magic edit, and mask edit.
 - Lightweight workflow modules and connections.
-- Typed first-pass workflow module registry for `Generate / Edit / Upscale / Remove BG / Batch / Upload Reference`, including backend API path mapping for generation request builders.
+- Typed first-pass workflow module registry for `Generate / Edit / Upscale / Remove BG / Batch / Upload Reference`, including backend API path mapping, input/output port definitions, and selected-node inspector summaries.
 - Batch import and processing.
 - T8-inspired batch queue status summaries, failed-item retry batches, cancellation, and merge-safe retry results.
 - Basketikun-inspired prompt library service boundary with backend-owned designer prompt presets and attribution.
@@ -82,7 +82,7 @@ Local inspection notes:
 | --- | --- | --- | --- |
 | Prompt library UI and prompt detail/selection behavior | `basketikun/infinite-canvas` | `web/src/components/prompts/*`, `web/src/services/api/prompts.ts` | Adapted backend prompt API boundary and designer attribution on 2026-06-28; richer prompt cards/details remain later. |
 | Asset persistence/search and image storage boundaries | `basketikun/infinite-canvas` | `use-asset-store.ts`, `image-storage.ts`, `file-storage.ts`, `app-sync.ts` | Adapt storage ideas to backend-owned assets; do not keep front-end-only API keys. |
-| Workflow node registry and port typing | `T8mars/T8-penguin-canvas` | `src/config/nodeRegistry.ts`, `src/config/portTypes.ts`, node components | Adapted first-pass typed module registry and backend endpoint mapping on 2026-06-28; next step is richer port compatibility and UI node inspector fields. |
+| Workflow node registry and port typing | `T8mars/T8-penguin-canvas` | `src/config/nodeRegistry.ts`, `src/config/portTypes.ts`, node components | Adapted first-pass typed module registry, backend endpoint mapping, port definitions, and inspector port summaries on 2026-06-28; next step is strict port compatibility during manual connections. |
 | Batch workflow behavior and partial failure tests | `T8mars/T8-penguin-canvas` | `BatchProcessorNode.tsx`, `batchProcessor.ts`, `tests/batchProcessor.test.ts` | Adapted lightweight retry/progress/cancel semantics into current batch queue on 2026-06-28; deeper async worker/concurrency remains later. |
 | RunningHub/ComfyUI provider adapters | `T8mars/T8-penguin-canvas`, `hero8152/Infinite-Canvas` | T8 backend provider files; hero settings/workflow JSON | Start from T8 provider registry and tests, then cross-check hero settings screens/workflow fixtures. |
 | API/provider settings UI | `hero8152/Infinite-Canvas` | `static/js/api-settings.js`, `static/js/comfyui-settings.js`, related HTML | Reuse field set and connection-test ideas, but keep secrets server-side in this product. |
@@ -90,7 +90,7 @@ Local inspection notes:
 
 ## Next Reuse-First Implementation Order
 
-1. Continue migrating T8-style port compatibility and node inspector fields so each module exposes typed image/text/config/result inputs consistently.
+1. Continue migrating T8-style strict port compatibility so manual node connections validate image/text/config/result ports before they are accepted.
 2. Extend the current T8-inspired batch queue with async worker concurrency, pause/resume, and persistent provider job progress after real provider adapters land.
 3. Expand basketikun-style prompt cards/details in the current prompt dock now that server-side prompt presets and designer attribution exist.
 4. Add RunningHub and ComfyUI live-ready provider adapters by porting T8 provider registry tests and reconciling hero workflow JSON/settings fields.

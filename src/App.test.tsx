@@ -1509,6 +1509,20 @@ describe("Designer canvas app shell", () => {
     expect(screen.getAllByText("Use this upload reference as an upstream image input.").length).toBeGreaterThan(0);
   });
 
+  it("shows typed input and output ports for the selected workflow node", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    await user.click(screen.getByRole("button", { name: "Edit node" }));
+
+    expect(await screen.findByRole("button", { name: /Workflow edit module/i })).toBeInTheDocument();
+    const selectedTask = screen.getByLabelText("Selected node task");
+    expect(selectedTask).toHaveTextContent("Inputs: Image, Prompt, Mask config");
+    expect(selectedTask).toHaveTextContent("Outputs: Edited result");
+  });
+
   it("chains workflow modules from module output ports and runs them in order", async () => {
     const user = userEvent.setup();
     await login(user);

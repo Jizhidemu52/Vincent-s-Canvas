@@ -135,6 +135,56 @@ describe("designer canvas workspace behavior", () => {
     expect(getWorkflowApiPathForOperation("removeBackground")).toBe("/api/remove-bg");
   });
 
+  it("keeps workflow module ports in the registry and applies them to created nodes", () => {
+    const editDefinition = getWorkflowModuleDefinition("edit");
+    const batchDefinition = getWorkflowModuleDefinition("batch");
+
+    expect(editDefinition.inputPorts).toEqual([
+      { id: "image", type: "image", label: "Image" },
+      { id: "text", type: "text", label: "Prompt" },
+      { id: "config", type: "config", label: "Mask config" }
+    ]);
+    expect(editDefinition.outputPorts).toEqual([{ id: "result", type: "result", label: "Edited result" }]);
+    expect(batchDefinition.inputPorts).toEqual([
+      { id: "image", type: "image", label: "Images" },
+      { id: "text", type: "text", label: "Batch prompt" },
+      { id: "config", type: "config", label: "Batch settings" }
+    ]);
+
+    const { workspace, project } = createProject(createInitialWorkspace(), "Typed ports");
+    const first = addAssetToProject(workspace, project.id, {
+      name: "front.png",
+      source: "front",
+      width: 500,
+      height: 700
+    });
+    const second = addAssetToProject(first, project.id, {
+      name: "back.png",
+      source: "back",
+      width: 500,
+      height: 700
+    });
+    const [front, back] = second.projects[0].nodes;
+
+    const withEdit = createWorkflowModuleFromSelection(second, project.id, [front.id], {
+      moduleType: "edit",
+      prompt: "Change trim color",
+      modelId: "gpt-image-2-medium"
+    });
+    const editNode = withEdit.projects[0].nodes.find((node) => node.moduleType === "edit")!;
+    const withBatch = createWorkflowModuleFromSelection(withEdit, project.id, [front.id, back.id], {
+      moduleType: "batch",
+      prompt: "Apply a shared cleanup",
+      modelId: "gpt-image-2-medium"
+    });
+    const batchNode = withBatch.projects[0].nodes.find((node) => node.moduleType === "batch")!;
+
+    expect(editNode.inputs).toEqual(editDefinition.inputPorts);
+    expect(editNode.outputs).toEqual(editDefinition.outputPorts);
+    expect(batchNode.inputs).toEqual(batchDefinition.inputPorts);
+    expect(batchNode.outputs).toEqual(batchDefinition.outputPorts);
+  });
+
   it("builds backend generation requests from workflow registry definitions", () => {
     const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Backend workflow requests");
     const withAsset = addAssetToProject(workspace, project.id, {
