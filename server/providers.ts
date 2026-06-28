@@ -223,6 +223,25 @@ function providerStatusUrl(body: unknown) {
   return stringValue(object.statusUrl ?? object.pollUrl ?? object.pollingUrl);
 }
 
+function messageWithCode(message: string | undefined, code: string | undefined) {
+  if (!message) return undefined;
+  return code ? `${message} (${code})` : message;
+}
+
+function providerErrorMessage(body: unknown) {
+  const object = objectValue(body);
+  const nestedError = objectValue(object.error);
+  const detail = objectValue(object.detail);
+  const firstArrayError = Array.isArray(object.errors) ? objectValue(object.errors[0]) : {};
+  return (
+    messageWithCode(stringValue(object.errorMessage), stringValue(object.code)) ??
+    messageWithCode(stringValue(object.message), stringValue(object.code)) ??
+    messageWithCode(stringValue(nestedError.message), stringValue(nestedError.code)) ??
+    messageWithCode(stringValue(detail.message), stringValue(detail.code)) ??
+    messageWithCode(stringValue(firstArrayError.message), stringValue(firstArrayError.code))
+  );
+}
+
 function providerJobId(body: unknown) {
   const object = objectValue(body);
   return stringValue(object.providerJobId ?? object.jobId ?? object.id ?? object.taskId);
@@ -243,7 +262,7 @@ function publishProgress(options: LiveProviderExecutionOptions, progress: Provid
 
 function assertProviderResponse(response: ProviderFetchResponse) {
   if (!response.ok) {
-    const message = stringValue(objectValue(response.body).errorMessage ?? objectValue(response.body).message);
+    const message = providerErrorMessage(response.body);
     throw new Error(message ?? `Provider request failed with ${response.status}`);
   }
   return response.body;
@@ -302,9 +321,9 @@ export async function executeLiveProviderPayload(
       };
     }
     if (status === "failed" || status === "error") {
-      progress = mergeProgress(body, { ...progress, status: "failed", errorMessage: stringValue(objectValue(body).errorMessage ?? objectValue(body).message) });
+      progress = mergeProgress(body, { ...progress, status: "failed", errorMessage: providerErrorMessage(body) });
       publishProgress(options, progress);
-      throw new Error(stringValue(objectValue(body).errorMessage ?? objectValue(body).message) ?? "Provider execution failed");
+      throw new Error(providerErrorMessage(body) ?? "Provider execution failed");
     }
     const statusUrl = providerStatusUrl(body);
     if (!statusUrl) break;

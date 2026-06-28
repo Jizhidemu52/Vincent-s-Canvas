@@ -251,7 +251,7 @@ describe("HTTP API server", () => {
       providerFetchJson: async () => ({
         ok: false,
         status: 503,
-        body: { errorMessage: "Provider unavailable" }
+        body: { error: { message: "Provider unavailable", code: "UPSTREAM_UNAVAILABLE" } }
       })
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -281,10 +281,10 @@ describe("HTTP API server", () => {
       const jobs = (await (await fetch(`${baseUrl}/api/admin/jobs`, { headers: { "x-user-id": "admin@company.local" } })).json()) as Array<Record<string, unknown>>;
 
       expect(response.status).toBe(400);
-      expect(await response.json()).toMatchObject({ status: "failed", errorMessage: "Provider unavailable" });
+      expect(await response.json()).toMatchObject({ status: "failed", errorMessage: "Provider unavailable (UPSTREAM_UNAVAILABLE)" });
       expect(profile.creditBalance).toBe(10);
       expect(history).toHaveLength(0);
-      expect(jobs[0]).toMatchObject({ status: "failed", creditCost: 0, errorMessage: "Provider unavailable" });
+      expect(jobs[0]).toMatchObject({ status: "failed", creditCost: 0, errorMessage: "Provider unavailable (UPSTREAM_UNAVAILABLE)" });
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));

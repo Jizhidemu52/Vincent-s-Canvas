@@ -346,4 +346,57 @@ describe("provider adapters", () => {
     ).rejects.toThrow("Provider secret OPENAI_API_KEY is not configured");
     expect(fetchJson).not.toHaveBeenCalled();
   });
+
+  it("normalizes nested OpenAI-style provider errors", async () => {
+    const providerRequest = request();
+    const payload = buildProviderPayload(providerRequest, openAiModel, {
+      mode: "live-ready",
+      endpointUrl: "https://api.openai.example/v1/images",
+      configuredSecrets: ["OPENAI_API_KEY"],
+      secretConfigured: true
+    });
+
+    await expect(
+      executeLiveProviderPayload(payload, providerRequest, openAiModel, "history-openai-error", 2, {
+        resolveSecret: (name) => (name === "OPENAI_API_KEY" ? "sk-live-secret" : undefined),
+        fetchJson: async () => ({
+          ok: false,
+          status: 429,
+          body: { error: { message: "OpenAI quota exceeded", code: "rate_limit_exceeded" } }
+        })
+      })
+    ).rejects.toThrow("OpenAI quota exceeded (rate_limit_exceeded)");
+  });
+
+  it("normalizes workflow provider array errors into progress and thrown messages", async () => {
+    const providerRequest = request({ modelId: runningHubModel.id });
+    const payload = buildProviderPayload(providerRequest, runningHubModel, {
+      mode: "live-ready",
+      endpointUrl: "https://runninghub.example/api/run",
+      configuredSecrets: ["RUNNINGHUB_API_KEY"],
+      secretConfigured: true
+    });
+    const progressSnapshots: unknown[] = [];
+
+    await expect(
+      executeLiveProviderPayload(payload, providerRequest, runningHubModel, "history-rh-error", 8, {
+        resolveSecret: (name) => (name === "RUNNINGHUB_API_KEY" ? "rh-live-secret" : undefined),
+        onProgress: (progress) => progressSnapshots.push(progress),
+        fetchJson: async () => ({
+          ok: true,
+          status: 200,
+          body: {
+            status: "failed",
+            jobId: "rh-job-error",
+            errors: [{ message: "RunningHub workflow validation failed", code: "INVALID_WORKFLOW" }]
+          }
+        })
+      })
+    ).rejects.toThrow("RunningHub workflow validation failed (INVALID_WORKFLOW)");
+    expect(progressSnapshots[progressSnapshots.length - 1]).toMatchObject({
+      providerJobId: "rh-job-error",
+      status: "failed",
+      errorMessage: "RunningHub workflow validation failed (INVALID_WORKFLOW)"
+    });
+  });
 });
