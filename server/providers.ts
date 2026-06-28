@@ -29,7 +29,21 @@ export type ProviderRuntimeSettingsMap = Partial<Record<ProviderName, ProviderRu
 
 export interface ProviderAdapter {
   provider: ProviderName;
-  execute(request: GenerationRequest, model: ModelDefinition, historyId: string, creditCost: number): GenerationResult;
+  execute(
+    request: GenerationRequest,
+    model: ModelDefinition,
+    historyId: string,
+    creditCost: number,
+    runtimeSettings?: ProviderRuntimeSettings
+  ): GenerationResult;
+}
+
+export interface ProviderPayload {
+  provider: ProviderName;
+  adapterId: string;
+  endpointUrl?: string;
+  secretNames: string[];
+  body: Record<string, unknown>;
 }
 
 interface ProviderConfig {
@@ -92,7 +106,60 @@ function dimensionsForRequest(request: GenerationRequest) {
   return { width: fallback, height: fallback };
 }
 
-function mockExecute(request: GenerationRequest, model: ModelDefinition, historyId: string, creditCost: number): GenerationResult {
+function compactObject(input: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
+}
+
+function imageProviderBody(request: GenerationRequest, model: ModelDefinition) {
+  return compactObject({
+    model: model.id,
+    operation: request.operation,
+    prompt: request.prompt,
+    n: request.outputCount,
+    size: request.providerSettings?.size,
+    quality: request.providerSettings?.quality,
+    preset: request.providerSettings?.preset,
+    references: request.referenceNodeIds,
+    mask: request.mask,
+    batchSettings: request.batchSettings
+  });
+}
+
+function workflowProviderBody(request: GenerationRequest, model: ModelDefinition) {
+  return {
+    workflowId: model.id,
+    operation: request.operation,
+    inputs: compactObject({
+      prompt: request.prompt,
+      references: request.referenceNodeIds,
+      outputCount: request.outputCount,
+      providerSettings: request.providerSettings,
+      mask: request.mask,
+      batchSettings: request.batchSettings
+    })
+  };
+}
+
+export function buildProviderPayload(request: GenerationRequest, model: ModelDefinition, runtimeSettings?: ProviderRuntimeSettings): ProviderPayload {
+  const config = providerConfigs[model.provider];
+  const isWorkflowProvider = model.provider === "runninghub" || model.provider === "comfyui";
+  return {
+    provider: model.provider,
+    adapterId: config.adapterId,
+    endpointUrl: runtimeSettings?.endpointUrl,
+    secretNames: configuredSecrets(model.provider, runtimeSettings),
+    body: isWorkflowProvider ? workflowProviderBody(request, model) : imageProviderBody(request, model)
+  };
+}
+
+function mockExecute(
+  request: GenerationRequest,
+  model: ModelDefinition,
+  historyId: string,
+  creditCost: number,
+  runtimeSettings?: ProviderRuntimeSettings
+): GenerationResult {
+  buildProviderPayload(request, model, runtimeSettings);
   const dimensions = dimensionsForRequest(request);
   return {
     status: "succeeded",
@@ -122,12 +189,18 @@ const adapters = new Map<ProviderName, ProviderAdapter>([
   ["internal", createAdapter("internal")]
 ]);
 
-export function runProviderModel(request: GenerationRequest, model: ModelDefinition, historyId: string, creditCost: number): GenerationResult {
+export function runProviderModel(
+  request: GenerationRequest,
+  model: ModelDefinition,
+  historyId: string,
+  creditCost: number,
+  providerSettings: ProviderRuntimeSettingsMap = {}
+): GenerationResult {
   const adapter = adapters.get(model.provider);
   if (!adapter) {
     throw new Error(`Provider adapter not configured for ${model.provider}`);
   }
-  return adapter.execute(request, model, historyId, creditCost);
+  return adapter.execute(request, model, historyId, creditCost, providerSettings[model.provider]);
 }
 
 export function getProviderHealth(models: ModelDefinition[], settings: ProviderRuntimeSettingsMap = {}): ProviderHealth[] {

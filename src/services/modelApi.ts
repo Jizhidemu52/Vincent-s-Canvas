@@ -126,6 +126,13 @@ export interface AdminGenerationJob {
   mask?: GenerationRequest["mask"];
   batchSettings?: GenerationRequest["batchSettings"];
   providerSettings?: GenerationRequest["providerSettings"];
+  providerPayload?: {
+    provider: ModelDefinition["provider"];
+    adapterId: string;
+    endpointUrl?: string;
+    secretNames: string[];
+    body: Record<string, unknown>;
+  };
   outputs?: AssetInput[];
   createdAt: string;
   updatedAt: string;

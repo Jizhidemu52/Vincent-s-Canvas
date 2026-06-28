@@ -13,11 +13,13 @@ import {
   type Workspace
 } from "../src/domain/workspace";
 import {
+  buildProviderPayload,
   getProviderHealth,
   providerNames,
   runProviderModel,
   type ProviderHealth,
   type ProviderName,
+  type ProviderPayload,
   type ProviderRuntimeSettingsMap
 } from "./providers";
 
@@ -141,6 +143,7 @@ export interface GenerationJob {
   mask?: GenerationRequest["mask"];
   batchSettings?: GenerationRequest["batchSettings"];
   providerSettings?: GenerationRequest["providerSettings"];
+  providerPayload?: ProviderPayload;
   outputs: AssetInput[];
   createdAt: string;
   updatedAt: string;
@@ -798,9 +801,11 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
   const duplicateKey = scopedRequestId(requestId, userId);
   const createdAt = new Date().toISOString();
   let result: GenerationResult;
+  let providerPayload: ProviderPayload | undefined;
 
   try {
-    result = runProviderModel(request, model, historyId, cost);
+    result = runProviderModel(request, model, historyId, cost, state.providerSettings);
+    providerPayload = buildProviderPayload(request, model, state.providerSettings[model.provider]);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Provider execution failed";
     state.generationJobs = [
@@ -887,6 +892,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
       mask: request.mask,
       batchSettings: request.batchSettings,
       providerSettings: request.providerSettings,
+      providerPayload,
       outputs: result.outputs,
       createdAt,
       updatedAt: createdAt,

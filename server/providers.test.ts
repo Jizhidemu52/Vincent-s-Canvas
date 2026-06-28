@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getProviderHealth, runProviderModel } from "./providers";
+import { buildProviderPayload, getProviderHealth, runProviderModel } from "./providers";
 import type { GenerationRequest, ModelDefinition } from "../src/domain/workspace";
 
 const openAiModel: ModelDefinition = {
@@ -18,6 +18,15 @@ const nanoBananaModel: ModelDefinition = {
   group: "Trending models",
   capability: ["generate", "edit"],
   cost: 11
+};
+
+const runningHubModel: ModelDefinition = {
+  id: "runninghub-fashion-workflow",
+  name: "RunningHub Fashion Workflow",
+  provider: "runninghub",
+  group: "Operations",
+  capability: ["generate", "edit", "upscale", "removeBackground"],
+  cost: 8
 };
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
@@ -127,6 +136,80 @@ describe("provider adapters", () => {
     expect(result.outputs[0]).toMatchObject({
       width: 1536,
       height: 1024
+    });
+  });
+
+  it("maps OpenAI image requests with typed provider settings without secret values", () => {
+    const payload = buildProviderPayload(
+      request({
+        referenceNodeIds: ["reference-front"],
+        outputCount: 3,
+        providerSettings: { size: "1536x1024", quality: "high", preset: "lookbook-cleanup" }
+      }),
+      openAiModel,
+      {
+        mode: "live-ready",
+        endpointUrl: "https://api.openai.example/v1/images",
+        configuredSecrets: ["OPENAI_API_KEY"],
+        secretConfigured: true
+      }
+    );
+
+    expect(payload).toMatchObject({
+      provider: "openai",
+      adapterId: "openai-image-adapter",
+      endpointUrl: "https://api.openai.example/v1/images",
+      secretNames: ["OPENAI_API_KEY"],
+      body: {
+        model: "gpt-image-2-low",
+        operation: "generate",
+        prompt: "make a clean fashion product image",
+        n: 3,
+        size: "1536x1024",
+        quality: "high",
+        preset: "lookbook-cleanup",
+        references: ["reference-front"]
+      }
+    });
+    expect(JSON.stringify(payload)).not.toContain("sk-admin-secret");
+  });
+
+  it("maps workflow providers with mask, batch, and provider settings", () => {
+    const payload = buildProviderPayload(
+      request({
+        modelId: runningHubModel.id,
+        operation: "edit",
+        referenceNodeIds: ["original-node"],
+        mask: { x: 10, y: 20, width: 300, height: 240 },
+        batchSettings: { concurrency: 2, failurePolicy: "continue" },
+        providerSettings: { size: "1024x1536", quality: "medium", preset: "catalog-retouch" }
+      }),
+      runningHubModel,
+      {
+        mode: "live-ready",
+        endpointUrl: "https://runninghub.example/api/run",
+        configuredSecrets: ["RUNNINGHUB_API_KEY"],
+        secretConfigured: true
+      }
+    );
+
+    expect(payload).toMatchObject({
+      provider: "runninghub",
+      adapterId: "runninghub-workflow-adapter",
+      endpointUrl: "https://runninghub.example/api/run",
+      secretNames: ["RUNNINGHUB_API_KEY"],
+      body: {
+        workflowId: "runninghub-fashion-workflow",
+        operation: "edit",
+        inputs: {
+          prompt: "make a clean fashion product image",
+          references: ["original-node"],
+          outputCount: 2,
+          providerSettings: { size: "1024x1536", quality: "medium", preset: "catalog-retouch" },
+          mask: { x: 10, y: 20, width: 300, height: 240 },
+          batchSettings: { concurrency: 2, failurePolicy: "continue" }
+        }
+      }
     });
   });
 });

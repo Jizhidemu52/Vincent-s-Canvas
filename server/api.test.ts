@@ -149,6 +149,43 @@ describe("backend hosted mock API", () => {
     });
   });
 
+  it("stores provider payload mapping in admin jobs without secret values", () => {
+    const state = createServerState({ creditBalance: 30 });
+    const providerSettings = { size: "1536x1024", quality: "high", preset: "lookbook-cleanup" };
+
+    configureProviderSettings(
+      state,
+      {
+        provider: "openai",
+        mode: "live-ready",
+        endpointUrl: "https://api.openai.example/v1/images",
+        secretName: "OPENAI_API_KEY",
+        secretValue: "sk-admin-secret"
+      },
+      "admin@company.local"
+    );
+    callApi(state, "/api/generations", request({ outputCount: 1, providerSettings }), "provider-payload", "alice@company.local");
+
+    const jobs = callApi(state, "/api/admin/jobs", undefined, undefined, "admin@company.local") as ReturnType<typeof createServerState>["generationJobs"];
+
+    expect(jobs[0]).toMatchObject({
+      providerPayload: {
+        provider: "openai",
+        adapterId: "openai-image-adapter",
+        endpointUrl: "https://api.openai.example/v1/images",
+        secretNames: ["OPENAI_API_KEY"],
+        body: {
+          model: "gpt-image-2-low",
+          n: 1,
+          size: "1536x1024",
+          quality: "high",
+          preset: "lookbook-cleanup"
+        }
+      }
+    });
+    expect(JSON.stringify(jobs[0])).not.toContain("sk-admin-secret");
+  });
+
   it("rejects invalid prompt before spending credits or writing history", () => {
     const state = createServerState({ creditBalance: 30 });
 

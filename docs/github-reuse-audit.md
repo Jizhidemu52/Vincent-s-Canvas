@@ -41,7 +41,7 @@ The current repository already includes:
 - Batch import and processing.
 - T8-inspired batch queue status summaries, failed-item retry batches, cancellation, and merge-safe retry results.
 - Basketikun-inspired prompt library service boundary with backend-owned designer prompt presets and attribution.
-- Backend-hosted provider registry, profile/history, admin credit adjustment, provider health, and persistence.
+- Backend-hosted provider registry, profile/history, admin credit adjustment, provider health, provider payload mapping, and persistence.
 - Admin credit limits and model pricing controls.
 - Admin generation job logs with designer, model, operation, status, cost, and project context.
 - SQLite-backed platform tables for accounts, credit ledger, projects, nodes, connections, assets, generation history/jobs, model configs, audit logs, and idempotency requests.
@@ -82,16 +82,16 @@ Local inspection notes:
 | --- | --- | --- | --- |
 | Prompt library UI and prompt detail/selection behavior | `basketikun/infinite-canvas` | `web/src/components/prompts/*`, `web/src/services/api/prompts.ts` | Adapted backend prompt API boundary and designer attribution on 2026-06-28; richer prompt cards/details remain later. |
 | Asset persistence/search and image storage boundaries | `basketikun/infinite-canvas` | `use-asset-store.ts`, `image-storage.ts`, `file-storage.ts`, `app-sync.ts` | Adapt storage ideas to backend-owned assets; do not keep front-end-only API keys. |
-| Workflow node registry and port typing | `T8mars/T8-penguin-canvas` | `src/config/nodeRegistry.ts`, `src/config/portTypes.ts`, node components | Adapted first-pass typed module registry, backend endpoint mapping, port definitions, inspector port summaries, strict connection compatibility, compatible module picker filtering, target port labels, drag-time compatible/incompatible highlights, port-level input/output target feedback, true port-specific drop connections, connected text-port prompt execution, connected image/result-port reference execution, connected config-port output-count execution, typed batch settings handoff for concurrency/failure policy, typed edit mask config handoff, and typed provider request settings for size/quality/preset on 2026-06-28; next step is live adapter payload mapping. |
+| Workflow node registry and port typing | `T8mars/T8-penguin-canvas` | `src/config/nodeRegistry.ts`, `src/config/portTypes.ts`, node components | Adapted first-pass typed module registry, backend endpoint mapping, port definitions, inspector port summaries, strict connection compatibility, compatible module picker filtering, target port labels, drag-time compatible/incompatible highlights, port-level input/output target feedback, true port-specific drop connections, connected text-port prompt execution, connected image/result-port reference execution, connected config-port output-count execution, typed batch settings handoff for concurrency/failure policy, typed edit mask config handoff, typed provider request settings for size/quality/preset, and provider payload mapping on 2026-06-28; next step is live adapter execution. |
 | Batch workflow behavior and partial failure tests | `T8mars/T8-penguin-canvas` | `BatchProcessorNode.tsx`, `batchProcessor.ts`, `tests/batchProcessor.test.ts` | Adapted lightweight retry/progress/cancel semantics into current batch queue on 2026-06-28; deeper async worker/concurrency remains later. |
-| RunningHub/ComfyUI provider adapters | `T8mars/T8-penguin-canvas`, `hero8152/Infinite-Canvas` | T8 backend provider files; hero settings/workflow JSON | Start from T8 provider registry and tests, then cross-check hero settings screens/workflow fixtures. |
+| RunningHub/ComfyUI provider adapters | `T8mars/T8-penguin-canvas`, `hero8152/Infinite-Canvas` | T8 backend provider files; hero settings/workflow JSON | Adapted first-pass OpenAI/NanoBanana image payload and RunningHub/ComfyUI workflow payload mapping on 2026-06-28; next step is real HTTP execution, polling, and output normalization. |
 | API/provider settings UI | `hero8152/Infinite-Canvas` | `static/js/api-settings.js`, `static/js/comfyui-settings.js`, related HTML | Reuse field set and connection-test ideas, but keep secrets server-side in this product. |
 | History bulk management | `hero8152/Infinite-Canvas` | `static/js/history-bulk-manager.js` | Use as reference after current team history has filtering, selection, and export needs. |
 
 ## Next Reuse-First Implementation Order
 
-1. Continue migrating T8/hero-style live adapter payload mapping so OpenAI, NanoBanana, RunningHub, and ComfyUI providers consume typed config-node settings instead of only mock output contracts.
+1. Add live-ready provider execution adapters so OpenAI, NanoBanana, RunningHub, and ComfyUI can submit the mapped payloads, poll status, and normalize returned assets without exposing provider secrets.
 2. Extend the current T8-inspired batch queue with real async worker concurrency, pause/resume, stop-on-failure execution, and persistent provider job progress after real provider adapters land.
 3. Expand basketikun-style prompt cards/details in the current prompt dock now that server-side prompt presets and designer attribution exist.
-4. Add RunningHub and ComfyUI live-ready provider adapters by porting T8 provider registry tests and reconciling hero workflow JSON/settings fields.
+4. Add richer RunningHub and ComfyUI workflow fixtures by porting T8 provider registry tests and reconciling hero workflow JSON/settings fields.
 5. Use hero history bulk management ideas for admin/team history filtering and export after real provider output storage is stable.
