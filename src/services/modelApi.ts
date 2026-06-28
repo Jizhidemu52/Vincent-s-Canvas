@@ -1,4 +1,4 @@
-import type { GenerationRequest, GenerationResult, HistoryEntry, ModelDefinition, OperationType, Profile, Workspace } from "../domain/workspace";
+import type { AssetInput, GenerationRequest, GenerationResult, HistoryEntry, ModelDefinition, OperationType, Profile, Workspace } from "../domain/workspace";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -101,6 +101,7 @@ export interface AdminGenerationJob {
   priceCents?: number;
   currency?: ModelDefinition["currency"];
   referenceCount: number;
+  outputs?: AssetInput[];
   createdAt: string;
   updatedAt: string;
   errorMessage?: string;

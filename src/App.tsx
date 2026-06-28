@@ -1674,6 +1674,13 @@ function AdminView({
                   {job.priceCents !== undefined ? <small>Job spend {formatEstimatedSpend(job.priceCents, job.currency)}</small> : null}
                   <small>{job.projectName ?? job.projectId} / {job.modelId}</small>
                   {job.errorMessage && <small>{job.errorMessage}</small>}
+                  {job.outputs?.length ? (
+                    <div className="history-output-strip" aria-label={`Job outputs for ${job.id}`}>
+                      {job.outputs.slice(0, 4).map((output) => (
+                        <img key={`${job.id}-${output.name}`} src={output.source} alt={`Job output ${output.name}`} />
+                      ))}
+                    </div>
+                  ) : null}
                   <small>{job.historyId ?? job.id}</small>
                 </div>
               ))

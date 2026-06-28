@@ -167,6 +167,10 @@ beforeEach(() => {
       priceCents: 620,
       currency: "CNY",
       referenceCount: 1,
+      outputs: [
+        { name: "alice-job-cleanup-1.jpg", source: "/fixtures/alice-job-cleanup-1.jpg", width: 1024, height: 1024 },
+        { name: "alice-job-cleanup-2.jpg", source: "/fixtures/alice-job-cleanup-2.jpg", width: 1024, height: 1024 }
+      ],
       createdAt: "2026-06-28T02:10:00.000Z"
     },
     {
@@ -1067,6 +1071,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Alice Designer · generate")).toBeInTheDocument();
     expect(screen.getByText("succeeded · 14 credits · 2 outputs")).toBeInTheDocument();
     expect(screen.getByText("Job spend 6.20 CNY estimated spend")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Job output alice-job-cleanup-1.jpg" })).toBeInTheDocument();
     expect(screen.getByText("Bob Designer · upscale")).toBeInTheDocument();
     expect(screen.getByText("succeeded · 4 credits · 1 output")).toBeInTheDocument();
     expect(screen.getByText("Job spend 2.40 CNY estimated spend")).toBeInTheDocument();
