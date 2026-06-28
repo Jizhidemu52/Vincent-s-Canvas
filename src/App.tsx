@@ -39,7 +39,8 @@ import {
   UserRound,
   Wand2,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  type LucideIcon
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent, type WheelEvent } from "react";
 import {
@@ -122,6 +123,14 @@ type HomeSection = "Projects" | "History" | "Profile";
 type RightPanel = "context" | "history" | "assets" | "prompts" | "assistant";
 type OpenProjectTarget = { nodeId?: string; historyId?: string };
 const DEFAULT_MASK_SELECTION: MaskSelection = { x: 28, y: 24, width: 44, height: 38 };
+const workflowModuleIcons: Record<ModuleType, LucideIcon> = {
+  generate: Plus,
+  edit: Wand2,
+  upscale: Maximize2,
+  removeBackground: Scissors,
+  batch: Upload,
+  upload: ImagePlus
+};
 
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -3094,12 +3103,14 @@ function RightDock({
           <span>{stats.texts} text nodes</span>
           <span>{stats.modules} modules</span>
           <div className="dock-actions">
-            <button type="button" onClick={() => onAddModule("generate")}><Plus size={13} /> Generate node</button>
-            <button type="button" onClick={() => onAddModule("edit")}><Wand2 size={13} /> Edit node</button>
-            <button type="button" onClick={() => onAddModule("upscale")}><Maximize2 size={13} /> Upscale node</button>
-            <button type="button" onClick={() => onAddModule("removeBackground")}><Scissors size={13} /> Remove BG node</button>
-            <button type="button" onClick={() => onAddModule("batch")}><Upload size={13} /> Batch node</button>
-            <button type="button" onClick={() => onAddModule("upload")}><ImagePlus size={13} /> Upload Reference node</button>
+            {WORKFLOW_MODULE_REGISTRY.map((definition) => {
+              const Icon = workflowModuleIcons[definition.moduleType];
+              return (
+                <button type="button" key={definition.moduleType} onClick={() => onAddModule(definition.moduleType)}>
+                  <Icon size={13} /> {definition.label} node
+                </button>
+              );
+            })}
           </div>
           {selectedNode && (
             <section className="node-task-card" aria-label="Selected node task">

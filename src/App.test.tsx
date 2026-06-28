@@ -1400,6 +1400,11 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "New project" }));
     await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
 
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from fashion-reference.jpg"));
+    fireEvent.pointerUp(window);
+    expect(screen.getByRole("button", { name: /Upload Reference reference handoff node/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
     expect(screen.getByRole("button", { name: "Generate node" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit node" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upscale node" })).toBeInTheDocument();
@@ -1411,6 +1416,12 @@ describe("Designer canvas app shell", () => {
 
     expect(await screen.findByRole("button", { name: /Workflow removeBackground module/i })).toBeInTheDocument();
     expect(screen.getByText("background-cleaner")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    await user.click(screen.getByRole("button", { name: "Upload Reference node" }));
+
+    expect(await screen.findByRole("button", { name: /Workflow upload module/i })).toBeInTheDocument();
+    expect(screen.getAllByText("Use this upload reference as an upstream image input.").length).toBeGreaterThan(0);
   });
 
   it("chains workflow modules from module output ports and runs them in order", async () => {

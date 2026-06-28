@@ -315,7 +315,7 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     moduleType: "upload",
     nodeType: "image",
     operation: "generate",
-    label: "Upload/ref",
+    label: "Upload Reference",
     detail: "reference handoff node",
     defaultPrompt: "Use this upload reference as an upstream image input.",
     defaultModelId: "gpt-image-2-medium"
