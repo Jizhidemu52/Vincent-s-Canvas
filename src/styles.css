@@ -1887,6 +1887,32 @@ button {
   text-align: left;
 }
 
+.asset-tag-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.asset-tag-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+.asset-tag-filters button.active {
+  border-color: #111827;
+  background: #111827;
+  color: #fff;
+}
+
+.asset-tag-filters span {
+  color: inherit;
+  opacity: 0.72;
+}
+
 .batch-queue-log {
   display: grid;
   gap: 6px;

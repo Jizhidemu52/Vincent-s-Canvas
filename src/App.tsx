@@ -3588,6 +3588,7 @@ function RightDock({
 }) {
   const [promptSearch, setPromptSearch] = useState("");
   const [selectedPromptPresetId, setSelectedPromptPresetId] = useState<string | null>(null);
+  const [selectedAssetTag, setSelectedAssetTag] = useState<string | null>(null);
   const normalizedPromptSearch = promptSearch.trim().toLowerCase();
   const filteredPrompts = normalizedPromptSearch
     ? workspace.prompts.filter((prompt) => {
@@ -3595,6 +3596,13 @@ function RightDock({
         return haystack.includes(normalizedPromptSearch);
       })
     : workspace.prompts;
+  const assetTagCounts = Array.from(
+    workspace.assets
+      .flatMap((asset) => asset.tags)
+      .reduce((counts, tag) => counts.set(tag, (counts.get(tag) ?? 0) + 1), new Map<string, number>())
+      .entries()
+  ).sort(([left], [right]) => left.localeCompare(right));
+  const filteredAssets = selectedAssetTag ? workspace.assets.filter((asset) => asset.tags.includes(selectedAssetTag)) : workspace.assets;
   const selectedPromptPreset = workspace.prompts.find((prompt) => prompt.id === selectedPromptPresetId) ?? null;
   const workflowPlan = useMemo(
     () => (selectedNode ? buildWorkflowExecutionPlan(workspace, project.id, selectedNode.id) : undefined),
@@ -3771,12 +3779,38 @@ function RightDock({
       {panel === "assets" && (
         <div className="dock-list">
           <strong>My assets</strong>
-          {workspace.assets.length ? workspace.assets.map((asset) => (
+          {assetTagCounts.length ? (
+            <div className="asset-tag-filters" aria-label="Asset tag filters">
+              {selectedAssetTag ? (
+                <button type="button" onClick={() => setSelectedAssetTag(null)}>
+                  Show all assets
+                </button>
+              ) : null}
+              {assetTagCounts.map(([tag, count]) => (
+                <button
+                  type="button"
+                  key={tag}
+                  className={selectedAssetTag === tag ? "active" : ""}
+                  aria-label={`Filter assets by ${tag}`}
+                  onClick={() => setSelectedAssetTag(tag)}
+                >
+                  {tag} <span>{count}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {selectedAssetTag ? (
+            <small>
+              {filteredAssets.length} asset{filteredAssets.length === 1 ? "" : "s"} tagged {selectedAssetTag}
+            </small>
+          ) : null}
+          {filteredAssets.length ? filteredAssets.map((asset) => (
             <button type="button" key={asset.id} onClick={() => onAssetInsert(asset)}>
               <b>{asset.title}</b>
+              <small>{asset.tags.join(", ")}</small>
               <span>{asset.type} · Use in canvas</span>
             </button>
-          )) : <small>Save a selected node to collect it here</small>}
+          )) : workspace.assets.length ? <small>No assets match this tag</small> : <small>Save a selected node to collect it here</small>}
         </div>
       )}
       {panel === "prompts" && (
