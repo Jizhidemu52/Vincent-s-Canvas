@@ -1335,6 +1335,10 @@ function ProjectsPanel({
 
 function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOpenProject: (projectId: string, target?: OpenProjectTarget) => void }) {
   const [projectFilter, setProjectFilter] = useState("all");
+  const [modelFilter, setModelFilter] = useState("all");
+  const [operationFilter, setOperationFilter] = useState("all");
+  const [designerFilter, setDesignerFilter] = useState("all");
+  const [timeFilter, setTimeFilter] = useState("all");
   const generatedNodes = workspace.projects.flatMap((project) =>
     project.nodes
       .filter((node) => node.kind === "generated" || node.kind === "edit" || node.kind === "operation")
@@ -1348,9 +1352,44 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
       })
     ).entries()
   );
-  const visibleHistory = projectFilter === "all" ? workspace.history : workspace.history.filter((entry) => entry.projectId === projectFilter);
-  const visibleGeneratedNodes =
-    projectFilter === "all" ? generatedNodes : generatedNodes.filter(({ project }) => project.id === projectFilter);
+  const historyModelOptions = Array.from(new Set(workspace.history.map((entry) => entry.modelId).filter(Boolean))).sort();
+  const historyOperationOptions = Array.from(new Set(workspace.history.map((entry) => entry.operation).filter(Boolean))) as OperationType[];
+  const historyDesignerOptions = Array.from(
+    new Map(
+      workspace.history.map((entry) => {
+        const userId = entry.userId ?? entry.designerName ?? workspace.profile.userId;
+        const label = entry.designerName ?? entry.userId ?? workspace.profile.designerName;
+        return [userId, label] as const;
+      })
+    ).entries()
+  ).sort(([, left], [, right]) => left.localeCompare(right));
+  const newestHistoryTime = workspace.history.reduce((latest, entry) => {
+    const time = Date.parse(entry.createdAt);
+    return Number.isFinite(time) ? Math.max(latest, time) : latest;
+  }, 0);
+  const visibleHistory = workspace.history.filter((entry) => {
+    if (projectFilter !== "all" && entry.projectId !== projectFilter) return false;
+    if (modelFilter !== "all" && entry.modelId !== modelFilter) return false;
+    if (operationFilter !== "all" && entry.operation !== operationFilter) return false;
+    if (designerFilter !== "all") {
+      const entryDesigner = entry.userId ?? entry.designerName ?? workspace.profile.userId;
+      if (entryDesigner !== designerFilter) return false;
+    }
+    if (timeFilter === "recent-7" || timeFilter === "recent-30") {
+      const entryTime = Date.parse(entry.createdAt);
+      if (!Number.isFinite(entryTime) || !newestHistoryTime) return false;
+      const days = timeFilter === "recent-7" ? 7 : 30;
+      if (entryTime < newestHistoryTime - days * 24 * 60 * 60 * 1000) return false;
+    }
+    return true;
+  });
+  const visibleHistoryIds = new Set(visibleHistory.map((entry) => entry.id));
+  const visibleGeneratedNodes = generatedNodes.filter(({ project, node }) => {
+    if (projectFilter !== "all" && project.id !== projectFilter) return false;
+    const nodeHistoryId = typeof node.metadata.historyId === "string" ? node.metadata.historyId : undefined;
+    if (nodeHistoryId) return visibleHistoryIds.has(nodeHistoryId);
+    return projectFilter === "all" && modelFilter === "all" && operationFilter === "all" && designerFilter === "all" && timeFilter === "all";
+  });
   function nodeForHistoryOutput(entryId: string, outputName: string, remoteSource: string) {
     return generatedNodes.find(
       ({ node }) => node.metadata.historyId === entryId && (node.metadata.remoteSource === remoteSource || node.name === outputName)
@@ -1366,20 +1405,63 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
           <h2>History</h2>
           <p>Designer generation records, model usage, credit cost, project source and reusable outputs.</p>
         </div>
-        <span>{projectFilter === "all" ? `${workspace.history.length} records` : `${visibleHistory.length} of ${workspace.history.length} records`}</span>
+        <span>{visibleHistory.length === workspace.history.length ? `${workspace.history.length} records` : `${visibleHistory.length} of ${workspace.history.length} records`}</span>
       </div>
-      {historyProjectOptions.length ? (
-        <label className="history-project-filter">
-          <span>Project</span>
-          <select aria-label="History project filter" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
-            <option value="all">All projects</option>
-            {historyProjectOptions.map(([projectId, projectName]) => (
-              <option key={projectId} value={projectId}>
-                {projectName}
-              </option>
-            ))}
-          </select>
-        </label>
+      {workspace.history.length ? (
+        <div className="history-filters" aria-label="History filters">
+          <label>
+            <span>Project</span>
+            <select aria-label="History project filter" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
+              <option value="all">All projects</option>
+              {historyProjectOptions.map(([projectId, projectName]) => (
+                <option key={projectId} value={projectId}>
+                  {projectName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Model</span>
+            <select aria-label="History model filter" value={modelFilter} onChange={(event) => setModelFilter(event.target.value)}>
+              <option value="all">All models</option>
+              {historyModelOptions.map((modelId) => (
+                <option key={modelId} value={modelId}>
+                  {modelId}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Type</span>
+            <select aria-label="History type filter" value={operationFilter} onChange={(event) => setOperationFilter(event.target.value)}>
+              <option value="all">All types</option>
+              {historyOperationOptions.map((operation) => (
+                <option key={operation} value={operation}>
+                  {operation}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Designer</span>
+            <select aria-label="History designer filter" value={designerFilter} onChange={(event) => setDesignerFilter(event.target.value)}>
+              <option value="all">All designers</option>
+              {historyDesignerOptions.map(([userId, designerName]) => (
+                <option key={userId} value={userId}>
+                  {designerName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Time</span>
+            <select aria-label="History time filter" value={timeFilter} onChange={(event) => setTimeFilter(event.target.value)}>
+              <option value="all">All time</option>
+              <option value="recent-7">Last 7 days</option>
+              <option value="recent-30">Last 30 days</option>
+            </select>
+          </label>
+        </div>
       ) : null}
       <div className="history-layout">
         <div className="history-records">
@@ -1392,6 +1474,10 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
                     <strong>{entry.modelId}</strong>
                     <small>{entry.creditCost} credits · {entry.outputCount} output · {entry.referenceCount ?? 0} refs</small>
                   </div>
+                  <small>
+                    {entry.designerName ?? entry.userId ?? workspace.profile.designerName} · {entry.projectName ?? project?.name ?? entry.projectId} ·{" "}
+                    {entry.operation ?? "generate"} · {new Date(entry.createdAt).toLocaleDateString()}
+                  </small>
                   <p>{entry.prompt}</p>
                   {entry.outputs?.length ? (
                     <div className="history-output-strip" aria-label={`History outputs for ${entry.id}`}>

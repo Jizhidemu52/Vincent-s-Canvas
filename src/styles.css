@@ -530,17 +530,26 @@ button {
   font-weight: 800;
 }
 
+.history-filters,
 .history-project-filter {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  width: fit-content;
   margin-bottom: 12px;
   color: #666;
   font-size: 13px;
   font-weight: 750;
 }
 
+.history-filters label,
+.history-project-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-filters select,
 .history-project-filter select {
   border: 1px solid #d8d8d8;
   border-radius: 7px;

@@ -2501,6 +2501,91 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("second project cutout direction")).toBeInTheDocument();
   });
 
+  it("filters home history records by model, type, designer, and recent time window", async () => {
+    backendHistory = [
+      {
+        id: "history-filter-generate",
+        projectId: "project-filter-a",
+        projectName: "Filter campaign",
+        nodeId: "node-filter-a",
+        prompt: "recent generate campaign",
+        modelId: "gpt-image-2-medium",
+        outputCount: 1,
+        creditCost: 7,
+        operation: "generate",
+        referenceCount: 1,
+        userId: "lina@company.local",
+        designerName: "Lina Zhou",
+        createdAt: "2026-06-28T02:00:00.000Z",
+        outputs: [{ name: "recent-generate.jpg", source: "/fixtures/recent-generate.jpg", width: 1024, height: 1024 }]
+      },
+      {
+        id: "history-filter-upscale",
+        projectId: "project-filter-b",
+        projectName: "Filter upscale",
+        nodeId: "node-filter-b",
+        prompt: "recent upscale pass",
+        modelId: "upscale-pro",
+        outputCount: 1,
+        creditCost: 4,
+        operation: "upscale",
+        referenceCount: 1,
+        userId: "maya@company.local",
+        designerName: "Maya Chen",
+        createdAt: "2026-06-27T02:00:00.000Z",
+        outputs: [{ name: "recent-upscale.jpg", source: "/fixtures/recent-upscale.jpg", width: 1024, height: 1024 }]
+      },
+      {
+        id: "history-filter-old-edit",
+        projectId: "project-filter-a",
+        projectName: "Filter campaign",
+        nodeId: "node-filter-c",
+        prompt: "old edit archive",
+        modelId: "nanobanana2",
+        outputCount: 1,
+        creditCost: 11,
+        operation: "edit",
+        referenceCount: 1,
+        userId: "lina@company.local",
+        designerName: "Lina Zhou",
+        createdAt: "2026-05-01T02:00:00.000Z",
+        outputs: [{ name: "old-edit.jpg", source: "/fixtures/old-edit.jpg", width: 1024, height: 1024 }]
+      }
+    ];
+    backendWorkspace = { ...backendWorkspace, history: backendHistory };
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "History" }));
+
+    expect(screen.getByText("recent generate campaign")).toBeInTheDocument();
+    expect(screen.getByText("recent upscale pass")).toBeInTheDocument();
+    expect(screen.getByText("old edit archive")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "History model filter" }), "upscale-pro");
+    expect(screen.queryByText("recent generate campaign")).not.toBeInTheDocument();
+    expect(screen.getByText("recent upscale pass")).toBeInTheDocument();
+    expect(screen.queryByText("old edit archive")).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 3 records")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "History model filter" }), "all");
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type filter" }), "edit");
+    expect(screen.getByText("old edit archive")).toBeInTheDocument();
+    expect(screen.queryByText("recent generate campaign")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "History type filter" }), "all");
+    await user.selectOptions(screen.getByRole("combobox", { name: "History designer filter" }), "maya@company.local");
+    expect(screen.getByText("recent upscale pass")).toBeInTheDocument();
+    expect(screen.queryByText("old edit archive")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "History designer filter" }), "all");
+    await user.selectOptions(screen.getByRole("combobox", { name: "History time filter" }), "recent-7");
+    expect(screen.getByText("recent generate campaign")).toBeInTheDocument();
+    expect(screen.getByText("recent upscale pass")).toBeInTheDocument();
+    expect(screen.queryByText("old edit archive")).not.toBeInTheDocument();
+    expect(screen.getByText("2 of 3 records")).toBeInTheDocument();
+  });
+
   it("calculates profile credit usage against the assigned credit limit", async () => {
     backendProfile = {
       ...backendProfile,
