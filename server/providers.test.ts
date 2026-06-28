@@ -318,7 +318,13 @@ describe("provider adapters", () => {
       status: "succeeded",
       creditCost: 8,
       historyId: "history-live-rh",
-      outputs: [{ name: "final.png", source: "https://cdn.example/runninghub/final.png", width: 1024, height: 1536 }]
+      outputs: [{ name: "final.png", source: "https://cdn.example/runninghub/final.png", width: 1024, height: 1536 }],
+      providerProgress: {
+        providerJobId: "rh-job-1",
+        status: "succeeded",
+        statusUrl: "https://runninghub.example/api/jobs/rh-job-1",
+        pollAttempts: 1
+      }
     });
   });
 

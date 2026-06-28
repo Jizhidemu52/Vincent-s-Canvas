@@ -170,6 +170,79 @@ describe("HTTP API server", () => {
     }
   });
 
+  it("keeps live provider progress snapshots in admin jobs over HTTP", async () => {
+    const state = createServerState({ creditBalance: 20 });
+    const server = createApiHttpServer({
+      state,
+      resolveProviderSecret: (name) => (name === "OPENAI_API_KEY" ? "sk-http-live" : undefined),
+      providerFetchJson: async (url) => {
+        if (url.endsWith("/images")) {
+          return {
+            ok: true,
+            status: 202,
+            body: { jobId: "openai-job-1", status: "running", statusUrl: "https://api.openai.example/v1/images/openai-job-1" }
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          body: {
+            status: "succeeded",
+            data: [{ url: "https://cdn.example/http-progress.png", width: 1024, height: 1024 }]
+          }
+        };
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Test server failed to bind a port");
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      await fetch(`${baseUrl}/api/admin/provider-settings`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+        body: JSON.stringify({
+          provider: "openai",
+          mode: "live-ready",
+          endpointUrl: "https://api.openai.example/v1/images",
+          secretName: "OPENAI_API_KEY",
+          secretValue: "sk-admin-secret"
+        })
+      });
+      const response = await fetch(`${baseUrl}/api/generations`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-request-id": "http-live-progress", "x-user-id": "alice@company.local" },
+        body: JSON.stringify(request({ outputCount: 1 }))
+      });
+      const result = (await response.json()) as GenerationResult;
+      const jobs = (await (await fetch(`${baseUrl}/api/admin/jobs`, { headers: { "x-user-id": "admin@company.local" } })).json()) as Array<Record<string, unknown>>;
+
+      expect(response.status).toBe(200);
+      expect(result).toMatchObject({
+        providerProgress: {
+          providerJobId: "openai-job-1",
+          status: "succeeded",
+          statusUrl: "https://api.openai.example/v1/images/openai-job-1",
+          pollAttempts: 1
+        }
+      });
+      expect(jobs[0]).toMatchObject({
+        status: "succeeded",
+        providerProgress: {
+          providerJobId: "openai-job-1",
+          status: "succeeded",
+          statusUrl: "https://api.openai.example/v1/images/openai-job-1",
+          pollAttempts: 1
+        }
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("records live provider failures over HTTP without charging or writing history", async () => {
     const state = createServerState({ creditBalance: 10 });
     const server = createApiHttpServer({

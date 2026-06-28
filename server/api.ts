@@ -8,6 +8,7 @@ import {
   type ModelDefinition,
   type ModuleType,
   type Profile,
+  type ProviderProgress,
   type Project,
   type PromptPreset,
   type Workspace
@@ -146,6 +147,7 @@ export interface GenerationJob {
   batchSettings?: GenerationRequest["batchSettings"];
   providerSettings?: GenerationRequest["providerSettings"];
   providerPayload?: ProviderPayload;
+  providerProgress?: ProviderProgress;
   outputs: AssetInput[];
   createdAt: string;
   updatedAt: string;
@@ -895,6 +897,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
       batchSettings: request.batchSettings,
       providerSettings: request.providerSettings,
       providerPayload,
+      providerProgress: result.providerProgress,
       outputs: result.outputs,
       createdAt,
       updatedAt: createdAt,
@@ -921,16 +924,23 @@ async function runModelAsync(
   const createdAt = new Date().toISOString();
   const providerRuntimeSettings = state.providerSettings[model.provider];
   const providerPayload = buildProviderPayload(request, model, providerRuntimeSettings);
+  let latestProviderProgress: ProviderProgress | undefined;
   let result: GenerationResult;
 
   try {
     result =
       providerRuntimeSettings?.mode === "live-ready"
-        ? await executeLiveProviderPayload(providerPayload, request, model, historyId, cost, liveProviderOptions ?? {
-            fetchJson: async () => {
-              throw new Error(`Live provider executor is not configured for ${model.provider}`);
-            },
-            resolveSecret: () => undefined
+        ? await executeLiveProviderPayload(providerPayload, request, model, historyId, cost, {
+            ...(liveProviderOptions ?? {
+              fetchJson: async () => {
+                throw new Error(`Live provider executor is not configured for ${model.provider}`);
+              },
+              resolveSecret: () => undefined
+            }),
+            onProgress: (progress) => {
+              latestProviderProgress = progress;
+              liveProviderOptions?.onProgress?.(progress);
+            }
           })
         : runProviderModel(request, model, historyId, cost, state.providerSettings);
   } catch (error) {
@@ -956,6 +966,7 @@ async function runModelAsync(
         batchSettings: request.batchSettings,
         providerSettings: request.providerSettings,
         providerPayload,
+        providerProgress: latestProviderProgress ? { ...latestProviderProgress, errorMessage } : undefined,
         outputs: [],
         createdAt,
         updatedAt: createdAt,
@@ -1021,6 +1032,7 @@ async function runModelAsync(
       batchSettings: request.batchSettings,
       providerSettings: request.providerSettings,
       providerPayload,
+      providerProgress: result.providerProgress,
       outputs: result.outputs,
       createdAt,
       updatedAt: createdAt,

@@ -170,6 +170,15 @@ export interface GenerationResult {
   outputs: AssetInput[];
   creditCost: number;
   historyId: string;
+  providerProgress?: ProviderProgress;
+  errorMessage?: string;
+}
+
+export interface ProviderProgress {
+  providerJobId?: string;
+  status?: string;
+  statusUrl?: string;
+  pollAttempts: number;
   errorMessage?: string;
 }
 

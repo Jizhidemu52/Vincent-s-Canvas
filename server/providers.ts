@@ -1,4 +1,4 @@
-import type { GenerationRequest, GenerationResult, ModelDefinition, OperationType } from "../src/domain/workspace";
+import type { GenerationRequest, GenerationResult, ModelDefinition, OperationType, ProviderProgress } from "../src/domain/workspace";
 
 export type ProviderName = ModelDefinition["provider"];
 
@@ -63,6 +63,7 @@ export interface LiveProviderExecutionOptions {
   resolveSecret: (name: string) => string | undefined;
   maxPollAttempts?: number;
   pollDelay?: () => Promise<void>;
+  onProgress?: (progress: ProviderProgress) => void;
 }
 
 interface ProviderConfig {
@@ -222,6 +223,24 @@ function providerStatusUrl(body: unknown) {
   return stringValue(object.statusUrl ?? object.pollUrl ?? object.pollingUrl);
 }
 
+function providerJobId(body: unknown) {
+  const object = objectValue(body);
+  return stringValue(object.providerJobId ?? object.jobId ?? object.id ?? object.taskId);
+}
+
+function mergeProgress(body: unknown, current: ProviderProgress): ProviderProgress {
+  return {
+    ...current,
+    providerJobId: providerJobId(body) ?? current.providerJobId,
+    status: providerStatus(body) ?? current.status,
+    statusUrl: providerStatusUrl(body) ?? current.statusUrl
+  };
+}
+
+function publishProgress(options: LiveProviderExecutionOptions, progress: ProviderProgress) {
+  options.onProgress?.({ ...progress });
+}
+
 function assertProviderResponse(response: ProviderFetchResponse) {
   if (!response.ok) {
     const message = stringValue(objectValue(response.body).errorMessage ?? objectValue(response.body).message);
@@ -257,6 +276,7 @@ export async function executeLiveProviderPayload(
     "Content-Type": "application/json",
     Authorization: secret ? `Bearer ${secret}` : undefined
   }) as Record<string, string>;
+  let progress: ProviderProgress = { status: "submitting", pollAttempts: 0 };
   let body = assertProviderResponse(
     await options.fetchJson(payload.endpointUrl, {
       method: "POST",
@@ -264,31 +284,43 @@ export async function executeLiveProviderPayload(
       body: JSON.stringify(payload.body)
     })
   );
+  progress = mergeProgress(body, { ...progress, status: providerStatus(body) ?? "submitted" });
+  publishProgress(options, progress);
   const maxPollAttempts = options.maxPollAttempts ?? 5;
   for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
     const outputs = normalizeProviderOutputs(body, request, model);
     const status = providerStatus(body);
     if (outputs.length || status === "succeeded" || status === "complete" || status === "completed") {
+      progress = mergeProgress(body, { ...progress, status: "succeeded" });
+      publishProgress(options, progress);
       return {
         status: "succeeded",
         creditCost,
         historyId,
-        outputs
+        outputs,
+        providerProgress: progress
       };
     }
     if (status === "failed" || status === "error") {
+      progress = mergeProgress(body, { ...progress, status: "failed", errorMessage: stringValue(objectValue(body).errorMessage ?? objectValue(body).message) });
+      publishProgress(options, progress);
       throw new Error(stringValue(objectValue(body).errorMessage ?? objectValue(body).message) ?? "Provider execution failed");
     }
     const statusUrl = providerStatusUrl(body);
     if (!statusUrl) break;
     if (options.pollDelay) await options.pollDelay();
+    progress = { ...progress, pollAttempts: progress.pollAttempts + 1, statusUrl };
     body = assertProviderResponse(
       await options.fetchJson(statusUrl, {
         method: "GET",
         headers
       })
     );
+    progress = mergeProgress(body, progress);
+    publishProgress(options, progress);
   }
+  progress = { ...progress, status: "timed_out", errorMessage: `Provider ${payload.provider} did not return outputs` };
+  publishProgress(options, progress);
   throw new Error(`Provider ${payload.provider} did not return outputs`);
 }
 

@@ -1876,6 +1876,13 @@ function AdminView({
                   </strong>
                   {job.priceCents !== undefined ? <small>Job spend {formatEstimatedSpend(job.priceCents, job.currency)}</small> : null}
                   <small>{job.projectName ?? job.projectId} / {job.modelId}</small>
+                  {job.providerProgress ? (
+                    <small>
+                      Provider {job.providerProgress.status ?? "unknown"}
+                      {job.providerProgress.providerJobId ? ` / ${job.providerProgress.providerJobId}` : ""}
+                      {` / ${job.providerProgress.pollAttempts} poll${job.providerProgress.pollAttempts === 1 ? "" : "s"}`}
+                    </small>
+                  ) : null}
                   {job.errorMessage && <small>{job.errorMessage}</small>}
                   {job.outputs?.length ? (
                     <div className="history-output-strip" aria-label={`Job outputs for ${job.id}`}>

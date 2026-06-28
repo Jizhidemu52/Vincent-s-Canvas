@@ -133,6 +133,7 @@ export interface AdminGenerationJob {
     secretNames: string[];
     body: Record<string, unknown>;
   };
+  providerProgress?: GenerationResult["providerProgress"];
   outputs?: AssetInput[];
   createdAt: string;
   updatedAt: string;
