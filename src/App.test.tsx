@@ -1523,6 +1523,22 @@ describe("Designer canvas app shell", () => {
     expect(selectedTask).toHaveTextContent("Outputs: Edited result");
   });
 
+  it("filters workflow module picker options by the dragged source port type", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from Prompt note"));
+    fireEvent.pointerUp(window);
+
+    expect(screen.getByText("Choose module")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Generate new design from references.*to Prompt/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Edit controlled image edit.*to Prompt/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Batch same brief across selected images.*to Batch prompt/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Upscale clean high-res output/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Remove BG cutout for product use/i })).not.toBeInTheDocument();
+  });
+
   it("chains workflow modules from module output ports and runs them in order", async () => {
     const user = userEvent.setup();
     await login(user);

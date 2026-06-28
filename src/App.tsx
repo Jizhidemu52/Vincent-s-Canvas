@@ -231,6 +231,18 @@ function nodeCanFeedModule(node: CanvasNode, moduleType: ModuleType) {
   return definition.inputPorts.some((input) => input.type === output.type || (output.type === "result" && input.type === "image"));
 }
 
+function moduleInputLabelsForSources(moduleType: ModuleType, sourceNodes: CanvasNode[]) {
+  const definition = getWorkflowModuleDefinition(moduleType);
+  const labels = sourceNodes.flatMap((node) => {
+    const output = node.outputs.find((port) => port.id === "out") ?? node.outputs[0];
+    if (!output) return [];
+    return definition.inputPorts
+      .filter((input) => input.type === output.type || (output.type === "result" && input.type === "image"))
+      .map((input) => input.label);
+  });
+  return Array.from(new Set(labels));
+}
+
 function isCanvasImageNode(node?: CanvasNode) {
   return Boolean(
     node &&
@@ -2643,6 +2655,7 @@ function CanvasStage({
           x={modulePicker.x * project.viewport.zoom + project.viewport.x}
           y={modulePicker.y * project.viewport.zoom + project.viewport.y}
           referenceCount={modulePicker.sourceIds.length}
+          sourceNodes={modulePicker.sourceIds.flatMap((id) => project.nodes.find((node) => node.id === id) ?? [])}
           onPick={(moduleType) => {
             onConnectModule(moduleType, modulePicker.sourceIds);
             setModulePicker(null);
@@ -2661,16 +2674,21 @@ function WorkflowModulePicker({
   x,
   y,
   referenceCount,
+  sourceNodes,
   onPick,
   onCancel
 }: {
   x: number;
   y: number;
   referenceCount: number;
+  sourceNodes: CanvasNode[];
   onPick: (moduleType: ModuleType) => void;
   onCancel: () => void;
 }) {
-  const options = WORKFLOW_MODULE_REGISTRY;
+  const options = WORKFLOW_MODULE_REGISTRY.map((option) => ({
+    ...option,
+    inputLabels: moduleInputLabelsForSources(option.moduleType, sourceNodes)
+  })).filter((option) => option.inputLabels.length);
 
   return (
     <div className="workflow-picker" style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()}>
@@ -2680,6 +2698,7 @@ function WorkflowModulePicker({
         <button type="button" key={option.moduleType} onClick={() => onPick(option.moduleType)}>
           <b>{option.label}</b>
           <span>{option.detail}</span>
+          <em>to {option.inputLabels.join(", ")}</em>
         </button>
       ))}
       <button type="button" className="workflow-picker-cancel" onClick={onCancel}>Cancel</button>

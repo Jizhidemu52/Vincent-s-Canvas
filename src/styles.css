@@ -1579,6 +1579,13 @@ button {
   font-size: 11px;
 }
 
+.workflow-picker button em {
+  color: #0f766e;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .workflow-picker .workflow-picker-cancel {
   justify-items: center;
   background: white;
