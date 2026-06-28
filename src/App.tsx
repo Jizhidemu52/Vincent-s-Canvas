@@ -31,6 +31,7 @@ import {
   Scissors,
   Search,
   Shirt,
+  SlidersHorizontal,
   Sparkles,
   SquareDashedMousePointer,
   Trash2,
@@ -46,6 +47,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent
 import {
   addAssetToProjectAt,
   addAssetToProject,
+  addConfigNode,
   addTextNode,
   addGenerationTargetFrame,
   applyBatchGenerationResultsToCanvas,
@@ -145,6 +147,10 @@ function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+function clampOutputCount(value: number) {
+  return Math.min(8, Math.max(1, Number.isFinite(value) ? Math.round(value) : 1));
 }
 
 function historyEntryToAuditEntry(entry: HistoryEntry): AdminAuditEntry {
@@ -557,6 +563,12 @@ export default function App() {
     addWorkflowModule(moduleType, sourceNodeIds);
   }
 
+  function addWorkflowSettingsNode() {
+    if (!activeProject) return;
+    const outputCount = selectedNode?.generation.outputCount ?? 3;
+    setWorkspace((current) => addConfigNode(current, activeProject.id, { outputCount }));
+  }
+
   function groupReferences() {
     if (!activeProject) return;
     const imageIds = activeProject.selectedNodeIds.filter((id) => activeProject.nodes.find((node) => node.id === id)?.type === "image");
@@ -945,6 +957,7 @@ export default function App() {
         onCancelBatch={cancelActiveBatch}
         onWorkflow={runWorkflow}
         onAddModule={addWorkflowModule}
+        onAddSettingsNode={addWorkflowSettingsNode}
         onConnectModule={connectSelectionToNewModule}
         onGroupReferences={groupReferences}
         onAssistantNote={insertAssistantNote}
@@ -2107,6 +2120,7 @@ function CanvasView({
   onCancelBatch,
   onWorkflow,
   onAddModule,
+  onAddSettingsNode,
   onConnectModule,
   onGroupReferences,
   onAssistantNote,
@@ -2140,6 +2154,7 @@ function CanvasView({
   onCancelBatch: () => void;
   onWorkflow: () => void;
   onAddModule: (moduleType: ModuleType) => void;
+  onAddSettingsNode: () => void;
   onConnectModule: (moduleType: ModuleType, sourceNodeIds?: string[]) => void;
   onGroupReferences: () => void;
   onAssistantNote: (content: string) => void;
@@ -2213,6 +2228,7 @@ function CanvasView({
           stats={stats}
           onPanel={onRightPanel}
           onAddModule={onAddModule}
+          onAddSettingsNode={onAddSettingsNode}
           onPromptInsert={(prompt) => onUpdateConfig({ prompt })}
           onSavePrompt={onSavePrompt}
           onPromptDelete={onDeletePrompt}
@@ -2490,9 +2506,18 @@ function PromptCard({
           aria-label="Output count"
           type="range"
           min={1}
-          max={4}
+          max={8}
           value={selectedNode?.generation.outputCount ?? 1}
-          onChange={(event) => onUpdateConfig({ outputCount: Number(event.target.value) })}
+          onChange={(event) => onUpdateConfig({ outputCount: clampOutputCount(Number(event.target.value)) })}
+        />
+        <input
+          aria-label="Output count value"
+          className="count-number-input"
+          type="number"
+          min={1}
+          max={8}
+          value={selectedNode?.generation.outputCount ?? 1}
+          onChange={(event) => onUpdateConfig({ outputCount: clampOutputCount(Number(event.target.value)) })}
         />
       </div>
       <button type="button" className="generate-button" onClick={onGenerate}>Generate</button>
@@ -3255,6 +3280,7 @@ function RightDock({
   stats,
   onPanel,
   onAddModule,
+  onAddSettingsNode,
   onPromptInsert,
   onSavePrompt,
   onPromptDelete,
@@ -3270,6 +3296,7 @@ function RightDock({
   stats: { images: number; texts: number; modules: number };
   onPanel: (panel: RightPanel) => void;
   onAddModule: (moduleType: ModuleType) => void;
+  onAddSettingsNode: () => void;
   onPromptInsert: (prompt: string) => void;
   onSavePrompt: () => void;
   onPromptDelete: (promptId: string) => void;
@@ -3346,6 +3373,9 @@ function RightDock({
                 </button>
               );
             })}
+            <button type="button" onClick={onAddSettingsNode}>
+              <SlidersHorizontal size={13} /> Settings node
+            </button>
           </div>
           {selectedNode && (
             <section className="node-task-card" aria-label="Selected node task">

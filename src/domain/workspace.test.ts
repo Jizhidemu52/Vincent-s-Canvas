@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addAssetToProject,
   addAssetToProjectAt,
+  addConfigNode,
   addGenerationTargetFrame,
   addTextNode,
   applyBatchGenerationResultsToCanvas,
@@ -406,6 +407,44 @@ describe("designer canvas workspace behavior", () => {
     expect(executed.history[0]).toMatchObject({
       nodeId: generateNode.id,
       referenceCount: 2
+    });
+  });
+
+  it("uses connected config input ports as workflow output settings", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Typed config input");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "batch-front.png",
+      source: "batch-front-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const withBatch = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "batch",
+      prompt: "Apply one batch direction from config.",
+      modelId: "gpt-image-2-medium"
+    });
+    const batchNode = withBatch.projects[0].nodes.find((node) => node.moduleType === "batch")!;
+    const withConfig = addConfigNode(withBatch, project.id, { outputCount: 3 });
+    const configNode = withConfig.projects[0].nodes.find((node) => node.type === "config" && node.outputs[0]?.type === "config")!;
+    const connected = connectWorkflowNode(withConfig, project.id, configNode.id, batchNode.id, "out", "config");
+
+    const plan = buildWorkflowExecutionPlan(connected, project.id, source.id);
+    const requests = buildWorkflowGenerationRequests(connected, project.id, source.id);
+    const executed = runWorkflowChain(connected, project.id, source.id);
+    const generatedNode = executed.projects[0].nodes.find((node) => node.kind === "generated")!;
+    const unitCost = connected.modelRegistry.find((model) => model.id === "gpt-image-2-medium")!.cost;
+
+    expect(configNode.generation.outputCount).toBe(3);
+    expect(plan.steps[0]).toMatchObject({
+      outputCount: 3,
+      estimatedCreditCost: unitCost * 3
+    });
+    expect(requests[0]).toMatchObject({ outputCount: 3 });
+    expect(generatedNode.generation.outputCount).toBe(3);
+    expect(executed.history[0]).toMatchObject({
+      outputCount: 3,
+      creditCost: unitCost * 3
     });
   });
 

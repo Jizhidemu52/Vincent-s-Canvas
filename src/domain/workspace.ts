@@ -436,6 +436,12 @@ function portsFor(type: NodeType, moduleType?: ModuleType): Pick<CanvasNode, "in
       outputs: [{ id: "out", type: "image", label: "Reference group" }]
     };
   }
+  if (type === "config") {
+    return {
+      inputs: [],
+      outputs: [{ id: "out", type: "config", label: "Settings" }]
+    };
+  }
   return {
     inputs: [
       { id: "image", type: "image", label: "Images" },
@@ -624,6 +630,34 @@ function workflowReferencesForModule(project: Project, moduleNode: CanvasNode, f
   if (connectedReferences.length) return connectedReferences;
   if (moduleNode.references.length) return moduleNode.references;
   return fallbackNodeId ? [fallbackNodeId] : [];
+}
+
+function metadataObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function outputCountFromConfigValue(value: unknown) {
+  const count = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isInteger(count) && count >= 1 && count <= 8 ? count : undefined;
+}
+
+function connectedConfigForModule(project: Project, moduleNode: CanvasNode): Record<string, unknown> {
+  const configInputPortIds = new Set(moduleNode.inputs.filter((port) => port.type === "config").map((port) => port.id));
+  const configConnection = project.connections.find((connection) => connection.toNodeId === moduleNode.id && configInputPortIds.has(connection.toPort));
+  if (!configConnection) return {};
+  const configNode = findNode(project, configConnection.fromNodeId);
+  return {
+    ...metadataObject(configNode.metadata.config),
+    ...configNode.metadata,
+    outputCount: configNode.type === "config" ? configNode.generation.outputCount : configNode.metadata.outputCount
+  };
+}
+
+function workflowSettingsForModule(project: Project, moduleNode: CanvasNode) {
+  const config = connectedConfigForModule(project, moduleNode);
+  return {
+    outputCount: outputCountFromConfigValue(config.outputCount) ?? moduleNode.generation.outputCount
+  };
 }
 
 function operationForModuleNode(node: CanvasNode): OperationType {
@@ -844,6 +878,30 @@ export function addTextNode(workspace: Workspace, projectId: string, content: st
       width: 260,
       height: 160,
       metadata: { content }
+    });
+    return withUndo(project, { nodes: [...project.nodes, node], selectedNodeIds: [node.id] });
+  });
+}
+
+export function addConfigNode(
+  workspace: Workspace,
+  projectId: string,
+  settings: { outputCount?: number; mask?: MaskSelection },
+  x = 620,
+  y = 470
+): Workspace {
+  return updateProject(workspace, projectId, (project) => {
+    const node = createNode({
+      type: "config",
+      kind: "workflow",
+      name: "Workflow settings",
+      source: "workflow-settings",
+      x,
+      y,
+      width: 260,
+      height: 140,
+      generation: { outputCount: settings.outputCount ?? 1, entryPoint: "workflow" },
+      metadata: { ...settings, config: settings }
     });
     return withUndo(project, { nodes: [...project.nodes, node], selectedNodeIds: [node.id] });
   });
@@ -1614,6 +1672,7 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
 
     const referenceNodeIds = workflowReferencesForModule(project, nextNode, cursorId);
     const prompt = workflowPromptForModule(project, nextNode);
+    const settings = workflowSettingsForModule(project, nextNode);
     const model = workspace.modelRegistry.find((item) => item.id === nextNode.generation.modelId);
     const operation = operationForModuleNode(nextNode);
     if (!model) {
@@ -1632,10 +1691,10 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
       operation,
       modelId: nextNode.generation.modelId,
       prompt,
-      outputCount: nextNode.generation.outputCount,
+      outputCount: settings.outputCount,
       referenceNodeIds,
       referenceCount: referenceNodeIds.length,
-      estimatedCreditCost: unitCost * nextNode.generation.outputCount
+      estimatedCreditCost: unitCost * settings.outputCount
     });
     cursorId = nextNode.id;
   }
@@ -1672,6 +1731,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
   const project = findProject(workspace, projectId);
   const prompt = workflowPromptForModule(project, moduleNode);
   const referenceNodeIds = workflowReferencesForModule(project, moduleNode);
+  const settings = workflowSettingsForModule(project, moduleNode);
   if (!prompt.trim()) throw new Error("Prompt is required");
   const historyId = createId("history");
   const operation = operationForModuleNode(moduleNode);
@@ -1680,7 +1740,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
   if (!model.capability.includes(operation as ModuleType)) {
     throw new Error(`Model ${model.id} does not support ${operation}`);
   }
-  const creditCost = model.cost * moduleNode.generation.outputCount;
+  const creditCost = model.cost * settings.outputCount;
   const charged = spendCredits(workspace, creditCost);
   let generatedOutput: AssetInput | undefined;
   const updated = updateProject(charged, projectId, (project) => {
@@ -1695,12 +1755,13 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
       y: moduleNode.y,
       width: 420,
       height: 420,
-      generation: { ...moduleNode.generation, prompt },
+      generation: { ...moduleNode.generation, prompt, outputCount: settings.outputCount },
       metadata: {
         historyId,
         moduleType: moduleNode.moduleType,
         operation,
         creditCost,
+        outputCount: settings.outputCount,
         prompt,
         modelId: moduleNode.generation.modelId
       }
@@ -1750,7 +1811,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
         nodeId: moduleNode.id,
         prompt,
         modelId: moduleNode.generation.modelId,
-        outputCount: moduleNode.generation.outputCount,
+        outputCount: settings.outputCount,
         creditCost,
         operation,
         moduleType: moduleNode.moduleType,

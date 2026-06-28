@@ -1496,6 +1496,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("button", { name: "Remove BG node" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Batch node" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload Reference node" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settings node" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Remove BG node" }));
 
@@ -1507,6 +1508,13 @@ describe("Designer canvas app shell", () => {
 
     expect(await screen.findByRole("button", { name: /Workflow upload module/i })).toBeInTheDocument();
     expect(screen.getAllByText("Use this upload reference as an upstream image input.").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "Settings node" }));
+
+    expect(await screen.findByRole("button", { name: /Workflow settings/i })).toBeInTheDocument();
+    expect(screen.getByLabelText("Selected node task")).toHaveTextContent("Outputs: Settings");
+    fireEvent.change(screen.getByLabelText("Output count value"), { target: { value: "3" } });
+    expect(screen.getByText("3 images")).toBeInTheDocument();
   });
 
   it("shows typed input and output ports for the selected workflow node", async () => {
