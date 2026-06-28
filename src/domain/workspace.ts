@@ -589,6 +589,19 @@ function connect(fromNodeId: string, toNodeId: string, fromPort = "out", toPort 
   };
 }
 
+function textContentFromNode(node: CanvasNode) {
+  return String(node.metadata.content ?? node.source ?? "");
+}
+
+function workflowPromptForModule(project: Project, moduleNode: CanvasNode) {
+  const textConnection = project.connections.find((connection) => connection.toNodeId === moduleNode.id && connection.toPort === "text");
+  if (!textConnection) return moduleNode.generation.prompt;
+  const textNode = project.nodes.find((node) => node.id === textConnection.fromNodeId);
+  if (!textNode || textNode.type !== "text") return moduleNode.generation.prompt;
+  const prompt = textContentFromNode(textNode).trim();
+  return prompt || moduleNode.generation.prompt;
+}
+
 function operationForModuleNode(node: CanvasNode): OperationType {
   if (node.operation) return node.operation;
   if (node.moduleType) return getWorkflowModuleDefinition(node.moduleType).operation;
@@ -1576,6 +1589,7 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
     }
 
     const referenceNodeIds = nextNode.references.length ? nextNode.references : [cursorId];
+    const prompt = workflowPromptForModule(project, nextNode);
     const model = workspace.modelRegistry.find((item) => item.id === nextNode.generation.modelId);
     const operation = operationForModuleNode(nextNode);
     if (!model) {
@@ -1583,7 +1597,7 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
     } else if (!model.capability.includes(operation as ModuleType)) {
       issues.push({ nodeId: nextNode.id, severity: "error", message: `Model ${model.id} does not support ${operation}` });
     }
-    if (!nextNode.generation.prompt.trim()) {
+    if (!prompt.trim()) {
       issues.push({ nodeId: nextNode.id, severity: "error", message: "Prompt is required" });
     }
     const unitCost = model?.cost ?? 1;
@@ -1593,7 +1607,7 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
       moduleType: nextNode.moduleType,
       operation,
       modelId: nextNode.generation.modelId,
-      prompt: nextNode.generation.prompt,
+      prompt,
       outputCount: nextNode.generation.outputCount,
       referenceNodeIds,
       referenceCount: referenceNodeIds.length,
@@ -1631,7 +1645,9 @@ export function buildWorkflowGenerationRequests(workspace: Workspace, projectId:
 }
 
 function executeModule(workspace: Workspace, projectId: string, moduleNode: CanvasNode): Workspace {
-  if (!moduleNode.generation.prompt.trim()) throw new Error("Prompt is required");
+  const project = findProject(workspace, projectId);
+  const prompt = workflowPromptForModule(project, moduleNode);
+  if (!prompt.trim()) throw new Error("Prompt is required");
   const historyId = createId("history");
   const operation = operationForModuleNode(moduleNode);
   const model = workspace.modelRegistry.find((item) => item.id === moduleNode.generation.modelId);
@@ -1654,13 +1670,13 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
       y: moduleNode.y,
       width: 420,
       height: 420,
-      generation: moduleNode.generation,
+      generation: { ...moduleNode.generation, prompt },
       metadata: {
         historyId,
         moduleType: moduleNode.moduleType,
         operation,
         creditCost,
-        prompt: moduleNode.generation.prompt,
+        prompt,
         modelId: moduleNode.generation.modelId
       }
     });
@@ -1689,7 +1705,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
                   creditCost,
                   operation,
                   modelId: moduleNode.generation.modelId,
-                  prompt: moduleNode.generation.prompt
+                  prompt
                 }
               }
             : node
@@ -1707,7 +1723,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
         id: historyId,
         projectId,
         nodeId: moduleNode.id,
-        prompt: moduleNode.generation.prompt,
+        prompt,
         modelId: moduleNode.generation.modelId,
         outputCount: moduleNode.generation.outputCount,
         creditCost,

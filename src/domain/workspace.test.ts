@@ -339,6 +339,38 @@ describe("designer canvas workspace behavior", () => {
     });
   });
 
+  it("uses connected text input ports as workflow prompts", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Typed prompt input");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "dress-front.png",
+      source: "dress-front-source",
+      width: 640,
+      height: 640
+    });
+    const withPrompt = addTextNode(withAsset, project.id, "Use the floral jacquard from the note and keep studio lighting.");
+    const [source, promptNode] = withPrompt.projects[0].nodes;
+    const withModule = createWorkflowModuleFromSelection(withPrompt, project.id, [source.id], {
+      moduleType: "generate",
+      prompt: "Default module prompt should be replaced",
+      modelId: "gpt-image-2-medium"
+    });
+    const generateNode = withModule.projects[0].nodes.find((node) => node.moduleType === "generate")!;
+    const connected = connectWorkflowNode(withModule, project.id, promptNode.id, generateNode.id, "out", "text");
+
+    const requests = buildWorkflowGenerationRequests(connected, project.id, source.id);
+    const executed = runWorkflowChain(connected, project.id, source.id);
+
+    expect(requests[0]).toMatchObject({
+      nodeId: generateNode.id,
+      prompt: "Use the floral jacquard from the note and keep studio lighting.",
+      referenceNodeIds: [source.id]
+    });
+    expect(executed.history[0]).toMatchObject({
+      nodeId: generateNode.id,
+      prompt: "Use the floral jacquard from the note and keep studio lighting."
+    });
+  });
+
   it("keeps backend run state visible after normal canvas selection changes", () => {
     const { workspace, project } = createProject(createInitialWorkspace(), "Run state feedback");
     const withAsset = addAssetToProject(workspace, project.id, {
