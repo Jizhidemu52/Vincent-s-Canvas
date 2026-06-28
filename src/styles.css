@@ -1906,13 +1906,15 @@ button {
   text-align: left;
 }
 
-.asset-tag-filters {
+.asset-tag-filters,
+.asset-folder-filters {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
 }
 
-.asset-tag-filters button {
+.asset-tag-filters button,
+.asset-folder-filters button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1921,13 +1923,15 @@ button {
   font-size: 11px;
 }
 
-.asset-tag-filters button.active {
+.asset-tag-filters button.active,
+.asset-folder-filters button.active {
   border-color: #111827;
   background: #111827;
   color: #fff;
 }
 
-.asset-tag-filters span {
+.asset-tag-filters span,
+.asset-folder-filters span {
   color: inherit;
   opacity: 0.72;
 }

@@ -3578,6 +3578,11 @@ function ShapeEditDialog({
   );
 }
 
+function folderNameForAsset(asset: LibraryAsset) {
+  const folder = asset.metadata?.folder;
+  return typeof folder === "string" && folder.trim() ? folder.trim() : "Unfiled";
+}
+
 function RightDock({
   workspace,
   project,
@@ -3614,6 +3619,7 @@ function RightDock({
   const [promptSearch, setPromptSearch] = useState("");
   const [assetSearch, setAssetSearch] = useState("");
   const [selectedPromptPresetId, setSelectedPromptPresetId] = useState<string | null>(null);
+  const [selectedAssetFolder, setSelectedAssetFolder] = useState<string | null>(null);
   const [selectedAssetTag, setSelectedAssetTag] = useState<string | null>(null);
   const normalizedPromptSearch = promptSearch.trim().toLowerCase();
   const normalizedAssetSearch = assetSearch.trim().toLowerCase();
@@ -3629,7 +3635,18 @@ function RightDock({
       .reduce((counts, tag) => counts.set(tag, (counts.get(tag) ?? 0) + 1), new Map<string, number>())
       .entries()
   ).sort(([left], [right]) => left.localeCompare(right));
-  const taggedAssets = selectedAssetTag ? workspace.assets.filter((asset) => asset.tags.includes(selectedAssetTag)) : workspace.assets;
+  const assetFolderCounts = Array.from(
+    workspace.assets
+      .reduce((counts, asset) => {
+        const folder = folderNameForAsset(asset);
+        return counts.set(folder, (counts.get(folder) ?? 0) + 1);
+      }, new Map<string, number>())
+      .entries()
+  ).sort(([left], [right]) => left.localeCompare(right));
+  const folderedAssets = selectedAssetFolder
+    ? workspace.assets.filter((asset) => folderNameForAsset(asset) === selectedAssetFolder)
+    : workspace.assets;
+  const taggedAssets = selectedAssetTag ? folderedAssets.filter((asset) => asset.tags.includes(selectedAssetTag)) : folderedAssets;
   const filteredAssets = normalizedAssetSearch
     ? taggedAssets.filter((asset) => {
         const haystack = `${asset.title} ${asset.type} ${asset.tags.join(" ")}`.toLowerCase();
@@ -3823,6 +3840,26 @@ function RightDock({
               />
             </label>
           </div>
+          {assetFolderCounts.length ? (
+            <div className="asset-folder-filters" aria-label="Asset folder filters">
+              {selectedAssetFolder ? (
+                <button type="button" onClick={() => setSelectedAssetFolder(null)}>
+                  Show all folders
+                </button>
+              ) : null}
+              {assetFolderCounts.map(([folder, count]) => (
+                <button
+                  type="button"
+                  key={folder}
+                  className={selectedAssetFolder === folder ? "active" : ""}
+                  aria-label={`Filter assets by folder ${folder}`}
+                  onClick={() => setSelectedAssetFolder(folder)}
+                >
+                  {folder} <span>{count}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
           {assetTagCounts.length ? (
             <div className="asset-tag-filters" aria-label="Asset tag filters">
               {selectedAssetTag ? (
@@ -3843,6 +3880,11 @@ function RightDock({
               ))}
             </div>
           ) : null}
+          {selectedAssetFolder ? (
+            <small>
+              {filteredAssets.length} asset{filteredAssets.length === 1 ? "" : "s"} in folder {selectedAssetFolder}
+            </small>
+          ) : null}
           {selectedAssetTag ? (
             <small>
               {filteredAssets.length} asset{filteredAssets.length === 1 ? "" : "s"} tagged {selectedAssetTag}
@@ -3857,10 +3899,17 @@ function RightDock({
             <button type="button" key={asset.id} onClick={() => onAssetInsert(asset)}>
               <b>{asset.title}</b>
               <small>{asset.tags.join(", ")}</small>
+              <small>Folder: {folderNameForAsset(asset)}</small>
               <span>{asset.type} · Use in canvas</span>
             </button>
           )) : workspace.assets.length ? (
-            <small>{normalizedAssetSearch ? "No assets match this search" : "No assets match this tag"}</small>
+            <small>
+              {normalizedAssetSearch
+                ? "No assets match this search"
+                : selectedAssetFolder
+                  ? "No assets match this folder"
+                  : "No assets match this tag"}
+            </small>
           ) : (
             <small>Save a selected node to collect it here</small>
           )}

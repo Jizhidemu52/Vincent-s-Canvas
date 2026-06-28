@@ -1654,6 +1654,51 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("1 asset matching embroidery")).toBeInTheDocument();
   });
 
+  it("filters saved assets by reusable folders in the canvas dock", async () => {
+    backendWorkspace = {
+      ...backendWorkspace,
+      assets: [
+        {
+          id: "asset-editorial",
+          type: "image",
+          title: "editorial-reference.jpg",
+          source: "/fixtures/fashion-reference.jpg",
+          tags: ["generated", "edit"],
+          createdAt: "2026-06-28T10:00:00.000Z",
+          metadata: { folder: "Editorial" }
+        },
+        {
+          id: "asset-ecommerce",
+          type: "image",
+          title: "ecommerce-cutout.png",
+          source: "/fixtures/fashion-reference.jpg",
+          tags: ["generated", "removebackground"],
+          createdAt: "2026-06-28T10:05:00.000Z",
+          metadata: { folder: "Ecommerce" }
+        }
+      ]
+    };
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Assets" }));
+
+    expect(screen.getByRole("button", { name: /editorial-reference\.jpg.*Use in canvas/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /ecommerce-cutout\.png.*Use in canvas/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Filter assets by folder Editorial" }));
+
+    expect(screen.getByRole("button", { name: /editorial-reference\.jpg.*Use in canvas/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /ecommerce-cutout\.png.*Use in canvas/i })).not.toBeInTheDocument();
+    expect(screen.getByText("1 asset in folder Editorial")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show all folders" }));
+
+    expect(screen.getByRole("button", { name: /editorial-reference\.jpg.*Use in canvas/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /ecommerce-cutout\.png.*Use in canvas/i })).toBeInTheDocument();
+  });
+
   it("runs workflow modules through backend APIs", async () => {
     const user = userEvent.setup();
     await login(user);

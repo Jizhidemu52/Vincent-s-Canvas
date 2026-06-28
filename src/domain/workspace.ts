@@ -783,7 +783,7 @@ function spendCredits(workspace: Workspace, cost: number): Workspace {
   };
 }
 
-function assetFromNode(node: CanvasNode, projectId: string): LibraryAsset {
+function assetFromNode(node: CanvasNode, project: Project): LibraryAsset {
   const operation = typeof node.metadata.operation === "string" ? node.metadata.operation : node.operation;
   return {
     id: createId("asset"),
@@ -792,7 +792,15 @@ function assetFromNode(node: CanvasNode, projectId: string): LibraryAsset {
     source: node.source,
     tags: ["generated", String(operation ?? node.type)],
     createdAt: now(),
-    metadata: { projectId, nodeId: node.id, historyId: node.metadata.historyId, operation, width: node.width, height: node.height }
+    metadata: {
+      projectId: project.id,
+      nodeId: node.id,
+      historyId: node.metadata.historyId,
+      operation,
+      folder: project.name,
+      width: node.width,
+      height: node.height
+    }
   };
 }
 
@@ -1317,12 +1325,13 @@ export function applyGenerationResultToCanvas(
       selectedNodeIds: generatedNodes.map((node) => node.id)
     })
   );
+  const assetProject = findProject(updated, projectId);
   return {
     ...updated,
     profile: serverState.profile ?? updated.profile,
     history: serverState.history ?? updated.history,
     modelRegistry: serverState.models ?? updated.modelRegistry,
-    assets: [...generatedNodes.map((node) => assetFromNode(node, projectId)), ...updated.assets]
+    assets: [...generatedNodes.map((node) => assetFromNode(node, assetProject)), ...updated.assets]
   };
 }
 
@@ -1455,12 +1464,13 @@ export function applyBatchGenerationResultsToCanvas(
       selectedNodeIds: (generatedNodes.length ? generatedNodes : auditedOriginalNodes).map((node) => node.id)
     });
   });
+  const assetProject = findProject(updated, projectId);
   return {
     ...updated,
     profile: serverState.profile ?? updated.profile,
     history: serverState.history ?? updated.history,
     modelRegistry: serverState.models ?? updated.modelRegistry,
-    assets: [...generatedNodes.map((node) => assetFromNode(node, projectId)), ...updated.assets]
+    assets: [...generatedNodes.map((node) => assetFromNode(node, assetProject)), ...updated.assets]
   };
 }
 
@@ -2015,7 +2025,8 @@ export function addGenerationTargetFrame(workspace: Workspace, projectId: string
 }
 
 export function saveNodeAsAsset(workspace: Workspace, projectId: string, nodeId: string): Workspace {
-  const node = findNode(findProject(workspace, projectId), nodeId);
+  const project = findProject(workspace, projectId);
+  const node = findNode(project, nodeId);
   const asset: LibraryAsset = {
     id: createId("asset"),
     type: node.type === "text" ? "text" : "image",
@@ -2023,7 +2034,7 @@ export function saveNodeAsAsset(workspace: Workspace, projectId: string, nodeId:
     source: node.source,
     tags: node.type === "text" ? ["prompt"] : ["canvas"],
     createdAt: now(),
-    metadata: { projectId, nodeId, width: node.width, height: node.height }
+    metadata: { projectId, nodeId, folder: project.name, width: node.width, height: node.height }
   };
   return { ...workspace, assets: [asset, ...workspace.assets] };
 }

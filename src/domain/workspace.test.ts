@@ -811,7 +811,7 @@ describe("designer canvas workspace behavior", () => {
 
     expect(saved.assets[0]).toMatchObject({
       title: "look-reference.png",
-      metadata: { projectId: project.id, nodeId: node.id, width: 720, height: 960 }
+      metadata: { projectId: project.id, nodeId: node.id, folder: "Reusable assets", width: 720, height: 960 }
     });
   });
 
