@@ -759,6 +759,12 @@ describe("designer canvas workspace behavior", () => {
       status: "succeeded",
       historyId: "history-backend-task",
       creditCost: 7,
+      providerProgress: {
+        providerJobId: "provider-job-42",
+        status: "succeeded",
+        statusUrl: "https://provider.example/jobs/provider-job-42",
+        pollAttempts: 2
+      },
       outputs: [{ name: "backend shirt edit.jpg", source: "mock://edit/shirt/1", width: 1024, height: 1024 }]
     });
     const updatedSource = updated.projects[0].nodes.find((node) => node.id === source.id)!;
@@ -773,7 +779,22 @@ describe("designer canvas workspace behavior", () => {
       creditCost: 7,
       operation: "edit",
       modelId: "gpt-image-2-medium",
-      prompt: "make a new neckline variation"
+      prompt: "make a new neckline variation",
+      providerProgress: {
+        providerJobId: "provider-job-42",
+        status: "succeeded",
+        statusUrl: "https://provider.example/jobs/provider-job-42",
+        pollAttempts: 2
+      }
+    });
+    expect(output.metadata).toMatchObject({
+      historyId: "history-backend-task",
+      providerProgress: {
+        providerJobId: "provider-job-42",
+        status: "succeeded",
+        statusUrl: "https://provider.example/jobs/provider-job-42",
+        pollAttempts: 2
+      }
     });
   });
 
@@ -895,6 +916,12 @@ describe("designer canvas workspace behavior", () => {
           status: "succeeded",
           historyId: "history-batch-front",
           creditCost: 2,
+          providerProgress: {
+            providerJobId: "batch-provider-front",
+            status: "succeeded",
+            statusUrl: "https://provider.example/jobs/batch-provider-front",
+            pollAttempts: 1
+          },
           outputs: [{ name: "front-clean.png", source: "mock://batch/front/1", width: 512, height: 512 }]
         }
       },
@@ -912,7 +939,13 @@ describe("designer canvas workspace behavior", () => {
       creditCost: 2,
       prompt: "remove background and normalize lighting",
       modelId: "background-cleaner",
-      operation: "removeBackground"
+      operation: "removeBackground",
+      providerProgress: {
+        providerJobId: "batch-provider-front",
+        status: "succeeded",
+        statusUrl: "https://provider.example/jobs/batch-provider-front",
+        pollAttempts: 1
+      }
     });
     expect(originalBack.status).toBe("error");
     expect(originalBack.metadata).toMatchObject({
@@ -928,7 +961,13 @@ describe("designer canvas workspace behavior", () => {
       creditCost: 2,
       prompt: "remove background and normalize lighting",
       modelId: "background-cleaner",
-      operation: "removeBackground"
+      operation: "removeBackground",
+      providerProgress: {
+        providerJobId: "batch-provider-front",
+        status: "succeeded",
+        statusUrl: "https://provider.example/jobs/batch-provider-front",
+        pollAttempts: 1
+      }
     });
   });
 

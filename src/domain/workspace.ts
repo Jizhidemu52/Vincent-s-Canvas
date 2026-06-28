@@ -1283,6 +1283,7 @@ export function applyGenerationResultToCanvas(
         prompt: request.prompt,
         modelId: request.modelId,
         mask: request.mask,
+        providerProgress: result.providerProgress,
         providerSettings: request.providerSettings
       }
     });
@@ -1304,7 +1305,8 @@ export function applyGenerationResultToCanvas(
                   creditCost: result.creditCost,
                   operation: request.operation,
                   modelId: request.modelId,
-                  prompt: request.prompt
+                  prompt: request.prompt,
+                  providerProgress: result.providerProgress
                 }
               }
             : node
@@ -1373,6 +1375,7 @@ export function applyBatchGenerationResultsToCanvas(
             sourceFile: file.name,
             historyId: result?.historyId,
             creditCost: result?.creditCost,
+            providerProgress: result?.providerProgress,
             remoteSource: output.source,
             prompt: batch.prompt,
             modelId: batch.modelId,
@@ -1404,6 +1407,7 @@ export function applyBatchGenerationResultsToCanvas(
           outputNodeIds,
           historyId: result?.historyId,
           creditCost: result?.creditCost,
+          providerProgress: result?.providerProgress,
           errorMessage: failed ? outcome?.errorMessage ?? "Batch item failed" : undefined,
           prompt: batch.prompt,
           modelId: batch.modelId,
