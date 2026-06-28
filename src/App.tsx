@@ -175,6 +175,11 @@ function formatActivityMinute(timestamp?: string) {
   return match ? `${match[1]} ${match[2]}` : timestamp;
 }
 
+function creditAdjustmentReason(summary: string) {
+  const reasonStart = summary.indexOf(": ");
+  return reasonStart >= 0 ? summary.slice(reasonStart + 2) : summary;
+}
+
 function createWorkspace() {
   return createInitialWorkspace({ userId: "designer-lina", designerName: "Lina Zhou", creditBalance: 180, role: "designer" });
 }
@@ -1338,8 +1343,9 @@ function AdminView({
     });
   }
 
-  async function refreshAdminAudit() {
-    const audit = await fetchAdminAudit(activeUserId);
+  async function refreshAdminReports() {
+    const [usage, audit] = await Promise.all([fetchAdminUsage(activeUserId), fetchAdminAudit(activeUserId)]);
+    setAdminUsage(usage);
     setAdminAudit(audit);
   }
 
@@ -1349,7 +1355,7 @@ function AdminView({
     try {
       const profile = await onAdjustCredits(targetUserId, Number(creditDelta), creditReason);
       syncAccountRow(profile);
-      await refreshAdminAudit();
+      await refreshAdminReports();
       setCreditNotice(`${profile.designerName} now has ${profile.creditBalance} credits`);
     } catch (error) {
       setCreditNotice(error instanceof Error ? error.message : "Credit adjustment failed");
@@ -1364,7 +1370,7 @@ function AdminView({
     try {
       const profile = await onSetCreditLimit(targetUserId, Number(creditLimit), limitReason);
       syncAccountRow(profile);
-      await refreshAdminAudit();
+      await refreshAdminReports();
       setCreditNotice(`${profile.designerName} credit limit set to ${profile.creditLimit}`);
     } catch (error) {
       setCreditNotice(error instanceof Error ? error.message : "Credit limit update failed");
@@ -1378,7 +1384,7 @@ function AdminView({
     setIsAdjusting(true);
     try {
       const model = await onUpdateModelPricing(pricingModelId, Number(modelCost), Number(modelPriceCents), modelCurrency);
-      await refreshAdminAudit();
+      await refreshAdminReports();
       setCreditNotice(`${model.name} now costs ${model.cost} credits per output`);
     } catch (error) {
       setCreditNotice(error instanceof Error ? error.message : "Model pricing update failed");
@@ -1411,7 +1417,7 @@ function AdminView({
       setModelCost(String(model.cost));
       setModelPriceCents(String(model.priceCents ?? 0));
       setModelCurrency(model.currency ?? "CNY");
-      await refreshAdminAudit();
+      await refreshAdminReports();
       setCreditNotice(`${model.name} registered for ${model.provider}`);
     } catch (error) {
       setCreditNotice(error instanceof Error ? error.message : "Model registration failed");
@@ -1435,7 +1441,7 @@ function AdminView({
         const exists = current.some((item) => item.provider === provider.provider);
         return exists ? current.map((item) => (item.provider === provider.provider ? provider : item)) : [...current, provider];
       });
-      await refreshAdminAudit();
+      await refreshAdminReports();
       setProviderSecretValue("");
       setCreditNotice(`${provider.provider} provider set to ${provider.mode}`);
     } catch (error) {
@@ -1660,6 +1666,26 @@ function AdminView({
               ))
             ) : (
               <p>No model usage yet. Completed image jobs will appear here.</p>
+            )}
+          </article>
+          <article className="admin-card">
+            <h2>Team credit ledger</h2>
+            <div className="admin-credit-summary" aria-label="Team credit totals">
+              <strong>{adminUsage?.totalCreditsAllocated ?? 0} credits allocated</strong>
+              <strong>{adminUsage?.totalCreditsRemoved ?? 0} credits removed</strong>
+            </div>
+            {adminUsage?.creditAdjustments.length ? (
+              adminUsage.creditAdjustments.slice(0, 8).map((adjustment) => (
+                <div className="admin-row" key={adjustment.id}>
+                  <span>{adjustment.targetUserId}</span>
+                  <strong>{adjustment.creditDelta > 0 ? `+${adjustment.creditDelta}` : adjustment.creditDelta} credits</strong>
+                  <small>Balance {adjustment.creditBalance ?? "not recorded"}</small>
+                  <small>{creditAdjustmentReason(adjustment.summary)}</small>
+                  <small>{formatActivityMinute(adjustment.createdAt)} / {adjustment.actorUserId ?? "system"}</small>
+                </div>
+              ))
+            ) : (
+              <p>No credit adjustments yet. Admin allocations and removals will appear here.</p>
             )}
           </article>
           <article className="admin-card">

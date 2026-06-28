@@ -750,6 +750,21 @@ button {
   padding-top: 0;
 }
 
+.admin-credit-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.admin-credit-summary strong {
+  border: 1px solid #ededed;
+  border-radius: 7px;
+  background: #f7f8f8;
+  padding: 10px;
+  font-size: 13px;
+}
+
 .team-accounts-card {
   grid-column: span 2;
 }

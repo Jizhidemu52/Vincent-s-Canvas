@@ -142,6 +142,17 @@ export interface AdminUsageSummary {
   totalHistoryEntries: number;
   totalPriceCents?: number;
   currency?: ModelDefinition["currency"] | "mixed";
+  totalCreditsAllocated: number;
+  totalCreditsRemoved: number;
+  creditAdjustments: Array<{
+    id: string;
+    actorUserId?: string;
+    targetUserId: string;
+    creditDelta: number;
+    creditBalance?: number;
+    summary: string;
+    createdAt: string;
+  }>;
   modelUsage: Array<{ modelId: string; count: number; credits: number; priceCents?: number; currency?: ModelDefinition["currency"] }>;
 }
 
@@ -836,6 +847,19 @@ export const apiRoutes = {
     assertAdminUser(state, userId);
     const byModel = new Map<string, { modelId: string; count: number; credits: number; priceCents?: number; currency?: ModelDefinition["currency"] }>();
     const history = allHistory(state);
+    const creditAdjustments = allAdminAudit(state)
+      .filter((entry) => entry.eventType === "credit-adjustment" && entry.targetUserId && entry.creditDelta)
+      .map((entry) => ({
+        id: entry.id,
+        actorUserId: entry.actorUserId,
+        targetUserId: entry.targetUserId!,
+        creditDelta: entry.creditDelta!,
+        creditBalance: entry.creditBalance,
+        summary: entry.summary,
+        createdAt: entry.createdAt
+      }));
+    const totalCreditsAllocated = creditAdjustments.reduce((sum, entry) => sum + Math.max(entry.creditDelta, 0), 0);
+    const totalCreditsRemoved = creditAdjustments.reduce((sum, entry) => sum + Math.abs(Math.min(entry.creditDelta, 0)), 0);
     let totalPriceCents = 0;
     let pricedEntries = 0;
     const currencies = new Set<ModelDefinition["currency"]>();
@@ -865,6 +889,9 @@ export const apiRoutes = {
       totalHistoryEntries: history.length,
       totalPriceCents: pricedEntries ? totalPriceCents : undefined,
       currency: currencies.size > 1 ? "mixed" : Array.from(currencies)[0],
+      totalCreditsAllocated,
+      totalCreditsRemoved,
+      creditAdjustments,
       modelUsage: Array.from(byModel.values())
     };
   },

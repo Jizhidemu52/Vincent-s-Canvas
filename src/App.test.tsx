@@ -22,6 +22,17 @@ let backendAdminUsage: {
   totalHistoryEntries: number;
   totalPriceCents?: number;
   currency?: "CNY" | "USD";
+  totalCreditsAllocated: number;
+  totalCreditsRemoved: number;
+  creditAdjustments: Array<{
+    id: string;
+    actorUserId?: string;
+    targetUserId: string;
+    creditDelta: number;
+    creditBalance?: number;
+    summary: string;
+    createdAt: string;
+  }>;
   modelUsage: Array<{ modelId: string; count: number; credits: number; priceCents?: number; currency?: "CNY" | "USD" }>;
 };
 let backendAdminJobs: Array<Record<string, unknown>> = [];
@@ -145,6 +156,28 @@ beforeEach(() => {
     totalHistoryEntries: 3,
     totalPriceCents: 860,
     currency: "CNY",
+    totalCreditsAllocated: 55,
+    totalCreditsRemoved: 5,
+    creditAdjustments: [
+      {
+        id: "admin-credit-alice-return",
+        actorUserId: "admin@company.local",
+        targetUserId: "alice@company.local",
+        creditDelta: -5,
+        creditBalance: 35,
+        summary: "Adjusted alice@company.local by -5 credits: returned unused credits",
+        createdAt: "2026-06-28T02:25:00.000Z"
+      },
+      {
+        id: "admin-credit-bob-rush",
+        actorUserId: "admin@company.local",
+        targetUserId: "bob@company.local",
+        creditDelta: 15,
+        creditBalance: 15,
+        summary: "Adjusted bob@company.local by 15 credits: rush campaign",
+        createdAt: "2026-06-28T02:20:00.000Z"
+      }
+    ],
     modelUsage: [
       { modelId: "gpt-image-2-medium", count: 2, credits: 14, priceCents: 620, currency: "CNY" },
       { modelId: "upscale-pro", count: 1, credits: 4, priceCents: 240, currency: "CNY" }
@@ -1067,6 +1100,12 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Credit management")).toBeInTheDocument();
     expect(await screen.findByText("Team accounts")).toBeInTheDocument();
     expect(screen.getByText("Model usage")).toBeInTheDocument();
+    expect(screen.getByText("Team credit ledger")).toBeInTheDocument();
+    expect(screen.getByText("55 credits allocated")).toBeInTheDocument();
+    expect(screen.getByText("5 credits removed")).toBeInTheDocument();
+    expect(screen.getByText("-5 credits")).toBeInTheDocument();
+    expect(screen.getByText("Balance 35")).toBeInTheDocument();
+    expect(screen.getByText("returned unused credits")).toBeInTheDocument();
     expect(screen.getByText("Generation jobs")).toBeInTheDocument();
     expect(screen.getByText("Alice Designer · generate")).toBeInTheDocument();
     expect(screen.getByText("succeeded · 14 credits · 2 outputs")).toBeInTheDocument();
@@ -1097,7 +1136,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).toBeInTheDocument();
     expect(screen.getByText("Bob Designer · Bob upscale · upscale-pro")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
-    expect(screen.getByText("alice@company.local")).toBeInTheDocument();
+    expect(screen.getAllByText("alice@company.local").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Alice Designer")).toBeInTheDocument();
     expect(screen.getByText("88 remaining")).toBeInTheDocument();
     expect(screen.getByText("12 used / limit 120")).toBeInTheDocument();

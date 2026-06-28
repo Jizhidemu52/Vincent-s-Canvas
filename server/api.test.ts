@@ -208,6 +208,39 @@ describe("backend hosted mock API", () => {
     );
   });
 
+  it("summarizes admin credit adjustments in team usage", () => {
+    const state = createServerState({ userId: "admin@company.local", role: "admin", creditBalance: 30 });
+
+    adjustAccountCredits(state, { targetUserId: "alice@company.local", delta: 40, reason: "monthly allocation" }, "admin@company.local");
+    adjustAccountCredits(state, { targetUserId: "bob@company.local", delta: 15, reason: "rush campaign" }, "admin@company.local");
+    adjustAccountCredits(state, { targetUserId: "alice@company.local", delta: -5, reason: "returned unused credits" }, "admin@company.local");
+
+    const usage = callApi(state, "/api/admin/usage", undefined, undefined, "admin@company.local") as AdminUsageSummary;
+
+    expect(usage.totalCreditsAllocated).toBe(55);
+    expect(usage.totalCreditsRemoved).toBe(5);
+    expect(usage.creditAdjustments).toEqual([
+      expect.objectContaining({
+        targetUserId: "alice@company.local",
+        creditDelta: -5,
+        creditBalance: 35,
+        summary: "Adjusted alice@company.local by -5 credits: returned unused credits"
+      }),
+      expect.objectContaining({
+        targetUserId: "bob@company.local",
+        creditDelta: 15,
+        creditBalance: 15,
+        summary: "Adjusted bob@company.local by 15 credits: rush campaign"
+      }),
+      expect.objectContaining({
+        targetUserId: "alice@company.local",
+        creditDelta: 40,
+        creditBalance: 40,
+        summary: "Adjusted alice@company.local by 40 credits: monthly allocation"
+      })
+    ]);
+  });
+
   it("rejects non-admin reads of team usage, audit, and provider status", () => {
     const state = createServerState({ creditBalance: 30 });
     callApi(state, "/api/generations", request({ outputCount: 1 }), "admin-read-guard", "alice@company.local");

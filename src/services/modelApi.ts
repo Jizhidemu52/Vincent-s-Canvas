@@ -80,6 +80,17 @@ export interface AdminUsageSummary {
   totalHistoryEntries: number;
   totalPriceCents?: number;
   currency?: ModelDefinition["currency"] | "mixed";
+  totalCreditsAllocated: number;
+  totalCreditsRemoved: number;
+  creditAdjustments: Array<{
+    id: string;
+    actorUserId?: string;
+    targetUserId: string;
+    creditDelta: number;
+    creditBalance?: number;
+    summary: string;
+    createdAt: string;
+  }>;
   modelUsage: Array<{ modelId: string; count: number; credits: number; priceCents?: number; currency?: ModelDefinition["currency"] }>;
 }
 
