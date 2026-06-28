@@ -2914,6 +2914,18 @@ function CanvasStage({
     onWorkspaceChange((current) => updateViewport(current, project.id, { zoom }));
   }
 
+  function focusNodeFromMinimap(nodeId: string) {
+    const node = project.nodes.find((item) => item.id === nodeId);
+    if (!node) return;
+    const rect = stageRef.current?.getBoundingClientRect();
+    const viewportWidth = rect && rect.width > 0 ? rect.width : 1900;
+    const viewportHeight = rect && rect.height > 0 ? rect.height : 840;
+    const zoom = project.viewport.zoom;
+    const nextX = Math.round(viewportWidth / 2 - (node.x + node.width / 2) * zoom);
+    const nextY = Math.round(viewportHeight / 2 - (node.y + node.height / 2) * zoom);
+    onWorkspaceChange((current) => updateViewport(selectNodes(current, project.id, [nodeId]), project.id, { x: nextX, y: nextY }));
+  }
+
   return (
     <section
       ref={stageRef}
@@ -2998,7 +3010,7 @@ function CanvasStage({
       )}
       {lasso && <div className="lasso" style={lasso} />}
       <ZoomControls workspace={workspace} project={project} onWorkspaceChange={onWorkspaceChange} />
-      {project.viewport.minimapOpen && <MiniMap project={project} />}
+      {project.viewport.minimapOpen && <MiniMap project={project} onFocusNode={focusNodeFromMinimap} />}
     </section>
   );
 }
@@ -3327,13 +3339,17 @@ function ZoomControls({
   );
 }
 
-function MiniMap({ project }: { project: Project }) {
+function MiniMap({ project, onFocusNode }: { project: Project; onFocusNode: (nodeId: string) => void }) {
   return (
     <div className="mini-map" aria-label="Canvas minimap">
-      {project.nodes.map((node) => (
-        <span
+      {project.nodes.map((node, index) => (
+        <button
+          type="button"
           key={node.id}
+          aria-label={`Focus minimap ${node.type} node ${index + 1}`}
+          title={`Focus ${node.name}`}
           className={project.selectedNodeIds.includes(node.id) ? "active" : ""}
+          onClick={() => onFocusNode(node.id)}
           style={{ left: `${node.x / 24}px`, top: `${node.y / 18}px`, width: `${Math.max(8, node.width / 30)}px`, height: `${Math.max(6, node.height / 40)}px` }}
         />
       ))}

@@ -33,7 +33,7 @@ Search beyond the initial three repositories when a feature is not already cover
 The current repository already includes:
 
 - Designer `Projects`, `History`, and `Profile`.
-- Recraft-style project canvas with dropped/pasted image nodes.
+- Recraft-style project canvas with dropped/pasted image nodes and basketikun-style clickable minimap navigation.
 - Left-panel and inline image model/prompt generation.
 - Toolbar operations for upscale, remove background, download, save asset, magic edit, and mask edit.
 - Lightweight workflow modules and connections.
@@ -80,6 +80,7 @@ Local inspection notes:
 
 | Target Need | Prefer Source | Candidate Modules | Decision |
 | --- | --- | --- | --- |
+| Infinite canvas minimap navigation | `basketikun/infinite-canvas` | `web/src/components/canvas/*`, canvas stage/status components | Adapted the existing local minimap into accessible node-jump controls on 2026-06-28; designers can select and center a distant node from the minimap without replacing the current canvas implementation. |
 | Prompt library UI and prompt detail/selection behavior | `basketikun/infinite-canvas` | `web/src/components/prompts/*`, `web/src/services/api/prompts.ts` | Adapted backend prompt API boundary and designer attribution on 2026-06-28; richer prompt cards/details remain later. |
 | Asset persistence/search and image storage boundaries | `basketikun/infinite-canvas` | `use-asset-store.ts`, `image-storage.ts`, `file-storage.ts`, `app-sync.ts` | Adapt storage ideas to backend-owned assets; do not keep front-end-only API keys. |
 | Workflow node registry and port typing | `T8mars/T8-penguin-canvas` | `src/config/nodeRegistry.ts`, `src/config/portTypes.ts`, node components | Adapted first-pass typed module registry, backend endpoint mapping, port definitions, inspector port summaries, strict connection compatibility, compatible module picker filtering, target port labels, drag-time compatible/incompatible highlights, port-level input/output target feedback, true port-specific drop connections, connected text-port prompt execution, connected image/result-port reference execution, connected config-port output-count execution, typed batch settings handoff for concurrency/failure policy, typed edit mask config handoff, typed provider request settings for size/quality/preset, and provider payload mapping on 2026-06-28; next step is live adapter execution. |

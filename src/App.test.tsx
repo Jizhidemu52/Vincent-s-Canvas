@@ -873,6 +873,22 @@ describe("Designer canvas app shell", () => {
     });
   });
 
+  it("lets designers jump to canvas nodes from the minimap", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const stageWorld = document.querySelector(".stage-world") as HTMLElement;
+    expect(stageWorld).toHaveStyle({ transform: "translate(0px, 0px) scale(1)" });
+
+    await user.click(screen.getByRole("button", { name: "Focus minimap image node 1" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i })).toHaveClass("selected");
+    });
+    expect(stageWorld.style.transform).toContain("translate(130px, 70px) scale(1)");
+  });
+
   it("lets designers copy, delete, undo, and redo selected image nodes", async () => {
     const user = userEvent.setup();
     await login(user);

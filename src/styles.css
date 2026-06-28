@@ -2109,13 +2109,20 @@ button {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
 }
 
-.mini-map span {
+.mini-map button {
   position: absolute;
+  padding: 0;
+  border: 0;
   border-radius: 2px;
   background: #bdbdbd;
+  cursor: pointer;
 }
 
-.mini-map span.active {
+.mini-map button:hover {
+  background: #8f8f8f;
+}
+
+.mini-map button.active {
   background: #23cbb8;
 }
 
