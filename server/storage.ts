@@ -332,12 +332,61 @@ function loadDatabaseState(filePath: string, fallback: ServerState) {
     createDatabaseSchema(db);
     const row = db.prepare("select state_json from platform_state where id = 1").get() as { state_json?: string } | undefined;
     if (!row?.state_json) {
-      return fallback;
+      return loadDatabaseTables(db, fallback);
     }
     return hydrateServerState(JSON.parse(row.state_json) as PersistedServerState);
   } finally {
     db.close();
   }
+}
+
+function loadJsonColumn<T>(value: unknown): T | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return JSON.parse(value) as T;
+}
+
+function loadDatabaseTables(db: ReturnType<typeof openDatabase>, fallback: ServerState): ServerState {
+  const state = createServerState(fallback.profile);
+  const accountRows = db.prepare("select user_id, account_json from accounts order by user_id").all() as Array<{ user_id: string; account_json: string }>;
+  const accounts = new Map<string, AccountWorkspace>();
+  for (const row of accountRows) {
+    const account = loadJsonColumn<AccountWorkspace>(row.account_json);
+    if (account) {
+      accounts.set(row.user_id, account);
+    }
+  }
+  const primaryAccount = accounts.get(fallback.profile.userId) ?? accounts.values().next().value;
+  if (primaryAccount) {
+    state.profile = primaryAccount.profile;
+    state.projects = primaryAccount.projects;
+    state.activeProjectId = primaryAccount.activeProjectId;
+    state.history = primaryAccount.history;
+    state.assets = primaryAccount.assets;
+    state.prompts = primaryAccount.prompts.length ? primaryAccount.prompts : state.prompts;
+  }
+  state.accounts = Object.fromEntries(
+    Array.from(accounts.entries()).filter(([userId]) => userId !== state.profile.userId)
+  );
+
+  const modelRows = db.prepare("select model_json from model_configs order by id").all() as Array<{ model_json: string }>;
+  const models = modelRows.map((row) => loadJsonColumn<ModelDefinition>(row.model_json)).filter((model): model is ModelDefinition => Boolean(model));
+  if (models.length) {
+    state.models = models;
+  }
+
+  const jobRows = db.prepare("select job_json from generation_jobs order by id").all() as Array<{ job_json: string }>;
+  state.generationJobs = jobRows
+    .map((row) => loadJsonColumn<GenerationJob>(row.job_json))
+    .filter((job): job is GenerationJob => Boolean(job));
+
+  const auditRows = db.prepare("select event_json from audit_logs where event_type != 'generation' order by created_at desc").all() as Array<{ event_json: string }>;
+  state.adminAudit = auditRows
+    .map((row) => loadJsonColumn<AdminAuditEntry>(row.event_json))
+    .filter((entry): entry is AdminAuditEntry => Boolean(entry));
+
+  const requestRows = db.prepare("select request_id from submitted_requests").all() as Array<{ request_id: string }>;
+  state.submittedRequestIds = new Set(requestRows.map((row) => row.request_id));
+  return state;
 }
 
 export function loadServerState(filePath: string, fallback: ServerState = createServerState()): ServerState {

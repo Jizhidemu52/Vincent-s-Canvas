@@ -29,17 +29,26 @@ describe("server database storage", () => {
       callApi(state, "/api/generations", request(), "sqlite-request-1", "designer@company.local");
 
       saveServerState(databasePath, state);
+      const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+      const db = new DatabaseSync(databasePath);
+      try {
+        db.exec("delete from platform_state");
+      } finally {
+        db.close();
+      }
       const restored = loadServerState(databasePath);
       const restoredProfile = callApi(restored, "/api/profile", undefined, undefined, "designer@company.local") as Profile;
       const duplicate = callApi(restored, "/api/generations", request(), "sqlite-request-1", "designer@company.local") as { errorMessage: string };
       const otherDesigner = callApi(restored, "/api/generations", request(), "sqlite-request-1", "other@company.local") as GenerationResult;
       const otherProfile = callApi(restored, "/api/profile", undefined, undefined, "other@company.local") as Profile;
+      const jobs = callApi(restored, "/api/admin/jobs", undefined, undefined, "admin@company.local") as ReturnType<typeof createServerState>["generationJobs"];
 
       expect(existsSync(databasePath)).toBe(true);
       expect(restoredProfile.creditBalance).toBe(28);
       expect(duplicate.errorMessage).toBe("Duplicate request");
       expect(otherDesigner.status).toBe("succeeded");
-      expect(otherProfile.creditBalance).toBe(28);
+      expect(otherProfile.creditBalance).toBe(26);
+      expect(jobs).toEqual(expect.arrayContaining([expect.objectContaining({ userId: "designer@company.local", status: "succeeded" })]));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
