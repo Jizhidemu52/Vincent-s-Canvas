@@ -39,6 +39,7 @@ The current repository already includes:
 - Lightweight workflow modules and connections.
 - Typed first-pass workflow module registry for `Generate / Edit / Upscale / Remove BG / Batch / Upload Reference`.
 - Batch import and processing.
+- T8-inspired batch queue status summaries, failed-item retry batches, cancellation, and merge-safe retry results.
 - Backend-hosted provider registry, profile/history, admin credit adjustment, provider health, and persistence.
 - Admin credit limits and model pricing controls.
 - Admin generation job logs with designer, model, operation, status, cost, and project context.
@@ -81,7 +82,7 @@ Local inspection notes:
 | Prompt library UI and prompt detail/selection behavior | `basketikun/infinite-canvas` | `web/src/components/prompts/*`, `web/src/services/api/prompts.ts` | Adapt into current `RightDock` prompt library before expanding custom prompt UX. |
 | Asset persistence/search and image storage boundaries | `basketikun/infinite-canvas` | `use-asset-store.ts`, `image-storage.ts`, `file-storage.ts`, `app-sync.ts` | Adapt storage ideas to backend-owned assets; do not keep front-end-only API keys. |
 | Workflow node registry and port typing | `T8mars/T8-penguin-canvas` | `src/config/nodeRegistry.ts`, `src/config/portTypes.ts`, node components | Use as the next source for a typed operation registry instead of expanding ad hoc module checks. |
-| Batch workflow behavior and partial failure tests | `T8mars/T8-penguin-canvas` | `BatchProcessorNode.tsx`, `batchProcessor.ts`, `tests/batchProcessor.test.ts` | Reuse queue semantics and tests when adding retries/progress/cancel. |
+| Batch workflow behavior and partial failure tests | `T8mars/T8-penguin-canvas` | `BatchProcessorNode.tsx`, `batchProcessor.ts`, `tests/batchProcessor.test.ts` | Adapted lightweight retry/progress/cancel semantics into current batch queue on 2026-06-28; deeper async worker/concurrency remains later. |
 | RunningHub/ComfyUI provider adapters | `T8mars/T8-penguin-canvas`, `hero8152/Infinite-Canvas` | T8 backend provider files; hero settings/workflow JSON | Start from T8 provider registry and tests, then cross-check hero settings screens/workflow fixtures. |
 | API/provider settings UI | `hero8152/Infinite-Canvas` | `static/js/api-settings.js`, `static/js/comfyui-settings.js`, related HTML | Reuse field set and connection-test ideas, but keep secrets server-side in this product. |
 | History bulk management | `hero8152/Infinite-Canvas` | `static/js/history-bulk-manager.js` | Use as reference after current team history has filtering, selection, and export needs. |
@@ -89,7 +90,7 @@ Local inspection notes:
 ## Next Reuse-First Implementation Order
 
 1. Continue migrating the typed node operation registry inspired by T8 `nodeRegistry` and `portTypes`: the first-pass registry now exists; next step is to let the right dock shortcut buttons and backend request builders consume the same definitions fully.
-2. Adapt T8 batch queue semantics for retry, cancel, and per-item progress while preserving current project canvas and credit ledger.
+2. Extend the current T8-inspired batch queue with async worker concurrency, pause/resume, and persistent provider job progress after real provider adapters land.
 3. Adapt basketikun prompt library UI patterns into the current prompt dock, keeping server-side prompt presets and designer attribution.
 4. Add RunningHub and ComfyUI live-ready provider adapters by porting T8 provider registry tests and reconciling hero workflow JSON/settings fields.
 5. Use hero history bulk management ideas for admin/team history filtering and export after real provider output storage is stable.

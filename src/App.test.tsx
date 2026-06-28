@@ -1047,11 +1047,13 @@ describe("Designer canvas app shell", () => {
 
   it("keeps processing a batch when one imported image fails", async () => {
     const originalFetch = vi.mocked(fetch).getMockImplementation();
+    let rejectedBackOnce = false;
     vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString();
       if (url.endsWith("/api/generations")) {
         const request = JSON.parse(String(init?.body)) as GenerationRequest;
-        if (request.referenceNodeIds[0] === "folder-back.png") {
+        if (request.referenceNodeIds[0] === "folder-back.png" && !rejectedBackOnce) {
+          rejectedBackOnce = true;
           return jsonResponse({ status: "failed", errorMessage: "Provider rejected folder-back.png" }, 500);
         }
       }
@@ -1080,6 +1082,17 @@ describe("Designer canvas app shell", () => {
     expect(screen.getAllByText("Provider rejected folder-back.png").length).toBeGreaterThanOrEqual(1);
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
     expect(calls).toHaveLength(2);
+    expect(screen.getByText("Batch progress 1/2 succeeded · 1 failed · 100% complete")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry failed batch items" }));
+
+    expect(await screen.findByText("Backend batch completed for 1 images")).toBeInTheDocument();
+    const retryCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
+    const retryRequest = JSON.parse(String(retryCalls[retryCalls.length - 1][1]?.body)) as GenerationRequest;
+    expect(retryCalls).toHaveLength(3);
+    expect(retryRequest.referenceNodeIds).toEqual(["folder-back.png"]);
+    expect(screen.getByText("Batch progress 2/2 succeeded · 0 failed · 100% complete")).toBeInTheDocument();
+    expect(screen.getAllByText("done").length).toBeGreaterThanOrEqual(2);
     await user.click(screen.getByRole("button", { name: "History" }));
     expect(screen.getAllByText(/Apply one consistent showroom cleanup/i).length).toBeGreaterThanOrEqual(1);
   });

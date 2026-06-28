@@ -50,8 +50,10 @@ import {
   addGenerationTargetFrame,
   applyBatchGenerationResultsToCanvas,
   applyGenerationResultToCanvas,
+  buildRetryBatchFromFailures,
   buildWorkflowExecutionPlan,
   buildWorkflowGenerationRequests,
+  cancelBatchQueue,
   commitShapeEdit,
   configureNodeGeneration,
   copyPasteSelectedNodes,
@@ -68,6 +70,7 @@ import {
   saveNodeAsAsset,
   savePromptPreset,
   selectNodes,
+  summarizeBatchQueue,
   undoProject,
   updateNodeTransform,
   updateViewport,
@@ -568,6 +571,38 @@ export default function App() {
     });
   }
 
+  async function submitBackendBatch(projectId: string, batch: BatchImport) {
+    try {
+      setApiNotice(`Running backend batch for ${batch.files.length} images...`);
+      const outcomes: BatchGenerationOutcome[] = [];
+      const operation = operationForBatchModel(workspace.modelRegistry, batch.modelId, selectedNode ? operationForNode(selectedNode) : undefined);
+      for (const [index, file] of batch.files.entries()) {
+        try {
+          const result = await submitGenerationRequest({
+            projectId,
+            nodeId: `batch-${file.name}-${index + 1}`,
+            modelId: batch.modelId,
+            prompt: batch.prompt,
+            referenceNodeIds: [file.name],
+            outputCount: batch.outputCount,
+            operation
+          }, activeUserId);
+          outcomes.push({ result });
+        } catch (error) {
+          outcomes.push({ errorMessage: error instanceof Error ? error.message : "Batch item failed" });
+        }
+      }
+      const serverState = await fetchBackendSnapshot(activeUserId);
+      setWorkspace((current) => applyBatchGenerationResultsToCanvas(current, projectId, batch, outcomes, serverState));
+      setRightPanel("history");
+      const succeeded = outcomes.filter((outcome) => outcome.result).length;
+      const failed = outcomes.length - succeeded;
+      setApiNotice(failed ? `Backend batch completed for ${succeeded} of ${batch.files.length} images; ${failed} failed` : `Backend batch completed for ${batch.files.length} images`);
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Backend batch failed");
+    }
+  }
+
   async function runBackendBatch(files?: FileList | null) {
     if (!activeProject) return;
     const projectId = activeProject.id;
@@ -600,35 +635,24 @@ export default function App() {
             { name: "look-03.jpg", source: TEST_IMAGE, width: 240, height: 320 }
           ]
         };
+    await submitBackendBatch(projectId, batch);
+  }
+
+  async function retryFailedBatch() {
+    if (!activeProject) return;
     try {
-      setApiNotice(`Running backend batch for ${batch.files.length} images...`);
-      const outcomes: BatchGenerationOutcome[] = [];
-      const operation = operationForBatchModel(workspace.modelRegistry, batch.modelId, selectedNode ? operationForNode(selectedNode) : undefined);
-      for (const [index, file] of batch.files.entries()) {
-        try {
-          const result = await submitGenerationRequest({
-            projectId,
-            nodeId: `batch-${file.name}-${index + 1}`,
-            modelId: batch.modelId,
-            prompt: batch.prompt,
-            referenceNodeIds: [file.name],
-            outputCount: batch.outputCount,
-            operation
-          }, activeUserId);
-          outcomes.push({ result });
-        } catch (error) {
-          outcomes.push({ errorMessage: error instanceof Error ? error.message : "Batch item failed" });
-        }
-      }
-      const serverState = await fetchBackendSnapshot(activeUserId);
-      setWorkspace((current) => applyBatchGenerationResultsToCanvas(current, projectId, batch, outcomes, serverState));
-      setRightPanel("history");
-      const succeeded = outcomes.filter((outcome) => outcome.result).length;
-      const failed = outcomes.length - succeeded;
-      setApiNotice(failed ? `Backend batch completed for ${succeeded} of ${batch.files.length} images; ${failed} failed` : `Backend batch completed for ${batch.files.length} images`);
+      const batch = buildRetryBatchFromFailures(workspace, activeProject.id);
+      await submitBackendBatch(activeProject.id, batch);
     } catch (error) {
-      setApiNotice(error instanceof Error ? error.message : "Backend batch failed");
+      setApiNotice(error instanceof Error ? error.message : "No failed batch items to retry");
     }
+  }
+
+  function cancelActiveBatch() {
+    if (!activeProject) return;
+    setWorkspace((current) => cancelBatchQueue(current, activeProject.id));
+    setRightPanel("history");
+    setApiNotice("Batch queue cancelled");
   }
   function shapeEdit() {
     if (!activeProject) return;
@@ -821,6 +845,8 @@ export default function App() {
         onGenerate={runSelectedGeneration}
         onGenerateNode={(nodeId) => void generateNodeThroughApi(nodeId)}
         onBatch={runBackendBatch}
+        onRetryBatch={retryFailedBatch}
+        onCancelBatch={cancelActiveBatch}
         onWorkflow={runWorkflow}
         onAddModule={addWorkflowModule}
         onConnectModule={connectSelectionToNewModule}
@@ -1981,6 +2007,8 @@ function CanvasView({
   onGenerate,
   onGenerateNode,
   onBatch,
+  onRetryBatch,
+  onCancelBatch,
   onWorkflow,
   onAddModule,
   onConnectModule,
@@ -2012,6 +2040,8 @@ function CanvasView({
   onGenerate: () => void;
   onGenerateNode: (nodeId: string) => void;
   onBatch: () => void;
+  onRetryBatch: () => void;
+  onCancelBatch: () => void;
   onWorkflow: () => void;
   onAddModule: (moduleType: ModuleType) => void;
   onConnectModule: (moduleType: ModuleType, sourceNodeIds?: string[]) => void;
@@ -2092,6 +2122,8 @@ function CanvasView({
           onPromptDelete={onDeletePrompt}
           onAssetInsert={onInsertAsset}
           onAssistantNote={onAssistantNote}
+          onRetryBatch={onRetryBatch}
+          onCancelBatch={onCancelBatch}
         />
         <ShapeEditDialog
           draft={shapeEditDraft}
@@ -3053,7 +3085,9 @@ function RightDock({
   onSavePrompt,
   onPromptDelete,
   onAssetInsert,
-  onAssistantNote
+  onAssistantNote,
+  onRetryBatch,
+  onCancelBatch
 }: {
   workspace: Workspace;
   project: Project;
@@ -3067,6 +3101,8 @@ function RightDock({
   onPromptDelete: (promptId: string) => void;
   onAssetInsert: (asset: LibraryAsset) => void;
   onAssistantNote: (content: string) => void;
+  onRetryBatch: () => void;
+  onCancelBatch: () => void;
 }) {
   const [promptSearch, setPromptSearch] = useState("");
   const normalizedPromptSearch = promptSearch.trim().toLowerCase();
@@ -3094,6 +3130,9 @@ function RightDock({
   const selectedModelId =
     selectedHistory?.modelId ??
     (typeof selectedNode?.metadata.modelId === "string" ? selectedNode.metadata.modelId : selectedNode?.generation.modelId);
+  const batchSummary = summarizeBatchQueue(project.batchQueue);
+  const hasRetryableBatchItems = project.batchQueue.some((item) => item.status === "error" || item.status === "cancelled");
+  const hasCancellableBatchItems = project.batchQueue.some((item) => item.status === "queued" || item.status === "processing");
   const assistantCards = [
     {
       title: "Two-reference concept",
@@ -3181,10 +3220,22 @@ function RightDock({
           {project.batchQueue.length ? (
             <section className="batch-queue-log" aria-label="Batch queue">
               <b>Batch queue</b>
+              <p>
+                Batch progress {batchSummary.succeeded}/{batchSummary.total} succeeded · {batchSummary.failed} failed · {batchSummary.percent}% complete
+              </p>
+              <div className="dock-actions compact">
+                <button type="button" aria-label="Retry failed batch items" onClick={onRetryBatch} disabled={!hasRetryableBatchItems}>
+                  Retry failed
+                </button>
+                <button type="button" aria-label="Cancel remaining batch items" onClick={onCancelBatch} disabled={!hasCancellableBatchItems}>
+                  Cancel remaining
+                </button>
+              </div>
               {project.batchQueue.map((item) => (
                 <article key={item.id} className={`batch-queue-item ${item.status}`}>
                   <span>{item.name}</span>
                   <em>{item.status}</em>
+                  {item.attempts ? <small>attempt {item.attempts}</small> : null}
                   {item.errorMessage ? <small>{item.errorMessage}</small> : null}
                 </article>
               ))}

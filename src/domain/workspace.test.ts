@@ -5,9 +5,11 @@ import {
   addGenerationTargetFrame,
   applyBatchGenerationResultsToCanvas,
   applyGenerationResultToCanvas,
+  buildRetryBatchFromFailures,
   buildWorkflowGenerationRequests,
   applyImageOperation,
   buildWorkflowExecutionPlan,
+  cancelBatchQueue,
   connectWorkflowNode,
   commitShapeEdit,
   configureNodeGeneration,
@@ -23,6 +25,7 @@ import {
   saveNodeAsAsset,
   savePromptPreset,
   selectNodes,
+  summarizeBatchQueue,
   deletePromptPreset,
   getWorkflowModuleDefinition,
   WORKFLOW_MODULE_REGISTRY
@@ -533,6 +536,82 @@ describe("designer canvas workspace behavior", () => {
       modelId: "background-cleaner",
       operation: "removeBackground"
     });
+  });
+
+  it("summarizes, cancels, and retries failed backend batch items without duplicating originals", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Batch retry queue");
+    const batch = {
+      folderName: "raw trims",
+      prompt: "remove background and normalize lighting",
+      modelId: "background-cleaner",
+      outputCount: 1,
+      files: [
+        { name: "front.png", source: "front-source", width: 300, height: 300 },
+        { name: "back.png", source: "back-source", width: 300, height: 300 }
+      ]
+    };
+    const firstPass = applyBatchGenerationResultsToCanvas(workspace, project.id, batch, [
+      {
+        result: {
+          status: "succeeded",
+          historyId: "history-batch-front",
+          creditCost: 2,
+          outputs: [{ name: "front-clean.png", source: "mock://batch/front/1", width: 512, height: 512 }]
+        }
+      },
+      { errorMessage: "Provider timed out" }
+    ]);
+
+    expect(summarizeBatchQueue(firstPass.projects[0].batchQueue)).toMatchObject({
+      total: 2,
+      completed: 2,
+      succeeded: 1,
+      failed: 1,
+      cancelled: 0,
+      percent: 100,
+      status: "error"
+    });
+    expect(firstPass.projects[0].batchQueue.find((item) => item.name === "back.png")).toMatchObject({
+      status: "error",
+      attempts: 1,
+      errorMessage: "Provider timed out"
+    });
+
+    const retryBatch = buildRetryBatchFromFailures(firstPass, project.id);
+    expect(retryBatch.files).toEqual([{ name: "back.png", source: "back-source", width: 300, height: 300 }]);
+
+    const retryPass = applyBatchGenerationResultsToCanvas(firstPass, project.id, retryBatch, [
+      {
+        result: {
+          status: "succeeded",
+          historyId: "history-batch-back",
+          creditCost: 2,
+          outputs: [{ name: "back-clean.png", source: "mock://batch/back/1", width: 512, height: 512 }]
+        }
+      }
+    ]);
+
+    expect(summarizeBatchQueue(retryPass.projects[0].batchQueue)).toMatchObject({
+      total: 2,
+      succeeded: 2,
+      failed: 0,
+      status: "succeeded"
+    });
+    expect(retryPass.projects[0].batchQueue.find((item) => item.name === "back.png")).toMatchObject({
+      status: "done",
+      attempts: 2
+    });
+    expect(retryPass.projects[0].nodes.filter((node) => node.metadata.batchOriginal && node.name === "back.png")).toHaveLength(1);
+    expect(retryPass.projects[0].nodes.filter((node) => node.kind === "generated")).toHaveLength(2);
+
+    const queued = importBatchFolder(workspace, project.id, batch);
+    const cancelled = cancelBatchQueue(queued, project.id);
+    expect(summarizeBatchQueue(cancelled.projects[0].batchQueue)).toMatchObject({
+      total: 2,
+      cancelled: 2,
+      status: "cancelled"
+    });
+    expect(cancelled.projects[0].batchQueue.every((item) => item.errorMessage === "Cancelled by designer")).toBe(true);
   });
 
   it("rejects batch processing with unregistered or non-executable models before spending credits", () => {

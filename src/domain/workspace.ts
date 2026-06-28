@@ -107,7 +107,9 @@ export interface BatchItem {
   source: string;
   width: number;
   height: number;
-  status: "queued" | "processing" | "done" | "error";
+  status: "queued" | "processing" | "done" | "error" | "cancelled";
+  attempts?: number;
+  maxAttempts?: number;
   errorMessage?: string;
 }
 
@@ -574,6 +576,42 @@ function createBatchOriginalNodes(batch: BatchImport, existingCount = 0): Canvas
   );
 }
 
+function batchFileKey(file: Pick<AssetInput, "name" | "source">) {
+  return `${file.name}\u0000${file.source}`;
+}
+
+function batchItemKey(item: Pick<BatchItem, "name" | "source">) {
+  return `${item.name}\u0000${item.source}`;
+}
+
+function batchOriginalKey(node: CanvasNode) {
+  return `${String(node.metadata.sourceFile ?? node.name)}\u0000${node.source}`;
+}
+
+export function summarizeBatchQueue(items: BatchItem[]) {
+  const total = items.length;
+  const queued = items.filter((item) => item.status === "queued").length;
+  const processing = items.filter((item) => item.status === "processing").length;
+  const succeeded = items.filter((item) => item.status === "done").length;
+  const failed = items.filter((item) => item.status === "error").length;
+  const cancelled = items.filter((item) => item.status === "cancelled").length;
+  const completed = succeeded + failed + cancelled;
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+  const status =
+    total === 0
+      ? "empty"
+      : failed
+        ? "error"
+        : processing
+          ? "running"
+          : cancelled && completed === total
+            ? "cancelled"
+            : completed === total
+              ? "succeeded"
+              : "queued";
+  return { total, queued, processing, completed, succeeded, failed, cancelled, percent, status };
+}
+
 export function createInitialWorkspace(profile: Partial<Profile> = {}): Workspace {
   const creditBalance = profile.creditBalance ?? profile.credits ?? 120;
   return {
@@ -986,15 +1024,19 @@ export function applyBatchGenerationResultsToCanvas(
   const model = workspace.modelRegistry.find((item) => item.id === batch.modelId);
   const operation = model ? defaultOperationForModel(model) ?? "generate" : "generate";
   const updated = updateProject(workspace, projectId, (project) => {
-    const originalNodes = createBatchOriginalNodes(
-      batch,
+    const existingOriginalByFile = new Map(
+      project.nodes.filter((node) => node.metadata.batchOriginal).map((node) => [batchOriginalKey(node), node])
+    );
+    const missingFiles = batch.files.filter((file) => !existingOriginalByFile.has(batchFileKey(file)));
+    const newOriginalNodes = createBatchOriginalNodes(
+      { ...batch, files: missingFiles },
       project.nodes.filter((node) => node.metadata.batchOriginal).length
     );
-    const originalByFile = new Map(originalNodes.map((node) => [String(node.metadata.sourceFile), node]));
+    const originalByFile = new Map<string, CanvasNode>([...existingOriginalByFile, ...newOriginalNodes.map((node) => [batchOriginalKey(node), node] as const)]);
     generatedNodes = batch.files.flatMap((file, fileIndex) => {
       const result = outcomes[fileIndex]?.result;
       const outputs = result?.outputs.length ? result.outputs : [];
-      const originalNode = originalByFile.get(file.name);
+      const originalNode = originalByFile.get(batchFileKey(file));
       return outputs.map((output, outputIndex) => {
         const x = (originalNode?.x ?? 220 + fileIndex * 148) + (originalNode?.width ?? file.width) + 112 + outputIndex * 24;
         const y = (originalNode?.y ?? 520) + outputIndex * 28;
@@ -1033,7 +1075,8 @@ export function applyBatchGenerationResultsToCanvas(
       if (!node.parentId) continue;
       outputIdsByOriginal.set(node.parentId, [...(outputIdsByOriginal.get(node.parentId) ?? []), node.id]);
     }
-    const auditedOriginalNodes = originalNodes.map((node, fileIndex) => {
+    const auditedOriginalNodes = batch.files.map((file, fileIndex) => {
+      const node = originalByFile.get(batchFileKey(file))!;
       const outcome = outcomes[fileIndex];
       const result = outcome?.result;
       const outputNodeIds = outputIdsByOriginal.get(node.id) ?? [];
@@ -1056,7 +1099,27 @@ export function applyBatchGenerationResultsToCanvas(
         }
       };
     });
+    const auditedById = new Map(auditedOriginalNodes.map((node) => [node.id, node]));
     const batchConnections = generatedNodes.flatMap((node) => (node.parentId ? [connect(node.parentId, node.id, "out", "image")] : []));
+    const existingQueueByFile = new Map(project.batchQueue.map((item) => [batchItemKey(item), item]));
+    const nextQueueByFile = new Map(project.batchQueue.map((item) => [batchItemKey(item), item]));
+    for (const [fileIndex, file] of batch.files.entries()) {
+      const key = batchFileKey(file);
+      const existing = existingQueueByFile.get(key);
+      const result = outcomes[fileIndex]?.result;
+      const errorMessage = outcomes[fileIndex]?.errorMessage ?? (!result ? "Batch item failed" : undefined);
+      nextQueueByFile.set(key, {
+        id: existing?.id ?? createId("batch"),
+        name: file.name,
+        source: file.source,
+        width: file.width,
+        height: file.height,
+        status: result ? "done" : "error",
+        attempts: (existing?.attempts ?? 0) + 1,
+        maxAttempts: existing?.maxAttempts ?? 2,
+        errorMessage
+      });
+    }
     return withUndo(project, {
       batchConfig: {
         folderName: batch.folderName,
@@ -1064,16 +1127,12 @@ export function applyBatchGenerationResultsToCanvas(
         modelId: batch.modelId,
         outputCount: batch.outputCount
       },
-      batchQueue: batch.files.map((file, fileIndex) => ({
-        id: createId("batch"),
-        name: file.name,
-        source: file.source,
-        width: file.width,
-        height: file.height,
-        status: outcomes[fileIndex]?.result ? "done" : "error",
-        errorMessage: outcomes[fileIndex]?.errorMessage
-      })),
-      nodes: [...project.nodes, ...auditedOriginalNodes, ...generatedNodes],
+      batchQueue: Array.from(nextQueueByFile.values()),
+      nodes: [
+        ...project.nodes.map((node) => auditedById.get(node.id) ?? node),
+        ...auditedOriginalNodes.filter((node) => !project.nodes.some((existing) => existing.id === node.id)),
+        ...generatedNodes
+      ],
       connections: [...project.connections, ...batchConnections],
       selectedNodeIds: (generatedNodes.length ? generatedNodes : auditedOriginalNodes).map((node) => node.id)
     });
@@ -1175,12 +1234,45 @@ export function importBatchFolder(workspace: Workspace, projectId: string, batch
         source: file.source,
         width: file.width,
         height: file.height,
-        status: "queued"
+        status: "queued",
+        attempts: 0,
+        maxAttempts: 2
       })),
       nodes: [...project.nodes, ...originalNodes],
       selectedNodeIds: originalNodes.map((node) => node.id)
     });
   });
+}
+
+export function buildRetryBatchFromFailures(workspace: Workspace, projectId: string): BatchImport {
+  const project = findProject(workspace, projectId);
+  if (!project.batchConfig) throw new Error("Batch configuration is required");
+  const retryItems = project.batchQueue.filter((item) => item.status === "error" || item.status === "cancelled");
+  if (!retryItems.length) throw new Error("No failed batch items to retry");
+  return {
+    folderName: project.batchConfig.folderName,
+    prompt: project.batchConfig.prompt,
+    modelId: project.batchConfig.modelId,
+    outputCount: project.batchConfig.outputCount,
+    files: retryItems.map((item) => ({
+      name: item.name,
+      source: item.source,
+      width: item.width,
+      height: item.height
+    }))
+  };
+}
+
+export function cancelBatchQueue(workspace: Workspace, projectId: string): Workspace {
+  return updateProject(workspace, projectId, (project) =>
+    withUndo(project, {
+      batchQueue: project.batchQueue.map((item) =>
+        item.status === "queued" || item.status === "processing"
+          ? { ...item, status: "cancelled" as const, errorMessage: "Cancelled by designer" }
+          : item
+      )
+    })
+  );
 }
 
 export function runBatchQueue(workspace: Workspace, projectId: string): Workspace {
@@ -1227,7 +1319,13 @@ export function runBatchQueue(workspace: Workspace, projectId: string): Workspac
   const batchConnections = generatedNodes.flatMap((node) => (node.parentId ? [connect(node.parentId, node.id, "out", "image")] : []));
   const updated = updateProject(charged, projectId, (item) =>
     withUndo(item, {
-      batchQueue: item.batchQueue.map((queueItem) => ({ ...queueItem, status: "done" })),
+      batchQueue: item.batchQueue.map((queueItem) => ({
+        ...queueItem,
+        status: "done" as const,
+        attempts: (queueItem.attempts ?? 0) + 1,
+        maxAttempts: queueItem.maxAttempts ?? 1,
+        errorMessage: undefined
+      })),
       nodes: [...item.nodes, ...generatedNodes],
       connections: [...item.connections, ...batchConnections],
       selectedNodeIds: generatedNodes.map((node) => node.id)
