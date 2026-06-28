@@ -124,6 +124,7 @@ import {
   type ModelRegistryRequest,
   type ProviderSettingsRequest
 } from "./services/modelApi";
+import { runBatchGenerationQueue } from "./services/batchRunner";
 
 const TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 const SECOND_TEST_IMAGE = "/fixtures/fashion-reference.jpg";
@@ -714,11 +715,11 @@ export default function App() {
   async function submitBackendBatch(projectId: string, batch: BatchImport) {
     try {
       setApiNotice(`Running backend batch for ${batch.files.length} images...`);
-      const outcomes: BatchGenerationOutcome[] = [];
       const operation = operationForBatchModel(workspace.modelRegistry, batch.modelId, selectedNode ? operationForNode(selectedNode) : undefined);
-      const failurePolicy = batch.batchSettings?.failurePolicy ?? "continue";
-      for (const [index, file] of batch.files.entries()) {
-        try {
+      const outcomes: BatchGenerationOutcome[] = await runBatchGenerationQueue(
+        batch.files,
+        batch.batchSettings ?? { concurrency: 1, failurePolicy: "continue" },
+        async (file, index) => {
           const result = await submitGenerationRequest({
             projectId,
             nodeId: `batch-${file.name}-${index + 1}`,
@@ -729,17 +730,9 @@ export default function App() {
             operation,
             batchSettings: batch.batchSettings
           }, activeUserId);
-          outcomes.push({ result });
-        } catch (error) {
-          outcomes.push({ errorMessage: error instanceof Error ? error.message : "Batch item failed" });
-          if (failurePolicy === "stop") {
-            for (let skippedIndex = index + 1; skippedIndex < batch.files.length; skippedIndex += 1) {
-              outcomes.push({ status: "cancelled", errorMessage: "Skipped after stop-on-failure" });
-            }
-            break;
-          }
+          return result;
         }
-      }
+      );
       const serverState = await fetchBackendSnapshot(activeUserId);
       setWorkspace((current) => applyBatchGenerationResultsToCanvas(current, projectId, batch, outcomes, serverState));
       setRightPanel("history");
