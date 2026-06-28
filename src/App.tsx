@@ -1714,6 +1714,7 @@ function AdminView({
                   <span>{entry.eventType ?? "generation"}</span>
                   <strong>{auditPrimaryMetric(entry)}</strong>
                   <small>{auditContext(entry)}</small>
+                  {entry.priceCents !== undefined ? <small>Audit spend {formatEstimatedSpend(entry.priceCents, entry.currency)}</small> : null}
                   <small>{auditDescription(entry)}</small>
                 </div>
               ))

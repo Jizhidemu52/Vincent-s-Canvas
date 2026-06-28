@@ -124,6 +124,8 @@ export interface AdminAuditEntry {
   operation?: OperationType;
   outputCount?: number;
   creditCost?: number;
+  priceCents?: number;
+  currency?: ModelDefinition["currency"];
   creditDelta?: number;
   creditBalance?: number;
   creditLimit?: number;

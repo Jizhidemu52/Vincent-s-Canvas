@@ -102,6 +102,8 @@ export interface AdminAuditEntry {
   operation?: string;
   outputCount?: number;
   creditCost?: number;
+  priceCents?: number;
+  currency?: ModelDefinition["currency"];
   creditDelta?: number;
   creditBalance?: number;
   creditLimit?: number;
@@ -288,6 +290,8 @@ function adminAuditFromHistory(entry: HistoryEntry): AdminAuditEntry {
     operation: entry.operation,
     outputCount: entry.outputCount,
     creditCost: entry.creditCost,
+    priceCents: entry.priceCents === undefined ? undefined : entry.priceCents * entry.outputCount,
+    currency: entry.currency,
     referenceCount: entry.referenceCount,
     summary: `${actor} generated ${entry.outputCount} output${entry.outputCount === 1 ? "" : "s"} with ${entry.modelId}`,
     createdAt: entry.createdAt,
@@ -796,7 +800,7 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
       prompt: request.prompt,
       outputCount: request.outputCount,
       creditCost: cost,
-      priceCents: model.priceCents,
+      priceCents: model.priceCents === undefined ? undefined : model.priceCents * request.outputCount,
       currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
       referenceCount: request.referenceNodeIds.length,
       outputs: result.outputs,

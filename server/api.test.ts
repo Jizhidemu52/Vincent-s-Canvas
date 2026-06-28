@@ -478,11 +478,24 @@ describe("backend hosted mock API", () => {
     const result = callApi(state, "/api/generations", request({ outputCount: 2 }), "priced-generation") as GenerationResult;
     const profile = callApi(state, "/api/profile") as Profile;
     const models = callApi(state, "/api/models") as ModelDefinition[];
+    const audit = callApi(state, "/api/admin/audit", undefined, undefined, "admin@company.local") as AdminAuditEntry[];
 
     expect(priced).toMatchObject({ id: "gpt-image-2-low", cost: 5, priceCents: 250, currency: "CNY" });
     expect(result.creditCost).toBe(10);
     expect(profile.creditBalance).toBe(20);
     expect(models.find((model) => model.id === "gpt-image-2-low")).toMatchObject({ cost: 5, priceCents: 250, currency: "CNY" });
+    expect(audit).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "generation",
+          modelId: "gpt-image-2-low",
+          creditCost: 10,
+          priceCents: 500,
+          currency: "CNY"
+        })
+      ])
+    );
+    expect(state.generationJobs[0]).toMatchObject({ priceCents: 500, currency: "CNY" });
   });
 
   it("lets admins register provider models used by later generations", () => {

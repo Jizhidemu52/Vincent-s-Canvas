@@ -109,6 +109,8 @@ beforeEach(() => {
       modelId: "gpt-image-2-medium",
       outputCount: 2,
       creditCost: 14,
+      priceCents: 620,
+      currency: "CNY",
       eventType: "generation",
       operation: "generate",
       referenceCount: 1,
@@ -1072,6 +1074,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("failed · 0 credits · 1 output")).toBeInTheDocument();
     expect(screen.getByText("Provider adapter not configured for retired-provider")).toBeInTheDocument();
     expect(screen.getByText("Admin audit")).toBeInTheDocument();
+    expect(screen.getByText("Audit spend 6.20 CNY estimated spend")).toBeInTheDocument();
     expect(screen.getByText("24")).toBeInTheDocument();
     expect(screen.getByText("3 history entries")).toBeInTheDocument();
     expect(screen.getAllByText("gpt-image-2-medium").length).toBeGreaterThanOrEqual(1);
