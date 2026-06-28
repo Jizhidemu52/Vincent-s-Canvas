@@ -1907,14 +1907,16 @@ button {
 }
 
 .asset-tag-filters,
-.asset-folder-filters {
+.asset-folder-filters,
+.prompt-tag-filters {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
 }
 
 .asset-tag-filters button,
-.asset-folder-filters button {
+.asset-folder-filters button,
+.prompt-tag-filters button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1924,16 +1926,22 @@ button {
 }
 
 .asset-tag-filters button.active,
-.asset-folder-filters button.active {
+.asset-folder-filters button.active,
+.prompt-tag-filters button.active {
   border-color: #111827;
   background: #111827;
   color: #fff;
 }
 
 .asset-tag-filters span,
-.asset-folder-filters span {
+.asset-folder-filters span,
+.prompt-tag-filters span {
   color: inherit;
   opacity: 0.72;
+}
+
+.prompt-tag-filters svg {
+  flex: 0 0 auto;
 }
 
 .batch-queue-log {

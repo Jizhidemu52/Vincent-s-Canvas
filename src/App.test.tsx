@@ -1,4 +1,4 @@
-import { act, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -1003,6 +1003,56 @@ describe("Designer canvas app shell", () => {
       expect.objectContaining({ method: "DELETE", headers: expect.objectContaining({ "x-user-id": "admin@company.local" }) })
     );
     expect(screen.queryByRole("button", { name: /Prompt note prompt.*pleated silk/i })).not.toBeInTheDocument();
+  });
+
+  it("filters prompt presets by reusable categories and favorites", async () => {
+    backendWorkspace = {
+      ...backendWorkspace,
+      prompts: [
+        {
+          id: "prompt-favorite-editorial",
+          title: "Editorial silk cleanup",
+          prompt: "Create a polished editorial silk variation with soft studio shadows.",
+          tags: ["editorial", "favorite"],
+          source: "designer",
+          userId: "admin@company.local",
+          designerName: "Admin Ops",
+          createdAt: "2026-06-28T10:00:00.000Z"
+        },
+        {
+          id: "prompt-ecommerce-cleanup",
+          title: "Ecommerce background cleanup",
+          prompt: "Remove clutter and keep ecommerce product edges crisp.",
+          tags: ["ecommerce"],
+          source: "designer",
+          userId: "admin@company.local",
+          designerName: "Admin Ops",
+          createdAt: "2026-06-28T10:05:00.000Z"
+        }
+      ]
+    };
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Prompts" }));
+    const promptLibrary = screen.getByText("Prompt library").closest(".dock-list") as HTMLElement;
+
+    expect(within(promptLibrary).getByText("Editorial silk cleanup")).toBeInTheDocument();
+    expect(within(promptLibrary).getByText("Ecommerce background cleanup")).toBeInTheDocument();
+
+    await user.click(within(promptLibrary).getByRole("button", { name: "Show favorite prompts" }));
+
+    expect(within(promptLibrary).getByText("Editorial silk cleanup")).toBeInTheDocument();
+    expect(within(promptLibrary).queryByText("Ecommerce background cleanup")).not.toBeInTheDocument();
+    expect(within(promptLibrary).getByText("1 favorite prompt")).toBeInTheDocument();
+
+    await user.click(within(promptLibrary).getByRole("button", { name: "Show all prompts" }));
+    await user.click(within(promptLibrary).getByRole("button", { name: "Filter prompts by ecommerce" }));
+
+    expect(within(promptLibrary).queryByText("Editorial silk cleanup")).not.toBeInTheDocument();
+    expect(within(promptLibrary).getByText("Ecommerce background cleanup")).toBeInTheDocument();
+    expect(within(promptLibrary).getByText("1 prompt tagged ecommerce")).toBeInTheDocument();
   });
 
   it("shows prompt preset details and turns a preset into a canvas note", async () => {

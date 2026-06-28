@@ -3619,16 +3619,31 @@ function RightDock({
   const [promptSearch, setPromptSearch] = useState("");
   const [assetSearch, setAssetSearch] = useState("");
   const [selectedPromptPresetId, setSelectedPromptPresetId] = useState<string | null>(null);
+  const [favoritePromptsOnly, setFavoritePromptsOnly] = useState(false);
+  const [selectedPromptTag, setSelectedPromptTag] = useState<string | null>(null);
   const [selectedAssetFolder, setSelectedAssetFolder] = useState<string | null>(null);
   const [selectedAssetTag, setSelectedAssetTag] = useState<string | null>(null);
   const normalizedPromptSearch = promptSearch.trim().toLowerCase();
   const normalizedAssetSearch = assetSearch.trim().toLowerCase();
+  const promptTagCounts = Array.from(
+    workspace.prompts
+      .flatMap((prompt) => prompt.tags.filter((tag) => tag !== "favorite"))
+      .reduce((counts, tag) => counts.set(tag, (counts.get(tag) ?? 0) + 1), new Map<string, number>())
+      .entries()
+  ).sort(([left], [right]) => left.localeCompare(right));
+  const favoritePromptCount = workspace.prompts.filter((prompt) => prompt.tags.includes("favorite")).length;
+  const taggedPrompts = selectedPromptTag
+    ? workspace.prompts.filter((prompt) => prompt.tags.includes(selectedPromptTag))
+    : workspace.prompts;
+  const scopedPrompts = favoritePromptsOnly
+    ? taggedPrompts.filter((prompt) => prompt.tags.includes("favorite"))
+    : taggedPrompts;
   const filteredPrompts = normalizedPromptSearch
-    ? workspace.prompts.filter((prompt) => {
+    ? scopedPrompts.filter((prompt) => {
         const haystack = `${prompt.title} ${prompt.prompt} ${prompt.tags.join(" ")}`.toLowerCase();
         return haystack.includes(normalizedPromptSearch);
       })
-    : workspace.prompts;
+    : scopedPrompts;
   const assetTagCounts = Array.from(
     workspace.assets
       .flatMap((asset) => asset.tags)
@@ -3932,6 +3947,52 @@ function RightDock({
               Save current prompt
             </button>
           </div>
+          <div className="prompt-tag-filters" aria-label="Prompt tag filters">
+            {favoritePromptsOnly || selectedPromptTag ? (
+              <button
+                type="button"
+                aria-label="Show all prompts"
+                onClick={() => {
+                  setFavoritePromptsOnly(false);
+                  setSelectedPromptTag(null);
+                }}
+              >
+                All <span>{workspace.prompts.length}</span>
+              </button>
+            ) : null}
+            <button
+              type="button"
+              aria-label="Show favorite prompts"
+              className={favoritePromptsOnly ? "active" : ""}
+              disabled={!favoritePromptCount}
+              onClick={() => {
+                setFavoritePromptsOnly(true);
+                setSelectedPromptTag(null);
+              }}
+            >
+              <Heart size={12} /> Favorites <span>{favoritePromptCount}</span>
+            </button>
+            {promptTagCounts.map(([tag, count]) => (
+              <button
+                type="button"
+                key={tag}
+                aria-label={`Filter prompts by ${tag}`}
+                className={selectedPromptTag === tag ? "active" : ""}
+                onClick={() => {
+                  setSelectedPromptTag(tag);
+                  setFavoritePromptsOnly(false);
+                }}
+              >
+                {tag} <span>{count}</span>
+              </button>
+            ))}
+          </div>
+          {favoritePromptsOnly ? (
+            <small>{filteredPrompts.length} favorite prompt{filteredPrompts.length === 1 ? "" : "s"}</small>
+          ) : null}
+          {selectedPromptTag ? (
+            <small>{filteredPrompts.length} prompt{filteredPrompts.length === 1 ? "" : "s"} tagged {selectedPromptTag}</small>
+          ) : null}
           {filteredPrompts.length ? filteredPrompts.map((prompt, index) => (
             <article className="prompt-preset-row" key={prompt.id}>
               <button type="button" className="prompt-preset-main" onClick={() => onPromptInsert(prompt.prompt)}>
@@ -3955,7 +4016,7 @@ function RightDock({
                 </button>
               )}
             </article>
-          )) : <small>No prompts match this search</small>}
+          )) : <small>{normalizedPromptSearch ? "No prompts match this search" : favoritePromptsOnly ? "No favorite prompts yet" : selectedPromptTag ? "No prompts match this tag" : "No prompts available"}</small>}
           {selectedPromptPreset && (
             <PromptPresetDetail
               prompt={selectedPromptPreset}
