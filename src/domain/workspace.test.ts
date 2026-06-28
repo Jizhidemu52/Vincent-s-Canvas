@@ -371,6 +371,44 @@ describe("designer canvas workspace behavior", () => {
     });
   });
 
+  it("uses connected image input ports as workflow references", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Typed image input");
+    const withFront = addAssetToProject(workspace, project.id, {
+      name: "front.png",
+      source: "front-source",
+      width: 640,
+      height: 640
+    });
+    const withTexture = addAssetToProject(withFront, project.id, {
+      name: "texture.png",
+      source: "texture-source",
+      width: 512,
+      height: 512
+    });
+    const [front, texture] = withTexture.projects[0].nodes;
+    const withModule = createWorkflowModuleFromSelection(withTexture, project.id, [front.id], {
+      moduleType: "generate",
+      prompt: "Combine the silhouette and texture references.",
+      modelId: "gpt-image-2-medium"
+    });
+    const generateNode = withModule.projects[0].nodes.find((node) => node.moduleType === "generate")!;
+    const connected = connectWorkflowNode(withModule, project.id, texture.id, generateNode.id, "out", "image");
+
+    const requests = buildWorkflowGenerationRequests(connected, project.id, front.id);
+    const executed = runWorkflowChain(connected, project.id, front.id);
+    const generatedNode = executed.projects[0].nodes.find((node) => node.kind === "generated")!;
+
+    expect(requests[0]).toMatchObject({
+      nodeId: generateNode.id,
+      referenceNodeIds: [front.id, texture.id]
+    });
+    expect(generatedNode.references).toEqual([front.id, texture.id]);
+    expect(executed.history[0]).toMatchObject({
+      nodeId: generateNode.id,
+      referenceCount: 2
+    });
+  });
+
   it("keeps backend run state visible after normal canvas selection changes", () => {
     const { workspace, project } = createProject(createInitialWorkspace(), "Run state feedback");
     const withAsset = addAssetToProject(workspace, project.id, {

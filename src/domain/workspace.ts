@@ -602,6 +602,30 @@ function workflowPromptForModule(project: Project, moduleNode: CanvasNode) {
   return prompt || moduleNode.generation.prompt;
 }
 
+function uniqueIds(ids: string[]) {
+  return Array.from(new Set(ids));
+}
+
+function expandReferenceNode(node: CanvasNode) {
+  return node.type === "imageGroup" ? node.references : [node.id];
+}
+
+function connectedImageReferencesForModule(project: Project, moduleNode: CanvasNode) {
+  const imageInputPortIds = new Set(moduleNode.inputs.filter((port) => port.type === "image").map((port) => port.id));
+  const references = project.connections.flatMap((connection) => {
+    if (connection.toNodeId !== moduleNode.id || !imageInputPortIds.has(connection.toPort)) return [];
+    return expandReferenceNode(findNode(project, connection.fromNodeId));
+  });
+  return uniqueIds(references);
+}
+
+function workflowReferencesForModule(project: Project, moduleNode: CanvasNode, fallbackNodeId?: string) {
+  const connectedReferences = connectedImageReferencesForModule(project, moduleNode);
+  if (connectedReferences.length) return connectedReferences;
+  if (moduleNode.references.length) return moduleNode.references;
+  return fallbackNodeId ? [fallbackNodeId] : [];
+}
+
 function operationForModuleNode(node: CanvasNode): OperationType {
   if (node.operation) return node.operation;
   if (node.moduleType) return getWorkflowModuleDefinition(node.moduleType).operation;
@@ -1588,7 +1612,7 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
       continue;
     }
 
-    const referenceNodeIds = nextNode.references.length ? nextNode.references : [cursorId];
+    const referenceNodeIds = workflowReferencesForModule(project, nextNode, cursorId);
     const prompt = workflowPromptForModule(project, nextNode);
     const model = workspace.modelRegistry.find((item) => item.id === nextNode.generation.modelId);
     const operation = operationForModuleNode(nextNode);
@@ -1647,6 +1671,7 @@ export function buildWorkflowGenerationRequests(workspace: Workspace, projectId:
 function executeModule(workspace: Workspace, projectId: string, moduleNode: CanvasNode): Workspace {
   const project = findProject(workspace, projectId);
   const prompt = workflowPromptForModule(project, moduleNode);
+  const referenceNodeIds = workflowReferencesForModule(project, moduleNode);
   if (!prompt.trim()) throw new Error("Prompt is required");
   const historyId = createId("history");
   const operation = operationForModuleNode(moduleNode);
@@ -1665,7 +1690,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
       name: `${moduleNode.name} output`,
       source: `${moduleNode.source || "workflow"}#${moduleNode.moduleType}-output`,
       parentId: moduleNode.id,
-      references: moduleNode.references,
+      references: referenceNodeIds,
       x: moduleNode.x + moduleNode.width + 112,
       y: moduleNode.y,
       width: 420,
@@ -1686,8 +1711,8 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
       width: generatedNode.width,
       height: generatedNode.height
     };
-    const inputNodeIds = moduleNode.references.length
-      ? moduleNode.references
+    const inputNodeIds = referenceNodeIds.length
+      ? referenceNodeIds
       : project.connections.filter((connection) => connection.toNodeId === moduleNode.id).map((connection) => connection.fromNodeId);
     return withUndo(project, {
       nodes: [
@@ -1729,7 +1754,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
         creditCost,
         operation,
         moduleType: moduleNode.moduleType,
-        referenceCount: moduleNode.references.length,
+        referenceCount: referenceNodeIds.length,
         outputs: generatedOutput ? [generatedOutput] : [],
         createdAt: now()
       },
