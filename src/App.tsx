@@ -80,6 +80,7 @@ import {
   type BatchGenerationOutcome,
   type BatchImport,
   type BatchFailurePolicy,
+  type BatchSettings,
   type CanvasNode,
   type GenerationResult,
   type HistoryEntry,
@@ -259,6 +260,20 @@ function operationForBatchModel(models: ModelDefinition[], modelId: string, pref
   if (model?.capability.includes("upscale")) return "upscale";
   if (model?.capability.includes("edit")) return "edit";
   return "generate";
+}
+
+function batchSettingsFromNode(node?: CanvasNode | null): BatchSettings | undefined {
+  if (!node) return undefined;
+  const concurrency =
+    typeof node.metadata.batchConcurrency === "number"
+      ? clampBatchConcurrency(node.metadata.batchConcurrency)
+      : undefined;
+  const failurePolicy: BatchFailurePolicy = node.metadata.failurePolicy === "stop" ? "stop" : "continue";
+  if (!concurrency && failurePolicy === "continue") return undefined;
+  return {
+    concurrency: concurrency ?? 1,
+    failurePolicy
+  };
 }
 
 function nodeCanFeedModule(node: CanvasNode, moduleType: ModuleType) {
@@ -701,6 +716,7 @@ export default function App() {
       setApiNotice(`Running backend batch for ${batch.files.length} images...`);
       const outcomes: BatchGenerationOutcome[] = [];
       const operation = operationForBatchModel(workspace.modelRegistry, batch.modelId, selectedNode ? operationForNode(selectedNode) : undefined);
+      const failurePolicy = batch.batchSettings?.failurePolicy ?? "continue";
       for (const [index, file] of batch.files.entries()) {
         try {
           const result = await submitGenerationRequest({
@@ -710,19 +726,33 @@ export default function App() {
             prompt: batch.prompt,
             referenceNodeIds: [file.name],
             outputCount: batch.outputCount,
-            operation
+            operation,
+            batchSettings: batch.batchSettings
           }, activeUserId);
           outcomes.push({ result });
         } catch (error) {
           outcomes.push({ errorMessage: error instanceof Error ? error.message : "Batch item failed" });
+          if (failurePolicy === "stop") {
+            for (let skippedIndex = index + 1; skippedIndex < batch.files.length; skippedIndex += 1) {
+              outcomes.push({ status: "cancelled", errorMessage: "Skipped after stop-on-failure" });
+            }
+            break;
+          }
         }
       }
       const serverState = await fetchBackendSnapshot(activeUserId);
       setWorkspace((current) => applyBatchGenerationResultsToCanvas(current, projectId, batch, outcomes, serverState));
       setRightPanel("history");
       const succeeded = outcomes.filter((outcome) => outcome.result).length;
-      const failed = outcomes.length - succeeded;
-      setApiNotice(failed ? `Backend batch completed for ${succeeded} of ${batch.files.length} images; ${failed} failed` : `Backend batch completed for ${batch.files.length} images`);
+      const skipped = outcomes.filter((outcome) => outcome.status === "cancelled").length;
+      const failed = outcomes.length - succeeded - skipped;
+      setApiNotice(
+        skipped
+          ? `Backend batch stopped after ${succeeded} of ${batch.files.length} images; ${failed} failed; ${skipped} skipped`
+          : failed
+            ? `Backend batch completed for ${succeeded} of ${batch.files.length} images; ${failed} failed`
+            : `Backend batch completed for ${batch.files.length} images`
+      );
     } catch (error) {
       setApiNotice(error instanceof Error ? error.message : "Backend batch failed");
     }
@@ -734,12 +764,14 @@ export default function App() {
     const imageFiles = Array.from(files ?? []).filter((file) => file.type.startsWith("image/"));
     const prompt = selectedNode?.generation.prompt.trim() || "Apply the same clean product-image treatment to each image while preserving garment shape and fabric details.";
     const outputCount = selectedNode?.generation.outputCount || 1;
+    const batchSettings = batchSettingsFromNode(selectedNode);
     const batch: BatchImport = imageFiles.length
       ? {
           folderName: "imported-folder",
           prompt,
           modelId: selectedNode?.generation.modelId || "background-cleaner",
           outputCount,
+          batchSettings,
           files: await Promise.all(
             imageFiles.map(async (file) => ({
               name: file.name,
@@ -754,6 +786,7 @@ export default function App() {
           prompt,
           modelId: "background-cleaner",
           outputCount,
+          batchSettings,
           files: [
             { name: "look-01.jpg", source: TEST_IMAGE, width: 240, height: 320 },
             { name: "look-02.jpg", source: TEST_IMAGE, width: 240, height: 320 },

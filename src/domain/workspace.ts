@@ -184,6 +184,7 @@ export interface ProviderProgress {
 
 export interface BatchGenerationOutcome {
   result?: GenerationResult;
+  status?: "error" | "cancelled";
   errorMessage?: string;
 }
 
@@ -1391,13 +1392,14 @@ export function applyBatchGenerationResultsToCanvas(
       const result = outcome?.result;
       const outputNodeIds = outputIdsByOriginal.get(node.id) ?? [];
       const failed = !result;
+      const cancelled = !result && outcome?.status === "cancelled";
       return {
         ...node,
         status: failed ? ("error" as NodeStatus) : ("done" as NodeStatus),
         errorMessage: failed ? outcome?.errorMessage ?? "Batch item failed" : undefined,
         metadata: {
           ...node.metadata,
-          runStatus: failed ? "error" : "done",
+          runStatus: cancelled ? "cancelled" : failed ? "error" : "done",
           inputNodeIds: [node.id],
           outputNodeIds,
           historyId: result?.historyId,
@@ -1417,6 +1419,7 @@ export function applyBatchGenerationResultsToCanvas(
       const key = batchFileKey(file);
       const existing = existingQueueByFile.get(key);
       const result = outcomes[fileIndex]?.result;
+      const cancelled = !result && outcomes[fileIndex]?.status === "cancelled";
       const errorMessage = outcomes[fileIndex]?.errorMessage ?? (!result ? "Batch item failed" : undefined);
       nextQueueByFile.set(key, {
         id: existing?.id ?? createId("batch"),
@@ -1424,7 +1427,7 @@ export function applyBatchGenerationResultsToCanvas(
         source: file.source,
         width: file.width,
         height: file.height,
-        status: result ? "done" : "error",
+        status: result ? "done" : cancelled ? "cancelled" : "error",
         attempts: (existing?.attempts ?? 0) + 1,
         maxAttempts: existing?.maxAttempts ?? 2,
         errorMessage

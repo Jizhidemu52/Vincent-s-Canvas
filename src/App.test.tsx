@@ -1135,6 +1135,48 @@ describe("Designer canvas app shell", () => {
     expect(screen.getAllByText(/Apply one consistent showroom cleanup/i).length).toBeGreaterThanOrEqual(1);
   });
 
+  it("stops backend batch submission after the first failure when the batch policy is stop", async () => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation();
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith("/api/generations")) {
+        const request = JSON.parse(String(init?.body)) as GenerationRequest;
+        if (request.referenceNodeIds[0] === "stop-back.png") {
+          return jsonResponse({ status: "failed", errorMessage: "Stop policy provider failure" }, 500);
+        }
+      }
+      return originalFetch?.(input, init) ?? jsonResponse({ status: "failed", errorMessage: "Route not found" }, 404);
+    });
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Settings node" }));
+    expect(await screen.findByRole("button", { name: /Workflow settings/i })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Batch concurrency"), { target: { value: "2" } });
+    await user.selectOptions(screen.getByLabelText("Batch failure policy"), "stop");
+    const promptBox = screen.getByPlaceholderText(/\[TARGET\]/);
+    await user.clear(promptBox);
+    await user.type(promptBox, "Stop this batch if the provider rejects one item.");
+    const folderInput = screen.getByLabelText("Batch folder input");
+    const front = new File(["front look"], "stop-front.png", { type: "image/png" });
+    const back = new File(["back look"], "stop-back.png", { type: "image/png" });
+    const side = new File(["side look"], "stop-side.png", { type: "image/png" });
+
+    await user.upload(folderInput, [front, back, side]);
+
+    expect(await screen.findByText("Backend batch stopped after 1 of 3 images; 1 failed; 1 skipped")).toBeInTheDocument();
+    const calls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
+    const requests = calls.map(([, init]) => JSON.parse(String(init?.body)) as GenerationRequest);
+    expect(calls).toHaveLength(2);
+    expect(requests.map((request) => request.referenceNodeIds[0])).toEqual(["stop-front.png", "stop-back.png"]);
+    expect(requests.every((request) => request.batchSettings?.failurePolicy === "stop")).toBe(true);
+    expect(requests.every((request) => request.batchSettings?.concurrency === 2)).toBe(true);
+    expect(screen.getAllByText("Stop policy provider failure").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Skipped after stop-on-failure").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/Batch progress 1\/3 succeeded.*1 failed.*100% complete/)).toBeInTheDocument();
+  });
+
   it("opens admin monitoring for an admin session", async () => {
     const user = userEvent.setup();
     await login(user);
