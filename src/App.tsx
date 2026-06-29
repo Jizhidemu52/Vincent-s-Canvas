@@ -4035,11 +4035,43 @@ function ShapeEditDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const freehandPathRef = useRef<NonNullable<MaskSelection["path"]>>([]);
+  useEffect(() => {
+    freehandPathRef.current = draft?.shape === "freehand" ? draft.mask?.path ?? [] : [];
+  }, [draft?.mask?.path, draft?.nodeId, draft?.shape]);
   if (!draft || !node) return null;
   const shapes: Array<NonNullable<ShapeEditDraft>["shape"]> = ["ellipse", "rectangle", "freehand"];
   const mask = draft.mask ?? DEFAULT_MASK_SELECTION;
   const selectedModelId = draft.modelId ?? node.generation.modelId;
   const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+  const maskPointFromEvent = (event: PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return undefined;
+    if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return undefined;
+    return {
+      x: Math.round(clamp(((event.clientX - rect.left) / rect.width) * 100, 0, 100)),
+      y: Math.round(clamp(((event.clientY - rect.top) / rect.height) * 100, 0, 100))
+    };
+  };
+  const maskFromPath = (path: NonNullable<MaskSelection["path"]>): MaskSelection => {
+    const minX = Math.min(...path.map((point) => point.x));
+    const minY = Math.min(...path.map((point) => point.y));
+    const maxX = Math.max(...path.map((point) => point.x));
+    const maxY = Math.max(...path.map((point) => point.y));
+    const padding = 4;
+    const x = Math.round(clamp(minX - padding, 0, 100));
+    const y = Math.round(clamp(minY - padding, 0, 100));
+    const width = Math.round(clamp(maxX - minX + padding * 2, 18, 100 - x));
+    const height = Math.round(clamp(maxY - minY + padding * 2, 16, 100 - y));
+    return { x, y, width, height, path };
+  };
+  const appendFreehandPoint = (event: PointerEvent<HTMLDivElement>, reset = false) => {
+    const point = maskPointFromEvent(event);
+    if (!point) return;
+    const path = reset ? [point] : [...freehandPathRef.current, point];
+    freehandPathRef.current = path;
+    onDraft({ ...draft, mask: maskFromPath(path) });
+  };
   const updateMaskCenter = (event: PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
@@ -4074,11 +4106,20 @@ function ShapeEditDialog({
         role="application"
         aria-label="Mask placement preview"
         onPointerDown={(event) => {
-          event.currentTarget.setPointerCapture(event.pointerId);
-          updateMaskCenter(event);
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          if (draft.shape === "freehand") {
+            appendFreehandPoint(event, true);
+          } else {
+            updateMaskCenter(event);
+          }
         }}
         onPointerMove={(event) => {
-          if (event.buttons === 1) updateMaskCenter(event);
+          if (event.buttons !== 1) return;
+          if (draft.shape === "freehand") {
+            appendFreehandPoint(event);
+          } else {
+            updateMaskCenter(event);
+          }
         }}
       >
         <img src={node.source} alt={node.name} />
@@ -4101,7 +4142,7 @@ function ShapeEditDialog({
               type="button"
               key={shape}
               className={draft.shape === shape ? "active" : ""}
-              onClick={() => onDraft({ ...draft, shape })}
+              onClick={() => onDraft({ ...draft, shape, mask: shape === "freehand" ? { ...mask, path: mask.path ?? [] } : { ...mask, path: undefined } })}
             >
               {shape}
             </button>

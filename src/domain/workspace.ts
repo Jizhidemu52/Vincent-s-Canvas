@@ -75,6 +75,7 @@ export interface MaskSelection {
   y: number;
   width: number;
   height: number;
+  path?: Array<{ x: number; y: number }>;
 }
 
 export interface CanvasNode {

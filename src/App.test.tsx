@@ -1969,6 +1969,50 @@ describe("Designer canvas app shell", () => {
     expect(screen.getAllByText("gpt-image-2-medium").length).toBeGreaterThan(0);
   });
 
+  it("records freehand mask paths when confirming local image edits", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: /Edit area/i }));
+    await user.click(screen.getByRole("button", { name: "freehand" }));
+    const preview = screen.getByRole("application", { name: "Mask placement preview" });
+    vi.spyOn(preview, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 200,
+      bottom: 200,
+      width: 200,
+      height: 200,
+      toJSON: () => ({})
+    });
+    const drawPoint = (type: "pointerdown" | "pointermove", clientX: number, clientY: number) => {
+      const event = createEvent[type === "pointerdown" ? "pointerDown" : "pointerMove"](preview, { pointerId: 1, buttons: 1 });
+      Object.defineProperty(event, "clientX", { value: clientX });
+      Object.defineProperty(event, "clientY", { value: clientY });
+      Object.defineProperty(event, "buttons", { value: 1 });
+      Object.defineProperty(event, "pointerId", { value: 1 });
+      fireEvent(preview, event);
+    };
+    drawPoint("pointerdown", 40, 60);
+    drawPoint("pointermove", 90, 120);
+    drawPoint("pointermove", 140, 80);
+    await user.click(screen.getByRole("button", { name: "Confirm edit" }));
+
+    const editCall = vi.mocked(fetch).mock.calls.find(([url]) => url.toString().endsWith("/api/edits"));
+    const editRequest = JSON.parse(String(editCall?.[1]?.body)) as GenerationRequest;
+    expect(editRequest.mask).toMatchObject({
+      path: [
+        { x: 20, y: 30 },
+        { x: 45, y: 60 },
+        { x: 70, y: 40 }
+      ]
+    });
+  });
+
   it("runs toolbar upscale through the backend operation API", async () => {
     const user = userEvent.setup();
     await login(user);

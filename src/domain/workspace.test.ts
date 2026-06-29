@@ -906,6 +906,43 @@ describe("designer canvas workspace behavior", () => {
     );
   });
 
+  it("keeps freehand mask paths in edit node metadata and history", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Freehand mask");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "pocket.png",
+      source: "pocket-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const mask = {
+      x: 16,
+      y: 26,
+      width: 62,
+      height: 42,
+      path: [
+        { x: 20, y: 30 },
+        { x: 45, y: 60 },
+        { x: 70, y: 40 }
+      ]
+    };
+
+    const edited = commitShapeEdit(withAsset, project.id, source.id, {
+      shape: "freehand",
+      prompt: "paint inside the hand drawn pocket area",
+      modelId: "nanobanana2",
+      mask
+    });
+
+    expect(edited.projects[0].nodes[1]).toMatchObject({ kind: "edit", editShape: "freehand" });
+    expect(edited.projects[0].nodes[1].metadata.mask).toEqual(mask);
+    expect(edited.history[0]).toMatchObject({
+      operation: "edit",
+      mask,
+      outputs: [expect.objectContaining({ name: "pocket.png mask edit" })]
+    });
+  });
+
   it("imports a batch folder and processes every image with one prompt", () => {
     const { workspace, project } = createProject(createInitialWorkspace({ credits: 8 }), "Batch material cleanup");
     const queued = importBatchFolder(workspace, project.id, {
