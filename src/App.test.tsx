@@ -2439,6 +2439,15 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText(/生成一款带盘扣的黑色马甲/)).toBeInTheDocument();
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "History original fashion-reference.jpg" })).toBeInTheDocument();
+    const thumbnailGrid = screen.getByRole("group", { name: "History thumbnails for history-1" });
+    expect(within(thumbnailGrid).getByText("Original")).toBeInTheDocument();
+    expect(within(thumbnailGrid).getByText("Result")).toBeInTheDocument();
+    const originalThumbnail = within(thumbnailGrid).getByRole("img", { name: "History original fashion-reference.jpg" });
+    const outputThumbnail = within(thumbnailGrid).getByRole("img", { name: "History output backend result 1.jpg" });
+    expect(originalThumbnail).toHaveAttribute("width", "56");
+    expect(originalThumbnail).toHaveAttribute("height", "56");
+    expect(outputThumbnail).toHaveAttribute("width", "56");
+    expect(outputThumbnail).toHaveAttribute("height", "56");
     const historyOutput = screen.getByRole("img", { name: "History output backend result 1.jpg" }) as HTMLImageElement;
     expect(historyOutput).toBeInTheDocument();
     expect(historyOutput.src).not.toMatch(/^mock:/);

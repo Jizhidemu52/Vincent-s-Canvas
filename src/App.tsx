@@ -1479,35 +1479,50 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
                     {entry.operation ?? "generate"} · {new Date(entry.createdAt).toLocaleDateString()}
                   </small>
                   <p>{entry.prompt}</p>
-                  {entry.references?.length ? (
-                    <div className="history-reference-strip" aria-label={`History originals for ${entry.id}`}>
-                      <span>Original</span>
-                      {entry.references.map((reference) => (
-                        <img key={`${entry.id}-${reference.name}-${reference.source}`} src={reference.source} alt={`History original ${reference.name}`} />
-                      ))}
-                    </div>
-                  ) : null}
-                  {entry.outputs?.length ? (
-                    <div className="history-output-strip" aria-label={`History outputs for ${entry.id}`}>
-                      {entry.outputs.map((output) => {
-                        const outputMatch = nodeForHistoryOutput(entry.id, output.name, output.source);
-                        return (
-                          <button
-                            type="button"
-                            key={`${entry.id}-${output.name}-${output.source}`}
-                            className="history-output-button"
-                            aria-label={`Open history output ${output.name}`}
-                            onClick={() =>
-                              outputMatch
-                                ? onOpenProject(outputMatch.project.id, { historyId: entry.id, nodeId: outputMatch.node.id })
-                                : project && onOpenProject(project.id, { historyId: entry.id, nodeId: entry.nodeId })
-                            }
-                            disabled={!outputMatch && !project}
-                          >
-                            <img src={sourceForHistoryOutput(entry.id, output.name, output.source)} alt={`History output ${output.name}`} />
-                          </button>
-                        );
-                      })}
+                  {entry.references?.length || entry.outputs?.length ? (
+                    <div className="history-thumbnail-grid" role="group" aria-label={`History thumbnails for ${entry.id}`}>
+                      {entry.references?.length ? (
+                        <div className="history-thumbnail-column history-originals" aria-label={`History originals for ${entry.id}`}>
+                          <span>Original</span>
+                          <div className="history-reference-strip">
+                            {entry.references.map((reference) => (
+                              <img
+                                key={`${entry.id}-${reference.name}-${reference.source}`}
+                                src={reference.source}
+                                alt={`History original ${reference.name}`}
+                                width={56}
+                                height={56}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {entry.outputs?.length ? (
+                        <div className="history-thumbnail-column history-results" aria-label={`History outputs for ${entry.id}`}>
+                          <span>Result</span>
+                          <div className="history-output-strip">
+                            {entry.outputs.map((output) => {
+                              const outputMatch = nodeForHistoryOutput(entry.id, output.name, output.source);
+                              return (
+                                <button
+                                  type="button"
+                                  key={`${entry.id}-${output.name}-${output.source}`}
+                                  className="history-output-button"
+                                  aria-label={`Open history output ${output.name}`}
+                                  onClick={() =>
+                                    outputMatch
+                                      ? onOpenProject(outputMatch.project.id, { historyId: entry.id, nodeId: outputMatch.node.id })
+                                      : project && onOpenProject(project.id, { historyId: entry.id, nodeId: entry.nodeId })
+                                  }
+                                  disabled={!outputMatch && !project}
+                                >
+                                  <img src={sourceForHistoryOutput(entry.id, output.name, output.source)} alt={`History output ${output.name}`} width={56} height={56} />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   <button type="button" onClick={() => project && onOpenProject(project.id, { historyId: entry.id, nodeId: entry.nodeId })} disabled={!project}>

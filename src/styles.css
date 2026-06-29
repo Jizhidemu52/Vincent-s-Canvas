@@ -566,25 +566,50 @@ button {
   gap: 6px;
 }
 
-.history-reference-strip {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+.history-thumbnail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(106px, 1fr));
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #e1e1e1;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.history-thumbnail-column {
+  display: grid;
   gap: 7px;
+  min-width: 0;
   color: #666;
   font-size: 12px;
   font-weight: 800;
 }
 
+.history-thumbnail-column > span {
+  color: #444;
+}
+
+.history-reference-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .history-reference-strip img {
-  width: 46px;
-  height: 46px;
+  width: 56px;
+  height: 56px;
   border: 1px solid #d9d9d9;
   border-radius: 6px;
   object-fit: cover;
 }
 
 .history-output-button {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -603,8 +628,8 @@ button {
 }
 
 .history-output-strip img {
-  width: 52px;
-  height: 52px;
+  width: 56px;
+  height: 56px;
   border: 1px solid #dedede;
   border-radius: 7px;
   background: #fff;
