@@ -2694,6 +2694,100 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("2 of 3 records")).toBeInTheDocument();
   });
 
+  it("exports the filtered designer history CSV with original and result image sources", async () => {
+    backendHistory = [
+      {
+        id: "history-export-generate",
+        projectId: "project-export-a",
+        projectName: "Export campaign",
+        nodeId: "node-export-a",
+        prompt: "export this generated look",
+        modelId: "gpt-image-2-medium",
+        outputCount: 2,
+        creditCost: 14,
+        operation: "generate",
+        referenceCount: 1,
+        userId: "lina@company.local",
+        designerName: "Lina Zhou",
+        createdAt: "2026-06-28T02:00:00.000Z",
+        references: [{ name: "export-original.jpg", source: "/fixtures/export-original.jpg", width: 512, height: 512 }],
+        outputs: [{ name: "export-result.jpg", source: "/fixtures/export-result.jpg", width: 1024, height: 1024 }]
+      },
+      {
+        id: "history-export-upscale",
+        projectId: "project-export-b",
+        projectName: "Hidden upscale",
+        nodeId: "node-export-b",
+        prompt: "do not export after model filter",
+        modelId: "upscale-pro",
+        outputCount: 1,
+        creditCost: 4,
+        operation: "upscale",
+        referenceCount: 1,
+        userId: "maya@company.local",
+        designerName: "Maya Chen",
+        createdAt: "2026-06-27T02:00:00.000Z",
+        references: [{ name: "hidden-original.jpg", source: "/fixtures/hidden-original.jpg", width: 512, height: 512 }],
+        outputs: [{ name: "hidden-result.jpg", source: "/fixtures/hidden-result.jpg", width: 1024, height: 1024 }]
+      }
+    ];
+    backendWorkspace = { ...backendWorkspace, history: backendHistory };
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "History" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "History model filter" }), "gpt-image-2-medium");
+
+    let exportAnchor: HTMLAnchorElement | undefined;
+    let exportedBlob: Blob | undefined;
+    const createElement = document.createElement.bind(document);
+    const createElementSpy = vi.spyOn(document, "createElement").mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+      const element = createElement(tagName, options);
+      if (tagName === "a") {
+        exportAnchor = element as HTMLAnchorElement;
+        vi.spyOn(exportAnchor, "click").mockImplementation(() => undefined);
+      }
+      return element;
+    });
+    const previousCreateObjectURL = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const previousRevokeObjectURL = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn((blob: Blob) => {
+        exportedBlob = blob;
+        return "blob:designer-history-csv-export";
+      })
+    });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+
+    try {
+      await user.click(screen.getByRole("button", { name: "Export history CSV" }));
+      const exportedText = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(exportedBlob!);
+      });
+
+      expect(exportAnchor?.download).toBe("designer-history-gpt-image-2-medium.csv");
+      expect(exportedBlob?.type).toBe("text/csv;charset=utf-8");
+      expect(exportedText).toContain("designerName,userId,projectName,modelId,operation,outputCount,creditCost,prompt,referenceSources,outputSources,createdAt");
+      expect(exportedText).toContain("Lina Zhou");
+      expect(exportedText).toContain("Export campaign");
+      expect(exportedText).toContain("gpt-image-2-medium");
+      expect(exportedText).toContain("/fixtures/export-original.jpg");
+      expect(exportedText).toContain("/fixtures/export-result.jpg");
+      expect(exportedText).not.toContain("do not export after model filter");
+      expect(exportedText).not.toContain("/fixtures/hidden-result.jpg");
+    } finally {
+      createElementSpy.mockRestore();
+      if (previousCreateObjectURL) Object.defineProperty(URL, "createObjectURL", previousCreateObjectURL);
+      else delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+      if (previousRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", previousRevokeObjectURL);
+      else delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
+    }
+  });
+
   it("calculates profile credit usage against the assigned credit limit", async () => {
     backendProfile = {
       ...backendProfile,

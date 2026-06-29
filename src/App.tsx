@@ -1404,6 +1404,18 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
   function sourceForHistoryOutput(entryId: string, outputName: string, remoteSource: string) {
     return nodeForHistoryOutput(entryId, outputName, remoteSource)?.node.source ?? remoteSource;
   }
+  const historyExportLabel =
+    modelFilter !== "all"
+      ? modelFilter
+      : projectFilter !== "all"
+        ? historyProjectOptions.find(([projectId]) => projectId === projectFilter)?.[1] ?? projectFilter
+        : designerFilter !== "all"
+          ? historyDesignerOptions.find(([userId]) => userId === designerFilter)?.[1] ?? designerFilter
+          : operationFilter !== "all"
+            ? operationFilter
+            : timeFilter !== "all"
+              ? timeFilter
+              : "all-records";
   return (
     <section className="home-section" aria-label="History management">
       <div className="section-heading">
@@ -1411,7 +1423,12 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
           <h2>History</h2>
           <p>Designer generation records, model usage, credit cost, project source and reusable outputs.</p>
         </div>
-        <span>{visibleHistory.length === workspace.history.length ? `${workspace.history.length} records` : `${visibleHistory.length} of ${workspace.history.length} records`}</span>
+        <div className="section-actions">
+          <button type="button" className="secondary-button" onClick={() => exportDesignerHistoryCsv(visibleHistory, historyExportLabel)} disabled={!visibleHistory.length}>
+            <Download size={14} /> Export history CSV
+          </button>
+          <span>{visibleHistory.length === workspace.history.length ? `${workspace.history.length} records` : `${visibleHistory.length} of ${workspace.history.length} records`}</span>
+        </div>
       </div>
       {workspace.history.length ? (
         <div className="history-filters" aria-label="History filters">
@@ -2533,6 +2550,17 @@ function exportAdminTeamHistoryCsv(entries: AdminHistoryEntry[], filterUserId: s
   downloadAdminTeamHistoryCsv(entries, `team-history-${safeFileName(filterUserId === "all" ? "all-designers" : filterUserId)}.csv`);
 }
 
+function exportDesignerHistoryCsv(entries: HistoryEntry[], filterLabel: string) {
+  const csv = designerHistoryCsv(entries);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `designer-history-${safeFileName(filterLabel)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function exportSelectedAdminTeamHistoryCsv(entries: AdminHistoryEntry[]) {
   downloadAdminTeamHistoryCsv(entries, "team-history-selected.csv");
 }
@@ -2574,6 +2602,36 @@ function adminTeamHistoryCsv(entries: AdminHistoryEntry[]) {
     entry.priceCents === undefined ? "" : String(entry.priceCents),
     entry.currency ?? "",
     entry.prompt,
+    entry.outputs?.map((output) => output.source).join(" | ") ?? "",
+    entry.createdAt
+  ]);
+  return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function designerHistoryCsv(entries: HistoryEntry[]) {
+  const headers = [
+    "designerName",
+    "userId",
+    "projectName",
+    "modelId",
+    "operation",
+    "outputCount",
+    "creditCost",
+    "prompt",
+    "referenceSources",
+    "outputSources",
+    "createdAt"
+  ];
+  const rows = entries.map((entry) => [
+    entry.designerName ?? "",
+    entry.userId ?? "",
+    entry.projectName ?? entry.projectId,
+    entry.modelId,
+    entry.operation ?? "",
+    String(entry.outputCount),
+    String(entry.creditCost),
+    entry.prompt,
+    entry.references?.map((reference) => reference.source).join(" | ") ?? "",
     entry.outputs?.map((output) => output.source).join(" | ") ?? "",
     entry.createdAt
   ]);

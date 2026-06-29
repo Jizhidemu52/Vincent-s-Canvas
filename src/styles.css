@@ -466,13 +466,22 @@ button {
   line-height: 1.45;
 }
 
-.section-heading > span {
+.section-heading > span,
+.section-actions > span {
   border: 1px solid #d7d7d7;
   border-radius: 7px;
   background: #fff;
   padding: 8px 10px;
   color: #555;
   font-weight: 800;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .history-layout {
