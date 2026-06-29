@@ -52,6 +52,7 @@ import {
   addGenerationTargetFrame,
   applyBatchGenerationResultsToCanvas,
   applyGenerationResultToCanvas,
+  applyWorkflowFinalHandoffs,
   buildResumeBatchFromPaused,
   buildRetryBatchFromFailures,
   buildWorkflowExecutionPlan,
@@ -726,6 +727,13 @@ export default function App() {
       return;
     }
     if (!plan.steps.length) {
+      const finalized = applyWorkflowFinalHandoffs(workspace, projectId, selectedNode.id);
+      if (finalized !== workspace) {
+        setWorkspace(finalized);
+        setRightPanel("assets");
+        setApiNotice("Workflow final handoff completed");
+        return;
+      }
       setApiNotice("No downstream workflow modules");
       return;
     }
@@ -746,6 +754,7 @@ export default function App() {
         );
         executed += 1;
       }
+      setWorkspace((current) => applyWorkflowFinalHandoffs(current, projectId, selectedNode.id));
       setRightPanel("history");
       setApiNotice(executed ? `Backend workflow completed ${executed} module${executed > 1 ? "s" : ""}` : "No downstream workflow modules");
     } catch (error) {

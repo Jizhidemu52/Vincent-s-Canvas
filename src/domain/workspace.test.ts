@@ -7,6 +7,7 @@ import {
   addTextNode,
   applyBatchGenerationResultsToCanvas,
   applyGenerationResultToCanvas,
+  applyWorkflowFinalHandoffs,
   buildRetryBatchFromFailures,
   buildWorkflowGenerationRequests,
   applyImageOperation,
@@ -1459,6 +1460,136 @@ describe("designer canvas workspace behavior", () => {
     expect(plan.steps.map((step) => step.moduleType)).toEqual(["removeBackground"]);
     expect(plan.totalEstimatedCredits).toBe(2);
     expect(requests.map((request) => request.operation)).toEqual(["removeBackground"]);
+  });
+
+  it("marks final workflow handoffs as done and saves the approved result as a reusable asset", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Final handoff asset");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat.png",
+      source: "coat-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const removeBgDefinition = getWorkflowModuleDefinition("removeBackground");
+    const withRemoveBg = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "removeBackground",
+      prompt: removeBgDefinition.defaultPrompt,
+      modelId: removeBgDefinition.defaultModelId
+    });
+    const removeBgNode = withRemoveBg.projects[0].nodes.find((node) => node.moduleType === "removeBackground")!;
+    const finalDefinition = getWorkflowModuleDefinition("final");
+    const withFinal = createWorkflowModuleFromSelection(withRemoveBg, project.id, [removeBgNode.id], {
+      moduleType: "final",
+      prompt: finalDefinition.defaultPrompt,
+      modelId: finalDefinition.defaultModelId
+    });
+    const finalNode = withFinal.projects[0].nodes.find((node) => node.moduleType === "final")!;
+
+    const executed = runWorkflowChain(withFinal, project.id, source.id);
+    const executedProject = executed.projects[0];
+    const executedFinal = executedProject.nodes.find((node) => node.id === finalNode.id)!;
+    const finalAsset = executed.assets.find((asset) => asset.metadata?.nodeId === finalNode.id);
+
+    expect(executed.profile.creditBalance).toBe(18);
+    expect(executed.history).toHaveLength(1);
+    expect(executedFinal.status).toBe("done");
+    expect(executedFinal.metadata).toMatchObject({
+      finalHandoff: true,
+      runStatus: "done",
+      operation: "download",
+      creditCost: 0,
+      inputNodeIds: [removeBgNode.id]
+    });
+    expect(finalAsset).toMatchObject({
+      type: "image",
+      title: "final module final",
+      tags: ["final", "handoff", "download"],
+      metadata: {
+        projectId: project.id,
+        nodeId: finalNode.id,
+        sourceNodeId: removeBgNode.id,
+        operation: "download",
+        folder: "Final handoff asset"
+      }
+    });
+  });
+
+  it("applies final handoff markers after backend workflow requests finish", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Backend final handoff");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat.png",
+      source: "coat-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const removeBgDefinition = getWorkflowModuleDefinition("removeBackground");
+    const withRemoveBg = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "removeBackground",
+      prompt: removeBgDefinition.defaultPrompt,
+      modelId: removeBgDefinition.defaultModelId
+    });
+    const removeBgNode = withRemoveBg.projects[0].nodes.find((node) => node.moduleType === "removeBackground")!;
+    const finalDefinition = getWorkflowModuleDefinition("final");
+    const withFinal = createWorkflowModuleFromSelection(withRemoveBg, project.id, [removeBgNode.id], {
+      moduleType: "final",
+      prompt: finalDefinition.defaultPrompt,
+      modelId: finalDefinition.defaultModelId
+    });
+    const finalNode = withFinal.projects[0].nodes.find((node) => node.moduleType === "final")!;
+    const result = {
+      status: "succeeded" as const,
+      outputs: [{ name: "cutout.png", source: "mock://cutout.png", width: 640, height: 640 }],
+      creditCost: 2,
+      historyId: "history-remove-bg"
+    };
+    const afterBackend = applyGenerationResultToCanvas(
+      withFinal,
+      project.id,
+      removeBgNode.id,
+      {
+        projectId: project.id,
+        nodeId: removeBgNode.id,
+        modelId: "background-cleaner",
+        prompt: removeBgNode.generation.prompt,
+        referenceNodeIds: [source.id],
+        outputCount: 1,
+        operation: "removeBackground"
+      },
+      result,
+      {
+        profile: { ...withFinal.profile, creditBalance: 18, credits: 18, creditUsed: 2 },
+        history: [],
+        models: withFinal.modelRegistry
+      }
+    );
+
+    const finalized = applyWorkflowFinalHandoffs(afterBackend, project.id, source.id);
+    const finalizedProject = finalized.projects[0];
+    const finalizedNode = finalizedProject.nodes.find((node) => node.id === finalNode.id)!;
+    const approvedOutput = finalizedProject.nodes.find((node) => node.metadata.remoteSource === "mock://cutout.png")!;
+
+    expect(finalizedNode).toMatchObject({
+      status: "done",
+      source: approvedOutput.source,
+      references: [approvedOutput.id],
+      metadata: expect.objectContaining({
+        finalHandoff: true,
+        approvedNodeId: approvedOutput.id,
+        inputNodeIds: [removeBgNode.id],
+        creditCost: 0
+      })
+    });
+    expect(finalized.assets[0]).toMatchObject({
+      source: approvedOutput.source,
+      tags: ["final", "handoff", "download"],
+      metadata: expect.objectContaining({
+        nodeId: finalNode.id,
+        sourceNodeId: removeBgNode.id,
+        approvedNodeId: approvedOutput.id
+      })
+    });
   });
 
   it("spends the configured model credits when running workflow chains", () => {

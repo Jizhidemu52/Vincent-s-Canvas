@@ -837,6 +837,10 @@ function isExecutableWorkflowNode(node: CanvasNode) {
   return node.kind === "workflow" || node.type === "config" || node.type === "edit" || node.type === "upscale" || node.type === "removeBg";
 }
 
+function isFinalWorkflowNode(node: CanvasNode) {
+  return node.moduleType === "final" || node.type === "final";
+}
+
 function placeNextTo(node: CanvasNode, index = 1) {
   return {
     x: node.x + node.width + 120 * index,
@@ -2262,6 +2266,92 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
   };
 }
 
+function latestOutputNodeFor(project: Project, node: CanvasNode) {
+  const outputNodeIds = Array.isArray(node.metadata.outputNodeIds)
+    ? node.metadata.outputNodeIds.filter((id): id is string => typeof id === "string")
+    : [];
+  const latestOutputId = outputNodeIds[outputNodeIds.length - 1];
+  return latestOutputId ? project.nodes.find((item) => item.id === latestOutputId) ?? node : node;
+}
+
+function executeFinalHandoff(workspace: Workspace, projectId: string, finalNode: CanvasNode, upstreamNodeId: string): Workspace {
+  const project = findProject(workspace, projectId);
+  const upstreamNode = findNode(project, upstreamNodeId);
+  const approvedNode = latestOutputNodeFor(project, upstreamNode);
+  const existingAssetId = typeof finalNode.metadata.assetId === "string" ? finalNode.metadata.assetId : undefined;
+  const assetId = existingAssetId ?? createId("asset");
+  const finalAsset: LibraryAsset = {
+    id: assetId,
+    type: "image",
+    title: `${finalNode.name} final`,
+    source: approvedNode.source,
+    tags: ["final", "handoff", "download"],
+    createdAt: now(),
+    metadata: {
+      projectId,
+      nodeId: finalNode.id,
+      sourceNodeId: upstreamNode.id,
+      approvedNodeId: approvedNode.id,
+      operation: "download",
+      folder: project.name,
+      width: approvedNode.width,
+      height: approvedNode.height
+    }
+  };
+  const updated = updateProject(workspace, projectId, (item) =>
+    withUndo(item, {
+      nodes: item.nodes.map((node) =>
+        node.id === finalNode.id
+          ? {
+              ...node,
+              source: approvedNode.source,
+              width: approvedNode.width,
+              height: approvedNode.height,
+              status: "done" as NodeStatus,
+              references: [approvedNode.id],
+              referenceIds: [approvedNode.id],
+              metadata: {
+                ...node.metadata,
+                finalHandoff: true,
+                runStatus: "done",
+                operation: "download",
+                creditCost: 0,
+                inputNodeIds: [upstreamNode.id],
+                approvedNodeId: approvedNode.id,
+                assetId
+              }
+            }
+          : node
+      ),
+      selectedNodeIds: [finalNode.id]
+    })
+  );
+  return {
+    ...updated,
+    assets: [finalAsset, ...updated.assets.filter((asset) => asset.id !== assetId)]
+  };
+}
+
+export function applyWorkflowFinalHandoffs(workspace: Workspace, projectId: string, startNodeId: string): Workspace {
+  let currentWorkspace = workspace;
+  let cursorId = startNodeId;
+  const visited = new Set<string>();
+  while (!visited.has(cursorId)) {
+    visited.add(cursorId);
+    const project = findProject(currentWorkspace, projectId);
+    const nextConnection = project.connections.find((connection) => connection.fromNodeId === cursorId);
+    if (!nextConnection) break;
+    const nextNode = findNode(project, nextConnection.toNodeId);
+    if (isFinalWorkflowNode(nextNode)) {
+      currentWorkspace = executeFinalHandoff(currentWorkspace, projectId, nextNode, cursorId);
+      cursorId = nextNode.id;
+      continue;
+    }
+    cursorId = nextNode.id;
+  }
+  return currentWorkspace;
+}
+
 export function runWorkflowChain(workspace: Workspace, projectId: string, startNodeId: string): Workspace {
   let currentWorkspace = workspace;
   let cursorId = startNodeId;
@@ -2272,6 +2362,11 @@ export function runWorkflowChain(workspace: Workspace, projectId: string, startN
     const nextConnection = project.connections.find((connection) => connection.fromNodeId === cursorId);
     if (!nextConnection) break;
     const nextNode = findNode(project, nextConnection.toNodeId);
+    if (isFinalWorkflowNode(nextNode)) {
+      currentWorkspace = executeFinalHandoff(currentWorkspace, projectId, nextNode, cursorId);
+      cursorId = nextNode.id;
+      continue;
+    }
     if (!isExecutableWorkflowNode(nextNode)) {
       cursorId = nextNode.id;
       continue;

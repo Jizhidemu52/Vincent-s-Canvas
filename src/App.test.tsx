@@ -2278,6 +2278,53 @@ describe("Designer canvas app shell", () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/edits$/), expect.objectContaining({ method: "POST" }));
   });
 
+  it("marks final workflow handoffs after backend workflow modules complete", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: "Remove BG node" }));
+    const removeBgModule = await screen.findByRole("button", { name: /Workflow removeBackground module/i });
+
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from removeBackground module"));
+    fireEvent.pointerUp(window);
+    await user.click(screen.getByRole("button", { name: /Final approved handoff/i }));
+    const finalModule = await screen.findByRole("button", { name: /Workflow final module/i });
+
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: /Run workflow/i }));
+
+    expect(await screen.findByText("Backend workflow completed 1 module")).toBeInTheDocument();
+    expect(removeBgModule).toHaveTextContent("Done");
+    expect(finalModule).toHaveTextContent("Done");
+
+    await user.click(screen.getByRole("button", { name: "Assets" }));
+
+    expect(await screen.findByText("final module final")).toBeInTheDocument();
+    expect(screen.getByText("final, handoff, download")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/remove-bg"))).toHaveLength(1);
+  });
+
+  it("allows a final-only workflow handoff without submitting model requests", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: "Final node" }));
+    const finalModule = await screen.findByRole("button", { name: /Workflow final module/i });
+
+    await user.click(screen.getByText("fashion-reference.jpg"));
+    await user.click(screen.getByRole("button", { name: /Run workflow/i }));
+
+    expect(await screen.findByText("Workflow final handoff completed")).toBeInTheDocument();
+    expect(finalModule).toHaveTextContent("Done");
+    await user.click(screen.getByRole("button", { name: "Assets" }));
+    expect(await screen.findByText("final module final")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => /\/api\/(generations|edits|upscale|remove-bg)$/.test(url.toString()))).toHaveLength(0);
+  });
+
   it("opens a workflow module picker from an image output port", async () => {
     const user = userEvent.setup();
     await login(user);
