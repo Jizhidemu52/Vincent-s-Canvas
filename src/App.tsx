@@ -139,7 +139,7 @@ const SECOND_TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 
 type ViewMode = "login" | "home" | "canvas" | "admin";
 type DragMode = "move" | "resize";
-type ShapeEditDraft = { nodeId: string; shape: "ellipse" | "rectangle" | "freehand"; prompt: string; mask?: MaskSelection } | null;
+type ShapeEditDraft = { nodeId: string; shape: "ellipse" | "rectangle" | "freehand"; prompt: string; modelId?: string; mask?: MaskSelection } | null;
 type HomeSection = "Projects" | "History" | "Profile";
 type RightPanel = "context" | "history" | "assets" | "prompts" | "assistant";
 type OpenProjectTarget = { nodeId?: string; historyId?: string };
@@ -887,7 +887,8 @@ export default function App() {
     setShapeEditDraft({
       nodeId: imageNode.id,
       shape: "ellipse",
-      prompt: "只在圈选区域增加精细刺绣花型，保持其他区域不变。"
+      prompt: "只在圈选区域增加精细刺绣花型，保持其他区域不变。",
+      modelId: imageNode.generation.modelId
     });
   }
 
@@ -901,6 +902,7 @@ export default function App() {
       commitShapeEdit(current, projectId, editDraft.nodeId, {
         shape: editDraft.shape,
         prompt: editDraft.prompt,
+        modelId: editDraft.modelId ?? source.generation.modelId,
         mask: editDraft.mask ?? DEFAULT_MASK_SELECTION
       })
     );
@@ -908,7 +910,7 @@ export default function App() {
     const request = {
       projectId,
       nodeId: source.id,
-      modelId: source.generation.modelId,
+      modelId: editDraft.modelId ?? source.generation.modelId,
       prompt: editDraft.prompt,
       referenceNodeIds: source.references.length ? source.references : [source.id],
       outputCount: 1,
@@ -2732,6 +2734,7 @@ function CanvasView({
         <ShapeEditDialog
           draft={shapeEditDraft}
           node={shapeEditDraft ? project.nodes.find((node) => node.id === shapeEditDraft.nodeId) : undefined}
+          models={workspace.modelRegistry}
           onDraft={onShapeEditDraft}
           onCancel={onCancelShapeEdit}
           onConfirm={onConfirmShapeEdit}
@@ -3830,12 +3833,14 @@ function NodeToolbar({
 function ShapeEditDialog({
   draft,
   node,
+  models,
   onDraft,
   onCancel,
   onConfirm
 }: {
   draft: ShapeEditDraft;
   node?: CanvasNode;
+  models: ModelDefinition[];
   onDraft: (draft: ShapeEditDraft) => void;
   onCancel: () => void;
   onConfirm: () => void;
@@ -3843,6 +3848,7 @@ function ShapeEditDialog({
   if (!draft || !node) return null;
   const shapes: Array<NonNullable<ShapeEditDraft>["shape"]> = ["ellipse", "rectangle", "freehand"];
   const mask = draft.mask ?? DEFAULT_MASK_SELECTION;
+  const selectedModelId = draft.modelId ?? node.generation.modelId;
   const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
   const updateMaskCenter = (event: PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -3922,6 +3928,14 @@ function ShapeEditDialog({
             onChange={(event) => updateMaskSize(Number(event.target.value))}
           />
         </label>
+        <ModelPicker
+          label="Mask edit model"
+          models={models}
+          value={selectedModelId}
+          operation="edit"
+          onChange={(modelId) => onDraft({ ...draft, modelId })}
+          compact
+        />
         <output className="mask-coordinates" aria-label="Mask coordinates">
           x {mask.x} · y {mask.y} · w {mask.width} · h {mask.height}
         </output>

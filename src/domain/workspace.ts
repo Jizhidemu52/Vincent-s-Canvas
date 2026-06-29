@@ -1567,7 +1567,7 @@ export function commitShapeEdit(
   workspace: Workspace,
   projectId: string,
   nodeId: string,
-  edit: { shape: "ellipse" | "rectangle" | "freehand"; prompt: string; mask?: MaskSelection }
+  edit: { shape: "ellipse" | "rectangle" | "freehand"; prompt: string; modelId?: string; mask?: MaskSelection }
 ): Workspace {
   return updateProject(workspace, projectId, (project) => {
     const source = findNode(project, nodeId);
@@ -1583,7 +1583,7 @@ export function commitShapeEdit(
       y: position.y,
       width: source.width,
       height: source.height,
-      generation: { prompt: edit.prompt, modelId: source.generation.modelId, entryPoint: "workflow" },
+      generation: { prompt: edit.prompt, modelId: edit.modelId ?? source.generation.modelId, entryPoint: "workflow" },
       metadata: { editShape: edit.shape, mask: edit.mask }
     });
     editNode.editShape = edit.shape;

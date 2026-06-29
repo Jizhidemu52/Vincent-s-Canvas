@@ -1850,6 +1850,9 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByText("fashion-reference.jpg"));
     await user.click(screen.getByRole("button", { name: /Edit area/i }));
     expect(screen.getByRole("dialog", { name: "Mask edit confirmation" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Mask edit model GPT Image 2 Medium/i }));
+    await user.click(screen.getByRole("option", { name: /Nano Banana 2.*11 credits/i }));
+    expect(screen.getByRole("button", { name: /Mask edit model Nano Banana 2/i })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "rectangle" }));
     expect(screen.getByRole("application", { name: "Mask placement preview" })).toBeInTheDocument();
     fireEvent.change(screen.getByRole("slider", { name: "Mask size" }), { target: { value: "60" } });
@@ -1857,10 +1860,11 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "Confirm edit" }));
     expect(screen.getByText("fashion-reference.jpg mask edit")).toBeInTheDocument();
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
-    expect(screen.getByText("Backend mask edit succeeded, 7 credits used")).toBeInTheDocument();
+    expect(screen.getByText("Backend mask edit succeeded, 11 credits used")).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/edits$/), expect.objectContaining({ method: "POST" }));
     const editCall = vi.mocked(fetch).mock.calls.find(([url]) => url.toString().endsWith("/api/edits"));
     const editRequest = JSON.parse(String(editCall?.[1]?.body)) as GenerationRequest;
+    expect(editRequest.modelId).toBe("nanobanana2");
     expect(editRequest.mask).toMatchObject({ width: 60, height: 52 });
 
     await user.click(screen.getByRole("button", { name: /Target frame/i }));
