@@ -1710,12 +1710,15 @@ export function runBatchQueue(workspace: Workspace, projectId: string): Workspac
   const totalOutputs = project.batchQueue.length * project.batchConfig.outputCount;
   const creditCost = model.cost * totalOutputs;
   const charged = spendCredits(workspace, creditCost);
+  const historyIdsByFile = new Map(project.batchQueue.map((item) => [item.name, createId("history")] as const));
   const generatedNodes = project.batchQueue.map((item, index) => {
     const originalNode = project.nodes.find(
       (node) => node.metadata.batchOriginal && node.metadata.sourceFile === item.name && node.source === item.source
     );
     const x = (originalNode?.x ?? 220 + index * 148) + (originalNode?.width ?? item.width) + 112;
     const y = originalNode?.y ?? 520;
+    const itemCreditCost = model.cost * project.batchConfig!.outputCount;
+    const historyId = historyIdsByFile.get(item.name);
     return createNode({
       type: "batch",
       kind: "generated",
@@ -1736,6 +1739,12 @@ export function runBatchQueue(workspace: Workspace, projectId: string): Workspac
       metadata: {
         folderName: project.batchConfig!.folderName,
         sourceFile: item.name,
+        originalSource: item.source,
+        historyId,
+        creditCost: itemCreditCost,
+        remoteSource: `${item.source}#batch-generated`,
+        prompt: project.batchConfig!.prompt,
+        modelId: project.batchConfig!.modelId,
         operation
       }
     });
@@ -1758,17 +1767,38 @@ export function runBatchQueue(workspace: Workspace, projectId: string): Workspac
   return {
     ...updated,
     history: [
-      {
-        id: createId("history"),
-        projectId,
-        nodeId: project.batchQueue[0]?.id ?? projectId,
-        prompt: project.batchConfig.prompt,
-        modelId: project.batchConfig.modelId,
-        outputCount: totalOutputs,
-        creditCost,
-        operation,
-        createdAt: now()
-      },
+      ...generatedNodes.map((node) => {
+        const sourceFile = typeof node.metadata.sourceFile === "string" ? node.metadata.sourceFile : "";
+        const originalSource = typeof node.metadata.originalSource === "string" ? node.metadata.originalSource : "";
+        const queueItem = project.batchQueue.find((item) => item.name === sourceFile && item.source === originalSource);
+        const originalNode = node.parentId ? project.nodes.find((item) => item.id === node.parentId) : undefined;
+        return {
+          id: String(node.metadata.historyId),
+          projectId,
+          projectName: project.name,
+          nodeId: node.id,
+          prompt: project.batchConfig!.prompt,
+          modelId: project.batchConfig!.modelId,
+          outputCount: project.batchConfig!.outputCount,
+          creditCost: model.cost * project.batchConfig!.outputCount,
+          operation,
+          moduleType: "batch" as const,
+          referenceCount: 1,
+          references: [
+            {
+              name: queueItem?.name ?? originalNode?.name ?? node.name,
+              source: queueItem?.source ?? originalNode?.source ?? node.source,
+              width: queueItem?.width ?? originalNode?.width ?? node.width,
+              height: queueItem?.height ?? originalNode?.height ?? node.height
+            }
+          ],
+          outputs: [{ name: node.name, source: node.source, width: node.width, height: node.height }],
+          userId: workspace.profile.userId,
+          designerName: workspace.profile.designerName,
+          batchSettings: project.batchConfig!.batchSettings,
+          createdAt: now()
+        } satisfies HistoryEntry;
+      }),
       ...updated.history
     ]
   };

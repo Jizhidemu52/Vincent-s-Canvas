@@ -895,12 +895,39 @@ describe("designer canvas workspace behavior", () => {
       ])
     );
     expect(processed.profile.credits).toBe(2);
-    expect(processed.history[0]).toMatchObject({
-      modelId: "background-cleaner",
-      outputCount: 3,
-      creditCost: 6,
-      operation: "removeBackground"
-    });
+    const batchHistory = processed.history.filter((entry) => entry.projectId === project.id);
+    expect(batchHistory).toHaveLength(3);
+    expect(batchHistory.map((entry) => entry.nodeId)).toEqual(
+      expect.arrayContaining(processed.projects[0].nodes.filter((node) => node.kind === "generated").map((node) => node.id))
+    );
+    expect(batchHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          modelId: "background-cleaner",
+          outputCount: 1,
+          creditCost: 2,
+          operation: "removeBackground",
+          references: [expect.objectContaining({ name: "a.png", source: "a" })],
+          outputs: [expect.objectContaining({ name: "a.png batch result", source: "a#batch-generated" })]
+        }),
+        expect.objectContaining({
+          modelId: "background-cleaner",
+          outputCount: 1,
+          creditCost: 2,
+          operation: "removeBackground",
+          references: [expect.objectContaining({ name: "b.png", source: "b" })],
+          outputs: [expect.objectContaining({ name: "b.png batch result", source: "b#batch-generated" })]
+        }),
+        expect.objectContaining({
+          modelId: "background-cleaner",
+          outputCount: 1,
+          creditCost: 2,
+          operation: "removeBackground",
+          references: [expect.objectContaining({ name: "c.png", source: "c" })],
+          outputs: [expect.objectContaining({ name: "c.png batch result", source: "c#batch-generated" })]
+        })
+      ])
+    );
   });
 
   it("stores backend batch status and outputs on each original canvas node", () => {
