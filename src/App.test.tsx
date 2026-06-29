@@ -2219,6 +2219,65 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("button", { name: /ecommerce-cutout\.png.*Use in canvas/i })).toBeInTheDocument();
   });
 
+  it("filters saved assets by operation and orientation metadata in the canvas dock", async () => {
+    backendWorkspace = {
+      ...backendWorkspace,
+      assets: [
+        {
+          id: "asset-upscale-landscape",
+          type: "image",
+          title: "campaign-upscale.png",
+          source: "/fixtures/fashion-reference.jpg",
+          tags: ["generated", "upscale"],
+          createdAt: "2026-06-28T10:00:00.000Z",
+          metadata: { folder: "Campaign A", operation: "upscale", width: 1536, height: 1024 }
+        },
+        {
+          id: "asset-edit-portrait",
+          type: "image",
+          title: "lookbook-edit.png",
+          source: "/fixtures/fashion-reference.jpg",
+          tags: ["generated", "edit"],
+          createdAt: "2026-06-28T10:05:00.000Z",
+          metadata: { folder: "Campaign A", operation: "edit", width: 800, height: 1200 }
+        },
+        {
+          id: "asset-remove-bg-square",
+          type: "image",
+          title: "ecommerce-cutout.png",
+          source: "/fixtures/fashion-reference.jpg",
+          tags: ["generated", "removebackground"],
+          createdAt: "2026-06-28T10:10:00.000Z",
+          metadata: { folder: "Ecommerce", operation: "removeBackground", width: 1024, height: 1024 }
+        }
+      ]
+    };
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: "Assets" }));
+
+    expect(screen.getByText("Operation: upscale / 1536x1024 / Landscape")).toBeInTheDocument();
+    expect(screen.getByText("Operation: edit / 800x1200 / Portrait")).toBeInTheDocument();
+    expect(screen.getByText("Operation: removeBackground / 1024x1024 / Square")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Filter assets by operation upscale" }));
+
+    expect(screen.getByRole("button", { name: /campaign-upscale\.png.*Use in canvas/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /lookbook-edit\.png.*Use in canvas/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /ecommerce-cutout\.png.*Use in canvas/i })).not.toBeInTheDocument();
+    expect(screen.getByText("1 asset from operation upscale")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show all operations" }));
+    await user.click(screen.getByRole("button", { name: "Filter assets by orientation Portrait" }));
+
+    expect(screen.getByRole("button", { name: /lookbook-edit\.png.*Use in canvas/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /campaign-upscale\.png.*Use in canvas/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /ecommerce-cutout\.png.*Use in canvas/i })).not.toBeInTheDocument();
+    expect(screen.getByText("1 asset with Portrait orientation")).toBeInTheDocument();
+  });
+
   it("lets designers edit saved asset folders and tags for reusable organization", async () => {
     backendWorkspace = {
       ...backendWorkspace,

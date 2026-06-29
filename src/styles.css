@@ -2112,6 +2112,8 @@ button {
 
 .asset-tag-filters,
 .asset-folder-filters,
+.asset-operation-filters,
+.asset-orientation-filters,
 .prompt-tag-filters {
   display: flex;
   flex-wrap: wrap;
@@ -2120,6 +2122,8 @@ button {
 
 .asset-tag-filters button,
 .asset-folder-filters button,
+.asset-operation-filters button,
+.asset-orientation-filters button,
 .prompt-tag-filters button {
   display: inline-flex;
   align-items: center;
@@ -2131,6 +2135,8 @@ button {
 
 .asset-tag-filters button.active,
 .asset-folder-filters button.active,
+.asset-operation-filters button.active,
+.asset-orientation-filters button.active,
 .prompt-tag-filters button.active {
   border-color: #111827;
   background: #111827;
@@ -2139,6 +2145,8 @@ button {
 
 .asset-tag-filters span,
 .asset-folder-filters span,
+.asset-operation-filters span,
+.asset-orientation-filters span,
 .prompt-tag-filters span {
   color: inherit;
   opacity: 0.72;

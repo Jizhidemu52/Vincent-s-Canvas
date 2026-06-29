@@ -4457,6 +4457,37 @@ function folderNameForAsset(asset: LibraryAsset) {
   return typeof folder === "string" && folder.trim() ? folder.trim() : "Unfiled";
 }
 
+function assetOperationFor(asset: LibraryAsset) {
+  const operation = asset.metadata?.operation;
+  if (typeof operation === "string" && operation.trim()) return operation.trim();
+  const reusableTag = asset.tags.find((tag) => !["generated", "canvas", "prompt"].includes(tag));
+  return reusableTag ?? (asset.tags.includes("canvas") ? "canvas" : asset.type);
+}
+
+function assetDimensionsFor(asset: LibraryAsset) {
+  const width = asset.metadata?.width;
+  const height = asset.metadata?.height;
+  if (typeof width !== "number" || typeof height !== "number") return undefined;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return undefined;
+  return { width, height };
+}
+
+function assetOrientationFor(asset: LibraryAsset) {
+  const dimensions = assetDimensionsFor(asset);
+  if (!dimensions) return undefined;
+  if (dimensions.width === dimensions.height) return "Square";
+  return dimensions.width > dimensions.height ? "Landscape" : "Portrait";
+}
+
+function assetMetadataSummary(asset: LibraryAsset) {
+  const dimensions = assetDimensionsFor(asset);
+  const orientation = assetOrientationFor(asset);
+  const parts = [`Operation: ${assetOperationFor(asset)}`];
+  if (dimensions) parts.push(`${dimensions.width}x${dimensions.height}`);
+  if (orientation) parts.push(orientation);
+  return parts.join(" / ");
+}
+
 function normalizeAssetTagDraft(value: string) {
   return Array.from(new Set(value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean)));
 }
@@ -4509,6 +4540,8 @@ function RightDock({
   const [selectedPromptTag, setSelectedPromptTag] = useState<string | null>(null);
   const [selectedAssetFolder, setSelectedAssetFolder] = useState<string | null>(null);
   const [selectedAssetTag, setSelectedAssetTag] = useState<string | null>(null);
+  const [selectedAssetOperation, setSelectedAssetOperation] = useState<string | null>(null);
+  const [selectedAssetOrientation, setSelectedAssetOrientation] = useState<string | null>(null);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [assetFolderDraft, setAssetFolderDraft] = useState("");
   const [assetTagsDraft, setAssetTagsDraft] = useState("");
@@ -4547,16 +4580,38 @@ function RightDock({
       }, new Map<string, number>())
       .entries()
   ).sort(([left], [right]) => left.localeCompare(right));
+  const assetOperationCounts = Array.from(
+    workspace.assets
+      .reduce((counts, asset) => {
+        const operation = assetOperationFor(asset);
+        return counts.set(operation, (counts.get(operation) ?? 0) + 1);
+      }, new Map<string, number>())
+      .entries()
+  ).sort(([left], [right]) => left.localeCompare(right));
+  const assetOrientationCounts = Array.from(
+    workspace.assets
+      .reduce((counts, asset) => {
+        const orientation = assetOrientationFor(asset);
+        return orientation ? counts.set(orientation, (counts.get(orientation) ?? 0) + 1) : counts;
+      }, new Map<string, number>())
+      .entries()
+  ).sort(([left], [right]) => left.localeCompare(right));
   const folderedAssets = selectedAssetFolder
     ? workspace.assets.filter((asset) => folderNameForAsset(asset) === selectedAssetFolder)
     : workspace.assets;
   const taggedAssets = selectedAssetTag ? folderedAssets.filter((asset) => asset.tags.includes(selectedAssetTag)) : folderedAssets;
+  const operationAssets = selectedAssetOperation
+    ? taggedAssets.filter((asset) => assetOperationFor(asset) === selectedAssetOperation)
+    : taggedAssets;
+  const orientedAssets = selectedAssetOrientation
+    ? operationAssets.filter((asset) => assetOrientationFor(asset) === selectedAssetOrientation)
+    : operationAssets;
   const filteredAssets = normalizedAssetSearch
-    ? taggedAssets.filter((asset) => {
-        const haystack = `${asset.title} ${asset.type} ${asset.tags.join(" ")}`.toLowerCase();
+    ? orientedAssets.filter((asset) => {
+        const haystack = `${asset.title} ${asset.type} ${asset.tags.join(" ")} ${folderNameForAsset(asset)} ${assetMetadataSummary(asset)}`.toLowerCase();
         return haystack.includes(normalizedAssetSearch);
       })
-    : taggedAssets;
+    : orientedAssets;
   const selectedPromptPreset = workspace.prompts.find((prompt) => prompt.id === selectedPromptPresetId) ?? null;
   const startAssetEdit = (asset: LibraryAsset) => {
     setEditingAssetId(asset.id);
@@ -4803,6 +4858,46 @@ function RightDock({
               ))}
             </div>
           ) : null}
+          {assetOperationCounts.length ? (
+            <div className="asset-operation-filters" aria-label="Asset operation filters">
+              {selectedAssetOperation ? (
+                <button type="button" onClick={() => setSelectedAssetOperation(null)}>
+                  Show all operations
+                </button>
+              ) : null}
+              {assetOperationCounts.map(([operation, count]) => (
+                <button
+                  type="button"
+                  key={operation}
+                  className={selectedAssetOperation === operation ? "active" : ""}
+                  aria-label={`Filter assets by operation ${operation}`}
+                  onClick={() => setSelectedAssetOperation(operation)}
+                >
+                  {operation} <span>{count}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {assetOrientationCounts.length ? (
+            <div className="asset-orientation-filters" aria-label="Asset orientation filters">
+              {selectedAssetOrientation ? (
+                <button type="button" onClick={() => setSelectedAssetOrientation(null)}>
+                  Show all orientations
+                </button>
+              ) : null}
+              {assetOrientationCounts.map(([orientation, count]) => (
+                <button
+                  type="button"
+                  key={orientation}
+                  className={selectedAssetOrientation === orientation ? "active" : ""}
+                  aria-label={`Filter assets by orientation ${orientation}`}
+                  onClick={() => setSelectedAssetOrientation(orientation)}
+                >
+                  {orientation} <span>{count}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
           {selectedAssetFolder ? (
             <small>
               {filteredAssets.length} asset{filteredAssets.length === 1 ? "" : "s"} in folder {selectedAssetFolder}
@@ -4811,6 +4906,16 @@ function RightDock({
           {selectedAssetTag ? (
             <small>
               {filteredAssets.length} asset{filteredAssets.length === 1 ? "" : "s"} tagged {selectedAssetTag}
+            </small>
+          ) : null}
+          {selectedAssetOperation ? (
+            <small>
+              {filteredAssets.length} asset{filteredAssets.length === 1 ? "" : "s"} from operation {selectedAssetOperation}
+            </small>
+          ) : null}
+          {selectedAssetOrientation ? (
+            <small>
+              {filteredAssets.length} asset{filteredAssets.length === 1 ? "" : "s"} with {selectedAssetOrientation} orientation
             </small>
           ) : null}
           {normalizedAssetSearch ? (
@@ -4824,6 +4929,7 @@ function RightDock({
                 <b>{asset.title}</b>
                 <small>{asset.tags.join(", ")}</small>
                 <small>Folder: {folderNameForAsset(asset)}</small>
+                <small>{assetMetadataSummary(asset)}</small>
                 <span>{asset.type} - Use in canvas</span>
               </button>
               <button
@@ -4863,7 +4969,13 @@ function RightDock({
                 ? "No assets match this search"
                 : selectedAssetFolder
                   ? "No assets match this folder"
-                  : "No assets match this tag"}
+                  : selectedAssetTag
+                    ? "No assets match this tag"
+                    : selectedAssetOperation
+                      ? "No assets match this operation"
+                      : selectedAssetOrientation
+                        ? "No assets match this orientation"
+                        : "No assets match these filters"}
             </small>
           ) : (
             <small>Save a selected node to collect it here</small>
