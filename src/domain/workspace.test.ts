@@ -841,8 +841,8 @@ describe("designer canvas workspace behavior", () => {
     expect(() => savePromptPreset(createInitialWorkspace(), { prompt: "   " })).toThrow("Prompt is required");
   });
 
-  it("creates editable derivatives from toolbar operations and confirmed shape edits", () => {
-    const { workspace, project } = createProject(createInitialWorkspace(), "Mask edits");
+  it("creates auditable derivatives from toolbar operations and confirmed shape edits", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Mask edits");
     const withAsset = addAssetToProject(workspace, project.id, {
       name: "bag.png",
       source: "bag-source",
@@ -865,6 +865,34 @@ describe("designer canvas workspace behavior", () => {
     expect(edited.projects[0].nodes[2].metadata.mask).toEqual({ x: 18, y: 22, width: 42, height: 36 });
     expect(edited.projects[0].nodes[2].source).toContain("#shape-edit");
     expect(edited.projects[0].nodes[2].x).toBeGreaterThan(source.x);
+    expect(edited.profile.creditBalance).toBe(5);
+    expect(edited.profile.creditUsed).toBe(15);
+    expect(edited.history).toHaveLength(2);
+    expect(edited.history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          projectId: project.id,
+          nodeId: edited.projects[0].nodes[1].id,
+          modelId: "upscale-pro",
+          operation: "upscale",
+          outputCount: 1,
+          creditCost: 4,
+          references: [expect.objectContaining({ name: "bag.png", source: "bag-source" })],
+          outputs: [expect.objectContaining({ name: "bag.png upscale" })]
+        }),
+        expect.objectContaining({
+          projectId: project.id,
+          nodeId: edited.projects[0].nodes[2].id,
+          modelId: "nanobanana2",
+          operation: "edit",
+          outputCount: 1,
+          creditCost: 11,
+          mask: { x: 18, y: 22, width: 42, height: 36 },
+          references: [expect.objectContaining({ name: "bag.png", source: "bag-source" })],
+          outputs: [expect.objectContaining({ name: "bag.png mask edit" })]
+        })
+      ])
+    );
   });
 
   it("imports a batch folder and processes every image with one prompt", () => {

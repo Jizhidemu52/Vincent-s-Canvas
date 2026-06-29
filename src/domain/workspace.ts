@@ -832,6 +832,19 @@ function assetFromNode(node: CanvasNode, project: Project): LibraryAsset {
   };
 }
 
+function assetInputFromNode(node: CanvasNode): AssetInput {
+  return {
+    name: node.name,
+    source: node.source,
+    width: node.width,
+    height: node.height
+  };
+}
+
+function modelCostFor(workspace: Workspace, modelId: string, outputCount = 1) {
+  return (workspace.modelRegistry.find((model) => model.id === modelId)?.cost ?? 1) * outputCount;
+}
+
 function createBatchOriginalNodes(batch: BatchImport, existingCount = 0): CanvasNode[] {
   return batch.files.map((file, index) =>
     createNode({
@@ -1532,35 +1545,71 @@ export function applyImageOperation(
   nodeId: string,
   operation: OperationType
 ): Workspace {
-  return updateProject(workspace, projectId, (project) => {
-    const source = findNode(project, nodeId);
-    const type: NodeType =
-      operation === "upscale" ? "upscale" : operation === "removeBackground" ? "removeBg" : operation === "edit" ? "edit" : "config";
-    const position = placeNextTo(source, 1);
-    const operationNode = createNode({
-      type,
-      kind: "operation",
-      name: `${source.name} ${operation}`,
+  const project = findProject(workspace, projectId);
+  const source = findNode(project, nodeId);
+  const modelId = operation === "upscale" ? "upscale-pro" : "background-cleaner";
+  const prompt = operation === "upscale" ? "高清放大，保留织物纹理和版型。" : "去除背景并保持主体边缘干净。";
+  const cost = modelCostFor(workspace, modelId);
+  const historyId = createId("history");
+  const charged = spendCredits(workspace, cost);
+  const type: NodeType =
+    operation === "upscale" ? "upscale" : operation === "removeBackground" ? "removeBg" : operation === "edit" ? "edit" : "config";
+  const position = placeNextTo(source, 1);
+  const operationNode = createNode({
+    type,
+    kind: "operation",
+    name: `${source.name} ${operation}`,
+    operation,
+    source: `${source.source}#${operation}`,
+    parentId: source.id,
+    references: [source.id],
+    x: position.x,
+    y: position.y,
+    width: source.width,
+    height: source.height,
+    generation: {
+      prompt,
+      modelId,
+      entryPoint: "workflow"
+    },
+    metadata: {
+      historyId,
       operation,
-      source: `${source.source}#${operation}`,
-      parentId: source.id,
-      references: [source.id],
-      x: position.x,
-      y: position.y,
-      width: source.width,
-      height: source.height,
-      generation: {
-        prompt: operation === "upscale" ? "高清放大，保留织物纹理和版型。" : "去除背景并保持主体边缘干净。",
-        modelId: operation === "upscale" ? "upscale-pro" : "background-cleaner",
-        entryPoint: "workflow"
-      }
-    });
-    return withUndo(project, {
+      creditCost: cost,
+      prompt,
+      modelId
+    }
+  });
+  const updated = updateProject(charged, projectId, (item) =>
+    withUndo(item, {
       nodes: [...project.nodes, operationNode],
       connections: [...project.connections, connect(source.id, operationNode.id)],
       selectedNodeIds: [operationNode.id]
-    });
-  });
+    })
+  );
+  return {
+    ...updated,
+    history: [
+      {
+        id: historyId,
+        projectId,
+        projectName: project.name,
+        nodeId: operationNode.id,
+        prompt,
+        modelId,
+        outputCount: 1,
+        creditCost: cost,
+        operation,
+        referenceCount: 1,
+        references: [assetInputFromNode(source)],
+        outputs: [assetInputFromNode(operationNode)],
+        userId: workspace.profile.userId,
+        designerName: workspace.profile.designerName,
+        createdAt: now()
+      },
+      ...updated.history
+    ]
+  };
 }
 
 export function commitShapeEdit(
@@ -1569,30 +1618,67 @@ export function commitShapeEdit(
   nodeId: string,
   edit: { shape: "ellipse" | "rectangle" | "freehand"; prompt: string; modelId?: string; mask?: MaskSelection }
 ): Workspace {
-  return updateProject(workspace, projectId, (project) => {
-    const source = findNode(project, nodeId);
-    const position = placeNextTo(source, 2);
-    const editNode = createNode({
-      type: "edit",
-      kind: "edit",
-      name: `${source.name} mask edit`,
-      source: `${source.source}#shape-edit`,
-      parentId: source.id,
-      references: [source.id],
-      x: position.x,
-      y: position.y,
-      width: source.width,
-      height: source.height,
-      generation: { prompt: edit.prompt, modelId: edit.modelId ?? source.generation.modelId, entryPoint: "workflow" },
-      metadata: { editShape: edit.shape, mask: edit.mask }
-    });
-    editNode.editShape = edit.shape;
-    return withUndo(project, {
+  const project = findProject(workspace, projectId);
+  const source = findNode(project, nodeId);
+  const modelId = edit.modelId ?? source.generation.modelId;
+  const cost = modelCostFor(workspace, modelId);
+  const historyId = createId("history");
+  const charged = spendCredits(workspace, cost);
+  const position = placeNextTo(source, 2);
+  const editNode = createNode({
+    type: "edit",
+    kind: "edit",
+    name: `${source.name} mask edit`,
+    source: `${source.source}#shape-edit`,
+    parentId: source.id,
+    references: [source.id],
+    x: position.x,
+    y: position.y,
+    width: source.width,
+    height: source.height,
+    generation: { prompt: edit.prompt, modelId, entryPoint: "workflow" },
+    metadata: {
+      historyId,
+      operation: "edit",
+      creditCost: cost,
+      prompt: edit.prompt,
+      modelId,
+      editShape: edit.shape,
+      mask: edit.mask
+    }
+  });
+  editNode.editShape = edit.shape;
+  const updated = updateProject(charged, projectId, (item) =>
+    withUndo(item, {
       nodes: [...project.nodes, editNode],
       connections: [...project.connections, connect(source.id, editNode.id)],
       selectedNodeIds: [editNode.id]
-    });
-  });
+    })
+  );
+  return {
+    ...updated,
+    history: [
+      {
+        id: historyId,
+        projectId,
+        projectName: project.name,
+        nodeId: editNode.id,
+        prompt: edit.prompt,
+        modelId,
+        outputCount: 1,
+        creditCost: cost,
+        operation: "edit",
+        referenceCount: 1,
+        references: [assetInputFromNode(source)],
+        mask: edit.mask,
+        outputs: [assetInputFromNode(editNode)],
+        userId: workspace.profile.userId,
+        designerName: workspace.profile.designerName,
+        createdAt: now()
+      },
+      ...updated.history
+    ]
+  };
 }
 
 export function importBatchFolder(workspace: Workspace, projectId: string, batch: BatchImport): Workspace {
