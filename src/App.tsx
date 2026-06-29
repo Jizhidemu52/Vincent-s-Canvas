@@ -2705,6 +2705,8 @@ function CanvasView({
           onSaveAsset={onSaveAsset}
           onGroupReferences={onGroupReferences}
           onDownload={() => downloadCanvasNode(selectedImageNode)}
+          onCopy={() => onWorkspaceChange((current) => copyPasteSelectedNodes(current, project.id))}
+          onDelete={() => onWorkspaceChange((current) => deleteSelectedNodes(current, project.id))}
         />
         <RightDock
           workspace={workspace}
@@ -3795,7 +3797,9 @@ function NodeToolbar({
   onShapeEdit,
   onSaveAsset,
   onGroupReferences,
-  onDownload
+  onDownload,
+  onCopy,
+  onDelete
 }: {
   selectedNode?: CanvasNode;
   onUpscale: () => void;
@@ -3804,6 +3808,8 @@ function NodeToolbar({
   onSaveAsset: () => void;
   onGroupReferences: () => void;
   onDownload: () => void;
+  onCopy: () => void;
+  onDelete: () => void;
 }) {
   if (!selectedNode) return null;
   return (
@@ -3814,6 +3820,8 @@ function NodeToolbar({
       <button type="button" title="Group references" onClick={onGroupReferences}><SquareDashedMousePointer size={15} /></button>
       <button type="button" title="Save asset" onClick={onSaveAsset}><Database size={15} /></button>
       <button type="button" title="Download" onClick={onDownload}><Download size={15} /></button>
+      <button type="button" title="Copy image" onClick={onCopy}><Copy size={15} /></button>
+      <button type="button" title="Delete image" onClick={onDelete}><Trash2 size={15} /></button>
       <button type="button" title="Magic edit" onClick={onShapeEdit}><Wand2 size={15} /></button>
     </div>
   );

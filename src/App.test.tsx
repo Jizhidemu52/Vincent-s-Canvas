@@ -986,6 +986,30 @@ describe("Designer canvas app shell", () => {
     });
   });
 
+  it("puts copy and delete actions directly in the selected image toolbar", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const imageNode = screen.getByRole("button", { name: /Image fashion-reference\.jpg/i });
+    await user.click(imageNode);
+    const initialNodeCount = screen.getAllByTestId("canvas-node").length;
+    const imageToolbar = within(screen.getByLabelText("selected image toolbar"));
+
+    await user.click(imageToolbar.getByRole("button", { name: "Copy image" }));
+
+    const copiedNode = await screen.findByRole("button", { name: /Image fashion-reference\.jpg copy/i });
+    expect(screen.getAllByTestId("canvas-node")).toHaveLength(initialNodeCount + 1);
+
+    await user.click(copiedNode);
+    await user.click(within(screen.getByLabelText("selected image toolbar")).getByRole("button", { name: "Delete image" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Image fashion-reference\.jpg copy/i })).not.toBeInTheDocument();
+    });
+    expect(screen.getAllByTestId("canvas-node")).toHaveLength(initialNodeCount);
+  });
+
   it("imports externally dropped image files onto the canvas at the drop point", async () => {
     const user = userEvent.setup();
     await login(user);
