@@ -1616,7 +1616,7 @@ function ProfilePanel({ workspace }: { workspace: Workspace }) {
           <span>Credit balance</span>
           <strong>{workspace.profile.creditBalance}</strong>
           <small>
-            {workspace.profile.creditUsed} credits used 路 limit {workspace.profile.creditLimit ?? "not set"}
+            {workspace.profile.creditUsed} credits used / limit {workspace.profile.creditLimit ?? "not set"}
           </small>
           <div className="credit-meter"><i style={{ width: `${usagePercent}%` }} /></div>
         </article>
@@ -2461,7 +2461,7 @@ function AdminView({
               <span>Role</span>
               <strong>{workspace.profile.role}</strong>
               <small>
-                {workspace.profile.userId} 路 limit {workspace.profile.creditLimit ?? "not set"}
+                {workspace.profile.userId} / limit {workspace.profile.creditLimit ?? "not set"}
               </small>
             </div>
           </article>

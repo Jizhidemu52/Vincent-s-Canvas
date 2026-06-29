@@ -2891,7 +2891,7 @@ describe("Designer canvas app shell", () => {
 
     await user.click(screen.getByRole("button", { name: "Profile" }));
 
-    expect(screen.getByText(/12 credits used.*limit 120/)).toBeInTheDocument();
+    expect(screen.getByText("12 credits used / limit 120")).toBeInTheDocument();
     expect(document.querySelector(".credit-meter i")).toHaveStyle({ width: "10%" });
   });
 
