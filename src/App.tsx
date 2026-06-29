@@ -105,6 +105,7 @@ import {
 import {
   adjustDesignerCredits,
   configureAdminModelPricing,
+  configureAdminOperationPricing,
   configureAdminModelRegistry,
   configureAdminProviderSettings,
   fetchAdminAccounts,
@@ -131,6 +132,7 @@ import {
   type AdminUsageSummary,
   type ProviderHealth,
   type ModelRegistryRequest,
+  type OperationPricingRequest,
   type ProviderSettingsRequest
 } from "./services/modelApi";
 import { runBatchGenerationQueue } from "./services/batchRunner";
@@ -255,6 +257,7 @@ function auditPrimaryMetric(entry: AdminAuditEntry) {
   if (entry.eventType === "credit-adjustment") return `${entry.creditDelta} credits`;
   if (entry.eventType === "credit-limit") return `limit ${entry.creditLimit}`;
   if (entry.eventType === "model-pricing") return `${entry.creditCost} credits/output`;
+  if (entry.eventType === "operation-pricing") return `${entry.operation ?? "operation"} ${entry.creditCost} credits/output`;
   if (entry.eventType === "provider-settings") return entry.provider ?? "provider";
   if (entry.eventType === "history-archive") return `${entry.outputCount ?? 0} archived`;
   return `${entry.creditCost ?? 0} credits`;
@@ -1117,6 +1120,17 @@ export default function App() {
     return updatedModel;
   }
 
+  async function updateOperationPricing(request: OperationPricingRequest) {
+    const updatedModel = await configureAdminOperationPricing(request, activeUserId);
+    setWorkspace((current) => ({
+      ...current,
+      modelRegistry: current.modelRegistry.map((model) => (model.id === updatedModel.id ? updatedModel : model))
+    }));
+    const operationPrice = updatedModel.operationPricing?.[request.operation];
+    setApiNotice(`${updatedModel.name} ${request.operation} now costs ${operationPrice?.cost ?? updatedModel.cost} credits`);
+    return updatedModel;
+  }
+
   async function updateModelRegistry(request: ModelRegistryRequest) {
     const updatedModel = await configureAdminModelRegistry(request, activeUserId);
     setWorkspace((current) => {
@@ -1193,6 +1207,7 @@ export default function App() {
         onAdjustCredits={adjustCredits}
         onSetCreditLimit={setCreditLimit}
         onUpdateModelPricing={updateModelPricing}
+        onUpdateOperationPricing={updateOperationPricing}
         onUpdateModelRegistry={updateModelRegistry}
         onConfigureProvider={updateProviderSettings}
       />
@@ -1731,6 +1746,7 @@ function AdminView({
   onAdjustCredits,
   onSetCreditLimit,
   onUpdateModelPricing,
+  onUpdateOperationPricing,
   onUpdateModelRegistry,
   onConfigureProvider
 }: {
@@ -1741,6 +1757,7 @@ function AdminView({
   onAdjustCredits: (targetUserId: string, delta: number, reason: string) => Promise<Profile>;
   onSetCreditLimit: (targetUserId: string, creditLimit: number, reason: string) => Promise<Profile>;
   onUpdateModelPricing: (modelId: string, cost: number, priceCents: number, currency: ModelDefinition["currency"]) => Promise<ModelDefinition>;
+  onUpdateOperationPricing: (request: OperationPricingRequest) => Promise<ModelDefinition>;
   onUpdateModelRegistry: (request: ModelRegistryRequest) => Promise<ModelDefinition>;
   onConfigureProvider: (request: ProviderSettingsRequest) => Promise<ProviderHealth>;
 }) {
@@ -1757,6 +1774,15 @@ function AdminView({
   const [modelCost, setModelCost] = useState(String(selectedPricingModel?.cost ?? 1));
   const [modelPriceCents, setModelPriceCents] = useState(String(selectedPricingModel?.priceCents ?? 0));
   const [modelCurrency, setModelCurrency] = useState<ModelDefinition["currency"]>(selectedPricingModel?.currency ?? "CNY");
+  const [operationModelId, setOperationModelId] = useState(workspace.modelRegistry.find((model) => model.capability.length)?.id ?? "");
+  const selectedOperationModel = workspace.modelRegistry.find((model) => model.id === operationModelId) ?? workspace.modelRegistry[0];
+  const [operationType, setOperationType] = useState<OperationType>((selectedOperationModel?.capability[0] as OperationType | undefined) ?? "generate");
+  const selectedOperationRule = selectedOperationModel?.operationPricing?.[operationType];
+  const [operationCost, setOperationCost] = useState(String(selectedOperationRule?.cost ?? selectedOperationModel?.cost ?? 1));
+  const [operationPriceCents, setOperationPriceCents] = useState(String(selectedOperationRule?.priceCents ?? selectedOperationModel?.priceCents ?? 0));
+  const [operationCurrency, setOperationCurrency] = useState<ModelDefinition["currency"]>(
+    selectedOperationRule?.currency ?? selectedOperationModel?.currency ?? "CNY"
+  );
   const [registryModelId, setRegistryModelId] = useState("custom-fashion-v1");
   const [registryModelName, setRegistryModelName] = useState("Custom Fashion V1");
   const [registryProvider, setRegistryProvider] = useState<ModelDefinition["provider"]>("runninghub");
@@ -1840,6 +1866,24 @@ function AdminView({
     () => visibleAdminHistory.filter((entry) => selectedAdminHistoryIds.includes(entry.id)),
     [selectedAdminHistoryIds, visibleAdminHistory]
   );
+
+  function syncOperationPricingDraft(model: ModelDefinition | undefined, operation: OperationType) {
+    const rule = model?.operationPricing?.[operation];
+    setOperationCost(String(rule?.cost ?? model?.cost ?? 1));
+    setOperationPriceCents(String(rule?.priceCents ?? model?.priceCents ?? 0));
+    setOperationCurrency(rule?.currency ?? model?.currency ?? "CNY");
+  }
+
+  useEffect(() => {
+    if (!selectedOperationModel) return;
+    if (!selectedOperationModel.capability.includes(operationType as ModuleType)) {
+      const nextOperation = (selectedOperationModel.capability[0] as OperationType | undefined) ?? "generate";
+      setOperationType(nextOperation);
+      syncOperationPricingDraft(selectedOperationModel, nextOperation);
+      return;
+    }
+    syncOperationPricingDraft(selectedOperationModel, operationType);
+  }, [operationType, selectedOperationModel]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2002,6 +2046,28 @@ function AdminView({
       setCreditNotice(`${model.name} now costs ${model.cost} credits per output`);
     } catch (error) {
       setCreditNotice(error instanceof Error ? error.message : "Model pricing update failed");
+    } finally {
+      setIsAdjusting(false);
+    }
+  }
+
+  async function submitOperationPricing(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsAdjusting(true);
+    try {
+      const model = await onUpdateOperationPricing({
+        modelId: operationModelId,
+        operation: operationType,
+        cost: Number(operationCost),
+        priceCents: Number(operationPriceCents),
+        currency: operationCurrency
+      });
+      const rule = model.operationPricing?.[operationType];
+      syncOperationPricingDraft(model, operationType);
+      await refreshAdminReports();
+      setCreditNotice(`${model.name} ${operationType} now costs ${rule?.cost ?? model.cost} credits per output`);
+    } catch (error) {
+      setCreditNotice(error instanceof Error ? error.message : "Operation pricing update failed");
     } finally {
       setIsAdjusting(false);
     }
@@ -2625,6 +2691,101 @@ function AdminView({
                   {model.name}: {model.cost} credits{model.priceCents !== undefined ? ` / ${(model.priceCents / 100).toFixed(2)} ${model.currency ?? "CNY"}` : ""}
                 </small>
               ))}
+            </div>
+          </article>
+          <article className="admin-card">
+            <h2>Operation pricing</h2>
+            <form className="admin-credit-form" onSubmit={submitOperationPricing}>
+              <label>
+                <span>Model</span>
+                <select
+                  aria-label="Operation pricing model"
+                  value={operationModelId}
+                  onChange={(event) => {
+                    const model = workspace.modelRegistry.find((item) => item.id === event.target.value);
+                    const nextOperation = (model?.capability[0] as OperationType | undefined) ?? "generate";
+                    setOperationModelId(event.target.value);
+                    setOperationType(nextOperation);
+                    syncOperationPricingDraft(model, nextOperation);
+                  }}
+                >
+                  {workspace.modelRegistry.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Operation</span>
+                <select
+                  aria-label="Operation pricing type"
+                  value={operationType}
+                  onChange={(event) => {
+                    const nextOperation = event.target.value as OperationType;
+                    setOperationType(nextOperation);
+                    syncOperationPricingDraft(selectedOperationModel, nextOperation);
+                  }}
+                >
+                  {(selectedOperationModel?.capability ?? []).map((operation) => (
+                    <option key={operation} value={operation}>
+                      {operation}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Credits per output</span>
+                <input
+                  aria-label="Operation credit cost"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={operationCost}
+                  onChange={(event) => setOperationCost(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Price cents</span>
+                <input
+                  aria-label="Operation price cents"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={operationPriceCents}
+                  onChange={(event) => setOperationPriceCents(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Currency</span>
+                <select
+                  aria-label="Operation currency"
+                  value={operationCurrency}
+                  onChange={(event) => setOperationCurrency(event.target.value as ModelDefinition["currency"])}
+                >
+                  <option value="CNY">CNY</option>
+                  <option value="USD">USD</option>
+                </select>
+              </label>
+              <button type="submit" className="generate-button" disabled={isAdjusting || !selectedOperationModel}>
+                Update operation pricing
+              </button>
+            </form>
+            <div className="admin-price-list" aria-label="Configured operation pricing">
+              {workspace.modelRegistry
+                .filter((model) => model.operationPricing && Object.keys(model.operationPricing).length)
+                .slice(0, 6)
+                .map((model) =>
+                  Object.entries(model.operationPricing ?? {}).map(([operation, rule]) => (
+                    <small key={`${model.id}-${operation}`}>
+                      {model.name} / {operation}: {rule.cost} credits
+                      {rule.priceCents !== undefined ? ` / ${(rule.priceCents / 100).toFixed(2)} ${rule.currency ?? model.currency ?? "CNY"}` : ""}
+                    </small>
+                  ))
+                )}
+              {workspace.modelRegistry.some((model) => model.operationPricing && Object.keys(model.operationPricing).length) ? null : (
+                <small>No operation overrides yet. Model default pricing is used.</small>
+              )}
             </div>
           </article>
         </section>

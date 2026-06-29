@@ -541,6 +541,35 @@ describe("HTTP API server", () => {
     expect(models.find((model) => model.id === "gpt-image-2-low")).toMatchObject({ cost: 5, priceCents: 250, currency: "CNY" });
   });
 
+  it("allows admins to set operation pricing over HTTP and uses it for deductions", async () => {
+    const pricingResponse = await fetch(`${context.baseUrl}/api/admin/operation-pricing`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ modelId: "background-cleaner", operation: "removeBackground", cost: 3, priceCents: 120, currency: "CNY" })
+    });
+    const generationResponse = await fetch(`${context.baseUrl}/api/remove-bg`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "http-operation-priced-remove-bg" },
+      body: JSON.stringify(request({ modelId: "background-cleaner", prompt: "", operation: "removeBackground", outputCount: 2 }))
+    });
+    const profile = (await (await fetch(`${context.baseUrl}/api/profile`)).json()) as Profile;
+    const history = (await (await fetch(`${context.baseUrl}/api/history`)).json()) as Array<Record<string, unknown>>;
+    const models = (await (await fetch(`${context.baseUrl}/api/models`)).json()) as Array<Record<string, unknown>>;
+
+    expect(pricingResponse.status).toBe(200);
+    expect(await pricingResponse.json()).toMatchObject({
+      id: "background-cleaner",
+      operationPricing: { removeBackground: { cost: 3, priceCents: 120, currency: "CNY" } }
+    });
+    expect(generationResponse.status).toBe(200);
+    expect(await generationResponse.json()).toMatchObject({ creditCost: 6 });
+    expect(profile.creditBalance).toBe(4);
+    expect(history[0]).toMatchObject({ modelId: "background-cleaner", operation: "removeBackground", creditCost: 6, priceCents: 120 });
+    expect(models.find((model) => model.id === "background-cleaner")).toMatchObject({
+      operationPricing: { removeBackground: { cost: 3, priceCents: 120, currency: "CNY" } }
+    });
+  });
+
   it("allows admins to register provider models over HTTP and rejects invalid callers", async () => {
     const modelRequest = {
       modelId: "http-fashion-v1",

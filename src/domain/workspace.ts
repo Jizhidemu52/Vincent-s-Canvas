@@ -311,6 +311,7 @@ export interface ModelDefinition {
   cost: number;
   priceCents?: number;
   currency?: "CNY" | "USD";
+  operationPricing?: Partial<Record<OperationType, { cost: number; priceCents?: number; currency?: "CNY" | "USD" }>>;
 }
 
 export interface WorkflowModuleDefinition {
@@ -886,8 +887,17 @@ function assetInputFromNode(node: CanvasNode): AssetInput {
   };
 }
 
-function modelCostFor(workspace: Workspace, modelId: string, outputCount = 1) {
-  return (workspace.modelRegistry.find((model) => model.id === modelId)?.cost ?? 1) * outputCount;
+export function pricingForOperation(model: ModelDefinition | undefined, operation: OperationType) {
+  const override = model?.operationPricing?.[operation];
+  return {
+    cost: override?.cost ?? model?.cost ?? 1,
+    priceCents: override?.priceCents ?? model?.priceCents,
+    currency: override?.currency ?? model?.currency
+  };
+}
+
+function modelCostFor(workspace: Workspace, modelId: string, operation: OperationType, outputCount = 1) {
+  return pricingForOperation(workspace.modelRegistry.find((model) => model.id === modelId), operation).cost * outputCount;
 }
 
 function referenceAssetsForNode(project: Project, source: CanvasNode): AssetInput[] {
@@ -1284,7 +1294,7 @@ export function runGeneration(workspace: Workspace, projectId: string, nodeId: s
   const project = findProject(workspace, projectId);
   const source = findNode(project, nodeId);
   if (!source.generation.prompt.trim()) throw new Error("Prompt is required");
-  const cost = modelCostFor(workspace, source.generation.modelId, source.generation.outputCount);
+  const cost = modelCostFor(workspace, source.generation.modelId, "generate", source.generation.outputCount);
   const historyId = createId("history");
   const charged = spendCredits(workspace, cost);
   const references = source.type === "imageGroup" ? source.references : source.references.length ? source.references : [source.id];
@@ -1614,7 +1624,7 @@ export function applyImageOperation(
   const source = findNode(project, nodeId);
   const modelId = operation === "upscale" ? "upscale-pro" : "background-cleaner";
   const prompt = operation === "upscale" ? "高清放大，保留织物纹理和版型。" : "去除背景并保持主体边缘干净。";
-  const cost = modelCostFor(workspace, modelId);
+  const cost = modelCostFor(workspace, modelId, operation);
   const historyId = createId("history");
   const charged = spendCredits(workspace, cost);
   const type: NodeType =
@@ -1686,7 +1696,7 @@ export function commitShapeEdit(
   const project = findProject(workspace, projectId);
   const source = findNode(project, nodeId);
   const modelId = edit.modelId ?? source.generation.modelId;
-  const cost = modelCostFor(workspace, modelId);
+  const cost = modelCostFor(workspace, modelId, "edit");
   const historyId = createId("history");
   const charged = spendCredits(workspace, cost);
   const position = placeNextTo(source, 2);
@@ -1859,7 +1869,8 @@ export function runBatchQueue(workspace: Workspace, projectId: string): Workspac
   const operation = defaultOperationForModel(model);
   if (!operation) throw new Error(`Model ${model.id} does not support batch operations`);
   const totalOutputs = project.batchQueue.length * project.batchConfig.outputCount;
-  const creditCost = model.cost * totalOutputs;
+  const unitPricing = pricingForOperation(model, operation);
+  const creditCost = unitPricing.cost * totalOutputs;
   const charged = spendCredits(workspace, creditCost);
   const historyIdsByFile = new Map(project.batchQueue.map((item) => [item.name, createId("history")] as const));
   const generatedNodes = project.batchQueue.map((item, index) => {
@@ -1868,7 +1879,7 @@ export function runBatchQueue(workspace: Workspace, projectId: string): Workspac
     );
     const x = (originalNode?.x ?? 220 + index * 148) + (originalNode?.width ?? item.width) + 112;
     const y = originalNode?.y ?? 520;
-    const itemCreditCost = model.cost * project.batchConfig!.outputCount;
+    const itemCreditCost = unitPricing.cost * project.batchConfig!.outputCount;
     const historyId = historyIdsByFile.get(item.name);
     return createNode({
       type: "batch",
@@ -1931,7 +1942,7 @@ export function runBatchQueue(workspace: Workspace, projectId: string): Workspac
           prompt: project.batchConfig!.prompt,
           modelId: project.batchConfig!.modelId,
           outputCount: project.batchConfig!.outputCount,
-          creditCost: model.cost * project.batchConfig!.outputCount,
+          creditCost: unitPricing.cost * project.batchConfig!.outputCount,
           operation,
           moduleType: "batch" as const,
           referenceCount: 1,
@@ -2098,7 +2109,7 @@ export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: stri
     if (!prompt.trim()) {
       issues.push({ nodeId: nextNode.id, severity: "error", message: "Prompt is required" });
     }
-    const unitCost = model?.cost ?? 1;
+    const unitCost = pricingForOperation(model, operation).cost;
     steps.push({
       nodeId: nextNode.id,
       name: nextNode.name,
@@ -2161,7 +2172,7 @@ function executeModule(workspace: Workspace, projectId: string, moduleNode: Canv
   if (!model.capability.includes(operation as ModuleType)) {
     throw new Error(`Model ${model.id} does not support ${operation}`);
   }
-  const creditCost = model.cost * settings.outputCount;
+  const creditCost = pricingForOperation(model, operation).cost * settings.outputCount;
   const charged = spendCredits(workspace, creditCost);
   let generatedOutput: AssetInput | undefined;
   const updated = updateProject(charged, projectId, (project) => {

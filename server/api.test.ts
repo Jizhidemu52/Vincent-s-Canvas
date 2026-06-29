@@ -4,6 +4,7 @@ import {
   callApi,
   callApiAsync,
   configureModelPricing,
+  configureOperationPricing,
   configureModelRegistry,
   configureProviderSettings,
   getWorkspaceSnapshot,
@@ -944,6 +945,69 @@ describe("backend hosted mock API", () => {
       ])
     );
     expect(state.generationJobs[0]).toMatchObject({ priceCents: 500, currency: "CNY" });
+  });
+
+  it("lets admins override operation pricing by model operation", () => {
+    const state = createServerState({ creditBalance: 30 });
+
+    const priced = configureOperationPricing(
+      state,
+      { modelId: "upscale-pro", operation: "upscale", cost: 9, priceCents: 450, currency: "CNY" },
+      "admin@company.local"
+    ) as ModelDefinition;
+    const result = callApi(
+      state,
+      "/api/upscale",
+      request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 2 }),
+      "operation-priced-upscale"
+    ) as GenerationResult;
+    const profile = callApi(state, "/api/profile") as Profile;
+    const usage = callApi(state, "/api/admin/usage", undefined, undefined, "admin@company.local") as AdminUsageSummary;
+    const audit = callApi(state, "/api/admin/audit", undefined, undefined, "admin@company.local") as AdminAuditEntry[];
+
+    expect(priced.operationPricing?.upscale).toMatchObject({ cost: 9, priceCents: 450, currency: "CNY" });
+    expect(result.creditCost).toBe(18);
+    expect(profile.creditBalance).toBe(12);
+    expect(state.history[0]).toMatchObject({
+      modelId: "upscale-pro",
+      operation: "upscale",
+      outputCount: 2,
+      creditCost: 18,
+      priceCents: 450,
+      currency: "CNY"
+    });
+    expect(state.generationJobs[0]).toMatchObject({ creditCost: 18, priceCents: 900, currency: "CNY" });
+    expect(usage.totalPriceCents).toBe(900);
+    expect(usage.modelUsage).toEqual(
+      expect.arrayContaining([expect.objectContaining({ modelId: "upscale-pro", credits: 18, priceCents: 900, currency: "CNY" })])
+    );
+    expect(audit).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventType: "operation-pricing", modelId: "upscale-pro", operation: "upscale", creditCost: 9 })
+      ])
+    );
+  });
+
+  it("rejects invalid operation pricing changes without dirty side effects", () => {
+    const state = createServerState({ creditBalance: 30 });
+
+    const unsupported = configureOperationPricing(
+      state,
+      { modelId: "gpt-image-2-low", operation: "upscale", cost: 5, priceCents: 250, currency: "CNY" },
+      "admin@company.local"
+    ) as ApiError;
+    const unauthorized = configureOperationPricing(
+      state,
+      { modelId: "background-cleaner", operation: "removeBackground", cost: 3, priceCents: 120, currency: "CNY" },
+      "designer@company.local"
+    ) as ApiError;
+    const models = callApi(state, "/api/models") as ModelDefinition[];
+
+    expect(unsupported).toMatchObject({ status: "failed", errorMessage: "Model gpt-image-2-low does not support upscale" });
+    expect(unauthorized).toMatchObject({ status: "failed", errorMessage: "Admin role required" });
+    expect(models.find((model) => model.id === "gpt-image-2-low")?.operationPricing).toBeUndefined();
+    expect(models.find((model) => model.id === "background-cleaner")?.operationPricing).toBeUndefined();
+    expect(state.adminAudit).toHaveLength(0);
   });
 
   it("lets admins register provider models used by later generations", () => {

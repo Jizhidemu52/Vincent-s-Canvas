@@ -78,6 +78,8 @@ http://127.0.0.1:5173/
 - `GET /api/admin/jobs`
 - `GET /api/admin/providers`
 - `POST /api/admin/credits`
+- `POST /api/admin/model-pricing`
+- `POST /api/admin/operation-pricing`
 - `POST /api/generations`
 - `POST /api/edits`
 - `POST /api/upscale`

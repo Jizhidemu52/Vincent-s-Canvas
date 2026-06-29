@@ -7,11 +7,13 @@ import {
   type LibraryAsset,
   type ModelDefinition,
   type ModuleType,
+  type OperationType,
   type Profile,
   type ProviderProgress,
   type Project,
   type PromptPreset,
-  type Workspace
+  type Workspace,
+  pricingForOperation
 } from "../src/domain/workspace";
 import {
   buildProviderPayload,
@@ -72,6 +74,10 @@ export interface ModelPricingRequest {
   currency?: ModelDefinition["currency"];
 }
 
+export interface OperationPricingRequest extends ModelPricingRequest {
+  operation: OperationType;
+}
+
 export interface ModelRegistryRequest {
   modelId: string;
   name: string;
@@ -111,7 +117,15 @@ export interface AssetMetadataRequest {
 
 export interface AdminAuditEntry {
   id: string;
-  eventType: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings" | "history-archive";
+  eventType:
+    | "generation"
+    | "credit-adjustment"
+    | "credit-limit"
+    | "model-pricing"
+    | "operation-pricing"
+    | "model-registry"
+    | "provider-settings"
+    | "history-archive";
   actorUserId?: string;
   userId?: string;
   targetUserId?: string;
@@ -714,6 +728,57 @@ export function configureModelPricing(state: ServerState, request: Partial<Model
   }
 }
 
+export function configureOperationPricing(
+  state: ServerState,
+  request: Partial<OperationPricingRequest>,
+  adminUserId?: string
+): ModelDefinition | ApiError {
+  try {
+    assertAdminUser(state, adminUserId);
+    const modelId = request.modelId?.trim();
+    if (!modelId) {
+      throw new Error("Model is required");
+    }
+    const model = state.models.find((item) => item.id === modelId);
+    if (!model) {
+      throw new Error("Model not found");
+    }
+    const operation = request.operation;
+    if (!operation || !modelCapabilities.includes(operation as ModuleType)) {
+      throw new Error("Operation is required");
+    }
+    if (!model.capability.some((capability) => capability === operation)) {
+      throw new Error(`Model ${model.id} does not support ${operation}`);
+    }
+    const { cost, priceCents, currency } = normalizeModelPrice(request, model.operationPricing?.[operation] ?? model);
+    const updated: ModelDefinition = {
+      ...model,
+      operationPricing: {
+        ...model.operationPricing,
+        [operation]: { cost, priceCents, currency }
+      }
+    };
+    state.models = state.models.map((item) => (item.id === modelId ? updated : item));
+    recordAdminAudit(state, {
+      eventType: "operation-pricing",
+      actorUserId: normalizeUserId(adminUserId),
+      modelId,
+      operation,
+      creditCost: cost,
+      priceCents,
+      currency,
+      summary: `Set ${modelId} ${operation} pricing to ${cost} credits${priceCents !== undefined ? ` / ${priceCents} ${currency}` : ""}`,
+      metadata: { operation, priceCents, currency }
+    });
+    return updated;
+  } catch (error) {
+    return {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "Unknown server error"
+    };
+  }
+}
+
 export function configureModelRegistry(state: ServerState, request: Partial<ModelRegistryRequest>, adminUserId?: string): ModelDefinition | ApiError {
   try {
     assertAdminUser(state, adminUserId);
@@ -934,12 +999,13 @@ function assertRequest(state: ServerState, request: GenerationRequest, requestId
   if (request.outputCount < 1 || request.outputCount > 8) {
     throw new Error("Output count must be between 1 and 8");
   }
-  const cost = Math.max(1, model.cost) * request.outputCount;
+  const pricing = pricingForOperation(model, request.operation);
+  const cost = Math.max(1, pricing.cost) * request.outputCount;
   const account = getAccountWorkspace(state, userId);
   if (account.profile.creditBalance < cost) {
     throw new Error("Not enough credits");
   }
-  return { model, cost, account };
+  return { model, pricing, cost, account };
 }
 
 function historyReferenceAssets(account: AccountWorkspace, request: GenerationRequest): AssetInput[] {
@@ -981,7 +1047,7 @@ function historyReferenceAssets(account: AccountWorkspace, request: GenerationRe
 }
 
 function runModel(state: ServerState, request: GenerationRequest, requestId?: string, userId?: string): GenerationResult {
-  const { model, cost, account } = assertRequest(state, request, requestId, userId);
+  const { model, pricing, cost, account } = assertRequest(state, request, requestId, userId);
   const historyId = `history-${allHistory(state).length + 1}`;
   const projectName = account.projects.find((project) => project.id === request.projectId)?.name;
   const duplicateKey = scopedRequestId(requestId, userId);
@@ -1045,8 +1111,8 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
     modelId: request.modelId,
     outputCount: request.outputCount,
     creditCost: cost,
-    priceCents: model.priceCents,
-    currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
+    priceCents: pricing.priceCents,
+    currency: pricing.priceCents === undefined ? undefined : pricing.currency ?? "CNY",
     userId: account.profile.userId,
     designerName: account.profile.designerName,
     operation: request.operation,
@@ -1077,8 +1143,8 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
       prompt: request.prompt,
       outputCount: request.outputCount,
       creditCost: cost,
-      priceCents: model.priceCents === undefined ? undefined : model.priceCents * request.outputCount,
-      currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
+      priceCents: pricing.priceCents === undefined ? undefined : pricing.priceCents * request.outputCount,
+      currency: pricing.priceCents === undefined ? undefined : pricing.currency ?? "CNY",
       referenceCount: request.referenceNodeIds.length,
       references,
       mask: request.mask,
@@ -1105,7 +1171,7 @@ async function runModelAsync(
   userId?: string,
   liveProviderOptions?: LiveProviderExecutionOptions
 ): Promise<GenerationResult> {
-  const { model, cost, account } = assertRequest(state, request, requestId, userId);
+  const { model, pricing, cost, account } = assertRequest(state, request, requestId, userId);
   const historyId = `history-${allHistory(state).length + 1}`;
   const projectName = account.projects.find((project) => project.id === request.projectId)?.name;
   const duplicateKey = scopedRequestId(requestId, userId);
@@ -1186,8 +1252,8 @@ async function runModelAsync(
     modelId: request.modelId,
     outputCount: request.outputCount,
     creditCost: cost,
-    priceCents: model.priceCents,
-    currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
+    priceCents: pricing.priceCents,
+    currency: pricing.priceCents === undefined ? undefined : pricing.currency ?? "CNY",
     userId: account.profile.userId,
     designerName: account.profile.designerName,
     operation: request.operation,
@@ -1218,8 +1284,8 @@ async function runModelAsync(
       prompt: request.prompt,
       outputCount: request.outputCount,
       creditCost: cost,
-      priceCents: model.priceCents === undefined ? undefined : model.priceCents * request.outputCount,
-      currency: model.priceCents === undefined ? undefined : model.currency ?? "CNY",
+      priceCents: pricing.priceCents === undefined ? undefined : pricing.priceCents * request.outputCount,
+      currency: pricing.priceCents === undefined ? undefined : pricing.currency ?? "CNY",
       referenceCount: request.referenceNodeIds.length,
       references,
       mask: request.mask,

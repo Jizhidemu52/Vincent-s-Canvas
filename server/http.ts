@@ -8,6 +8,7 @@ import {
   callApiAsync,
   configureProviderSettings,
   configureModelPricing,
+  configureOperationPricing,
   configureModelRegistry,
   createServerState,
   getWorkspaceSnapshot,
@@ -19,6 +20,7 @@ import {
   type CreditAdjustmentRequest,
   type CreditLimitRequest,
   type ModelPricingRequest,
+  type OperationPricingRequest,
   type ModelRegistryRequest,
   type PromptPresetRequest,
   type ProviderSettingsRequest,
@@ -226,6 +228,24 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
         }
         const body = await readJsonBody<Partial<ModelPricingRequest>>(request, bodyLimitBytes);
         const result = configureModelPricing(state, body ?? {}, userId);
+        if (!isApiError(result) && stateFilePath) {
+          saveServerState(stateFilePath, state);
+        }
+        sendJson(response, statusFromApiResult(result), result);
+        return;
+      }
+
+      if (pathname === "/api/admin/operation-pricing") {
+        if (request.method === "OPTIONS") {
+          sendJson(response, 204);
+          return;
+        }
+        if (request.method !== "POST") {
+          sendJson(response, 405, { status: "failed", errorMessage: "Method not allowed" });
+          return;
+        }
+        const body = await readJsonBody<Partial<OperationPricingRequest>>(request, bodyLimitBytes);
+        const result = configureOperationPricing(state, body ?? {}, userId);
         if (!isApiError(result) && stateFilePath) {
           saveServerState(stateFilePath, state);
         }
