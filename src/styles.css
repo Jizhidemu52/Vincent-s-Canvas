@@ -663,6 +663,141 @@ button {
   object-fit: cover;
 }
 
+.history-output-placeholder {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 1px dashed #cfcfcf;
+  border-radius: 7px;
+  background: #fff;
+  color: #777;
+  font-size: 10px;
+  font-weight: 850;
+  text-align: center;
+}
+
+.history-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.history-media-card {
+  overflow: hidden;
+  border: 1px solid #dedede;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.history-media-preview {
+  position: relative;
+  display: grid;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid #e4e4e4;
+  background: #f7f7f7;
+  cursor: pointer;
+  padding: 0;
+}
+
+.history-media-preview:disabled {
+  cursor: not-allowed;
+}
+
+.history-media-preview > img:first-child {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.history-media-preview > span {
+  place-self: center;
+  color: #777;
+  font-weight: 800;
+}
+
+.history-media-original {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 54px;
+  height: 54px;
+  border: 2px solid #fff;
+  border-radius: 7px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  object-fit: cover;
+}
+
+.history-media-body {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+}
+
+.history-media-body > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history-media-body strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-media-body span {
+  border: 1px solid #dcdcdc;
+  border-radius: 7px;
+  background: #fafafa;
+  padding: 4px 7px;
+  color: #555;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.history-media-body p {
+  display: -webkit-box;
+  min-height: 38px;
+  overflow: hidden;
+  margin: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: #4f4f4f;
+  line-height: 1.35;
+}
+
+.history-media-body dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+}
+
+.history-media-body dl div {
+  min-width: 0;
+}
+
+.history-media-body dt {
+  color: #777;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.history-media-body dd {
+  overflow: hidden;
+  margin: 2px 0 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .empty-history {
   border: 1px dashed #cfcfcf;
   border-radius: 8px;

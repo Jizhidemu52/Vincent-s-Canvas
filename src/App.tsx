@@ -1499,8 +1499,24 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
       ({ node }) => node.metadata.historyId === entryId && (node.metadata.remoteSource === remoteSource || node.name === outputName)
     );
   }
+  function isRenderableImageSource(source?: string) {
+    return Boolean(source && !source.startsWith("mock://") && !source.startsWith("provider://"));
+  }
   function sourceForHistoryOutput(entryId: string, outputName: string, remoteSource: string) {
-    return nodeForHistoryOutput(entryId, outputName, remoteSource)?.node.source ?? remoteSource;
+    const nodeSource = nodeForHistoryOutput(entryId, outputName, remoteSource)?.node.source;
+    if (isRenderableImageSource(nodeSource)) return nodeSource;
+    if (isRenderableImageSource(remoteSource)) return remoteSource;
+    return undefined;
+  }
+  function openHistoryEntry(entry: HistoryEntry) {
+    const project = workspace.projects.find((item) => item.id === entry.projectId);
+    const output = entry.outputs?.[0];
+    const outputMatch = output ? nodeForHistoryOutput(entry.id, output.name, output.source) : undefined;
+    if (outputMatch) {
+      onOpenProject(outputMatch.project.id, { historyId: entry.id, nodeId: outputMatch.node.id });
+      return;
+    }
+    if (project) onOpenProject(project.id, { historyId: entry.id, nodeId: entry.nodeId });
   }
   const historyExportLabel =
     modelFilter !== "all"
@@ -1584,6 +1600,56 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
           </label>
         </div>
       ) : null}
+      {visibleHistory.length ? (
+        <div className="history-media-grid" role="group" aria-label="History thumbnail grid">
+          {visibleHistory.map((entry) => {
+            const project = workspace.projects.find((item) => item.id === entry.projectId);
+            const original = entry.references?.[0];
+            const result = entry.outputs?.[0];
+            const originalSource = isRenderableImageSource(original?.source) ? original?.source : undefined;
+            const originalName = original?.name ?? "reference";
+            const previewSource = result ? sourceForHistoryOutput(entry.id, result.name, result.source) ?? originalSource : originalSource;
+            const previewAlt = result ? `History grid output ${result.name}` : original ? `History grid original ${originalName}` : "History grid record without image";
+            const projectName = entry.projectName ?? project?.name ?? entry.projectId;
+            const operator = entry.designerName ?? entry.userId ?? workspace.profile.designerName;
+            return (
+              <article className="history-media-card" aria-label={`History record ${entry.id}`} key={entry.id}>
+                <button type="button" className="history-media-preview" onClick={() => openHistoryEntry(entry)} disabled={!previewSource && !project}>
+                  {previewSource ? <img src={previewSource} alt={previewAlt} /> : <span>No image</span>}
+                  {originalSource && result?.source ? (
+                    <img className="history-media-original" src={originalSource} alt={`History grid original ${originalName}`} />
+                  ) : null}
+                </button>
+                <div className="history-media-body">
+                  <div>
+                    <strong>{entry.modelId}</strong>
+                    <span>{entry.operation ?? "generate"}</span>
+                  </div>
+                  <p>{entry.prompt}</p>
+                  <dl>
+                    <div>
+                      <dt>Project</dt>
+                      <dd>{projectName}</dd>
+                    </div>
+                    <div>
+                      <dt>Operator</dt>
+                      <dd>{operator}</dd>
+                    </div>
+                    <div>
+                      <dt>Outputs</dt>
+                      <dd>{entry.outputCount}</dd>
+                    </div>
+                    <div>
+                      <dt>Credits</dt>
+                      <dd>{entry.creditCost}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : null}
       <div className="history-layout">
         <div className="history-records">
           {visibleHistory.length ? (
@@ -1626,6 +1692,7 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
                           <div className="history-output-strip">
                             {entry.outputs.map((output) => {
                               const outputMatch = nodeForHistoryOutput(entry.id, output.name, output.source);
+                              const outputSource = sourceForHistoryOutput(entry.id, output.name, output.source);
                               return (
                                 <button
                                   type="button"
@@ -1639,7 +1706,11 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
                                   }
                                   disabled={!outputMatch && !project}
                                 >
-                                  <img src={sourceForHistoryOutput(entry.id, output.name, output.source)} alt={`History output ${output.name}`} width={56} height={56} />
+                                  {outputSource ? (
+                                    <img src={outputSource} alt={`History output ${output.name}`} width={56} height={56} />
+                                  ) : (
+                                    <span className="history-output-placeholder">No preview</span>
+                                  )}
                                 </button>
                               );
                             })}

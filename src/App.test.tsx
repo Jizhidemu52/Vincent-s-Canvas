@@ -2976,9 +2976,21 @@ describe("Designer canvas app shell", () => {
 
     await user.click(screen.getByRole("button", { name: "History" }));
     expect(screen.getByRole("region", { name: "History management" })).toBeInTheDocument();
-    expect(screen.getByText(/生成一款带盘扣的黑色马甲/)).toBeInTheDocument();
+    expect(screen.getAllByText(/生成一款带盘扣的黑色马甲/).length).toBeGreaterThanOrEqual(1);
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "History original fashion-reference.jpg" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "History thumbnail grid" })).toBeInTheDocument();
+    const historyCard = screen.getByRole("article", { name: "History record history-1" });
+    expect(within(historyCard).getByRole("img", { name: "History grid output backend result 1.jpg" })).toBeInTheDocument();
+    expect(within(historyCard).getByRole("img", { name: "History grid original fashion-reference.jpg" })).toBeInTheDocument();
+    expect(within(historyCard).getByText("Project")).toBeInTheDocument();
+    expect(within(historyCard).getByText("Untitled 1")).toBeInTheDocument();
+    expect(within(historyCard).getByText("Operator")).toBeInTheDocument();
+    expect(within(historyCard).getByText("Lina Zhou")).toBeInTheDocument();
+    expect(within(historyCard).getByText("Outputs")).toBeInTheDocument();
+    expect(within(historyCard).getAllByText("1").length).toBeGreaterThan(0);
+    expect(within(historyCard).getByText("Credits")).toBeInTheDocument();
+    expect(within(historyCard).getByText("7")).toBeInTheDocument();
     const thumbnailGrid = screen.getByRole("group", { name: "History thumbnails for history-1" });
     expect(within(thumbnailGrid).getByText("Original")).toBeInTheDocument();
     expect(within(thumbnailGrid).getByText("Result")).toBeInTheDocument();
@@ -3045,20 +3057,20 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "Projects" }));
     await user.click(screen.getByRole("button", { name: "History" }));
 
-    expect(screen.getByText("first project embroidery concept")).toBeInTheDocument();
-    expect(screen.getByText("second project cutout direction")).toBeInTheDocument();
+    expect(screen.getAllByText("first project embroidery concept").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("second project cutout direction").length).toBeGreaterThanOrEqual(1);
 
     const projectFilter = screen.getByRole("combobox", { name: "History project filter" });
     await user.selectOptions(projectFilter, screen.getByRole("option", { name: "Untitled 1" }));
 
-    expect(screen.getByText("first project embroidery concept")).toBeInTheDocument();
+    expect(screen.getAllByText("first project embroidery concept").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("second project cutout direction")).not.toBeInTheDocument();
     expect(screen.getByText("1 of 2 records")).toBeInTheDocument();
 
     await user.selectOptions(projectFilter, "all");
 
-    expect(screen.getByText("first project embroidery concept")).toBeInTheDocument();
-    expect(screen.getByText("second project cutout direction")).toBeInTheDocument();
+    expect(screen.getAllByText("first project embroidery concept").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("second project cutout direction").length).toBeGreaterThanOrEqual(1);
   });
 
   it("filters home history records by model, type, designer, and recent time window", async () => {
@@ -3118,30 +3130,30 @@ describe("Designer canvas app shell", () => {
 
     await user.click(screen.getByRole("button", { name: "History" }));
 
-    expect(screen.getByText("recent generate campaign")).toBeInTheDocument();
-    expect(screen.getByText("recent upscale pass")).toBeInTheDocument();
-    expect(screen.getByText("old edit archive")).toBeInTheDocument();
+    expect(screen.getAllByText("recent generate campaign").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("recent upscale pass").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("old edit archive").length).toBeGreaterThanOrEqual(1);
 
     await user.selectOptions(screen.getByRole("combobox", { name: "History model filter" }), "upscale-pro");
     expect(screen.queryByText("recent generate campaign")).not.toBeInTheDocument();
-    expect(screen.getByText("recent upscale pass")).toBeInTheDocument();
+    expect(screen.getAllByText("recent upscale pass").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("old edit archive")).not.toBeInTheDocument();
     expect(screen.getByText("1 of 3 records")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByRole("combobox", { name: "History model filter" }), "all");
     await user.selectOptions(screen.getByRole("combobox", { name: "History type filter" }), "edit");
-    expect(screen.getByText("old edit archive")).toBeInTheDocument();
+    expect(screen.getAllByText("old edit archive").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("recent generate campaign")).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByRole("combobox", { name: "History type filter" }), "all");
     await user.selectOptions(screen.getByRole("combobox", { name: "History designer filter" }), "maya@company.local");
-    expect(screen.getByText("recent upscale pass")).toBeInTheDocument();
+    expect(screen.getAllByText("recent upscale pass").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("old edit archive")).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByRole("combobox", { name: "History designer filter" }), "all");
     await user.selectOptions(screen.getByRole("combobox", { name: "History time filter" }), "recent-7");
-    expect(screen.getByText("recent generate campaign")).toBeInTheDocument();
-    expect(screen.getByText("recent upscale pass")).toBeInTheDocument();
+    expect(screen.getAllByText("recent generate campaign").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("recent upscale pass").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("old edit archive")).not.toBeInTheDocument();
     expect(screen.getByText("2 of 3 records")).toBeInTheDocument();
   });
@@ -3177,7 +3189,7 @@ describe("Designer canvas app shell", () => {
 
     await user.click(screen.getByRole("button", { name: "History" }));
 
-    expect(screen.getByText("track the external provider job")).toBeInTheDocument();
+    expect(screen.getAllByText("track the external provider job").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Provider succeeded / nano-job-7788 / 2 polls")).toBeInTheDocument();
   });
 

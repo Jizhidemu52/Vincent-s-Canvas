@@ -47,7 +47,7 @@ The current repository already includes:
 - Admin credit limits, model default pricing controls, and operation-level pricing overrides for generate/edit/upscale/remove-bg accounting.
 - Admin generation job logs with designer, model, operation, status, cost, and project context.
 - Hero-inspired admin team history filtering, row selection, filtered/selected JSON/CSV export, and selected-row archive for audit and finance handoff.
-- Hero-inspired designer history project filtering and output-thumbnail deep links for project-level generation traceability and continued editing.
+- Hero-inspired designer history project/model/type/designer/time filtering, video-style thumbnail record grid with original/result review, CSV export, and output-thumbnail deep links for project-level generation traceability and continued editing.
 - SQLite-backed platform tables for accounts, credit ledger, projects, nodes, connections, assets, asset blobs, generation history/jobs, model configs, audit logs, and idempotency requests.
 
 ## 2026-06-28 Source Audit
