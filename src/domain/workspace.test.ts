@@ -671,7 +671,7 @@ describe("designer canvas workspace behavior", () => {
   });
 
   it("generates outputs beside the source image, spends credits, and writes history", () => {
-    const { workspace, project } = createProject(createInitialWorkspace({ credits: 10 }), "Sleeve options");
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 30 }), "Sleeve options");
     const withAsset = addAssetToProject(workspace, project.id, {
       name: "sleeve.png",
       source: "sleeve-source",
@@ -681,7 +681,7 @@ describe("designer canvas workspace behavior", () => {
     const node = withAsset.projects[0].nodes[0];
     const configured = configureNodeGeneration(withAsset, project.id, node.id, {
       prompt: "make the sleeve satin with soft highlights",
-      modelId: "nano-banana",
+      modelId: "nanobanana2",
       outputCount: 2,
       entryPoint: "inspector"
     });
@@ -689,21 +689,32 @@ describe("designer canvas workspace behavior", () => {
     const generated = runGeneration(configured, project.id, node.id);
 
     expect(generated.profile.credits).toBe(8);
+    expect(generated.profile.creditUsed).toBe(22);
     expect(generated.projects[0].nodes).toHaveLength(3);
     expect(generated.projects[0].nodes.slice(1).every((item) => item.kind === "generated")).toBe(true);
     expect(generated.projects[0].nodes[1].x).toBeGreaterThan(node.x);
     expect(generated.projects[0].nodes[1].metadata).toMatchObject({
       historyId: generated.history[0].id,
-      creditCost: 2,
+      creditCost: 22,
       operation: "generate",
       prompt: "make the sleeve satin with soft highlights",
-      modelId: "nano-banana"
+      modelId: "nanobanana2"
     });
     expect(generated.history[0]).toMatchObject({
       projectId: project.id,
+      projectName: "Sleeve options",
+      nodeId: node.id,
       prompt: "make the sleeve satin with soft highlights",
-      modelId: "nano-banana",
-      outputCount: 2
+      modelId: "nanobanana2",
+      outputCount: 2,
+      creditCost: 22,
+      userId: "designer-demo",
+      designerName: "Demo Designer",
+      references: [expect.objectContaining({ name: "sleeve.png", source: "sleeve-source", width: 800, height: 600 })],
+      outputs: [
+        expect.objectContaining({ name: "sleeve.png result 1", source: "sleeve-source#generated-1" }),
+        expect.objectContaining({ name: "sleeve.png result 2", source: "sleeve-source#generated-2" })
+      ]
     });
   });
 

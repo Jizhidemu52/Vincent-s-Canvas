@@ -845,6 +845,14 @@ function modelCostFor(workspace: Workspace, modelId: string, outputCount = 1) {
   return (workspace.modelRegistry.find((model) => model.id === modelId)?.cost ?? 1) * outputCount;
 }
 
+function referenceAssetsForNode(project: Project, source: CanvasNode): AssetInput[] {
+  const referenceIds = source.type === "imageGroup" ? source.references : source.references.length ? source.references : [source.id];
+  return referenceIds
+    .map((referenceId) => project.nodes.find((node) => node.id === referenceId || node.name === referenceId))
+    .filter((node): node is CanvasNode => Boolean(node))
+    .map(assetInputFromNode);
+}
+
 function createBatchOriginalNodes(batch: BatchImport, existingCount = 0): CanvasNode[] {
   return batch.files.map((file, index) =>
     createNode({
@@ -1225,9 +1233,10 @@ export function runGeneration(workspace: Workspace, projectId: string, nodeId: s
   const project = findProject(workspace, projectId);
   const source = findNode(project, nodeId);
   if (!source.generation.prompt.trim()) throw new Error("Prompt is required");
-  const cost = source.generation.outputCount;
+  const cost = modelCostFor(workspace, source.generation.modelId, source.generation.outputCount);
   const historyId = createId("history");
   const charged = spendCredits(workspace, cost);
+  const references = source.type === "imageGroup" ? source.references : source.references.length ? source.references : [source.id];
 
   const generatedNodes = Array.from({ length: source.generation.outputCount }, (_, index) => {
     const position = placeNextTo(source, index + 1);
@@ -1242,7 +1251,7 @@ export function runGeneration(workspace: Workspace, projectId: string, nodeId: s
       height: source.height,
       generation: source.generation,
       parentId: source.id,
-      references: source.type === "imageGroup" ? source.references : source.references.length ? source.references : [source.id],
+      references,
       metadata: {
         historyId,
         operation: "generate",
@@ -1267,13 +1276,18 @@ export function runGeneration(workspace: Workspace, projectId: string, nodeId: s
       {
         id: historyId,
         projectId,
+        projectName: project.name,
         nodeId,
         prompt: source.generation.prompt,
         modelId: source.generation.modelId,
         outputCount: source.generation.outputCount,
         creditCost: cost,
         operation: "generate",
-        referenceCount: source.references.length || 1,
+        referenceCount: references.length,
+        references: referenceAssetsForNode(project, source),
+        outputs: generatedNodes.map(assetInputFromNode),
+        userId: workspace.profile.userId,
+        designerName: workspace.profile.designerName,
         createdAt: now()
       },
       ...updated.history
