@@ -959,6 +959,36 @@ describe("Designer canvas app shell", () => {
     });
   });
 
+  it("lets designers pan the infinite canvas by dragging blank canvas space", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    const stageWorld = document.querySelector(".stage-world") as HTMLElement;
+    const dispatchPointer = (target: EventTarget, type: string, clientX: number, clientY: number) => {
+      target.dispatchEvent(
+        new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX,
+          clientY
+        })
+      );
+    };
+
+    expect(stageWorld).toHaveStyle({ transform: "translate(0px, 0px) scale(1)" });
+
+    await act(async () => {
+      dispatchPointer(stageWorld, "pointerdown", 420, 260);
+      dispatchPointer(window, "pointermove", 500, 315);
+      dispatchPointer(window, "pointerup", 500, 315);
+    });
+
+    await waitFor(() => {
+      expect(stageWorld.style.transform).toContain("translate(80px, 55px) scale(1)");
+    });
+  });
+
   it("lets designers jump to canvas nodes from the minimap", async () => {
     const user = userEvent.setup();
     await login(user);

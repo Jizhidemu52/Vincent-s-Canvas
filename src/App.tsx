@@ -3324,7 +3324,8 @@ function CanvasStage({
   }
 
   function panCanvas(event: PointerEvent<HTMLElement>) {
-    if (event.target !== event.currentTarget) return;
+    const target = event.target as HTMLElement;
+    if (event.target !== event.currentTarget && !target.classList.contains("stage-world")) return;
     event.preventDefault();
     setModulePicker(null);
     const rect = event.currentTarget.getBoundingClientRect();
