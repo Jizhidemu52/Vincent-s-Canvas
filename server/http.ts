@@ -369,7 +369,14 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
           return;
         }
         const result = callApi(state, pathname, undefined, undefined, userId, {
-          userId: requestUrl.searchParams.get("userId") ?? undefined
+          userId: requestUrl.searchParams.get("userId") ?? undefined,
+          projectId: requestUrl.searchParams.get("projectId") ?? undefined,
+          modelId: requestUrl.searchParams.get("modelId") ?? undefined,
+          operation: requestUrl.searchParams.get("operation") ?? undefined,
+          from: requestUrl.searchParams.get("from") ?? undefined,
+          to: requestUrl.searchParams.get("to") ?? undefined,
+          dateFrom: requestUrl.searchParams.get("dateFrom") ?? undefined,
+          dateTo: requestUrl.searchParams.get("dateTo") ?? undefined
         });
         sendJson(response, statusFromApiResult(result), result);
         return;

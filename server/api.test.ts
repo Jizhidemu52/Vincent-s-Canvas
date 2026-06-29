@@ -542,6 +542,83 @@ describe("backend hosted mock API", () => {
     expect(history[0]).toMatchObject({ userId: "bob@company.local", modelId: "upscale-pro" });
   });
 
+  it("filters admin generation history by project, model, operation, and created date window", () => {
+    const state = createServerState({ creditBalance: 30 });
+    const aliceCreated = createProject(createInitialWorkspace({ userId: "alice@company.local", designerName: "Alice Designer", creditBalance: 30 }), "Alice edit board");
+    const bobCreated = createProject(createInitialWorkspace({ userId: "bob@company.local", designerName: "Bob Designer", creditBalance: 30 }), "Bob upscale board");
+    saveWorkspaceSnapshot(state, aliceCreated.workspace, "alice@company.local");
+    saveWorkspaceSnapshot(state, bobCreated.workspace, "bob@company.local");
+
+    callApi(
+      state,
+      "/api/edits",
+      request({ projectId: aliceCreated.project.id, modelId: "nanobanana2", operation: "edit", outputCount: 1 }),
+      "team-history-filter-rich-alice-edit",
+      "alice@company.local"
+    );
+    callApi(
+      state,
+      "/api/generations",
+      request({ projectId: aliceCreated.project.id, outputCount: 1 }),
+      "team-history-filter-rich-alice-generate",
+      "alice@company.local"
+    );
+    callApi(
+      state,
+      "/api/upscale",
+      request({ projectId: bobCreated.project.id, modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }),
+      "team-history-filter-rich-bob-upscale",
+      "bob@company.local"
+    );
+
+    state.accounts["alice@company.local"].history.find((entry) => entry.operation === "edit")!.createdAt = "2026-06-12T10:00:00.000Z";
+    state.accounts["alice@company.local"].history.find((entry) => entry.operation === "generate")!.createdAt = "2026-06-02T10:00:00.000Z";
+    state.accounts["bob@company.local"].history[0].createdAt = "2026-06-22T10:00:00.000Z";
+
+    const history = callApi(
+      state,
+      "/api/admin/history",
+      undefined,
+      undefined,
+      "admin@company.local",
+      {
+        userId: "alice@company.local",
+        projectId: aliceCreated.project.id,
+        modelId: "nanobanana2",
+        operation: "edit",
+        from: "2026-06-10T00:00:00.000Z",
+        to: "2026-06-20T00:00:00.000Z"
+      }
+    ) as HistoryEntry[];
+    const emptyBoundary = callApi(
+      state,
+      "/api/admin/history",
+      undefined,
+      undefined,
+      "admin@company.local",
+      { projectId: "missing-project" }
+    ) as HistoryEntry[];
+    const invalidDate = callApi(
+      state,
+      "/api/admin/history",
+      undefined,
+      undefined,
+      "admin@company.local",
+      { from: "not-a-date" }
+    ) as ApiError;
+
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      userId: "alice@company.local",
+      projectId: aliceCreated.project.id,
+      modelId: "nanobanana2",
+      operation: "edit",
+      createdAt: "2026-06-12T10:00:00.000Z"
+    });
+    expect(emptyBoundary).toEqual([]);
+    expect(invalidDate).toMatchObject({ status: "failed", errorMessage: "Invalid history date filter" });
+  });
+
   it("archives selected admin generation history without changing credit usage", () => {
     const state = createServerState({ creditBalance: 30 });
     callApi(state, "/api/generations", request({ outputCount: 1 }), "team-history-archive-alice", "alice@company.local");

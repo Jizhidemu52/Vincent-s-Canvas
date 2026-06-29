@@ -363,14 +363,53 @@ function listGenerationJobs(state: ServerState, adminUserId?: string): Generatio
 
 export interface ApiQuery {
   userId?: string;
+  projectId?: string;
+  modelId?: string;
+  operation?: string;
+  from?: string;
+  to?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
-function listAdminHistory(state: ServerState, adminUserId?: string, filterUserId?: string): HistoryEntry[] | ApiError {
+function textFilter(value?: string) {
+  const normalized = value?.trim();
+  return normalized || undefined;
+}
+
+function historyDateFilter(value?: string) {
+  const normalized = textFilter(value);
+  if (!normalized) return undefined;
+  const timestamp = Date.parse(normalized);
+  if (!Number.isFinite(timestamp)) {
+    throw new Error("Invalid history date filter");
+  }
+  return timestamp;
+}
+
+function listAdminHistory(state: ServerState, adminUserId?: string, query: ApiQuery = {}): HistoryEntry[] | ApiError {
   try {
     assertAdminUser(state, adminUserId);
-    const normalizedFilter = filterUserId?.trim();
-    const history = allHistory(state).filter((entry) => !entry.archivedAt);
-    return normalizedFilter ? history.filter((entry) => entry.userId === normalizedFilter) : history;
+    const filterUserId = textFilter(query.userId);
+    const projectId = textFilter(query.projectId);
+    const modelId = textFilter(query.modelId);
+    const operation = textFilter(query.operation);
+    const from = historyDateFilter(query.from ?? query.dateFrom);
+    const to = historyDateFilter(query.to ?? query.dateTo);
+    if (from !== undefined && to !== undefined && from > to) {
+      throw new Error("Invalid history date filter");
+    }
+    return allHistory(state).filter((entry) => {
+      if (entry.archivedAt) return false;
+      if (filterUserId && entry.userId !== filterUserId) return false;
+      if (projectId && entry.projectId !== projectId) return false;
+      if (modelId && entry.modelId !== modelId) return false;
+      if (operation && entry.operation !== operation) return false;
+      const createdAt = Date.parse(entry.createdAt);
+      if (from !== undefined && createdAt < from) return false;
+      if (to !== undefined && createdAt > to) return false;
+      return true;
+    });
   } catch (error) {
     return {
       status: "failed",
@@ -1294,7 +1333,7 @@ export function callApi(
 ) {
   try {
     if (path === "/api/admin/history") {
-      return listAdminHistory(state, userId, query?.userId);
+      return listAdminHistory(state, userId, query);
     }
     if (path === "/api/prompts") {
       return managePromptPresets(state, request as PromptPresetRequest | undefined, userId);

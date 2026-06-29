@@ -778,6 +778,41 @@ describe("HTTP API server", () => {
     expect(history[0]).toMatchObject({ userId: "bob@company.local", modelId: "upscale-pro", outputCount: 1 });
   });
 
+  it("filters team generation history by project, model, operation, and date window over HTTP", async () => {
+    await fetch(`${context.baseUrl}/api/generations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "team-history-rich-http-alice", "x-user-id": "alice@company.local" },
+      body: JSON.stringify(request({ projectId: "project-http-a", outputCount: 1 }))
+    });
+    await fetch(`${context.baseUrl}/api/upscale`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "team-history-rich-http-bob", "x-user-id": "bob@company.local" },
+      body: JSON.stringify(request({ projectId: "project-http-b", modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }))
+    });
+
+    const query = new URLSearchParams({
+      userId: "bob@company.local",
+      projectId: "project-http-b",
+      modelId: "upscale-pro",
+      operation: "upscale",
+      from: "2000-01-01T00:00:00.000Z",
+      to: "2999-01-01T00:00:00.000Z"
+    });
+    const historyResponse = await fetch(`${context.baseUrl}/api/admin/history?${query}`, {
+      headers: { "x-user-id": "admin@company.local" }
+    });
+    const invalidDateResponse = await fetch(`${context.baseUrl}/api/admin/history?from=not-a-date`, {
+      headers: { "x-user-id": "admin@company.local" }
+    });
+
+    expect(historyResponse.status).toBe(200);
+    const history = (await historyResponse.json()) as Array<Record<string, unknown>>;
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ userId: "bob@company.local", projectId: "project-http-b", modelId: "upscale-pro", operation: "upscale" });
+    expect(invalidDateResponse.status).toBe(400);
+    expect(await invalidDateResponse.json()).toMatchObject({ status: "failed", errorMessage: "Invalid history date filter" });
+  });
+
   it("archives selected team generation history over HTTP without changing usage totals", async () => {
     await fetch(`${context.baseUrl}/api/generations`, {
       method: "POST",
