@@ -190,7 +190,13 @@ function providerSettingsFromMetadata(value: unknown): ProviderRequestSettings {
   return {
     size: typeof settings.size === "string" ? settings.size : undefined,
     quality: typeof settings.quality === "string" ? settings.quality : undefined,
-    preset: typeof settings.preset === "string" ? settings.preset : undefined
+    preset: typeof settings.preset === "string" ? settings.preset : undefined,
+    webappId: typeof settings.webappId === "string" ? settings.webappId : undefined,
+    taskType: settings.taskType === "ASYNC" || settings.taskType === "SYNC" ? settings.taskType : undefined,
+    instanceType: typeof settings.instanceType === "string" ? settings.instanceType : undefined,
+    nodeInfoList: Array.isArray(settings.nodeInfoList) ? settings.nodeInfoList : undefined,
+    workflow: settings.workflow && typeof settings.workflow === "object" && !Array.isArray(settings.workflow) ? settings.workflow : undefined,
+    addMetadata: typeof settings.addMetadata === "boolean" ? settings.addMetadata : undefined
   };
 }
 
@@ -209,6 +215,30 @@ function providerProgressFromMetadata(value: unknown): ProviderProgress | undefi
 function providerProgressLabel(progress?: ProviderProgress) {
   if (!progress) return undefined;
   return `Provider ${progress.status ?? "unknown"}${progress.providerJobId ? ` / ${progress.providerJobId}` : ""} / ${progress.pollAttempts} poll${progress.pollAttempts === 1 ? "" : "s"}`;
+}
+
+function providerJsonValue(value: unknown) {
+  return value === undefined ? "" : JSON.stringify(value, null, 2);
+}
+
+function parseProviderJsonObject(value: string) {
+  if (!value.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseProviderJsonArray(value: string) {
+  if (!value.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function historyEntryToAuditEntry(entry: HistoryEntry): AdminAuditEntry {
@@ -3182,13 +3212,16 @@ function PromptCard({
       }
     });
   }
-  function updateProviderSetting(key: keyof ProviderRequestSettings, value: string) {
+  function updateProviderSettings(patch: Partial<ProviderRequestSettings>) {
     onUpdateMetadata({
       providerSettings: {
         ...selectedProviderSettings,
-        [key]: value.trim() || undefined
+        ...patch
       }
     });
+  }
+  function updateProviderSetting(key: keyof ProviderRequestSettings, value: string) {
+    updateProviderSettings({ [key]: value.trim() || undefined });
   }
   return (
     <aside className="prompt-card">
@@ -3364,6 +3397,62 @@ function PromptCard({
               value={selectedProviderSettings.preset ?? ""}
               onChange={(event) => updateProviderSetting("preset", event.target.value)}
             />
+          </label>
+          <label>
+            <span>RunningHub webapp ID</span>
+            <input
+              aria-label="Provider webapp ID"
+              value={selectedProviderSettings.webappId ?? ""}
+              onChange={(event) => updateProviderSetting("webappId", event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Provider task type</span>
+            <select
+              aria-label="Provider task type"
+              value={selectedProviderSettings.taskType ?? "ASYNC"}
+              onChange={(event) => updateProviderSettings({ taskType: event.target.value as ProviderRequestSettings["taskType"] })}
+            >
+              <option value="ASYNC">ASYNC</option>
+              <option value="SYNC">SYNC</option>
+            </select>
+          </label>
+          <label>
+            <span>Provider instance type</span>
+            <input
+              aria-label="Provider instance type"
+              value={selectedProviderSettings.instanceType ?? ""}
+              onChange={(event) => updateProviderSetting("instanceType", event.target.value)}
+            />
+          </label>
+          <label>
+            <span>RunningHub node info JSON</span>
+            <textarea
+              aria-label="RunningHub node info JSON"
+              value={providerJsonValue(selectedProviderSettings.nodeInfoList)}
+              onChange={(event) =>
+                updateProviderSettings({
+                  nodeInfoList: parseProviderJsonArray(event.target.value) as ProviderRequestSettings["nodeInfoList"]
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>ComfyUI workflow JSON</span>
+            <textarea
+              aria-label="ComfyUI workflow JSON"
+              value={providerJsonValue(selectedProviderSettings.workflow)}
+              onChange={(event) => updateProviderSettings({ workflow: parseProviderJsonObject(event.target.value) })}
+            />
+          </label>
+          <label className="settings-checkbox">
+            <input
+              aria-label="Provider add metadata"
+              type="checkbox"
+              checked={Boolean(selectedProviderSettings.addMetadata)}
+              onChange={(event) => updateProviderSettings({ addMetadata: event.target.checked })}
+            />
+            <span>Add provider metadata</span>
           </label>
         </div>
       ) : null}

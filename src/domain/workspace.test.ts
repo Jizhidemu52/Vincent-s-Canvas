@@ -563,6 +563,49 @@ describe("designer canvas workspace behavior", () => {
     expect(executed.history[0].providerSettings).toEqual(providerSettings);
   });
 
+  it("passes workflow provider app and ComfyUI settings from connected config nodes", () => {
+    const providerSettings = {
+      size: "1024x1536",
+      quality: "medium",
+      webappId: "rh-webapp-7788",
+      taskType: "ASYNC" as const,
+      instanceType: "plus",
+      nodeInfoList: [
+        { nodeId: "3", fieldName: "prompt", fieldValue: "clean product shadow", valueType: "text" as const },
+        { nodeId: "9", fieldName: "image", fieldValue: "uploaded-reference.png", valueType: "image" as const }
+      ],
+      workflow: { nodes: [{ id: "12", type: "KSampler" }] },
+      addMetadata: true
+    };
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 40 }), "Workflow provider app config");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "provider-app-jacket.png",
+      source: "provider-app-jacket-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const withGenerate = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "generate",
+      prompt: "Generate through the configured provider app.",
+      modelId: "gpt-image-2-medium"
+    });
+    const generateNode = withGenerate.projects[0].nodes.find((node) => node.moduleType === "generate")!;
+    const withConfig = addConfigNode(withGenerate, project.id, { outputCount: 1, providerSettings });
+    const configNode = withConfig.projects[0].nodes.find((node) => node.type === "config" && node.outputs[0]?.type === "config")!;
+    const connected = connectWorkflowNode(withConfig, project.id, configNode.id, generateNode.id, "out", "config");
+
+    const plan = buildWorkflowExecutionPlan(connected, project.id, source.id);
+    const requests = buildWorkflowGenerationRequests(connected, project.id, source.id);
+    const executed = runWorkflowChain(connected, project.id, source.id);
+    const generatedNode = executed.projects[0].nodes.find((node) => node.kind === "generated")!;
+
+    expect(plan.steps[0].providerSettings).toEqual(providerSettings);
+    expect(requests[0]).toMatchObject({ providerSettings });
+    expect(generatedNode.metadata.providerSettings).toEqual(providerSettings);
+    expect(executed.history[0].providerSettings).toEqual(providerSettings);
+  });
+
   it("keeps backend run state visible after normal canvas selection changes", () => {
     const { workspace, project } = createProject(createInitialWorkspace(), "Run state feedback");
     const withAsset = addAssetToProject(workspace, project.id, {

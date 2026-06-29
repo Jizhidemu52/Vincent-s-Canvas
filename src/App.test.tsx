@@ -2390,6 +2390,60 @@ describe("Designer canvas app shell", () => {
     expect(selectedTask).toHaveTextContent("Outputs: Edited result");
   });
 
+  it("sends advanced provider settings from workflow settings nodes", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    await user.click(screen.getByRole("button", { name: "Generate node" }));
+    await screen.findByRole("button", { name: /Workflow generate module/i });
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    await user.click(screen.getByRole("button", { name: "Settings node" }));
+    await screen.findByRole("button", { name: /Workflow settings/i });
+
+    await user.selectOptions(screen.getByLabelText("Provider size"), "1024x1536");
+    await user.selectOptions(screen.getByLabelText("Provider quality"), "medium");
+    await user.type(screen.getByLabelText("Provider webapp ID"), "rh-webapp-7788");
+    await user.selectOptions(screen.getByLabelText("Provider task type"), "ASYNC");
+    await user.type(screen.getByLabelText("Provider instance type"), "plus");
+    fireEvent.change(screen.getByLabelText("RunningHub node info JSON"), {
+      target: {
+        value: JSON.stringify([
+          { nodeId: "3", fieldName: "prompt", fieldValue: "clean product shadow", valueType: "text" },
+          { nodeId: "9", fieldName: "image", fieldValue: "uploaded-reference.png", valueType: "image" }
+        ])
+      }
+    });
+    fireEvent.change(screen.getByLabelText("ComfyUI workflow JSON"), {
+      target: { value: JSON.stringify({ nodes: [{ id: "12", type: "KSampler" }] }) }
+    });
+    await user.click(screen.getByRole("checkbox", { name: "Provider add metadata" }));
+
+    fireEvent.pointerDown(screen.getByLabelText("Create workflow from Workflow settings"));
+    fireEvent.pointerUp(screen.getByLabelText("Provider settings input port on generate module"));
+
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    await user.click(screen.getByRole("button", { name: /Run workflow/i }));
+    expect(await screen.findByText("Backend workflow completed 1 module")).toBeInTheDocument();
+
+    const generationCall = vi.mocked(fetch).mock.calls.find(([url]) => url.toString().endsWith("/api/generations"));
+    const request = JSON.parse(String(generationCall?.[1]?.body)) as GenerationRequest;
+    expect(request.providerSettings).toMatchObject({
+      size: "1024x1536",
+      quality: "medium",
+      webappId: "rh-webapp-7788",
+      taskType: "ASYNC",
+      instanceType: "plus",
+      addMetadata: true,
+      nodeInfoList: [
+        { nodeId: "3", fieldName: "prompt", fieldValue: "clean product shadow", valueType: "text" },
+        { nodeId: "9", fieldName: "image", fieldValue: "uploaded-reference.png", valueType: "image" }
+      ],
+      workflow: { nodes: [{ id: "12", type: "KSampler" }] }
+    });
+  });
+
   it("filters workflow module picker options by the dragged source port type", async () => {
     const user = userEvent.setup();
     await login(user);

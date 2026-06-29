@@ -1391,13 +1391,38 @@ button {
 }
 
 .settings-fields input,
-.settings-fields select {
+.settings-fields select,
+.settings-fields textarea {
   min-width: 0;
   border: 1px solid #d9d9d9;
   border-radius: 7px;
   padding: 6px 7px;
   font: inherit;
   background: #fff;
+}
+
+.settings-fields textarea {
+  min-height: 74px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.settings-fields label:has(textarea) {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+}
+
+.settings-fields .settings-checkbox {
+  grid-template-columns: 18px minmax(0, 1fr);
+  justify-items: start;
+}
+
+.settings-fields .settings-checkbox input {
+  width: 16px;
+  height: 16px;
+  padding: 0;
 }
 
 .mask-grid {

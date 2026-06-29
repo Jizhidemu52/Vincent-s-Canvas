@@ -740,14 +740,56 @@ function nonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function providerTaskTypeFromConfigValue(value: unknown): ProviderRequestSettings["taskType"] | undefined {
+  return value === "ASYNC" || value === "SYNC" ? value : undefined;
+}
+
+function providerNodeInfoListFromConfigValue(value: unknown): ProviderRequestSettings["nodeInfoList"] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items: NonNullable<ProviderRequestSettings["nodeInfoList"]> = [];
+  for (const rawItem of value) {
+    const item = metadataObject(rawItem);
+    const nodeId = nonEmptyString(item.nodeId);
+    const fieldName = nonEmptyString(item.fieldName);
+    const fieldValue = typeof item.fieldValue === "string" || typeof item.fieldValue === "number" ? item.fieldValue : undefined;
+    const valueType =
+      item.valueType === "text" ||
+      item.valueType === "number" ||
+      item.valueType === "image" ||
+      item.valueType === "video" ||
+      item.valueType === "audio"
+        ? item.valueType
+        : undefined;
+    if (nodeId && fieldName && fieldValue !== undefined) {
+      items.push(valueType ? { nodeId, fieldName, fieldValue, valueType } : { nodeId, fieldName, fieldValue });
+    }
+  }
+  return items.length ? items : undefined;
+}
+
+function providerWorkflowFromConfigValue(value: unknown): ProviderRequestSettings["workflow"] | undefined {
+  const workflow = metadataObject(value);
+  return Object.keys(workflow).length ? workflow : undefined;
+}
+
 function providerSettingsFromConfig(config: Record<string, unknown>): ProviderRequestSettings | undefined {
   const nested = metadataObject(config.providerSettings);
   const settings: ProviderRequestSettings = {
     size: nonEmptyString(config.providerSize ?? nested.size),
     quality: nonEmptyString(config.providerQuality ?? nested.quality),
-    preset: nonEmptyString(config.providerPreset ?? nested.preset)
+    preset: nonEmptyString(config.providerPreset ?? nested.preset),
+    webappId: nonEmptyString(config.providerWebappId ?? config.webappId ?? nested.webappId),
+    taskType: providerTaskTypeFromConfigValue(config.providerTaskType ?? config.taskType ?? nested.taskType),
+    instanceType: nonEmptyString(config.providerInstanceType ?? config.instanceType ?? nested.instanceType),
+    nodeInfoList: providerNodeInfoListFromConfigValue(config.providerNodeInfoList ?? config.nodeInfoList ?? nested.nodeInfoList),
+    workflow: providerWorkflowFromConfigValue(config.providerWorkflow ?? config.workflow ?? nested.workflow),
+    addMetadata:
+      typeof (config.providerAddMetadata ?? config.addMetadata ?? nested.addMetadata) === "boolean"
+        ? Boolean(config.providerAddMetadata ?? config.addMetadata ?? nested.addMetadata)
+        : undefined
   };
-  return settings.size || settings.quality || settings.preset ? settings : undefined;
+  const compactSettings = Object.fromEntries(Object.entries(settings).filter(([, value]) => value !== undefined)) as ProviderRequestSettings;
+  return Object.keys(compactSettings).length ? compactSettings : undefined;
 }
 
 function connectedConfigForModule(project: Project, moduleNode: CanvasNode): Record<string, unknown> {
@@ -1041,6 +1083,12 @@ export function addConfigNode(
     providerSize?: string;
     providerQuality?: string;
     providerPreset?: string;
+    providerWebappId?: string;
+    providerTaskType?: ProviderRequestSettings["taskType"];
+    providerInstanceType?: string;
+    providerNodeInfoList?: ProviderRequestSettings["nodeInfoList"];
+    providerWorkflow?: ProviderRequestSettings["workflow"];
+    providerAddMetadata?: boolean;
   },
   x = 620,
   y = 470
