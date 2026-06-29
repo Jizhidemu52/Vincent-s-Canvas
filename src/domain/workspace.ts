@@ -221,6 +221,8 @@ export interface HistoryEntry {
   mask?: MaskSelection;
   batchSettings?: BatchSettings;
   providerSettings?: ProviderRequestSettings;
+  providerProgress?: ProviderProgress;
+  errorMessage?: string;
   outputs?: AssetInput[];
   archivedAt?: string;
   archivedBy?: string;

@@ -206,6 +206,11 @@ function providerProgressFromMetadata(value: unknown): ProviderProgress | undefi
   };
 }
 
+function providerProgressLabel(progress?: ProviderProgress) {
+  if (!progress) return undefined;
+  return `Provider ${progress.status ?? "unknown"}${progress.providerJobId ? ` / ${progress.providerJobId}` : ""} / ${progress.pollAttempts} poll${progress.pollAttempts === 1 ? "" : "s"}`;
+}
+
 function historyEntryToAuditEntry(entry: HistoryEntry): AdminAuditEntry {
   return {
     ...entry,
@@ -1502,6 +1507,8 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
                     {entry.designerName ?? entry.userId ?? workspace.profile.designerName} · {entry.projectName ?? project?.name ?? entry.projectId} ·{" "}
                     {entry.operation ?? "generate"} · {new Date(entry.createdAt).toLocaleDateString()}
                   </small>
+                  {entry.providerProgress ? <small className="history-provider-progress">{providerProgressLabel(entry.providerProgress)}</small> : null}
+                  {entry.errorMessage ? <small className="history-error-message">{entry.errorMessage}</small> : null}
                   <p>{entry.prompt}</p>
                   {entry.references?.length || entry.outputs?.length ? (
                     <div className="history-thumbnail-grid" role="group" aria-label={`History thumbnails for ${entry.id}`}>
@@ -4404,11 +4411,7 @@ function RightDock({
                 </span>
               ) : null}
               {selectedProviderProgress ? (
-                <span>
-                  Provider {selectedProviderProgress.status ?? "unknown"}
-                  {selectedProviderProgress.providerJobId ? ` / ${selectedProviderProgress.providerJobId}` : ""}
-                  {` / ${selectedProviderProgress.pollAttempts} poll${selectedProviderProgress.pollAttempts === 1 ? "" : "s"}`}
-                </span>
+                <span>{providerProgressLabel(selectedProviderProgress)}</span>
               ) : null}
               {selectedNode.inputs.length ? <span>Inputs: {selectedNode.inputs.map((port) => port.label).join(", ")}</span> : null}
               {selectedNode.outputs.length ? <span>Outputs: {selectedNode.outputs.map((port) => port.label).join(", ")}</span> : null}

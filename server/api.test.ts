@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   adjustAccountCredits,
   callApi,
+  callApiAsync,
   configureModelPricing,
   configureModelRegistry,
   configureProviderSettings,
@@ -246,6 +247,60 @@ describe("backend hosted mock API", () => {
       status: "succeeded",
       providerSettings
     });
+  });
+
+  it("keeps live provider progress in designer history", async () => {
+    const state = createServerState({ creditBalance: 30 });
+    configureProviderSettings(
+      state,
+      {
+        provider: "openai",
+        mode: "live-ready",
+        endpointUrl: "https://api.openai.example/v1/images",
+        secretName: "OPENAI_API_KEY",
+        secretValue: "sk-admin-secret"
+      },
+      "admin@company.local"
+    );
+
+    const result = (await callApiAsync(
+      state,
+      "/api/generations",
+      request({ outputCount: 1, providerSettings: { size: "1536x1024", quality: "high" } }),
+      "provider-progress-history",
+      "alice@company.local",
+      {
+        resolveSecret: (name) => (name === "OPENAI_API_KEY" ? "sk-admin-secret" : undefined),
+        fetchJson: async () => ({
+          ok: true,
+          status: 200,
+          body: {
+            status: "succeeded",
+            jobId: "openai-history-job-1",
+            statusUrl: "https://api.openai.example/v1/jobs/openai-history-job-1",
+            data: [{ url: "https://cdn.example/openai/history-1.png", width: 1536, height: 1024 }]
+          }
+        })
+      }
+    )) as GenerationResult;
+
+    const history = callApi(state, "/api/history", undefined, undefined, "alice@company.local") as HistoryEntry[];
+
+    expect(result.providerProgress).toMatchObject({
+      providerJobId: "openai-history-job-1",
+      status: "succeeded",
+      statusUrl: "https://api.openai.example/v1/jobs/openai-history-job-1",
+      pollAttempts: 0
+    });
+    expect(history[0]).toMatchObject({
+      providerProgress: {
+        providerJobId: "openai-history-job-1",
+        status: "succeeded",
+        statusUrl: "https://api.openai.example/v1/jobs/openai-history-job-1",
+        pollAttempts: 0
+      }
+    });
+    expect(JSON.stringify(history[0])).not.toContain("sk-admin-secret");
   });
 
   it("stores provider payload mapping in admin jobs without secret values", () => {

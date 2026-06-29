@@ -533,6 +533,21 @@ button {
   line-height: 1.42;
 }
 
+.history-provider-progress,
+.history-error-message {
+  justify-self: start;
+  border-radius: 6px;
+  background: #f4f5f5;
+  padding: 4px 7px;
+  color: #4f5a5a;
+  font-weight: 800;
+}
+
+.history-error-message {
+  background: #fff1f1;
+  color: #9b2727;
+}
+
 .history-record button {
   justify-self: start;
   border: 1px solid #d7d7d7;

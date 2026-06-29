@@ -709,6 +709,12 @@ beforeEach(() => {
           creditUsed: backendProfile.creditUsed + creditCost,
           credits: backendProfile.creditBalance - creditCost
         };
+        const providerProgress = {
+          providerJobId: `provider-history-${backendHistory.length + 1}`,
+          status: "succeeded",
+          statusUrl: `https://provider.example/jobs/provider-history-${backendHistory.length + 1}`,
+          pollAttempts: 1
+        } satisfies NonNullable<HistoryEntry["providerProgress"]>;
         const historyEntry: HistoryEntry = {
           id: `history-${backendHistory.length + 1}`,
           projectId: request.projectId,
@@ -720,6 +726,7 @@ beforeEach(() => {
           operation: request.operation,
           referenceCount: request.referenceNodeIds.length,
           references,
+          providerProgress,
           createdAt: new Date().toISOString(),
           outputs: Array.from({ length: request.outputCount }, (_, index) => ({
             name: `backend result ${index + 1}.jpg`,
@@ -733,12 +740,7 @@ beforeEach(() => {
           status: "succeeded",
           creditCost,
           historyId: historyEntry.id,
-          providerProgress: {
-            providerJobId: `provider-${historyEntry.id}`,
-            status: "succeeded",
-            statusUrl: `https://provider.example/jobs/provider-${historyEntry.id}`,
-            pollAttempts: 1
-          },
+          providerProgress,
           outputs: historyEntry.outputs
         });
       }
@@ -2781,6 +2783,41 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("recent upscale pass")).toBeInTheDocument();
     expect(screen.queryByText("old edit archive")).not.toBeInTheDocument();
     expect(screen.getByText("2 of 3 records")).toBeInTheDocument();
+  });
+
+  it("shows provider progress details in designer history records", async () => {
+    backendHistory = [
+      {
+        id: "history-provider-progress",
+        projectId: "project-provider-progress",
+        projectName: "Provider audit",
+        nodeId: "node-provider-progress",
+        prompt: "track the external provider job",
+        modelId: "nanobanana2",
+        outputCount: 1,
+        creditCost: 11,
+        operation: "generate",
+        referenceCount: 1,
+        userId: "lina@company.local",
+        designerName: "Lina Zhou",
+        createdAt: "2026-06-28T02:00:00.000Z",
+        providerProgress: {
+          providerJobId: "nano-job-7788",
+          status: "succeeded",
+          statusUrl: "https://provider.example/jobs/nano-job-7788",
+          pollAttempts: 2
+        },
+        outputs: [{ name: "provider-output.jpg", source: "/fixtures/provider-output.jpg", width: 1024, height: 1024 }]
+      }
+    ];
+    backendWorkspace = { ...backendWorkspace, history: backendHistory };
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "History" }));
+
+    expect(screen.getByText("track the external provider job")).toBeInTheDocument();
+    expect(screen.getByText("Provider succeeded / nano-job-7788 / 2 polls")).toBeInTheDocument();
   });
 
   it("exports the filtered designer history CSV with original and result image sources", async () => {

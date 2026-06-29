@@ -1055,6 +1055,8 @@ function runModel(state: ServerState, request: GenerationRequest, requestId?: st
     mask: request.mask,
     batchSettings: request.batchSettings,
     providerSettings: request.providerSettings,
+    providerProgress: result.providerProgress,
+    errorMessage: result.errorMessage,
     outputs: result.outputs,
     createdAt
   };
@@ -1194,6 +1196,8 @@ async function runModelAsync(
     mask: request.mask,
     batchSettings: request.batchSettings,
     providerSettings: request.providerSettings,
+    providerProgress: result.providerProgress,
+    errorMessage: result.errorMessage,
     outputs: result.outputs,
     createdAt
   };
