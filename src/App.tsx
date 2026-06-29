@@ -145,7 +145,7 @@ const TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 const SECOND_TEST_IMAGE = "/fixtures/fashion-reference.jpg";
 
 type ViewMode = "login" | "home" | "canvas" | "admin";
-type DragMode = "move" | "resize";
+type DragMode = "move" | "resize" | "resize-nw" | "resize-ne" | "resize-sw" | "resize-se";
 type ShapeEditDraft = { nodeId: string; shape: "ellipse" | "rectangle" | "freehand"; prompt: string; modelId?: string; mask?: MaskSelection } | null;
 type HomeSection = "Projects" | "History" | "Profile";
 type RightPanel = "context" | "history" | "assets" | "prompts" | "assistant";
@@ -2643,11 +2643,28 @@ function AdminView({
                         Archived by {entry.archivedBy ?? "admin"} / {entry.archiveReason ?? "no reason"} / {formatActivityMinute(entry.archivedAt)}
                       </small>
                     ) : null}
-                    {entry.outputs?.length ? (
-                      <div className="history-output-strip" aria-label={`Team history outputs for ${entry.id}`}>
-                        {entry.outputs.slice(0, 4).map((output) => (
-                          <img key={`${entry.id}-${output.name}`} src={output.source} alt={`Team history output ${output.name}`} />
-                        ))}
+                    {entry.references?.length || entry.outputs?.length ? (
+                      <div className="history-thumbnail-grid" aria-label={`Team history thumbnails for ${entry.id}`}>
+                        {entry.references?.length ? (
+                          <div className="history-thumbnail-column" aria-label={`Team history originals for ${entry.id}`}>
+                            <span>Original</span>
+                            <div className="history-reference-strip">
+                              {entry.references.slice(0, 4).map((reference) => (
+                                <img key={`${entry.id}-${reference.name}`} src={reference.source} alt={`Team history original ${reference.name}`} />
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {entry.outputs?.length ? (
+                          <div className="history-thumbnail-column" aria-label={`Team history outputs for ${entry.id}`}>
+                            <span>Result</span>
+                            <div className="history-output-strip">
+                              {entry.outputs.slice(0, 4).map((output) => (
+                                <img key={`${entry.id}-${output.name}`} src={output.source} alt={`Team history output ${output.name}`} />
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : (
                       <small>No output thumbnails recorded</small>
@@ -4105,20 +4122,30 @@ function CanvasNodeView({
     : "";
   const [inlineEditorOpen, setInlineEditorOpen] = useState(false);
 
-  function startPointer(event: PointerEvent<HTMLDivElement>, mode: DragMode = "move") {
+  function startPointer(event: PointerEvent<HTMLElement>, mode: DragMode = "move") {
     if ((event.target as HTMLElement).closest(".node-port, .inline-node-editor")) return;
-    event.preventDefault();
     event.stopPropagation();
     onSelect(node.id, event.shiftKey || event.ctrlKey || event.metaKey);
     const startX = event.clientX;
     const startY = event.clientY;
     const origin = node.transform;
     const handleMove = (moveEvent: globalThis.PointerEvent) => {
-      if (mode === "resize") {
-        const width = Math.max(120, origin.width + moveEvent.clientX - startX);
+      if (mode !== "move") {
+        const isWest = mode === "resize-nw" || mode === "resize-sw";
+        const isNorth = mode === "resize-nw" || mode === "resize-ne";
+        const deltaX = moveEvent.clientX - startX;
+        const deltaY = moveEvent.clientY - startY;
+        const requestedWidth = isWest ? origin.width - deltaX : origin.width + deltaX;
+        const width = Math.max(120, requestedWidth);
         const ratio = origin.height / origin.width || 1;
-        const height = origin.lockedRatio ? width * ratio : Math.max(80, origin.height + moveEvent.clientY - startY);
-        patchTransform({ width: Math.round(width), height: Math.round(height) });
+        const requestedHeight = isNorth ? origin.height - deltaY : origin.height + deltaY;
+        const height = origin.lockedRatio ? width * ratio : Math.max(80, requestedHeight);
+        patchTransform({
+          x: isWest ? Math.round(origin.x + origin.width - width) : origin.x,
+          y: isNorth ? Math.round(origin.y + origin.height - height) : origin.y,
+          width: Math.round(width),
+          height: Math.round(height)
+        });
       } else {
         patchTransform({ x: Math.round(origin.x + moveEvent.clientX - startX), y: Math.round(origin.y + moveEvent.clientY - startY) });
       }
@@ -4208,15 +4235,7 @@ function CanvasNodeView({
           {node.status === "error" && <em>{node.errorMessage}</em>}
         </div>
       )}
-      {selected && <SelectionHandles width={node.width} height={node.height} />}
-      {selected && (
-        <span
-          className="resize-handle"
-          style={{ left: node.width - 18, top: Math.max(28, node.height - 18) }}
-          onPointerDown={(event) => startPointer(event as PointerEvent<HTMLDivElement>, "resize")}
-          aria-label="Resize image"
-        />
-      )}
+      {selected && isImageLike && <SelectionHandles width={node.width} height={node.height} onResizeStart={startPointer} />}
       {selected && inlineEditorOpen && isImageLike && (
         <InlineNodeEditor
           node={node}
@@ -4307,13 +4326,48 @@ function InlineNodeEditor({
   );
 }
 
-function SelectionHandles({ width, height }: { width: number; height: number }) {
+function SelectionHandles({
+  width,
+  height,
+  onResizeStart
+}: {
+  width: number;
+  height: number;
+  onResizeStart: (event: PointerEvent<HTMLElement>, mode: DragMode) => void;
+}) {
   return (
     <>
-      <i className="handle tl" />
-      <i className="handle tr" style={{ left: width - 4 }} />
-      <i className="handle bl" style={{ top: height + 18 }} />
-      <i className="handle br" style={{ left: width - 4, top: height + 18 }} />
+      <i
+        className="handle tl"
+        role="button"
+        tabIndex={-1}
+        aria-label="Resize image top-left"
+        onPointerDown={(event) => onResizeStart(event, "resize-nw")}
+      />
+      <i
+        className="handle tr"
+        role="button"
+        tabIndex={-1}
+        aria-label="Resize image top-right"
+        style={{ left: width - 4 }}
+        onPointerDown={(event) => onResizeStart(event, "resize-ne")}
+      />
+      <i
+        className="handle bl"
+        role="button"
+        tabIndex={-1}
+        aria-label="Resize image bottom-left"
+        style={{ top: height + 18 }}
+        onPointerDown={(event) => onResizeStart(event, "resize-sw")}
+      />
+      <i
+        className="handle br"
+        role="button"
+        tabIndex={-1}
+        aria-label="Resize image"
+        style={{ left: width - 4, top: height + 18 }}
+        onPointerDown={(event) => onResizeStart(event, "resize-se")}
+      />
     </>
   );
 }

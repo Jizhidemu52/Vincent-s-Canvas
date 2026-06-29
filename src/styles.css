@@ -1711,27 +1711,19 @@ button {
 
 .handle {
   position: absolute;
-  width: 7px;
-  height: 7px;
-  border: 1px solid #20cfc0;
-  background: white;
-  pointer-events: none;
-}
-
-.handle.tl { left: -4px; top: 18px; }
-.handle.tr { top: 18px; }
-.handle.bl { left: -4px; }
-
-.resize-handle {
-  position: absolute;
-  z-index: 16;
-  width: 18px;
-  height: 18px;
+  z-index: 18;
+  width: 12px;
+  height: 12px;
   border: 2px solid #20cfc0;
-  border-radius: 50%;
   background: white;
-  cursor: nwse-resize;
+  pointer-events: auto;
+  touch-action: none;
 }
+
+.handle.tl { left: -6px; top: 17px; cursor: nwse-resize; }
+.handle.tr { top: 17px; cursor: nesw-resize; }
+.handle.bl { left: -6px; cursor: nesw-resize; }
+.handle.br { cursor: nwse-resize; }
 
 .node-port {
   position: absolute;

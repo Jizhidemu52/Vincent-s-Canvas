@@ -87,6 +87,7 @@ beforeEach(() => {
       creditCost: 14,
       operation: "generate",
       referenceCount: 1,
+      references: [{ name: "alice-original.jpg", source: "/fixtures/alice-original.jpg", width: 512, height: 512 }],
       userId: "alice@company.local",
       designerName: "Alice Designer",
       createdAt: "2026-06-28T02:10:00.000Z",
@@ -106,6 +107,7 @@ beforeEach(() => {
       creditCost: 4,
       operation: "upscale",
       referenceCount: 1,
+      references: [{ name: "bob-original.jpg", source: "/fixtures/bob-original.jpg", width: 512, height: 512 }],
       userId: "bob@company.local",
       designerName: "Bob Designer",
       createdAt: "2026-06-28T02:05:00.000Z",
@@ -1077,6 +1079,18 @@ describe("Designer canvas app shell", () => {
     await waitFor(() => {
       expect(imageNode).toHaveStyle({ width: `${initialWidth + 60}px` });
     });
+
+    const afterBottomRightLeft = Number.parseInt(imageNode.style.left, 10);
+    const afterBottomRightWidth = Number.parseInt(imageNode.style.width, 10);
+    const topLeftResizeHandle = screen.getByLabelText("Resize image top-left");
+    await act(async () => {
+      dispatchPointer(topLeftResizeHandle, "pointerdown", 700, 220);
+      dispatchPointer(window, "pointermove", 660, 180);
+      dispatchPointer(window, "pointerup", 660, 180);
+    });
+    await waitFor(() => {
+      expect(imageNode).toHaveStyle({ left: `${afterBottomRightLeft - 40}px`, width: `${afterBottomRightWidth + 40}px` });
+    });
   });
 
   it("lets designers pan the infinite canvas by dragging blank canvas space", async () => {
@@ -1675,8 +1689,10 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("Team history")).toBeInTheDocument();
     expect(screen.getByText("Alice Designer · Alice campaign · gpt-image-2-medium")).toBeInTheDocument();
     expect(screen.getByText("14 credits · 2 outputs")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Team history original alice-original.jpg" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).toBeInTheDocument();
     expect(screen.getByText("Bob Designer · Bob upscale · upscale-pro")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Team history original bob-original.jpg" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
     expect(screen.getAllByText("alice@company.local").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Alice Designer").length).toBeGreaterThanOrEqual(1);
