@@ -2659,4 +2659,31 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText(/12 credits used.*limit 120/)).toBeInTheDocument();
     expect(document.querySelector(".credit-meter i")).toHaveStyle({ width: "10%" });
   });
+
+  it("shows designer-visible credit pricing rules from the model registry", async () => {
+    backendWorkspace = {
+      ...backendWorkspace,
+      modelRegistry: backendWorkspace.modelRegistry.map((model) =>
+        model.id === "gpt-image-2-medium"
+          ? { ...model, cost: 9, priceCents: 450, currency: "CNY" }
+          : model.id === "background-cleaner"
+            ? { ...model, cost: 3, priceCents: 120, currency: "CNY" }
+            : model
+      )
+    };
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "Profile" }));
+
+    const pricing = screen.getByRole("region", { name: "Credit pricing rules" });
+    const mediumModel = within(pricing).getByRole("article", { name: "GPT Image 2 Medium pricing rule" });
+    const removeBgModel = within(pricing).getByRole("article", { name: "Remove Background pricing rule" });
+    expect(within(mediumModel).getByText("GPT Image 2 Medium")).toBeInTheDocument();
+    expect(within(mediumModel).getByText("9 credits / 4.50 CNY")).toBeInTheDocument();
+    expect(within(mediumModel).getByText("generate + edit")).toBeInTheDocument();
+    expect(within(removeBgModel).getByText("Remove Background")).toBeInTheDocument();
+    expect(within(removeBgModel).getByText("3 credits / 1.20 CNY")).toBeInTheDocument();
+    expect(within(removeBgModel).getByText("removeBackground")).toBeInTheDocument();
+  });
 });

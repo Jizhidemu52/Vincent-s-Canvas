@@ -509,6 +509,8 @@ button {
 .history-record p,
 .empty-history p,
 .profile-card small,
+.credit-pricing p,
+.pricing-rule-row small,
 .profile-ledger p,
 .ledger-row small {
   color: #777;
@@ -516,6 +518,7 @@ button {
 
 .history-record p,
 .empty-history p,
+.credit-pricing p,
 .profile-ledger p {
   margin: 0;
   line-height: 1.42;
@@ -690,6 +693,7 @@ button {
 }
 
 .profile-card,
+.credit-pricing,
 .profile-ledger article {
   display: grid;
   gap: 7px;
@@ -725,6 +729,50 @@ button {
   height: 100%;
   border-radius: inherit;
   background: #21c9b6;
+}
+
+.credit-pricing {
+  gap: 12px;
+}
+
+.credit-pricing h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.pricing-rule-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.pricing-rule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  border-top: 1px solid #ededed;
+  padding: 10px 0 2px;
+}
+
+.pricing-rule-row div {
+  display: grid;
+  min-width: 0;
+}
+
+.pricing-rule-row strong,
+.pricing-rule-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pricing-rule-row span {
+  color: #333;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .profile-ledger {

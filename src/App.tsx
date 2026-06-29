@@ -1613,6 +1613,27 @@ function ProfilePanel({ workspace }: { workspace: Workspace }) {
           <small>server-hosted provider entries</small>
         </article>
       </div>
+      <section className="credit-pricing" aria-label="Credit pricing rules">
+        <div>
+          <h3>Credit pricing rules</h3>
+          <p>Designer-visible point costs and money estimates set by the admin model registry.</p>
+        </div>
+        <div className="pricing-rule-list">
+          {workspace.modelRegistry.length ? (
+            workspace.modelRegistry.map((model) => (
+              <article className="pricing-rule-row" aria-label={`${model.name} pricing rule`} key={model.id}>
+                <div>
+                  <strong>{model.name}</strong>
+                  <small>{model.capability.join(" + ")}</small>
+                </div>
+                <span>{model.cost} credits / {formatMoneyCents(model.priceCents, model.currency) ?? "No price configured"}</span>
+              </article>
+            ))
+          ) : (
+            <p>No model pricing rules configured yet.</p>
+          )}
+        </div>
+      </section>
       <div className="profile-ledger">
         <article>
           <h3>Credit ledger</h3>
