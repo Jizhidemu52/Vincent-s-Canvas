@@ -41,6 +41,7 @@ export interface ServerState {
   providerSettings: ProviderRuntimeSettingsMap;
   adminAudit: AdminAuditEntry[];
   generationJobs: GenerationJob[];
+  assetBlobs: Record<string, AssetBlob>;
 }
 
 export type WorkspaceSnapshot = Pick<
@@ -113,6 +114,28 @@ export interface AssetMetadataRequest {
   id?: string;
   tags?: string[];
   folder?: string;
+}
+
+export interface AssetCreateRequest extends AssetMetadataRequest {
+  title?: string;
+  type?: LibraryAsset["type"];
+  source?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface AssetBlob {
+  mimeType: string;
+  base64: string;
+  byteSize: number;
+  createdAt: string;
+  userId?: string;
+}
+
+export interface AssetContent {
+  mimeType: string;
+  bytes: Buffer;
+  title: string;
 }
 
 export interface AdminAuditEntry {
@@ -231,7 +254,8 @@ export function createServerState(profile: Partial<Profile> = {}): ServerState {
     submittedRequestIds: new Set(),
     providerSettings: {},
     adminAudit: [],
-    generationJobs: []
+    generationJobs: [],
+    assetBlobs: {}
   };
 }
 
@@ -277,19 +301,22 @@ function createAccountWorkspace(state: ServerState, userId: string, initialCredi
 
 function getAccountWorkspace(state: ServerState, userId?: string): AccountWorkspace {
   const normalized = normalizeUserId(userId);
-  if (!normalized) return accountFromState(state);
+  if (!normalized || normalized === normalizeUserId(state.profile.userId)) return accountFromState(state);
   state.accounts[normalized] ??= createAccountWorkspace(state, normalized);
   return state.accounts[normalized];
 }
 
 function getAdminManagedAccountWorkspace(state: ServerState, userId: string): AccountWorkspace {
+  if (normalizeUserId(userId) === normalizeUserId(state.profile.userId)) {
+    return accountFromState(state);
+  }
   state.accounts[userId] ??= createAccountWorkspace(state, userId, 0);
   return state.accounts[userId];
 }
 
 function saveAccountWorkspace(state: ServerState, account: AccountWorkspace, userId?: string) {
   const normalized = normalizeUserId(userId);
-  if (!normalized) {
+  if (!normalized || normalized === normalizeUserId(state.profile.userId)) {
     state.profile = account.profile;
     state.projects = account.projects;
     state.activeProjectId = account.activeProjectId;
@@ -663,9 +690,74 @@ function managePromptPresets(state: ServerState, request?: PromptPresetRequest, 
   return preset;
 }
 
-function manageAssets(state: ServerState, request?: AssetMetadataRequest, userId?: string): LibraryAsset[] | LibraryAsset {
+const maxAssetBlobBytes = 20 * 1024 * 1024;
+
+function parseImageDataUrl(source?: string) {
+  const match = source?.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=\s]+)$/);
+  if (!match) {
+    throw new Error("Asset source must be a base64 data URL");
+  }
+  const mimeType = match[1].trim().toLowerCase();
+  if (!mimeType.startsWith("image/")) {
+    throw new Error("Only image assets can be stored");
+  }
+  const base64 = match[2].replace(/\s/g, "");
+  const bytes = Buffer.from(base64, "base64");
+  if (!bytes.byteLength) {
+    throw new Error("Asset source is empty");
+  }
+  if (bytes.byteLength > maxAssetBlobBytes) {
+    throw new Error("Asset source is too large");
+  }
+  return { mimeType, base64, bytes };
+}
+
+function assetTitleFromRequest(request: AssetCreateRequest, mimeType: string, nextIndex: number) {
+  const title = request.title?.trim();
+  if (title) return title;
+  const extension = mimeType.split("/")[1]?.replace(/[^a-z0-9]+/gi, "") || "image";
+  return `asset-${nextIndex}.${extension}`;
+}
+
+function createAsset(state: ServerState, request: AssetCreateRequest, userId?: string): LibraryAsset {
+  const account = getAccountWorkspace(state, userId);
+  const parsed = parseImageDataUrl(request.source);
+  const id = `asset-${Date.now()}-${account.assets.length + 1}`;
+  const createdAt = new Date().toISOString();
+  const asset: LibraryAsset = {
+    id,
+    type: request.type ?? "image",
+    title: assetTitleFromRequest(request, parsed.mimeType, account.assets.length + 1),
+    source: `/api/assets/${encodeURIComponent(id)}/content`,
+    tags: normalizeAssetTags(request.tags),
+    createdAt,
+    metadata: {
+      ...(request.folder !== undefined ? { folder: request.folder.trim() || "Unfiled" } : { folder: "Unfiled" }),
+      ...(Number.isFinite(request.width) ? { width: request.width } : {}),
+      ...(Number.isFinite(request.height) ? { height: request.height } : {}),
+      mimeType: parsed.mimeType,
+      byteSize: parsed.bytes.byteLength,
+      storage: "server"
+    }
+  };
+  state.assetBlobs[id] = {
+    mimeType: parsed.mimeType,
+    base64: parsed.base64,
+    byteSize: parsed.bytes.byteLength,
+    createdAt,
+    userId: account.profile.userId
+  };
+  account.assets = [asset, ...account.assets];
+  saveAccountWorkspace(state, account, userId);
+  return asset;
+}
+
+function manageAssets(state: ServerState, request?: AssetCreateRequest, userId?: string): LibraryAsset[] | LibraryAsset {
   const account = getAccountWorkspace(state, userId);
   if (!request) return account.assets;
+  if (!request.id && request.source) {
+    return createAsset(state, request, userId);
+  }
   if (!request.id) throw new Error("Asset id is required");
   let updatedAsset: LibraryAsset | undefined;
   account.assets = account.assets.map((asset) => {
@@ -684,6 +776,23 @@ function manageAssets(state: ServerState, request?: AssetMetadataRequest, userId
   if (!updatedAsset) throw new Error("Asset not found");
   saveAccountWorkspace(state, account, userId);
   return updatedAsset;
+}
+
+export function getAssetContent(state: ServerState, assetId: string, userId?: string): AssetContent | ApiError {
+  const account = getAccountWorkspace(state, userId);
+  const asset = account.assets.find((item) => item.id === assetId);
+  if (!asset) {
+    return { status: "failed", errorMessage: "Asset not found" };
+  }
+  const blob = state.assetBlobs[assetId];
+  if (!blob) {
+    return { status: "failed", errorMessage: "Asset content not found" };
+  }
+  return {
+    mimeType: blob.mimeType,
+    bytes: Buffer.from(blob.base64, "base64"),
+    title: asset.title
+  };
 }
 
 function totalCreditsUsed(state: ServerState) {
@@ -1430,7 +1539,7 @@ export const apiRoutes = {
     getAccountWorkspace(state, userId).history,
   "/api/prompts": (state: ServerState, request?: PromptPresetRequest, _requestId?: string, userId?: string) =>
     managePromptPresets(state, request, userId),
-  "/api/assets": (state: ServerState, request?: AssetMetadataRequest, _requestId?: string, userId?: string) =>
+  "/api/assets": (state: ServerState, request?: AssetCreateRequest, _requestId?: string, userId?: string) =>
     manageAssets(state, request, userId),
   "/api/admin/history": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) =>
     listAdminHistory(state, userId),
@@ -1517,7 +1626,7 @@ export const apiRoutes = {
 export function callApi(
   state: ServerState,
   path: keyof typeof apiRoutes,
-  request?: GenerationRequest | PromptPresetRequest | AssetMetadataRequest | AdminHistoryArchiveRequest,
+  request?: GenerationRequest | PromptPresetRequest | AssetCreateRequest | AdminHistoryArchiveRequest,
   requestId?: string,
   userId?: string,
   query?: ApiQuery
@@ -1530,7 +1639,7 @@ export function callApi(
       return managePromptPresets(state, request as PromptPresetRequest | undefined, userId);
     }
     if (path === "/api/assets") {
-      return manageAssets(state, request as AssetMetadataRequest | undefined, userId);
+      return manageAssets(state, request as AssetCreateRequest | undefined, userId);
     }
     const route = apiRoutes[path];
     if (

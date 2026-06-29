@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { adjustAccountCredits, callApi, configureModelPricing, createServerState, saveWorkspaceSnapshot } from "./api";
+import { adjustAccountCredits, callApi, configureModelPricing, createServerState, getAssetContent, saveWorkspaceSnapshot } from "./api";
 import { loadServerState, saveServerState } from "./storage";
 import { addAssetToProject, createInitialWorkspace, createProject } from "../src/domain/workspace";
 import type { GenerationRequest, GenerationResult, HistoryEntry, Profile } from "../src/domain/workspace";
@@ -28,6 +28,17 @@ describe("server database storage", () => {
     try {
       const state = createServerState({ userId: "designer@company.local", designerName: "Mia", creditBalance: 30 });
       callApi(state, "/api/generations", request(), "sqlite-request-1", "designer@company.local");
+      const asset = callApi(
+        state,
+        "/api/assets" as never,
+        {
+          title: "sqlite-reference.png",
+          source: "data:image/png;base64,aGVsbG8=",
+          tags: ["reference"]
+        } as never,
+        undefined,
+        "designer@company.local"
+      ) as { id: string; source: string };
 
       saveServerState(databasePath, state);
       const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
@@ -43,9 +54,15 @@ describe("server database storage", () => {
       const otherDesigner = callApi(restored, "/api/generations", request(), "sqlite-request-1", "other@company.local") as GenerationResult;
       const otherProfile = callApi(restored, "/api/profile", undefined, undefined, "other@company.local") as Profile;
       const jobs = callApi(restored, "/api/admin/jobs", undefined, undefined, "admin@company.local") as ReturnType<typeof createServerState>["generationJobs"];
+      const restoredAssetContent = getAssetContent(restored, asset.id, "designer@company.local");
 
       expect(existsSync(databasePath)).toBe(true);
       expect(restoredProfile.creditBalance).toBe(28);
+      expect(asset.source).toBe(`/api/assets/${encodeURIComponent(asset.id)}/content`);
+      expect(restoredAssetContent).toHaveProperty("bytes");
+      if ("bytes" in restoredAssetContent) {
+        expect(restoredAssetContent.bytes.toString("utf8")).toBe("hello");
+      }
       expect(duplicate.errorMessage).toBe("Duplicate request");
       expect(otherDesigner.status).toBe("succeeded");
       expect(otherProfile.creditBalance).toBe(26);
@@ -132,6 +149,7 @@ describe("server database storage", () => {
       expect(tables).toEqual(
         expect.arrayContaining([
           "accounts",
+          "asset_blobs",
           "assets",
           "audit_logs",
           "canvas_connections",

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
-import { createServerState, type AccountWorkspace, type AdminAuditEntry, type GenerationJob, type ServerState } from "./api";
+import { createServerState, type AccountWorkspace, type AdminAuditEntry, type AssetBlob, type GenerationJob, type ServerState } from "./api";
 import type { ProviderRuntimeSettingsMap } from "./providers";
 import type { HistoryEntry, LibraryAsset, ModelDefinition, Profile, Project, PromptPreset } from "../src/domain/workspace";
 
@@ -19,6 +19,7 @@ interface PersistedServerState {
   providerSettings?: ProviderRuntimeSettingsMap;
   adminAudit?: AdminAuditEntry[];
   generationJobs?: GenerationJob[];
+  assetBlobs?: Record<string, AssetBlob>;
 }
 
 function serializeServerState(state: ServerState): PersistedServerState {
@@ -35,7 +36,8 @@ function serializeServerState(state: ServerState): PersistedServerState {
     submittedRequestIds: Array.from(state.submittedRequestIds),
     providerSettings: state.providerSettings,
     adminAudit: state.adminAudit,
-    generationJobs: state.generationJobs
+    generationJobs: state.generationJobs,
+    assetBlobs: state.assetBlobs
   };
 }
 
@@ -53,7 +55,8 @@ function hydrateServerState(data: PersistedServerState): ServerState {
     submittedRequestIds: new Set(data.submittedRequestIds ?? []),
     providerSettings: data.providerSettings ?? {},
     adminAudit: data.adminAudit ?? [],
-    generationJobs: data.generationJobs ?? []
+    generationJobs: data.generationJobs ?? [],
+    assetBlobs: data.assetBlobs ?? {}
   };
 }
 
@@ -134,6 +137,14 @@ function createDatabaseSchema(db: ReturnType<typeof openDatabase>) {
       type text not null,
       asset_json text not null
     );
+    create table if not exists asset_blobs (
+      asset_id text primary key,
+      user_id text not null,
+      mime_type text not null,
+      base64 text not null,
+      byte_size integer not null,
+      created_at text not null
+    );
     create table if not exists generation_jobs (
       id text primary key,
       user_id text not null,
@@ -202,6 +213,7 @@ function resetDatabaseTables(db: ReturnType<typeof openDatabase>) {
     "canvas_nodes",
     "canvas_connections",
     "assets",
+    "asset_blobs",
     "generation_jobs",
     "generation_outputs",
     "generation_history",
@@ -252,6 +264,9 @@ function saveDatabaseState(filePath: string, state: ServerState) {
       "insert into canvas_connections (id, project_id, user_id, from_node_id, to_node_id, connection_json) values (?, ?, ?, ?, ?, ?)"
     );
     const insertAsset = db.prepare("insert into assets (id, user_id, title, type, asset_json) values (?, ?, ?, ?, ?)");
+    const insertAssetBlob = db.prepare(
+      "insert into asset_blobs (asset_id, user_id, mime_type, base64, byte_size, created_at) values (?, ?, ?, ?, ?, ?)"
+    );
     const insertHistory = db.prepare(
       "insert into generation_history (id, user_id, project_id, node_id, model_id, operation, output_count, reference_count, designer_name, prompt, credit_cost, price_cents, currency, created_at, history_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
@@ -287,6 +302,10 @@ function saveDatabaseState(filePath: string, state: ServerState) {
       }
       for (const asset of account.assets) {
         insertAsset.run(asset.id, userId, asset.title, asset.type, JSON.stringify(asset));
+        const blob = state.assetBlobs[asset.id];
+        if (blob) {
+          insertAssetBlob.run(asset.id, userId, blob.mimeType, blob.base64, blob.byteSize, blob.createdAt);
+        }
       }
       for (const history of account.history) {
         insertHistory.run(
@@ -413,6 +432,22 @@ function loadDatabaseTables(db: ReturnType<typeof openDatabase>, fallback: Serve
   state.generationJobs = jobRows
     .map((row) => loadJsonColumn<GenerationJob>(row.job_json))
     .filter((job): job is GenerationJob => Boolean(job));
+
+  const blobRows = db
+    .prepare("select asset_id, user_id, mime_type, base64, byte_size, created_at from asset_blobs")
+    .all() as Array<{ asset_id: string; user_id: string; mime_type: string; base64: string; byte_size: number; created_at: string }>;
+  state.assetBlobs = Object.fromEntries(
+    blobRows.map((row) => [
+      row.asset_id,
+      {
+        mimeType: row.mime_type,
+        base64: row.base64,
+        byteSize: row.byte_size,
+        createdAt: row.created_at,
+        userId: row.user_id
+      }
+    ])
+  );
 
   const auditRows = db.prepare("select event_json from audit_logs where event_type != 'generation' order by created_at desc").all() as Array<{ event_json: string }>;
   state.adminAudit = auditRows

@@ -139,6 +139,83 @@ describe("HTTP API server", () => {
     expect(snapshot.assets.find((item) => item.id === asset.id)).toMatchObject({ metadata: { folder: "Campaign A" } });
   });
 
+  it("creates reusable image assets with a server-owned content endpoint", async () => {
+    const source = "data:image/png;base64,aGVsbG8=";
+
+    const createResponse = await fetch(`${context.baseUrl}/api/assets`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "alice@company.local" },
+      body: JSON.stringify({
+        title: "dropped-reference.png",
+        source,
+        tags: ["Reference", "reference", "Generated"],
+        folder: "Campaign A",
+        width: 320,
+        height: 240
+      })
+    });
+    const created = (await createResponse.json()) as LibraryAsset;
+    const listResponse = await fetch(`${context.baseUrl}/api/assets`, { headers: { "x-user-id": "alice@company.local" } });
+    const listed = (await listResponse.json()) as LibraryAsset[];
+    const contentResponse = await fetch(`${context.baseUrl}${created.source}`, { headers: { "x-user-id": "alice@company.local" } });
+    const content = await contentResponse.text();
+
+    expect(createResponse.status).toBe(200);
+    expect(created.source).toBe(`/api/assets/${encodeURIComponent(created.id)}/content`);
+    expect(created.tags).toEqual(["reference", "generated"]);
+    expect(created.metadata).toMatchObject({
+      folder: "Campaign A",
+      width: 320,
+      height: 240,
+      mimeType: "image/png",
+      byteSize: 5,
+      storage: "server"
+    });
+    expect(listed.find((asset) => asset.id === created.id)).toMatchObject({ source: created.source });
+    expect(JSON.stringify(listed)).not.toContain("aGVsbG8=");
+    expect(contentResponse.status).toBe(200);
+    expect(contentResponse.headers.get("content-type")).toBe("image/png");
+    expect(content).toBe("hello");
+  });
+
+  it("rejects invalid reusable asset uploads without mutating the library", async () => {
+    const createResponse = await fetch(`${context.baseUrl}/api/assets`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "alice@company.local" },
+      body: JSON.stringify({
+        title: "broken-reference.png",
+        source: "not-a-data-url",
+        tags: ["reference"],
+        folder: "Campaign A"
+      })
+    });
+    const result = (await createResponse.json()) as { status: "failed"; errorMessage: string };
+    const listResponse = await fetch(`${context.baseUrl}/api/assets`, { headers: { "x-user-id": "alice@company.local" } });
+    const listed = (await listResponse.json()) as LibraryAsset[];
+
+    expect(createResponse.status).toBe(400);
+    expect(result.errorMessage).toBe("Asset source must be a base64 data URL");
+    expect(listed).toHaveLength(0);
+  });
+
+  it("keeps reusable asset content isolated by designer account", async () => {
+    const createResponse = await fetch(`${context.baseUrl}/api/assets`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "alice@company.local" },
+      body: JSON.stringify({
+        title: "alice-reference.png",
+        source: "data:image/png;base64,aGVsbG8="
+      })
+    });
+    const created = (await createResponse.json()) as LibraryAsset;
+
+    const bobResponse = await fetch(`${context.baseUrl}${created.source}`, { headers: { "x-user-id": "bob@company.local" } });
+    const bobResult = (await bobResponse.json()) as { status: "failed"; errorMessage: string };
+
+    expect(bobResponse.status).toBe(404);
+    expect(bobResult.errorMessage).toBe("Asset not found");
+  });
+
   it("handles generation over HTTP, updates credit balance, and writes history", async () => {
     const response = await fetch(`${context.baseUrl}/api/generations`, {
       method: "POST",

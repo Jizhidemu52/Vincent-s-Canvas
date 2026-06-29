@@ -73,6 +73,10 @@ http://127.0.0.1:5173/
 - `GET /api/prompts`
 - `POST /api/prompts`
 - `DELETE /api/prompts/:id`
+- `GET /api/assets`
+- `POST /api/assets`
+- `PATCH /api/assets/:id`
+- `GET /api/assets/:id/content`
 - `GET /api/admin/audit`
 - `GET /api/admin/usage`
 - `GET /api/admin/jobs`

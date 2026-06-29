@@ -145,6 +145,43 @@ describe("backend hosted mock API", () => {
     });
   });
 
+  it("stores reusable image assets behind server-owned content URLs", () => {
+    const state = createServerState();
+    const source = "data:image/png;base64,aGVsbG8=";
+
+    const created = callApi(
+      state,
+      "/api/assets" as never,
+      {
+        title: "dropped-reference.png",
+        source,
+        tags: ["Reference", "generated"],
+        folder: "Campaign A",
+        width: 320,
+        height: 240
+      } as never,
+      undefined,
+      "alice@company.local"
+    ) as LibraryAsset;
+    const snapshot = getWorkspaceSnapshot(state, "alice@company.local");
+
+    expect(created.source).toBe(`/api/assets/${encodeURIComponent(created.id)}/content`);
+    expect(created.tags).toEqual(["reference", "generated"]);
+    expect(created.metadata).toMatchObject({
+      folder: "Campaign A",
+      width: 320,
+      height: 240,
+      mimeType: "image/png",
+      byteSize: 5,
+      storage: "server"
+    });
+    expect(snapshot.assets.find((item) => item.id === created.id)).toMatchObject({
+      source: created.source,
+      metadata: expect.objectContaining({ storage: "server" })
+    });
+    expect(JSON.stringify(snapshot.assets)).not.toContain("aGVsbG8=");
+  });
+
   it("generates mock outputs, deducts credits, and writes history", () => {
     const state = createServerState({ creditBalance: 30 });
 

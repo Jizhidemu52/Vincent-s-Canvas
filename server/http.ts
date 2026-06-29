@@ -11,11 +11,13 @@ import {
   configureOperationPricing,
   configureModelRegistry,
   createServerState,
+  getAssetContent,
   getWorkspaceSnapshot,
   saveWorkspaceSnapshot,
   setAccountCreditLimit,
   type ApiError,
   type AdminHistoryArchiveRequest,
+  type AssetCreateRequest,
   type AssetMetadataRequest,
   type CreditAdjustmentRequest,
   type CreditLimitRequest,
@@ -85,6 +87,7 @@ function statusFromApiError(error: ApiError) {
   if (error.errorMessage === "Duplicate request") return 409;
   if (error.errorMessage === "Not enough credits") return 402;
   if (error.errorMessage === "Model not found") return 404;
+  if (error.errorMessage === "Asset not found" || error.errorMessage === "Asset content not found") return 404;
   return 400;
 }
 
@@ -360,6 +363,32 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
         }
         if (request.method === "GET" && pathname === "/api/assets") {
           const result = callApi(state, "/api/assets", undefined, undefined, userId);
+          sendJson(response, statusFromApiResult(result), result);
+          return;
+        }
+        const contentMatch = pathname.match(/^\/api\/assets\/([^/]+)\/content$/);
+        if (request.method === "GET" && contentMatch) {
+          const result = getAssetContent(state, decodeURIComponent(contentMatch[1]), userId);
+          if (isApiError(result)) {
+            sendJson(response, statusFromApiResult(result), result);
+            return;
+          }
+          response.writeHead(200, {
+            ...corsHeaders(),
+            "content-type": result.mimeType,
+            "content-length": String(result.bytes.byteLength),
+            "cache-control": "private, max-age=31536000",
+            "content-disposition": `inline; filename="${encodeURIComponent(result.title)}"`
+          });
+          response.end(result.bytes);
+          return;
+        }
+        if (request.method === "POST" && pathname === "/api/assets") {
+          const body = await readJsonBody<AssetCreateRequest>(request, bodyLimitBytes);
+          const result = callApi(state, "/api/assets", body, undefined, userId);
+          if (!isApiError(result) && stateFilePath) {
+            saveServerState(stateFilePath, state);
+          }
           sendJson(response, statusFromApiResult(result), result);
           return;
         }
