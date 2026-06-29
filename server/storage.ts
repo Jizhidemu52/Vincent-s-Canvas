@@ -67,6 +67,13 @@ function openDatabase(filePath: string) {
   return new DatabaseSync(filePath);
 }
 
+function ensureColumn(db: ReturnType<typeof openDatabase>, tableName: string, columnName: string, definition: string) {
+  const columns = db.prepare(`pragma table_info(${tableName})`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === columnName)) {
+    db.exec(`alter table ${tableName} add column ${columnName} ${definition}`);
+  }
+}
+
 function createDatabaseSchema(db: ReturnType<typeof openDatabase>) {
   db.exec(`
     create table if not exists platform_state (
@@ -149,6 +156,11 @@ function createDatabaseSchema(db: ReturnType<typeof openDatabase>) {
       project_id text not null,
       node_id text not null,
       model_id text not null,
+      operation text,
+      output_count integer not null default 1,
+      reference_count integer not null default 0,
+      designer_name text,
+      prompt text,
       credit_cost integer not null,
       price_cents integer,
       currency text,
@@ -175,6 +187,11 @@ function createDatabaseSchema(db: ReturnType<typeof openDatabase>) {
       request_id text primary key
     );
   `);
+  ensureColumn(db, "generation_history", "operation", "text");
+  ensureColumn(db, "generation_history", "output_count", "integer not null default 1");
+  ensureColumn(db, "generation_history", "reference_count", "integer not null default 0");
+  ensureColumn(db, "generation_history", "designer_name", "text");
+  ensureColumn(db, "generation_history", "prompt", "text");
 }
 
 function resetDatabaseTables(db: ReturnType<typeof openDatabase>) {
@@ -236,7 +253,7 @@ function saveDatabaseState(filePath: string, state: ServerState) {
     );
     const insertAsset = db.prepare("insert into assets (id, user_id, title, type, asset_json) values (?, ?, ?, ?, ?)");
     const insertHistory = db.prepare(
-      "insert into generation_history (id, user_id, project_id, node_id, model_id, credit_cost, price_cents, currency, created_at, history_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      "insert into generation_history (id, user_id, project_id, node_id, model_id, operation, output_count, reference_count, designer_name, prompt, credit_cost, price_cents, currency, created_at, history_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     const insertLedger = db.prepare(
       "insert into credit_ledger (id, user_id, model_id, project_id, node_id, credit_cost, price_cents, currency, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -278,6 +295,11 @@ function saveDatabaseState(filePath: string, state: ServerState) {
           history.projectId,
           history.nodeId,
           history.modelId,
+          history.operation ?? null,
+          history.outputCount,
+          history.referenceCount ?? history.references?.length ?? 0,
+          history.designerName ?? account.profile.designerName,
+          history.prompt,
           history.creditCost,
           history.priceCents ?? null,
           history.currency ?? null,

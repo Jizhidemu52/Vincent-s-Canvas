@@ -3,9 +3,10 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { adjustAccountCredits, callApi, configureModelPricing, createServerState } from "./api";
+import { adjustAccountCredits, callApi, configureModelPricing, createServerState, saveWorkspaceSnapshot } from "./api";
 import { loadServerState, saveServerState } from "./storage";
-import type { GenerationRequest, GenerationResult, Profile } from "../src/domain/workspace";
+import { addAssetToProject, createInitialWorkspace, createProject } from "../src/domain/workspace";
+import type { GenerationRequest, GenerationResult, HistoryEntry, Profile } from "../src/domain/workspace";
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
   return {
@@ -61,7 +62,27 @@ describe("server database storage", () => {
     try {
       const state = createServerState({ creditBalance: 30 });
       configureModelPricing(state, { modelId: "gpt-image-2-low", cost: 2, priceCents: 150, currency: "CNY" }, "admin@company.local");
-      callApi(state, "/api/generations", request(), "sqlite-request-2");
+      const { workspace, project } = createProject(createInitialWorkspace(state.profile), "SQLite trace board");
+      const withReference = addAssetToProject(workspace, project.id, {
+        name: "sqlite-reference.png",
+        source: "/uploads/sqlite-reference.png",
+        width: 640,
+        height: 800
+      });
+      const source = withReference.projects[0].nodes[0];
+      saveWorkspaceSnapshot(state, withReference);
+      callApi(
+        state,
+        "/api/generations",
+        request({
+          projectId: project.id,
+          nodeId: source.id,
+          referenceNodeIds: [source.id],
+          outputCount: 2,
+          providerSettings: { size: "1536x1024", quality: "high", preset: "catalog" }
+        }),
+        "sqlite-request-2"
+      );
       adjustAccountCredits(state, { targetUserId: "alice@company.local", delta: 25, reason: "monthly allocation" }, "admin@company.local");
 
       saveServerState(databasePath, state);
@@ -72,7 +93,16 @@ describe("server database storage", () => {
       let jobCount: { count: number };
       let outputCount: { count: number };
       let outputRecord: { job_id: string; user_id: string; output_json: string };
-      let historyBilling: { price_cents: number; currency: string };
+      let historyRecord: {
+        price_cents: number;
+        currency: string;
+        operation: string;
+        output_count: number;
+        reference_count: number;
+        designer_name: string;
+        prompt: string;
+        history_json: string;
+      };
       let ledgerRows: Array<{ user_id: string; model_id: string; credit_cost: number; price_cents: number | null; currency: string | null }>;
       try {
         tables = db
@@ -87,7 +117,11 @@ describe("server database storage", () => {
           user_id: string;
           output_json: string;
         };
-        historyBilling = db.prepare("select price_cents, currency from generation_history").get() as { price_cents: number; currency: string };
+        historyRecord = db
+          .prepare(
+            "select price_cents, currency, operation, output_count, reference_count, designer_name, prompt, history_json from generation_history"
+          )
+          .get() as typeof historyRecord;
         ledgerRows = db
           .prepare("select user_id, model_id, credit_cost, price_cents, currency from credit_ledger order by model_id")
           .all() as Array<{ user_id: string; model_id: string; credit_cost: number; price_cents: number | null; currency: string | null }>;
@@ -113,17 +147,45 @@ describe("server database storage", () => {
       );
       expect(historyCount.count).toBe(1);
       expect(jobCount.count).toBe(1);
-      expect(outputCount.count).toBe(1);
+      expect(outputCount.count).toBe(2);
       expect(outputRecord).toMatchObject({ job_id: "job-history-1", user_id: "designer-demo" });
       expect(JSON.parse(outputRecord.output_json)).toMatchObject({
         name: "GPT Image 2 Low output 1.jpg",
-        source: "mock://openai/generate/node-sqlite/1"
+        source: `mock://openai/generate/${source.id}/1`
       });
-      expect(historyBilling).toEqual({ price_cents: 150, currency: "CNY" });
+      expect(historyRecord).toMatchObject({
+        price_cents: 150,
+        currency: "CNY",
+        operation: "generate",
+        output_count: 2,
+        reference_count: 1,
+        designer_name: "Demo Designer",
+        prompt: "make a clean internal product image"
+      });
+      const persistedHistory = JSON.parse(historyRecord.history_json) as HistoryEntry;
+      expect(persistedHistory).toMatchObject({
+        projectId: project.id,
+        projectName: "SQLite trace board",
+        nodeId: source.id,
+        modelId: "gpt-image-2-low",
+        prompt: "make a clean internal product image",
+        outputCount: 2,
+        creditCost: 4,
+        userId: "designer-demo",
+        designerName: "Demo Designer",
+        operation: "generate",
+        referenceCount: 1,
+        references: [{ name: "sqlite-reference.png", source: "/uploads/sqlite-reference.png", width: 640, height: 800 }],
+        outputs: [
+          { name: "GPT Image 2 Low output 1.jpg", source: `mock://openai/generate/${source.id}/1`, width: 1536, height: 1024 },
+          { name: "GPT Image 2 Low output 2.jpg", source: `mock://openai/generate/${source.id}/2`, width: 1536, height: 1024 }
+        ],
+        providerSettings: { size: "1536x1024", quality: "high", preset: "catalog" }
+      });
       expect(ledgerRows).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ user_id: "alice@company.local", model_id: "admin-credit-adjustment", credit_cost: 25, price_cents: null, currency: null }),
-          expect.objectContaining({ user_id: "designer-demo", model_id: "gpt-image-2-low", credit_cost: 2, price_cents: 150, currency: "CNY" })
+          expect.objectContaining({ user_id: "designer-demo", model_id: "gpt-image-2-low", credit_cost: 4, price_cents: 150, currency: "CNY" })
         ])
       );
     } finally {
