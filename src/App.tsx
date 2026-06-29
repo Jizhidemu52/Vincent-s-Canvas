@@ -126,6 +126,7 @@ import {
   type AdminAccountSummary,
   type AdminAuditEntry,
   type AdminHistoryEntry,
+  type AdminHistoryFilters,
   type AdminGenerationJob,
   type AdminUsageSummary,
   type ProviderHealth,
@@ -1741,6 +1742,10 @@ function AdminView({
   const [adminHistory, setAdminHistory] = useState<AdminHistoryEntry[]>([]);
   const [filteredAdminHistory, setFilteredAdminHistory] = useState<AdminHistoryEntry[] | null>(null);
   const [adminHistoryUserFilter, setAdminHistoryUserFilter] = useState("all");
+  const [adminHistoryProjectFilter, setAdminHistoryProjectFilter] = useState("all");
+  const [adminHistoryModelFilter, setAdminHistoryModelFilter] = useState("all");
+  const [adminHistoryOperationFilter, setAdminHistoryOperationFilter] = useState("all");
+  const [adminHistoryTimeFilter, setAdminHistoryTimeFilter] = useState("all");
   const [selectedAdminHistoryIds, setSelectedAdminHistoryIds] = useState<string[]>([]);
   const [adminAudit, setAdminAudit] = useState<AdminAuditEntry[]>(workspace.history.map(historyEntryToAuditEntry));
   const estimatedSpend = formatMoneyCents(adminUsage?.totalPriceCents, adminUsage?.currency);
@@ -1755,12 +1760,44 @@ function AdminView({
   const adminHistoryDesigners = Array.from(
     new Map(adminHistory.map((entry) => [entry.userId ?? "unknown-user", entry.designerName ?? entry.userId ?? "Unknown designer"])).entries()
   ).sort(([left], [right]) => left.localeCompare(right));
+  const adminHistoryProjects = Array.from(
+    new Map(adminHistory.map((entry) => [entry.projectId, entry.projectName ?? entry.projectId])).entries()
+  ).sort(([, left], [, right]) => left.localeCompare(right));
+  const adminHistoryModels = Array.from(new Set(adminHistory.map((entry) => entry.modelId))).sort();
+  const adminHistoryOperations = Array.from(new Set(adminHistory.map((entry) => entry.operation ?? "generate"))).sort();
+  const newestAdminHistoryTime = adminHistory.reduce((newest, entry) => {
+    const timestamp = Date.parse(entry.createdAt);
+    return Number.isFinite(timestamp) ? Math.max(newest, timestamp) : newest;
+  }, 0);
+  const adminHistoryQuery = useMemo(() => {
+    const query: AdminHistoryFilters = {};
+    if (adminHistoryUserFilter !== "all") query.userId = adminHistoryUserFilter;
+    if (adminHistoryProjectFilter !== "all") query.projectId = adminHistoryProjectFilter;
+    if (adminHistoryModelFilter !== "all") query.modelId = adminHistoryModelFilter;
+    if (adminHistoryOperationFilter !== "all") query.operation = adminHistoryOperationFilter as OperationType;
+    if ((adminHistoryTimeFilter === "recent-7" || adminHistoryTimeFilter === "recent-30") && newestAdminHistoryTime) {
+      const days = adminHistoryTimeFilter === "recent-7" ? 7 : 30;
+      query.from = new Date(newestAdminHistoryTime - days * 24 * 60 * 60 * 1000).toISOString();
+      query.to = new Date(newestAdminHistoryTime).toISOString();
+    }
+    return query;
+  }, [adminHistoryModelFilter, adminHistoryOperationFilter, adminHistoryProjectFilter, adminHistoryTimeFilter, adminHistoryUserFilter, newestAdminHistoryTime]);
+  const hasAdminHistoryFilters = Object.keys(adminHistoryQuery).length > 0;
+  const adminHistoryExportLabel =
+    adminHistoryModelFilter !== "all"
+      ? adminHistoryModelFilter
+      : adminHistoryProjectFilter !== "all"
+        ? adminHistoryProjects.find(([projectId]) => projectId === adminHistoryProjectFilter)?.[1] ?? adminHistoryProjectFilter
+        : adminHistoryUserFilter !== "all"
+          ? adminHistoryUserFilter
+          : adminHistoryOperationFilter !== "all"
+            ? adminHistoryOperationFilter
+            : adminHistoryTimeFilter !== "all"
+              ? adminHistoryTimeFilter
+              : "all-designers";
   const visibleAdminHistory = useMemo(
-    () =>
-      adminHistoryUserFilter === "all"
-        ? adminHistory
-        : filteredAdminHistory ?? adminHistory.filter((entry) => entry.userId === adminHistoryUserFilter),
-    [adminHistory, adminHistoryUserFilter, filteredAdminHistory]
+    () => (hasAdminHistoryFilters ? filteredAdminHistory ?? [] : adminHistory),
+    [adminHistory, filteredAdminHistory, hasAdminHistoryFilters]
   );
   const selectedAdminHistory = useMemo(
     () => visibleAdminHistory.filter((entry) => selectedAdminHistoryIds.includes(entry.id)),
@@ -1815,12 +1852,12 @@ function AdminView({
   }, [activeUserId]);
 
   useEffect(() => {
-    if (adminHistoryUserFilter === "all") {
+    if (!hasAdminHistoryFilters) {
       setFilteredAdminHistory(null);
       return;
     }
     let cancelled = false;
-    void fetchAdminHistory(activeUserId, adminHistoryUserFilter)
+    void fetchAdminHistory(activeUserId, adminHistoryQuery)
       .then((history) => {
         if (!cancelled) setFilteredAdminHistory(history);
       })
@@ -1830,7 +1867,7 @@ function AdminView({
     return () => {
       cancelled = true;
     };
-  }, [activeUserId, adminHistoryUserFilter]);
+  }, [activeUserId, adminHistoryQuery, hasAdminHistoryFilters]);
 
   useEffect(() => {
     const visibleIds = new Set(visibleAdminHistory.map((entry) => entry.id));
@@ -2280,10 +2317,67 @@ function AdminView({
                     ))}
                   </select>
                 </label>
-                <button type="button" className="secondary-button" onClick={() => exportAdminTeamHistory(visibleAdminHistory, adminHistoryUserFilter)}>
+                <label className="admin-inline-filter">
+                  <span>Project</span>
+                  <select
+                    aria-label="Team history project filter"
+                    value={adminHistoryProjectFilter}
+                    onChange={(event) => setAdminHistoryProjectFilter(event.target.value)}
+                  >
+                    <option value="all">All projects</option>
+                    {adminHistoryProjects.map(([projectId, projectName]) => (
+                      <option key={projectId} value={projectId}>
+                        {projectName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="admin-inline-filter">
+                  <span>Model</span>
+                  <select
+                    aria-label="Team history model filter"
+                    value={adminHistoryModelFilter}
+                    onChange={(event) => setAdminHistoryModelFilter(event.target.value)}
+                  >
+                    <option value="all">All models</option>
+                    {adminHistoryModels.map((modelId) => (
+                      <option key={modelId} value={modelId}>
+                        {modelId}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="admin-inline-filter">
+                  <span>Type</span>
+                  <select
+                    aria-label="Team history type filter"
+                    value={adminHistoryOperationFilter}
+                    onChange={(event) => setAdminHistoryOperationFilter(event.target.value)}
+                  >
+                    <option value="all">All types</option>
+                    {adminHistoryOperations.map((operation) => (
+                      <option key={operation} value={operation}>
+                        {operation}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="admin-inline-filter">
+                  <span>Time</span>
+                  <select
+                    aria-label="Team history time filter"
+                    value={adminHistoryTimeFilter}
+                    onChange={(event) => setAdminHistoryTimeFilter(event.target.value)}
+                  >
+                    <option value="all">All time</option>
+                    <option value="recent-7">Last 7 days</option>
+                    <option value="recent-30">Last 30 days</option>
+                  </select>
+                </label>
+                <button type="button" className="secondary-button" onClick={() => exportAdminTeamHistory(visibleAdminHistory, adminHistoryExportLabel)}>
                   <Download size={14} /> Export team history
                 </button>
-                <button type="button" className="secondary-button" onClick={() => exportAdminTeamHistoryCsv(visibleAdminHistory, adminHistoryUserFilter)}>
+                <button type="button" className="secondary-button" onClick={() => exportAdminTeamHistoryCsv(visibleAdminHistory, adminHistoryExportLabel)}>
                   <Download size={14} /> Export team history CSV
                 </button>
                 <button
@@ -2335,7 +2429,7 @@ function AdminView({
                 </div>
               ))
             ) : adminHistory.length ? (
-              <p>No team generation history matches this designer.</p>
+              <p>No team generation history matches these filters.</p>
             ) : (
               <p>No team generation history yet. Designer outputs will appear here.</p>
             )}

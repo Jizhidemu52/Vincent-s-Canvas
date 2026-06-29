@@ -656,8 +656,23 @@ beforeEach(() => {
         if (!adminUserId.includes("admin")) {
           return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
         }
-        const filterUserId = new URL(url, "http://localhost").searchParams.get("userId");
-        return jsonResponse(filterUserId ? backendAdminHistory.filter((entry) => entry.userId === filterUserId) : backendAdminHistory);
+        const query = new URL(url, "http://localhost").searchParams;
+        const from = query.get("from");
+        const to = query.get("to");
+        const fromTime = from ? Date.parse(from) : undefined;
+        const toTime = to ? Date.parse(to) : undefined;
+        return jsonResponse(
+          backendAdminHistory.filter((entry) => {
+            if (query.get("userId") && entry.userId !== query.get("userId")) return false;
+            if (query.get("projectId") && entry.projectId !== query.get("projectId")) return false;
+            if (query.get("modelId") && entry.modelId !== query.get("modelId")) return false;
+            if (query.get("operation") && entry.operation !== query.get("operation")) return false;
+            const createdAt = Date.parse(entry.createdAt);
+            if (fromTime !== undefined && createdAt < fromTime) return false;
+            if (toTime !== undefined && createdAt > toTime) return false;
+            return true;
+          })
+        );
       }
       if (url.endsWith("/api/admin/jobs")) {
         const headers = init?.headers as Record<string, string> | undefined;
@@ -1644,6 +1659,36 @@ describe("Designer canvas app shell", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Team history designer filter" }), "all");
 
     expect(screen.getByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
+  });
+
+  it("filters admin team history by project, model, type, and recent time window", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: /Admin monitoring/i }));
+    expect(await screen.findByText("Team history")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team history designer filter" }), "bob@company.local");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team history project filter" }), "bob-upscale");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team history model filter" }), "upscale-pro");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team history type filter" }), "upscale");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team history time filter" }), "recent-30");
+
+    const adminHistoryCalls = vi
+      .mocked(fetch)
+      .mock.calls.map(([url]) => String(url))
+      .filter((url) => url.includes("/api/admin/history"));
+    const adminHistoryCall = adminHistoryCalls[adminHistoryCalls.length - 1];
+    expect(adminHistoryCall).toBeDefined();
+    const query = new URL(adminHistoryCall!, "http://localhost").searchParams;
+    expect(query.get("userId")).toBe("bob@company.local");
+    expect(query.get("projectId")).toBe("bob-upscale");
+    expect(query.get("modelId")).toBe("upscale-pro");
+    expect(query.get("operation")).toBe("upscale");
+    expect(query.get("from")).toBe("2026-05-29T02:10:00.000Z");
+    expect(query.get("to")).toBe("2026-06-28T02:10:00.000Z");
+    expect(screen.queryByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
   });
 

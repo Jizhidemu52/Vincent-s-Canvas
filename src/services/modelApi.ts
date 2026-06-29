@@ -144,6 +144,15 @@ export interface AdminGenerationJob {
 
 export type AdminHistoryEntry = HistoryEntry;
 
+export interface AdminHistoryFilters {
+  userId?: string;
+  projectId?: string;
+  modelId?: string;
+  operation?: OperationType;
+  from?: string;
+  to?: string;
+}
+
 export interface AdminAuditEntry {
   id: string;
   eventType?: "generation" | "credit-adjustment" | "credit-limit" | "model-pricing" | "model-registry" | "provider-settings" | "history-archive";
@@ -347,8 +356,15 @@ export async function fetchAdminJobs(adminUserId?: string): Promise<AdminGenerat
   return readJson<AdminGenerationJob[]>(response);
 }
 
-export async function fetchAdminHistory(adminUserId?: string, filterUserId?: string): Promise<AdminHistoryEntry[]> {
-  const query = filterUserId ? `?${new URLSearchParams({ userId: filterUserId }).toString()}` : "";
+export async function fetchAdminHistory(adminUserId?: string, filters?: AdminHistoryFilters | string): Promise<AdminHistoryEntry[]> {
+  const normalizedFilters = typeof filters === "string" ? { userId: filters } : filters;
+  const searchParams = new URLSearchParams();
+  if (normalizedFilters) {
+    for (const [key, value] of Object.entries(normalizedFilters)) {
+      if (value) searchParams.set(key, value);
+    }
+  }
+  const query = searchParams.size ? `?${searchParams.toString()}` : "";
   const response = await fetch(`${API_BASE_URL}/api/admin/history${query}`, { headers: userHeaders(adminUserId) });
   return readJson<AdminHistoryEntry[]>(response);
 }
