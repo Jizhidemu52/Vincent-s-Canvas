@@ -2,7 +2,7 @@ import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@t
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { createInitialWorkspace, type GenerationRequest, type HistoryEntry, type ModelDefinition, type Profile, type Workspace } from "./domain/workspace";
+import { createInitialWorkspace, type GenerationRequest, type HistoryEntry, type LibraryAsset, type ModelDefinition, type Profile, type Workspace } from "./domain/workspace";
 import type { AdminAuditEntry, ProviderHealth } from "./services/modelApi";
 
 let backendProfile: Profile = {
@@ -340,6 +340,34 @@ beforeEach(() => {
         const promptId = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
         backendWorkspace = { ...backendWorkspace, prompts: backendWorkspace.prompts.filter((prompt) => prompt.id !== promptId) };
         return jsonResponse(backendWorkspace.prompts);
+      }
+      if (url.endsWith("/api/assets") && init?.method === "POST") {
+        const request = JSON.parse(String(init?.body)) as {
+          title?: string;
+          type?: LibraryAsset["type"];
+          source?: string;
+          tags?: string[];
+          folder?: string;
+          width?: number;
+          height?: number;
+        };
+        const savedAsset: LibraryAsset = {
+          id: `asset-hosted-${backendWorkspace.assets.length + 1}`,
+          type: request.type ?? "image",
+          title: request.title ?? "Saved asset",
+          source: `/api/assets/asset-hosted-${backendWorkspace.assets.length + 1}/content`,
+          tags: Array.from(new Set((request.tags ?? ["canvas"]).map((tag) => tag.trim().toLowerCase()).filter(Boolean))),
+          createdAt: "2026-06-29T08:00:00.000Z",
+          metadata: {
+            folder: request.folder ?? "Unfiled",
+            width: request.width,
+            height: request.height,
+            storage: "server",
+            sourcePreview: request.source?.slice(0, 22)
+          }
+        };
+        backendWorkspace = { ...backendWorkspace, assets: [savedAsset, ...backendWorkspace.assets] };
+        return jsonResponse(savedAsset);
       }
       if (url.includes("/api/assets/") && init?.method === "PATCH") {
         const assetId = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
@@ -2201,21 +2229,45 @@ describe("Designer canvas app shell", () => {
     await login(user);
 
     await user.click(screen.getByRole("button", { name: "New project" }));
-    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    const stage = screen.getByRole("region", { name: "Infinite canvas" });
+    const front = new File(["front reference"], "dropped-front.png", { type: "image/png" });
+    const dropEvent = createEvent.drop(stage, {
+      dataTransfer: { files: [front], dropEffect: "copy" }
+    });
+    Object.defineProperties(dropEvent, {
+      clientX: { value: 320 },
+      clientY: { value: 280 }
+    });
+    fireEvent(stage, dropEvent);
+    await user.click(await screen.findByRole("button", { name: /Image dropped-front\.png/i }));
     const initialNodeCount = screen.getAllByTestId("canvas-node").length;
 
     await user.click(screen.getByRole("button", { name: "Save asset" }));
 
     expect(screen.getByText("My assets")).toBeInTheDocument();
-    const savedAsset = screen.getByRole("button", { name: /fashion-reference\.jpg.*Use in canvas/i });
+    const assetPostCall = await waitFor(() => {
+      const call = vi.mocked(fetch).mock.calls.find(([url, init]) => url.toString().endsWith("/api/assets") && init?.method === "POST");
+      expect(call).toBeTruthy();
+      return call;
+    });
+    const assetPayload = JSON.parse(String(assetPostCall?.[1]?.body)) as { title: string; source: string; folder: string };
+    expect(assetPayload).toMatchObject({ title: "dropped-front.png" });
+    expect(assetPayload.folder).toMatch(/^Untitled/);
+    expect(assetPayload.source).toMatch(/^data:image\/png;base64,/);
+    const savedAsset = await screen.findByRole("button", { name: /dropped-front\.png.*Use in canvas/i });
     expect(savedAsset).toBeInTheDocument();
+    expect(backendWorkspace.assets[0]).toMatchObject({
+      title: "dropped-front.png",
+      source: "/api/assets/asset-hosted-1/content",
+      metadata: { storage: "server" }
+    });
 
     await user.click(savedAsset);
 
     await waitFor(() => {
       expect(screen.getAllByTestId("canvas-node")).toHaveLength(initialNodeCount + 1);
     });
-    expect(screen.getAllByRole("button", { name: /Image fashion-reference\.jpg/i }).length).toBeGreaterThan(1);
+    expect(screen.getAllByRole("button", { name: /Image dropped-front\.png/i }).length).toBeGreaterThan(1);
   });
 
   it("filters saved assets by reusable tags in the canvas dock", async () => {

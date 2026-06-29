@@ -318,6 +318,26 @@ export async function updateAssetMetadataRemote(
   return readJson<LibraryAsset>(response);
 }
 
+export async function saveAssetRemote(
+  request: {
+    title?: string;
+    type?: LibraryAsset["type"];
+    source: string;
+    tags?: string[];
+    folder?: string;
+    width?: number;
+    height?: number;
+  },
+  userId?: string
+): Promise<LibraryAsset> {
+  const response = await fetch(`${API_BASE_URL}/api/assets`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...userHeaders(userId) },
+    body: JSON.stringify(request)
+  });
+  return readJson<LibraryAsset>(response);
+}
+
 export async function adjustDesignerCredits(request: CreditAdjustmentRequest, adminUserId?: string): Promise<Profile> {
   const response = await fetch(`${API_BASE_URL}/api/admin/credits`, {
     method: "POST",

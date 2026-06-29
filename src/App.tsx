@@ -121,6 +121,7 @@ import {
   fetchWorkspaceSnapshot,
   restoreAdminHistoryRemote,
   deletePromptPresetRemote,
+  saveAssetRemote,
   saveWorkspaceSnapshot,
   savePromptPresetRemote,
   setDesignerCreditLimit,
@@ -175,6 +176,10 @@ function clampOutputCount(value: number) {
 
 function clampBatchConcurrency(value: number) {
   return Math.min(8, Math.max(1, Number.isFinite(value) ? Math.round(value) : 1));
+}
+
+function canStoreAssetRemotely(node: CanvasNode) {
+  return node.type !== "text" && /^data:image\/[^;,]+;base64,/i.test(node.source);
 }
 
 function clampMaskMetric(value: number) {
@@ -985,10 +990,39 @@ export default function App() {
       setApiNotice(message);
     }
   }
-  function saveAsset() {
+  async function saveAsset() {
     if (!activeProject || !selectedNode) return;
-    setWorkspace((current) => saveNodeAsAsset(current, activeProject.id, selectedNode.id));
-    setRightPanel("assets");
+    if (!canStoreAssetRemotely(selectedNode)) {
+      setWorkspace((current) => saveNodeAsAsset(current, activeProject.id, selectedNode.id));
+      setRightPanel("assets");
+      setApiNotice("Asset saved to local workspace library");
+      return;
+    }
+    try {
+      setApiNotice("Saving asset to hosted library...");
+      const savedAsset = await saveAssetRemote(
+        {
+          title: selectedNode.name,
+          type: "image",
+          source: selectedNode.source,
+          tags: ["canvas"],
+          folder: activeProject.name,
+          width: selectedNode.width,
+          height: selectedNode.height
+        },
+        activeUserId
+      );
+      setWorkspace((current) => ({
+        ...current,
+        assets: [savedAsset, ...current.assets.filter((asset) => asset.id !== savedAsset.id)]
+      }));
+      setRightPanel("assets");
+      setApiNotice("Asset saved to hosted library");
+    } catch (error) {
+      setWorkspace((current) => saveNodeAsAsset(current, activeProject.id, selectedNode.id));
+      setRightPanel("assets");
+      setApiNotice(error instanceof Error ? `Hosted asset save failed; saved locally: ${error.message}` : "Hosted asset save failed; saved locally");
+    }
   }
 
   async function saveSelectedPrompt() {
