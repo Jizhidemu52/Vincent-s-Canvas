@@ -2703,10 +2703,12 @@ function CanvasView({
       <section className="recraft-canvas">
         <PromptCard
           workspace={workspace}
+          project={project}
           selectedNode={selectedNode}
           apiNotice={apiNotice}
           onUpdateConfig={onUpdateConfig}
           onUpdateMetadata={onUpdateMetadata}
+          onSelectReference={(nodeId) => onWorkspaceChange((current) => selectNodes(current, project.id, [nodeId]))}
           onGenerate={onGenerate}
           onBatch={onBatch}
           onBatchFiles={onBatch}
@@ -2982,26 +2984,31 @@ function ModelPicker({
 
 function PromptCard({
   workspace,
+  project,
   selectedNode,
   apiNotice,
   onUpdateConfig,
   onUpdateMetadata,
+  onSelectReference,
   onGenerate,
   onBatch,
   onBatchFiles,
   onPromptInsert
 }: {
   workspace: Workspace;
+  project: Project;
   selectedNode?: CanvasNode;
   apiNotice: string;
   onUpdateConfig: (patch: Partial<CanvasNode["generation"]>) => void;
   onUpdateMetadata: (patch: Record<string, unknown>) => void;
+  onSelectReference: (nodeId: string) => void;
   onGenerate: () => void;
   onBatch: () => void;
   onBatchFiles: (files: FileList | null) => void;
   onPromptInsert: (prompt: string) => void;
 }) {
   const batchInputRef = useRef<HTMLInputElement | null>(null);
+  const referenceNodes = project.nodes.filter(isCanvasImageNode);
   const isSettingsNode = selectedNode?.type === "config";
   const selectedBatchConcurrency =
     typeof selectedNode?.metadata.batchConcurrency === "number" ? selectedNode.metadata.batchConcurrency : 1;
@@ -3045,8 +3052,17 @@ function PromptCard({
       <label className="model-row">
         <Image size={18} />
         <span>
-          <small>Style</small>
-          <strong>Not selected</strong>
+          <small>Reference image</small>
+          <select
+            aria-label="Reference image"
+            value={selectedNode && isCanvasImageNode(selectedNode) ? selectedNode.id : ""}
+            onChange={(event) => event.target.value && onSelectReference(event.target.value)}
+          >
+            <option value="">No reference selected</option>
+            {referenceNodes.map((node) => (
+              <option key={node.id} value={node.id}>Reference: {node.name}</option>
+            ))}
+          </select>
         </span>
       </label>
       <textarea

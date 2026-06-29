@@ -865,6 +865,28 @@ describe("Designer canvas app shell", () => {
     });
   });
 
+  it("lets designers choose the prompt panel reference image before generating", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Upload images/i }));
+
+    const referencePicker = screen.getByRole("combobox", { name: "Reference image" });
+    await user.selectOptions(referencePicker, within(referencePicker).getByRole("option", { name: "Reference: reference-texture.jpg" }));
+    const selectedReferenceId = (referencePicker as HTMLSelectElement).value;
+    expect(screen.getByRole("button", { name: /Image reference-texture\.jpg/i })).toHaveClass("selected");
+    const promptBox = screen.getByPlaceholderText(/\[TARGET\]/);
+    await user.clear(promptBox);
+    await user.type(promptBox, "Use the texture reference for a new embroidered jacket.");
+    await user.click(screen.getAllByRole("button", { name: "Generate" })[0]);
+
+    expect(await screen.findByRole("button", { name: /Image backend result 1\.jpg/i })).toBeInTheDocument();
+    const generationCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
+    const request = JSON.parse(String(generationCalls[generationCalls.length - 1]?.[1]?.body)) as GenerationRequest;
+    expect(request.referenceNodeIds).toEqual([selectedReferenceId]);
+  });
+
   it("opens grouped Recraft-style model menus from the prompt panel and inline image editor", async () => {
     const user = userEvent.setup();
     await login(user);
