@@ -2164,6 +2164,7 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("button", { name: "Edit node" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upscale node" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove BG node" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Final node" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Batch node" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload Reference node" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Settings node" })).toBeInTheDocument();
@@ -2178,6 +2179,13 @@ describe("Designer canvas app shell", () => {
 
     expect(await screen.findByRole("button", { name: /Workflow upload module/i })).toBeInTheDocument();
     expect(screen.getAllByText("Use this upload reference as an upstream image input.").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    await user.click(screen.getByRole("button", { name: "Final node" }));
+
+    expect(await screen.findByRole("button", { name: /Workflow final module/i })).toBeInTheDocument();
+    expect(screen.getAllByText("Mark this image as the approved final handoff for review.").length).toBeGreaterThan(0);
+    expect(screen.getByText("handoff-final")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Settings node" }));
 

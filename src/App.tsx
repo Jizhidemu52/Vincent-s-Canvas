@@ -149,6 +149,7 @@ const workflowModuleIcons: Record<ModuleType, LucideIcon> = {
   edit: Wand2,
   upscale: Maximize2,
   removeBackground: Scissors,
+  final: Check,
   batch: Upload,
   upload: ImagePlus
 };
@@ -642,9 +643,12 @@ export default function App() {
       }
       const firstSource = project.nodes.find((node) => node.id === resolvedSourceIds[0]);
       const operationModel = workspace.modelRegistry.find((model) => model.capability.includes(definition.operation as ModuleType));
-      const shouldUseOperationModel = definition.operation === "upscale" || definition.operation === "removeBackground";
+      const shouldUseModuleDefaultModel =
+        definition.moduleType === "final" || definition.operation === "upscale" || definition.operation === "removeBackground";
       const modelId =
-        shouldUseOperationModel ? operationModel?.id ?? definition.defaultModelId : firstSource?.generation.modelId ?? operationModel?.id ?? definition.defaultModelId;
+        shouldUseModuleDefaultModel
+          ? operationModel?.id ?? definition.defaultModelId
+          : firstSource?.generation.modelId ?? operationModel?.id ?? definition.defaultModelId;
       return createWorkflowModuleFromSelection(current, projectId, resolvedSourceIds, {
         moduleType,
         prompt,

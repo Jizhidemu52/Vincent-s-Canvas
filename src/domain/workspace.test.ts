@@ -79,6 +79,7 @@ describe("designer canvas workspace behavior", () => {
       "edit",
       "upscale",
       "removeBackground",
+      "final",
       "batch",
       "upload"
     ]);
@@ -129,6 +130,7 @@ describe("designer canvas workspace behavior", () => {
       ["edit", "edit", "/api/edits"],
       ["upscale", "upscale", "/api/upscale"],
       ["removeBackground", "removeBackground", "/api/remove-bg"],
+      ["final", "download", undefined],
       ["batch", "generate", "/api/generations"],
       ["upload", "generate", "/api/generations"]
     ]);
@@ -1270,6 +1272,45 @@ describe("designer canvas workspace behavior", () => {
     expect(plan.steps.map((step) => step.referenceNodeIds)).toEqual([[source.id], [editNode.id], [upscaleNode.id]]);
     expect(plan.totalEstimatedCredits).toBe(13);
     expect(plan.issues).toEqual([]);
+  });
+
+  it("keeps a final handoff node at the end of a lightweight workflow without charging credits", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Final handoff chain");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat.png",
+      source: "coat-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const removeBgDefinition = getWorkflowModuleDefinition("removeBackground");
+    const removeBgWorkspace = createWorkflowModuleFromSelection(withAsset, project.id, [source.id], {
+      moduleType: "removeBackground",
+      prompt: removeBgDefinition.defaultPrompt,
+      modelId: removeBgDefinition.defaultModelId
+    });
+    const removeBgNode = removeBgWorkspace.projects[0].nodes.find((node) => node.moduleType === "removeBackground")!;
+    const finalDefinition = getWorkflowModuleDefinition("final");
+    const finalWorkspace = createWorkflowModuleFromSelection(removeBgWorkspace, project.id, [removeBgNode.id], {
+      moduleType: "final",
+      prompt: finalDefinition.defaultPrompt,
+      modelId: finalDefinition.defaultModelId
+    });
+    const finalNode = finalWorkspace.projects[0].nodes.find((node) => node.moduleType === "final")!;
+
+    const plan = buildWorkflowExecutionPlan(finalWorkspace, project.id, source.id);
+    const requests = buildWorkflowGenerationRequests(finalWorkspace, project.id, source.id);
+
+    expect(finalNode).toMatchObject({
+      type: "final",
+      kind: "workflow",
+      references: [removeBgNode.id],
+      generation: expect.objectContaining({ modelId: "handoff-final", outputCount: 1 })
+    });
+    expect(plan.status).toBe("ready");
+    expect(plan.steps.map((step) => step.moduleType)).toEqual(["removeBackground"]);
+    expect(plan.totalEstimatedCredits).toBe(2);
+    expect(requests.map((request) => request.operation)).toEqual(["removeBackground"]);
   });
 
   it("spends the configured model credits when running workflow chains", () => {

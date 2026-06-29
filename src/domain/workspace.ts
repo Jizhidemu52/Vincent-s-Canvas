@@ -7,12 +7,13 @@ export type NodeType =
   | "upscale"
   | "removeBg"
   | "batch"
+  | "final"
   | "assistant";
 
 export type NodeKind = "upload" | "generated" | "operation" | "edit" | "workflow" | "referenceGroup";
 export type NodeStatus = "idle" | "selected" | "running" | "done" | "error";
 export type OperationType = "generate" | "edit" | "upscale" | "removeBackground" | "crop" | "duplicate" | "download";
-export type ModuleType = "upload" | "edit" | "upscale" | "removeBackground" | "generate" | "batch";
+export type ModuleType = "upload" | "edit" | "upscale" | "removeBackground" | "final" | "generate" | "batch";
 export type PortType = "image" | "text" | "config" | "result";
 export type GenerationApiPath = "/api/generations" | "/api/edits" | "/api/upscale" | "/api/remove-bg";
 
@@ -313,7 +314,7 @@ export interface WorkflowModuleDefinition {
   moduleType: ModuleType;
   nodeType: NodeType;
   operation: OperationType;
-  apiPath: GenerationApiPath;
+  apiPath?: GenerationApiPath;
   inputPorts: NodePort[];
   outputPorts: NodePort[];
   label: string;
@@ -380,6 +381,17 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
     defaultModelId: "background-cleaner"
   },
   {
+    moduleType: "final",
+    nodeType: "final",
+    operation: "download",
+    inputPorts: [{ id: "image", type: "image", label: "Approved image" }],
+    outputPorts: [{ id: "result", type: "result", label: "Final handoff" }],
+    label: "Final",
+    detail: "approved handoff for review",
+    defaultPrompt: "Mark this image as the approved final handoff for review.",
+    defaultModelId: "handoff-final"
+  },
+  {
     moduleType: "batch",
     nodeType: "batch",
     operation: "generate",
@@ -416,9 +428,9 @@ export function getWorkflowModuleDefinition(moduleType: ModuleType) {
 }
 
 export function getWorkflowApiPathForOperation(operation: GenerationRequest["operation"]): GenerationApiPath {
-  const definition = WORKFLOW_MODULE_REGISTRY.find((item) => item.operation === operation);
+  const definition = WORKFLOW_MODULE_REGISTRY.find((item) => item.operation === operation && item.apiPath);
   if (!definition) throw new Error(`Workflow operation ${operation} is not registered`);
-  return definition.apiPath;
+  return definition.apiPath!;
 }
 
 export interface Workspace {
@@ -775,6 +787,7 @@ function defaultOperationForModel(model: ModelDefinition): OperationType | undef
 }
 
 function isExecutableWorkflowNode(node: CanvasNode) {
+  if (node.moduleType === "final" || node.type === "final") return false;
   return node.kind === "workflow" || node.type === "config" || node.type === "edit" || node.type === "upscale" || node.type === "removeBg";
 }
 
@@ -2067,7 +2080,7 @@ export function runWorkflowChain(workspace: Workspace, projectId: string, startN
     const nextConnection = project.connections.find((connection) => connection.fromNodeId === cursorId);
     if (!nextConnection) break;
     const nextNode = findNode(project, nextConnection.toNodeId);
-    if (nextNode.kind !== "workflow" && nextNode.type !== "config" && nextNode.type !== "edit" && nextNode.type !== "upscale") {
+    if (!isExecutableWorkflowNode(nextNode)) {
       cursorId = nextNode.id;
       continue;
     }
