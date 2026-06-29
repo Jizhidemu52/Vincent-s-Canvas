@@ -289,7 +289,11 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
         return;
       }
 
-      if (pathname === "/api/admin/history/archive") {
+      if (
+        pathname === "/api/admin/history/archive" ||
+        pathname === "/api/admin/history/restore" ||
+        pathname === "/api/admin/history/delete"
+      ) {
         if (request.method === "OPTIONS") {
           sendJson(response, 204);
           return;
@@ -299,7 +303,7 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
           return;
         }
         const body = await readJsonBody<AdminHistoryArchiveRequest>(request, bodyLimitBytes);
-        const result = callApi(state, "/api/admin/history/archive", body ?? {}, undefined, userId);
+        const result = callApi(state, pathname as "/api/admin/history/archive" | "/api/admin/history/restore" | "/api/admin/history/delete", body ?? {}, undefined, userId);
         if (!isApiError(result) && stateFilePath) {
           saveServerState(stateFilePath, state);
         }
@@ -393,6 +397,7 @@ export function createApiHttpServer(options: ApiHttpServerOptions = {}): Server 
           projectId: requestUrl.searchParams.get("projectId") ?? undefined,
           modelId: requestUrl.searchParams.get("modelId") ?? undefined,
           operation: requestUrl.searchParams.get("operation") ?? undefined,
+          status: requestUrl.searchParams.get("status") ?? undefined,
           from: requestUrl.searchParams.get("from") ?? undefined,
           to: requestUrl.searchParams.get("to") ?? undefined,
           dateFrom: requestUrl.searchParams.get("dateFrom") ?? undefined,

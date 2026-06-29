@@ -125,7 +125,9 @@ export interface AdminAuditEntry {
     | "operation-pricing"
     | "model-registry"
     | "provider-settings"
-    | "history-archive";
+    | "history-archive"
+    | "history-restore"
+    | "history-delete";
   actorUserId?: string;
   userId?: string;
   targetUserId?: string;
@@ -380,6 +382,7 @@ export interface ApiQuery {
   projectId?: string;
   modelId?: string;
   operation?: string;
+  status?: string;
   from?: string;
   to?: string;
   dateFrom?: string;
@@ -408,13 +411,18 @@ function listAdminHistory(state: ServerState, adminUserId?: string, query: ApiQu
     const projectId = textFilter(query.projectId);
     const modelId = textFilter(query.modelId);
     const operation = textFilter(query.operation);
+    const status = textFilter(query.status) ?? "active";
+    if (!["active", "archived", "all"].includes(status)) {
+      throw new Error("Invalid history status filter");
+    }
     const from = historyDateFilter(query.from ?? query.dateFrom);
     const to = historyDateFilter(query.to ?? query.dateTo);
     if (from !== undefined && to !== undefined && from > to) {
       throw new Error("Invalid history date filter");
     }
     return allHistory(state).filter((entry) => {
-      if (entry.archivedAt) return false;
+      if (status === "active" && entry.archivedAt) return false;
+      if (status === "archived" && !entry.archivedAt) return false;
       if (filterUserId && entry.userId !== filterUserId) return false;
       if (projectId && entry.projectId !== projectId) return false;
       if (modelId && entry.modelId !== modelId) return false;
@@ -483,6 +491,115 @@ function archiveAdminHistory(state: ServerState, request: AdminHistoryArchiveReq
 
   return {
     archivedCount: archivedEntries.length,
+    history: listAdminHistory(state, adminUserId),
+    auditEntry
+  };
+}
+
+function restoreAdminHistory(state: ServerState, request: AdminHistoryArchiveRequest | undefined, adminUserId?: string) {
+  assertAdminUser(state, adminUserId);
+  const historyIds = Array.from(new Set((request?.historyIds ?? []).map((id) => id.trim()).filter(Boolean)));
+  if (!historyIds.length) throw new Error("History ids are required");
+  const historyIdSet = new Set(historyIds);
+  const reason = request?.reason?.trim() || undefined;
+  const restoredEntries: HistoryEntry[] = [];
+  const accountEntries: Array<{ userId?: string; account: AccountWorkspace }> = [
+    { account: accountFromState(state) },
+    ...Object.entries(state.accounts).map(([userId, account]) => ({ userId, account }))
+  ];
+
+  for (const item of accountEntries) {
+    let changed = false;
+    item.account.history = item.account.history.map((entry) => {
+      if (!historyIdSet.has(entry.id) || !entry.archivedAt) return entry;
+      changed = true;
+      const { archivedAt, archivedBy, archiveReason, ...restored } = entry;
+      void archivedAt;
+      void archivedBy;
+      void archiveReason;
+      restoredEntries.push(historyWithAccountContext({ ...item.account, history: [restored] })[0]);
+      return restored;
+    });
+    if (changed) {
+      saveAccountWorkspace(state, item.account, item.userId);
+    }
+  }
+  if (!restoredEntries.length) throw new Error("Archived history records not found");
+
+  const affectedUsers = Array.from(new Set(restoredEntries.map((entry) => entry.userId).filter(Boolean)));
+  const auditEntry = recordAdminAudit(state, {
+    eventType: "history-restore",
+    actorUserId: adminUserId,
+    targetUserId: affectedUsers.length === 1 ? affectedUsers[0] : undefined,
+    summary: `Restored ${restoredEntries.length} team history record${restoredEntries.length === 1 ? "" : "s"}`,
+    prompt: reason,
+    outputCount: restoredEntries.length,
+    creditCost: 0,
+    metadata: {
+      historyIds: restoredEntries.map((entry) => entry.id),
+      reason,
+      affectedUsers
+    }
+  });
+
+  return {
+    restoredCount: restoredEntries.length,
+    history: listAdminHistory(state, adminUserId),
+    auditEntry
+  };
+}
+
+function deleteArchivedAdminHistory(state: ServerState, request: AdminHistoryArchiveRequest | undefined, adminUserId?: string) {
+  assertAdminUser(state, adminUserId);
+  const historyIds = Array.from(new Set((request?.historyIds ?? []).map((id) => id.trim()).filter(Boolean)));
+  if (!historyIds.length) throw new Error("History ids are required");
+  const historyIdSet = new Set(historyIds);
+  const reason = request?.reason?.trim() || undefined;
+  const deletedEntries: HistoryEntry[] = [];
+  const accountEntries: Array<{ userId?: string; account: AccountWorkspace }> = [
+    { account: accountFromState(state) },
+    ...Object.entries(state.accounts).map(([userId, account]) => ({ userId, account }))
+  ];
+
+  for (const item of accountEntries) {
+    const remainingHistory: HistoryEntry[] = [];
+    let changed = false;
+    for (const entry of item.account.history) {
+      if (historyIdSet.has(entry.id)) {
+        if (!entry.archivedAt) {
+          throw new Error("Only archived history records can be permanently deleted");
+        }
+        changed = true;
+        deletedEntries.push(historyWithAccountContext({ ...item.account, history: [entry] })[0]);
+        continue;
+      }
+      remainingHistory.push(entry);
+    }
+    if (changed) {
+      item.account.history = remainingHistory;
+      saveAccountWorkspace(state, item.account, item.userId);
+    }
+  }
+  if (!deletedEntries.length) throw new Error("Archived history records not found");
+
+  const affectedUsers = Array.from(new Set(deletedEntries.map((entry) => entry.userId).filter(Boolean)));
+  const auditEntry = recordAdminAudit(state, {
+    eventType: "history-delete",
+    actorUserId: adminUserId,
+    targetUserId: affectedUsers.length === 1 ? affectedUsers[0] : undefined,
+    summary: `Permanently deleted ${deletedEntries.length} archived team history record${deletedEntries.length === 1 ? "" : "s"}`,
+    prompt: reason,
+    outputCount: deletedEntries.length,
+    creditCost: 0,
+    metadata: {
+      historyIds: deletedEntries.map((entry) => entry.id),
+      reason,
+      affectedUsers
+    }
+  });
+
+  return {
+    deletedCount: deletedEntries.length,
     history: listAdminHistory(state, adminUserId),
     auditEntry
   };
@@ -1319,6 +1436,10 @@ export const apiRoutes = {
     listAdminHistory(state, userId),
   "/api/admin/history/archive": (state: ServerState, request?: AdminHistoryArchiveRequest, _requestId?: string, userId?: string) =>
     archiveAdminHistory(state, request, userId),
+  "/api/admin/history/restore": (state: ServerState, request?: AdminHistoryArchiveRequest, _requestId?: string, userId?: string) =>
+    restoreAdminHistory(state, request, userId),
+  "/api/admin/history/delete": (state: ServerState, request?: AdminHistoryArchiveRequest, _requestId?: string, userId?: string) =>
+    deleteArchivedAdminHistory(state, request, userId),
   "/api/admin/audit": (state: ServerState, _request?: GenerationRequest, _requestId?: string, userId?: string) => {
     assertAdminUser(state, userId);
     return allAdminAudit(state);

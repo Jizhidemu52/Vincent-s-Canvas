@@ -714,6 +714,69 @@ describe("backend hosted mock API", () => {
     });
   });
 
+  it("lets admins review, restore, and permanently delete archived team history without changing credit usage", () => {
+    const state = createServerState({ creditBalance: 30 });
+    callApi(state, "/api/generations", request({ outputCount: 1 }), "team-history-restore-alice", "alice@company.local");
+    callApi(state, "/api/upscale", request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }), "team-history-restore-bob", "bob@company.local");
+    const beforeUsage = callApi(state, "/api/admin/usage", undefined, undefined, "admin@company.local") as AdminUsageSummary;
+    const allBefore = callApi(state, "/api/admin/history", undefined, undefined, "admin@company.local") as HistoryEntry[];
+    const bobHistoryId = allBefore.find((entry) => entry.userId === "bob@company.local")!.id;
+
+    callApi(
+      state,
+      "/api/admin/history/archive",
+      { historyIds: [bobHistoryId], reason: "hide duplicate upscale from team review" },
+      undefined,
+      "admin@company.local"
+    );
+    const archived = callApi(state, "/api/admin/history", undefined, undefined, "admin@company.local", { status: "archived" }) as HistoryEntry[];
+    const restoreResult = callApi(
+      state,
+      "/api/admin/history/restore",
+      { historyIds: [bobHistoryId], reason: "reviewed and restored" },
+      undefined,
+      "admin@company.local"
+    ) as { restoredCount: number; history: HistoryEntry[]; auditEntry: AdminAuditEntry };
+    const visibleAfterRestore = callApi(state, "/api/admin/history", undefined, undefined, "admin@company.local") as HistoryEntry[];
+
+    callApi(
+      state,
+      "/api/admin/history/archive",
+      { historyIds: [bobHistoryId], reason: "remove duplicate from review" },
+      undefined,
+      "admin@company.local"
+    );
+    const deleteResult = callApi(
+      state,
+      "/api/admin/history/delete",
+      { historyIds: [bobHistoryId], reason: "permanent cleanup after finance export" },
+      undefined,
+      "admin@company.local"
+    ) as { deletedCount: number; history: HistoryEntry[]; auditEntry: AdminAuditEntry };
+    const visibleAfterDelete = callApi(state, "/api/admin/history", undefined, undefined, "admin@company.local") as HistoryEntry[];
+    const archivedAfterDelete = callApi(state, "/api/admin/history", undefined, undefined, "admin@company.local", { status: "archived" }) as HistoryEntry[];
+    const afterUsage = callApi(state, "/api/admin/usage", undefined, undefined, "admin@company.local") as AdminUsageSummary;
+    const audit = callApi(state, "/api/admin/audit", undefined, undefined, "admin@company.local") as AdminAuditEntry[];
+
+    expect(archived).toHaveLength(1);
+    expect(archived[0]).toMatchObject({ id: bobHistoryId, userId: "bob@company.local", archivedBy: "admin@company.local" });
+    expect(restoreResult).toMatchObject({ restoredCount: 1 });
+    expect(restoreResult.history.some((entry) => entry.id === bobHistoryId)).toBe(true);
+    expect(visibleAfterRestore.find((entry) => entry.id === bobHistoryId)).not.toHaveProperty("archivedAt");
+    expect(deleteResult).toMatchObject({ deletedCount: 1 });
+    expect(visibleAfterDelete.some((entry) => entry.id === bobHistoryId)).toBe(false);
+    expect(archivedAfterDelete.some((entry) => entry.id === bobHistoryId)).toBe(false);
+    expect(afterUsage.totalCreditsUsed).toBe(beforeUsage.totalCreditsUsed);
+    expect(audit[0]).toMatchObject({
+      eventType: "history-delete",
+      actorUserId: "admin@company.local",
+      targetUserId: "bob@company.local",
+      summary: "Permanently deleted 1 archived team history record"
+    });
+    expect(audit[1]).toMatchObject({ eventType: "history-archive" });
+    expect(audit[2]).toMatchObject({ eventType: "history-restore", summary: "Restored 1 team history record" });
+  });
+
   it("keeps designer credits and history isolated by user id", () => {
     const state = createServerState({ creditBalance: 30 });
 

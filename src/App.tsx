@@ -115,9 +115,11 @@ import {
   fetchAdminJobs,
   fetchAdminUsage,
   archiveAdminHistoryRemote,
+  deleteAdminHistoryRemote,
   fetchBackendSnapshot,
   fetchProviderHealth,
   fetchWorkspaceSnapshot,
+  restoreAdminHistoryRemote,
   deletePromptPresetRemote,
   saveWorkspaceSnapshot,
   savePromptPresetRemote,
@@ -261,6 +263,8 @@ function auditPrimaryMetric(entry: AdminAuditEntry) {
   if (entry.eventType === "operation-pricing") return `${entry.operation ?? "operation"} ${entry.creditCost} credits/output`;
   if (entry.eventType === "provider-settings") return entry.provider ?? "provider";
   if (entry.eventType === "history-archive") return `${entry.outputCount ?? 0} archived`;
+  if (entry.eventType === "history-restore") return `${entry.outputCount ?? 0} restored`;
+  if (entry.eventType === "history-delete") return `${entry.outputCount ?? 0} deleted`;
   return `${entry.creditCost ?? 0} credits`;
 }
 
@@ -1818,6 +1822,7 @@ function AdminView({
   const [adminHistoryModelFilter, setAdminHistoryModelFilter] = useState("all");
   const [adminHistoryOperationFilter, setAdminHistoryOperationFilter] = useState("all");
   const [adminHistoryTimeFilter, setAdminHistoryTimeFilter] = useState("all");
+  const [adminHistoryStatusFilter, setAdminHistoryStatusFilter] = useState<"active" | "archived" | "all">("active");
   const [selectedAdminHistoryIds, setSelectedAdminHistoryIds] = useState<string[]>([]);
   const [adminAudit, setAdminAudit] = useState<AdminAuditEntry[]>(workspace.history.map(historyEntryToAuditEntry));
   const estimatedSpend = formatMoneyCents(adminUsage?.totalPriceCents, adminUsage?.currency);
@@ -1847,13 +1852,14 @@ function AdminView({
     if (adminHistoryProjectFilter !== "all") query.projectId = adminHistoryProjectFilter;
     if (adminHistoryModelFilter !== "all") query.modelId = adminHistoryModelFilter;
     if (adminHistoryOperationFilter !== "all") query.operation = adminHistoryOperationFilter as OperationType;
+    if (adminHistoryStatusFilter !== "active") query.status = adminHistoryStatusFilter;
     if ((adminHistoryTimeFilter === "recent-7" || adminHistoryTimeFilter === "recent-30") && newestAdminHistoryTime) {
       const days = adminHistoryTimeFilter === "recent-7" ? 7 : 30;
       query.from = new Date(newestAdminHistoryTime - days * 24 * 60 * 60 * 1000).toISOString();
       query.to = new Date(newestAdminHistoryTime).toISOString();
     }
     return query;
-  }, [adminHistoryModelFilter, adminHistoryOperationFilter, adminHistoryProjectFilter, adminHistoryTimeFilter, adminHistoryUserFilter, newestAdminHistoryTime]);
+  }, [adminHistoryModelFilter, adminHistoryOperationFilter, adminHistoryProjectFilter, adminHistoryStatusFilter, adminHistoryTimeFilter, adminHistoryUserFilter, newestAdminHistoryTime]);
   const hasAdminHistoryFilters = Object.keys(adminHistoryQuery).length > 0;
   const adminHistoryExportLabel =
     adminHistoryModelFilter !== "all"
@@ -1984,6 +1990,48 @@ function AdminView({
       setCreditNotice(`Archived ${result.archivedCount} team history record${result.archivedCount === 1 ? "" : "s"}`);
     } catch (error) {
       setCreditNotice(error instanceof Error ? error.message : "Team history archive failed");
+    } finally {
+      setIsAdjusting(false);
+    }
+  }
+
+  async function restoreSelectedAdminHistory() {
+    if (!selectedAdminHistoryIds.length) return;
+    setIsAdjusting(true);
+    try {
+      const result = await restoreAdminHistoryRemote(selectedAdminHistoryIds, "Restored from admin archive review", activeUserId);
+      setAdminHistory(result.history);
+      setFilteredAdminHistory((current) =>
+        current ? current.filter((entry) => !selectedAdminHistoryIds.includes(entry.id)) : current
+      );
+      setSelectedAdminHistoryIds([]);
+      if (result.auditEntry) {
+        setAdminAudit((current) => [result.auditEntry!, ...current.filter((entry) => entry.id !== result.auditEntry!.id)]);
+      }
+      setCreditNotice(`Restored ${result.restoredCount} team history record${result.restoredCount === 1 ? "" : "s"}`);
+    } catch (error) {
+      setCreditNotice(error instanceof Error ? error.message : "Team history restore failed");
+    } finally {
+      setIsAdjusting(false);
+    }
+  }
+
+  async function deleteSelectedAdminHistory() {
+    if (!selectedAdminHistoryIds.length) return;
+    setIsAdjusting(true);
+    try {
+      const result = await deleteAdminHistoryRemote(selectedAdminHistoryIds, "Permanent admin archive cleanup", activeUserId);
+      setAdminHistory(result.history);
+      setFilteredAdminHistory((current) =>
+        current ? current.filter((entry) => !selectedAdminHistoryIds.includes(entry.id)) : current
+      );
+      setSelectedAdminHistoryIds([]);
+      if (result.auditEntry) {
+        setAdminAudit((current) => [result.auditEntry!, ...current.filter((entry) => entry.id !== result.auditEntry!.id)]);
+      }
+      setCreditNotice(`Permanently deleted ${result.deletedCount} archived team history record${result.deletedCount === 1 ? "" : "s"}`);
+    } catch (error) {
+      setCreditNotice(error instanceof Error ? error.message : "Team history delete failed");
     } finally {
       setIsAdjusting(false);
     }
@@ -2415,6 +2463,18 @@ function AdminView({
             {adminHistory.length ? (
               <div className="admin-history-tools">
                 <label className="admin-inline-filter">
+                  <span>Status</span>
+                  <select
+                    aria-label="Team history status filter"
+                    value={adminHistoryStatusFilter}
+                    onChange={(event) => setAdminHistoryStatusFilter(event.target.value as "active" | "archived" | "all")}
+                  >
+                    <option value="active">Active review</option>
+                    <option value="archived">Archived review</option>
+                    <option value="all">All records</option>
+                  </select>
+                </label>
+                <label className="admin-inline-filter">
                   <span>Designer</span>
                   <select
                     aria-label="Team history designer filter"
@@ -2504,9 +2564,25 @@ function AdminView({
                   type="button"
                   className="secondary-button"
                   onClick={archiveSelectedAdminHistory}
-                  disabled={!selectedAdminHistory.length || isAdjusting}
+                  disabled={!selectedAdminHistory.length || isAdjusting || adminHistoryStatusFilter === "archived"}
                 >
                   <Archive size={14} /> Archive selected team history
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={restoreSelectedAdminHistory}
+                  disabled={!selectedAdminHistory.length || isAdjusting || adminHistoryStatusFilter !== "archived"}
+                >
+                  <RotateCcw size={14} /> Restore selected team history
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button danger"
+                  onClick={deleteSelectedAdminHistory}
+                  disabled={!selectedAdminHistory.length || isAdjusting || adminHistoryStatusFilter !== "archived"}
+                >
+                  <Trash2 size={14} /> Permanently delete selected team history
                 </button>
                 {selectedAdminHistory.length ? <span className="admin-selection-count">{selectedAdminHistory.length} selected</span> : null}
               </div>
@@ -2528,6 +2604,11 @@ function AdminView({
                       {entry.creditCost} credits · {entry.outputCount} output{entry.outputCount === 1 ? "" : "s"}
                     </strong>
                     <small>{entry.prompt}</small>
+                    {entry.archivedAt ? (
+                      <small>
+                        Archived by {entry.archivedBy ?? "admin"} / {entry.archiveReason ?? "no reason"} / {formatActivityMinute(entry.archivedAt)}
+                      </small>
+                    ) : null}
                     {entry.outputs?.length ? (
                       <div className="history-output-strip" aria-label={`Team history outputs for ${entry.id}`}>
                         {entry.outputs.slice(0, 4).map((output) => (

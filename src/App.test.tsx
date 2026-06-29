@@ -17,6 +17,7 @@ let backendHistory: HistoryEntry[] = [];
 let backendWorkspace: Workspace = createInitialWorkspace();
 let backendAdminAudit: AdminAuditEntry[] = [];
 let backendAdminHistory: HistoryEntry[] = [];
+let backendArchivedAdminHistory: HistoryEntry[] = [];
 let backendAdminUsage: {
   totalCreditsUsed: number;
   totalHistoryEntries: number;
@@ -111,6 +112,7 @@ beforeEach(() => {
       outputs: [{ name: "bob-upscale-1.jpg", source: "/fixtures/bob-upscale-1.jpg", width: 1024, height: 1024 }]
     }
   ];
+  backendArchivedAdminHistory = [];
   backendAdminAudit = [
     {
       id: "audit-alice-1",
@@ -636,6 +638,15 @@ beforeEach(() => {
         const ids = new Set(request.historyIds ?? []);
         const archived = backendAdminHistory.filter((entry) => ids.has(entry.id));
         backendAdminHistory = backendAdminHistory.filter((entry) => !ids.has(entry.id));
+        backendArchivedAdminHistory = [
+          ...archived.map((entry) => ({
+            ...entry,
+            archivedAt: "2026-06-28T02:30:00.000Z",
+            archivedBy: adminUserId,
+            archiveReason: request.reason
+          })),
+          ...backendArchivedAdminHistory
+        ];
         const auditEntry: AdminAuditEntry = {
           id: `admin-history-archive-${backendAdminAudit.length + 1}`,
           eventType: "history-archive",
@@ -650,6 +661,63 @@ beforeEach(() => {
         backendAdminAudit = [auditEntry, ...backendAdminAudit];
         return jsonResponse({ archivedCount: archived.length, history: backendAdminHistory, auditEntry });
       }
+      if (url.endsWith("/api/admin/history/restore") && init?.method === "POST") {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        const request = JSON.parse(String(init?.body)) as { historyIds?: string[]; reason?: string };
+        const ids = new Set(request.historyIds ?? []);
+        const restored = backendArchivedAdminHistory.filter((entry) => ids.has(entry.id));
+        backendArchivedAdminHistory = backendArchivedAdminHistory.filter((entry) => !ids.has(entry.id));
+        backendAdminHistory = [
+          ...restored.map(({ archivedAt, archivedBy, archiveReason, ...entry }) => {
+            void archivedAt;
+            void archivedBy;
+            void archiveReason;
+            return entry;
+          }),
+          ...backendAdminHistory
+        ];
+        const auditEntry: AdminAuditEntry = {
+          id: `admin-history-restore-${backendAdminAudit.length + 1}`,
+          eventType: "history-restore",
+          actorUserId: adminUserId,
+          targetUserId: restored.length === 1 ? restored[0].userId : undefined,
+          prompt: request.reason,
+          summary: `Restored ${restored.length} team history record${restored.length === 1 ? "" : "s"}`,
+          outputCount: restored.length,
+          creditCost: 0,
+          createdAt: new Date().toISOString()
+        };
+        backendAdminAudit = [auditEntry, ...backendAdminAudit];
+        return jsonResponse({ restoredCount: restored.length, history: backendAdminHistory, auditEntry });
+      }
+      if (url.endsWith("/api/admin/history/delete") && init?.method === "POST") {
+        const headers = init?.headers as Record<string, string> | undefined;
+        const adminUserId = headers?.["x-user-id"] ?? "";
+        if (!adminUserId.includes("admin")) {
+          return jsonResponse({ status: "failed", errorMessage: "Admin role required" }, 400);
+        }
+        const request = JSON.parse(String(init?.body)) as { historyIds?: string[]; reason?: string };
+        const ids = new Set(request.historyIds ?? []);
+        const deleted = backendArchivedAdminHistory.filter((entry) => ids.has(entry.id));
+        backendArchivedAdminHistory = backendArchivedAdminHistory.filter((entry) => !ids.has(entry.id));
+        const auditEntry: AdminAuditEntry = {
+          id: `admin-history-delete-${backendAdminAudit.length + 1}`,
+          eventType: "history-delete",
+          actorUserId: adminUserId,
+          targetUserId: deleted.length === 1 ? deleted[0].userId : undefined,
+          prompt: request.reason,
+          summary: `Permanently deleted ${deleted.length} archived team history record${deleted.length === 1 ? "" : "s"}`,
+          outputCount: deleted.length,
+          creditCost: 0,
+          createdAt: new Date().toISOString()
+        };
+        backendAdminAudit = [auditEntry, ...backendAdminAudit];
+        return jsonResponse({ deletedCount: deleted.length, history: backendAdminHistory, auditEntry });
+      }
       if (url.includes("/api/admin/history")) {
         const headers = init?.headers as Record<string, string> | undefined;
         const adminUserId = headers?.["x-user-id"] ?? "";
@@ -661,8 +729,15 @@ beforeEach(() => {
         const to = query.get("to");
         const fromTime = from ? Date.parse(from) : undefined;
         const toTime = to ? Date.parse(to) : undefined;
+        const status = query.get("status");
+        const sourceHistory =
+          status === "archived"
+            ? backendArchivedAdminHistory
+            : status === "all"
+              ? [...backendAdminHistory, ...backendArchivedAdminHistory]
+              : backendAdminHistory;
         return jsonResponse(
-          backendAdminHistory.filter((entry) => {
+          sourceHistory.filter((entry) => {
             if (query.get("userId") && entry.userId !== query.get("userId")) return false;
             if (query.get("projectId") && entry.projectId !== query.get("projectId")) return false;
             if (query.get("modelId") && entry.modelId !== query.get("modelId")) return false;
@@ -1889,6 +1964,64 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).toBeInTheDocument();
     expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
     expect(screen.getByText(/history-archive/i)).toBeInTheDocument();
+  });
+
+  it("lets admins review archived team history and either restore or permanently delete selected rows", async () => {
+    const archivedBob = {
+      ...backendAdminHistory.find((entry) => entry.id === "history-bob-team-1")!,
+      archivedAt: "2026-06-28T02:30:00.000Z",
+      archivedBy: "admin@company.local",
+      archiveReason: "duplicate provider test"
+    };
+    const archivedAlice = {
+      ...backendAdminHistory.find((entry) => entry.id === "history-alice-team-1")!,
+      id: "history-alice-archived-1",
+      archivedAt: "2026-06-28T02:35:00.000Z",
+      archivedBy: "admin@company.local",
+      archiveReason: "finance exported"
+    };
+    backendAdminHistory = backendAdminHistory.filter((entry) => entry.id === "history-alice-team-1");
+    backendArchivedAdminHistory = [archivedBob, archivedAlice];
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: /Admin monitoring/i }));
+    await screen.findByText("Team history");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team history status filter" }), "archived");
+    expect(await screen.findByRole("img", { name: "Team history output bob-upscale-1.jpg" })).toBeInTheDocument();
+    expect(screen.getAllByText(/Archived by admin@company.local/)).toHaveLength(2);
+    expect(screen.getByText(/duplicate provider test/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Select team history history-bob-team-1" }));
+    await user.click(screen.getByRole("button", { name: "Restore selected team history" }));
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/admin\/history\/restore$/),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "x-user-id": "admin@company.local" }),
+        body: expect.stringContaining("history-bob-team-1")
+      })
+    );
+    expect((await screen.findAllByText("Restored 1 team history record")).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("img", { name: "Team history output bob-upscale-1.jpg" })).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Select team history history-alice-archived-1" }));
+    await user.click(screen.getByRole("button", { name: "Permanently delete selected team history" }));
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/admin\/history\/delete$/),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "x-user-id": "admin@company.local" }),
+        body: expect.stringContaining("history-alice-archived-1")
+      })
+    );
+    expect((await screen.findAllByText("Permanently deleted 1 archived team history record")).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("img", { name: "Team history output alice-cleanup-1.jpg" })).not.toBeInTheDocument();
+    expect(screen.getByText(/history-delete/i)).toBeInTheDocument();
   });
 
   it("supports the image node inline model/prompt entry and generation loop", async () => {

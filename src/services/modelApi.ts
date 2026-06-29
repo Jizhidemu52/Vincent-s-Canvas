@@ -153,6 +153,7 @@ export interface AdminHistoryFilters {
   projectId?: string;
   modelId?: string;
   operation?: OperationType;
+  status?: "active" | "archived" | "all";
   from?: string;
   to?: string;
 }
@@ -167,7 +168,9 @@ export interface AdminAuditEntry {
     | "operation-pricing"
     | "model-registry"
     | "provider-settings"
-    | "history-archive";
+    | "history-archive"
+    | "history-restore"
+    | "history-delete";
   actorUserId?: string;
   userId?: string;
   targetUserId?: string;
@@ -193,6 +196,18 @@ export interface AdminAuditEntry {
 
 export interface AdminHistoryArchiveResult {
   archivedCount: number;
+  history: AdminHistoryEntry[];
+  auditEntry?: AdminAuditEntry;
+}
+
+export interface AdminHistoryRestoreResult {
+  restoredCount: number;
+  history: AdminHistoryEntry[];
+  auditEntry?: AdminAuditEntry;
+}
+
+export interface AdminHistoryDeleteResult {
+  deletedCount: number;
   history: AdminHistoryEntry[];
   auditEntry?: AdminAuditEntry;
 }
@@ -397,6 +412,24 @@ export async function archiveAdminHistoryRemote(historyIds: string[], reason: st
     body: JSON.stringify({ historyIds, reason })
   });
   return readJson<AdminHistoryArchiveResult>(response);
+}
+
+export async function restoreAdminHistoryRemote(historyIds: string[], reason: string, adminUserId?: string): Promise<AdminHistoryRestoreResult> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/history/restore`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...userHeaders(adminUserId) },
+    body: JSON.stringify({ historyIds, reason })
+  });
+  return readJson<AdminHistoryRestoreResult>(response);
+}
+
+export async function deleteAdminHistoryRemote(historyIds: string[], reason: string, adminUserId?: string): Promise<AdminHistoryDeleteResult> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/history/delete`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...userHeaders(adminUserId) },
+    body: JSON.stringify({ historyIds, reason })
+  });
+  return readJson<AdminHistoryDeleteResult>(response);
 }
 
 export async function fetchAdminAudit(adminUserId?: string): Promise<AdminAuditEntry[]> {

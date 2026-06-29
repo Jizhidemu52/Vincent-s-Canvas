@@ -77,6 +77,10 @@ http://127.0.0.1:5173/
 - `GET /api/admin/usage`
 - `GET /api/admin/jobs`
 - `GET /api/admin/providers`
+- `GET /api/admin/history`
+- `POST /api/admin/history/archive`
+- `POST /api/admin/history/restore`
+- `POST /api/admin/history/delete`
 - `POST /api/admin/credits`
 - `POST /api/admin/model-pricing`
 - `POST /api/admin/operation-pricing`

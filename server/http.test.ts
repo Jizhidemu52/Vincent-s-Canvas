@@ -890,6 +890,69 @@ describe("HTTP API server", () => {
     expect(audit[0]).toMatchObject({ eventType: "history-archive", summary: "Archived 1 team history record" });
   });
 
+  it("restores and permanently deletes archived team generation history over HTTP", async () => {
+    await fetch(`${context.baseUrl}/api/generations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "team-history-restore-http-alice", "x-user-id": "alice@company.local" },
+      body: JSON.stringify(request({ outputCount: 1 }))
+    });
+    await fetch(`${context.baseUrl}/api/upscale`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-request-id": "team-history-restore-http-bob", "x-user-id": "bob@company.local" },
+      body: JSON.stringify(request({ modelId: "upscale-pro", prompt: "", operation: "upscale", outputCount: 1 }))
+    });
+    const beforeHistory = (await (
+      await fetch(`${context.baseUrl}/api/admin/history`, { headers: { "x-user-id": "admin@company.local" } })
+    ).json()) as Array<Record<string, unknown>>;
+    const bobHistoryId = String(beforeHistory.find((entry) => entry.userId === "bob@company.local")!.id);
+
+    await fetch(`${context.baseUrl}/api/admin/history/archive`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ historyIds: [bobHistoryId], reason: "temporary review archive" })
+    });
+    const archivedHistory = (await (
+      await fetch(`${context.baseUrl}/api/admin/history?status=archived`, { headers: { "x-user-id": "admin@company.local" } })
+    ).json()) as Array<Record<string, unknown>>;
+    const restoreResponse = await fetch(`${context.baseUrl}/api/admin/history/restore`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ historyIds: [bobHistoryId], reason: "restore after review" })
+    });
+    const restoreResult = (await restoreResponse.json()) as Record<string, unknown>;
+    await fetch(`${context.baseUrl}/api/admin/history/archive`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ historyIds: [bobHistoryId], reason: "ready for permanent cleanup" })
+    });
+    const deleteResponse = await fetch(`${context.baseUrl}/api/admin/history/delete`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "admin@company.local" },
+      body: JSON.stringify({ historyIds: [bobHistoryId], reason: "finance export complete" })
+    });
+    const deleteResult = (await deleteResponse.json()) as Record<string, unknown>;
+    const visibleHistory = (await (
+      await fetch(`${context.baseUrl}/api/admin/history`, { headers: { "x-user-id": "admin@company.local" } })
+    ).json()) as Array<Record<string, unknown>>;
+    const archivedAfterDelete = (await (
+      await fetch(`${context.baseUrl}/api/admin/history?status=archived`, { headers: { "x-user-id": "admin@company.local" } })
+    ).json()) as Array<Record<string, unknown>>;
+    const audit = (await (
+      await fetch(`${context.baseUrl}/api/admin/audit`, { headers: { "x-user-id": "admin@company.local" } })
+    ).json()) as Array<Record<string, unknown>>;
+
+    expect(archivedHistory).toHaveLength(1);
+    expect(archivedHistory[0]).toMatchObject({ id: bobHistoryId, archivedBy: "admin@company.local" });
+    expect(restoreResponse.status).toBe(200);
+    expect(restoreResult).toMatchObject({ restoredCount: 1 });
+    expect(deleteResponse.status).toBe(200);
+    expect(deleteResult).toMatchObject({ deletedCount: 1 });
+    expect(visibleHistory.some((entry) => entry.id === bobHistoryId)).toBe(false);
+    expect(archivedAfterDelete.some((entry) => entry.id === bobHistoryId)).toBe(false);
+    expect(audit[0]).toMatchObject({ eventType: "history-delete", summary: "Permanently deleted 1 archived team history record" });
+    expect(audit[2]).toMatchObject({ eventType: "history-restore", summary: "Restored 1 team history record" });
+  });
+
   it("ignores workspace model registry changes across server restarts because models are server-owned", async () => {
     await new Promise<void>((resolve, reject) => {
       context.server.close((error) => (error ? reject(error) : resolve()));
