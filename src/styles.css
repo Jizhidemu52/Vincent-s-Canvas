@@ -965,6 +965,19 @@ button {
   text-align: right;
 }
 
+.operation-pricing {
+  border-top: 1px solid #e7e7e7;
+  padding-top: 14px;
+}
+
+.operation-pricing-row {
+  border-top-style: dashed;
+}
+
+.operation-pricing-row strong {
+  text-transform: none;
+}
+
 .profile-ledger {
   grid-template-columns: 1fr 1fr;
 }

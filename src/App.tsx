@@ -1802,6 +1802,13 @@ function ProfilePanel({ workspace }: { workspace: Workspace }) {
     memo[entry.modelId] = (memo[entry.modelId] ?? 0) + entry.creditCost;
     return memo;
   }, {});
+  const operationPricingRows = workspace.modelRegistry.flatMap((model) =>
+    Object.entries(model.operationPricing ?? {}).map(([operation, rule]) => ({
+      model,
+      operation: operation as OperationType,
+      rule
+    }))
+  );
   return (
     <section className="home-section" aria-label="Profile credit management">
       <div className="section-heading">
@@ -1854,6 +1861,27 @@ function ProfilePanel({ workspace }: { workspace: Workspace }) {
             ))
           ) : (
             <p>No model pricing rules configured yet.</p>
+          )}
+        </div>
+      </section>
+      <section className="credit-pricing operation-pricing" aria-label="Operation pricing rules">
+        <div>
+          <h3>Operation pricing overrides</h3>
+          <p>Admin-defined point costs for specific actions such as generate, edit, upscale and remove background.</p>
+        </div>
+        <div className="pricing-rule-list">
+          {operationPricingRows.length ? (
+            operationPricingRows.map(({ model, operation, rule }) => (
+              <article className="pricing-rule-row operation-pricing-row" aria-label={`${model.name} ${operation} operation pricing rule`} key={`${model.id}-${operation}`}>
+                <div>
+                  <strong>{operation}</strong>
+                  <small>{model.name}</small>
+                </div>
+                <span>{rule.cost} credits / {formatMoneyCents(rule.priceCents, rule.currency ?? model.currency) ?? "No price configured"}</span>
+              </article>
+            ))
+          ) : (
+            <p>No operation-specific pricing overrides configured yet.</p>
           )}
         </div>
       </section>

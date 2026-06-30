@@ -3317,9 +3317,9 @@ describe("Designer canvas app shell", () => {
       ...backendWorkspace,
       modelRegistry: backendWorkspace.modelRegistry.map((model) =>
         model.id === "gpt-image-2-medium"
-          ? { ...model, cost: 9, priceCents: 450, currency: "CNY" }
+          ? { ...model, cost: 9, priceCents: 450, currency: "CNY", operationPricing: { edit: { cost: 12, priceCents: 680, currency: "CNY" } } }
           : model.id === "background-cleaner"
-            ? { ...model, cost: 3, priceCents: 120, currency: "CNY" }
+            ? { ...model, cost: 3, priceCents: 120, currency: "CNY", operationPricing: { removeBackground: { cost: 4, priceCents: 160, currency: "CNY" } } }
             : model
       )
     };
@@ -3337,5 +3337,15 @@ describe("Designer canvas app shell", () => {
     expect(within(removeBgModel).getByText("Remove Background")).toBeInTheDocument();
     expect(within(removeBgModel).getByText("3 credits / 1.20 CNY")).toBeInTheDocument();
     expect(within(removeBgModel).getByText("removeBackground")).toBeInTheDocument();
+
+    const operationPricing = screen.getByRole("region", { name: "Operation pricing rules" });
+    const editRule = within(operationPricing).getByRole("article", { name: "GPT Image 2 Medium edit operation pricing rule" });
+    const removeBgRule = within(operationPricing).getByRole("article", { name: "Remove Background removeBackground operation pricing rule" });
+    expect(within(editRule).getByText("edit")).toBeInTheDocument();
+    expect(within(editRule).getByText("GPT Image 2 Medium")).toBeInTheDocument();
+    expect(within(editRule).getByText("12 credits / 6.80 CNY")).toBeInTheDocument();
+    expect(within(removeBgRule).getByText("removeBackground")).toBeInTheDocument();
+    expect(within(removeBgRule).getByText("Remove Background")).toBeInTheDocument();
+    expect(within(removeBgRule).getByText("4 credits / 1.60 CNY")).toBeInTheDocument();
   });
 });
