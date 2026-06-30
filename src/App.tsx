@@ -65,6 +65,7 @@ import {
   copyPasteSelectedNodes,
   createInitialWorkspace,
   createProject,
+  createStandardWorkflowChain,
   createWorkflowModuleFromSelection,
   deleteSelectedNodes,
   importBatchFolder,
@@ -713,6 +714,30 @@ export default function App() {
     addWorkflowModule(moduleType, sourceNodeIds);
   }
 
+  function createStandardWorkflow() {
+    if (!activeProject) return;
+    const projectId = activeProject.id;
+    const selectedCandidateIds = activeProject.selectedNodeIds.length ? activeProject.selectedNodeIds : selectedNode?.id ? [selectedNode.id] : [];
+    const startNodeId =
+      selectedCandidateIds.find((id) => {
+        const node = activeProject.nodes.find((item) => item.id === id);
+        return node ? nodeCanFeedModule(node, "upload") : false;
+      }) ?? activeProject.nodes.find((node) => nodeCanFeedModule(node, "upload"))?.id;
+    if (!startNodeId) {
+      setApiNotice("Add or select an image before creating a workflow chain");
+      return;
+    }
+    try {
+      const nextWorkspace = createStandardWorkflowChain(workspace, projectId, startNodeId);
+      setWorkspace(nextWorkspace);
+      setRightPanel("context");
+      setApiNotice("Standard workflow chain created");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not create workflow chain";
+      setApiNotice(message);
+    }
+  }
+
   function addWorkflowSettingsNode() {
     if (!activeProject) return;
     const outputCount = selectedNode?.generation.outputCount ?? 3;
@@ -1230,6 +1255,7 @@ export default function App() {
         onCancelBatch={cancelActiveBatch}
         onWorkflow={runWorkflow}
         onAddModule={addWorkflowModule}
+        onCreateStandardWorkflow={createStandardWorkflow}
         onAddSettingsNode={addWorkflowSettingsNode}
         onConnectModule={connectSelectionToNewModule}
         onGroupReferences={groupReferences}
@@ -3246,6 +3272,7 @@ function CanvasView({
   onCancelBatch,
   onWorkflow,
   onAddModule,
+  onCreateStandardWorkflow,
   onAddSettingsNode,
   onConnectModule,
   onGroupReferences,
@@ -3285,6 +3312,7 @@ function CanvasView({
   onCancelBatch: () => void;
   onWorkflow: () => void;
   onAddModule: (moduleType: ModuleType) => void;
+  onCreateStandardWorkflow: () => void;
   onAddSettingsNode: () => void;
   onConnectModule: (moduleType: ModuleType, sourceNodeIds?: string[]) => void;
   onGroupReferences: () => void;
@@ -3366,6 +3394,7 @@ function CanvasView({
           stats={stats}
           onPanel={onRightPanel}
           onAddModule={onAddModule}
+          onCreateStandardWorkflow={onCreateStandardWorkflow}
           onAddSettingsNode={onAddSettingsNode}
           onPromptInsert={(prompt) => onUpdateConfig({ prompt })}
           onSavePrompt={onSavePrompt}
@@ -4803,6 +4832,7 @@ function RightDock({
   stats,
   onPanel,
   onAddModule,
+  onCreateStandardWorkflow,
   onAddSettingsNode,
   onPromptInsert,
   onSavePrompt,
@@ -4823,6 +4853,7 @@ function RightDock({
   stats: { images: number; texts: number; modules: number };
   onPanel: (panel: RightPanel) => void;
   onAddModule: (moduleType: ModuleType) => void;
+  onCreateStandardWorkflow: () => void;
   onAddSettingsNode: () => void;
   onPromptInsert: (prompt: string) => void;
   onSavePrompt: () => void;
@@ -4992,6 +5023,9 @@ function RightDock({
           <span>{stats.texts} text nodes</span>
           <span>{stats.modules} modules</span>
           <div className="dock-actions">
+            <button type="button" aria-label="Create standard workflow chain" onClick={onCreateStandardWorkflow} disabled={!selectedNode}>
+              <Network size={13} /> Standard chain
+            </button>
             {WORKFLOW_MODULE_REGISTRY.map((definition) => {
               const Icon = workflowModuleIcons[definition.moduleType];
               return (

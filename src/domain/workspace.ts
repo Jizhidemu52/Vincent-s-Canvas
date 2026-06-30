@@ -425,6 +425,8 @@ export const WORKFLOW_MODULE_REGISTRY: WorkflowModuleDefinition[] = [
   }
 ];
 
+export const STANDARD_WORKFLOW_CHAIN: ModuleType[] = ["upload", "generate", "edit", "upscale", "removeBackground", "final"];
+
 export function getWorkflowModuleDefinition(moduleType: ModuleType) {
   const definition = WORKFLOW_MODULE_REGISTRY.find((item) => item.moduleType === moduleType);
   if (!definition) throw new Error(`Workflow module ${moduleType} is not registered`);
@@ -2067,6 +2069,29 @@ export function createWorkflowModuleFromSelection(
       selectedNodeIds: [moduleNode.id]
     });
   });
+}
+
+export function createStandardWorkflowChain(workspace: Workspace, projectId: string, sourceNodeId: string): Workspace {
+  findNode(findProject(workspace, projectId), sourceNodeId);
+  let nextWorkspace = workspace;
+  let upstreamNodeId = sourceNodeId;
+
+  for (const moduleType of STANDARD_WORKFLOW_CHAIN) {
+    const definition = getWorkflowModuleDefinition(moduleType);
+    nextWorkspace = createWorkflowModuleFromSelection(nextWorkspace, projectId, [upstreamNodeId], {
+      moduleType,
+      prompt: definition.defaultPrompt,
+      modelId: definition.defaultModelId
+    });
+    const project = findProject(nextWorkspace, projectId);
+    upstreamNodeId = project.selectedNodeIds[0] ?? project.nodes[project.nodes.length - 1]?.id ?? upstreamNodeId;
+  }
+
+  return updateProject(nextWorkspace, projectId, (project) => ({
+    ...project,
+    selectedNodeIds: [sourceNodeId],
+    updatedAt: now()
+  }));
 }
 
 export function buildWorkflowExecutionPlan(workspace: Workspace, projectId: string, startNodeId: string): WorkflowExecutionPlan {

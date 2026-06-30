@@ -16,6 +16,7 @@ import {
   connectWorkflowNode,
   commitShapeEdit,
   configureNodeGeneration,
+  createStandardWorkflowChain,
   createInitialWorkspace,
   createProject,
   createWorkflowModuleFromSelection,
@@ -34,6 +35,7 @@ import {
   deletePromptPreset,
   getWorkflowModuleDefinition,
   getWorkflowApiPathForOperation,
+  STANDARD_WORKFLOW_CHAIN,
   WORKFLOW_MODULE_REGISTRY
 } from "./workspace";
 import type { ModelDefinition } from "./workspace";
@@ -140,6 +142,47 @@ describe("designer canvas workspace behavior", () => {
     expect(getWorkflowApiPathForOperation("edit")).toBe("/api/edits");
     expect(getWorkflowApiPathForOperation("upscale")).toBe("/api/upscale");
     expect(getWorkflowApiPathForOperation("removeBackground")).toBe("/api/remove-bg");
+  });
+
+  it("creates the standard lightweight workflow chain from one reference image", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 60 }), "Standard workflow");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "coat.png",
+      source: "coat-source",
+      width: 640,
+      height: 640
+    });
+    const source = withAsset.projects[0].nodes[0];
+
+    const chained = createStandardWorkflowChain(withAsset, project.id, source.id);
+    const chainedProject = chained.projects[0];
+    const workflowNodes = chainedProject.nodes.filter((node) => node.kind === "workflow");
+    const workflowNodeIds = workflowNodes.map((node) => node.id);
+    const plan = buildWorkflowExecutionPlan(chained, project.id, source.id);
+
+    expect(STANDARD_WORKFLOW_CHAIN).toEqual(["upload", "generate", "edit", "upscale", "removeBackground", "final"]);
+    expect(workflowNodes.map((node) => node.moduleType)).toEqual(STANDARD_WORKFLOW_CHAIN);
+    expect(chainedProject.selectedNodeIds).toEqual([source.id]);
+    expect(chainedProject.connections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fromNodeId: source.id, toNodeId: workflowNodeIds[0] }),
+        expect.objectContaining({ fromNodeId: workflowNodeIds[0], toNodeId: workflowNodeIds[1] }),
+        expect.objectContaining({ fromNodeId: workflowNodeIds[1], toNodeId: workflowNodeIds[2] }),
+        expect.objectContaining({ fromNodeId: workflowNodeIds[2], toNodeId: workflowNodeIds[3] }),
+        expect.objectContaining({ fromNodeId: workflowNodeIds[3], toNodeId: workflowNodeIds[4] }),
+        expect.objectContaining({ fromNodeId: workflowNodeIds[4], toNodeId: workflowNodeIds[5] })
+      ])
+    );
+    expect(plan.status).toBe("ready");
+    expect(plan.steps.map((step) => step.moduleType)).toEqual(["upload", "generate", "edit", "upscale", "removeBackground"]);
+    expect(plan.steps.map((step) => step.modelId)).toEqual([
+      "gpt-image-2-medium",
+      "gpt-image-2-medium",
+      "gpt-image-2-medium",
+      "upscale-pro",
+      "background-cleaner"
+    ]);
+    expect(plan.issues).toEqual([]);
   });
 
   it("keeps workflow module ports in the registry and applies them to created nodes", () => {

@@ -2683,6 +2683,38 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByLabelText("Selected node task")).toHaveTextContent("Provider: 1536x1024 / high / lookbook-cleanup");
   });
 
+  it("creates a standard workflow chain from the context dock", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    await user.click(screen.getByRole("button", { name: "Create standard workflow chain" }));
+
+    expect(await screen.findByText("Standard workflow chain created")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Workflow upload module/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Workflow generate module/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Workflow edit module/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Workflow upscale module/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Workflow removeBackground module/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Workflow final module/i })).toBeInTheDocument();
+    expect(screen.getByLabelText("Workflow execution plan")).toHaveTextContent("5 executable steps");
+    expect(screen.getByLabelText("Workflow execution plan")).toHaveTextContent("removeBackground / background-cleaner / 1 refs");
+  });
+
+  it("falls back to the project image when creating a standard chain from a text selection", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Text Prompt note/i }));
+    await user.click(screen.getByRole("button", { name: "Create standard workflow chain" }));
+
+    expect(await screen.findByText("Standard workflow chain created")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Workflow upload module/i })).toBeInTheDocument();
+    expect(screen.getByLabelText("Workflow execution plan")).toHaveTextContent("5 executable steps");
+  });
+
   it("shows typed input and output ports for the selected workflow node", async () => {
     const user = userEvent.setup();
     await login(user);
