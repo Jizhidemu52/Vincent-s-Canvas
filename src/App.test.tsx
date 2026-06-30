@@ -2205,6 +2205,66 @@ describe("Designer canvas app shell", () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/upscale$/), expect.objectContaining({ method: "POST" }));
   });
 
+  it("routes Make Mockup and Vectorize through the shared generation flow", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Text Prompt note/i }));
+    const initialGenerationCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations")).length;
+
+    await user.click(screen.getByRole("button", { name: "Make Mockup" }));
+
+    expect(await screen.findByText("Backend generate succeeded, 7 credits used")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"))).toHaveLength(initialGenerationCalls + 1);
+    });
+    const mockupGenerationCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
+    const mockupCall = mockupGenerationCalls[mockupGenerationCalls.length - 1];
+    const mockupRequest = JSON.parse(String(mockupCall?.[1]?.body)) as GenerationRequest;
+    expect(mockupRequest).toMatchObject({
+      operation: "generate",
+      modelId: "gpt-image-2-medium",
+      outputCount: 1
+    });
+    expect(mockupRequest.prompt).toContain("product mockup");
+
+    await user.click(screen.getByRole("button", { name: "Vectorize" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"))).toHaveLength(initialGenerationCalls + 2);
+    });
+    const vectorGenerationCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"));
+    const vectorCall = vectorGenerationCalls[vectorGenerationCalls.length - 1];
+    const vectorRequest = JSON.parse(String(vectorCall?.[1]?.body)) as GenerationRequest;
+    expect(vectorRequest).toMatchObject({
+      operation: "generate",
+      modelId: "gpt-image-2-medium",
+      outputCount: 1
+    });
+    expect(vectorRequest.prompt).toContain("vector-style");
+    expect(screen.getAllByText("backend result 1.jpg").length).toBeGreaterThan(0);
+  });
+
+  it("shows a clear notice instead of submitting preset tools when no image exists in the project", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Image fashion-reference\.jpg/i })).not.toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Text Prompt note/i }));
+    const initialGenerationCalls = vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations")).length;
+
+    await user.click(screen.getByRole("button", { name: "Make Mockup" }));
+
+    expect(screen.getByText("Add or select an image before running this tool")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url.toString().endsWith("/api/generations"))).toHaveLength(initialGenerationCalls);
+  });
+
   it("wires toolbar download, magic edit, and top remove background actions", async () => {
     const user = userEvent.setup();
     await login(user);

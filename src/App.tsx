@@ -662,8 +662,11 @@ export default function App() {
   }
 
   function runImageOperation(operation: "upscale" | "removeBackground") {
-    const imageNode = isCanvasImageNode(selectedNode) ? selectedNode : undefined;
-    if (!imageNode) return;
+    const imageNode = isCanvasImageNode(selectedNode) ? selectedNode : activeProject?.nodes.find(isCanvasImageNode);
+    if (!imageNode) {
+      setApiNotice("Add or select an image before running this tool");
+      return;
+    }
     void generateNodeThroughApi(imageNode.id, {
       operation,
       modelId: operation === "upscale" ? "upscale-pro" : "background-cleaner",
@@ -671,6 +674,24 @@ export default function App() {
         operation === "upscale"
           ? "Upscale this image while preserving garment construction, embroidery, fabric texture and clean product lighting."
           : "",
+      outputCount: 1
+    });
+  }
+
+  function runImageGenerationPreset(preset: "mockup" | "vectorize") {
+    const imageNode = isCanvasImageNode(selectedNode) ? selectedNode : activeProject?.nodes.find(isCanvasImageNode);
+    if (!imageNode) {
+      setApiNotice("Add or select an image before running this tool");
+      return;
+    }
+    const prompt =
+      preset === "mockup"
+        ? "Create a clean product mockup from this reference image. Preserve the garment design, fabric texture, proportions and key construction details, and present it with polished ecommerce lighting."
+        : "Create a crisp vector-style product illustration from this reference image. Preserve the silhouette, seam lines, trims and material cues, with clean flat colors and sharp editable-looking edges.";
+    void generateNodeThroughApi(imageNode.id, {
+      operation: "generate",
+      modelId: imageNode.generation.modelId,
+      prompt,
       outputCount: 1
     });
   }
@@ -1262,6 +1283,8 @@ export default function App() {
         onAssistantNote={insertAssistantNote}
         onUpscale={() => runImageOperation("upscale")}
         onRemoveBg={() => runImageOperation("removeBackground")}
+        onMakeMockup={() => runImageGenerationPreset("mockup")}
+        onVectorize={() => runImageGenerationPreset("vectorize")}
         onShapeEdit={shapeEdit}
         onSaveAsset={saveAsset}
         onSavePrompt={saveSelectedPrompt}
@@ -3279,6 +3302,8 @@ function CanvasView({
   onAssistantNote,
   onUpscale,
   onRemoveBg,
+  onMakeMockup,
+  onVectorize,
   onShapeEdit,
   onSaveAsset,
   onSavePrompt,
@@ -3319,6 +3344,8 @@ function CanvasView({
   onAssistantNote: (content: string) => void;
   onUpscale: () => void;
   onRemoveBg: () => void;
+  onMakeMockup: () => void;
+  onVectorize: () => void;
   onShapeEdit: () => void;
   onSaveAsset: () => void;
   onSavePrompt: () => void;
@@ -3352,6 +3379,8 @@ function CanvasView({
         onExport={() => exportProjectPackage(workspace, project)}
         onShapeEdit={onShapeEdit}
         onRemoveBg={onRemoveBg}
+        onMakeMockup={onMakeMockup}
+        onVectorize={onVectorize}
       />
       <section className="recraft-canvas">
         <PromptCard
@@ -3523,7 +3552,9 @@ function TopToolbar({
   onAddTargetFrame,
   onExport,
   onShapeEdit,
-  onRemoveBg
+  onRemoveBg,
+  onMakeMockup,
+  onVectorize
 }: {
   onBack: () => void;
   onImportImages: () => void;
@@ -3536,6 +3567,8 @@ function TopToolbar({
   onExport: () => void;
   onShapeEdit: () => void;
   onRemoveBg: () => void;
+  onMakeMockup: () => void;
+  onVectorize: () => void;
 }) {
   return (
     <header className="canvas-toolbar">
@@ -3551,8 +3584,8 @@ function TopToolbar({
         <button type="button" onClick={onAddTargetFrame}><SquareDashedMousePointer size={14} /> Target frame</button>
         <button type="button" onClick={onShapeEdit}><BoxSelect size={14} /> Edit area</button>
         <button type="button" onClick={onRemoveBg}><Scissors size={14} /> Remove bg</button>
-        <button type="button"><Shirt size={14} /> Make Mockup</button>
-        <button type="button"><Archive size={14} /> Vectorize</button>
+        <button type="button" onClick={onMakeMockup}><Shirt size={14} /> Make Mockup</button>
+        <button type="button" onClick={onVectorize}><Archive size={14} /> Vectorize</button>
         <button type="button" onClick={onWorkflow}><Play size={14} /> Run workflow</button>
         <button type="button" onClick={onExport}><Download size={14} /> Export package</button>
       </div>
