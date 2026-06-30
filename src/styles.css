@@ -408,10 +408,24 @@ button {
   font-weight: 700;
 }
 
+.project-thumb.multi {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 2px;
+  place-items: stretch;
+  padding: 2px;
+}
+
 .project-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.project-thumb.multi img {
+  min-width: 0;
+  min-height: 0;
+  border-radius: 5px;
 }
 
 .project-card strong,
@@ -422,6 +436,23 @@ button {
 
 .project-card small {
   color: #858585;
+}
+
+.project-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.project-card-meta span {
+  border: 1px solid #dedede;
+  border-radius: 7px;
+  background: #fff;
+  padding: 5px 7px;
+  color: #555;
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .create-card .plus {

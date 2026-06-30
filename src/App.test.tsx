@@ -2974,6 +2974,13 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByText("fashion-reference.jpg"));
     await user.click(screen.getByRole("button", { name: "Projects" }));
 
+    const projectCard = screen.getByRole("button", { name: "Open project Untitled 1" });
+    expect(within(projectCard).getByRole("img", { name: "Project Untitled 1 preview fashion-reference.jpg" })).toBeInTheDocument();
+    expect(within(projectCard).getByRole("img", { name: "Project Untitled 1 preview backend result 1.jpg" })).toBeInTheDocument();
+    expect(projectCard).toHaveTextContent("3 nodes / 1 history / 7 credits spent");
+    expect(projectCard).toHaveTextContent("1 outputs");
+    expect(projectCard).toHaveTextContent("1 results");
+
     await user.click(screen.getByRole("button", { name: "History" }));
     expect(screen.getByRole("region", { name: "History management" })).toBeInTheDocument();
     expect(screen.getAllByText(/生成一款带盘扣的黑色马甲/).length).toBeGreaterThanOrEqual(1);

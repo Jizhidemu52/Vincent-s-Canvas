@@ -32,7 +32,7 @@ Search beyond the initial three repositories when a feature is not already cover
 
 The current repository already includes:
 
-- Designer `Projects`, `History`, and `Profile`.
+- Designer `Projects`, `History`, and `Profile`, including multi-image project cards with per-project history, output, result, and credit summaries.
 - Recraft-style project canvas with dropped/pasted image nodes and basketikun-style clickable minimap navigation.
 - Left-panel and inline image model/prompt generation.
 - Toolbar operations for upscale, remove background, download, save asset, magic edit, and mask edit.

@@ -300,6 +300,10 @@ function formatActivityMinute(timestamp?: string) {
   return match ? `${match[1]} ${match[2]}` : timestamp;
 }
 
+function isRenderableImageSource(source?: string) {
+  return Boolean(source && !source.startsWith("mock://") && !source.startsWith("provider://"));
+}
+
 function creditAdjustmentReason(summary: string) {
   const reasonStart = summary.indexOf(": ");
   return reasonStart >= 0 ? summary.slice(reasonStart + 2) : summary;
@@ -1344,7 +1348,7 @@ function HomeView({
             <small>{workspace.profile.creditUsed} credits used</small>
           </div>
         </div>
-        {activeSection === "Projects" && <ProjectsPanel projects={projectCards} onCreateProject={onCreateProject} onOpenProject={onOpenProject} onRenameProject={onRenameProject} onDeleteProject={onDeleteProject} />}
+        {activeSection === "Projects" && <ProjectsPanel projects={projectCards} history={workspace.history} onCreateProject={onCreateProject} onOpenProject={onOpenProject} onRenameProject={onRenameProject} onDeleteProject={onDeleteProject} />}
         {activeSection === "History" && <HistoryPanel workspace={workspace} onOpenProject={onOpenProject} />}
         {activeSection === "Profile" && <ProfilePanel workspace={workspace} />}
       </section>
@@ -1354,12 +1358,14 @@ function HomeView({
 
 function ProjectsPanel({
   projects,
+  history,
   onCreateProject,
   onOpenProject,
   onRenameProject,
   onDeleteProject
 }: {
   projects: Project[];
+  history: HistoryEntry[];
   onCreateProject: () => void;
   onOpenProject: (projectId: string, target?: OpenProjectTarget) => void;
   onRenameProject: (projectId: string, name: string) => void;
@@ -1380,6 +1386,21 @@ function ProjectsPanel({
     setDraftProjectName("");
   }
 
+  function projectPreviewNodes(project: Project) {
+    return project.nodes
+      .filter(
+        (node) =>
+          isRenderableImageSource(node.source) &&
+          (node.type === "image" ||
+            node.type === "batch" ||
+            node.type === "imageGroup" ||
+            node.kind === "generated" ||
+            node.kind === "edit" ||
+            node.kind === "operation")
+      )
+      .slice(0, 4);
+  }
+
   return (
     <>
       <div className="home-filters">
@@ -1394,14 +1415,30 @@ function ProjectsPanel({
           <span className="plus">+</span>
           <strong>Create new project</strong>
         </button>
-        {projects.map((project) => (
+        {projects.map((project) => {
+          const previews = projectPreviewNodes(project);
+          const projectHistory = history.filter((entry) => entry.projectId === project.id);
+          const projectCredits = projectHistory.reduce((sum, entry) => sum + entry.creditCost, 0);
+          const projectOutputs = projectHistory.reduce((sum, entry) => sum + entry.outputCount, 0);
+          const generatedCount = project.nodes.filter((node) => node.kind === "generated" || node.kind === "edit" || node.kind === "operation").length;
+          return (
           <article className="project-card managed-project-card" key={project.id}>
             <button type="button" className="project-card-main" aria-label={`Open project ${project.name}`} onClick={() => onOpenProject(project.id)}>
-              <div className="project-thumb">
-                {project.nodes[0]?.source ? <img src={project.nodes[0].source} alt="" /> : <span>No images</span>}
+              <div className={`project-thumb ${previews.length > 1 ? "multi" : ""}`} aria-label={`Project ${project.name} preview grid`}>
+                {previews.length ? (
+                  previews.map((node) => <img key={node.id} src={node.source} alt={`Project ${project.name} preview ${node.name}`} />)
+                ) : (
+                  <span>No images</span>
+                )}
               </div>
               <strong>{project.name}</strong>
-              <small>{project.nodes.length} nodes · modified just now</small>
+              <small>
+                {project.nodes.length} nodes / {projectHistory.length} history / {projectCredits} credits spent
+              </small>
+              <div className="project-card-meta" aria-label={`Project ${project.name} summary`}>
+                <span>{projectOutputs} outputs</span>
+                <span>{generatedCount} results</span>
+              </div>
             </button>
             {editingProjectId === project.id ? (
               <form className="project-rename-form" onSubmit={(event) => saveRename(event, project)}>
@@ -1424,7 +1461,8 @@ function ProjectsPanel({
               </button>
             </div>
           </article>
-        ))}
+          );
+        })}
         {!projects.length && (
           <article className="project-card empty-project-card">
             <div className="project-thumb"><span>No images</span></div>
@@ -1498,9 +1536,6 @@ function HistoryPanel({ workspace, onOpenProject }: { workspace: Workspace; onOp
     return generatedNodes.find(
       ({ node }) => node.metadata.historyId === entryId && (node.metadata.remoteSource === remoteSource || node.name === outputName)
     );
-  }
-  function isRenderableImageSource(source?: string) {
-    return Boolean(source && !source.startsWith("mock://") && !source.startsWith("provider://"));
   }
   function sourceForHistoryOutput(entryId: string, outputName: string, remoteSource: string) {
     const nodeSource = nodeForHistoryOutput(entryId, outputName, remoteSource)?.node.source;
