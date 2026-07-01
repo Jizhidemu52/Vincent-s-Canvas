@@ -850,6 +850,34 @@ function placeNextTo(node: CanvasNode, index = 1) {
   };
 }
 
+function rectsOverlap(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+  padding = 32
+) {
+  return !(
+    left.x + left.width + padding <= right.x ||
+    right.x + right.width + padding <= left.x ||
+    left.y + left.height + padding <= right.y ||
+    right.y + right.height + padding <= left.y
+  );
+}
+
+function placeNextToAvailable(source: CanvasNode, existingNodes: CanvasNode[], width: number, height: number, index = 1) {
+  let position = placeNextTo(source, index);
+  let candidate = { ...position, width, height };
+  for (let guard = 0; guard < 12; guard += 1) {
+    const collision = existingNodes.find((node) => node.id !== source.id && rectsOverlap(candidate, node));
+    if (!collision) return position;
+    position = {
+      x: Math.max(position.x + 96, collision.x + collision.width + 48),
+      y: position.y + 24
+    };
+    candidate = { ...position, width, height };
+  }
+  return position;
+}
+
 function spendCredits(workspace: Workspace, cost: number): Workspace {
   if (workspace.profile.creditBalance < cost) throw new Error("Not enough credits");
   return {
@@ -1403,18 +1431,20 @@ export function applyGenerationResultToCanvas(
         width: source.width,
         height: source.height
       }));
-  const generatedNodes = outputs.map((output, index) => {
-    const position = placeNextTo(source, index + 1);
+  const generatedNodes = outputs.reduce<CanvasNode[]>((nodes, output, index) => {
+    const width = output.width || source.width;
+    const height = output.height || source.height;
+    const position = placeNextToAvailable(source, [...project.nodes, ...nodes], width, height, index + 1);
     const outputSource = output.source.startsWith("mock://") ? `${source.source || "generated"}#${result.historyId}-${index + 1}` : output.source;
-    return createNode({
+    const generatedNode = createNode({
       type: "image",
       kind: "generated",
       name: output.name || `${source.name} result ${index + 1}`,
       source: outputSource,
       x: position.x,
       y: position.y,
-      width: output.width || source.width,
-      height: output.height || source.height,
+      width,
+      height,
       generation: {
         ...source.generation,
         prompt: request.prompt,
@@ -1436,7 +1466,8 @@ export function applyGenerationResultToCanvas(
         providerSettings: request.providerSettings
       }
     });
-  });
+    return [...nodes, generatedNode];
+  }, []);
   const updated = updateProject(workspace, projectId, (item) =>
     withUndo(item, {
       nodes: [

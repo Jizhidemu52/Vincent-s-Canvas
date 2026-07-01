@@ -152,6 +152,12 @@ type HomeSection = "Projects" | "History" | "Profile";
 type RightPanel = "context" | "history" | "assets" | "prompts" | "assistant";
 type OpenProjectTarget = { nodeId?: string; historyId?: string };
 const DEFAULT_MASK_SELECTION: MaskSelection = { x: 28, y: 24, width: 44, height: 38 };
+
+function maskShapeLabel(shape?: "ellipse" | "rectangle" | "freehand") {
+  if (shape === "ellipse") return "circle";
+  return shape ?? "unknown";
+}
+
 const workflowModuleIcons: Record<ModuleType, LucideIcon> = {
   generate: Plus,
   edit: Wand2,
@@ -4149,7 +4155,7 @@ function CanvasStage({
   return (
     <section
       ref={stageRef}
-      className={`stage ${project.viewport.background}`}
+      className={`stage ${project.viewport.background} ${selectedSet.size ? "has-selection" : ""}`}
       aria-label="Infinite canvas"
       tabIndex={0}
       onPointerDown={panCanvas}
@@ -4332,10 +4338,18 @@ function CanvasNodeView({
         const deltaX = moveEvent.clientX - startX;
         const deltaY = moveEvent.clientY - startY;
         const requestedWidth = isWest ? origin.width - deltaX : origin.width + deltaX;
-        const width = Math.max(120, requestedWidth);
         const ratio = origin.height / origin.width || 1;
         const requestedHeight = isNorth ? origin.height - deltaY : origin.height + deltaY;
-        const height = origin.lockedRatio ? width * ratio : Math.max(80, requestedHeight);
+        let width = Math.max(120, requestedWidth);
+        let height = Math.max(80, requestedHeight);
+        if (origin.lockedRatio) {
+          const widthDelta = Math.abs(requestedWidth - origin.width) / Math.max(origin.width, 1);
+          const heightDelta = Math.abs(requestedHeight - origin.height) / Math.max(origin.height, 1);
+          width = widthDelta >= heightDelta ? width : height / ratio;
+          width = Math.max(120, width);
+          height = Math.max(80, width * ratio);
+          width = Math.max(120, height / ratio);
+        }
         patchTransform({
           x: isWest ? Math.round(origin.x + origin.width - width) : origin.x,
           y: isNorth ? Math.round(origin.y + origin.height - height) : origin.y,
@@ -4560,7 +4574,7 @@ function SelectionHandles({
         className="handle br"
         role="button"
         tabIndex={-1}
-        aria-label="Resize image"
+        aria-label="Resize image bottom-right"
         style={{ left: width - 4, top: height + 18 }}
         onPointerDown={(event) => onResizeStart(event, "resize-se")}
       />
@@ -4773,9 +4787,10 @@ function ShapeEditDialog({
               type="button"
               key={shape}
               className={draft.shape === shape ? "active" : ""}
+              aria-label={maskShapeLabel(shape)}
               onClick={() => onDraft({ ...draft, shape, mask: shape === "freehand" ? { ...mask, path: mask.path ?? [] } : { ...mask, path: undefined } })}
             >
-              {shape}
+              {maskShapeLabel(shape)}
             </button>
           ))}
         </div>
@@ -5016,6 +5031,11 @@ function RightDock({
   const selectedFailurePolicy =
     selectedNode?.metadata.failurePolicy === "stop" ? "stop" : selectedNode?.metadata.failurePolicy === "continue" ? "continue" : undefined;
   const selectedMask = maskFromMetadata(selectedNode?.metadata.mask);
+  const selectedEditShape =
+    selectedNode?.editShape ??
+    (selectedNode?.metadata.editShape === "ellipse" || selectedNode?.metadata.editShape === "rectangle" || selectedNode?.metadata.editShape === "freehand"
+      ? selectedNode.metadata.editShape
+      : undefined);
   const selectedProviderSettings = providerSettingsFromMetadata(selectedNode?.metadata.providerSettings);
   const selectedProviderProgress = providerProgressFromMetadata(selectedNode?.metadata.providerProgress);
   const batchSummary = summarizeBatchQueue(project.batchQueue);
@@ -5089,6 +5109,7 @@ function RightDock({
                   Mask: x {selectedMask.x} / y {selectedMask.y} / w {selectedMask.width} / h {selectedMask.height}
                 </span>
               ) : null}
+              {selectedEditShape ? <span>Mask shape: {maskShapeLabel(selectedEditShape)}</span> : null}
               {selectedProviderSettings.size || selectedProviderSettings.quality || selectedProviderSettings.preset ? (
                 <span>
                   Provider: {selectedProviderSettings.size ?? "auto"} / {selectedProviderSettings.quality ?? "auto"} / {selectedProviderSettings.preset ?? "default"}

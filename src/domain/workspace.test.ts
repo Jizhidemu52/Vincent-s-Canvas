@@ -900,6 +900,44 @@ describe("designer canvas workspace behavior", () => {
     });
   });
 
+  it("places backend outputs after existing edit nodes instead of covering the local mask edit", () => {
+    const { workspace, project } = createProject(createInitialWorkspace({ credits: 20 }), "Mask edit output placement");
+    const withAsset = addAssetToProject(workspace, project.id, {
+      name: "dress.png",
+      source: "dress-source",
+      width: 360,
+      height: 520
+    });
+    const source = withAsset.projects[0].nodes[0];
+    const withEditNode = commitShapeEdit(withAsset, project.id, source.id, {
+      shape: "ellipse",
+      prompt: "add embroidery inside the circle",
+      modelId: "gpt-image-2-medium",
+      mask: { x: 28, y: 24, width: 44, height: 38 }
+    });
+    const editNode = withEditNode.projects[0].nodes.find((node) => node.name === "dress.png mask edit")!;
+    const request = {
+      projectId: project.id,
+      nodeId: source.id,
+      modelId: "gpt-image-2-medium",
+      prompt: "add embroidery inside the circle",
+      referenceNodeIds: [source.id],
+      outputCount: 1,
+      operation: "edit" as const,
+      mask: { x: 28, y: 24, width: 44, height: 38 }
+    };
+
+    const updated = applyGenerationResultToCanvas(withEditNode, project.id, source.id, request, {
+      status: "succeeded",
+      historyId: "history-mask-edit-output",
+      creditCost: 7,
+      outputs: [{ name: "backend mask edit.jpg", source: "mock://edit/mask/1", width: 1024, height: 1024 }]
+    });
+    const output = updated.projects[0].nodes.find((node) => node.name === "backend mask edit.jpg")!;
+
+    expect(output.x).toBeGreaterThanOrEqual(editNode.x + editNode.width + 48);
+  });
+
   it("keeps saved asset dimensions for reuse on the canvas", () => {
     const { workspace, project } = createProject(createInitialWorkspace(), "Reusable assets");
     const withAsset = addAssetToProject(workspace, project.id, {

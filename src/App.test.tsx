@@ -1069,8 +1069,9 @@ describe("Designer canvas app shell", () => {
     await waitFor(() => {
       expect(imageNode).toHaveStyle({ left: `${initialLeft + 48}px`, top: `${initialTop + 40}px` });
     });
+    expect(document.querySelector(".stage")).toHaveClass("has-selection");
 
-    const resizeHandle = screen.getByLabelText("Resize image");
+    const resizeHandle = screen.getByLabelText("Resize image bottom-right");
     await act(async () => {
       dispatchPointer(resizeHandle, "pointerdown", 1000, 650);
       dispatchPointer(window, "pointermove", 1060, 710);
@@ -1080,16 +1081,49 @@ describe("Designer canvas app shell", () => {
       expect(imageNode).toHaveStyle({ width: `${initialWidth + 60}px` });
     });
 
-    const afterBottomRightLeft = Number.parseInt(imageNode.style.left, 10);
-    const afterBottomRightWidth = Number.parseInt(imageNode.style.width, 10);
+    let previousLeft = Number.parseInt(imageNode.style.left, 10);
+    let previousTop = Number.parseInt(imageNode.style.top, 10);
+    let previousWidth = Number.parseInt(imageNode.style.width, 10);
     const topLeftResizeHandle = screen.getByLabelText("Resize image top-left");
     await act(async () => {
       dispatchPointer(topLeftResizeHandle, "pointerdown", 700, 220);
-      dispatchPointer(window, "pointermove", 660, 180);
-      dispatchPointer(window, "pointerup", 660, 180);
+      dispatchPointer(window, "pointermove", 650, 170);
+      dispatchPointer(window, "pointerup", 650, 170);
     });
     await waitFor(() => {
-      expect(imageNode).toHaveStyle({ left: `${afterBottomRightLeft - 40}px`, width: `${afterBottomRightWidth + 40}px` });
+      expect(Number.parseInt(imageNode.style.left, 10)).toBeLessThan(previousLeft);
+      expect(Number.parseInt(imageNode.style.top, 10)).toBeLessThan(previousTop);
+      expect(Number.parseInt(imageNode.style.width, 10)).toBeGreaterThan(previousWidth);
+    });
+
+    previousLeft = Number.parseInt(imageNode.style.left, 10);
+    previousTop = Number.parseInt(imageNode.style.top, 10);
+    previousWidth = Number.parseInt(imageNode.style.width, 10);
+    const topRightResizeHandle = screen.getByLabelText("Resize image top-right");
+    await act(async () => {
+      dispatchPointer(topRightResizeHandle, "pointerdown", 1000, 220);
+      dispatchPointer(window, "pointermove", 1000, 160);
+      dispatchPointer(window, "pointerup", 1000, 160);
+    });
+    await waitFor(() => {
+      expect(Number.parseInt(imageNode.style.left, 10)).toBe(previousLeft);
+      expect(Number.parseInt(imageNode.style.top, 10)).toBeLessThan(previousTop);
+      expect(Number.parseInt(imageNode.style.width, 10)).toBeGreaterThan(previousWidth);
+    });
+
+    previousLeft = Number.parseInt(imageNode.style.left, 10);
+    previousTop = Number.parseInt(imageNode.style.top, 10);
+    previousWidth = Number.parseInt(imageNode.style.width, 10);
+    const bottomLeftResizeHandle = screen.getByLabelText("Resize image bottom-left");
+    await act(async () => {
+      dispatchPointer(bottomLeftResizeHandle, "pointerdown", 700, 650);
+      dispatchPointer(window, "pointermove", 640, 650);
+      dispatchPointer(window, "pointerup", 640, 650);
+    });
+    await waitFor(() => {
+      expect(Number.parseInt(imageNode.style.left, 10)).toBeLessThan(previousLeft);
+      expect(Number.parseInt(imageNode.style.top, 10)).toBe(previousTop);
+      expect(Number.parseInt(imageNode.style.width, 10)).toBeGreaterThan(previousWidth);
     });
   });
 
@@ -2129,7 +2163,10 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: /Mask edit model GPT Image 2 Medium/i }));
     await user.click(screen.getByRole("option", { name: /Nano Banana 2.*11 credits/i }));
     expect(screen.getByRole("button", { name: /Mask edit model Nano Banana 2/i })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "rectangle" }));
+    expect(screen.getByRole("button", { name: "circle" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "rectangle" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "freehand" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "circle" }));
     expect(screen.getByRole("application", { name: "Mask placement preview" })).toBeInTheDocument();
     fireEvent.change(screen.getByRole("slider", { name: "Mask size" }), { target: { value: "60" } });
     expect(screen.getByLabelText("Mask coordinates")).toHaveTextContent("w 60");
@@ -2137,6 +2174,9 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("fashion-reference.jpg mask edit")).toBeInTheDocument();
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
     expect(screen.getByText("Backend mask edit succeeded, 11 credits used")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Context" }));
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg mask edit/i }));
+    expect(screen.getByRole("region", { name: "Selected node task" })).toHaveTextContent("Mask shape: circle");
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/edits$/), expect.objectContaining({ method: "POST" }));
     const editCall = vi.mocked(fetch).mock.calls.find(([url]) => url.toString().endsWith("/api/edits"));
     const editRequest = JSON.parse(String(editCall?.[1]?.body)) as GenerationRequest;

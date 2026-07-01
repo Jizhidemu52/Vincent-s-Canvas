@@ -1667,6 +1667,10 @@ button {
   transform-origin: 0 0;
 }
 
+.stage.has-selection .stage-world {
+  z-index: 10;
+}
+
 .drop-hint {
   position: absolute;
   left: 50%;
