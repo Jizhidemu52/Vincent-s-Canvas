@@ -1155,7 +1155,7 @@ button {
 
 .admin-account-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1.4fr) minmax(130px, 0.9fr) minmax(150px, 1fr) auto;
+  grid-template-columns: minmax(160px, 1.35fr) minmax(130px, 0.85fr) minmax(150px, 1fr) minmax(112px, auto);
   align-items: center;
   gap: 10px;
   border-top: 1px solid #ececec;
@@ -1172,6 +1172,10 @@ button {
   gap: 2px;
 }
 
+.admin-account-actions {
+  justify-items: end;
+}
+
 .admin-account-row span,
 .admin-account-row small {
   color: #767676;
@@ -1184,6 +1188,16 @@ button {
   color: #555;
   font-size: 11px;
   font-style: normal;
+  font-weight: 800;
+}
+
+.admin-account-actions button {
+  border: 1px solid #dedede;
+  border-radius: 6px;
+  background: #fff;
+  padding: 6px 8px;
+  color: #333;
+  font-size: 11px;
   font-weight: 800;
 }
 

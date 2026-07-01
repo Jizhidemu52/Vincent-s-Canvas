@@ -1742,7 +1742,6 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByText("12 used / limit 120")).toBeInTheDocument();
     expect(screen.getByText("2 projects / 5 history / 7 assets")).toBeInTheDocument();
     expect(screen.getByText("Last active 2026-06-28 02:00")).toBeInTheDocument();
-
     await user.clear(screen.getByRole("spinbutton", { name: "Credit delta" }));
     await user.type(screen.getByRole("spinbutton", { name: "Credit delta" }), "20");
     await user.click(screen.getByRole("button", { name: "Update credits" }));
@@ -1790,6 +1789,20 @@ describe("Designer canvas app shell", () => {
     await user.click(screen.getByRole("button", { name: "Back to projects" }));
     await user.click(screen.getByRole("button", { name: "Profile" }));
     expect(screen.getByRole("region", { name: "Profile credit management" })).toHaveTextContent("200");
+  });
+
+  it("lets admins pick a designer account before changing credits or limits", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: /Admin monitoring/i }));
+    await screen.findByText("Team accounts");
+    await user.click(await screen.findByRole("button", { name: "Manage credits for Alice Designer" }));
+
+    expect(screen.getByRole("textbox", { name: "Designer account" })).toHaveValue("alice@company.local");
+    expect(screen.getByRole("textbox", { name: "Limit designer account" })).toHaveValue("alice@company.local");
+    expect(screen.getByRole("spinbutton", { name: "Credit limit" })).toHaveValue(120);
+    expect(screen.getByText("Managing credits for Alice Designer: 88 remaining")).toBeInTheDocument();
   });
 
   it("filters team history by designer in the admin workspace", async () => {

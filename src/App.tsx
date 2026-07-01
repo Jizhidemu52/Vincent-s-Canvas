@@ -2204,6 +2204,12 @@ function AdminView({
     setSelectedAdminHistoryIds((current) => (current.includes(entryId) ? current.filter((id) => id !== entryId) : [...current, entryId]));
   }
 
+  function selectAccountForCreditManagement(account: AdminAccountSummary) {
+    setTargetUserId(account.userId);
+    setCreditLimitValue(String(account.creditLimit ?? account.creditBalance));
+    setCreditNotice(`Managing credits for ${account.designerName}: ${account.creditBalance} remaining`);
+  }
+
   async function archiveSelectedAdminHistory() {
     if (!selectedAdminHistoryIds.length) return;
     setIsAdjusting(true);
@@ -2457,7 +2463,12 @@ function AdminView({
                       {account.projectCount} projects / {account.historyCount} history / {account.assetCount} assets
                     </small>
                     <small>Last active {formatActivityMinute(account.lastActivityAt)}</small>
-                    <em>{account.role}</em>
+                    <div className="admin-account-actions">
+                      <em>{account.role}</em>
+                      <button type="button" aria-label={`Manage credits for ${account.designerName}`} onClick={() => selectAccountForCreditManagement(account)}>
+                        Manage credits
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
