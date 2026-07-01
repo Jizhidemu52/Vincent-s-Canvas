@@ -1224,18 +1224,37 @@ describe("Designer canvas app shell", () => {
     const initialNodeCount = screen.getAllByTestId("canvas-node").length;
     const imageToolbar = within(screen.getByLabelText("selected image toolbar"));
 
-    await user.click(imageToolbar.getByRole("button", { name: "Copy image" }));
+    await user.click(imageToolbar.getByRole("button", { name: "Copy selected image" }));
 
     const copiedNode = await screen.findByRole("button", { name: /Image fashion-reference\.jpg copy/i });
     expect(screen.getAllByTestId("canvas-node")).toHaveLength(initialNodeCount + 1);
 
     await user.click(copiedNode);
-    await user.click(within(screen.getByLabelText("selected image toolbar")).getByRole("button", { name: "Delete image" }));
+    await user.click(within(screen.getByLabelText("selected image toolbar")).getByRole("button", { name: "Delete selected image" }));
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: /Image fashion-reference\.jpg copy/i })).not.toBeInTheDocument();
     });
     expect(screen.getAllByTestId("canvas-node")).toHaveLength(initialNodeCount);
+  });
+
+  it("exposes the first-pass selected image toolbar operations with clear action names", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    await user.click(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i }));
+
+    const imageToolbar = within(screen.getByLabelText("selected image toolbar"));
+    expect(imageToolbar.getByRole("button", { name: "Upscale selected image" })).toBeInTheDocument();
+    expect(imageToolbar.getByRole("button", { name: "Remove selected image background" })).toBeInTheDocument();
+    expect(imageToolbar.getByRole("button", { name: "Frame edit selected image" })).toBeInTheDocument();
+    expect(imageToolbar.getByRole("button", { name: "Group selected references" })).toBeInTheDocument();
+    expect(imageToolbar.getByRole("button", { name: "Save selected image to assets" })).toBeInTheDocument();
+    expect(imageToolbar.getByRole("button", { name: "Download selected image" })).toBeInTheDocument();
+    expect(imageToolbar.getByRole("button", { name: "Copy selected image" })).toBeInTheDocument();
+    expect(imageToolbar.getByRole("button", { name: "Delete selected image" })).toBeInTheDocument();
+    expect(imageToolbar.getByRole("button", { name: "Magic edit selected image" })).toBeInTheDocument();
   });
 
   it("imports externally dropped image files onto the canvas at the drop point", async () => {
@@ -2259,7 +2278,7 @@ describe("Designer canvas app shell", () => {
 
     await user.click(screen.getByRole("button", { name: "New project" }));
     await user.click(screen.getByText("fashion-reference.jpg"));
-    await user.click(screen.getByRole("button", { name: "Upscale" }));
+    await user.click(screen.getByRole("button", { name: "Upscale selected image" }));
 
     expect(await screen.findByText("backend result 1.jpg")).toBeInTheDocument();
     expect(screen.getByText("Backend upscale succeeded, 4 credits used")).toBeInTheDocument();
@@ -2344,14 +2363,14 @@ describe("Designer canvas app shell", () => {
       return element;
     });
     try {
-      await user.click(screen.getByRole("button", { name: "Download" }));
+      await user.click(screen.getByRole("button", { name: "Download selected image" }));
       expect(downloadAnchor?.download).toBe("fashion-reference.jpg");
       expect(downloadAnchor?.href).toContain("/fixtures/fashion-reference.jpg");
     } finally {
       createElementSpy.mockRestore();
     }
 
-    await user.click(screen.getByRole("button", { name: "Magic edit" }));
+    await user.click(screen.getByRole("button", { name: "Magic edit selected image" }));
     expect(screen.getByRole("dialog", { name: "Mask edit confirmation" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -2379,7 +2398,7 @@ describe("Designer canvas app shell", () => {
     await user.click(await screen.findByRole("button", { name: /Image dropped-front\.png/i }));
     const initialNodeCount = screen.getAllByTestId("canvas-node").length;
 
-    await user.click(screen.getByRole("button", { name: "Save asset" }));
+    await user.click(screen.getByRole("button", { name: "Save selected image to assets" }));
 
     expect(screen.getByText("My assets")).toBeInTheDocument();
     const assetPostCall = await waitFor(() => {

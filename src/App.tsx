@@ -4734,15 +4734,15 @@ function NodeToolbar({
   if (!selectedNode) return null;
   return (
     <div className="node-toolbar" aria-label="selected image toolbar">
-      <button type="button" title="Upscale" onClick={onUpscale}><Maximize2 size={15} /></button>
-      <button type="button" title="Remove background" onClick={onRemoveBg}><Scissors size={15} /></button>
-      <button type="button" title="Mask edit" onClick={onShapeEdit}><CircleDashed size={15} /></button>
-      <button type="button" title="Group references" onClick={onGroupReferences}><SquareDashedMousePointer size={15} /></button>
-      <button type="button" title="Save asset" onClick={onSaveAsset}><Database size={15} /></button>
-      <button type="button" title="Download" onClick={onDownload}><Download size={15} /></button>
-      <button type="button" title="Copy image" onClick={onCopy}><Copy size={15} /></button>
-      <button type="button" title="Delete image" onClick={onDelete}><Trash2 size={15} /></button>
-      <button type="button" title="Magic edit" onClick={onShapeEdit}><Wand2 size={15} /></button>
+      <button type="button" aria-label="Upscale selected image" title="Upscale" onClick={onUpscale}><Maximize2 size={15} /></button>
+      <button type="button" aria-label="Remove selected image background" title="Remove background" onClick={onRemoveBg}><Scissors size={15} /></button>
+      <button type="button" aria-label="Frame edit selected image" title="Mask edit" onClick={onShapeEdit}><CircleDashed size={15} /></button>
+      <button type="button" aria-label="Group selected references" title="Group references" onClick={onGroupReferences}><SquareDashedMousePointer size={15} /></button>
+      <button type="button" aria-label="Save selected image to assets" title="Save asset" onClick={onSaveAsset}><Database size={15} /></button>
+      <button type="button" aria-label="Download selected image" title="Download" onClick={onDownload}><Download size={15} /></button>
+      <button type="button" aria-label="Copy selected image" title="Copy image" onClick={onCopy}><Copy size={15} /></button>
+      <button type="button" aria-label="Delete selected image" title="Delete image" onClick={onDelete}><Trash2 size={15} /></button>
+      <button type="button" aria-label="Magic edit selected image" title="Magic edit" onClick={onShapeEdit}><Wand2 size={15} /></button>
     </div>
   );
 }
