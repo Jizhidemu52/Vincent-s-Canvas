@@ -22,6 +22,28 @@ function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
 }
 
 describe("server database storage", () => {
+  it("merges new default provider models into older persisted registries without losing admin pricing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "designer-canvas-model-migration-"));
+    const statePath = join(dir, "server-state.json");
+    try {
+      const oldState = createServerState({ creditBalance: 30 });
+      oldState.models = oldState.models
+        .filter((model) => !["recraft-v3", "runninghub-fashion-workflow", "comfyui-fashion-workflow"].includes(model.id))
+        .map((model) => (model.id === "gpt-image-2-medium" ? { ...model, cost: 9, priceCents: 450, currency: "CNY" } : model));
+
+      saveServerState(statePath, oldState);
+      const restored = loadServerState(statePath);
+      const restoredModels = callApi(restored, "/api/models") as ReturnType<typeof createServerState>["models"];
+
+      expect(restoredModels.find((model) => model.id === "gpt-image-2-medium")).toMatchObject({ cost: 9, priceCents: 450, currency: "CNY" });
+      expect(restoredModels.find((model) => model.id === "recraft-v3")).toMatchObject({ provider: "recraft", capability: ["generate", "edit"] });
+      expect(restoredModels.find((model) => model.id === "runninghub-fashion-workflow")).toMatchObject({ provider: "runninghub" });
+      expect(restoredModels.find((model) => model.id === "comfyui-fashion-workflow")).toMatchObject({ provider: "comfyui" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("persists platform state in sqlite tables instead of the JSON fallback", () => {
     const dir = mkdtempSync(join(tmpdir(), "designer-canvas-db-"));
     const databasePath = join(dir, "server-state.sqlite");

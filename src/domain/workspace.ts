@@ -305,7 +305,7 @@ export interface Project {
 export interface ModelDefinition {
   id: string;
   name: string;
-  provider: "openai" | "nanobanana" | "comfyui" | "runninghub" | "internal";
+  provider: "openai" | "nanobanana" | "recraft" | "comfyui" | "runninghub" | "internal";
   group: "Trending models" | "Image" | "Edit" | "Operations";
   capability: ModuleType[];
   cost: number;
@@ -1047,7 +1047,10 @@ export function createInitialWorkspace(profile: Partial<Profile> = {}): Workspac
       { id: "gpt-image-2-low", name: "GPT Image 2 Low", provider: "openai", group: "Trending models", capability: ["generate", "edit"], cost: 2 },
       { id: "nanobanana2", name: "Nano Banana 2", provider: "nanobanana", group: "Trending models", capability: ["generate", "edit"], cost: 11 },
       { id: "nanobanana2-pro", name: "Nano Banana Pro", provider: "nanobanana", group: "Trending models", capability: ["generate", "edit"], cost: 20 },
+      { id: "recraft-v3", name: "Recraft V3", provider: "recraft", group: "Image", capability: ["generate", "edit"], cost: 8, priceCents: 360, currency: "CNY" },
       { id: "flux-pro", name: "Flux Pro", provider: "internal", group: "Image", capability: ["generate", "edit"], cost: 6 },
+      { id: "runninghub-fashion-workflow", name: "RunningHub Fashion Workflow", provider: "runninghub", group: "Operations", capability: ["generate", "edit", "upscale", "removeBackground"], cost: 8 },
+      { id: "comfyui-fashion-workflow", name: "ComfyUI Fashion Workflow", provider: "comfyui", group: "Operations", capability: ["generate", "edit", "upscale", "removeBackground"], cost: 5 },
       { id: "upscale-pro", name: "Creative Upscale", provider: "internal", group: "Operations", capability: ["upscale"], cost: 4 },
       { id: "background-cleaner", name: "Remove Background", provider: "internal", group: "Operations", capability: ["removeBackground"], cost: 2 }
     ]

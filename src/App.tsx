@@ -545,7 +545,9 @@ export default function App() {
         560,
         210
       );
-      return next;
+      const activeProject = next.projects.find((project) => project.id === created.project.id);
+      const referenceImage = activeProject?.nodes.find((node) => node.type === "image");
+      return referenceImage ? selectNodes(next, created.project.id, [referenceImage.id]) : next;
     });
     setView("canvas");
   }
@@ -723,7 +725,12 @@ export default function App() {
         resolvedSourceIds.push(fallbackNode.id);
       }
       const firstSource = project.nodes.find((node) => node.id === resolvedSourceIds[0]);
-      const operationModel = workspace.modelRegistry.find((model) => model.capability.includes(definition.operation as ModuleType));
+      const defaultModel = current.modelRegistry.find((model) => model.id === definition.defaultModelId);
+      const operationModel =
+        defaultModel?.capability.includes(definition.operation as ModuleType)
+          ? defaultModel
+          : current.modelRegistry.find((model) => model.group === "Operations" && model.capability.length === 1 && model.capability.includes(definition.operation as ModuleType)) ??
+            current.modelRegistry.find((model) => model.capability.includes(definition.operation as ModuleType));
       const shouldUseModuleDefaultModel =
         definition.moduleType === "final" || definition.operation === "upscale" || definition.operation === "removeBackground";
       const modelId =
@@ -2053,7 +2060,7 @@ function AdminView({
     memo[model.provider] = (memo[model.provider] ?? 0) + 1;
     return memo;
   }, {});
-  const configurableProviders = Array.from(new Set(["openai", "nanobanana", "runninghub", "comfyui", "internal", ...workspace.modelRegistry.map((model) => model.provider)])) as ModelDefinition["provider"][];
+  const configurableProviders = Array.from(new Set(["openai", "nanobanana", "recraft", "runninghub", "comfyui", "internal", ...workspace.modelRegistry.map((model) => model.provider)])) as ModelDefinition["provider"][];
   const modelGroupOptions: ModelDefinition["group"][] = ["Trending models", "Image", "Edit", "Operations"];
   const modelCapabilityOptions: ModuleType[] = ["generate", "edit", "upscale", "removeBackground"];
   const visibleAdminAudit = adminAudit.length ? adminAudit : workspace.history.map(historyEntryToAuditEntry);
@@ -4002,6 +4009,7 @@ function CanvasStage({
   const selectedIds = project.selectedNodeIds;
   const selectedSet = new Set(selectedIds);
   const connectionSourceNode = connectionSource ? project.nodes.find((node) => node.id === connectionSource.nodeId) : undefined;
+  const selectedResizableNodes = project.nodes.filter((node) => selectedSet.has(node.id) && isCanvasImageNode(node));
 
   async function importCanvasFiles(files: FileList | File[], clientX?: number, clientY?: number) {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
@@ -4152,6 +4160,49 @@ function CanvasStage({
     onWorkspaceChange((current) => updateViewport(selectNodes(current, project.id, [nodeId]), project.id, { x: nextX, y: nextY }));
   }
 
+  function startResizeNode(event: PointerEvent<HTMLElement>, node: CanvasNode, mode: DragMode) {
+    event.preventDefault();
+    event.stopPropagation();
+    onWorkspaceChange((current) => selectNodes(current, project.id, [node.id], event.shiftKey || event.ctrlKey || event.metaKey));
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const origin = node.transform;
+    const zoom = project.viewport.zoom || 1;
+    const handleMove = (moveEvent: globalThis.PointerEvent) => {
+      const isWest = mode === "resize-nw" || mode === "resize-sw";
+      const isNorth = mode === "resize-nw" || mode === "resize-ne";
+      const deltaX = (moveEvent.clientX - startX) / zoom;
+      const deltaY = (moveEvent.clientY - startY) / zoom;
+      const requestedWidth = isWest ? origin.width - deltaX : origin.width + deltaX;
+      const ratio = origin.height / origin.width || 1;
+      const requestedHeight = isNorth ? origin.height - deltaY : origin.height + deltaY;
+      let width = Math.max(120, requestedWidth);
+      let height = Math.max(80, requestedHeight);
+      if (origin.lockedRatio) {
+        const widthDelta = Math.abs(requestedWidth - origin.width) / Math.max(origin.width, 1);
+        const heightDelta = Math.abs(requestedHeight - origin.height) / Math.max(origin.height, 1);
+        width = widthDelta >= heightDelta ? width : height / ratio;
+        width = Math.max(120, width);
+        height = Math.max(80, width * ratio);
+        width = Math.max(120, height / ratio);
+      }
+      onWorkspaceChange((current) =>
+        updateNodeTransform(current, project.id, node.id, {
+          x: isWest ? Math.round(origin.x + origin.width - width) : origin.x,
+          y: isNorth ? Math.round(origin.y + origin.height - height) : origin.y,
+          width: Math.round(width),
+          height: Math.round(height)
+        })
+      );
+    };
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
   return (
     <section
       ref={stageRef}
@@ -4221,6 +4272,14 @@ function CanvasStage({
           />
         ))}
       </div>
+      {selectedResizableNodes.map((node) => (
+        <CanvasResizeHandles
+          key={node.id}
+          node={node}
+          viewport={project.viewport}
+          onResizeStart={(event, mode) => startResizeNode(event, node, mode)}
+        />
+      ))}
       {modulePicker && (
         <WorkflowModulePicker
           x={modulePicker.x * project.viewport.zoom + project.viewport.x}
@@ -4323,6 +4382,7 @@ function CanvasNodeView({
     ? `${nodeHistoryId}${nodeCreditCost !== undefined ? ` · ${nodeCreditCost} credits` : ""}`
     : "";
   const [inlineEditorOpen, setInlineEditorOpen] = useState(false);
+  const statusClass = node.status === "selected" ? "idle" : node.status;
 
   function startPointer(event: PointerEvent<HTMLElement>, mode: DragMode = "move") {
     if ((event.target as HTMLElement).closest(".node-port, .inline-node-editor")) return;
@@ -4395,7 +4455,7 @@ function CanvasNodeView({
       aria-label={`${isImageLike ? "Image" : isText ? "Text" : "Workflow"} ${node.name}`}
       data-testid="canvas-node"
       tabIndex={0}
-      className={`stage-node ${node.type} ${node.status} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""} ${connectionState ? `connection-${connectionState}` : ""}`}
+      className={`stage-node ${node.type} ${statusClass} ${selected ? "selected" : ""} ${highlighted ? "highlighted" : ""} ${connectionState ? `connection-${connectionState}` : ""}`}
       style={{ left: node.x, top: node.y, width: node.width, minHeight: node.height }}
       onPointerDown={(event) => startPointer(event)}
       onDoubleClick={(event) => {
@@ -4445,7 +4505,6 @@ function CanvasNodeView({
           {node.status === "error" && <em>{node.errorMessage}</em>}
         </div>
       )}
-      {selected && isImageLike && <SelectionHandles width={node.width} height={node.height} onResizeStart={startPointer} />}
       {selected && inlineEditorOpen && isImageLike && (
         <InlineNodeEditor
           node={node}
@@ -4536,22 +4595,34 @@ function InlineNodeEditor({
   );
 }
 
-function SelectionHandles({
-  width,
-  height,
+function CanvasResizeHandles({
+  node,
+  viewport,
   onResizeStart
 }: {
-  width: number;
-  height: number;
+  node: CanvasNode;
+  viewport: Project["viewport"];
   onResizeStart: (event: PointerEvent<HTMLElement>, mode: DragMode) => void;
 }) {
+  const zoom = viewport.zoom || 1;
+  const left = viewport.x + node.x * zoom;
+  const top = viewport.y + node.y * zoom;
+  const width = node.width * zoom;
+  const height = node.height * zoom;
+  const topCenter = top + 23 * zoom;
+  const bottomCenter = top + (node.height + 24) * zoom;
+  const leftCenter = left;
+  const rightCenter = left + width + 2 * zoom;
+  const handleOffset = 9;
+
   return (
-    <>
+    <div className="resize-handle-overlay" aria-hidden={false}>
       <i
         className="handle tl"
         role="button"
         tabIndex={-1}
         aria-label="Resize image top-left"
+        style={{ left: leftCenter - handleOffset, top: topCenter - handleOffset }}
         onPointerDown={(event) => onResizeStart(event, "resize-nw")}
       />
       <i
@@ -4559,7 +4630,7 @@ function SelectionHandles({
         role="button"
         tabIndex={-1}
         aria-label="Resize image top-right"
-        style={{ left: width - 4 }}
+        style={{ left: rightCenter - handleOffset, top: topCenter - handleOffset }}
         onPointerDown={(event) => onResizeStart(event, "resize-ne")}
       />
       <i
@@ -4567,7 +4638,7 @@ function SelectionHandles({
         role="button"
         tabIndex={-1}
         aria-label="Resize image bottom-left"
-        style={{ top: height + 18 }}
+        style={{ left: leftCenter - handleOffset, top: bottomCenter - handleOffset }}
         onPointerDown={(event) => onResizeStart(event, "resize-sw")}
       />
       <i
@@ -4575,10 +4646,10 @@ function SelectionHandles({
         role="button"
         tabIndex={-1}
         aria-label="Resize image bottom-right"
-        style={{ left: width - 4, top: height + 18 }}
+        style={{ left: rightCenter - handleOffset, top: bottomCenter - handleOffset }}
         onPointerDown={(event) => onResizeStart(event, "resize-se")}
       />
-    </>
+    </div>
   );
 }
 

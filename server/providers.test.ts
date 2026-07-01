@@ -20,6 +20,15 @@ const nanoBananaModel: ModelDefinition = {
   cost: 11
 };
 
+const recraftModel: ModelDefinition = {
+  id: "recraft-v3",
+  name: "Recraft V3",
+  provider: "recraft",
+  group: "Image",
+  capability: ["generate", "edit"],
+  cost: 8
+};
+
 const runningHubModel: ModelDefinition = {
   id: "runninghub-fashion-workflow",
   name: "RunningHub Fashion Workflow",
@@ -79,6 +88,27 @@ describe("provider adapters", () => {
       keyLocation: "server"
     });
     expect(JSON.stringify(health)).not.toContain("sk-test-secret");
+  });
+
+  it("exposes Recraft as a server-hosted image provider without leaking keys", () => {
+    const [health] = getProviderHealth([recraftModel], {
+      recraft: { configuredSecrets: ["RECRAFT_API_KEY"], secretConfigured: true }
+    });
+
+    expect(health).toMatchObject({
+      provider: "recraft",
+      status: "healthy",
+      modelCount: 1,
+      keyLocation: "server",
+      mode: "live-ready",
+      secretConfigured: true,
+      adapterId: "recraft-image-adapter",
+      requiredSecrets: ["RECRAFT_API_KEY"],
+      configuredSecrets: ["RECRAFT_API_KEY"],
+      missingSecrets: [],
+      supportedOperations: ["generate", "edit"]
+    });
+    expect(JSON.stringify(health)).not.toContain("sk-");
   });
 
   it("uses admin provider settings without exposing stored secret values", () => {

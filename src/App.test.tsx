@@ -1020,6 +1020,9 @@ describe("Designer canvas app shell", () => {
     expect(screen.getByRole("listbox", { name: "Model options" })).toBeInTheDocument();
     expect(screen.getByText("Trending models")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Nano Banana 2.*11 credits.*generate.*edit/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Recraft V3.*8 credits.*generate.*edit/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /RunningHub Fashion Workflow.*8 credits.*generate.*edit.*upscale.*removeBackground/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /ComfyUI Fashion Workflow.*5 credits.*generate.*edit.*upscale.*removeBackground/i })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /Creative Upscale/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /Remove Background/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: /Nano Banana 2.*11 credits/i }));
@@ -1047,6 +1050,11 @@ describe("Designer canvas app shell", () => {
 
     await user.click(screen.getByRole("button", { name: "New project" }));
     const imageNode = screen.getByRole("button", { name: /Image fashion-reference\.jpg/i });
+    expect(imageNode).toHaveClass("selected");
+    expect(screen.getByLabelText("Resize image top-left")).toBeInTheDocument();
+    expect(screen.getByLabelText("Resize image top-right")).toBeInTheDocument();
+    expect(screen.getByLabelText("Resize image bottom-left")).toBeInTheDocument();
+    expect(screen.getByLabelText("Resize image bottom-right")).toBeInTheDocument();
     const dispatchPointer = (target: EventTarget, type: string, clientX: number, clientY: number) => {
       target.dispatchEvent(
         new MouseEvent(type, {
@@ -1298,19 +1306,19 @@ describe("Designer canvas app shell", () => {
       })
     );
     await user.type(screen.getByRole("textbox", { name: "Search prompts" }), "pleated silk");
-    expect(screen.getByRole("button", { name: /Prompt note prompt.*pleated silk/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /fashion-reference\.jpg prompt.*pleated silk/i })).toBeInTheDocument();
     expect(screen.getByText("Saved by Admin Ops")).toBeInTheDocument();
 
     await user.clear(promptBox);
-    await user.click(screen.getByRole("button", { name: /Prompt note prompt.*pleated silk/i }));
+    await user.click(screen.getByRole("button", { name: /fashion-reference\.jpg prompt.*pleated silk/i }));
     expect(promptBox).toHaveValue("Create a pleated silk vest with tiny tonal embroidery and clean studio lighting.");
 
-    await user.click(screen.getByRole("button", { name: "Delete prompt Prompt note prompt" }));
+    await user.click(screen.getByRole("button", { name: "Delete prompt fashion-reference.jpg prompt" }));
     expect(fetch).toHaveBeenCalledWith(
       expect.stringMatching(/\/api\/prompts\/prompt-backend-\d+$/),
       expect.objectContaining({ method: "DELETE", headers: expect.objectContaining({ "x-user-id": "admin@company.local" }) })
     );
-    expect(screen.queryByRole("button", { name: /Prompt note prompt.*pleated silk/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /fashion-reference\.jpg prompt.*pleated silk/i })).not.toBeInTheDocument();
   });
 
   it("filters prompt presets by reusable categories and favorites", async () => {

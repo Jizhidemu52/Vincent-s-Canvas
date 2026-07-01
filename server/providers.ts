@@ -83,6 +83,11 @@ const providerConfigs: Record<ProviderName, ProviderConfig> = {
     requiredSecrets: ["NANOBANANA_API_KEY", "NANO_BANANA_API_KEY"],
     supportedOperations: ["generate", "edit"]
   },
+  recraft: {
+    adapterId: "recraft-image-adapter",
+    requiredSecrets: ["RECRAFT_API_KEY"],
+    supportedOperations: ["generate", "edit"]
+  },
   comfyui: {
     adapterId: "comfyui-workflow-adapter",
     requiredSecrets: ["COMFYUI_API_URL"],
@@ -541,6 +546,7 @@ function createAdapter(provider: ProviderName): ProviderAdapter {
 const adapters = new Map<ProviderName, ProviderAdapter>([
   ["openai", createAdapter("openai")],
   ["nanobanana", createAdapter("nanobanana")],
+  ["recraft", createAdapter("recraft")],
   ["comfyui", createAdapter("comfyui")],
   ["runninghub", createAdapter("runninghub")],
   ["internal", createAdapter("internal")]

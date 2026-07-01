@@ -39,6 +39,9 @@ describe("backend hosted mock API", () => {
     const profile = callApi(state, "/api/profile") as ReturnType<typeof createServerState>["profile"];
 
     expect(models.some((model) => model.id === "nanobanana2")).toBe(true);
+    expect(models.some((model) => model.id === "recraft-v3" && model.provider === "recraft")).toBe(true);
+    expect(models.some((model) => model.id === "runninghub-fashion-workflow" && model.provider === "runninghub")).toBe(true);
+    expect(models.some((model) => model.id === "comfyui-fashion-workflow" && model.provider === "comfyui")).toBe(true);
     expect(models.every((model) => !("apiKey" in model))).toBe(true);
     expect(profile.creditBalance).toBe(30);
   });

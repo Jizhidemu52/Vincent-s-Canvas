@@ -41,11 +41,22 @@ function serializeServerState(state: ServerState): PersistedServerState {
   };
 }
 
+function mergeModelRegistry(models: ModelDefinition[] | undefined, fallbackModels: ModelDefinition[]) {
+  if (!Array.isArray(models) || !models.length) return fallbackModels;
+  const fallbackById = new Map(fallbackModels.map((model) => [model.id, model]));
+  const mergedModels = models.map((model) => {
+    const fallback = fallbackById.get(model.id);
+    return fallback ? { ...fallback, ...model, operationPricing: model.operationPricing ?? fallback.operationPricing } : model;
+  });
+  const modelIds = new Set(mergedModels.map((model) => model.id));
+  return [...mergedModels, ...fallbackModels.filter((model) => !modelIds.has(model.id))];
+}
+
 function hydrateServerState(data: PersistedServerState): ServerState {
   const fallback = createServerState(data.profile);
   return {
     profile: data.profile,
-    models: data.models?.length ? data.models : fallback.models,
+    models: mergeModelRegistry(data.models, fallback.models),
     history: Array.isArray(data.history) ? data.history : [],
     projects: Array.isArray(data.projects) ? data.projects : [],
     activeProjectId: data.activeProjectId,
@@ -425,7 +436,7 @@ function loadDatabaseTables(db: ReturnType<typeof openDatabase>, fallback: Serve
   const modelRows = db.prepare("select model_json from model_configs order by id").all() as Array<{ model_json: string }>;
   const models = modelRows.map((row) => loadJsonColumn<ModelDefinition>(row.model_json)).filter((model): model is ModelDefinition => Boolean(model));
   if (models.length) {
-    state.models = models;
+    state.models = mergeModelRegistry(models, fallback.models);
   }
 
   const jobRows = db.prepare("select job_json from generation_jobs order by id").all() as Array<{ job_json: string }>;
