@@ -987,6 +987,20 @@ describe("Designer canvas app shell", () => {
     });
   });
 
+  it("offers a clear back-to-projects command from the canvas toolbar", async () => {
+    const user = userEvent.setup();
+    await login(user);
+
+    await user.click(screen.getByRole("button", { name: "New project" }));
+    expect(screen.getByRole("region", { name: "Infinite canvas" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Back to projects" }));
+
+    expect(screen.getByRole("region", { name: "Projects" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New project" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Switch to new UI" })).not.toBeInTheDocument();
+  });
+
   it("lets designers choose the prompt panel reference image before generating", async () => {
     const user = userEvent.setup();
     await login(user);

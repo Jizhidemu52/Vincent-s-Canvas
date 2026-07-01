@@ -3598,7 +3598,7 @@ function TopToolbar({
     <header className="canvas-toolbar">
       <div className="toolbar-left">
         <button type="button" className="icon-button" onClick={onBack} title="Projects"><Menu size={15} /></button>
-        <button type="button" className="toolbar-pill">Switch to new UI</button>
+        <button type="button" className="toolbar-pill" onClick={onBack}>Back to projects</button>
         <button type="button" className="toolbar-text">Insert <ChevronDown size={13} /></button>
         <button type="button" className="toolbar-text">Templates <ChevronDown size={13} /></button>
         <button type="button" className="icon-button" title="Select"><MousePointer2 size={15} /></button>
