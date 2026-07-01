@@ -1149,6 +1149,31 @@ describe("Designer canvas app shell", () => {
     });
   });
 
+  it("keeps every selected image resize corner inside the visible viewport", async () => {
+    const originalInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 999 });
+    const user = userEvent.setup();
+
+    try {
+      await login(user);
+      await user.click(screen.getByRole("button", { name: "New project" }));
+
+      const handleCenters = [
+        "Resize image top-left",
+        "Resize image top-right",
+        "Resize image bottom-left",
+        "Resize image bottom-right"
+      ].map((label) => {
+        const handle = screen.getByLabelText(label) as HTMLElement;
+        return Number.parseFloat(handle.style.left) + 9;
+      });
+
+      expect(handleCenters.every((centerX) => centerX >= 0 && centerX <= window.innerWidth)).toBe(true);
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+    }
+  });
+
   it("lets designers pan the infinite canvas by dragging blank canvas space", async () => {
     const user = userEvent.setup();
     await login(user);
@@ -1192,7 +1217,7 @@ describe("Designer canvas app shell", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Image fashion-reference\.jpg/i })).toHaveClass("selected");
     });
-    expect(stageWorld.style.transform).toContain("translate(130px, 70px) scale(1)");
+    expect(stageWorld.style.transform).toContain("translate(340px, 70px) scale(1)");
   });
 
   it("lets designers copy, delete, undo, and redo selected image nodes", async () => {

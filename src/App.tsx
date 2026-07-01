@@ -532,18 +532,24 @@ export default function App() {
   function openNewProject() {
     setWorkspace((current) => {
       const created = createProject(current, `Untitled ${current.projects.length + 1}`);
-      let next = addAssetToProject(created.workspace, created.project.id, {
-        name: "fashion-reference.jpg",
-        source: TEST_IMAGE,
-        width: 360,
-        height: 520
-      });
+      let next = addAssetToProjectAt(
+        created.workspace,
+        created.project.id,
+        {
+          name: "fashion-reference.jpg",
+          source: TEST_IMAGE,
+          width: 360,
+          height: 520
+        },
+        430,
+        90
+      );
       next = addTextNode(
         next,
         created.project.id,
         "参考当前服装轮廓，生成一款新的女装单品，保持干净棚拍质感。",
-        560,
-        210
+        430,
+        650
       );
       const activeProject = next.projects.find((project) => project.id === created.project.id);
       const referenceImage = activeProject?.nodes.find((node) => node.type === "image");
