@@ -16,6 +16,8 @@ import { createAdminHistoryRouter, createHistoryRouter } from "./routes/history"
 import { createAdminAssetsRouter, createAssetsRouter } from "./routes/assets";
 import { ObjectStorage } from "./object-storage";
 import { createAdminProjectsRouter, createProjectsRouter } from "./routes/projects";
+import { createWorkflowsRouter } from "./routes/workflows";
+import { createChatRouter } from "./routes/chat";
 import { sessionMiddleware } from "./session";
 
 const config = loadConfig();
@@ -48,6 +50,8 @@ app.use("/api/assets", sessionMiddleware(db, cache, config), createAssetsRouter(
 app.use("/api/admin/assets", sessionMiddleware(db, cache, config), createAdminAssetsRouter(db));
 app.use("/api/projects", sessionMiddleware(db, cache, config), createProjectsRouter(db));
 app.use("/api/admin/projects", sessionMiddleware(db, cache, config), createAdminProjectsRouter(db));
+app.use("/api/admin/workflows", sessionMiddleware(db, cache, config), createWorkflowsRouter(db));
+app.use("/api/chat", sessionMiddleware(db, cache, config), createChatRouter(db, config));
 app.use("/api/admin/accounts", sessionMiddleware(db, cache, config), createAccountsRouter(db));
 app.use("/api/admin/departments", sessionMiddleware(db, cache, config), createDepartmentsRouter(db));
 app.use("/api/admin/audit-logs", sessionMiddleware(db, cache, config), createAuditRouter(db));

@@ -22,8 +22,8 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const [open, setOpen] = useState(false);
     const canManageConfig = useCanManageConfig();
     const [serverModels,setServerModels]=useState<Array<{modelId:string;name:string;creditCost:number;capabilities:string[]}>>([]);
-    useEffect(()=>{if(capability!=="image")return;fetch("/api/models",{credentials:"include"}).then((response)=>response.ok?response.json():Promise.reject()).then((result:{models:Array<{modelId:string;name:string;creditCost:number;capabilities:string[]}>})=>setServerModels(result.models.filter((model)=>model.capabilities.includes("generate")||model.capabilities.includes("edit")))).catch(()=>setServerModels([]));},[capability]);
-    const options = useMemo(() => capability === "image" ? serverModels.map((model)=>model.modelId) : Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, serverModels, value]);
+    useEffect(()=>{if(!capability)return;const required=capability==="image"?["generate","edit"]:[capability==="text"?"chat":capability];fetch("/api/models",{credentials:"include"}).then((response)=>response.ok?response.json():Promise.reject()).then((result:{models:Array<{modelId:string;name:string;creditCost:number;capabilities:string[]}>})=>setServerModels(result.models.filter((model)=>required.some((item)=>model.capabilities.includes(item))))).catch(()=>setServerModels([]));},[capability]);
+    const options = useMemo(() => capability ? serverModels.map((model)=>model.modelId) : Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, serverModels, value]);
     const current = value || "";
 
     useEffect(() => {

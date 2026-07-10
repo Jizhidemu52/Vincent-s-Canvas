@@ -7,6 +7,7 @@ import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSe
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { requestQueuedMedia } from "@/services/api/generation-tasks";
 
 type VideoResponse = { id: string; status?: string; error?: { message?: string } };
 type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
@@ -35,17 +36,10 @@ function aiHeaders(config: AiConfig, contentType?: string) {
 }
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
-    const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
-    const delayMs = task.provider === "seedance" ? 5000 : 2500;
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-        if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-        const state = await pollVideoGenerationTask(config, task, options);
-        if (state.status === "completed") return state.result;
-        if (state.status === "failed") throw new Error(state.error);
-        if (attempt === 119) throw new Error(`${task.provider === "seedance" ? "Seedance " : ""}视频生成超时，请稍后重试`);
-        await delay(delayMs, options?.signal);
-    }
-    throw new Error("视频生成超时，请稍后重试");
+    const sourceFiles:File[]=[];const sourceUrls:string[]=[];
+    for(const image of references)sourceFiles.push(dataUrlToFile({...image,dataUrl:await imageToDataUrl(image)}));
+    for(const media of [...videoReferences,...audioReferences]){if(media.url.startsWith("/api/assets/")){sourceUrls.push(media.url);continue;}let blob:Blob|null=null;if(media.storageKey)blob=await getMediaBlob(media.storageKey);if(!blob&&media.url)blob=await fetch(media.url).then((response)=>response.blob());if(blob)sourceFiles.push(new File([blob],`${media.id}.${blob.type.split("/")[1]||"bin"}`,{type:blob.type}));}
+    const [url]=await requestQueuedMedia({modelId:config.model||config.videoModel,prompt,operationType:"video_generation",sourceFiles,sourceUrls,signal:options?.signal});if(!url)throw new Error("视频任务没有返回结果");return{url,mimeType:"video/mp4"};
 }
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationTask> {

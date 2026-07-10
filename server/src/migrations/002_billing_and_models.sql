@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS model_configs (
 
 CREATE TABLE IF NOT EXISTS pricing_rule_versions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    operation_type text NOT NULL CHECK (operation_type IN ('image_generation','upscale','remove_background','inpaint','batch_image','seamless_stitch')),
+    operation_type text NOT NULL CHECK (operation_type IN ('image_generation','video_generation','upscale','remove_background','inpaint','batch_image','seamless_stitch')),
     label text NOT NULL,
     credits integer NOT NULL CHECK (credits >= 0),
     department_credits integer NOT NULL DEFAULT 0 CHECK (department_credits >= 0),
@@ -49,6 +49,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_published_price_per_operation
 
 INSERT INTO pricing_rule_versions(operation_type,label,credits,rmb_cost,version,status,published_at) VALUES
     ('image_generation','生成一张图',8,0.8,1,'published',now()),
+    ('video_generation','生成视频',30,3.0,1,'published',now()),
     ('upscale','放大图片',5,0.5,1,'published',now()),
     ('remove_background','去背景',3,0.3,1,'published',now()),
     ('inpaint','局部编辑',6,0.6,1,'published',now()),

@@ -630,18 +630,9 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
     try {
-        if (requestConfig.apiFormat === "gemini") {
-            const answer = (await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages), onDelta, options)).content || "没有返回内容";
-            if (answer === "没有返回内容") onDelta(answer);
-            return answer;
-        }
-        const answer = (await requestStreamingResponse(requestConfig, {
-            model: requestConfig.model,
-            input: toResponseInput(withSystemMessage(requestConfig, messages)),
-        }, onDelta, options)).content || "没有返回内容";
-        if (answer === "没有返回内容") onDelta(answer);
+        const result=await requestServerResponse(config,toResponseInput(withSystemMessage(config,messages)),[],"auto",options);
+        const answer=result.content||"没有返回内容";onDelta(answer);
         return answer;
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
@@ -649,22 +640,14 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 }
 
 export async function requestToolResponse(config: AiConfig, messages: ResponseInputMessage[], tools: ResponseFunctionTool[], toolChoice: ToolChoice = "auto", onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
     try {
-        if (requestConfig.apiFormat === "gemini") {
-            return await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages, toGeminiToolOptions(tools, toolChoice)), onDelta, options);
-        }
-        return await requestStreamingResponse(requestConfig, {
-            model: requestConfig.model,
-            input: toResponseInput(withSystemMessage(requestConfig, messages)),
-            tools: tools.map(toResponseTool),
-            tool_choice: toolChoice,
-            parallel_tool_calls: false,
-        }, onDelta, options);
+        const result=await requestServerResponse(config,toResponseInput(withSystemMessage(config,messages)),tools.map(toResponseTool),toolChoice,options);if(result.content)onDelta?.(result.content);return result;
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
 }
+
+async function requestServerResponse(config:AiConfig,input:ResponseInputItem[],tools:ResponseApiToolDefinition[],toolChoice:ToolChoice,options?:RequestOptions):Promise<ToolResponseResult>{const response=await fetch("/api/chat/responses",{method:"POST",credentials:"include",headers:{"content-type":"application/json"},body:JSON.stringify({modelId:config.model||config.textModel,input,tools,toolChoice}),signal:options?.signal});if(!response.ok){const payload=await response.json().catch(()=>({})) as {message?:string};throw new Error(payload.message||`对话请求失败：${response.status}`);}return response.json() as Promise<ToolResponseResult>;}
 
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
     try {

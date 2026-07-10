@@ -21,6 +21,7 @@ import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 
 const operationOptions: Array<{ label: string; value: AdminOperationType }> = [
     { label: "生成一张图", value: "image_generation" },
+    { label: "生成视频", value: "video_generation" },
     { label: "放大图片", value: "upscale" },
     { label: "去背景", value: "remove_background" },
     { label: "局部编辑", value: "inpaint" },

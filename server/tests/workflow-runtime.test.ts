@@ -1,0 +1,3 @@
+import{describe,expect,test}from"bun:test";
+import{normalizeWorkflowOutputs,readPath,renderTemplate}from"../src/workflow-runtime";
+describe("workflow runtime",()=>{test("renders structured variables without stringifying arrays",()=>{expect(renderTemplate({prompt:"$prompt",images:"$sourceUrls",label:"job-${workflowId}"},{prompt:"增强细节",sourceUrls:["a.png","b.png"],workflowId:"wf-1"})).toEqual({prompt:"增强细节",images:["a.png","b.png"],label:"job-wf-1"});});test("reads nested response paths",()=>{expect(readPath({data:{task:{id:"abc"}}},"data.task.id")).toBe("abc");});test("normalizes workflow output shapes",()=>{expect(normalizeWorkflowOutputs([{url:"a.png"},{output:{imageUrl:"b.png"}}])).toEqual(["a.png","b.png"]);});});

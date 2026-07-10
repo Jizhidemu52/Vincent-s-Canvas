@@ -1,7 +1,7 @@
 export type AdminRole = "designer" | "admin";
 export type DesignerStatus = "active" | "disabled";
-export type AdminOperationType = "image_generation" | "upscale" | "remove_background" | "inpaint" | "batch_image" | "seamless_stitch";
-export type AdminModelCapability = "generate" | "edit" | "upscale" | "remove_background" | "batch";
+export type AdminOperationType = "image_generation" | "video_generation" | "upscale" | "remove_background" | "inpaint" | "batch_image" | "seamless_stitch";
+export type AdminModelCapability = "generate" | "edit" | "upscale" | "remove_background" | "batch" | "chat" | "video" | "audio";
 export type BatchItemStatus = "waiting" | "processing" | "success" | "failed" | "paused" | "cancelled";
 export type AdminProviderProtocol = "openai" | "gemini" | "volcengine" | "runninghub" | "codex" | "custom";
 export type AdminProviderModelType = "image" | "chat" | "video";
