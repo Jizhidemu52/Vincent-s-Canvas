@@ -1,10 +1,8 @@
-.next/
-out/
 node_modules/
-.env*
-!.env.example
+dist/
+web/dist/
+server/.env
+web/.env
+.env
 data/
 *.log
-*.tsbuildinfo
-.DS_Store
-.idea

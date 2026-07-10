@@ -13,7 +13,7 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useAdminStore } from "@/stores/use-admin-store";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { useUserStore } from "@/stores/use-user-store";
+import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 
 const groupLabels: Record<NavigationGroup, string> = {
     local: "本地功能",
@@ -82,8 +82,8 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
     const currentAccount = designers.find((designer) => designer.id === user?.id);
     const buttonClass = "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-[12px] font-semibold !text-stone-500 transition hover:bg-white hover:!text-stone-950";
     const displayName = currentAccount?.name || user?.displayName || "未登录";
-    const roleLabel = user?.role === "admin" ? "管理员" : user?.role === "designer" ? "设计师" : "登录";
-    const credits = currentAccount ? `${currentAccount.quotaRemaining} 积分` : "请选择身份";
+    const roleLabel = user?.role === "super_admin" ? "超级管理员" : user?.role === "department_admin" ? "部门管理员" : user?.role === "designer" ? "设计师" : "登录";
+    const credits = user ? `${user.creditBalance} 积分` : "请登录";
 
     return (
         <div className="space-y-1 border-t border-stone-200 pt-3">
@@ -109,10 +109,10 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
             <button
                 type="button"
                 className={buttonClass}
-                onClick={() => {
+                onClick={async () => {
                     if (user) {
                         logoutAdmin();
-                        clearSession();
+                        await clearSession();
                         navigate("/login");
                     } else {
                         navigate("/login");
@@ -128,7 +128,7 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
                     <p className="truncate text-[11px] font-semibold text-stone-700">{displayName}</p>
                     <p className="flex items-center gap-1 text-[11px] font-semibold text-orange-600">
                         <CircleDollarSign className="size-3" />
-                        {user?.role === "admin" ? roleLabel : credits}
+                        {isAdminRole(user?.role) ? roleLabel : credits}
                     </p>
                 </div>
             </div>

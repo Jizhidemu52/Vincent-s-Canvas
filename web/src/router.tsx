@@ -2,12 +2,14 @@ import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from "re
 import { createBrowserRouter, Outlet } from "react-router-dom";
 
 import UserLayout from "@/layouts/user-layout";
+import { AuthGate } from "@/components/auth/auth-gate";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
 const AdminLoginPage = lazy(() => import("@/pages/admin/login"));
 const AssetsPage = lazy(() => import("@/pages/assets"));
 const CanvasPage = lazy(() => import("@/pages/canvas"));
 const CanvasProjectPage = lazy(() => import("@/pages/canvas/project"));
+const ChangePasswordPage = lazy(() => import("@/pages/change-password"));
 const HomePage = lazy(() => import("@/pages/home"));
 const ImagePage = lazy(() => import("@/pages/image"));
 const LoginPage = lazy(() => import("@/pages/login"));
@@ -33,6 +35,10 @@ function routeElement(Page: RoutePage) {
     );
 }
 
+function protectedRoute(Page: RoutePage, admin = false) {
+    return <AuthGate admin={admin}>{routeElement(Page)}</AuthGate>;
+}
+
 export const router = createBrowserRouter([
     {
         element: (
@@ -41,16 +47,17 @@ export const router = createBrowserRouter([
             </UserLayout>
         ),
         children: [
-            { path: "/", element: routeElement(HomePage) },
+            { path: "/", element: protectedRoute(HomePage) },
             { path: "/login", element: routeElement(LoginPage) },
-            { path: "/image", element: routeElement(ImagePage) },
-            { path: "/video", element: routeElement(VideoPage) },
-            { path: "/assets", element: routeElement(AssetsPage) },
-            { path: "/prompts", element: routeElement(PromptsPage) },
-            { path: "/admin", element: routeElement(AdminPage) },
+            { path: "/change-password", element: protectedRoute(ChangePasswordPage) },
+            { path: "/image", element: protectedRoute(ImagePage) },
+            { path: "/video", element: protectedRoute(VideoPage) },
+            { path: "/assets", element: protectedRoute(AssetsPage) },
+            { path: "/prompts", element: protectedRoute(PromptsPage) },
+            { path: "/admin", element: protectedRoute(AdminPage, true) },
             { path: "/admin/login", element: routeElement(AdminLoginPage) },
-            { path: "/canvas", element: routeElement(CanvasPage) },
-            { path: "/canvas/:id", element: routeElement(CanvasProjectPage) },
+            { path: "/canvas", element: protectedRoute(CanvasPage) },
+            { path: "/canvas/:id", element: protectedRoute(CanvasProjectPage) },
         ],
     },
     { path: "*", element: routeElement(NotFound) },

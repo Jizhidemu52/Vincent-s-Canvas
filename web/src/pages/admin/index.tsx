@@ -1,16 +1,20 @@
 import type { ReactNode } from "react";
-import { Download, Edit3, LogOut, ShieldCheck, SlidersHorizontal, UserPlus, UsersRound, WalletCards } from "lucide-react";
-import { useMemo, useState } from "react";
-import { App, Button, Form, Input, InputNumber, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
+import { Download, Edit3, FileUp, LogOut, ShieldCheck, SlidersHorizontal, UserPlus, UsersRound, WalletCards } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { App, Button, Form, Input, InputNumber, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload } from "antd";
 import { saveAs } from "file-saver";
+import Papa from "papaparse";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
-import { type AdminModelCapability, type AdminModelConfig, type AdminOperationType, type AdminRole, type DesignerAccount, type DesignerStatus, type PricingRule } from "@/lib/admin-domain";
+import { type AdminModelCapability, type AdminModelConfig, type AdminOperationType, type DesignerAccount, type PricingRule } from "@/lib/admin-domain";
 import { ApiProviderPanel } from "@/pages/admin/components/api-provider-panel";
 import { WorkflowManagementPanel } from "@/pages/admin/components/workflow-management-panel";
 import { useAdminStore } from "@/stores/use-admin-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { adjustAccountCredits, bulkCreateAccounts, createAccount, listAccounts, listDepartments, resetAccountPassword, updateAccount, type AccountInput, type Department } from "@/services/api/admin-accounts";
+import type { ApiUser, ApiUserRole } from "@/services/api/auth";
+import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 
 const operationOptions: Array<{ label: string; value: AdminOperationType }> = [
     { label: "生成一张图", value: "image_generation" },
@@ -44,8 +48,11 @@ type AccountFormValues = {
     loginName: string;
     password?: string;
     name: string;
-    role: AdminRole;
-    status: DesignerStatus;
+    email?: string;
+    employeeNo?: string;
+    departmentId?: string;
+    role: ApiUserRole;
+    status: ApiUser["status"];
     quotaRemaining: number;
     quotaLimit: number;
 };
@@ -67,27 +74,42 @@ export default function AdminPage() {
     const [pricingForm] = Form.useForm<PricingFormValues>();
     const [modelForm] = Form.useForm<ModelFormValues>();
     const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+    const [accounts, setAccounts] = useState<ApiUser[]>([]);
+    const [departments, setDepartments] = useState<Department[]>([]);
+    const [accountsLoading, setAccountsLoading] = useState(true);
     const [historyDesigner, setHistoryDesigner] = useState<string>("all");
     const [historyModel, setHistoryModel] = useState<string>("all");
     const [historyOperation, setHistoryOperation] = useState<string>("all");
     const [assetDesigner, setAssetDesigner] = useState<string>("all");
     const [searchParams, setSearchParams] = useSearchParams();
     const state = useAdminStore();
+    const signedInUser = useUserStore((store) => store.user);
     const projects = useCanvasStore((store) => store.projects);
     const assets = useAssetStore((store) => store.assets);
-    const currentOperator = state.designers.find((designer) => designer.id === state.adminSession?.userId);
-    const isAdmin = currentOperator?.role === "admin";
+    const currentOperator = signedInUser;
+    const isAdmin = signedInUser?.role === "super_admin";
+    const canManageAccounts = isAdminRole(signedInUser?.role);
 
-    if (!state.canAccessAdmin()) return <Navigate to="/admin/login" replace />;
+    const refreshAccounts = async () => {
+        setAccountsLoading(true);
+        try {
+            const [accountResult, departmentResult] = await Promise.all([listAccounts(), listDepartments()]);
+            setAccounts(accountResult.users);
+            setDepartments(departmentResult.departments);
+        } catch (error) { message.error(error instanceof Error ? error.message : "账号数据加载失败"); }
+        finally { setAccountsLoading(false); }
+    };
 
-    const designerOptions = state.designers.map((designer) => ({
-        label: `${designer.name}（${designer.role === "admin" ? "管理员" : "设计师"}）`,
+    useEffect(() => { if (canManageAccounts) void refreshAccounts(); }, [canManageAccounts]);
+
+    const designerOptions = accounts.map((designer) => ({
+        label: `${designer.displayName}（${designer.role === "designer" ? "设计师" : "管理员"}）`,
         value: designer.id,
     }));
 
-    const activeDesigner = state.designers.find((designer) => designer.id === state.activeDesignerId);
-    const totalRemaining = state.designers.reduce((sum, designer) => sum + designer.quotaRemaining, 0);
-    const totalUsed = state.designers.reduce((sum, designer) => sum + designer.quotaUsed, 0);
+    const activeDesigner = accounts.find((designer) => designer.role === "designer");
+    const totalRemaining = accounts.reduce((sum, designer) => sum + designer.creditBalance, 0);
+    const totalUsed = accounts.reduce((sum, designer) => sum + Math.max(0, designer.creditLimit - designer.creditBalance), 0);
     const totalCost = state.ledger.reduce((sum, item) => sum + item.rmb, 0);
 
     const filteredHistory = useMemo(
@@ -137,7 +159,8 @@ export default function AdminPage() {
         [assetDesigner, assets, state.materials],
     );
 
-    const activeAdminTab = searchParams.get("tab") || "accounts";
+    const requestedAdminTab = searchParams.get("tab") || "accounts";
+    const activeAdminTab = isAdmin ? requestedAdminTab : "accounts";
     const changeAdminTab = (tab: string) => {
         setSearchParams(tab === "accounts" ? {} : { tab }, { replace: true });
     };
@@ -151,44 +174,76 @@ export default function AdminPage() {
         { key: "projects", label: "项目素材" },
         { key: "batch", label: "批量任务" },
         { key: "audit", label: "审计日志" },
-    ];
+    ].filter((tab) => isAdmin || tab.key === "accounts");
 
-    const submitCreditChange = (values: CreditFormValues) => {
-        const result = state.changeDesignerCredits(values.designerId, values.amount, values.reason || "管理员调整");
-        showActionResult(result, message, "额度已调整");
+    const submitCreditChange = async (values: CreditFormValues) => {
+        try { await adjustAccountCredits(values.designerId, values.amount, values.reason || "管理员调整"); message.success("额度已调整"); await refreshAccounts(); }
+        catch (error) { message.error(error instanceof Error ? error.message : "额度调整失败"); }
     };
 
-    const submitLimitChange = (values: LimitFormValues) => {
-        const result = state.changeDesignerQuotaLimit(values.designerId, values.quotaLimit);
-        showActionResult(result, message, "额度上限已更新");
+    const submitLimitChange = async (values: LimitFormValues) => {
+        try { await updateAccount(values.designerId, { creditLimit: values.quotaLimit }); message.success("额度上限已更新"); await refreshAccounts(); }
+        catch (error) { message.error(error instanceof Error ? error.message : "额度上限更新失败"); }
     };
 
-    const submitAccount = (values: AccountFormValues) => {
-        const existing = editingAccountId ? state.designers.find((designer) => designer.id === editingAccountId) : undefined;
-        const result = state.saveDesignerAccount({
-            id: editingAccountId || undefined,
-            ...values,
-            quotaUsed: existing?.quotaUsed || 0,
-        });
-        showActionResult(result, message, editingAccountId ? "账号已更新，设计师端会同步最新权限和额度" : "账号已开通，设计师可用账号密码登录");
-        if (result.ok) {
+    const submitAccount = async (values: AccountFormValues) => {
+        try {
+            if (editingAccountId) {
+                await updateAccount(editingAccountId, { displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, role: values.role === "super_admin" ? undefined : values.role, status: values.status, creditLimit: values.quotaLimit });
+                if (values.password) await resetAccountPassword(editingAccountId, values.password);
+            } else {
+                await createAccount({ username: values.loginName, displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, password: values.password || "", role: values.role, creditBalance: values.quotaRemaining, creditLimit: values.quotaLimit });
+            }
+            message.success(editingAccountId ? "账号已更新，权限和额度会在重新校验会话后同步" : "账号已开通，首次登录必须修改密码");
             setEditingAccountId(null);
             accountForm.resetFields();
             accountForm.setFieldsValue({ role: "designer", status: "active", quotaRemaining: 500, quotaLimit: 500 });
-        }
+            await refreshAccounts();
+        } catch (error) { message.error(error instanceof Error ? error.message : "账号保存失败"); }
     };
 
-    const editAccount = (designer: DesignerAccount) => {
+    const editAccount = (designer: ApiUser) => {
         setEditingAccountId(designer.id);
         accountForm.setFieldsValue({
-            loginName: designer.loginName || designer.id,
+            loginName: designer.username,
             password: "",
-            name: designer.name,
+            name: designer.displayName,
+            email: designer.email || undefined,
+            employeeNo: designer.employeeNo || undefined,
+            departmentId: designer.departmentId || undefined,
             role: designer.role,
             status: designer.status,
-            quotaRemaining: designer.quotaRemaining,
-            quotaLimit: designer.quotaLimit,
+            quotaRemaining: designer.creditBalance,
+            quotaLimit: designer.creditLimit,
         });
+    };
+
+    const downloadAccountTemplate = () => {
+        const csv = Papa.unparse([{ username: "zhangsan", displayName: "张三", email: "zhangsan@company.com", employeeNo: "D001", password: "Canvas2026Start", role: "designer", departmentCode: departments[0]?.code || "design", creditBalance: 500, creditLimit: 500 }]);
+        saveAs(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }), "设计师账号导入模板.csv");
+    };
+
+    const importAccountCsv = async (file: File) => {
+        try {
+            const parsed = Papa.parse<Record<string, string>>(await file.text(), { header: true, skipEmptyLines: true });
+            const firstError = parsed.errors[0];
+            if (firstError) throw new Error(`CSV 第 ${(firstError.row ?? 0) + 2} 行格式错误：${firstError.message}`);
+            const accountsToCreate: AccountInput[] = parsed.data.map((row, index) => {
+                const department = departments.find((item) => item.code.toLowerCase() === row.departmentCode?.trim().toLowerCase());
+                if (!department) throw new Error(`CSV 第 ${index + 2} 行的部门编码不存在`);
+                const role = row.role?.trim() === "department_admin" ? "department_admin" : "designer";
+                return {
+                    username: row.username?.trim(), displayName: row.displayName?.trim(), email: row.email?.trim() || null,
+                    employeeNo: row.employeeNo?.trim() || null, password: row.password, role, departmentId: department.id,
+                    creditBalance: Number(row.creditBalance || 0), creditLimit: Number(row.creditLimit || 0),
+                };
+            });
+            const result = await bulkCreateAccounts(accountsToCreate);
+            if (result.failures.length) message.warning(`成功导入 ${result.created} 人，失败 ${result.failures.length} 人；首条失败：${result.failures[0].message}`);
+            else message.success(`成功导入 ${result.created} 个账号`);
+            await refreshAccounts();
+        } catch (error) { message.error(error instanceof Error ? error.message : "CSV 导入失败"); }
+        return false;
     };
 
     const submitPricingRule = (values: PricingFormValues) => {
@@ -227,6 +282,8 @@ export default function AdminPage() {
         message.success("历史记录已导出");
     };
 
+    if (!signedInUser || !canManageAccounts) return <Navigate to="/admin/login" replace />;
+
     return (
         <div className="h-full overflow-y-auto bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
             <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-6 py-5">
@@ -237,7 +294,7 @@ export default function AdminPage() {
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                         <div className="rounded-md border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900">
-                            当前管理员：<span className="font-medium">{currentOperator?.name}</span>
+                            当前管理员：<span className="font-medium">{currentOperator?.displayName}</span>
                         </div>
                         <Button
                             icon={<LogOut className="size-4" />}
@@ -252,7 +309,7 @@ export default function AdminPage() {
                 </section>
 
                 <section className="grid gap-3 md:grid-cols-4">
-                    <Metric icon={<UsersRound className="size-4" />} label="设计师账号" value={String(state.designers.length)} />
+                    <Metric icon={<UsersRound className="size-4" />} label="可管理账号" value={String(accounts.length)} />
                     <Metric icon={<WalletCards className="size-4" />} label="剩余额度" value={totalRemaining.toLocaleString()} />
                     <Metric icon={<SlidersHorizontal className="size-4" />} label="已用额度" value={totalUsed.toLocaleString()} />
                     <Metric icon={<ShieldCheck className="size-4" />} label="人民币成本" value={`￥${totalCost.toFixed(2)}`} />
@@ -260,7 +317,7 @@ export default function AdminPage() {
 
                 {!isAdmin ? (
                     <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
-                        当前操作人是普通设计师，只能查看后台数据，不能修改额度、价格和模型配置。
+                        当前为部门管理员，只能管理本部门设计师账号和额度；模型、API 与全局价格仅超级管理员可配置。
                     </div>
                 ) : null}
 
@@ -296,19 +353,21 @@ export default function AdminPage() {
                                         <Table
                                             rowKey="id"
                                             size="small"
-                                            pagination={false}
-                                            dataSource={state.designers}
+                                            loading={accountsLoading}
+                                            pagination={{ pageSize: 20, showSizeChanger: false }}
+                                            dataSource={accounts}
                                             columns={[
-                                                { title: "姓名", dataIndex: "name" },
-                                                { title: "登录账号", render: (_, record: DesignerAccount) => record.loginName || record.id },
-                                                { title: "角色", render: (_, record: DesignerAccount) => <Tag color={record.role === "admin" ? "blue" : "default"}>{record.role === "admin" ? "管理员" : "设计师"}</Tag> },
-                                                { title: "状态", render: (_, record: DesignerAccount) => <Tag color={record.status === "active" ? "green" : "red"}>{record.status === "active" ? "启用" : "停用"}</Tag> },
-                                                { title: "剩余额度", dataIndex: "quotaRemaining", sorter: (a, b) => a.quotaRemaining - b.quotaRemaining },
-                                                { title: "已用额度", dataIndex: "quotaUsed", sorter: (a, b) => a.quotaUsed - b.quotaUsed },
-                                                { title: "额度上限", dataIndex: "quotaLimit" },
+                                                { title: "姓名", dataIndex: "displayName" },
+                                                { title: "登录账号", dataIndex: "username" },
+                                                { title: "部门", dataIndex: "departmentName", render: (value: string | null) => value || "未分配" },
+                                                { title: "角色", render: (_, record: ApiUser) => <Tag color={record.role === "super_admin" ? "red" : record.role === "department_admin" ? "blue" : "default"}>{record.role === "super_admin" ? "超级管理员" : record.role === "department_admin" ? "部门管理员" : "设计师"}</Tag> },
+                                                { title: "状态", render: (_, record: ApiUser) => <Tag color={record.status === "active" ? "green" : "red"}>{record.status === "active" ? "启用" : record.status === "locked" ? "锁定" : "停用"}</Tag> },
+                                                { title: "剩余额度", dataIndex: "creditBalance", sorter: (a: ApiUser, b: ApiUser) => a.creditBalance - b.creditBalance },
+                                                { title: "已用额度", render: (_, record: ApiUser) => Math.max(0, record.creditLimit - record.creditBalance) },
+                                                { title: "额度上限", dataIndex: "creditLimit" },
                                                 {
                                                     title: "操作",
-                                                    render: (_, record: DesignerAccount) => (
+                                                    render: (_, record: ApiUser) => (
                                                         <Button size="small" icon={<Edit3 className="size-3.5" />} onClick={() => editAccount(record)}>
                                                             编辑
                                                         </Button>
@@ -318,7 +377,13 @@ export default function AdminPage() {
                                         />
                                         <div className="grid gap-3">
                                             <Panel title={editingAccountId ? "编辑账号权限" : "开通设计师账号"}>
-                                                <Form form={accountForm} layout="vertical" disabled={!isAdmin} initialValues={{ role: "designer", status: "active", quotaRemaining: 500, quotaLimit: 500 }} onFinish={submitAccount}>
+                                                <div className="mb-4 flex flex-wrap gap-2">
+                                                    <Upload accept=".csv,text/csv" maxCount={1} showUploadList={false} beforeUpload={(file) => importAccountCsv(file as File)}>
+                                                        <Button icon={<FileUp className="size-4" />}>批量导入 CSV</Button>
+                                                    </Upload>
+                                                    <Button icon={<Download className="size-4" />} onClick={downloadAccountTemplate}>下载模板</Button>
+                                                </div>
+                                                <Form form={accountForm} layout="vertical" disabled={!canManageAccounts} initialValues={{ role: "designer", status: "active", quotaRemaining: 500, quotaLimit: 500 }} onFinish={submitAccount}>
                                                     <Form.Item name="loginName" label="登录账号" rules={[{ required: true, message: "请输入登录账号" }]}>
                                                         <Input placeholder="例如：张三 / zhangsan / 邮箱 / 工号" disabled={Boolean(editingAccountId)} />
                                                     </Form.Item>
@@ -328,11 +393,18 @@ export default function AdminPage() {
                                                     <Form.Item name="name" label="姓名" rules={[{ required: true, message: "请输入姓名" }]}>
                                                         <Input placeholder="设计师姓名" />
                                                     </Form.Item>
+                                                    <div className="grid grid-cols-2 gap-3">
+                                                        <Form.Item name="email" label="邮箱"><Input placeholder="可用于登录" /></Form.Item>
+                                                        <Form.Item name="employeeNo" label="工号"><Input placeholder="可用于登录" /></Form.Item>
+                                                    </div>
+                                                    <Form.Item name="departmentId" label="所属部门" rules={[{ required: true, message: "请选择部门" }]}>
+                                                        <Select options={departments.map((department) => ({ label: department.name, value: department.id }))} />
+                                                    </Form.Item>
                                                     <Form.Item name="role" label="角色" rules={[{ required: true }]}>
                                                         <Select
                                                             options={[
                                                                 { label: "普通设计师", value: "designer" },
-                                                                { label: "管理员", value: "admin" },
+                                                                ...(isAdmin ? [{ label: "部门管理员", value: "department_admin" }] : []),
                                                             ]}
                                                         />
                                                     </Form.Item>
@@ -370,14 +442,12 @@ export default function AdminPage() {
                                                         ) : null}
                                                     </Space>
                                                 </Form>
-                                                <Typography.Paragraph className="!mb-0 !mt-3 text-xs !text-stone-500">
-                                                    登录账号支持中文名、英文账号、邮箱或工号。管理员修改角色、停用账号、调整额度后，设计师端读取同一份账号数据，余额和权限会同步生效。
-                                                </Typography.Paragraph>
+                                                <Typography.Paragraph className="!mb-0 !mt-3 text-xs !text-stone-500">登录账号支持中文或英文，邮箱和工号也可登录。新账号首次登录必须修改密码；停用和重置密码会使既有会话失效。</Typography.Paragraph>
                                             </Panel>
                                             <Panel title="调整额度">
-                                                <Form form={creditForm} layout="vertical" disabled={!isAdmin} initialValues={{ designerId: activeDesigner?.id, amount: 100, reason: "项目补充额度" }} onFinish={submitCreditChange}>
+                                                <Form form={creditForm} layout="vertical" disabled={!canManageAccounts} initialValues={{ designerId: activeDesigner?.id, amount: 100, reason: "项目补充额度" }} onFinish={submitCreditChange}>
                                                     <Form.Item name="designerId" label="设计师" rules={[{ required: true }]}>
-                                                        <Select options={designerOptions.filter((item) => state.designers.find((designer) => designer.id === item.value)?.role !== "admin")} />
+                                                        <Select options={designerOptions.filter((item) => accounts.find((designer) => designer.id === item.value)?.role === "designer")} />
                                                     </Form.Item>
                                                     <Form.Item name="amount" label="积分变化" rules={[{ required: true }]}>
                                                         <InputNumber className="w-full" min={-100000} max={100000} />
@@ -391,9 +461,9 @@ export default function AdminPage() {
                                                 </Form>
                                             </Panel>
                                             <Panel title="设置额度上限">
-                                                <Form form={limitForm} layout="vertical" disabled={!isAdmin} initialValues={{ designerId: activeDesigner?.id, quotaLimit: activeDesigner?.quotaLimit || 500 }} onFinish={submitLimitChange}>
+                                                <Form form={limitForm} layout="vertical" disabled={!canManageAccounts} initialValues={{ designerId: activeDesigner?.id, quotaLimit: activeDesigner?.creditLimit || 500 }} onFinish={submitLimitChange}>
                                                     <Form.Item name="designerId" label="设计师" rules={[{ required: true }]}>
-                                                        <Select options={designerOptions.filter((item) => state.designers.find((designer) => designer.id === item.value)?.role !== "admin")} />
+                                                        <Select options={designerOptions.filter((item) => accounts.find((designer) => designer.id === item.value)?.role === "designer")} />
                                                     </Form.Item>
                                                     <Form.Item name="quotaLimit" label="最多可拥有积分" rules={[{ required: true }]}>
                                                         <InputNumber className="w-full" min={0} max={1000000} />
@@ -651,7 +721,7 @@ export default function AdminPage() {
                 </div>
 
                 <div className="rounded-md border border-stone-200 bg-white px-4 py-3 text-xs leading-5 text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">
-                    当前版本在浏览器本地持久化后台数据，适合单机管理和业务规则验证。API Key、真实管理员接口鉴权、服务端账本锁和外部模型代理需要后端落地后才能满足生产安全要求。
+                    账号、部门、登录会话和管理审计已由服务端统一管理。模型密钥、正式额度账本、任务队列和公司对象存储将在后续阶段接入同一套权限体系。
                 </div>
             </main>
         </div>

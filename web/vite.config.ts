@@ -34,6 +34,11 @@ export default defineConfig(({ mode }) => {
         build: {
             chunkSizeWarningLimit: 1500,
         },
+        server: {
+            proxy: {
+                "/api": { target: env.VITE_API_PROXY_TARGET || "http://localhost:3100", changeOrigin: true },
+            },
+        },
         resolve: {
             alias: {
                 "@": resolve(webDir, "src"),

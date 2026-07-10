@@ -22,6 +22,7 @@ const updateSchema = z.object({
     creditLimit: z.number().int().nonnegative().optional(),
 });
 const resetSchema = z.object({ password: z.string().min(1) });
+const creditSchema = z.object({ amount: z.number().int().min(-1_000_000).max(1_000_000).refine((value) => value !== 0), reason: z.string().trim().min(2).max(300) });
 
 export function createAccountsRouter(db: Database) {
     const router = Router();
@@ -110,6 +111,29 @@ export function createAccountsRouter(db: Database) {
             await writeAudit(db, { actor, action: "account.password_reset", targetType: "user", targetId: target.id, departmentId: target.departmentId, result: "success", ip: request.ip });
             response.status(204).end();
         } catch (error) { next(error); }
+    });
+
+    router.post("/:id/credits", async (request, response, next) => {
+        const actor = (request as unknown as AuthenticatedRequest).auth;
+        const client = await db.connect();
+        try {
+            const input = creditSchema.parse(request.body);
+            await client.query("BEGIN");
+            const targetResult = await client.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1 FOR UPDATE OF u`, [request.params.id]);
+            const target = targetResult.rows[0] && mapUser(targetResult.rows[0]);
+            if (!target) { await client.query("ROLLBACK"); response.status(404).json({ error: "NOT_FOUND", message: "账号不存在" }); return; }
+            if (!canManageUser(actor, target)) { await client.query("ROLLBACK"); response.status(403).json({ error: "FORBIDDEN", message: "不能调整该账号额度" }); return; }
+            const nextBalance = target.creditBalance + input.amount;
+            if (nextBalance < 0 || nextBalance > target.creditLimit) { await client.query("ROLLBACK"); response.status(400).json({ error: "INVALID_CREDIT", message: "调整后积分必须在 0 和额度上限之间" }); return; }
+            const updated = await client.query<UserRow>(`UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2
+                RETURNING id,username,display_name,email,employee_no,role,status,department_id,
+                (SELECT name FROM departments WHERE id=department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`, [nextBalance, target.id]);
+            await client.query("COMMIT");
+            const user = mapUser(updated.rows[0]);
+            await writeAudit(db, { actor, action: "account.credits_adjusted", targetType: "user", targetId: user.id, departmentId: user.departmentId, result: "success", detail: { amount: input.amount, reason: input.reason, balance: nextBalance }, ip: request.ip });
+            response.json({ user });
+        } catch (error) { await client.query("ROLLBACK").catch(() => undefined); next(error); }
+        finally { client.release(); }
     });
 
     router.post("/bulk", async (request, response, next) => {

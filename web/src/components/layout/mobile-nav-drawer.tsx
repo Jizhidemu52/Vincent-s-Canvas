@@ -3,9 +3,9 @@ import { Link } from "react-router-dom";
 
 import { navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { estimateAdminCredits } from "@/lib/admin-domain";
+import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
 import { useAdminStore } from "@/stores/use-admin-store";
-import { useUserStore } from "@/stores/use-user-store";
 
 type MobileNavDrawerProps = {
     open: boolean;
@@ -21,8 +21,7 @@ const groupLabels: Record<NavigationGroup, string> = {
 
 export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDrawerProps) {
     const adminState = useAdminStore();
-    const user = useUserStore((state) => state.user);
-    const adminVisible = user?.role === "admin" && adminState.canAccessAdmin();
+    const adminVisible = useCanManageConfig();
     const getToolBadge = (slug: NavigationToolSlug) => {
         const billing = navigationToolBilling[slug];
         if (billing) return `${estimateAdminCredits(adminState, { ...billing, quantity: 1 }).credits}积分`;

@@ -1,35 +1,33 @@
-import { LogIn, ShieldCheck, Sparkles, UserRound } from "lucide-react";
+import { LogIn, QrCode, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import { App, Button, Input } from "antd";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { useAdminStore } from "@/stores/use-admin-store";
+import { getWeComLoginUrl } from "@/services/api/auth";
 import { useUserStore } from "@/stores/use-user-store";
 
 export default function LoginPage() {
     const { message } = App.useApp();
     const navigate = useNavigate();
-    const loginAccount = useAdminStore((state) => state.loginAccount);
-    const login = useUserStore((state) => state.login);
-    const [loginName, setLoginName] = useState("designer-1");
-    const [password, setPassword] = useState("123456");
+    const login = useUserStore((state) => state.loginWithPassword);
+    const [loginName, setLoginName] = useState("");
+    const [password, setPassword] = useState("");
+    const [submitting, setSubmitting] = useState(false);
 
-    const submitDesignerLogin = () => {
-        const result = loginAccount(loginName, password, "designer");
-        if (!result.ok || !result.account) {
-            message.error(result.reason || "登录失败");
-            return;
-        }
+    const submitDesignerLogin = async () => {
+        if (!loginName.trim() || !password) { message.warning("请输入账号和密码"); return; }
+        setSubmitting(true);
+        try {
+            const user = await login(loginName, password, "designer");
+            message.success(`已进入设计师工作台：${user.displayName}`);
+            navigate(user.mustChangePassword ? "/change-password" : "/", { replace: true });
+        } catch (error) { message.error(error instanceof Error ? error.message : "登录失败"); }
+        finally { setSubmitting(false); }
+    };
 
-        login({
-            id: result.account.id,
-            username: result.account.loginName,
-            displayName: result.account.name,
-            avatarUrl: "",
-            role: "designer",
-        });
-        message.success(`已进入设计师工作台：${result.account.name}`);
-        navigate("/", { replace: true });
+    const loginWithWeCom = async () => {
+        try { window.location.assign((await getWeComLoginUrl()).authorizationUrl); }
+        catch (error) { message.error(error instanceof Error ? error.message : "企业微信登录暂不可用"); }
     };
 
     return (
@@ -70,9 +68,10 @@ export default function LoginPage() {
                             <Input size="large" value={loginName} onChange={(event) => setLoginName(event.target.value)} placeholder="中文名 / 英文账号 / 邮箱 / 工号" />
                             <label className="block text-sm font-bold text-stone-700">登录密码</label>
                             <Input.Password size="large" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" onPressEnter={submitDesignerLogin} />
-                            <Button type="primary" size="large" block icon={<LogIn className="size-4" />} onClick={submitDesignerLogin}>
+                            <Button type="primary" size="large" block loading={submitting} icon={<LogIn className="size-4" />} onClick={submitDesignerLogin}>
                                 登录设计师工作台
                             </Button>
+                            <Button size="large" block icon={<QrCode className="size-4" />} onClick={loginWithWeCom}>企业微信扫码登录</Button>
                             <div className="rounded-md bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-900">支持中文名、英文账号、邮箱或工号加密码登录。演示账号：designer-1 / 123456。</div>
                         </div>
                     </section>

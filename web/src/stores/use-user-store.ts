@@ -1,27 +1,45 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 
-export type LocalUser = {
-    id: string;
-    username: string;
-    displayName: string;
-    avatarUrl: string;
-    role: "designer" | "admin";
-};
+import { getCurrentSession, loginWithPassword, logoutSession, type ApiUser, type ApiUserRole } from "@/services/api/auth";
+
+export type LocalUser = ApiUser & { avatarUrl: string };
+export type AuthStatus = "idle" | "loading" | "authenticated" | "guest";
 
 type UserStore = {
     user: LocalUser | null;
-    login: (user: LocalUser) => void;
-    clearSession: () => void;
+    status: AuthStatus;
+    hydrateSession: () => Promise<void>;
+    loginWithPassword: (identifier: string, password: string, portal: "designer" | "admin") => Promise<LocalUser>;
+    clearSession: () => Promise<void>;
+    updateUser: (user: ApiUser) => void;
 };
 
-export const useUserStore = create<UserStore>()(
-    persist(
-        (set) => ({
-            user: null,
-            login: (user) => set({ user }),
-            clearSession: () => set({ user: null }),
-        }),
-        { name: "wireless-canvas:user_store" },
-    ),
-);
+let hydration: Promise<void> | null = null;
+
+export const useUserStore = create<UserStore>((set) => ({
+    user: null,
+    status: "idle",
+    hydrateSession: async () => {
+        if (hydration) return hydration;
+        set({ status: "loading" });
+        hydration = getCurrentSession()
+            .then(({ user }) => set({ user: { ...user, avatarUrl: "" }, status: "authenticated" }))
+            .catch(() => set({ user: null, status: "guest" }))
+            .finally(() => { hydration = null; });
+        return hydration;
+    },
+    loginWithPassword: async (identifier, password, portal) => {
+        const { user } = await loginWithPassword(identifier, password, portal);
+        const localUser = { ...user, avatarUrl: "" };
+        set({ user: localUser, status: "authenticated" });
+        return localUser;
+    },
+    clearSession: async () => {
+        try { await logoutSession(); } finally { set({ user: null, status: "guest" }); }
+    },
+    updateUser: (user) => set({ user: { ...user, avatarUrl: "" }, status: "authenticated" }),
+}));
+
+export function isAdminRole(role: ApiUserRole | undefined): role is "super_admin" | "department_admin" {
+    return role === "super_admin" || role === "department_admin";
+}

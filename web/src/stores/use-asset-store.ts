@@ -147,7 +147,9 @@ export function assetOwnerId(asset: Pick<Asset, "ownerId" | "metadata">) {
 
 export function canUserAccessAsset(asset: Asset, user: LocalUser | null) {
     if (!user) return false;
-    return user.role === "admin" || assetOwnerId(asset) === user.id;
+    if (user.role === "super_admin") return true;
+    if (user.role === "department_admin") return Boolean(user.departmentId) && asset.metadata?.departmentId === user.departmentId;
+    return assetOwnerId(asset) === user.id;
 }
 
 function canCurrentUserManageAsset(asset: Asset) {
