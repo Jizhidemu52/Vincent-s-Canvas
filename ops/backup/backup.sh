@@ -17,9 +17,8 @@ while true; do
     pg_dump "$DATABASE_URL" --format=custom --compress=9 --file="$file"
     mc cp "$file" "storage/${S3_BUCKET}/backups/postgres/${stamp}.dump"
     rm -f "$file"
-    cutoff="$(date -u -d "-${retention_days} days" +%Y-%m-%dT%H:%M:%SZ)"
     mc rm --recursive --force --older-than "${retention_days}d" "storage/${S3_BUCKET}/backups/postgres/" || true
-    echo "Backup completed at ${stamp}; cutoff ${cutoff}"
+    echo "Backup completed at ${stamp}; retention ${retention_days} days"
     if [[ "${BACKUP_RUN_ONCE:-false}" == "true" ]]; then
         break
     fi
