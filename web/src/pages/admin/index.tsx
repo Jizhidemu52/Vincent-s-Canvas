@@ -1,42 +1,21 @@
 import type { ReactNode } from "react";
 import { Download, Edit3, FileUp, LogOut, ShieldCheck, SlidersHorizontal, UserPlus, UsersRound, WalletCards } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { App, Button, Form, Input, InputNumber, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload } from "antd";
+import { useEffect, useState } from "react";
+import { App, Button, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag, Typography, Upload } from "antd";
 import { saveAs } from "file-saver";
 import Papa from "papaparse";
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
-import { type AdminModelCapability, type AdminModelConfig, type AdminOperationType, type DesignerAccount, type PricingRule } from "@/lib/admin-domain";
 import { ApiProviderPanel } from "@/pages/admin/components/api-provider-panel";
 import { WorkflowManagementPanel } from "@/pages/admin/components/workflow-management-panel";
 import { ModelPricingPanel } from "@/pages/admin/components/model-pricing-panel";
 import { HistoryManagementPanel, TaskManagementPanel } from "@/pages/admin/components/task-history-panels";
 import { AdminAssetsPanel } from "@/pages/admin/components/admin-assets-panel";
 import { IntegrationStatusPanel } from "@/pages/admin/components/integration-status-panel";
-import { useAdminStore } from "@/stores/use-admin-store";
-import { useAssetStore } from "@/stores/use-asset-store";
-import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, listAccounts, listAuditLogs, listDepartments, resetAccountPassword, updateAccount, type AccountInput, type AuditLog, type Department } from "@/services/api/admin-accounts";
+import { listAdminHistory } from "@/services/api/task-history";
 import type { ApiUser, ApiUserRole } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
-
-const operationOptions: Array<{ label: string; value: AdminOperationType }> = [
-    { label: "生成一张图", value: "image_generation" },
-    { label: "生成视频", value: "video_generation" },
-    { label: "放大图片", value: "upscale" },
-    { label: "去背景", value: "remove_background" },
-    { label: "局部编辑", value: "inpaint" },
-    { label: "批量处理每张图", value: "batch_image" },
-    { label: "无缝拼接", value: "seamless_stitch" },
-];
-
-const capabilityOptions: Array<{ label: string; value: AdminModelCapability }> = [
-    { label: "生成", value: "generate" },
-    { label: "编辑", value: "edit" },
-    { label: "放大", value: "upscale" },
-    { label: "去背景", value: "remove_background" },
-    { label: "批量", value: "batch" },
-];
 
 type CreditFormValues = {
     designerId: string;
@@ -62,22 +41,12 @@ type AccountFormValues = {
     quotaLimit: number;
 };
 
-type PricingFormValues = {
-    operationType: AdminOperationType;
-    label: string;
-    credits: number;
-    rmbCost: number;
-};
-
-type ModelFormValues = AdminModelConfig;
-
 export default function AdminPage() {
     const { message } = App.useApp();
     const [creditForm] = Form.useForm<CreditFormValues>();
     const [limitForm] = Form.useForm<LimitFormValues>();
     const [accountForm] = Form.useForm<AccountFormValues>();
-    const [pricingForm] = Form.useForm<PricingFormValues>();
-    const [modelForm] = Form.useForm<ModelFormValues>();
+    const navigate = useNavigate();
     const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
     const [accounts, setAccounts] = useState<ApiUser[]>([]);
     const [departments, setDepartments] = useState<Department[]>([]);
@@ -85,15 +54,10 @@ export default function AdminPage() {
     const [departmentName, setDepartmentName] = useState("");
     const [departmentCode, setDepartmentCode] = useState("");
     const [accountsLoading, setAccountsLoading] = useState(true);
-    const [historyDesigner, setHistoryDesigner] = useState<string>("all");
-    const [historyModel, setHistoryModel] = useState<string>("all");
-    const [historyOperation, setHistoryOperation] = useState<string>("all");
-    const [assetDesigner, setAssetDesigner] = useState<string>("all");
+    const [totalCost, setTotalCost] = useState(0);
     const [searchParams, setSearchParams] = useSearchParams();
-    const state = useAdminStore();
     const signedInUser = useUserStore((store) => store.user);
-    const projects = useCanvasStore((store) => store.projects);
-    const assets = useAssetStore((store) => store.assets);
+    const clearSession = useUserStore((store) => store.clearSession);
     const currentOperator = signedInUser;
     const isAdmin = signedInUser?.role === "super_admin";
     const canManageAccounts = isAdminRole(signedInUser?.role);
@@ -101,10 +65,11 @@ export default function AdminPage() {
     const refreshAccounts = async () => {
         setAccountsLoading(true);
         try {
-            const [accountResult, departmentResult, auditResult] = await Promise.all([listAccounts(), listDepartments(), listAuditLogs()]);
+            const [accountResult, departmentResult, auditResult, historyResult] = await Promise.all([listAccounts(), listDepartments(), listAuditLogs(), listAdminHistory()]);
             setAccounts(accountResult.users);
             setDepartments(departmentResult.departments);
             setAuditLogs(auditResult.auditLogs);
+            setTotalCost(historyResult.history.reduce((sum, item) => sum + item.rmbCost, 0));
         } catch (error) { message.error(error instanceof Error ? error.message : "账号数据加载失败"); }
         finally { setAccountsLoading(false); }
     };
@@ -119,54 +84,6 @@ export default function AdminPage() {
     const activeDesigner = accounts.find((designer) => designer.role === "designer");
     const totalRemaining = accounts.reduce((sum, designer) => sum + designer.creditBalance, 0);
     const totalUsed = accounts.reduce((sum, designer) => sum + Math.max(0, designer.creditLimit - designer.creditBalance), 0);
-    const totalCost = state.ledger.reduce((sum, item) => sum + item.rmb, 0);
-
-    const filteredHistory = useMemo(
-        () =>
-            state.history.filter((record) => {
-                if (historyDesigner !== "all" && record.designerId !== historyDesigner) return false;
-                if (historyModel !== "all" && record.modelId !== historyModel) return false;
-                if (historyOperation !== "all" && record.operationType !== historyOperation) return false;
-                return true;
-            }),
-        [historyDesigner, historyModel, historyOperation, state.history],
-    );
-
-    const projectRows = useMemo(
-        () =>
-            projects.map((project) => {
-                const projectHistory = state.history.filter((record) => record.projectId === project.id);
-                return {
-                    id: project.id,
-                    title: project.title,
-                    status: project.nodes.length ? "使用中" : "空项目",
-                    nodes: project.nodes.length,
-                    tasks: projectHistory.length,
-                    credits: projectHistory.reduce((sum, record) => sum + record.credits, 0),
-                    updatedAt: project.updatedAt,
-                };
-            }),
-        [projects, state.history],
-    );
-
-    const materialRows = useMemo(
-        () =>
-            [
-                ...state.materials.map((item) => ({ ...item, kind: "后台历史", source: item.operationType })),
-                ...assets.map((asset) => ({
-                    id: asset.id,
-                    projectId: String(asset.metadata?.projectId || "未归属"),
-                    designerId: asset.ownerId || String(asset.metadata?.designerId || "未归属"),
-                    operationType: String(asset.metadata?.operationType || "素材库"),
-                    title: asset.title,
-                    url: asset.coverUrl,
-                    createdAt: asset.createdAt,
-                    kind: asset.kind,
-                    source: asset.source || "素材库",
-                })),
-            ].filter((item) => assetDesigner === "all" || item.designerId === assetDesigner),
-        [assetDesigner, assets, state.materials],
-    );
 
     const requestedAdminTab = searchParams.get("tab") || "accounts";
     const activeAdminTab = isAdmin ? requestedAdminTab : "accounts";
@@ -266,42 +183,6 @@ export default function AdminPage() {
         } catch (error) { message.error(error instanceof Error ? error.message : "部门创建失败"); }
     };
 
-    const submitPricingRule = (values: PricingFormValues) => {
-        const result = state.savePricingRule(values);
-        showActionResult(result, message, "价格规则已保存");
-    };
-
-    const submitModel = (values: ModelFormValues) => {
-        const model: AdminModelConfig = {
-            ...values,
-            id: values.id || values.modelId,
-            capabilities: values.capabilities || [],
-            enabled: Boolean(values.enabled),
-        };
-        const result = state.saveModelConfig(model);
-        showActionResult(result, message, "模型配置已保存");
-    };
-
-    const exportHistory = () => {
-        const csv = toCsv(
-            filteredHistory.map((record) => ({
-                时间: record.createdAt,
-                操作人: designerName(state.designers, record.designerId),
-                项目: record.projectId,
-                操作类型: operationLabel(record.operationType),
-                模型: modelName(state.models, record.modelId),
-                数量: record.quantity,
-                积分: record.credits,
-                金额: record.rmb,
-                状态: record.status === "success" ? "成功" : "失败",
-                失败原因: record.failureReason || "",
-                提示词: record.prompt,
-            })),
-        );
-        saveAs(new Blob([csv], { type: "text/csv;charset=utf-8" }), `wireless-canvas-history-${Date.now()}.csv`);
-        message.success("历史记录已导出");
-    };
-
     if (!signedInUser || !canManageAccounts) return <Navigate to="/admin/login" replace />;
 
     return (
@@ -318,9 +199,9 @@ export default function AdminPage() {
                         </div>
                         <Button
                             icon={<LogOut className="size-4" />}
-                            onClick={() => {
-                                state.logoutAdmin();
-                                message.success("已退出后台");
+                            onClick={async () => {
+                                await clearSession();
+                                navigate("/admin/login", { replace: true });
                             }}
                         >
                             退出
@@ -599,37 +480,4 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
             {children}
         </section>
     );
-}
-
-function showActionResult(result: { ok: boolean; reason?: string }, message: ReturnType<typeof App.useApp>["message"], success: string) {
-    if (result.ok) message.success(success);
-    else message.error(result.reason || "操作失败");
-}
-
-function operationLabel(operation: string) {
-    return operationOptions.find((item) => item.value === operation)?.label || operation;
-}
-
-function capabilityLabel(capability: AdminModelCapability) {
-    return capabilityOptions.find((item) => item.value === capability)?.label || capability;
-}
-
-function designerName(designers: DesignerAccount[], id: string) {
-    return designers.find((designer) => designer.id === id)?.name || id;
-}
-
-function modelName(models: AdminModelConfig[], id: string) {
-    return models.find((model) => model.id === id || model.modelId === id)?.name || id;
-}
-
-function toCsv(rows: Array<Record<string, string | number>>) {
-    if (!rows.length) return "\uFEFF";
-    const headers = Object.keys(rows[0] || {});
-    const lines = rows.map((row) => headers.map((header) => csvCell(row[header])).join(","));
-    return `\uFEFF${headers.join(",")}\n${lines.join("\n")}`;
-}
-
-function csvCell(value: string | number | undefined) {
-    const text = String(value ?? "");
-    return `"${text.replace(/"/g, '""')}"`;
 }
