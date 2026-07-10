@@ -66,7 +66,7 @@ export function createAccountsRouter(db: Database) {
                     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
                     [input.username, input.displayName, input.email ?? null, input.employeeNo ?? null, await hashPassword(input.password), input.role, input.departmentId ?? null, input.creditBalance, input.creditLimit, actor.id]);
                 await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
-                    VALUES($1,$2,$3,'adjustment',$4,$4,'account',$2::text,'账号初始额度')`, [`account-create:${inserted.rows[0].id}`, inserted.rows[0].id, actor.id, input.creditBalance]);
+                    VALUES($1,$2,$3,'adjustment',$4,$4,'account',$5,'账号初始额度')`, [`account-create:${inserted.rows[0].id}`, inserted.rows[0].id, actor.id, input.creditBalance, inserted.rows[0].id]);
                 const selected = await client.query<UserRow>(
                     `SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`,
                     [inserted.rows[0].id],
@@ -171,7 +171,7 @@ export function createAccountsRouter(db: Database) {
                         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [account.username, account.displayName, account.email ?? null, account.employeeNo ?? null,
                         await hashPassword(account.password), account.role, account.departmentId ?? null, account.creditBalance, account.creditLimit, actor.id]);
                     await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
-                        VALUES($1,$2,$3,'adjustment',$4,$4,'account',$2::text,'批量导入初始额度')`, [`account-import:${randomUUID()}`, inserted.rows[0].id, actor.id, account.creditBalance]);
+                        VALUES($1,$2,$3,'adjustment',$4,$4,'account',$5,'批量导入初始额度')`, [`account-import:${randomUUID()}`, inserted.rows[0].id, actor.id, account.creditBalance, inserted.rows[0].id]);
                     await client.query("COMMIT");
                     created += 1;
                 } catch { await client.query("ROLLBACK"); failures.push({ index, message: "账号、邮箱或工号重复" }); }

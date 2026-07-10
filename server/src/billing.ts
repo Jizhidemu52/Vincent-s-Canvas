@@ -40,7 +40,7 @@ export async function adjustCredits(db: Database, input: { requestId: string; ac
         if (balance < 0 || balance > user.credit_limit) throw new BillingError("INVALID_CREDIT", "调整后积分必须在 0 和额度上限之间");
         await client.query("UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2", [balance, input.userId]);
         await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
-            VALUES($1,$2,$3,'adjustment',$4,$5,'user',$2::text,$6)`, [input.requestId, input.userId, input.actorId, input.amount, balance, input.reason]);
+            VALUES($1,$2,$3,'adjustment',$4,$5,'user',$7,$6)`, [input.requestId, input.userId, input.actorId, input.amount, balance, input.reason, input.userId]);
         return { balance, duplicate: false };
     });
 }
