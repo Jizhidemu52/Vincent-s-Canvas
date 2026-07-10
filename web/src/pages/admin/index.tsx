@@ -9,6 +9,7 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { type AdminModelCapability, type AdminModelConfig, type AdminOperationType, type DesignerAccount, type PricingRule } from "@/lib/admin-domain";
 import { ApiProviderPanel } from "@/pages/admin/components/api-provider-panel";
 import { WorkflowManagementPanel } from "@/pages/admin/components/workflow-management-panel";
+import { ModelPricingPanel } from "@/pages/admin/components/model-pricing-panel";
 import { useAdminStore } from "@/stores/use-admin-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -503,41 +504,7 @@ export default function AdminPage() {
                             {
                                 key: "pricing",
                                 label: "积分价格",
-                                children: (
-                                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-                                        <Table
-                                            rowKey="operationType"
-                                            size="small"
-                                            pagination={false}
-                                            dataSource={state.pricingRules}
-                                            columns={[
-                                                { title: "操作", render: (_, record: PricingRule) => operationLabel(record.operationType) },
-                                                { title: "后台名称", dataIndex: "label" },
-                                                { title: "积分/次", dataIndex: "credits" },
-                                                { title: "人民币成本/次", render: (_, record: PricingRule) => `￥${record.rmbCost.toFixed(2)}` },
-                                            ]}
-                                        />
-                                        <Panel title="修改价格规则">
-                                            <Form form={pricingForm} layout="vertical" disabled={!isAdmin} initialValues={{ operationType: "image_generation", label: "生成一张图", credits: 8, rmbCost: 0.8 }} onFinish={submitPricingRule}>
-                                                <Form.Item name="operationType" label="操作类型" rules={[{ required: true }]}>
-                                                    <Select options={operationOptions} />
-                                                </Form.Item>
-                                                <Form.Item name="label" label="显示名称" rules={[{ required: true }]}>
-                                                    <Input />
-                                                </Form.Item>
-                                                <Form.Item name="credits" label="积分" rules={[{ required: true }]}>
-                                                    <InputNumber className="w-full" min={0} max={100000} />
-                                                </Form.Item>
-                                                <Form.Item name="rmbCost" label="人民币成本" rules={[{ required: true }]}>
-                                                    <InputNumber className="w-full" min={0} max={100000} precision={2} />
-                                                </Form.Item>
-                                                <Button type="primary" htmlType="submit" block>
-                                                    保存规则
-                                                </Button>
-                                            </Form>
-                                        </Panel>
-                                    </div>
-                                ),
+                                children: <ModelPricingPanel mode="prices" />,
                             },
                             {
                                 key: "providers",
@@ -552,73 +519,7 @@ export default function AdminPage() {
                             {
                                 key: "models",
                                 label: "模型 API",
-                                children: (
-                                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-                                        <Table
-                                            rowKey="id"
-                                            size="small"
-                                            dataSource={state.models}
-                                            columns={[
-                                                { title: "模型名称", dataIndex: "name" },
-                                                { title: "模型 ID", dataIndex: "modelId" },
-                                                { title: "Provider", dataIndex: "provider" },
-                                                {
-                                                    title: "能力",
-                                                    render: (_, record: AdminModelConfig) => (
-                                                        <Space wrap>
-                                                            {record.capabilities.map((item) => (
-                                                                <Tag key={item}>{capabilityLabel(item)}</Tag>
-                                                            ))}
-                                                        </Space>
-                                                    ),
-                                                },
-                                                { title: "积分", dataIndex: "credits" },
-                                                { title: "成本", render: (_, record: AdminModelConfig) => `￥${record.rmbCost.toFixed(2)}` },
-                                                { title: "状态", render: (_, record: AdminModelConfig) => <Tag color={record.enabled ? "green" : "red"}>{record.enabled ? "启用" : "停用"}</Tag> },
-                                            ]}
-                                        />
-                                        <Panel title="配置模型">
-                                            <Form
-                                                form={modelForm}
-                                                layout="vertical"
-                                                disabled={!isAdmin}
-                                                initialValues={{ id: "", name: "", modelId: "", provider: "", capabilities: ["generate"], credits: 4, rmbCost: 0.4, enabled: true }}
-                                                onFinish={submitModel}
-                                            >
-                                                <Form.Item name="id" label="后台唯一 ID">
-                                                    <Input placeholder="留空时使用模型 ID" />
-                                                </Form.Item>
-                                                <Form.Item name="name" label="模型名称" rules={[{ required: true }]}>
-                                                    <Input placeholder="GPT Image 2" />
-                                                </Form.Item>
-                                                <Form.Item name="modelId" label="模型 ID" rules={[{ required: true }]}>
-                                                    <Input placeholder="gpt-image-2" />
-                                                </Form.Item>
-                                                <Form.Item name="provider" label="Provider / API 来源" rules={[{ required: true }]}>
-                                                    <Input placeholder="OpenAI / Nano Banana / 内部模型" />
-                                                </Form.Item>
-                                                <Form.Item name="capabilities" label="支持能力" rules={[{ required: true }]}>
-                                                    <Select mode="multiple" options={capabilityOptions} />
-                                                </Form.Item>
-                                                <div className="grid grid-cols-2 gap-3">
-                                                    <Form.Item name="credits" label="模型积分" rules={[{ required: true }]}>
-                                                        <InputNumber className="w-full" min={0} max={100000} />
-                                                    </Form.Item>
-                                                    <Form.Item name="rmbCost" label="模型成本" rules={[{ required: true }]}>
-                                                        <InputNumber className="w-full" min={0} max={100000} precision={2} />
-                                                    </Form.Item>
-                                                </div>
-                                                <Form.Item name="enabled" label="是否启用" valuePropName="checked">
-                                                    <Switch />
-                                                </Form.Item>
-                                                <div className="mb-3 rounded-md bg-stone-100 px-3 py-2 text-xs leading-5 text-stone-600 dark:bg-stone-900 dark:text-stone-300">当前前端只保存模型元数据和价格，不保存 API Key；真实密钥需要服务端配置。</div>
-                                                <Button type="primary" htmlType="submit" block>
-                                                    保存模型
-                                                </Button>
-                                            </Form>
-                                        </Panel>
-                                    </div>
-                                ),
+                                children: <ModelPricingPanel mode="models" />,
                             },
                             {
                                 key: "history",

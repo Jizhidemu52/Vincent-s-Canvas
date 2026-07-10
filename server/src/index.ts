@@ -8,7 +8,9 @@ import { createCache, createDatabase } from "./db";
 import { createAccountsRouter } from "./routes/accounts";
 import { createAuditRouter } from "./routes/audit-logs";
 import { createAuthRouter } from "./routes/auth";
+import { createBillingRouter } from "./routes/billing";
 import { createDepartmentsRouter } from "./routes/departments";
+import { createModelConfigurationRouter, createPublicModelRouter } from "./routes/model-configuration";
 import { sessionMiddleware } from "./session";
 
 const config = loadConfig();
@@ -29,6 +31,9 @@ app.get("/api/health", async (_request, response, next) => {
     } catch (error) { next(error); }
 });
 app.use("/api/auth", createAuthRouter(db, cache, config));
+app.use("/api/billing", sessionMiddleware(db, cache, config), createBillingRouter(db));
+app.use("/api/models", sessionMiddleware(db, cache, config), createPublicModelRouter(db));
+app.use("/api/admin/model-configuration", sessionMiddleware(db, cache, config), createModelConfigurationRouter(db, config));
 app.use("/api/admin/accounts", sessionMiddleware(db, cache, config), createAccountsRouter(db));
 app.use("/api/admin/departments", sessionMiddleware(db, cache, config), createDepartmentsRouter(db));
 app.use("/api/admin/audit-logs", sessionMiddleware(db, cache, config), createAuditRouter(db));

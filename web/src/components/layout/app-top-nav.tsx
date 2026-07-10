@@ -1,8 +1,7 @@
-import { ChevronDown, CircleDollarSign, Globe2, Link2, LogIn, LogOut, Menu, Plus, Settings2 } from "lucide-react";
+import { ChevronDown, CircleDollarSign, Globe2, Link2, LogIn, LogOut, Menu, Plus } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
 
-import { AppConfigModal } from "@/components/layout/app-config-modal";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
@@ -11,7 +10,6 @@ import { estimateAdminCredits } from "@/lib/admin-domain";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useAdminStore } from "@/stores/use-admin-store";
-import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 
@@ -72,7 +70,6 @@ function ToolGroup({ group, activeToolSlug, adminVisible, getToolBadge }: { grou
 
 function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
     const navigate = useNavigate();
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
     const user = useUserStore((state) => state.user);
@@ -91,12 +88,6 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
                 <button type="button" className={buttonClass} onClick={() => navigate("/admin?tab=providers")}>
                     <Link2 className="size-4 text-stone-400" />
                     API 设置
-                </button>
-            ) : null}
-            {adminVisible ? (
-                <button type="button" className={buttonClass} onClick={() => openConfigDialog(false)}>
-                    <Settings2 className="size-4 text-stone-400" />
-                    更多设置
                 </button>
             ) : null}
             <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={buttonClass} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}>
@@ -230,7 +221,6 @@ export function AppTopNav() {
             ) : null}
 
             <MobileNavDrawer open={mobileNavOpen} activeToolSlug={activeToolSlug} onClose={() => setMobileNavOpen(false)} />
-            {adminVisible ? <AppConfigModal /> : null}
         </>
     );
 }

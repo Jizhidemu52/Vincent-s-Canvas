@@ -59,7 +59,8 @@ docker compose up -d --build
 生成 MFA 加密密钥：
 
 ```bash
-openssl rand -base64 32
+openssl rand -base64 32  # MFA_ENCRYPTION_KEY
+openssl rand -base64 32  # PROVIDER_ENCRYPTION_KEY，必须使用另一把密钥
 ```
 
 首次启动会自动执行数据库迁移并创建首位超级管理员。打开 `http://服务器地址:3000/admin/login`，使用 `.env` 中的管理员账号和初始密码登录，随后系统会强制修改密码并启用六位动态验证码。

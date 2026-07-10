@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 
 import { writeAudit } from "../audit";
+import { adjustCredits, BillingError } from "../billing";
 import type { Database } from "../db";
 import { canManageUser, requireRole } from "../rbac";
 import { hashPassword, validatePassword } from "../security";
@@ -22,7 +24,7 @@ const updateSchema = z.object({
     creditLimit: z.number().int().nonnegative().optional(),
 });
 const resetSchema = z.object({ password: z.string().min(1) });
-const creditSchema = z.object({ amount: z.number().int().min(-1_000_000).max(1_000_000).refine((value) => value !== 0), reason: z.string().trim().min(2).max(300) });
+const creditSchema = z.object({ requestId: z.string().min(8).max(200), amount: z.number().int().min(-1_000_000).max(1_000_000).refine((value) => value !== 0), reason: z.string().trim().min(2).max(300) });
 
 export function createAccountsRouter(db: Database) {
     const router = Router();
@@ -56,12 +58,19 @@ export function createAccountsRouter(db: Database) {
             if (input.creditBalance > input.creditLimit) {
                 response.status(400).json({ error: "INVALID_CREDIT", message: "初始积分不能超过积分上限" }); return;
             }
-            const result = await db.query<UserRow>(
-                `INSERT INTO users(username,display_name,email,employee_no,password_hash,role,department_id,credit_balance,credit_limit,created_by)
-                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,username,display_name,email,employee_no,role,status,department_id,
-                 (SELECT name FROM departments WHERE departments.id=users.department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`,
-                [input.username, input.displayName, input.email ?? null, input.employeeNo ?? null, await hashPassword(input.password), input.role, input.departmentId ?? null, input.creditBalance, input.creditLimit, actor.id],
-            );
+            const client = await db.connect();
+            let result;
+            try {
+                await client.query("BEGIN");
+                result = await client.query<UserRow>(`INSERT INTO users(username,display_name,email,employee_no,password_hash,role,department_id,credit_balance,credit_limit,created_by)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,username,display_name,email,employee_no,role,status,department_id,
+                    (SELECT name FROM departments WHERE departments.id=users.department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`,
+                    [input.username, input.displayName, input.email ?? null, input.employeeNo ?? null, await hashPassword(input.password), input.role, input.departmentId ?? null, input.creditBalance, input.creditLimit, actor.id]);
+                await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
+                    VALUES($1,$2,$3,'adjustment',$4,$4,'account',$2,'账号初始额度')`, [`account-create:${result.rows[0].id}`, result.rows[0].id, actor.id, input.creditBalance]);
+                await client.query("COMMIT");
+            } catch (error) { await client.query("ROLLBACK"); throw error; }
+            finally { client.release(); }
             const user = mapUser(result.rows[0]);
             await writeAudit(db, { actor, action: "account.created", targetType: "user", targetId: user.id, departmentId: user.departmentId, result: "success", detail: { role: user.role }, ip: request.ip });
             response.status(201).json({ user });
@@ -120,25 +129,21 @@ export function createAccountsRouter(db: Database) {
 
     router.post("/:id/credits", async (request, response, next) => {
         const actor = (request as unknown as AuthenticatedRequest).auth;
-        const client = await db.connect();
         try {
             const input = creditSchema.parse(request.body);
-            await client.query("BEGIN");
-            const targetResult = await client.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1 FOR UPDATE OF u`, [request.params.id]);
+            const targetResult = await db.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`, [request.params.id]);
             const target = targetResult.rows[0] && mapUser(targetResult.rows[0]);
-            if (!target) { await client.query("ROLLBACK"); response.status(404).json({ error: "NOT_FOUND", message: "账号不存在" }); return; }
-            if (!canManageUser(actor, target)) { await client.query("ROLLBACK"); response.status(403).json({ error: "FORBIDDEN", message: "不能调整该账号额度" }); return; }
-            const nextBalance = target.creditBalance + input.amount;
-            if (nextBalance < 0 || nextBalance > target.creditLimit) { await client.query("ROLLBACK"); response.status(400).json({ error: "INVALID_CREDIT", message: "调整后积分必须在 0 和额度上限之间" }); return; }
-            const updated = await client.query<UserRow>(`UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2
-                RETURNING id,username,display_name,email,employee_no,role,status,department_id,
-                (SELECT name FROM departments WHERE departments.id=users.department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`, [nextBalance, target.id]);
-            await client.query("COMMIT");
+            if (!target) { response.status(404).json({ error: "NOT_FOUND", message: "账号不存在" }); return; }
+            if (!canManageUser(actor, target)) { response.status(403).json({ error: "FORBIDDEN", message: "不能调整该账号额度" }); return; }
+            const adjustment = await adjustCredits(db, { requestId: input.requestId, actorId: actor.id, userId: target.id, amount: input.amount, reason: input.reason });
+            const updated = await db.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`, [target.id]);
             const user = mapUser(updated.rows[0]);
-            await writeAudit(db, { actor, action: "account.credits_adjusted", targetType: "user", targetId: user.id, departmentId: user.departmentId, result: "success", detail: { amount: input.amount, reason: input.reason, balance: nextBalance }, ip: request.ip });
+            await writeAudit(db, { actor, action: "account.credits_adjusted", targetType: "user", targetId: user.id, departmentId: user.departmentId, result: "success", detail: { requestId: input.requestId, amount: input.amount, reason: input.reason, balance: adjustment.balance, duplicate: adjustment.duplicate }, ip: request.ip });
             response.json({ user });
-        } catch (error) { await client.query("ROLLBACK").catch(() => undefined); next(error); }
-        finally { client.release(); }
+        } catch (error) {
+            if (error instanceof BillingError) { response.status(400).json({ error: error.code, message: error.message }); return; }
+            next(error);
+        }
     });
 
     router.post("/bulk", async (request, response, next) => {
@@ -152,12 +157,18 @@ export function createAccountsRouter(db: Database) {
                 if (passwordError || account.role === "super_admin" || account.creditBalance > account.creditLimit || (actor.role === "department_admin" && (account.role !== "designer" || account.departmentId !== actor.departmentId))) {
                     failures.push({ index, message: passwordError ?? "账号权限或积分设置不合法" }); continue;
                 }
+                const client = await db.connect();
                 try {
-                    await db.query(`INSERT INTO users(username,display_name,email,employee_no,password_hash,role,department_id,credit_balance,credit_limit,created_by)
-                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [account.username, account.displayName, account.email ?? null, account.employeeNo ?? null,
+                    await client.query("BEGIN");
+                    const inserted = await client.query<{ id: string }>(`INSERT INTO users(username,display_name,email,employee_no,password_hash,role,department_id,credit_balance,credit_limit,created_by)
+                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [account.username, account.displayName, account.email ?? null, account.employeeNo ?? null,
                         await hashPassword(account.password), account.role, account.departmentId ?? null, account.creditBalance, account.creditLimit, actor.id]);
+                    await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
+                        VALUES($1,$2,$3,'adjustment',$4,$4,'account',$2,'批量导入初始额度')`, [`account-import:${randomUUID()}`, inserted.rows[0].id, actor.id, account.creditBalance]);
+                    await client.query("COMMIT");
                     created += 1;
-                } catch { failures.push({ index, message: "账号、邮箱或工号重复" }); }
+                } catch { await client.query("ROLLBACK"); failures.push({ index, message: "账号、邮箱或工号重复" }); }
+                finally { client.release(); }
             }
             await writeAudit(db, { actor, action: "account.bulk_created", targetType: "user", result: failures.length ? "failed" : "success", detail: { created, failed: failures.length }, ip: request.ip });
             response.status(failures.length ? 207 : 201).json({ created, failures });
