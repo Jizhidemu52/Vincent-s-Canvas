@@ -1,13 +1,32 @@
 ---
 title: 本地开发
-description: 前端优先的本地开发方式
+description: 启动 Web、API、Worker、PostgreSQL、Redis 和对象存储
 ---
 
 # 本地开发
 
-当前主应用以 `web/` 前端为主，AI 请求由浏览器前台直连用户自己的 OpenAI 兼容接口。
+业务功能依赖正式后端。只启动 `web/` 可以调整登录页和界面，但不能绕过 Session 使用生成、额度或素材接口。
 
-## 1. 启动前端
+## 推荐：Docker Compose
+
+```bash
+cp .env.example .env
+# 替换 .env 中所有 replace-with 值
+docker compose up -d --build
+docker compose ps
+curl http://localhost:3000/api/health
+```
+
+访问：
+
+```text
+设计师入口：http://localhost:3000/login
+管理员入口：http://localhost:3000/admin/login
+```
+
+首次管理员登录后必须修改密码并启用 MFA。开发环境需要模拟生成时可暂时设置 `TASK_MOCK_MODE=true`，它仍会走 Redis 队列、额度冻结、Worker、对象存储、历史和结算，只是不调用外部模型。
+
+## 分开启动前端
 
 ```bash
 cd web
@@ -15,26 +34,18 @@ bun install
 bun run dev
 ```
 
-前端默认访问：
+Vite 会把 `/api` 代理到 `http://localhost:3100`，因此还需要启动 API、Worker、PostgreSQL 和 Redis。模型 Base URL 与 API Key 由超级管理员在后台配置，设计师端没有密钥弹窗。
 
-```text
-http://localhost:3000
-```
-
-## 2. 配置模型
-
-打开右上角配置弹窗，填写自己的 `Base URL`、`API Key` 和模型名。第三方提示词和 WebDAV 都由浏览器前端直连。
-
-## 3. 启动文档站
-
-如果需要单独调整文档站，在 `docs` 目录执行：
+## 质量检查
 
 ```bash
-bun run dev
+cd server
+bun run build
+bun test
+
+cd ../web
+bun run build
+bun test
 ```
 
-## 常见场景
-
-- 改画布、页面和交互：主要看 `web/`
-- 改提示词缓存：主要看 `web/src/services/api/prompts.ts`
-- 改文档站内容：主要看 `docs/content/docs/`
+推送到 `main` 后，GitHub Actions 还会运行真实 PostgreSQL/Redis 集成、Compose 恢复演练、40 人并发和跨账号隔离测试。

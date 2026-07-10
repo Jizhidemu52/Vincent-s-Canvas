@@ -1,47 +1,49 @@
 ---
 title: 快速开始
-description: 用最少步骤把无线画布跑起来
+description: 用完整后端启动无线画布
 ---
 
 # 快速开始
 
-如果你只是想先把项目跑起来，优先部署或启动 `web/` 前端。
+## 1. 准备环境
 
-## Vercel 部署
-
-在 Vercel 中导入仓库即可，根目录 `vercel.json` 会构建 `web/`。当前版本的 AI 请求由浏览器前台直连用户自己的 OpenAI 兼容地址，不需要额外配置服务端。
-
-## 本地启动
+安装 Docker Engine 与 Docker Compose，克隆仓库后进入项目目录：
 
 ```bash
-cd /path/to/wireless-canvas
-cd web
-bun install
-bun run dev
+git clone https://github.com/Jizhidemu52/Vincent-s-Canvas.git
+cd Vincent-s-Canvas
+cp .env.example .env
 ```
 
-启动后访问：
+编辑 `.env`，至少替换数据库密码、首位管理员初始密码、MFA 加密密钥、Provider 加密密钥和对象存储密钥。两把加密密钥必须不同。
 
-```text
-http://localhost:3000
-```
-
-## Docker 启动
-
-如果你需要基于当前源码构建镜像：
+## 2. 启动完整服务
 
 ```bash
-docker build -t wireless-canvas .
-docker run --rm -p 3000:3000 wireless-canvas
+docker compose up -d --build
+docker compose ps
+curl http://localhost:3000/api/health
 ```
 
-## 首次使用建议
+## 3. 首次管理员登录
 
-- 先打开右上角配置弹窗，填入自己的 `Base URL`、`API Key` 和模型名。
-- 如果需要提示词仓库内容，打开 `/prompts` 会由浏览器前端直连拉取并缓存到 IndexedDB。
-- 如果需要跨设备同步画布、素材和生成记录，可在配置弹窗中填写 WebDAV。
+1. 打开 `http://localhost:3000/admin/login`。
+2. 使用 `.env` 中的超级管理员账号和初始密码。
+3. 按提示修改密码。
+4. 使用验证器启用六位动态验证码。
+5. 进入账号管理创建部门和设计师。
 
-## 说明
+## 4. 设计师登录
 
-- 当前画布项目和“我的素材”主要保存在浏览器本地，WebDAV 同步需要用户自行配置。
-- AI API Key 保存在浏览器本地，并由前端直接请求 OpenAI 兼容接口。
+1. 打开 `http://localhost:3000/login`。
+2. 输入管理员创建的中文账号、英文账号、邮箱或工号与密码。
+3. 首次登录修改密码。
+4. 设计师只能看到自己的项目、任务、素材、历史和剩余额度。
+
+## 5. 配置模型
+
+超级管理员在后台按顺序配置 Provider、工作流、模型和积分价格。API Key 加密保存在服务端，设计师只看到模型名称、能力、启用状态与积分预估。
+
+需要先验证业务链路时，在测试环境设置 `TASK_MOCK_MODE=true`；确认任务、额度、素材和历史后必须在生产环境改回 `false`。
+
+详细步骤和截图见 [完整操作手册](../../../manual/operation-manual.md) 与 [生产部署手册](../../../manual/production-deployment.md)。

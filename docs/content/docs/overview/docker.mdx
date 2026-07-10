@@ -1,51 +1,40 @@
 ---
 title: Docker 部署
-description: 使用 Docker Compose 部署无线画布
+description: 使用 Docker Compose 部署完整业务平台
 ---
 
 # Docker 部署
 
-如果你希望在自己的机器或服务器上运行项目，可以直接使用 Docker Compose。
+根目录 Compose 会启动 Web、API、Worker、PostgreSQL、Redis、MinIO、初始化器和备份服务。
 
-## 使用发布镜像
-
-```bash
-cd /path/to/wireless-canvas
-docker compose up -d
-```
-
-启动后访问：
-
-```text
-http://localhost:3000
-```
-
-## 本地构建镜像
-
-如果需要基于当前源码构建镜像：
+## 启动
 
 ```bash
-docker compose -f docker-compose.local.yml up -d --build
+cp .env.example .env
+# 编辑生产密码、加密密钥、对象存储和企业微信参数
+bun ops/preflight/production-preflight.ts --require-wecom
+docker compose up -d --build
+docker compose ps
 ```
 
-## 文档站镜像
+只允许 HTTPS 网关访问 Web。不要把 `3100`、`5432`、`6379`、`9000` 或 `9001` 暴露到公网。
 
-文档站位于 `docs/` 目录，按带服务端能力的 Next.js standalone 应用单独构建，不打进主应用镜像。
+## 数据归属
 
-使用发布镜像：
+| 服务 | 保存内容 |
+| --- | --- |
+| PostgreSQL | 用户、部门、权限、项目、账本、任务、历史、素材元数据、审计 |
+| Redis | Session、登录限流和任务队列 |
+| S3/MinIO | 原图、生成结果、视频、音频、文本和数据库备份 |
+| Worker | 从队列取任务，解密服务端 Provider 凭据并执行模型调用 |
+
+## 健康检查与日志
 
 ```bash
-cd docs
-docker compose up -d
+curl http://localhost:3000/api/health
+docker compose logs --tail=200 api worker postgres redis minio backup
 ```
 
-基于当前源码本地构建：
+## 备份恢复
 
-```bash
-cd docs
-docker compose -f docker-compose.local.yml up -d --build
-```
-
-## 数据说明
-
-当前主应用镜像只启动 Next.js。画布、我的素材、生成记录和 AI API Key 默认保存在浏览器本地；第三方提示词由浏览器前端直连拉取，不需要额外挂载数据目录。
+备份容器定期把 PostgreSQL dump 写到对象存储。恢复前停止 API 和 Worker，再使用 `restore.sh` 恢复指定对象。完整命令、企业微信和 40 人验收步骤见 [生产部署与验收手册](../../../manual/production-deployment.md)。

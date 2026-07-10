@@ -168,9 +168,11 @@ $sourceUrls   公司素材地址数组
 $workflowId   工作流 ID
 $modelId      模型 ID
 $apiKey       服务端 Provider API Key
+$voice        音频任务参数示例
+$seconds      视频任务参数示例
 ```
 
-设计师端只会收到模型名称、能力、积分、价格和启用状态。
+任务的 `parameters` 会作为同名模板变量传给 Worker，并原样进入历史记录。设计师端只会收到模型名称、能力、积分、价格和启用状态；Provider Key 不进入任务参数或浏览器存储。
 
 ## 6. 模拟出图验收
 
@@ -237,7 +239,7 @@ docker compose up -d api worker
 | 负余额账号 | 0 |
 | 重复请求 ID | 0 |
 
-对应的公开验证记录：[GitHub Actions #13](https://github.com/Jizhidemu52/Vincent-s-Canvas/actions/runs/29092186577)。该测试使用 `TASK_MOCK_MODE=true`，验证的是平台自身的并发、计费、队列和存储能力，不代表外部模型供应商的生成速度。接入正式模型后，还需要对每个 Provider 单独做限流与超时验收。
+对应的并发基线记录：[GitHub Actions 验证](https://github.com/Jizhidemu52/Vincent-s-Canvas/actions/runs/29092186577)。服务端媒体参数、音频计价、模型能力校验、跨账号隔离与恢复复验见 [最新 GitHub Actions 验证](https://github.com/Jizhidemu52/Vincent-s-Canvas/actions/runs/29096875561)。测试使用 `TASK_MOCK_MODE=true` 的部分验证平台自身并发、计费、队列和存储能力，不代表外部模型供应商的生成速度；接入正式模型后仍需对每个 Provider 单独做限流与超时验收。
 
 ### 手工复验
 
