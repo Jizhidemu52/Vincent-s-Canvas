@@ -482,6 +482,126 @@ integration("production identity and RBAC", () => {
     );
     expect(incompatibleModelTask.response.status).toBe(400);
     expect(incompatibleModelTask.body.error).toBe("MODEL_CAPABILITY_MISMATCH");
+
+    const batchSubmission = await api<{
+      batchId: string;
+      tasks: Array<{ id: string }>;
+      failures: unknown[];
+    }>(
+      "/api/tasks/batch",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          requestId: "integration-batch-control-001",
+          projectId: "integration-batch-control",
+          operationType: "batch_image",
+          modelConfigId: internalSeamlessModel!.id,
+          prompt: "统一白底产品改图",
+          items: [
+            { sourceUrls: ["/api/assets/integration-source-a/content"] },
+            { sourceUrls: ["/api/assets/integration-source-b/content"] },
+          ],
+        }),
+      },
+      chineseLogin.cookie,
+    );
+    expect(batchSubmission.response.status).toBe(201);
+    expect(batchSubmission.body.tasks).toHaveLength(2);
+    expect(batchSubmission.body.failures).toEqual([]);
+    const batchHeldSession = await api<{ user: { creditBalance: number } }>(
+      "/api/auth/session",
+      {},
+      chineseLogin.cookie,
+    );
+    expect(batchHeldSession.body.user.creditBalance).toBe(492);
+
+    const pauseBatch = await api<{ changed: number }>(
+      `/api/tasks/batches/${batchSubmission.body.batchId}/pause`,
+      { method: "POST" },
+      chineseLogin.cookie,
+    );
+    expect(pauseBatch.response.status).toBe(200);
+    expect(pauseBatch.body.changed).toBe(2);
+    const pausedBatches = await api<{
+      batches: Array<{
+        id: string;
+        status: string;
+        pausedItems: number;
+        failedItems: number;
+      }>;
+    }>("/api/tasks/batches", {}, chineseLogin.cookie);
+    expect(
+      pausedBatches.body.batches.find(
+        (batch) => batch.id === batchSubmission.body.batchId,
+      ),
+    ).toMatchObject({ status: "paused", pausedItems: 2, failedItems: 0 });
+
+    const resumeBatch = await api<{ changed: number }>(
+      `/api/tasks/batches/${batchSubmission.body.batchId}/resume`,
+      { method: "POST" },
+      chineseLogin.cookie,
+    );
+    expect(resumeBatch.response.status).toBe(200);
+    expect(resumeBatch.body.changed).toBe(2);
+    const crossAccountBatchPause = await api<{ error: string }>(
+      `/api/tasks/batches/${batchSubmission.body.batchId}/pause`,
+      { method: "POST" },
+      emailLogin.cookie,
+    );
+    expect(crossAccountBatchPause.response.status).toBe(404);
+
+    const managerPauseBatch = await api<{ changed: number }>(
+      `/api/admin/tasks/batches/${batchSubmission.body.batchId}/pause`,
+      { method: "POST" },
+      employeeLogin.cookie,
+    );
+    expect(managerPauseBatch.response.status).toBe(200);
+    expect(managerPauseBatch.body.changed).toBe(2);
+    const managerResumeBatch = await api<{ changed: number }>(
+      `/api/admin/tasks/batches/${batchSubmission.body.batchId}/resume`,
+      { method: "POST" },
+      employeeLogin.cookie,
+    );
+    expect(managerResumeBatch.response.status).toBe(200);
+    expect(managerResumeBatch.body.changed).toBe(2);
+    await api(
+      `/api/tasks/batches/${batchSubmission.body.batchId}/pause`,
+      { method: "POST" },
+      chineseLogin.cookie,
+    );
+    const cancelBatch = await api<{ changed: number }>(
+      `/api/tasks/batches/${batchSubmission.body.batchId}/cancel`,
+      { method: "POST" },
+      chineseLogin.cookie,
+    );
+    expect(cancelBatch.response.status).toBe(200);
+    expect(cancelBatch.body.changed).toBe(2);
+    const cancelledBatches = await api<{
+      batches: Array<{
+        id: string;
+        status: string;
+        cancelledItems: number;
+        failedItems: number;
+        plannedCredits: number;
+        consumedCredits: number;
+      }>;
+    }>("/api/tasks/batches", {}, chineseLogin.cookie);
+    expect(
+      cancelledBatches.body.batches.find(
+        (batch) => batch.id === batchSubmission.body.batchId,
+      ),
+    ).toMatchObject({
+      status: "cancelled",
+      cancelledItems: 2,
+      failedItems: 0,
+      plannedCredits: 8,
+      consumedCredits: 0,
+    });
+    const batchReleasedSession = await api<{
+      user: { creditBalance: number };
+    }>("/api/auth/session", {}, chineseLogin.cookie);
+    expect(batchReleasedSession.body.user.creditBalance).toBe(500);
+
     const ledger = await api<{
       entries: Array<{ entryType: string; referenceId: string }>;
     }>("/api/billing/ledger", {}, chineseLogin.cookie);
@@ -700,6 +820,11 @@ integration("production identity and RBAC", () => {
     expect(
       audit.body.auditLogs.some(
         (entry) => entry.action === "account.password_reset",
+      ),
+    ).toBe(true);
+    expect(
+      audit.body.auditLogs.some(
+        (entry) => entry.action === "batch.admin_paused",
       ),
     ).toBe(true);
 
