@@ -3,7 +3,7 @@ import { BillingError, reserveCredits, settleReservation } from "./billing";
 import type { Cache, Database } from "./db";
 
 export type TaskPriority = "normal" | "priority" | "urgent";
-export type TaskInput = { requestId: string; userId: string; departmentId: string | null; projectId: string; operationType: string; modelConfigId?: string | null; prompt: string; sourceUrls: string[]; priority: TaskPriority; batchId?: string | null };
+export type TaskInput = { requestId: string; userId: string; departmentId: string | null; projectId: string; operationType: string; modelConfigId?: string | null; prompt: string; parameters?: Record<string, unknown>; sourceUrls: string[]; priority: TaskPriority; batchId?: string | null };
 
 const priorityBand: Record<TaskPriority, number> = { urgent: 0, priority: 1, normal: 2 };
 export function queueScore(priority: TaskPriority, timestamp = Date.now()) { return priorityBand[priority] * 1_000_000_000_000_000 + timestamp; }
@@ -11,10 +11,10 @@ export function queueScore(priority: TaskPriority, timestamp = Date.now()) { ret
 export async function enqueueTask(db: Database, cache: Cache, input: TaskInput) {
     const taskId = randomUUID();
     const inserted = await db.query<{ id: string }>(
-        `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,priority,credits,rmb_cost)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,0)
+        `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,credits,rmb_cost)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,0)
          ON CONFLICT(request_id) DO NOTHING RETURNING id`,
-        [taskId, input.requestId, input.batchId ?? null, input.userId, input.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, JSON.stringify(input.sourceUrls), input.priority],
+        [taskId, input.requestId, input.batchId ?? null, input.userId, input.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, input.parameters ?? {}, JSON.stringify(input.sourceUrls), input.priority],
     );
     if (!inserted.rows[0]) {
         const existing = await db.query<{ id: string; requestId: string; status: string; credits: number; rmbCost: number }>(

@@ -7,11 +7,11 @@ import { requireRole } from "../rbac";
 import { BillingError, enqueueTask, recalculateBatch } from "../tasks";
 import type { AuthenticatedRequest } from "../types";
 
-const base = z.object({ requestId: z.string().min(8).max(200), projectId: z.string().min(1).max(200), operationType: z.string().min(1).max(80), modelConfigId: z.string().uuid().nullish(), prompt: z.string().max(20_000).default(""), priority: z.enum(["normal", "priority", "urgent"]).default("normal") });
+const base = z.object({ requestId: z.string().min(8).max(200), projectId: z.string().min(1).max(200), operationType: z.string().min(1).max(80), modelConfigId: z.string().uuid().nullish(), prompt: z.string().max(20_000).default(""), parameters: z.record(z.string(), z.unknown()).default({}), priority: z.enum(["normal", "priority", "urgent"]).default("normal") });
 const singleSchema = base.extend({ sourceUrls: z.array(z.string().max(2_000)).max(20).default([]) });
 const batchSchema = base.extend({ items: z.array(z.object({ sourceUrls: z.array(z.string().max(2_000)).min(1).max(20) })).min(1).max(200) });
 
-const taskSelect = `t.id,t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
+const taskSelect = `t.id,t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
 
 export function createTasksRouter(db: Database, cache: Cache) {
     const router = Router();
@@ -41,11 +41,11 @@ export function createTasksRouter(db: Database, cache: Cache) {
                     if (existing.rows[0]) {
                         await db.query("UPDATE tasks SET status='failed',credits=0,rmb_cost=0,failure_reason=$1,completed_at=now(),updated_at=now() WHERE id=$2", [reason, failedId]);
                     } else {
-                        await db.query(`INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,priority,status,credits,rmb_cost,failure_reason,completed_at)
-                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'failed',0,0,$12,now())`, [failedId, itemRequestId, batchId, actor.id, actor.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, JSON.stringify(item.sourceUrls), input.priority, reason]);
+                        await db.query(`INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,status,credits,rmb_cost,failure_reason,completed_at)
+                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'failed',0,0,$13,now())`, [failedId, itemRequestId, batchId, actor.id, actor.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, input.parameters, JSON.stringify(item.sourceUrls), input.priority, reason]);
                     }
-                    await db.query(`INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,result_urls,credits,rmb_cost,status,failure_reason)
-                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,'[]',0,0,'failed',$9) ON CONFLICT(task_id) DO UPDATE SET status='failed',failure_reason=EXCLUDED.failure_reason,credits=0,rmb_cost=0`, [failedId, actor.id, actor.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, JSON.stringify(item.sourceUrls), reason]);
+                    await db.query(`INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,status,failure_reason)
+                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'[]',0,0,'failed',$10) ON CONFLICT(task_id) DO UPDATE SET status='failed',failure_reason=EXCLUDED.failure_reason,credits=0,rmb_cost=0`, [failedId, actor.id, actor.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, input.parameters, JSON.stringify(item.sourceUrls), reason]);
                     failures.push({ index, reason });
                 }
             }

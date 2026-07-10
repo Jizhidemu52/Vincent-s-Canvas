@@ -6,9 +6,10 @@ import { settleReservation } from "./billing";
 import { queueScore, recalculateBatch, type TaskPriority } from "./tasks";
 import { ObjectStorage } from "./object-storage";
 import { normalizeWorkflowOutputs, parsePromptVariables, readPath, renderTemplate } from "./workflow-runtime";
+import { buildOpenAiAudioRequest, buildOpenAiVideoFields, unwrapProviderEnvelope } from "./media-runtime";
 
 type WorkRow = {
-    id: string; request_id: string; batch_id: string | null; user_id: string; department_id: string | null; project_id: string; operation_type: string; model_config_id: string | null; prompt: string; source_urls: string[]; attempts: number; priority: TaskPriority;
+    id: string; request_id: string; batch_id: string | null; user_id: string; department_id: string | null; project_id: string; operation_type: string; model_config_id: string | null; prompt: string; parameters: Record<string, unknown>; source_urls: string[]; attempts: number; priority: TaskPriority;
     model_id: string | null; concurrency_limit: number | null; protocol: string | null; base_url: string | null; encrypted_credentials: string | null;
     workflow_config_id:string|null;workflow_id:string|null;submit_path:string|null;status_path:string|null;request_template:unknown;external_task_path:string|null;status_value_path:string|null;success_values:string[]|null;failure_values:string[]|null;output_path:string|null;poll_interval_ms:number|null;timeout_seconds:number|null;
 };
@@ -28,7 +29,7 @@ async function runTask(taskId: string) {
     const claimed = await db.query<WorkRow>(`UPDATE tasks SET status='processing',started_at=COALESCE(started_at,now()),attempts=attempts+1,updated_at=now()
         WHERE id=$1 AND status='waiting' RETURNING id,request_id,batch_id,prompt,source_urls,attempts,priority,model_config_id`, [taskId]);
     if (!claimed.rows[0]) return;
-    const details = await db.query<WorkRow>(`SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.source_urls,t.attempts,t.priority,m.model_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
+    const details = await db.query<WorkRow>(`SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.parameters,t.source_urls,t.attempts,t.priority,m.model_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
         FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id AND w.enabled=true WHERE t.id=$1`, [taskId]);
     const task = details.rows[0]!;
     const semaphoreKey = task.model_id ? `model:${task.model_id}:running` : "model:none:running";
@@ -48,8 +49,8 @@ async function runTask(taskId: string) {
         try {
             await client.query("BEGIN");
             await client.query("UPDATE tasks SET status='success',result_urls=$1,completed_at=now(),updated_at=now() WHERE id=$2", [JSON.stringify(resultUrls), task.id]);
-            await client.query(`INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,result_urls,credits,rmb_cost,status)
-                SELECT id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,result_urls,credits,rmb_cost,'success' FROM tasks WHERE id=$1 ON CONFLICT(task_id) DO NOTHING`, [task.id]);
+            await client.query(`INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,status)
+                SELECT id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,'success' FROM tasks WHERE id=$1 ON CONFLICT(task_id) DO NOTHING`, [task.id]);
             await client.query("COMMIT");
         } catch (error) { await client.query("ROLLBACK"); throw error; }
         finally { client.release(); }
@@ -61,8 +62,8 @@ async function runTask(taskId: string) {
         } else {
             await settleReservation(db, task.request_id, "release").catch(() => undefined);
             await db.query("UPDATE tasks SET status='failed',failure_reason=$1,completed_at=now(),updated_at=now() WHERE id=$2", [reason, task.id]);
-            await db.query(`INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,result_urls,credits,rmb_cost,status,failure_reason)
-                SELECT id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,'[]',0,0,'failed',$2 FROM tasks WHERE id=$1 ON CONFLICT(task_id) DO NOTHING`, [task.id, reason]);
+            await db.query(`INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,status,failure_reason)
+                SELECT id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,'[]',0,0,'failed',$2 FROM tasks WHERE id=$1 ON CONFLICT(task_id) DO NOTHING`, [task.id, reason]);
             await db.query(`INSERT INTO audit_logs(actor_user_id,action,target_type,target_id,result,detail)
                 SELECT user_id,'task.failed','task',id::text,'failed',jsonb_build_object('reason',$2::text,'attempts',attempts) FROM tasks WHERE id=$1`, [task.id, reason]);
         }
@@ -78,6 +79,8 @@ async function executeProvider(task: WorkRow) {
     const credentials = JSON.parse(decryptSecret(task.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as Record<string, string>;
     if(task.workflow_config_id&&task.submit_path&&task.output_path)return executeWorkflow(task,credentials);
     const authorization: Record<string,string> = credentials.apiKey ? { authorization: `Bearer ${credentials.apiKey}` } : {};
+    if (task.protocol === "openai" && task.operation_type === "audio_generation") return executeOpenAiAudio(task, authorization);
+    if (task.protocol === "openai" && task.operation_type === "video_generation") return executeOpenAiVideo(task, authorization);
     let response: Response;
     if (task.protocol === "openai" && task.operation_type !== "image_generation" && task.source_urls.length) {
         const form = new FormData(); form.set("model",task.model_id); form.set("prompt",task.prompt); form.set("n","1"); form.set("response_format","b64_json");
@@ -95,9 +98,55 @@ async function executeProvider(task: WorkRow) {
     return Promise.all(urls.map(fetchResult));
 }
 
-async function executeWorkflow(task:WorkRow,credentials:Record<string,string>){const sourceAssets=await Promise.all(task.source_urls.map((url)=>loadSourceAsset(url,task.user_id)));const sourceImagesBase64=sourceAssets.map((asset)=>Buffer.from(asset.bytes).toString("base64"));const variables:Record<string,unknown>={prompt:task.prompt,...parsePromptVariables(task.prompt),sourceUrls:task.source_urls,sourceBase64:sourceImagesBase64[0]??"",sourceImagesBase64,workflowId:task.workflow_id,modelId:task.model_id,...credentials};const body=renderTemplate(task.request_template??{},variables);const headers:Record<string,string>={"content-type":"application/json"};if(credentials.apiKey){headers.authorization=`Bearer ${credentials.apiKey}`;headers["x-api-key"]=credentials.apiKey;}if(credentials.walletApiKey)headers["wallet-api-key"]=credentials.walletApiKey;const submit=await fetch(joinUrl(task.base_url!,task.submit_path!),{method:"POST",headers,body:JSON.stringify(body),signal:AbortSignal.timeout(180_000)});if(!submit.ok)throw new Error(`工作流提交失败 ${submit.status}: ${(await submit.text()).slice(0,500)}`);let payload=await submit.json() as unknown;let outputs=normalizeWorkflowOutputs(readPath(payload,task.output_path!));if(outputs.length)return Promise.all(outputs.map(fetchResult));const externalId=task.external_task_path?readPath(payload,task.external_task_path):null;if(!externalId||!task.status_path)throw new Error("工作流响应中没有任务 ID 或直接结果");const deadline=Date.now()+(task.timeout_seconds??600)*1000;while(Date.now()<deadline){await Bun.sleep(task.poll_interval_ms??2000);const statusResponse=await fetch(joinUrl(task.base_url!,task.status_path.replace("{taskId}",encodeURIComponent(String(externalId)))),{headers,signal:AbortSignal.timeout(60_000)});if(!statusResponse.ok)throw new Error(`工作流状态查询失败 ${statusResponse.status}`);payload=await statusResponse.json();outputs=normalizeWorkflowOutputs(readPath(payload,task.output_path!));if(outputs.length)return Promise.all(outputs.map(fetchResult));const state=String(task.status_value_path?readPath(payload,task.status_value_path):"").toLowerCase();if((task.failure_values??[]).map((value)=>value.toLowerCase()).includes(state))throw new Error(`工作流执行失败：${state}`);if((task.success_values??[]).map((value)=>value.toLowerCase()).includes(state))throw new Error("工作流已完成但没有返回结果地址");}throw new Error("工作流执行超时");}
+async function executeOpenAiAudio(task: WorkRow, authorization: Record<string, string>) {
+    const request = buildOpenAiAudioRequest(task.model_id!, task.prompt, task.parameters);
+    const response = await fetch(`${task.base_url!.replace(/\/$/, "")}/audio/speech`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...authorization },
+        body: JSON.stringify(request.payload),
+        signal: AbortSignal.timeout(180_000),
+    });
+    if (!response.ok) throw new Error(`音频 Provider ${response.status}: ${(await response.text()).slice(0, 500)}`);
+    return [{ bytes: Buffer.from(await response.arrayBuffer()), mimeType: response.headers.get("content-type")?.split(";")[0] || request.mimeType }];
+}
+
+async function executeOpenAiVideo(task: WorkRow, authorization: Record<string, string>) {
+    const fields = buildOpenAiVideoFields(task.model_id!, task.prompt, task.parameters);
+    const form = new FormData();
+    form.set("model", fields.model);
+    form.set("prompt", fields.prompt);
+    form.set("seconds", fields.seconds);
+    if (fields.size) form.set("size", fields.size);
+    form.set("resolution_name", fields.resolution);
+    form.set("preset", fields.preset);
+    for (const [index, url] of task.source_urls.entries()) {
+        const source = await loadSourceAsset(url, task.user_id);
+        if (!source.mimeType.startsWith("image/")) continue;
+        form.append("input_reference[]", new Blob([Uint8Array.from(source.bytes).buffer], { type: source.mimeType }), source.filename || `reference-${index + 1}.png`);
+    }
+    const createdResponse = await fetch(`${task.base_url!.replace(/\/$/, "")}/videos`, { method: "POST", headers: authorization, body: form, signal: AbortSignal.timeout(180_000) });
+    if (!createdResponse.ok) throw new Error(`视频 Provider ${createdResponse.status}: ${(await createdResponse.text()).slice(0, 500)}`);
+    const created = unwrapProviderEnvelope(await createdResponse.json()) as { id?: string; status?: string; error?: { message?: string } };
+    if (!created.id) throw new Error("视频 Provider 没有返回任务 ID");
+    const deadline = Date.now() + fields.timeoutSeconds * 1000;
+    while (Date.now() < deadline) {
+        await Bun.sleep(2_000);
+        const statusResponse = await fetch(`${task.base_url!.replace(/\/$/, "")}/videos/${encodeURIComponent(created.id)}`, { headers: authorization, signal: AbortSignal.timeout(60_000) });
+        if (!statusResponse.ok) throw new Error(`视频状态查询失败 ${statusResponse.status}`);
+        const status = unwrapProviderEnvelope(await statusResponse.json()) as { status?: string; error?: { message?: string } };
+        if (status.status === "failed" || status.status === "cancelled") throw new Error(status.error?.message || "视频生成失败");
+        if (status.status !== "completed") continue;
+        const content = await fetch(`${task.base_url!.replace(/\/$/, "")}/videos/${encodeURIComponent(created.id)}/content`, { headers: authorization, signal: AbortSignal.timeout(180_000) });
+        if (!content.ok) throw new Error(`视频下载失败 ${content.status}`);
+        return [{ bytes: Buffer.from(await content.arrayBuffer()), mimeType: content.headers.get("content-type")?.split(";")[0] || "video/mp4" }];
+    }
+    throw new Error("视频生成超时");
+}
+
+async function executeWorkflow(task:WorkRow,credentials:Record<string,string>){const sourceAssets=await Promise.all(task.source_urls.map((url)=>loadSourceAsset(url,task.user_id)));const sourceImagesBase64=sourceAssets.map((asset)=>Buffer.from(asset.bytes).toString("base64"));const variables:Record<string,unknown>={prompt:task.prompt,...task.parameters,...parsePromptVariables(task.prompt),sourceUrls:task.source_urls,sourceBase64:sourceImagesBase64[0]??"",sourceImagesBase64,workflowId:task.workflow_id,modelId:task.model_id,...credentials};const body=renderTemplate(task.request_template??{},variables);const headers:Record<string,string>={"content-type":"application/json"};if(credentials.apiKey){headers.authorization=`Bearer ${credentials.apiKey}`;headers["x-api-key"]=credentials.apiKey;}if(credentials.walletApiKey)headers["wallet-api-key"]=credentials.walletApiKey;const submit=await fetch(joinUrl(task.base_url!,task.submit_path!),{method:"POST",headers,body:JSON.stringify(body),signal:AbortSignal.timeout(180_000)});if(!submit.ok)throw new Error(`工作流提交失败 ${submit.status}: ${(await submit.text()).slice(0,500)}`);let payload=await submit.json() as unknown;let outputs=normalizeWorkflowOutputs(readPath(payload,task.output_path!));if(outputs.length)return Promise.all(outputs.map(fetchResult));const externalId=task.external_task_path?readPath(payload,task.external_task_path):null;if(!externalId||!task.status_path)throw new Error("工作流响应中没有任务 ID 或直接结果");const deadline=Date.now()+(task.timeout_seconds??600)*1000;while(Date.now()<deadline){await Bun.sleep(task.poll_interval_ms??2000);const statusResponse=await fetch(joinUrl(task.base_url!,task.status_path.replace("{taskId}",encodeURIComponent(String(externalId)))),{headers,signal:AbortSignal.timeout(60_000)});if(!statusResponse.ok)throw new Error(`工作流状态查询失败 ${statusResponse.status}`);payload=await statusResponse.json();outputs=normalizeWorkflowOutputs(readPath(payload,task.output_path!));if(outputs.length)return Promise.all(outputs.map(fetchResult));const state=String(task.status_value_path?readPath(payload,task.status_value_path):"").toLowerCase();if((task.failure_values??[]).map((value)=>value.toLowerCase()).includes(state))throw new Error(`工作流执行失败：${state}`);if((task.success_values??[]).map((value)=>value.toLowerCase()).includes(state))throw new Error("工作流已完成但没有返回结果地址");}throw new Error("工作流执行超时");}
 
 function joinUrl(base:string,path:string){return`${base.replace(/\/$/,"")}/${path.replace(/^\//,"")}`;}
+
 
 async function loadSourceAsset(url:string,userId:string){const match=url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i);if(!match)throw new Error("参考图不是公司素材地址");const result=await db.query<{object_key:string;mime_type:string;filename:string}>("SELECT object_key,mime_type,filename FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",[match[1],userId]);const asset=result.rows[0];if(!asset)throw new Error("参考图不存在或无权访问");const object=await storage.get(asset.object_key);return{bytes:await object.Body!.transformToByteArray(),mimeType:asset.mime_type,filename:asset.filename};}
 
@@ -117,15 +166,15 @@ async function storeResults(task: WorkRow, results: Array<{ bytes: Uint8Array; m
     const urls: string[] = [];
     for (const [index, result] of results.entries()) {
         const id = randomUUID();
-        const extension = result.mimeType === "image/jpeg" ? "jpg" : result.mimeType === "image/svg+xml" ? "svg" : result.mimeType.includes("webm")?"webm":result.mimeType.startsWith("video/")?"mp4":"png";
+        const extension = result.mimeType === "image/jpeg" ? "jpg" : result.mimeType === "image/svg+xml" ? "svg" : result.mimeType.includes("webm")?"webm":result.mimeType.startsWith("video/")?"mp4":result.mimeType.includes("wav")?"wav":result.mimeType.includes("aac")?"aac":result.mimeType.includes("ogg")?"ogg":result.mimeType.startsWith("audio/")?"mp3":"png";
         const filename = `task-${task.id}-${index + 1}.${extension}`;
         const key = `users/${task.user_id}/generated/${task.id}/${filename}`;
         await storage.put(key, result.bytes, result.mimeType);
-        const kind=result.mimeType.startsWith("video/")?"video":"image";
+        const kind=result.mimeType.startsWith("video/")?"video":result.mimeType.startsWith("audio/")?"other":"image";
         const asset = await db.query<{ id: string }>(`INSERT INTO assets(id,owner_user_id,department_id,project_external_id,task_id,object_key,filename,mime_type,byte_size,kind,source,operation_type,prompt,model_config_id,status)
             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'ready')
             ON CONFLICT(object_key) DO UPDATE SET status='ready',byte_size=EXCLUDED.byte_size,mime_type=EXCLUDED.mime_type,updated_at=now()
-            RETURNING id`, [id, task.user_id, task.department_id, task.project_id, task.id, key, filename, result.mimeType, result.bytes.byteLength,kind, task.operation_type === "image_generation"||task.operation_type==="video_generation" ? "generation" : "edit", task.operation_type, task.prompt, task.model_config_id]);
+            RETURNING id`, [id, task.user_id, task.department_id, task.project_id, task.id, key, filename, result.mimeType, result.bytes.byteLength,kind, task.operation_type === "image_generation"||task.operation_type==="video_generation"||task.operation_type==="audio_generation" ? "generation" : "edit", task.operation_type, task.prompt, task.model_config_id]);
         urls.push(`/api/assets/${asset.rows[0]!.id}/content`);
     }
     return urls;

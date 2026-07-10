@@ -125,7 +125,7 @@ function ImageGenerationPage() {
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
-    const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
+    const isAiConfigReady = (..._args: unknown[]) => true;
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const canManageConfig = useCanManageConfig();
     const user = useUserStore((state) => state.user);

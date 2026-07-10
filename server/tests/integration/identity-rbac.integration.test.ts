@@ -314,6 +314,48 @@ integration("production identity and RBAC", () => {
         (price) => price.operationType === "seamless_stitch",
       )?.credits,
     ).toBe(2);
+    expect(
+      publicModels.body.prices.find(
+        (price) => price.operationType === "audio_generation",
+      )?.credits,
+    ).toBe(10);
+
+    const audioProvider = await api<{ provider: { id: string } }>(
+      "/api/admin/model-configuration/providers",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: "Integration Audio Provider",
+          protocol: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          enabled: true,
+          credentials: { apiKey: "integration-audio-key" },
+        }),
+      },
+      admin.cookie,
+    );
+    expect(audioProvider.response.status).toBe(201);
+    expect(JSON.stringify(audioProvider.body)).not.toContain(
+      "integration-audio-key",
+    );
+    const audioModel = await api<{ model: { id: string } }>(
+      "/api/admin/model-configuration/models",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          providerId: audioProvider.body.provider.id,
+          name: "Integration Audio Model",
+          modelId: "integration-audio-v1",
+          capabilities: ["audio"],
+          creditCost: 3,
+          rmbCost: 0.1,
+          concurrencyLimit: 2,
+          enabled: true,
+        }),
+      },
+      admin.cookie,
+    );
+    expect(audioModel.response.status).toBe(201);
 
     const duplicateRequestId = "integration-seamless-duplicate-001";
     const submitSeamless = (cookie: string) =>
@@ -366,6 +408,68 @@ integration("production identity and RBAC", () => {
       chineseLogin.cookie,
     );
     expect(releasedSession.body.user.creditBalance).toBe(500);
+
+    const audioParameters = {
+      voice: "alloy",
+      speed: 1.25,
+      responseFormat: "mp3",
+    };
+    const audioSubmission = await api<{
+      task: { id: string; credits: number };
+    }>(
+      "/api/tasks",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          requestId: "integration-audio-task-001",
+          projectId: "integration-audio",
+          operationType: "audio_generation",
+          modelConfigId: audioModel.body.model.id,
+          prompt: "内部产品介绍旁白",
+          parameters: audioParameters,
+          sourceUrls: [],
+        }),
+      },
+      chineseLogin.cookie,
+    );
+    expect(audioSubmission.response.status).toBe(201);
+    expect(audioSubmission.body.task.credits).toBe(13);
+    const designerTasks = await api<{
+      tasks: Array<{ id: string; parameters: Record<string, unknown> }>;
+    }>("/api/tasks", {}, chineseLogin.cookie);
+    expect(
+      designerTasks.body.tasks.find(
+        (task) => task.id === audioSubmission.body.task.id,
+      )?.parameters,
+    ).toEqual(audioParameters);
+    const cancelAudio = await api(
+      `/api/tasks/${audioSubmission.body.task.id}/cancel`,
+      { method: "POST" },
+      chineseLogin.cookie,
+    );
+    expect(cancelAudio.response.status).toBe(204);
+    const audioReleasedSession = await api<{
+      user: { creditBalance: number };
+    }>("/api/auth/session", {}, chineseLogin.cookie);
+    expect(audioReleasedSession.body.user.creditBalance).toBe(500);
+
+    const incompatibleModelTask = await api<{ error: string }>(
+      "/api/tasks",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          requestId: "integration-audio-wrong-model-001",
+          projectId: "integration-audio",
+          operationType: "audio_generation",
+          modelConfigId: internalSeamlessModel!.id,
+          prompt: "should be rejected",
+          sourceUrls: [],
+        }),
+      },
+      chineseLogin.cookie,
+    );
+    expect(incompatibleModelTask.response.status).toBe(400);
+    expect(incompatibleModelTask.body.error).toBe("MODEL_CAPABILITY_MISMATCH");
     const ledger = await api<{
       entries: Array<{ entryType: string; referenceId: string }>;
     }>("/api/billing/ledger", {}, chineseLogin.cookie);

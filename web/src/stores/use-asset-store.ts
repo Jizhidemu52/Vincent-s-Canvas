@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { cleanupUnusedImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
-import { syncAssetToCompanyDatabase } from "@/services/api/company-assets";
+import { uploadServerAsset } from "@/services/api/server-assets";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useUserStore, type LocalUser } from "@/stores/use-user-store";
 
@@ -82,15 +82,14 @@ export const useAssetStore = create<AssetStore>()(
                 set((state) => ({ assets: [created, ...state.assets] }));
                 const user = useUserStore.getState().user;
                 if (user) {
-                    void syncAssetToCompanyDatabase(created, user)
-                        .then((result) => {
-                            if (!result.synced) return;
+                    void syncAssetToServerStorage(created)
+                        .then((serverAssetId) => {
                             set((state) => ({
                                 assets: state.assets.map((item) =>
                                     item.id === id
                                         ? {
                                               ...item,
-                                              metadata: { ...item.metadata, companyDatabaseStatus: "synced", companyDatabaseSyncedAt: new Date().toISOString() },
+                                              metadata: { ...item.metadata, serverAssetId, companyDatabaseStatus: "synced", companyDatabaseSyncedAt: new Date().toISOString() },
                                           }
                                         : item,
                                 ),
@@ -158,4 +157,35 @@ function canCurrentUserManageAsset(asset: Asset) {
 
 function currentAssetOwnerId() {
     return useUserStore.getState().user?.id || "unassigned";
+}
+
+async function syncAssetToServerStorage(asset: Asset) {
+    const existingId = serverAssetIdFromAsset(asset);
+    if (existingId) return existingId;
+    const metadata = { ...asset.metadata, localAssetId: asset.id, title: asset.title, tags: asset.tags, source: asset.source || "local-cache", note: asset.note || "" };
+    if (asset.kind === "text") {
+        return uploadServerAsset(new File([asset.data.content], `${safeFilename(asset.title)}.txt`, { type: "text/plain;charset=utf-8" }), metadata);
+    }
+    const sourceUrl = asset.kind === "image" ? asset.data.dataUrl : asset.data.url;
+    const response = await fetch(sourceUrl, { credentials: "include" });
+    if (!response.ok) throw new Error(`素材读取失败（${response.status}）`);
+    const blob = await response.blob();
+    const extension = asset.kind === "video" ? "mp4" : blob.type.includes("jpeg") ? "jpg" : "png";
+    return uploadServerAsset(new File([blob], `${safeFilename(asset.title)}.${extension}`, { type: blob.type || asset.data.mimeType }), metadata);
+}
+
+function serverAssetIdFromAsset(asset: Asset) {
+    const explicit = typeof asset.metadata?.serverAssetId === "string" ? asset.metadata.serverAssetId : "";
+    if (explicit) return explicit;
+    const sourceUrl = asset.kind === "image" ? asset.data.dataUrl : asset.kind === "video" ? asset.data.url : "";
+    return sourceUrl.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i)?.[1] || "";
+}
+
+function safeFilename(value: string) {
+    return (
+        value
+            .trim()
+            .replace(/[^A-Za-z0-9\u4e00-\u9fff._-]+/g, "-")
+            .replace(/^-+|-+$/g, "") || "asset"
+    );
 }

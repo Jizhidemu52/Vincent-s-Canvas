@@ -14,7 +14,7 @@ const providerInput = z.object({ name: z.string().trim().min(1).max(100), protoc
 const providerUpdate = providerInput.partial();
 const modelInput = z.object({ providerId: z.string().uuid(), workflowConfigId: z.string().uuid().nullish(), name: z.string().trim().min(1).max(120), modelId: z.string().trim().min(1).max(200), capabilities, creditCost: z.number().int().nonnegative(), rmbCost: z.number().nonnegative(), concurrencyLimit: z.number().int().min(1).max(100).default(5), enabled: z.boolean().default(true) });
 const modelUpdate = modelInput.partial();
-const priceInput = z.object({ operationType: z.enum(["image_generation", "video_generation", "upscale", "remove_background", "inpaint", "batch_image", "seamless_stitch"]), label: z.string().trim().min(1).max(100), credits: z.number().int().nonnegative(), rmbCost: z.number().nonnegative() });
+const priceInput = z.object({ operationType: z.enum(["image_generation", "video_generation", "audio_generation", "upscale", "remove_background", "inpaint", "batch_image", "seamless_stitch"]), label: z.string().trim().min(1).max(100), credits: z.number().int().nonnegative(), rmbCost: z.number().nonnegative() });
 
 const providerSelect = `id,name,protocol,base_url AS "baseUrl",enabled,(encrypted_credentials IS NOT NULL) AS "hasCredentials",created_at AS "createdAt",updated_at AS "updatedAt"`;
 const modelSelect = `m.id,m.provider_id AS "providerId",p.name AS "providerName",m.workflow_config_id AS "workflowConfigId",w.name AS "workflowName",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",m.concurrency_limit AS "concurrencyLimit",m.enabled,m.created_at AS "createdAt",m.updated_at AS "updatedAt"`;

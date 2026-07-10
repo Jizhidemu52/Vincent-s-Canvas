@@ -3,12 +3,14 @@ import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { uploadServerAsset } from "@/services/api/server-assets";
 import { imageToDataUrl } from "@/services/image-storage";
+import { modelOptionName } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
-type Task = { id: string; requestId: string; status: string; resultUrls: string[]; failureReason: string | null };
+export type QueuedTask = { id: string; requestId: string; status: string; resultUrls: string[]; failureReason: string | null };
+export type QueuedMediaInput = { modelId: string; prompt: string; operationType: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; signal?: AbortSignal };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(path, {
@@ -65,19 +67,38 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
     }
 }
 
-export async function requestQueuedMedia(input: { modelId: string; prompt: string; operationType: string; sourceFiles?: File[]; sourceUrls?: string[]; signal?: AbortSignal }) {
+export async function submitQueuedMediaTask(input: QueuedMediaInput) {
     const model = await resolvePublicModel(input.modelId);
     const sourceUrls = [...(input.sourceUrls || [])];
     for (const file of input.sourceFiles || []) {
         const id = await uploadServerAsset(file, { title: file.name, source: "task-reference" });
         sourceUrls.push(`/api/assets/${id}/content`);
     }
-    const result = await request<{ task: { id: string } }>("/api/tasks", {
+    const result = await request<{ task: QueuedTask }>("/api/tasks", {
         method: "POST",
-        body: JSON.stringify({ requestId: crypto.randomUUID(), projectId: currentProjectId("video-workbench"), operationType: input.operationType, modelConfigId: model.id, prompt: input.prompt, sourceUrls, priority: "normal" }),
+        body: JSON.stringify({
+            requestId: crypto.randomUUID(),
+            projectId: currentProjectId(input.operationType === "audio_generation" ? "audio-workbench" : "video-workbench"),
+            operationType: input.operationType,
+            modelConfigId: model.id,
+            prompt: input.prompt,
+            parameters: input.parameters || {},
+            sourceUrls,
+            priority: "normal",
+        }),
     });
-    const ids = [result.task.id];
     void refreshSessionBalance();
+    return result.task;
+}
+
+export async function getQueuedTask(id: string) {
+    const result = await request<{ tasks: QueuedTask[] }>("/api/tasks");
+    return result.tasks.find((task) => task.id === id) || null;
+}
+
+export async function requestQueuedMedia(input: QueuedMediaInput) {
+    const submitted = await submitQueuedMediaTask(input);
+    const ids = [submitted.id];
     try {
         const [completed] = await waitForTasks(ids, input.signal);
         if (!completed || completed.status !== "success") throw new Error(completed?.failureReason || "任务失败");
@@ -92,7 +113,8 @@ export async function requestQueuedMedia(input: { modelId: string; prompt: strin
 
 async function resolvePublicModel(modelId: string) {
     const result = await request<{ models: PublicModel[] }>("/api/models");
-    const model = result.models.find((item) => item.id === modelId || item.modelId === modelId || item.name === modelId);
+    const normalized = modelOptionName(modelId);
+    const model = result.models.find((item) => item.id === modelId || item.modelId === normalized || item.name === modelId);
     if (!model) throw new Error(`管理员尚未启用模型：${modelId}`);
     return model;
 }
@@ -101,7 +123,7 @@ async function waitForTasks(ids: string[], signal?: AbortSignal) {
     const wanted = new Set(ids);
     for (;;) {
         if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
-        const result = await request<{ tasks: Task[] }>("/api/tasks");
+        const result = await request<{ tasks: QueuedTask[] }>("/api/tasks");
         const tasks = result.tasks.filter((task) => wanted.has(task.id));
         if (tasks.length === ids.length && tasks.every((task) => ["success", "failed", "cancelled"].includes(task.status))) return tasks;
         await delay(1_000, signal);

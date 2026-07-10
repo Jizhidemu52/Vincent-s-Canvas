@@ -85,10 +85,11 @@ export const navigationTools = [
 export type NavigationGroup = (typeof navigationTools)[number]["group"];
 export type NavigationToolSlug = (typeof navigationTools)[number]["slug"];
 
-export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operationType: AdminOperationType; modelId: string }>> = {
+export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operationType: AdminOperationType; modelId?: string }>> = {
     image: { operationType: "image_generation", modelId: "gpt-image-2" },
     "detail-enhance": { operationType: "upscale", modelId: "gpt-image-2" },
     "image-edit": { operationType: "inpaint", modelId: "gpt-image-2" },
     "angle-control": { operationType: "inpaint", modelId: "gpt-image-2" },
     "seamless-stitch": { operationType: "seamless_stitch", modelId: "internal-seamless" },
+    video: { operationType: "video_generation" },
 };

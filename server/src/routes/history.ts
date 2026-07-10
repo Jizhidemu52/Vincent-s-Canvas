@@ -4,7 +4,7 @@ import type { Database } from "../db";
 import { requireRole } from "../rbac";
 import type { AuthenticatedRequest } from "../types";
 
-const select = `h.id,h.task_id AS "taskId",h.user_id AS "userId",u.display_name AS "userName",h.department_id AS "departmentId",d.name AS "departmentName",h.project_id AS "projectId",h.operation_type AS "operationType",h.model_config_id AS "modelConfigId",m.name AS "modelName",h.prompt,h.source_urls AS "sourceUrls",h.result_urls AS "resultUrls",h.credits,h.rmb_cost::float8 AS "rmbCost",h.status,h.failure_reason AS "failureReason",h.created_at AS "createdAt"`;
+const select = `h.id,h.task_id AS "taskId",h.user_id AS "userId",u.display_name AS "userName",h.department_id AS "departmentId",d.name AS "departmentName",h.project_id AS "projectId",h.operation_type AS "operationType",h.model_config_id AS "modelConfigId",m.name AS "modelName",h.prompt,h.parameters,h.source_urls AS "sourceUrls",h.result_urls AS "resultUrls",h.credits,h.rmb_cost::float8 AS "rmbCost",h.status,h.failure_reason AS "failureReason",h.created_at AS "createdAt"`;
 
 export function createHistoryRouter(db: Database) {
     const router = Router();

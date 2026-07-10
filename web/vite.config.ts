@@ -5,7 +5,6 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 
 import { parseChangelog } from "./src/lib/release";
-import { companyAssetDatabaseProxyPlugin } from "./company-asset-database-proxy";
 
 const webDir = dirname(fileURLToPath(import.meta.url));
 const localVersion = readFileSync(resolve(webDir, "../VERSION"), "utf8").trim() || "dev";
@@ -14,15 +13,7 @@ const localChangelog = readFileSync(resolve(webDir, "../CHANGELOG.md"), "utf8");
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, webDir, "");
     return {
-        plugins: [
-            react(),
-            companyAssetDatabaseProxyPlugin({
-                configPath: resolve(webDir, "../data/company-asset-database-config.json"),
-                baseUrl: env.COMPANY_ASSET_DATABASE_URL,
-                apiToken: env.COMPANY_ASSET_DATABASE_TOKEN,
-                configToken: env.INTERNAL_AI_CONFIG_TOKEN,
-            }),
-        ],
+        plugins: [react()],
         build: {
             chunkSizeWarningLimit: 1500,
         },

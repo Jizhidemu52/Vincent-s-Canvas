@@ -1,6 +1,6 @@
 export type AdminRole = "designer" | "admin";
 export type DesignerStatus = "active" | "disabled";
-export type AdminOperationType = "image_generation" | "video_generation" | "upscale" | "remove_background" | "inpaint" | "batch_image" | "seamless_stitch";
+export type AdminOperationType = "image_generation" | "video_generation" | "audio_generation" | "upscale" | "remove_background" | "inpaint" | "batch_image" | "seamless_stitch";
 export type AdminModelCapability = "generate" | "edit" | "upscale" | "remove_background" | "batch" | "chat" | "video" | "audio";
 export type BatchItemStatus = "waiting" | "processing" | "success" | "failed" | "paused" | "cancelled";
 export type AdminProviderProtocol = "openai" | "gemini" | "volcengine" | "runninghub" | "codex" | "custom";
@@ -242,6 +242,7 @@ export function createDefaultAdminState(now = new Date().toISOString()): AdminSt
         ],
         pricingRules: [
             { operationType: "image_generation", label: "生成一张图", credits: 8, rmbCost: 0.8 },
+            { operationType: "audio_generation", label: "生成音频", credits: 10, rmbCost: 0.5 },
             { operationType: "upscale", label: "放大图片", credits: 5, rmbCost: 0.5 },
             { operationType: "remove_background", label: "去背景", credits: 3, rmbCost: 0.3 },
             { operationType: "inpaint", label: "局部编辑", credits: 6, rmbCost: 0.6 },
