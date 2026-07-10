@@ -19,7 +19,7 @@ import { createAdminProjectsRouter, createProjectsRouter } from "./routes/projec
 import { createWorkflowsRouter } from "./routes/workflows";
 import { createChatRouter } from "./routes/chat";
 import { requireSameOrigin } from "./http-security";
-import { sessionMiddleware } from "./session";
+import { requireAccountReady, sessionMiddleware } from "./session";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
@@ -41,22 +41,23 @@ app.get("/api/health", async (_request, response, next) => {
     } catch (error) { next(error); }
 });
 app.use("/api/auth", createAuthRouter(db, cache, config));
-app.use("/api/billing", sessionMiddleware(db, cache, config), createBillingRouter(db));
-app.use("/api/models", sessionMiddleware(db, cache, config), createPublicModelRouter(db));
-app.use("/api/admin/model-configuration", sessionMiddleware(db, cache, config), createModelConfigurationRouter(db, config));
-app.use("/api/tasks", sessionMiddleware(db, cache, config), createTasksRouter(db, cache));
-app.use("/api/admin/tasks", sessionMiddleware(db, cache, config), createAdminTasksRouter(db));
-app.use("/api/history", sessionMiddleware(db, cache, config), createHistoryRouter(db));
-app.use("/api/admin/history", sessionMiddleware(db, cache, config), createAdminHistoryRouter(db));
-app.use("/api/assets", sessionMiddleware(db, cache, config), createAssetsRouter(db, storage));
-app.use("/api/admin/assets", sessionMiddleware(db, cache, config), createAdminAssetsRouter(db));
-app.use("/api/projects", sessionMiddleware(db, cache, config), createProjectsRouter(db));
-app.use("/api/admin/projects", sessionMiddleware(db, cache, config), createAdminProjectsRouter(db));
-app.use("/api/admin/workflows", sessionMiddleware(db, cache, config), createWorkflowsRouter(db));
-app.use("/api/chat", sessionMiddleware(db, cache, config), createChatRouter(db, config));
-app.use("/api/admin/accounts", sessionMiddleware(db, cache, config), createAccountsRouter(db));
-app.use("/api/admin/departments", sessionMiddleware(db, cache, config), createDepartmentsRouter(db));
-app.use("/api/admin/audit-logs", sessionMiddleware(db, cache, config), createAuditRouter(db));
+const requireSession = sessionMiddleware(db, cache, config);
+app.use("/api/billing", requireSession, requireAccountReady, createBillingRouter(db));
+app.use("/api/models", requireSession, requireAccountReady, createPublicModelRouter(db));
+app.use("/api/admin/model-configuration", requireSession, requireAccountReady, createModelConfigurationRouter(db, config));
+app.use("/api/tasks", requireSession, requireAccountReady, createTasksRouter(db, cache));
+app.use("/api/admin/tasks", requireSession, requireAccountReady, createAdminTasksRouter(db));
+app.use("/api/history", requireSession, requireAccountReady, createHistoryRouter(db));
+app.use("/api/admin/history", requireSession, requireAccountReady, createAdminHistoryRouter(db));
+app.use("/api/assets", requireSession, requireAccountReady, createAssetsRouter(db, storage));
+app.use("/api/admin/assets", requireSession, requireAccountReady, createAdminAssetsRouter(db));
+app.use("/api/projects", requireSession, requireAccountReady, createProjectsRouter(db));
+app.use("/api/admin/projects", requireSession, requireAccountReady, createAdminProjectsRouter(db));
+app.use("/api/admin/workflows", requireSession, requireAccountReady, createWorkflowsRouter(db));
+app.use("/api/chat", requireSession, requireAccountReady, createChatRouter(db, config));
+app.use("/api/admin/accounts", requireSession, requireAccountReady, createAccountsRouter(db));
+app.use("/api/admin/departments", requireSession, requireAccountReady, createDepartmentsRouter(db));
+app.use("/api/admin/audit-logs", requireSession, requireAccountReady, createAuditRouter(db));
 
 app.use((_request, response) => response.status(404).json({ error: "NOT_FOUND", message: "接口不存在" }));
 const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {

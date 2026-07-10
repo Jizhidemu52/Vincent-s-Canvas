@@ -1,0 +1,105 @@
+name: Production backend verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "web/**"
+      - "docker-compose.yml"
+      - ".github/workflows/production-ci.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - "web/**"
+      - "docker-compose.yml"
+      - ".github/workflows/production-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: wireless_canvas
+          POSTGRES_USER: wireless_canvas
+          POSTGRES_PASSWORD: integration-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wireless_canvas"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: server
+    env:
+      NODE_ENV: test
+      PORT: 3100
+      DATABASE_URL: postgres://wireless_canvas:integration-postgres-password@127.0.0.1:5432/wireless_canvas
+      REDIS_URL: redis://127.0.0.1:6379
+      SESSION_COOKIE_NAME: wireless_canvas_session
+      SESSION_TTL_SECONDS: 28800
+      BOOTSTRAP_ADMIN_USERNAME: admin
+      BOOTSTRAP_ADMIN_DISPLAY_NAME: Integration Admin
+      BOOTSTRAP_ADMIN_PASSWORD: AdminStart2026
+      MFA_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      PROVIDER_ENCRYPTION_KEY: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+      TASK_MOCK_MODE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun test
+      - name: Run PostgreSQL and Redis identity integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun src/migrate.ts
+          bun src/bootstrap.ts
+          bun src/index.ts >/tmp/wireless-canvas-api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true; cat /tmp/wireless-canvas-api.log' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3100/api/health >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "API did not become healthy" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          RUN_INTEGRATION_TESTS=true bun test tests/integration/identity-rbac.integration.test.ts
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun test tests/admin-domain.test.ts

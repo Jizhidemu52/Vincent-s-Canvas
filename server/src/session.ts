@@ -42,6 +42,25 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig)
     };
 }
 
+export function requireAccountReady(request: Request, response: Response, next: NextFunction) {
+    const authenticated = request as unknown as AuthenticatedRequest;
+    if (authenticated.auth.mustChangePassword) {
+        response.status(403).json({
+            error: "PASSWORD_CHANGE_REQUIRED",
+            message: "首次登录必须先修改密码",
+        });
+        return;
+    }
+    if (authenticated.auth.role === "super_admin" && !authenticated.auth.mfaEnabled) {
+        response.status(403).json({
+            error: "MFA_SETUP_REQUIRED",
+            message: "超级管理员必须先启用二次验证",
+        });
+        return;
+    }
+    next();
+}
+
 export function setSessionCookie(response: Response, config: AppConfig, token: string) {
     response.cookie(config.SESSION_COOKIE_NAME, token, {
         httpOnly: true,

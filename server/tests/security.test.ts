@@ -3,6 +3,8 @@ import type { NextFunction, Request, Response } from "express";
 import type { Cache } from "../src/db";
 import { rateLimit, requireSameOrigin } from "../src/http-security";
 import { createSessionToken, createTotpSecret, decryptSecret, encryptSecret, hashPassword, hashToken, totpCode, validatePassword, verifyPassword, verifyTotp } from "../src/security";
+import { requireAccountReady } from "../src/session";
+import type { SessionUser } from "../src/types";
 
 function createResponse() {
     const result = { statusCode: 200, body: undefined as unknown, headers: {} as Record<string, string> };
@@ -102,5 +104,35 @@ describe("HTTP security", () => {
         expect(expiries).toEqual([["rate:login:10.0.0.8:designer-a", 300]]);
         expect(blocked.result.statusCode).toBe(429);
         expect(blocked.result.headers["retry-after"]).toBe("300");
+    });
+
+    test("blocks normal APIs until password change and super-admin MFA enrollment", () => {
+        const user = (overrides: Partial<SessionUser>): SessionUser => ({
+            id: "user-1",
+            username: "user-1",
+            displayName: "User 1",
+            email: null,
+            employeeNo: null,
+            role: "designer",
+            status: "active",
+            departmentId: null,
+            departmentName: null,
+            mustChangePassword: false,
+            mfaEnabled: false,
+            creditBalance: 0,
+            creditLimit: 0,
+            ...overrides,
+        });
+        const check = (auth: SessionUser) => {
+            const output = createResponse();
+            let allowed = false;
+            requireAccountReady({ auth } as unknown as Request, output.response, (() => { allowed = true; }) as NextFunction);
+            return { ...output.result, allowed };
+        };
+
+        expect(check(user({ mustChangePassword: true }))).toMatchObject({ statusCode: 403, allowed: false, body: { error: "PASSWORD_CHANGE_REQUIRED" } });
+        expect(check(user({ role: "super_admin" }))).toMatchObject({ statusCode: 403, allowed: false, body: { error: "MFA_SETUP_REQUIRED" } });
+        expect(check(user({ role: "super_admin", mfaEnabled: true })).allowed).toBe(true);
+        expect(check(user({ role: "designer" })).allowed).toBe(true);
     });
 });
