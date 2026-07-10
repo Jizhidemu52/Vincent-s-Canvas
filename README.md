@@ -4,6 +4,8 @@
 
 一句话理解：这是一个“设计师前台创作工具 + 管理员后台管控中心”。
 
+生产服务器部署、企业微信、工作流、备份恢复和 40 人压测请参阅：[生产部署与验收手册](docs/manual/production-deployment.md)。
+
 ![项目工作台首页](docs/assets/github/project-dashboard.png)
 
 ## 角色怎么区分

@@ -10,6 +10,7 @@ import { createSessionToken, createTotpSecret, decryptSecret, encryptSecret, has
 import { sessionMiddleware, setSessionCookie } from "../session";
 import type { AuthenticatedRequest } from "../types";
 import { mapUser, userSelect, type UserRow } from "../user-mapper";
+import { rateLimit } from "../http-security";
 
 const loginSchema = z.object({
     identifier: z.string().trim().min(1).max(200),
@@ -23,7 +24,12 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
     const router = Router();
     const requireSession = sessionMiddleware(db, cache, config);
 
-    router.post("/login", async (request, response, next) => {
+    router.post("/login", rateLimit(cache, {
+        prefix: "login",
+        limit: 20,
+        windowSeconds: 300,
+        key: (request) => `${request.ip}:${String(request.body?.identifier ?? "").trim().toLocaleLowerCase()}`,
+    }), async (request, response, next) => {
         try {
             const input = loginSchema.parse(request.body);
             const result = await db.query<UserRow & { password_hash: string | null; locked_until: Date | null; mfa_secret_encrypted: string | null }>(

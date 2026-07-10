@@ -18,6 +18,7 @@ import { ObjectStorage } from "./object-storage";
 import { createAdminProjectsRouter, createProjectsRouter } from "./routes/projects";
 import { createWorkflowsRouter } from "./routes/workflows";
 import { createChatRouter } from "./routes/chat";
+import { requireSameOrigin } from "./http-security";
 import { sessionMiddleware } from "./session";
 
 const config = loadConfig();
@@ -31,6 +32,7 @@ app.disable("x-powered-by");
 app.use(helmet());
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
+app.use(requireSameOrigin);
 
 app.get("/api/health", async (_request, response, next) => {
     try {
