@@ -165,7 +165,7 @@ jobs:
             -c "INSERT INTO departments(name,code) VALUES('Recovery Marker','recovery-marker')"
           docker compose run --rm --no-deps -e BACKUP_RUN_ONCE=true backup
           backup_key=$(docker compose run --rm --no-deps --entrypoint /bin/sh minio-init -c \
-            'mc alias set local http://minio:9000 "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" >/dev/null && mc find "local/$S3_BUCKET/backups/postgres" --name "*.dump" --print' \
+            'mc alias set local http://minio:9000 "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" >/dev/null && mc find "local/$S3_BUCKET/backups/postgres" --name "*.dump"' \
             | tail -n 1)
           test -n "$backup_key"
           backup_path=${backup_key#local/wireless-canvas/}
