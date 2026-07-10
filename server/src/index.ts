@@ -68,7 +68,11 @@ const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => 
         response.status(409).json({ error: "DUPLICATE", message: "账号、邮箱、工号或部门编码已存在" }); return;
     }
     console.error(error);
-    response.status(500).json({ error: "INTERNAL_ERROR", message: "服务器处理失败" });
+    response.status(500).json({
+        error: "INTERNAL_ERROR",
+        message: "服务器处理失败",
+        ...(config.NODE_ENV === "test" ? { detail: error instanceof Error ? error.message : String(error) } : {}),
+    });
 };
 app.use(errorHandler);
 

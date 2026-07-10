@@ -69,7 +69,7 @@ integration("production identity and RBAC", () => {
                 body: JSON.stringify({ name, code }),
             }, admin.cookie);
             if (result.response.status !== 201) {
-                throw new Error(`Account creation failed (${result.response.status}): ${JSON.stringify(result.body)}`);
+                throw new Error(`Department creation failed (${result.response.status}): ${JSON.stringify(result.body)}`);
             }
             return result.body.department.id;
         };
@@ -81,7 +81,9 @@ integration("production identity and RBAC", () => {
                 method: "POST",
                 body: JSON.stringify(input),
             }, admin.cookie);
-            expect(result.response.status).toBe(201);
+            if (result.response.status !== 201) {
+                throw new Error(`Account creation failed (${result.response.status}): ${JSON.stringify(result.body)}`);
+            }
             return result.body.user;
         };
         const designerA = await createAccount({
