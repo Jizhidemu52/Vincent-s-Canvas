@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { canUserAccessAsset, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
+import { deleteServerAsset, listServerAssets, uploadServerAsset, type ServerAsset } from "@/services/api/server-assets";
 
 type AssetFormValues = {
     kind: AssetKind;
@@ -40,7 +41,9 @@ export default function AssetsPage() {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInputRef = useRef<HTMLInputElement>(null);
     const batchImageInputRef = useRef<HTMLInputElement>(null);
-    const assets = useAssetStore((state) => state.assets);
+    const localAssets = useAssetStore((state) => state.assets);
+    const [serverAssets, setServerAssets] = useState<ServerAsset[]>([]);
+    const [serverAssetIds, setServerAssetIds] = useState<Set<string>>(new Set());
     const user = useUserStore((state) => state.user);
     const addAsset = useAssetStore((state) => state.addAsset);
     const updateAsset = useAssetStore((state) => state.updateAsset);
@@ -59,6 +62,12 @@ export default function AssetsPage() {
     const title = Form.useWatch("title", form) || "";
     const tags = Form.useWatch("tags", form) || [];
     const content = Form.useWatch("content", form) || "";
+    const refreshServerAssets = async () => {
+        try { const result = await listServerAssets(); setServerAssets(result.assets); setServerAssetIds(new Set(result.assets.map((asset) => asset.id))); }
+        catch (error) { message.error(error instanceof Error ? error.message : "公司素材加载失败"); }
+    };
+    useEffect(() => { void refreshServerAssets(); }, []);
+    const assets = useMemo(() => [...serverAssets.map(serverAssetToLocal), ...localAssets.filter((asset) => !serverAssetIds.has(asset.id))], [localAssets, serverAssetIds, serverAssets]);
     const validAssets = useMemo(() => assets.filter((asset) => canUserAccessAsset(asset, user) && (asset.kind === "text" || asset.kind === "image" || asset.kind === "video")), [assets, user]);
 
     const filteredAssets = useMemo(() => {
@@ -115,7 +124,15 @@ export default function AssetsPage() {
             metadata: editingAsset?.metadata || { source: "manual" },
         };
 
-        if (values.kind === "text") {
+        if (!editingAsset && values.kind === "text") {
+            const file = new File([(values.content || "").trim()], `${values.title.trim() || "text"}.txt`, { type: "text/plain;charset=utf-8" });
+            await uploadServerAsset(file, { title: values.title.trim(), tags: values.tags || [], source: values.source || "手动添加", note: values.note || "", content: (values.content || "").trim() });
+            await refreshServerAssets();
+        } else if (!editingAsset && values.kind === "image" && imageDraft) {
+            const blob = await fetch(imageDraft.dataUrl).then((response) => response.blob());
+            await uploadServerAsset(new File([blob], values.title.trim() || "image.png", { type: imageDraft.mimeType || blob.type || "image/png" }), { title: values.title.trim(), tags: values.tags || [], source: values.source || "手动上传", note: values.note || "" });
+            await refreshServerAssets();
+        } else if (values.kind === "text") {
             const asset = { ...base, kind: "text" as const, data: { content: (values.content || "").trim() } };
             editingAsset ? updateAsset(editingAsset.id, asset) : addAsset(asset);
         } else {
@@ -190,18 +207,8 @@ export default function AssetsPage() {
             message.warning("请选择图片文件");
             return;
         }
-        for (const file of imageFiles) {
-            const image = await uploadImage(file);
-            addAsset({
-                kind: "image",
-                title: file.name,
-                coverUrl: image.url,
-                tags: ["手动上传"],
-                source: "手动上传",
-                data: { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
-                metadata: { source: "manual-upload", module: "素材库", originalFileName: file.name },
-            });
-        }
+        for (const file of imageFiles) await uploadServerAsset(file, { title: file.name, tags: ["手动上传"], source: "manual-upload", module: "素材库", originalFileName: file.name });
+        await refreshServerAssets();
         message.success(`已上传 ${imageFiles.length} 张图片`);
         if (batchImageInputRef.current) batchImageInputRef.current.value = "";
     };
@@ -215,9 +222,10 @@ export default function AssetsPage() {
         navigate(url);
     };
 
-    const confirmDelete = () => {
+    const confirmDelete = async () => {
         if (!deletingAsset) return;
-        removeAsset(deletingAsset.id);
+        if (serverAssetIds.has(deletingAsset.id)) { await deleteServerAsset(deletingAsset.id); await refreshServerAssets(); }
+        else removeAsset(deletingAsset.id);
         message.success("素材已删除");
         setDeletingAsset(null);
     };
@@ -450,6 +458,14 @@ export default function AssetsPage() {
             </Modal>
         </div>
     );
+}
+
+function serverAssetToLocal(asset: ServerAsset): Asset {
+    const title = typeof asset.metadata.title === "string" ? asset.metadata.title : asset.filename;
+    const common = { id: asset.id, ownerId: asset.ownerUserId, title, coverUrl: `/api/assets/${asset.id}/content`, tags: Array.isArray(asset.metadata.tags) ? asset.metadata.tags.map(String) : [], source: asset.source, note: typeof asset.metadata.note === "string" ? asset.metadata.note : undefined, metadata: { ...asset.metadata, designerId: asset.ownerUserId, departmentId: asset.departmentId, projectId: asset.projectId, operationType: asset.operationType, prompt: asset.prompt, modelName: asset.modelName }, createdAt: asset.createdAt, updatedAt: asset.createdAt };
+    if (asset.kind === "text") return { ...common, kind: "text", data: { content: typeof asset.metadata.content === "string" ? asset.metadata.content : "" } };
+    if (asset.kind === "video") return { ...common, kind: "video", data: { url: common.coverUrl, storageKey: asset.id, width: 0, height: 0, bytes: asset.byteSize, mimeType: asset.mimeType } };
+    return { ...common, kind: "image", data: { dataUrl: common.coverUrl, storageKey: asset.id, width: 0, height: 0, bytes: asset.byteSize, mimeType: asset.mimeType } };
 }
 
 function AssetCard({

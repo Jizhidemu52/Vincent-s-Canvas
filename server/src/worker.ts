@@ -1,17 +1,20 @@
 import { loadConfig } from "./config";
+import { randomUUID } from "node:crypto";
 import { createCache, createDatabase, type Cache, type Database } from "./db";
 import { decryptSecret } from "./security";
 import { settleReservation } from "./billing";
 import { queueScore, recalculateBatch, type TaskPriority } from "./tasks";
+import { ObjectStorage } from "./object-storage";
 
 type WorkRow = {
-    id: string; request_id: string; batch_id: string | null; prompt: string; source_urls: string[]; attempts: number; priority: TaskPriority;
+    id: string; request_id: string; batch_id: string | null; user_id: string; department_id: string | null; project_id: string; operation_type: string; model_config_id: string | null; prompt: string; source_urls: string[]; attempts: number; priority: TaskPriority;
     model_id: string | null; concurrency_limit: number | null; protocol: string | null; base_url: string | null; encrypted_credentials: string | null;
 };
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
 const cache = await createCache(config.REDIS_URL);
+const storage = new ObjectStorage(config);
 let stopping = false;
 
 async function nextTask() {
@@ -23,7 +26,7 @@ async function runTask(taskId: string) {
     const claimed = await db.query<WorkRow>(`UPDATE tasks SET status='processing',started_at=COALESCE(started_at,now()),attempts=attempts+1,updated_at=now()
         WHERE id=$1 AND status='waiting' RETURNING id,request_id,batch_id,prompt,source_urls,attempts,priority,model_config_id`, [taskId]);
     if (!claimed.rows[0]) return;
-    const details = await db.query<WorkRow>(`SELECT t.id,t.request_id,t.batch_id,t.prompt,t.source_urls,t.attempts,t.priority,m.model_id,m.concurrency_limit,p.protocol,p.base_url,p.encrypted_credentials
+    const details = await db.query<WorkRow>(`SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.source_urls,t.attempts,t.priority,m.model_id,m.concurrency_limit,p.protocol,p.base_url,p.encrypted_credentials
         FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id WHERE t.id=$1`, [taskId]);
     const task = details.rows[0]!;
     const semaphoreKey = task.model_id ? `model:${task.model_id}:running` : "model:none:running";
@@ -36,7 +39,8 @@ async function runTask(taskId: string) {
         return;
     }
     try {
-        const resultUrls = config.TASK_MOCK_MODE === "true" ? [`/api/tasks/${task.id}/mock-image`] : await executeProvider(task);
+        const providerResults = config.TASK_MOCK_MODE === "true" ? [{ bytes: Buffer.from(mockSvg(task.id)), mimeType: "image/svg+xml" }] : await executeProvider(task);
+        const resultUrls = await storeResults(task, providerResults);
         await settleReservation(db, task.request_id, "capture");
         const client = await db.connect();
         try {
@@ -78,8 +82,37 @@ async function executeProvider(task: WorkRow) {
     const body = await response.json() as { data?: Array<{ url?: string; b64_json?: string }>; resultUrls?: string[]; url?: string };
     const urls = body.resultUrls ?? body.data?.map((item) => item.url || (item.b64_json ? `data:image/png;base64,${item.b64_json}` : "")).filter(Boolean) ?? (body.url ? [body.url] : []);
     if (!urls.length) throw new Error("Provider 未返回图片结果");
+    return Promise.all(urls.map(fetchResult));
+}
+
+async function fetchResult(url: string) {
+    if (url.startsWith("data:")) {
+        const match = url.match(/^data:([^;,]+);base64,(.+)$/);
+        if (!match) throw new Error("Provider 返回了无法识别的内联图片");
+        return { bytes: Buffer.from(match[2]!, "base64"), mimeType: match[1]! };
+    }
+    const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+    if (!response.ok) throw new Error(`下载 Provider 结果失败：${response.status}`);
+    return { bytes: Buffer.from(await response.arrayBuffer()), mimeType: response.headers.get("content-type")?.split(";")[0] || "image/png" };
+}
+
+async function storeResults(task: WorkRow, results: Array<{ bytes: Uint8Array; mimeType: string }>) {
+    if (!storage.configured) throw new Error("公司对象存储尚未配置，不能保存生成结果");
+    const urls: string[] = [];
+    for (const [index, result] of results.entries()) {
+        const id = randomUUID();
+        const extension = result.mimeType === "image/jpeg" ? "jpg" : result.mimeType === "image/svg+xml" ? "svg" : "png";
+        const filename = `task-${task.id}-${index + 1}.${extension}`;
+        const key = `users/${task.user_id}/generated/${task.id}/${filename}`;
+        await storage.put(key, result.bytes, result.mimeType);
+        await db.query(`INSERT INTO assets(id,owner_user_id,department_id,project_external_id,task_id,object_key,filename,mime_type,byte_size,kind,source,operation_type,prompt,model_config_id,status)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'image',$10,$11,$12,$13,'ready')`, [id, task.user_id, task.department_id, task.project_id, task.id, key, filename, result.mimeType, result.bytes.byteLength, task.operation_type === "image_generation" ? "generation" : "edit", task.operation_type, task.prompt, task.model_config_id]);
+        urls.push(`/api/assets/${id}/content`);
+    }
     return urls;
 }
+
+function mockSvg(id: string) { const hue = [...id].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360; return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="1024" height="1024" fill="hsl(${hue} 65% 46%)"/><circle cx="512" cy="440" r="260" fill="white" opacity=".7"/><text x="512" y="900" text-anchor="middle" font-family="sans-serif" font-size="40" fill="white">Wireless Canvas QA ${id.slice(0, 8)}</text></svg>`; }
 
 async function workerLoop() {
     while (!stopping) {

@@ -19,6 +19,12 @@ const schema = z.object({
     PROVIDER_ENCRYPTION_KEY: z.string().optional(),
     WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(40).default(10),
     TASK_MOCK_MODE: z.enum(["true", "false"]).default("false"),
+    S3_ENDPOINT: z.string().url().optional(),
+    S3_REGION: z.string().default("us-east-1"),
+    S3_BUCKET: z.string().default("wireless-canvas"),
+    S3_ACCESS_KEY_ID: z.string().optional(),
+    S3_SECRET_ACCESS_KEY: z.string().optional(),
+    S3_FORCE_PATH_STYLE: z.enum(["true", "false"]).default("true"),
 });
 
 export type AppConfig = z.infer<typeof schema>;
@@ -30,6 +36,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     }
     if (config.NODE_ENV === "production" && (!config.PROVIDER_ENCRYPTION_KEY || Buffer.from(config.PROVIDER_ENCRYPTION_KEY, "base64").length !== 32)) {
         throw new Error("PROVIDER_ENCRYPTION_KEY must be a base64-encoded 32-byte key in production");
+    }
+    if (config.NODE_ENV === "production" && (!config.S3_ENDPOINT || !config.S3_ACCESS_KEY_ID || !config.S3_SECRET_ACCESS_KEY)) {
+        throw new Error("S3_ENDPOINT, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are required in production");
     }
     return config;
 }

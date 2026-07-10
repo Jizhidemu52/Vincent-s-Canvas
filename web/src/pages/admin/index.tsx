@@ -11,6 +11,7 @@ import { ApiProviderPanel } from "@/pages/admin/components/api-provider-panel";
 import { WorkflowManagementPanel } from "@/pages/admin/components/workflow-management-panel";
 import { ModelPricingPanel } from "@/pages/admin/components/model-pricing-panel";
 import { HistoryManagementPanel, TaskManagementPanel } from "@/pages/admin/components/task-history-panels";
+import { AdminAssetsPanel } from "@/pages/admin/components/admin-assets-panel";
 import { useAdminStore } from "@/stores/use-admin-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -530,46 +531,7 @@ export default function AdminPage() {
                             {
                                 key: "projects",
                                 label: "项目素材",
-                                children: (
-                                    <div className="grid gap-4">
-                                        <Table
-                                            rowKey="id"
-                                            size="small"
-                                            dataSource={projectRows}
-                                            columns={[
-                                                { title: "项目", dataIndex: "title" },
-                                                { title: "状态", dataIndex: "status" },
-                                                { title: "节点数", dataIndex: "nodes" },
-                                                { title: "历史任务", dataIndex: "tasks" },
-                                                { title: "消耗积分", dataIndex: "credits" },
-                                                { title: "更新时间", dataIndex: "updatedAt" },
-                                            ]}
-                                        />
-                                        <Table
-                                            rowKey="id"
-                                            size="small"
-                                            title={() => (
-                                                <div className="flex flex-wrap items-center justify-between gap-3">
-                                                    <span>素材归档（管理员可查看全部设计师）</span>
-                                                    <Select
-                                                        className="w-64"
-                                                        value={assetDesigner}
-                                                        onChange={setAssetDesigner}
-                                                        options={[{ label: "全部设计师", value: "all" }, ...designerOptions.filter((item) => state.designers.find((designer) => designer.id === item.value)?.role === "designer")]}
-                                                    />
-                                                </div>
-                                            )}
-                                            dataSource={materialRows}
-                                            columns={[
-                                                { title: "素材", dataIndex: "title" },
-                                                { title: "项目", dataIndex: "projectId" },
-                                                { title: "设计师", render: (_, record) => designerName(state.designers, record.designerId) },
-                                                { title: "类型/来源", render: (_, record) => `${record.kind} · ${record.source}` },
-                                                { title: "时间", dataIndex: "createdAt" },
-                                            ]}
-                                        />
-                                    </div>
-                                ),
+                                children: <AdminAssetsPanel />,
                             },
                             {
                                 key: "batch",

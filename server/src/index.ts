@@ -13,11 +13,14 @@ import { createDepartmentsRouter } from "./routes/departments";
 import { createModelConfigurationRouter, createPublicModelRouter } from "./routes/model-configuration";
 import { createAdminTasksRouter, createTasksRouter } from "./routes/tasks";
 import { createAdminHistoryRouter, createHistoryRouter } from "./routes/history";
+import { createAdminAssetsRouter, createAssetsRouter } from "./routes/assets";
+import { ObjectStorage } from "./object-storage";
 import { sessionMiddleware } from "./session";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
 const cache = await createCache(config.REDIS_URL);
+const storage = new ObjectStorage(config);
 const app = express();
 
 if (config.TRUST_PROXY === "true") app.set("trust proxy", 1);
@@ -40,6 +43,8 @@ app.use("/api/tasks", sessionMiddleware(db, cache, config), createTasksRouter(db
 app.use("/api/admin/tasks", sessionMiddleware(db, cache, config), createAdminTasksRouter(db));
 app.use("/api/history", sessionMiddleware(db, cache, config), createHistoryRouter(db));
 app.use("/api/admin/history", sessionMiddleware(db, cache, config), createAdminHistoryRouter(db));
+app.use("/api/assets", sessionMiddleware(db, cache, config), createAssetsRouter(db, storage));
+app.use("/api/admin/assets", sessionMiddleware(db, cache, config), createAdminAssetsRouter(db));
 app.use("/api/admin/accounts", sessionMiddleware(db, cache, config), createAccountsRouter(db));
 app.use("/api/admin/departments", sessionMiddleware(db, cache, config), createDepartmentsRouter(db));
 app.use("/api/admin/audit-logs", sessionMiddleware(db, cache, config), createAuditRouter(db));
