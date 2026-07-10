@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "wireless-canvas": {
+      "command": "npx",
+      "args": ["-y", "@wireless-canvas/canvas-agent", "mcp"],
+      "startup_timeout_sec": 20,
+      "tool_timeout_sec": 90
+    }
+  }
+}

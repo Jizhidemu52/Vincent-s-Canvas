@@ -1,0 +1,7 @@
+services:
+  app:
+    image: ghcr.io/wireless-canvas/app:latest
+    container_name: wireless-canvas
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
