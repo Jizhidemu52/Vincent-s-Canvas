@@ -485,7 +485,7 @@ integration("production identity and RBAC", () => {
 
     const batchSubmission = await api<{
       batchId: string;
-      tasks: Array<{ id: string }>;
+      tasks: Array<{ id: string; itemIndex: number }>;
       failures: unknown[];
     }>(
       "/api/tasks/batch",
@@ -507,6 +507,9 @@ integration("production identity and RBAC", () => {
     );
     expect(batchSubmission.response.status).toBe(201);
     expect(batchSubmission.body.tasks).toHaveLength(2);
+    expect(batchSubmission.body.tasks.map((task) => task.itemIndex)).toEqual([
+      0, 1,
+    ]);
     expect(batchSubmission.body.failures).toEqual([]);
     const batchHeldSession = await api<{ user: { creditBalance: number } }>(
       "/api/auth/session",

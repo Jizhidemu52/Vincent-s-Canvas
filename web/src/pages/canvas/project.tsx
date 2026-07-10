@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Bot, Home, ImageIcon, Images, List, Menu, Music2, Plus, Redo2, Settings2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
+import { Bot, Home, ImageIcon, Images, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 import { saveAs } from "file-saver";
 
-import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { requestBatchEdit, requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { controlQueuedBatch, type QueuedBatchAction } from "@/services/api/generation-tasks";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { defaultConfig, modelOptionName, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -99,7 +100,7 @@ type BatchEditFileItem = {
     id: string;
     file: File;
     relativePath: string;
-    status: "waiting" | "processing" | "success" | "failed";
+    status: "waiting" | "processing" | "paused" | "success" | "failed" | "cancelled";
     sourceUrl?: string;
     resultUrl?: string;
     failureReason?: string;
@@ -338,6 +339,8 @@ function WirelessCanvasPage() {
     const [batchEditPrompt, setBatchEditPrompt] = useState("");
     const [batchEditItems, setBatchEditItems] = useState<BatchEditFileItem[]>([]);
     const [batchEditRunning, setBatchEditRunning] = useState(false);
+    const [batchEditServerId, setBatchEditServerId] = useState<string | null>(null);
+    const [batchEditAction, setBatchEditAction] = useState<QueuedBatchAction | null>(null);
     const [projectLoaded, setProjectLoaded] = useState(false);
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
     const [nodeImageSettingsOpen, setNodeImageSettingsOpen] = useState(false);
@@ -2321,77 +2324,182 @@ function WirelessCanvasPage() {
             return;
         }
 
-        const batchId = `canvas-batch-${nanoid()}`;
+        const localBatchId = `canvas-batch-${nanoid()}`;
         const origin = getCanvasCenter();
         const sourceX = origin.x - 420;
         const resultX = origin.x + 60;
         const rowGap = 52;
         const maxWidth = 320;
         const maxHeight = 240;
-        const resultUrls = Array(items.length).fill("");
-        const sourceUrls = Array(items.length).fill("");
-        const failures: Array<{ sourceUrl: string; reason: string }> = [];
+        const prepared: Array<{
+            originalIndex: number;
+            item: BatchEditFileItem;
+            sourceId: string;
+            resultId: string;
+            uploadedSource: UploadedImage;
+        }> = [];
+        let localFailures = 0;
         const selectedResults: string[] = [];
+        const settledResultIds = new Set<string>();
 
         setBatchEditRunning(true);
-        setBatchEditItems((prev) => prev.map((item) => ({ ...item, status: "waiting", sourceUrl: undefined, resultUrl: undefined, failureReason: undefined })));
+        setBatchEditServerId(null);
+        setBatchEditAction(null);
+        setBatchEditItems((prev) =>
+            prev.map((item) => ({ ...item, status: "waiting", sourceUrl: undefined, resultUrl: undefined, failureReason: undefined })),
+        );
 
         for (const [index, item] of items.entries()) {
-            const sourceId = `${batchId}-source-${index + 1}`;
-            const resultId = `${batchId}-result-${index + 1}`;
+            const sourceId = `${localBatchId}-source-${index + 1}`;
+            const resultId = `${localBatchId}-result-${index + 1}`;
             try {
                 setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "processing" } : entry)));
                 const uploadedSource = await uploadImage(item.file);
                 const sourceSize = fitNodeSize(uploadedSource.width, uploadedSource.height, maxWidth, maxHeight);
                 const rowY = origin.y + index * (Math.max(sourceSize.height, maxHeight) + rowGap);
-                const sourceNode: CanvasNodeData = {
-                    id: sourceId,
-                    type: CanvasNodeType.Image,
-                    title: item.relativePath,
-                    position: { x: sourceX, y: rowY },
-                    width: sourceSize.width,
-                    height: sourceSize.height,
-                    metadata: { ...imageMetadata(uploadedSource), prompt, batchRootId: batchId },
-                };
-                const resultNode: CanvasNodeData = {
-                    id: resultId,
-                    type: CanvasNodeType.Image,
-                    title: `${item.file.name} 改图结果`,
-                    position: { x: resultX, y: rowY },
-                    width: sourceSize.width,
-                    height: sourceSize.height,
-                    metadata: {
-                        prompt,
-                        status: NODE_STATUS_LOADING,
-                        generationType: "edit",
-                        model,
-                        size: effectiveConfig.size,
-                        quality: effectiveConfig.quality,
-                        count: 1,
-                        references: [uploadedSource.storageKey || uploadedSource.url],
-                        batchRootId: batchId,
+                setNodes((prev) => [
+                    ...prev,
+                    {
+                        id: sourceId,
+                        type: CanvasNodeType.Image,
+                        title: item.relativePath,
+                        position: { x: sourceX, y: rowY },
+                        width: sourceSize.width,
+                        height: sourceSize.height,
+                        metadata: { ...imageMetadata(uploadedSource), prompt, batchRootId: localBatchId },
                     },
-                };
-                sourceUrls[index] = uploadedSource.url;
-                setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, sourceUrl: uploadedSource.url } : entry)));
-                setNodes((prev) => [...prev, sourceNode, resultNode]);
+                    {
+                        id: resultId,
+                        type: CanvasNodeType.Image,
+                        title: `${item.file.name} 改图结果`,
+                        position: { x: resultX, y: rowY },
+                        width: sourceSize.width,
+                        height: sourceSize.height,
+                        metadata: {
+                            prompt,
+                            status: NODE_STATUS_LOADING,
+                            generationType: "edit",
+                            model,
+                            size: effectiveConfig.size,
+                            quality: effectiveConfig.quality,
+                            count: 1,
+                            references: [uploadedSource.storageKey || uploadedSource.url],
+                            batchRootId: localBatchId,
+                        },
+                    },
+                ]);
                 setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: sourceId, toNodeId: resultId }]);
-                setSelectedNodeIds(new Set([resultId]));
-                setSelectedConnectionId(null);
+                prepared.push({ originalIndex: index, item, sourceId, resultId, uploadedSource });
+                setBatchEditItems((prev) =>
+                    prev.map((entry) => (entry.id === item.id ? { ...entry, status: "waiting", sourceUrl: uploadedSource.url } : entry)),
+                );
+            } catch (error) {
+                localFailures += 1;
+                const reason = error instanceof Error ? error.message : "本地图片读取失败";
+                setBatchEditItems((prev) =>
+                    prev.map((entry) =>
+                        entry.id === item.id ? { ...entry, status: "failed", sourceUrl: `file://${item.relativePath}`, failureReason: reason } : entry,
+                    ),
+                );
+            }
+        }
 
-                const reference = { id: sourceId, name: item.file.name, type: uploadedSource.mimeType, dataUrl: uploadedSource.url, storageKey: uploadedSource.storageKey };
-                const generated = await requestEdit({ ...effectiveConfig, model, count: "1" }, prompt, [reference], undefined, { operationType: "batch_image" }).then((results) => results[0]);
-                if (!generated) throw new Error("接口没有返回图片");
-                const uploadedResult = await uploadImage(generated.dataUrl);
-                const resultSize = fitNodeSize(uploadedResult.width, uploadedResult.height, maxWidth, maxHeight);
-                resultUrls[index] = uploadedResult.url;
-                selectedResults.push(resultId);
+        if (!prepared.length) {
+            setBatchEditRunning(false);
+            message.error("没有可提交的图片");
+            return;
+        }
+
+        let failedCount = localFailures;
+        let cancelledCount = 0;
+        try {
+            const result = await requestBatchEdit(
+                { ...effectiveConfig, model, count: "1" },
+                prompt,
+                prepared.map((entry) => ({ file: entry.item.file, title: entry.item.relativePath })),
+                {
+                    onSubmitted: setBatchEditServerId,
+                    onProgress: (current) => {
+                        const byPreparedIndex = new Map(current.map((task) => [task.itemIndex, task]));
+                        setBatchEditItems((prev) =>
+                            prev.map((entry) => {
+                                const preparedIndex = prepared.findIndex((item) => item.item.id === entry.id);
+                                const task = byPreparedIndex.get(preparedIndex);
+                                if (!task) return entry;
+                                return {
+                                    ...entry,
+                                    status: batchTaskUiStatus(task.status),
+                                    failureReason: task.failureReason || entry.failureReason,
+                                };
+                            }),
+                        );
+                    },
+                },
+            );
+
+            for (const failure of result.failures) {
+                const entry = prepared[failure.index];
+                if (!entry) continue;
+                failedCount += 1;
+                setBatchEditItems((prev) =>
+                    prev.map((item) => (item.id === entry.item.id ? { ...item, status: "failed", failureReason: failure.reason } : item)),
+                );
                 setNodes((prev) =>
                     prev.map((node) =>
-                        node.id === resultId
+                        node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: failure.reason } } : node,
+                    ),
+                );
+                settledResultIds.add(entry.resultId);
+            }
+
+            for (const task of result.tasks) {
+                const entry = prepared[task.itemIndex];
+                if (!entry) continue;
+                if (task.status !== "success") {
+                    const cancelled = task.status === "cancelled";
+                    if (cancelled) cancelledCount += 1;
+                    else failedCount += 1;
+                    const reason = task.failureReason || (cancelled ? "任务已取消" : "批量改图失败");
+                    setBatchEditItems((prev) =>
+                        prev.map((item) =>
+                            item.id === entry.item.id ? { ...item, status: cancelled ? "cancelled" : "failed", failureReason: reason } : item,
+                        ),
+                    );
+                    setNodes((prev) =>
+                        prev.map((node) =>
+                            node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node,
+                        ),
+                    );
+                    settledResultIds.add(entry.resultId);
+                    continue;
+                }
+                const resultUrl = task.resultUrls[0];
+                if (!resultUrl) {
+                    failedCount += 1;
+                    const reason = "任务成功但没有返回结果图片";
+                    setBatchEditItems((prev) =>
+                        prev.map((item) => (item.id === entry.item.id ? { ...item, status: "failed", failureReason: reason } : item)),
+                    );
+                    setNodes((prev) =>
+                        prev.map((node) =>
+                            node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node,
+                        ),
+                    );
+                    settledResultIds.add(entry.resultId);
+                    continue;
+                }
+                const uploadedResult = await uploadImage(resultUrl);
+                const resultSize = fitNodeSize(uploadedResult.width, uploadedResult.height, maxWidth, maxHeight);
+                selectedResults.push(entry.resultId);
+                setNodes((prev) =>
+                    prev.map((node) =>
+                        node.id === entry.resultId
                             ? {
                                   ...node,
-                                  position: { x: node.position.x + node.width / 2 - resultSize.width / 2, y: node.position.y + node.height / 2 - resultSize.height / 2 },
+                                  position: {
+                                      x: node.position.x + node.width / 2 - resultSize.width / 2,
+                                      y: node.position.y + node.height / 2 - resultSize.height / 2,
+                                  },
                                   width: resultSize.width,
                                   height: resultSize.height,
                                   metadata: {
@@ -2403,7 +2511,7 @@ function WirelessCanvasPage() {
                                       size: effectiveConfig.size,
                                       quality: effectiveConfig.quality,
                                       count: 1,
-                                      references: [uploadedSource.storageKey || uploadedSource.url],
+                                      references: [entry.uploadedSource.storageKey || entry.uploadedSource.url],
                                   },
                               }
                             : node,
@@ -2411,11 +2519,18 @@ function WirelessCanvasPage() {
                 );
                 addAsset({
                     kind: "image",
-                    title: `${item.file.name} 改图结果`,
+                    title: `${entry.item.file.name} 改图结果`,
                     coverUrl: uploadedResult.url,
                     tags: ["批量改图"],
                     source: "无线画布-批量改图",
-                    data: { dataUrl: uploadedResult.url, storageKey: uploadedResult.storageKey, width: uploadedResult.width, height: uploadedResult.height, bytes: uploadedResult.bytes, mimeType: uploadedResult.mimeType },
+                    data: {
+                        dataUrl: uploadedResult.url,
+                        storageKey: uploadedResult.storageKey,
+                        width: uploadedResult.width,
+                        height: uploadedResult.height,
+                        bytes: uploadedResult.bytes,
+                        mimeType: uploadedResult.mimeType,
+                    },
                     metadata: {
                         source: "canvas",
                         module: "批量改图",
@@ -2423,36 +2538,64 @@ function WirelessCanvasPage() {
                         model,
                         modelId,
                         projectId,
-                        nodeId: resultId,
-                        sourceFile: item.relativePath,
+                        nodeId: entry.resultId,
+                        sourceFile: entry.item.relativePath,
+                        serverBatchId: result.batchId,
+                        serverAssetId: serverAssetIdFromContentUrl(resultUrl),
                         toolMode: "batch-image-edit",
                         recreatePath: `/image?tool=image-edit&prompt=${encodeURIComponent(prompt)}&model=${encodeURIComponent(model)}`,
                     },
                 });
-                setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "success", resultUrl: uploadedResult.url } : entry)));
-            } catch (error) {
-                const reason = error instanceof Error ? error.message : "批量改图失败";
-                const sourceUrl = sourceUrls[index] || `file://${item.relativePath}`;
-                sourceUrls[index] = sourceUrl;
-                failures.push({ sourceUrl, reason });
-                setNodes((prev) =>
-                    prev.map((node) =>
-                        node.id === resultId
-                            ? {
-                                  ...node,
-                                  metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason },
-                              }
-                            : node,
-                    ),
+                setBatchEditItems((prev) =>
+                    prev.map((item) => (item.id === entry.item.id ? { ...item, status: "success", resultUrl: uploadedResult.url } : item)),
                 );
-                setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "failed", sourceUrl, failureReason: reason } : entry)));
+                settledResultIds.add(entry.resultId);
             }
+        } catch (error) {
+            const reason = error instanceof Error ? error.message : "批量任务提交失败";
+            const unresolved = prepared.filter((entry) => !settledResultIds.has(entry.resultId));
+            failedCount += unresolved.length;
+            setBatchEditItems((prev) =>
+                prev.map((item) =>
+                    unresolved.some((entry) => entry.item.id === item.id)
+                        ? { ...item, status: "failed", failureReason: reason }
+                        : item,
+                ),
+            );
+            setNodes((prev) =>
+                prev.map((node) =>
+                    unresolved.some((entry) => entry.resultId === node.id)
+                        ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } }
+                        : node,
+                ),
+            );
+        } finally {
+            setSelectedNodeIds(new Set(selectedResults));
+            setBatchEditRunning(false);
         }
 
-        setSelectedNodeIds(new Set(selectedResults));
-        setBatchEditRunning(false);
-        failures.length ? message.warning(`批量改图完成，成功 ${selectedResults.length} 张，失败 ${failures.length} 张`) : message.success(`批量改图完成：${selectedResults.length} 张`);
+        if (failedCount || cancelledCount) {
+            message.warning(`批量改图完成，成功 ${selectedResults.length} 张，失败 ${failedCount} 张，取消 ${cancelledCount} 张`);
+        } else {
+            message.success(`批量改图完成：${selectedResults.length} 张`);
+        }
     }, [addAsset, batchEditItems, batchEditPrompt, effectiveConfig, estimateUsage, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, message, projectId, user]);
+
+    const controlActiveBatchEdit = useCallback(
+        async (action: QueuedBatchAction) => {
+            if (!batchEditServerId) return;
+            setBatchEditAction(action);
+            try {
+                const result = await controlQueuedBatch(batchEditServerId, action);
+                message.success(`${action === "pause" ? "暂停" : action === "resume" ? "恢复" : "取消"}成功，影响 ${result.changed} 张图片`);
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "批量任务操作失败");
+            } finally {
+                setBatchEditAction(null);
+            }
+        },
+        [batchEditServerId, message],
+    );
 
     const handleDrop = useCallback(
         (event: ReactDragEvent<HTMLDivElement>) => {
@@ -3511,6 +3654,39 @@ function WirelessCanvasPage() {
                                 清空列表
                             </Button>
                         </div>
+                        {batchEditServerId && batchEditRunning ? (
+                            <div className="flex flex-wrap items-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-3 py-2">
+                                <span className="mr-auto text-xs text-stone-500">服务端批次 {batchEditServerId.slice(0, 8)}</span>
+                                <Button
+                                    size="small"
+                                    icon={<Pause className="size-4" />}
+                                    loading={batchEditAction === "pause"}
+                                    disabled={Boolean(batchEditAction) || !batchEditItems.some((item) => item.status === "waiting")}
+                                    onClick={() => void controlActiveBatchEdit("pause")}
+                                >
+                                    暂停等待项
+                                </Button>
+                                <Button
+                                    size="small"
+                                    icon={<Play className="size-4" />}
+                                    loading={batchEditAction === "resume"}
+                                    disabled={Boolean(batchEditAction) || !batchEditItems.some((item) => item.status === "paused")}
+                                    onClick={() => void controlActiveBatchEdit("resume")}
+                                >
+                                    恢复
+                                </Button>
+                                <Button
+                                    size="small"
+                                    danger
+                                    icon={<X className="size-4" />}
+                                    loading={batchEditAction === "cancel"}
+                                    disabled={Boolean(batchEditAction) || !batchEditItems.some((item) => item.status === "waiting" || item.status === "paused")}
+                                    onClick={() => void controlActiveBatchEdit("cancel")}
+                                >
+                                    取消未处理项
+                                </Button>
+                            </div>
+                        ) : null}
                         <Input.TextArea value={batchEditPrompt} onChange={(event) => setBatchEditPrompt(event.target.value)} rows={4} placeholder="例如：白底图产品摄影，保留产品结构，提升质感和光影，适合电商详情页" />
                         <div className="rounded-lg border border-stone-200">
                             <div className="flex items-center justify-between border-b border-stone-200 px-3 py-2 text-xs font-semibold text-stone-500">
@@ -3955,17 +4131,30 @@ function batchFilePath(file: File) {
 
 function batchStatusLabel(status: BatchEditFileItem["status"]) {
     if (status === "processing") return "处理中";
+    if (status === "paused") return "已暂停";
     if (status === "success") return "成功";
     if (status === "failed") return "失败";
+    if (status === "cancelled") return "已取消";
     return "等待中";
 }
 
 function batchStatusClass(status: BatchEditFileItem["status"]) {
     const base = "justify-self-end rounded-full px-2 py-0.5 text-xs font-semibold";
     if (status === "processing") return `${base} bg-orange-50 text-orange-600`;
+    if (status === "paused") return `${base} bg-amber-50 text-amber-700`;
     if (status === "success") return `${base} bg-emerald-50 text-emerald-600`;
     if (status === "failed") return `${base} bg-red-50 text-red-600`;
+    if (status === "cancelled") return `${base} bg-stone-200 text-stone-600`;
     return `${base} bg-stone-100 text-stone-500`;
+}
+
+function batchTaskUiStatus(status: string): BatchEditFileItem["status"] {
+    if (status === "processing" || status === "paused" || status === "success" || status === "failed" || status === "cancelled") return status;
+    return "waiting";
+}
+
+function serverAssetIdFromContentUrl(url: string) {
+    return url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i)?.[1];
 }
 
 function imageMetadata(image: UploadedImage): CanvasNodeMetadata {

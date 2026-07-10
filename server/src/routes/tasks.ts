@@ -120,16 +120,15 @@ export function createTasksRouter(db: Database, cache: Cache) {
       const failures = [];
       for (const [index, item] of input.items.entries()) {
         try {
-          tasks.push(
-            await enqueueTask(db, cache, {
-              ...input,
-              requestId: `${input.requestId}:${index}`,
-              sourceUrls: item.sourceUrls,
-              userId: actor.id,
-              departmentId: actor.departmentId,
-              batchId,
-            }),
-          );
+          const task = await enqueueTask(db, cache, {
+            ...input,
+            requestId: `${input.requestId}:${index}`,
+            sourceUrls: item.sourceUrls,
+            userId: actor.id,
+            departmentId: actor.departmentId,
+            batchId,
+          });
+          tasks.push({ ...task, itemIndex: index });
         } catch (error) {
           const reason =
             error instanceof Error ? error.message : "任务创建失败";

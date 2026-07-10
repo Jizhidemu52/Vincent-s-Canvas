@@ -1,5 +1,5 @@
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
-import { requestQueuedImages } from "@/services/api/generation-tasks";
+import { requestQueuedImageBatch, requestQueuedImages, type QueuedBatchItem } from "@/services/api/generation-tasks";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 
@@ -50,6 +50,17 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         operationType: options?.operationType || "inpaint",
         references: [...references, ...(mask ? [mask] : [])],
         signal: options?.signal,
+    });
+}
+
+export async function requestBatchEdit(config: AiConfig, prompt: string, files: Array<{ file: File; title: string }>, options?: { signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+    return requestQueuedImageBatch({
+        modelId: modelOptionName(config.model || config.imageModel),
+        prompt: withSystemPrompt(config, prompt),
+        files,
+        signal: options?.signal,
+        onSubmitted: options?.onSubmitted,
+        onProgress: options?.onProgress,
     });
 }
 

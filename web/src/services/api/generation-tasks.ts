@@ -11,6 +11,9 @@ type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_im
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
 export type QueuedTask = { id: string; requestId: string; status: string; resultUrls: string[]; failureReason: string | null };
 export type QueuedMediaInput = { modelId: string; prompt: string; operationType: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; signal?: AbortSignal };
+export type QueuedBatchItem = QueuedTask & { itemIndex: number };
+export type QueuedBatchFailure = { index: number; reason: string };
+export type QueuedBatchAction = "pause" | "resume" | "cancel";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(path, {
@@ -67,6 +70,72 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
     }
 }
 
+export async function requestQueuedImageBatch(input: { modelId: string; prompt: string; files: Array<{ file: File; title: string }>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+    const model = await resolvePublicModel(input.modelId);
+    const uploadedItems: Array<{ itemIndex: number; sourceUrl: string }> = [];
+    const uploadFailures: QueuedBatchFailure[] = [];
+    for (const [itemIndex, item] of input.files.entries()) {
+        try {
+            const assetId = await uploadServerAsset(item.file, { title: item.title, source: "canvas-batch-reference" });
+            uploadedItems.push({ itemIndex, sourceUrl: `/api/assets/${assetId}/content` });
+        } catch (error) {
+            uploadFailures.push({ index: itemIndex, reason: error instanceof Error ? error.message : "源图片上传失败" });
+        }
+    }
+    if (!uploadedItems.length) throw new Error(uploadFailures[0]?.reason || "没有可提交的源图片");
+
+    const result = await request<{
+        batchId: string;
+        tasks: Array<{ id: string; itemIndex: number }>;
+        failures: QueuedBatchFailure[];
+    }>("/api/tasks/batch", {
+        method: "POST",
+        body: JSON.stringify({
+            requestId: crypto.randomUUID(),
+            projectId: currentProjectId("canvas-batch-edit"),
+            operationType: "batch_image",
+            modelConfigId: model.id,
+            prompt: input.prompt,
+            priority: "normal",
+            items: uploadedItems.map((item) => ({ sourceUrls: [item.sourceUrl] })),
+        }),
+    });
+    const remapped = restoreBatchItemIndices(uploadedItems, result.tasks, result.failures);
+    const itemIndexByTaskId = new Map(remapped.tasks.map((task) => [task.id, task.itemIndex]));
+    const failures = [...uploadFailures, ...remapped.failures];
+    const ids = result.tasks.map((task) => task.id);
+    input.onSubmitted?.(result.batchId);
+    void refreshSessionBalance();
+    if (!ids.length) return { batchId: result.batchId, tasks: [] as QueuedBatchItem[], failures };
+    try {
+        const tasks = await waitForTasks(ids, input.signal, (current) => input.onProgress?.(current.map((task) => ({ ...task, itemIndex: itemIndexByTaskId.get(task.id)! }))));
+        return {
+            batchId: result.batchId,
+            tasks: tasks.map((task) => ({ ...task, itemIndex: itemIndexByTaskId.get(task.id)! })),
+            failures,
+        };
+    } catch (error) {
+        if (input.signal?.aborted) {
+            await request<{ changed: number }>(`/api/tasks/batches/${result.batchId}/cancel`, { method: "POST" }).catch(() => undefined);
+        }
+        throw error;
+    } finally {
+        await refreshSessionBalance();
+    }
+}
+
+export function controlQueuedBatch(batchId: string, action: QueuedBatchAction) {
+    return request<{ changed: number }>(`/api/tasks/batches/${batchId}/${action}`, { method: "POST" });
+}
+
+export function restoreBatchItemIndices(uploadedItems: Array<{ itemIndex: number }>, tasks: Array<{ id: string; itemIndex: number }>, failures: QueuedBatchFailure[]) {
+    const originalIndex = (submittedIndex: number) => uploadedItems[submittedIndex]?.itemIndex ?? submittedIndex;
+    return {
+        tasks: tasks.map((task) => ({ ...task, itemIndex: originalIndex(task.itemIndex) })),
+        failures: failures.map((failure) => ({ ...failure, index: originalIndex(failure.index) })),
+    };
+}
+
 export async function submitQueuedMediaTask(input: QueuedMediaInput) {
     const model = await resolvePublicModel(input.modelId);
     const sourceUrls = [...(input.sourceUrls || [])];
@@ -119,12 +188,13 @@ async function resolvePublicModel(modelId: string) {
     return model;
 }
 
-async function waitForTasks(ids: string[], signal?: AbortSignal) {
+async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks: QueuedTask[]) => void) {
     const wanted = new Set(ids);
     for (;;) {
         if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
         const result = await request<{ tasks: QueuedTask[] }>("/api/tasks");
         const tasks = result.tasks.filter((task) => wanted.has(task.id));
+        onPoll?.(tasks);
         if (tasks.length === ids.length && tasks.every((task) => ["success", "failed", "cancelled"].includes(task.status))) return tasks;
         await delay(1_000, signal);
     }
