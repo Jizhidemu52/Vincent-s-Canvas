@@ -20,10 +20,7 @@ export type ResponseToolCall = {
     thoughtSignature?: string;
 };
 
-export type ResponseInputMessage =
-    | AiTextMessage
-    | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string }
-    | { role: "tool"; tool_call_id: string; content: string };
+export type ResponseInputMessage = AiTextMessage | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { role: "tool"; tool_call_id: string; content: string };
 
 export type ResponseFunctionTool = {
     type: "function";
@@ -43,10 +40,7 @@ export type ToolResponseResult = {
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
 type ResponseMessageContent = AiTextMessage["content"] | string;
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
-type ResponseInputItem =
-    | { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] }
-    | { type: "function_call"; call_id: string; name: string; arguments: string }
-    | { type: "function_call_output"; call_id: string; output: string };
+type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "function_call"; call_id: string; name: string; arguments: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = {
     type: "function";
     name: string;
@@ -54,9 +48,7 @@ type ResponseApiToolDefinition = {
     parameters: Record<string, unknown>;
     strict?: boolean;
 };
-type ResponseApiOutputItem =
-    | { type?: "message"; content?: Array<{ type?: string; text?: string }> }
-    | { type?: "function_call"; id?: string; call_id?: string; name?: string; arguments?: string };
+type ResponseApiOutputItem = { type?: "message"; content?: Array<{ type?: string; text?: string }> } | { type?: "function_call"; id?: string; call_id?: string; name?: string; arguments?: string };
 type ResponseApiPayload = {
     id?: string;
     output?: ResponseApiOutputItem[];
@@ -91,7 +83,7 @@ type GeminiPayload = {
     promptFeedback?: { blockReason?: string };
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = { signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image" };
 
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
@@ -420,12 +412,7 @@ async function requestStreamingResponse(config: AiConfig, body: Record<string, u
 }
 
 function toGeminiBody(config: AiConfig, messages: ResponseInputMessage[], extra?: Record<string, unknown>) {
-    const systemText = [
-        config.systemPrompt.trim(),
-        ...messages.flatMap((message) => (!("type" in message) && message.role === "system" ? [geminiTextContent(message.content)] : [])),
-    ]
-        .filter(Boolean)
-        .join("\n\n");
+    const systemText = [config.systemPrompt.trim(), ...messages.flatMap((message) => (!("type" in message) && message.role === "system" ? [geminiTextContent(message.content)] : []))].filter(Boolean).join("\n\n");
     const contents = toGeminiContents(messages.filter((message) => ("type" in message ? true : message.role !== "system")));
     return {
         contents,
@@ -485,10 +472,7 @@ function toGeminiToolOptions(tools: ResponseFunctionTool[], toolChoice: ToolChoi
         description: tool.function.description,
         parameters: tool.function.parameters,
     }));
-    const functionCallingConfig =
-        typeof toolChoice === "object"
-            ? { mode: "ANY", allowedFunctionNames: [toolChoice.name] }
-            : { mode: toolChoice === "required" ? "ANY" : "AUTO" };
+    const functionCallingConfig = typeof toolChoice === "object" ? { mode: "ANY", allowedFunctionNames: [toolChoice.name] } : { mode: toolChoice === "required" ? "ANY" : "AUTO" };
     return {
         tools: [{ functionDeclarations }],
         toolConfig: { functionCallingConfig },
@@ -613,7 +597,7 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     try {
-        return await requestQueuedImages({ modelId: config.model || config.imageModel, prompt: withSystemPrompt(config, prompt), count: n, operationType: "image_generation", signal: options?.signal });
+        return await requestQueuedImages({ modelId: config.model || config.imageModel, prompt: withSystemPrompt(config, prompt), count: n, operationType: options?.operationType || "image_generation", signal: options?.signal });
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
@@ -623,7 +607,14 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     try {
-        return await requestQueuedImages({ modelId: config.model || config.imageModel, prompt: withSystemPrompt(config, requestPrompt), count: n, operationType: "inpaint", references: [...references, ...(mask ? [mask] : [])], signal: options?.signal });
+        return await requestQueuedImages({
+            modelId: config.model || config.imageModel,
+            prompt: withSystemPrompt(config, requestPrompt),
+            count: n,
+            operationType: options?.operationType || "inpaint",
+            references: [...references, ...(mask ? [mask] : [])],
+            signal: options?.signal,
+        });
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
@@ -631,8 +622,9 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
     try {
-        const result=await requestServerResponse(config,toResponseInput(withSystemMessage(config,messages)),[],"auto",options);
-        const answer=result.content||"没有返回内容";onDelta(answer);
+        const result = await requestServerResponse(config, toResponseInput(withSystemMessage(config, messages)), [], "auto", options);
+        const answer = result.content || "没有返回内容";
+        onDelta(answer);
         return answer;
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
@@ -641,13 +633,28 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 
 export async function requestToolResponse(config: AiConfig, messages: ResponseInputMessage[], tools: ResponseFunctionTool[], toolChoice: ToolChoice = "auto", onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
     try {
-        const result=await requestServerResponse(config,toResponseInput(withSystemMessage(config,messages)),tools.map(toResponseTool),toolChoice,options);if(result.content)onDelta?.(result.content);return result;
+        const result = await requestServerResponse(config, toResponseInput(withSystemMessage(config, messages)), tools.map(toResponseTool), toolChoice, options);
+        if (result.content) onDelta?.(result.content);
+        return result;
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
 }
 
-async function requestServerResponse(config:AiConfig,input:ResponseInputItem[],tools:ResponseApiToolDefinition[],toolChoice:ToolChoice,options?:RequestOptions):Promise<ToolResponseResult>{const response=await fetch("/api/chat/responses",{method:"POST",credentials:"include",headers:{"content-type":"application/json"},body:JSON.stringify({modelId:config.model||config.textModel,input,tools,toolChoice}),signal:options?.signal});if(!response.ok){const payload=await response.json().catch(()=>({})) as {message?:string};throw new Error(payload.message||`对话请求失败：${response.status}`);}return response.json() as Promise<ToolResponseResult>;}
+async function requestServerResponse(config: AiConfig, input: ResponseInputItem[], tools: ResponseApiToolDefinition[], toolChoice: ToolChoice, options?: RequestOptions): Promise<ToolResponseResult> {
+    const response = await fetch("/api/chat/responses", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ modelId: config.model || config.textModel, input, tools, toolChoice }),
+        signal: options?.signal,
+    });
+    if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(payload.message || `对话请求失败：${response.status}`);
+    }
+    return response.json() as Promise<ToolResponseResult>;
+}
 
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
     try {

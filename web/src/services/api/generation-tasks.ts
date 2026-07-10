@@ -1,30 +1,142 @@
 import { nanoid } from "nanoid";
+
 import { dataUrlToFile } from "@/lib/image-utils";
-import { imageToDataUrl } from "@/services/image-storage";
 import { uploadServerAsset } from "@/services/api/server-assets";
+import { imageToDataUrl } from "@/services/image-storage";
+import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
+type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
 type Task = { id: string; requestId: string; status: string; resultUrls: string[]; failureReason: string | null };
-async function request<T>(path:string,init?:RequestInit):Promise<T>{const response=await fetch(path,{...init,credentials:"include",headers:{"content-type":"application/json",...init?.headers}});if(!response.ok){const body=await response.json().catch(()=>({})) as {message?:string};throw new Error(body.message||"任务提交失败");}return response.status===204?undefined as T:response.json() as Promise<T>;}
 
-export async function requestQueuedImages(input:{modelId:string;prompt:string;count:number;operationType:"image_generation"|"inpaint";references?:ReferenceImage[];signal?:AbortSignal}){
-    const models=await request<{models:PublicModel[]}>("/api/models");
-    const model=models.models.find((item)=>item.id===input.modelId||item.modelId===input.modelId||item.name===input.modelId);
-    if(!model)throw new Error(`管理员尚未启用模型：${input.modelId}`);
-    const sourceUrls:string[]=[];
-    for(const reference of input.references||[]){const dataUrl=await imageToDataUrl(reference);const file=dataUrlToFile({...reference,dataUrl});const assetId=await uploadServerAsset(file,{title:reference.name,source:"task-reference"});sourceUrls.push(`/api/assets/${assetId}/content`);}
-    const rootRequestId=crypto.randomUUID();
-    let ids:string[]=[];
-    const projectId=window.location.pathname.match(/^\/canvas\/([^/]+)/)?.[1]||"image-workbench";
-    if(input.count===1){const result=await request<{task:{id:string}}>("/api/tasks",{method:"POST",body:JSON.stringify({requestId:rootRequestId,projectId,operationType:input.operationType,modelConfigId:model.id,prompt:input.prompt,sourceUrls,priority:"normal"})});ids=[result.task.id];}
-    else{const result=await request<{tasks:Array<{id:string}>;failures:Array<{reason:string}>}>("/api/tasks/batch",{method:"POST",body:JSON.stringify({requestId:rootRequestId,projectId,operationType:input.operationType,modelConfigId:model.id,prompt:input.prompt,priority:"normal",items:Array.from({length:input.count},()=>({sourceUrls}))})});if(result.failures.length&&!result.tasks.length)throw new Error(result.failures[0]!.reason);ids=result.tasks.map((task)=>task.id);}
-    let tasks:Task[];
-    try{tasks=await waitForTasks(ids,input.signal);}catch(error){if(input.signal?.aborted)await Promise.allSettled(ids.map((id)=>request<void>(`/api/tasks/${id}/cancel`,{method:"POST"})));throw error;}
-    const failed=tasks.find((task)=>task.status==="failed"||task.status==="cancelled");if(failed)throw new Error(failed.failureReason||"生成任务失败");
-    return tasks.flatMap((task)=>task.resultUrls.map((dataUrl)=>({id:nanoid(),dataUrl})));
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(path, {
+        ...init,
+        credentials: "include",
+        headers: { "content-type": "application/json", ...init?.headers },
+    });
+    if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(body.message || "任务提交失败");
+    }
+    return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
 
-async function waitForTasks(ids:string[],signal?:AbortSignal){const wanted=new Set(ids);for(;;){if(signal?.aborted)throw new DOMException("请求已取消","AbortError");const result=await request<{tasks:Task[]}>("/api/tasks");const tasks=result.tasks.filter((task)=>wanted.has(task.id));if(tasks.length===ids.length&&tasks.every((task)=>["success","failed","cancelled"].includes(task.status)))return tasks;await new Promise((resolve,reject)=>{const timer=setTimeout(resolve,1000);signal?.addEventListener("abort",()=>{clearTimeout(timer);reject(new DOMException("请求已取消","AbortError"));},{once:true});});}}
+export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; references?: ReferenceImage[]; signal?: AbortSignal }) {
+    const model = await resolvePublicModel(input.modelId);
+    const sourceUrls: string[] = [];
+    for (const reference of input.references || []) {
+        const dataUrl = await imageToDataUrl(reference);
+        const file = dataUrlToFile({ ...reference, dataUrl });
+        const assetId = await uploadServerAsset(file, { title: reference.name, source: "task-reference" });
+        sourceUrls.push(`/api/assets/${assetId}/content`);
+    }
 
-export async function requestQueuedMedia(input:{modelId:string;prompt:string;operationType:string;sourceFiles?:File[];sourceUrls?:string[];signal?:AbortSignal}){const models=await request<{models:PublicModel[]}>("/api/models");const model=models.models.find((item)=>item.id===input.modelId||item.modelId===input.modelId||item.name===input.modelId);if(!model)throw new Error(`管理员尚未启用模型：${input.modelId}`);const sourceUrls=[...(input.sourceUrls||[])];for(const file of input.sourceFiles||[]){const id=await uploadServerAsset(file,{title:file.name,source:"task-reference"});sourceUrls.push(`/api/assets/${id}/content`);}const task=await request<{task:{id:string}}>("/api/tasks",{method:"POST",body:JSON.stringify({requestId:crypto.randomUUID(),projectId:window.location.pathname.match(/^\/canvas\/([^/]+)/)?.[1]||"video-workbench",operationType:input.operationType,modelConfigId:model.id,prompt:input.prompt,sourceUrls,priority:"normal"})});try{const [completed]=await waitForTasks([task.task.id],input.signal);if(!completed||completed.status!=="success")throw new Error(completed?.failureReason||"任务失败");return completed.resultUrls;}catch(error){if(input.signal?.aborted)await Promise.allSettled([request<void>(`/api/tasks/${task.task.id}/cancel`,{method:"POST"})]);throw error;}}
+    const rootRequestId = crypto.randomUUID();
+    const projectId = currentProjectId("image-workbench");
+    let ids: string[];
+    if (input.count === 1) {
+        const result = await request<{ task: { id: string } }>("/api/tasks", {
+            method: "POST",
+            body: JSON.stringify({ requestId: rootRequestId, projectId, operationType: input.operationType, modelConfigId: model.id, prompt: input.prompt, sourceUrls, priority: "normal" }),
+        });
+        ids = [result.task.id];
+    } else {
+        const result = await request<{ tasks: Array<{ id: string }>; failures: Array<{ reason: string }> }>("/api/tasks/batch", {
+            method: "POST",
+            body: JSON.stringify({ requestId: rootRequestId, projectId, operationType: input.operationType, modelConfigId: model.id, prompt: input.prompt, priority: "normal", items: Array.from({ length: input.count }, () => ({ sourceUrls })) }),
+        });
+        if (result.failures.length && !result.tasks.length) throw new Error(result.failures[0]!.reason);
+        ids = result.tasks.map((task) => task.id);
+    }
+
+    void refreshSessionBalance();
+    try {
+        const tasks = await waitForTasks(ids, input.signal);
+        const failed = tasks.find((task) => task.status === "failed" || task.status === "cancelled");
+        if (failed) throw new Error(failed.failureReason || "生成任务失败");
+        return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl })));
+    } catch (error) {
+        if (input.signal?.aborted) await cancelTasks(ids);
+        throw error;
+    } finally {
+        await refreshSessionBalance();
+    }
+}
+
+export async function requestQueuedMedia(input: { modelId: string; prompt: string; operationType: string; sourceFiles?: File[]; sourceUrls?: string[]; signal?: AbortSignal }) {
+    const model = await resolvePublicModel(input.modelId);
+    const sourceUrls = [...(input.sourceUrls || [])];
+    for (const file of input.sourceFiles || []) {
+        const id = await uploadServerAsset(file, { title: file.name, source: "task-reference" });
+        sourceUrls.push(`/api/assets/${id}/content`);
+    }
+    const result = await request<{ task: { id: string } }>("/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({ requestId: crypto.randomUUID(), projectId: currentProjectId("video-workbench"), operationType: input.operationType, modelConfigId: model.id, prompt: input.prompt, sourceUrls, priority: "normal" }),
+    });
+    const ids = [result.task.id];
+    void refreshSessionBalance();
+    try {
+        const [completed] = await waitForTasks(ids, input.signal);
+        if (!completed || completed.status !== "success") throw new Error(completed?.failureReason || "任务失败");
+        return completed.resultUrls;
+    } catch (error) {
+        if (input.signal?.aborted) await cancelTasks(ids);
+        throw error;
+    } finally {
+        await refreshSessionBalance();
+    }
+}
+
+async function resolvePublicModel(modelId: string) {
+    const result = await request<{ models: PublicModel[] }>("/api/models");
+    const model = result.models.find((item) => item.id === modelId || item.modelId === modelId || item.name === modelId);
+    if (!model) throw new Error(`管理员尚未启用模型：${modelId}`);
+    return model;
+}
+
+async function waitForTasks(ids: string[], signal?: AbortSignal) {
+    const wanted = new Set(ids);
+    for (;;) {
+        if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
+        const result = await request<{ tasks: Task[] }>("/api/tasks");
+        const tasks = result.tasks.filter((task) => wanted.has(task.id));
+        if (tasks.length === ids.length && tasks.every((task) => ["success", "failed", "cancelled"].includes(task.status))) return tasks;
+        await delay(1_000, signal);
+    }
+}
+
+async function cancelTasks(ids: string[]) {
+    await Promise.allSettled(ids.map((id) => request<void>(`/api/tasks/${id}/cancel`, { method: "POST" })));
+}
+
+async function refreshSessionBalance() {
+    await useUserStore
+        .getState()
+        .hydrateSession()
+        .catch(() => undefined);
+}
+
+function currentProjectId(fallback: string) {
+    return window.location.pathname.match(/^\/canvas\/([^/]+)/)?.[1] || fallback;
+}
+
+function delay(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException("请求已取消", "AbortError"));
+            return;
+        }
+        const timer = window.setTimeout(resolve, ms);
+        signal?.addEventListener(
+            "abort",
+            () => {
+                window.clearTimeout(timer);
+                reject(new DOMException("请求已取消", "AbortError"));
+            },
+            { once: true },
+        );
+    });
+}

@@ -6,11 +6,11 @@ import { nanoid } from "nanoid";
 import { useSearchParams } from "react-router-dom";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
-import { estimateAdminCredits } from "@/lib/admin-domain";
 import { requestSeamlessStitch } from "@/services/api/internal-ai";
 import { uploadImage, type UploadedImage } from "@/services/image-storage";
-import { useAdminStore } from "@/stores/use-admin-store";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
 const INTERNAL_SEAMLESS_MODEL_ID = "internal-seamless";
@@ -22,7 +22,8 @@ export function SeamlessStitchPage() {
     const { message } = App.useApp();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const adminState = useAdminStore();
+    const user = useUserStore((state) => state.user);
+    const estimate = useBusinessConfigStore((state) => state.estimate);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [source, setSource] = useState<ReferenceImage | null>(null);
     const [rows, setRows] = useState(() => readMultiplier(searchParams.get("rows")));
@@ -30,9 +31,8 @@ export function SeamlessStitchPage() {
     const [result, setResult] = useState<StitchResult>({ status: "idle" });
     const [running, setRunning] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
-    const activeDesigner = adminState.designers.find((designer) => designer.id === adminState.activeDesignerId);
-    const estimatedUsage = estimateAdminCredits(adminState, { operationType: "seamless_stitch", modelId: INTERNAL_SEAMLESS_MODEL_ID, quantity: 1 });
-    const quotaBlocked = Boolean(activeDesigner && activeDesigner.quotaRemaining < estimatedUsage.credits);
+    const estimatedUsage = estimate({ operationType: "seamless_stitch", modelId: INTERNAL_SEAMLESS_MODEL_ID, quantity: 1 });
+    const quotaBlocked = Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
 
     const setSourceFromBlob = async (blob: Blob, name: string) => {
         const uploaded = await uploadImage(blob);
@@ -84,16 +84,15 @@ export function SeamlessStitchPage() {
             message.error("请先上传一张需要无缝拼接的图片");
             return;
         }
-        if (!activeDesigner || activeDesigner.status !== "active") {
+        if (!user || user.status !== "active") {
             message.error("当前设计师账号不可用");
             return;
         }
         if (quotaBlocked) {
-            message.error(`额度不足：需要 ${estimatedUsage.credits} 积分，当前剩余 ${activeDesigner.quotaRemaining} 积分`);
+            message.error(`额度不足：需要 ${estimatedUsage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
             return;
         }
 
-        const requestId = `seamless-stitch-${nanoid()}`;
         const prompt = `无缝拼接，横向倍率 ${rows}，纵向倍率 ${cols}`;
         const startedAt = performance.now();
         setRunning(true);
@@ -101,19 +100,6 @@ export function SeamlessStitchPage() {
         try {
             const response = await requestSeamlessStitch(source, rows, cols);
             const uploaded = await uploadImage(response.dataUrl);
-            const charge = adminState.chargeUsage({
-                requestId,
-                operationType: "seamless_stitch",
-                modelId: INTERNAL_SEAMLESS_MODEL_ID,
-                quantity: 1,
-                projectId: "tool-seamless-stitch",
-                prompt,
-                originalUrls: [source.url || source.dataUrl],
-                resultUrls: [uploaded.url],
-                createdAt: new Date().toISOString(),
-            });
-            if (!charge.ok) throw new Error(charge.reason || "额度扣减失败");
-
             addAsset({
                 kind: "image",
                 title: `${source.name.replace(/\.[^.]+$/, "")} 无缝拼接`,
@@ -127,7 +113,7 @@ export function SeamlessStitchPage() {
                     toolMode: "seamless-stitch",
                     operationType: "seamless_stitch",
                     projectId: "tool-seamless-stitch",
-                    designerId: adminState.activeDesignerId,
+                    designerId: user.id,
                     prompt,
                     model: INTERNAL_SEAMLESS_MODEL_ID,
                     modelId: INTERNAL_SEAMLESS_MODEL_ID,
@@ -139,21 +125,9 @@ export function SeamlessStitchPage() {
                 },
             });
             setResult({ status: "success", image: uploaded, durationMs: performance.now() - startedAt });
-            message.success(`无缝拼接完成，已扣除 ${charge.credits ?? estimatedUsage.credits} 积分`);
+            message.success(`无缝拼接完成，预计消耗 ${estimatedUsage.credits} 积分`);
         } catch (error) {
             const reason = error instanceof Error ? error.message : "无缝拼接失败";
-            adminState.chargeUsage({
-                requestId,
-                operationType: "seamless_stitch",
-                modelId: INTERNAL_SEAMLESS_MODEL_ID,
-                quantity: 1,
-                projectId: "tool-seamless-stitch",
-                prompt,
-                originalUrls: [source.url || source.dataUrl],
-                resultUrls: [],
-                failureReason: reason,
-                createdAt: new Date().toISOString(),
-            });
             setResult({ status: "failed", error: reason });
             message.error(reason);
         } finally {
@@ -228,7 +202,7 @@ export function SeamlessStitchPage() {
                         <div className="mb-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs dark:border-stone-800 dark:bg-stone-950">
                             <div className="flex items-center justify-between gap-3">
                                 <span>本次消耗 {estimatedUsage.credits} 积分</span>
-                                <span>{activeDesigner ? `${activeDesigner.name} 剩余 ${activeDesigner.quotaRemaining}` : "未选择设计师"}</span>
+                                <span>{user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录"}</span>
                             </div>
                             {quotaBlocked ? <div className="mt-1 text-red-500">额度不足，无法提交任务。</div> : null}
                         </div>

@@ -16,12 +16,12 @@ type UserStore = {
 
 let hydration: Promise<void> | null = null;
 
-export const useUserStore = create<UserStore>((set) => ({
+export const useUserStore = create<UserStore>((set, get) => ({
     user: null,
     status: "idle",
     hydrateSession: async () => {
         if (hydration) return hydration;
-        set({ status: "loading" });
+        if (!get().user) set({ status: "loading" });
         hydration = getCurrentSession()
             .then(({ user }) => set({ user: { ...user, avatarUrl: "" }, status: "authenticated" }))
             .catch(() => set({ user: null, status: "guest" }))

@@ -72,7 +72,7 @@ export default function LoginPage() {
                                 登录设计师工作台
                             </Button>
                             <Button size="large" block icon={<QrCode className="size-4" />} onClick={loginWithWeCom}>企业微信扫码登录</Button>
-                            <div className="rounded-md bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-900">支持中文名、英文账号、邮箱或工号加密码登录。演示账号：designer-1 / 123456。</div>
+                            <div className="rounded-md bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-900">支持中文名、英文账号、邮箱或工号加密码登录。账号由管理员统一创建，首次登录后必须修改初始密码。</div>
                         </div>
                     </section>
 

@@ -11,7 +11,7 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
-import { estimateAdminCredits, toolModeOperation, type AdminToolMode } from "@/lib/admin-domain";
+import { toolModeOperation, type AdminToolMode } from "@/lib/admin-domain";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { modelOptionLabel, modelOptionName, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -19,7 +19,8 @@ import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { requestEdit, requestGeneration } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
-import { useAdminStore } from "@/stores/use-admin-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ReferenceImage } from "@/types/image";
 import { SeamlessStitchPage } from "@/pages/image/seamless-stitch";
@@ -127,7 +128,8 @@ function ImageGenerationPage() {
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const canManageConfig = useCanManageConfig();
-    const adminState = useAdminStore();
+    const user = useUserStore((state) => state.user);
+    const estimate = useBusinessConfigStore((state) => state.estimate);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
@@ -146,13 +148,12 @@ function ImageGenerationPage() {
 
     const toolMode = resolveImageToolMode(searchParams.get("tool"));
     const toolModeConfig = imageToolModes[toolMode];
-    const operationType = toolModeOperation(toolMode);
+    const operationType = toolModeOperation(toolMode) as "image_generation" | "inpaint" | "upscale";
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
     const adminModelId = modelOptionName(model);
-    const activeDesigner = adminState.designers.find((designer) => designer.id === adminState.activeDesignerId);
-    const estimatedUsage = estimateAdminCredits(adminState, { operationType, modelId: adminModelId, quantity: generationCount });
-    const quotaBlocked = false;
+    const estimatedUsage = estimate({ operationType, modelId: adminModelId, quantity: generationCount });
+    const quotaBlocked = Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const missingReference = toolModeConfig.requiresReference && references.length === 0;
     const canGenerate = Boolean(prompt.trim()) && !quotaBlocked && !missingReference;
 
@@ -228,12 +229,12 @@ function ImageGenerationPage() {
             handleMissingModelConfig();
             return;
         }
-        if (!activeDesigner || activeDesigner.status !== "active") {
+        if (!user || user.status !== "active") {
             message.error("当前设计师账号不可用");
             return;
         }
         if (quotaBlocked) {
-            message.error(`额度不足：预计需要 ${estimatedUsage.credits} 积分，当前剩余 ${activeDesigner.quotaRemaining} 积分`);
+            message.error(`额度不足：预计需要 ${estimatedUsage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
             return;
         }
 
@@ -306,7 +307,7 @@ function ImageGenerationPage() {
                 toolMode,
                 operationType,
                 projectId: toolModeConfig.projectId,
-                designerId: adminState.activeDesignerId,
+                designerId: user?.id,
                 model,
                 modelId: adminModelId,
                 recreatePath: `/image?tool=${toolMode}&prompt=${encodeURIComponent(prompt)}&model=${encodeURIComponent(model)}`,
@@ -378,7 +379,7 @@ function ImageGenerationPage() {
     const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, { operationType }) : await requestGeneration(snapshot.config, snapshot.text, { operationType });
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
@@ -506,7 +507,7 @@ function ImageGenerationPage() {
                             <div className="mb-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
                                 <div className="flex items-center justify-between gap-3">
                                     <span>预计消耗 {estimatedUsage.credits} 积分</span>
-                                    <span>{activeDesigner ? `${activeDesigner.name} 剩余 ${activeDesigner.quotaRemaining}` : "未选择设计师"}</span>
+                                    <span>{user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录"}</span>
                                 </div>
                                 {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{toolModeConfig.title}需要先添加至少一张参考图。</div> : null}
                                 {quotaBlocked ? <div className="mt-1 text-red-500">额度不足，无法提交生成任务。</div> : null}

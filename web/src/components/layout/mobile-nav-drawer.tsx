@@ -2,10 +2,9 @@ import { Drawer } from "antd";
 import { Link } from "react-router-dom";
 
 import { navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
-import { estimateAdminCredits } from "@/lib/admin-domain";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
-import { useAdminStore } from "@/stores/use-admin-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 
 type MobileNavDrawerProps = {
     open: boolean;
@@ -20,11 +19,14 @@ const groupLabels: Record<NavigationGroup, string> = {
 };
 
 export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDrawerProps) {
-    const adminState = useAdminStore();
+    const estimate = useBusinessConfigStore((state) => state.estimate);
     const adminVisible = useCanManageConfig();
     const getToolBadge = (slug: NavigationToolSlug) => {
         const billing = navigationToolBilling[slug];
-        if (billing) return `${estimateAdminCredits(adminState, { ...billing, quantity: 1 }).credits}积分`;
+        if (billing) {
+            const usage = estimate({ ...billing, quantity: 1 });
+            return usage.configured ? `${usage.credits}积分` : "待配置";
+        }
         if (slug === "video") return "按模型";
         if (slug === "prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
         if (slug === "admin") return "管理员";

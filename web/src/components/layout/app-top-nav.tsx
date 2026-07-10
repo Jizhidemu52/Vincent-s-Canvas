@@ -6,10 +6,9 @@ import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
-import { estimateAdminCredits } from "@/lib/admin-domain";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
-import { useAdminStore } from "@/stores/use-admin-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 
@@ -74,11 +73,8 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
     const setTheme = useThemeStore((state) => state.setTheme);
     const user = useUserStore((state) => state.user);
     const clearSession = useUserStore((state) => state.clearSession);
-    const logoutAdmin = useAdminStore((state) => state.logoutAdmin);
-    const designers = useAdminStore((state) => state.designers);
-    const currentAccount = designers.find((designer) => designer.id === user?.id);
     const buttonClass = "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-[12px] font-semibold !text-stone-500 transition hover:bg-white hover:!text-stone-950";
-    const displayName = currentAccount?.name || user?.displayName || "未登录";
+    const displayName = user?.displayName || "未登录";
     const roleLabel = user?.role === "super_admin" ? "超级管理员" : user?.role === "department_admin" ? "部门管理员" : user?.role === "designer" ? "设计师" : "登录";
     const credits = user ? `${user.creditBalance} 积分` : "请登录";
 
@@ -102,7 +98,6 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
                 className={buttonClass}
                 onClick={async () => {
                     if (user) {
-                        logoutAdmin();
                         await clearSession();
                         navigate("/login");
                     } else {
@@ -149,14 +144,14 @@ export function AppTopNav() {
     const activeToolSlug = getActiveToolSlug(pathname, search);
     const createProject = useCanvasStore((state) => state.createProject);
     const projectsLength = useCanvasStore((state) => state.projects.length);
-    const adminState = useAdminStore();
+    const estimate = useBusinessConfigStore((state) => state.estimate);
     const adminVisible = useCanManageConfig();
 
     const getToolBadge = (slug: NavigationToolSlug) => {
         const billing = navigationToolBilling[slug];
         if (billing) {
-            const estimate = estimateAdminCredits(adminState, { ...billing, quantity: 1 });
-            return `${estimate.credits}积分`;
+            const usage = estimate({ ...billing, quantity: 1 });
+            return usage.configured ? `${usage.credits}积分` : "待配置";
         }
         if (slug === "video") return "按模型";
         if (slug === "prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
