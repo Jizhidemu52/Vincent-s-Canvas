@@ -62,7 +62,7 @@ jobs:
       PROVIDER_ENCRYPTION_KEY: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
       TASK_MOCK_MODE: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.13
@@ -96,10 +96,94 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.13
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: bun test tests/admin-domain.test.ts
+
+  compose-recovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure isolated production-like stack
+        shell: bash
+        run: |
+          cat >.env <<'EOF'
+          POSTGRES_PASSWORD=compose-postgres-password
+          NODE_ENV=production
+          PORT=3100
+          SESSION_COOKIE_NAME=wireless_canvas_session
+          SESSION_TTL_SECONDS=28800
+          TRUST_PROXY=true
+          BOOTSTRAP_ADMIN_USERNAME=admin
+          BOOTSTRAP_ADMIN_DISPLAY_NAME=Compose Admin
+          BOOTSTRAP_ADMIN_PASSWORD=ComposeAdmin2026
+          MFA_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          PROVIDER_ENCRYPTION_KEY=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+          WORKER_CONCURRENCY=10
+          TASK_MOCK_MODE=true
+          S3_ENDPOINT=http://minio:9000
+          S3_REGION=us-east-1
+          S3_BUCKET=wireless-canvas
+          S3_ACCESS_KEY_ID=wireless-canvas
+          S3_SECRET_ACCESS_KEY=compose-object-storage-password
+          S3_FORCE_PATH_STYLE=true
+          WECOM_CORP_ID=
+          WECOM_AGENT_ID=
+          WECOM_SECRET=
+          WECOM_CALLBACK_URL=
+          EOF
+          docker compose config --quiet
+      - name: Build, start, back up, and restore the full stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker compose ps || true
+            docker compose logs --no-color --tail=200 || true
+            docker compose down --volumes --remove-orphans || true
+          }
+          trap cleanup EXIT
+
+          docker compose up -d --build
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/api/health >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "Full stack did not become healthy" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:3000/ | grep -q '<div id="root">'
+
+          docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas \
+            -c "INSERT INTO departments(name,code) VALUES('Recovery Marker','recovery-marker')"
+          docker compose run --rm --no-deps -e BACKUP_RUN_ONCE=true backup
+          backup_key=$(docker compose run --rm --no-deps --entrypoint /bin/sh minio-init -c \
+            'mc alias set local http://minio:9000 "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" >/dev/null && mc find "local/$S3_BUCKET/backups/postgres" --name "*.dump" --print' \
+            | tail -n 1)
+          test -n "$backup_key"
+          backup_path=${backup_key#local/wireless-canvas/}
+
+          docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas \
+            -c "DELETE FROM departments WHERE code='recovery-marker'"
+          docker compose stop web api worker backup
+          docker compose run --rm --no-deps backup restore.sh "$backup_path"
+          restored=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc \
+            "SELECT COUNT(*) FROM departments WHERE code='recovery-marker'")
+          test "$restored" = "1"
+
+          docker compose up -d api worker web
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not recover after database restore" >&2
+          exit 1

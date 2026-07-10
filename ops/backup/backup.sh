@@ -20,5 +20,8 @@ while true; do
     cutoff="$(date -u -d "-${retention_days} days" +%Y-%m-%dT%H:%M:%SZ)"
     mc rm --recursive --force --older-than "${retention_days}d" "storage/${S3_BUCKET}/backups/postgres/" || true
     echo "Backup completed at ${stamp}; cutoff ${cutoff}"
+    if [[ "${BACKUP_RUN_ONCE:-false}" == "true" ]]; then
+        break
+    fi
     sleep "$interval"
 done
