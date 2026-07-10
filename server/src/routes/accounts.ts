@@ -47,6 +47,9 @@ export function createAccountsRouter(db: Database) {
             if (actor.role === "department_admin" && (input.role !== "designer" || input.departmentId !== actor.departmentId)) {
                 response.status(403).json({ error: "FORBIDDEN", message: "部门管理员只能创建本部门设计师" }); return;
             }
+            if (input.role === "super_admin") {
+                response.status(403).json({ error: "FORBIDDEN", message: "超级管理员只能通过受控初始化流程创建" }); return;
+            }
             if (input.role === "department_admin" && !input.departmentId) {
                 response.status(400).json({ error: "DEPARTMENT_REQUIRED", message: "部门管理员必须属于一个部门" }); return;
             }
@@ -56,7 +59,7 @@ export function createAccountsRouter(db: Database) {
             const result = await db.query<UserRow>(
                 `INSERT INTO users(username,display_name,email,employee_no,password_hash,role,department_id,credit_balance,credit_limit,created_by)
                  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,username,display_name,email,employee_no,role,status,department_id,
-                 (SELECT name FROM departments WHERE id=department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`,
+                 (SELECT name FROM departments WHERE departments.id=users.department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`,
                 [input.username, input.displayName, input.email ?? null, input.employeeNo ?? null, await hashPassword(input.password), input.role, input.departmentId ?? null, input.creditBalance, input.creditLimit, actor.id],
             );
             const user = mapUser(result.rows[0]);
@@ -76,11 +79,13 @@ export function createAccountsRouter(db: Database) {
             const departmentId = input.departmentId === undefined ? current.departmentId : input.departmentId;
             if (actor.role === "department_admin" && departmentId !== actor.departmentId) { response.status(403).json({ error: "FORBIDDEN", message: "不能将账号移出本部门" }); return; }
             const role = (input.role ?? current.role) as UserRole;
+            if (actor.role === "department_admin" && role !== "designer") { response.status(403).json({ error: "FORBIDDEN", message: "部门管理员不能提升账号角色" }); return; }
             if (role === "department_admin" && !departmentId) { response.status(400).json({ error: "DEPARTMENT_REQUIRED", message: "部门管理员必须属于一个部门" }); return; }
+            if (input.creditLimit !== undefined && input.creditLimit < current.creditBalance) { response.status(400).json({ error: "INVALID_CREDIT", message: "额度上限不能低于当前剩余积分" }); return; }
             const result = await db.query<UserRow>(
                 `UPDATE users SET display_name=$1,email=$2,employee_no=$3,role=$4,department_id=$5,status=$6,credit_limit=$7,updated_at=now()
                  WHERE id=$8 RETURNING id,username,display_name,email,employee_no,role,status,department_id,
-                 (SELECT name FROM departments WHERE id=department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`,
+                 (SELECT name FROM departments WHERE departments.id=users.department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`,
                 [input.displayName ?? current.displayName, input.email === undefined ? current.email : input.email, input.employeeNo === undefined ? current.employeeNo : input.employeeNo,
                     role, departmentId, input.status ?? current.status, input.creditLimit ?? current.creditLimit, current.id],
             );
@@ -127,7 +132,7 @@ export function createAccountsRouter(db: Database) {
             if (nextBalance < 0 || nextBalance > target.creditLimit) { await client.query("ROLLBACK"); response.status(400).json({ error: "INVALID_CREDIT", message: "调整后积分必须在 0 和额度上限之间" }); return; }
             const updated = await client.query<UserRow>(`UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2
                 RETURNING id,username,display_name,email,employee_no,role,status,department_id,
-                (SELECT name FROM departments WHERE id=department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`, [nextBalance, target.id]);
+                (SELECT name FROM departments WHERE departments.id=users.department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`, [nextBalance, target.id]);
             await client.query("COMMIT");
             const user = mapUser(updated.rows[0]);
             await writeAudit(db, { actor, action: "account.credits_adjusted", targetType: "user", targetId: user.id, departmentId: user.departmentId, result: "success", detail: { amount: input.amount, reason: input.reason, balance: nextBalance }, ip: request.ip });
@@ -144,7 +149,7 @@ export function createAccountsRouter(db: Database) {
             let created = 0;
             for (const [index, account] of accounts.entries()) {
                 const passwordError = validatePassword(account.password);
-                if (passwordError || account.creditBalance > account.creditLimit || (actor.role === "department_admin" && (account.role !== "designer" || account.departmentId !== actor.departmentId))) {
+                if (passwordError || account.role === "super_admin" || account.creditBalance > account.creditLimit || (actor.role === "department_admin" && (account.role !== "designer" || account.departmentId !== actor.departmentId))) {
                     failures.push({ index, message: passwordError ?? "账号权限或积分设置不合法" }); continue;
                 }
                 try {

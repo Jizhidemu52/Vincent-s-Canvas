@@ -26,7 +26,7 @@ export default function LoginPage() {
     };
 
     const loginWithWeCom = async () => {
-        try { window.location.assign((await getWeComLoginUrl()).authorizationUrl); }
+        try { window.location.assign((await getWeComLoginUrl("designer")).authorizationUrl); }
         catch (error) { message.error(error instanceof Error ? error.message : "企业微信登录暂不可用"); }
     };
 

@@ -1,6 +1,9 @@
 services:
   web:
-    image: ghcr.io/wireless-canvas/app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wireless-canvas-web:local
     container_name: wireless-canvas-web
     ports:
       - "3000:3000"

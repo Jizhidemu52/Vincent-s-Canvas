@@ -6,3 +6,4 @@ web/.env
 .env
 data/
 *.log
+*.tsbuildinfo

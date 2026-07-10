@@ -4,4 +4,4 @@ COPY server/package.json server/bun.lock* ./
 RUN bun install --frozen-lockfile
 COPY server ./
 EXPOSE 3100
-CMD ["bun", "src/index.ts"]
+CMD ["sh", "-c", "bun src/migrate.ts && bun src/bootstrap.ts && bun src/index.ts"]

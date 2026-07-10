@@ -1,6 +1,7 @@
 import type { ApiUser, ApiUserRole } from "./auth";
 
 export type Department = { id: string; name: string; code: string; createdAt: string };
+export type AuditLog = { id: string; action: string; targetType: string; targetId: string | null; result: "success" | "denied" | "failed"; detail: Record<string, unknown>; createdAt: string; actorName: string | null; actorRole: ApiUserRole | null; departmentName: string | null };
 export type AccountInput = {
     username: string; displayName: string; email?: string | null; employeeNo?: string | null; password: string;
     role: ApiUserRole; departmentId?: string | null; creditBalance: number; creditLimit: number;
@@ -22,4 +23,6 @@ export const updateAccount = (id: string, input: AccountUpdate) => request<{ use
 export const resetAccountPassword = (id: string, password: string) => request<void>(`/api/admin/accounts/${id}/reset-password`, { method: "POST", body: JSON.stringify({ password }) });
 export const adjustAccountCredits = (id: string, amount: number, reason: string) => request<{ user: ApiUser }>(`/api/admin/accounts/${id}/credits`, { method: "POST", body: JSON.stringify({ amount, reason }) });
 export const listDepartments = () => request<{ departments: Department[] }>("/api/admin/departments");
+export const createDepartment = (name: string, code: string) => request<{ department: Department }>("/api/admin/departments", { method: "POST", body: JSON.stringify({ name, code }) });
+export const listAuditLogs = () => request<{ auditLogs: AuditLog[] }>("/api/admin/audit-logs?limit=500");
 export const bulkCreateAccounts = (accounts: AccountInput[]) => request<{ created: number; failures: Array<{ index: number; message: string }> }>("/api/admin/accounts/bulk", { method: "POST", body: JSON.stringify({ accounts }) });

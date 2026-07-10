@@ -4,6 +4,7 @@ import { App } from "antd";
 
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { createModelChannel, useConfigStore } from "@/stores/use-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
@@ -12,6 +13,17 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const config = useConfigStore((state) => state.config);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const canManageConfig = useCanManageConfig();
+    const authStatus = useUserStore((state) => state.status);
+    const hydrateSession = useUserStore((state) => state.hydrateSession);
+
+    useEffect(() => {
+        if (authStatus !== "authenticated") return;
+        const refresh = () => void hydrateSession();
+        const timer = window.setInterval(refresh, 30_000);
+        const onVisibility = () => { if (document.visibilityState === "visible") refresh(); };
+        document.addEventListener("visibilitychange", onVisibility);
+        return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisibility); };
+    }, [authStatus, hydrateSession]);
 
     useEffect(() => {
         if (handledConfigParams.current) return;

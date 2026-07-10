@@ -1,9 +1,10 @@
-import { LockKeyhole, ShieldCheck, UserRound } from "lucide-react";
+import { LockKeyhole, QrCode, ShieldCheck, UserRound } from "lucide-react";
 import { App, Button, Input } from "antd";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useUserStore } from "@/stores/use-user-store";
+import { getWeComLoginUrl } from "@/services/api/auth";
 
 export default function AdminLoginPage() {
     const { message } = App.useApp();
@@ -11,17 +12,23 @@ export default function AdminLoginPage() {
     const login = useUserStore((state) => state.loginWithPassword);
     const [loginName, setLoginName] = useState("");
     const [password, setPassword] = useState("");
+    const [mfaCode, setMfaCode] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
     const submit = async () => {
         if (!loginName.trim() || !password) { message.warning("请输入管理员账号和密码"); return; }
         setSubmitting(true);
         try {
-            const user = await login(loginName, password, "admin");
+            const user = await login(loginName, password, "admin", mfaCode);
             message.success("已进入管理员后台");
             navigate(user.mustChangePassword ? "/change-password" : "/admin", { replace: true });
         } catch (error) { message.error(error instanceof Error ? error.message : "登录失败"); }
         finally { setSubmitting(false); }
+    };
+
+    const loginWithWeCom = async () => {
+        try { window.location.assign((await getWeComLoginUrl("admin")).authorizationUrl); }
+        catch (error) { message.error(error instanceof Error ? error.message : "企业微信登录暂不可用"); }
     };
 
     return (
@@ -42,9 +49,12 @@ export default function AdminLoginPage() {
                     <Input size="large" value={loginName} onChange={(event) => setLoginName(event.target.value)} placeholder="请输入管理员账号" />
                     <label className="block text-sm font-medium">登录密码</label>
                     <Input.Password size="large" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" onPressEnter={submit} />
+                    <label className="block text-sm font-medium">动态验证码（已启用时填写）</label>
+                    <Input size="large" value={mfaCode} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6 位验证码" inputMode="numeric" maxLength={6} onPressEnter={submit} />
                     <Button type="primary" size="large" block loading={submitting} icon={<LockKeyhole className="size-4" />} onClick={submit}>
                         登录后台
                     </Button>
+                    <Button size="large" block icon={<QrCode className="size-4" />} onClick={loginWithWeCom}>企业微信扫码登录</Button>
                     <Button size="large" block icon={<UserRound className="size-4" />} onClick={() => navigate("/login")}>
                         返回设计师登录
                     </Button>

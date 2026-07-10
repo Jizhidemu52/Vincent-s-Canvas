@@ -15,10 +15,15 @@ const schema = z.object({
     WECOM_AGENT_ID: z.string().optional(),
     WECOM_SECRET: z.string().optional(),
     WECOM_CALLBACK_URL: z.string().url().optional().or(z.literal("")),
+    MFA_ENCRYPTION_KEY: z.string().optional(),
 });
 
 export type AppConfig = z.infer<typeof schema>;
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
-    return schema.parse(env);
+    const config = schema.parse(env);
+    if (config.NODE_ENV === "production" && (!config.MFA_ENCRYPTION_KEY || Buffer.from(config.MFA_ENCRYPTION_KEY, "base64").length !== 32)) {
+        throw new Error("MFA_ENCRYPTION_KEY must be a base64-encoded 32-byte key in production");
+    }
+    return config;
 }

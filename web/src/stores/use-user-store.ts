@@ -9,7 +9,7 @@ type UserStore = {
     user: LocalUser | null;
     status: AuthStatus;
     hydrateSession: () => Promise<void>;
-    loginWithPassword: (identifier: string, password: string, portal: "designer" | "admin") => Promise<LocalUser>;
+    loginWithPassword: (identifier: string, password: string, portal: "designer" | "admin", mfaCode?: string) => Promise<LocalUser>;
     clearSession: () => Promise<void>;
     updateUser: (user: ApiUser) => void;
 };
@@ -28,8 +28,8 @@ export const useUserStore = create<UserStore>((set) => ({
             .finally(() => { hydration = null; });
         return hydration;
     },
-    loginWithPassword: async (identifier, password, portal) => {
-        const { user } = await loginWithPassword(identifier, password, portal);
+    loginWithPassword: async (identifier, password, portal, mfaCode) => {
+        const { user } = await loginWithPassword(identifier, password, portal, mfaCode);
         const localUser = { ...user, avatarUrl: "" };
         set({ user: localUser, status: "authenticated" });
         return localUser;

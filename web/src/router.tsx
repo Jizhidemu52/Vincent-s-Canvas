@@ -15,6 +15,7 @@ const ImagePage = lazy(() => import("@/pages/image"));
 const LoginPage = lazy(() => import("@/pages/login"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const PromptsPage = lazy(() => import("@/pages/prompts"));
+const SetupMfaPage = lazy(() => import("@/pages/setup-mfa"));
 const VideoPage = lazy(() => import("@/pages/video"));
 
 type RoutePage = LazyExoticComponent<ComponentType>;
@@ -50,6 +51,7 @@ export const router = createBrowserRouter([
             { path: "/", element: protectedRoute(HomePage) },
             { path: "/login", element: routeElement(LoginPage) },
             { path: "/change-password", element: protectedRoute(ChangePasswordPage) },
+            { path: "/setup-mfa", element: protectedRoute(SetupMfaPage, true) },
             { path: "/image", element: protectedRoute(ImagePage) },
             { path: "/video", element: protectedRoute(VideoPage) },
             { path: "/assets", element: protectedRoute(AssetsPage) },

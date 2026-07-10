@@ -12,7 +12,7 @@ import { WorkflowManagementPanel } from "@/pages/admin/components/workflow-manag
 import { useAdminStore } from "@/stores/use-admin-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
-import { adjustAccountCredits, bulkCreateAccounts, createAccount, listAccounts, listDepartments, resetAccountPassword, updateAccount, type AccountInput, type Department } from "@/services/api/admin-accounts";
+import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, listAccounts, listAuditLogs, listDepartments, resetAccountPassword, updateAccount, type AccountInput, type AuditLog, type Department } from "@/services/api/admin-accounts";
 import type { ApiUser, ApiUserRole } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 
@@ -76,6 +76,9 @@ export default function AdminPage() {
     const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
     const [accounts, setAccounts] = useState<ApiUser[]>([]);
     const [departments, setDepartments] = useState<Department[]>([]);
+    const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+    const [departmentName, setDepartmentName] = useState("");
+    const [departmentCode, setDepartmentCode] = useState("");
     const [accountsLoading, setAccountsLoading] = useState(true);
     const [historyDesigner, setHistoryDesigner] = useState<string>("all");
     const [historyModel, setHistoryModel] = useState<string>("all");
@@ -93,9 +96,10 @@ export default function AdminPage() {
     const refreshAccounts = async () => {
         setAccountsLoading(true);
         try {
-            const [accountResult, departmentResult] = await Promise.all([listAccounts(), listDepartments()]);
+            const [accountResult, departmentResult, auditResult] = await Promise.all([listAccounts(), listDepartments(), listAuditLogs()]);
             setAccounts(accountResult.users);
             setDepartments(departmentResult.departments);
+            setAuditLogs(auditResult.auditLogs);
         } catch (error) { message.error(error instanceof Error ? error.message : "账号数据加载失败"); }
         finally { setAccountsLoading(false); }
     };
@@ -246,6 +250,16 @@ export default function AdminPage() {
         return false;
     };
 
+    const submitDepartment = async () => {
+        if (!departmentName.trim() || !departmentCode.trim()) { message.warning("请输入部门名称和编码"); return; }
+        try {
+            await createDepartment(departmentName, departmentCode);
+            setDepartmentName(""); setDepartmentCode("");
+            message.success("部门已创建");
+            await refreshAccounts();
+        } catch (error) { message.error(error instanceof Error ? error.message : "部门创建失败"); }
+    };
+
     const submitPricingRule = (values: PricingFormValues) => {
         const result = state.savePricingRule(values);
         showActionResult(result, message, "价格规则已保存");
@@ -376,6 +390,15 @@ export default function AdminPage() {
                                             ]}
                                         />
                                         <div className="grid gap-3">
+                                            {isAdmin ? (
+                                                <Panel title="部门管理">
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <Input value={departmentName} onChange={(event) => setDepartmentName(event.target.value)} placeholder="部门名称" />
+                                                        <Input value={departmentCode} onChange={(event) => setDepartmentCode(event.target.value)} placeholder="唯一编码" />
+                                                    </div>
+                                                    <Button className="mt-2" block onClick={submitDepartment}>新建部门</Button>
+                                                </Panel>
+                                            ) : null}
                                             <Panel title={editingAccountId ? "编辑账号权限" : "开通设计师账号"}>
                                                 <div className="mb-4 flex flex-wrap gap-2">
                                                     <Upload accept=".csv,text/csv" maxCount={1} showUploadList={false} beforeUpload={(file) => importAccountCsv(file as File)}>
@@ -704,13 +727,14 @@ export default function AdminPage() {
                                     <Table
                                         rowKey="id"
                                         size="small"
-                                        dataSource={state.auditLogs}
+                                        dataSource={auditLogs}
                                         columns={[
                                             { title: "时间", dataIndex: "createdAt", width: 180 },
-                                            { title: "操作人", render: (_, record) => designerName(state.designers, record.operatorId) },
+                                            { title: "操作人", dataIndex: "actorName", render: (value: string | null) => value || "系统" },
+                                            { title: "部门", dataIndex: "departmentName", render: (value: string | null) => value || "全局" },
                                             { title: "目标", dataIndex: "targetId" },
                                             { title: "行为", dataIndex: "action" },
-                                            { title: "内容", dataIndex: "detail" },
+                                            { title: "内容", dataIndex: "detail", ellipsis: true, render: (value: Record<string, unknown>) => JSON.stringify(value) },
                                             { title: "结果", render: (_, record) => <Tag color={record.result === "success" ? "green" : "red"}>{record.result === "success" ? "成功" : "失败"}</Tag> },
                                         ]}
                                     />
