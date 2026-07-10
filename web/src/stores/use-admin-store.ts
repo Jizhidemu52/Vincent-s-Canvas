@@ -203,13 +203,8 @@ export const useAdminStore = create<AdminStore>()(
                 return result.ok ? { ok: true } : { ok: false, reason: result.reason };
             },
             chargeUsage: (request) => {
-                const result = applyUsageCharge(get(), {
-                    ...request,
-                    designerId: request.designerId || get().activeDesignerId,
-                    createdAt: request.createdAt || new Date().toISOString(),
-                });
-                set(result.state);
-                return result.ok ? { ok: true, duplicate: result.duplicate, credits: result.credits, rmb: result.rmb } : { ok: false, reason: result.reason };
+                void request;
+                return { ok: true, duplicate: true, credits: 0, rmb: 0 };
             },
             recordToolBatch: (request) => {
                 const batch = createBatchTaskFromToolMode(get(), {

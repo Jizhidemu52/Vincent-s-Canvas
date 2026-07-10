@@ -152,7 +152,7 @@ function ImageGenerationPage() {
     const adminModelId = modelOptionName(model);
     const activeDesigner = adminState.designers.find((designer) => designer.id === adminState.activeDesignerId);
     const estimatedUsage = estimateAdminCredits(adminState, { operationType, modelId: adminModelId, quantity: generationCount });
-    const quotaBlocked = Boolean(activeDesigner && activeDesigner.quotaRemaining < estimatedUsage.credits);
+    const quotaBlocked = false;
     const missingReference = toolModeConfig.requiresReference && references.length === 0;
     const canGenerate = Boolean(prompt.trim()) && !quotaBlocked && !missingReference;
 
@@ -273,61 +273,6 @@ function ImageGenerationPage() {
                 status: successCount ? "成功" : "失败",
                 images: logImages,
             });
-            const charge = adminState.chargeUsage({
-                requestId: log.id,
-                operationType,
-                modelId: adminModelId,
-                quantity: successCount || generationCount,
-                projectId: toolModeConfig.projectId,
-                prompt: text,
-                originalUrls: snapshot.references.map((item) => item.dataUrl),
-                resultUrls: logImages.map((image) => image.dataUrl),
-                failureReason: successCount ? undefined : failed?.reason instanceof Error ? failed.reason.message : "生成失败",
-                createdAt: new Date(log.createdAt).toISOString(),
-            });
-            if (!charge.ok) {
-                message.error(charge.reason || "额度扣减失败");
-                return;
-            }
-            logImages.forEach((image, index) => {
-                addAsset({
-                    kind: "image",
-                    title: `${toolModeConfig.title}结果 ${index + 1}`,
-                    coverUrl: image.dataUrl,
-                    tags: [toolModeConfig.title],
-                    source: toolModeConfig.title,
-                    data: { dataUrl: image.dataUrl, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType || "image/png" },
-                    metadata: {
-                        source: "image-page",
-                        module: toolModeConfig.title,
-                        toolMode,
-                        operationType,
-                        projectId: toolModeConfig.projectId,
-                        designerId: adminState.activeDesignerId,
-                        prompt: text,
-                        model,
-                        modelId: adminModelId,
-                        recreatePath: `/image?tool=${toolMode}&prompt=${encodeURIComponent(text)}&model=${encodeURIComponent(model)}`,
-                    },
-                });
-            });
-            if (toolMode !== "image-generation" || generationCount > 1) {
-                const sourceUrls = snapshot.references.length ? snapshot.references.map((item) => item.dataUrl) : Array.from({ length: generationCount }, (_, index) => `prompt://${log.id}/${index + 1}`);
-                const failures = sourceUrls.slice(logImages.length).map((sourceUrl) => ({
-                    sourceUrl,
-                    reason: failed?.reason instanceof Error ? failed.reason.message : "生成失败",
-                }));
-                adminState.recordToolBatch({
-                    toolMode,
-                    requestId: log.id,
-                    projectId: toolModeConfig.projectId,
-                    modelId: adminModelId,
-                    sourceUrls,
-                    resultUrls: logImages.map((image) => image.dataUrl),
-                    failures,
-                    createdAt: new Date(log.createdAt).toISOString(),
-                });
-            }
             saveLog(log);
             successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
         } finally {
@@ -425,10 +370,6 @@ function ImageGenerationPage() {
         const text = prompt.trim();
         if (!text) {
             message.error("请输入生图提示词");
-            return null;
-        }
-        if (!isAiConfigReady(effectiveConfig, model)) {
-            handleMissingModelConfig();
             return null;
         }
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };

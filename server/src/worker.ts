@@ -74,16 +74,25 @@ async function executeProvider(task: WorkRow) {
     if (!task.protocol || !task.base_url || !task.model_id) throw new Error("任务模型或 Provider 未配置");
     if (!task.encrypted_credentials || !config.PROVIDER_ENCRYPTION_KEY) throw new Error("Provider 服务端凭据未配置");
     const credentials = JSON.parse(decryptSecret(task.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as Record<string, string>;
-    const headers = { "content-type": "application/json", ...(credentials.apiKey ? { authorization: `Bearer ${credentials.apiKey}` } : {}) };
-    const endpoint = task.protocol === "openai" ? `${task.base_url.replace(/\/$/, "")}/images/generations` : task.base_url;
-    const payload = task.protocol === "openai" ? { model: task.model_id, prompt: task.prompt, n: 1 } : { model: task.model_id, prompt: task.prompt, sourceUrls: task.source_urls, credentials: Object.fromEntries(Object.entries(credentials).filter(([key]) => key !== "apiKey")) };
-    const response = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(180_000) });
+    const authorization: Record<string,string> = credentials.apiKey ? { authorization: `Bearer ${credentials.apiKey}` } : {};
+    let response: Response;
+    if (task.protocol === "openai" && task.operation_type !== "image_generation" && task.source_urls.length) {
+        const form = new FormData(); form.set("model",task.model_id); form.set("prompt",task.prompt); form.set("n","1"); form.set("response_format","b64_json");
+        for(const [index,url] of task.source_urls.entries()){const source=await loadSourceAsset(url,task.user_id);form.append("image",new Blob([Uint8Array.from(source.bytes).buffer],{type:source.mimeType}),source.filename||`reference-${index+1}.png`);}
+        response=await fetch(`${task.base_url.replace(/\/$/, "")}/images/edits`,{method:"POST",headers:authorization,body:form,signal:AbortSignal.timeout(180_000)});
+    } else {
+        const endpoint = task.protocol === "openai" ? `${task.base_url.replace(/\/$/, "")}/images/generations` : task.base_url;
+        const payload = task.protocol === "openai" ? { model: task.model_id, prompt: task.prompt, n: 1, response_format:"b64_json" } : { model: task.model_id, prompt: task.prompt, sourceUrls: task.source_urls, credentials: Object.fromEntries(Object.entries(credentials).filter(([key]) => key !== "apiKey")) };
+        response=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",...authorization},body:JSON.stringify(payload),signal:AbortSignal.timeout(180_000)});
+    }
     if (!response.ok) throw new Error(`Provider ${response.status}: ${(await response.text()).slice(0, 500)}`);
     const body = await response.json() as { data?: Array<{ url?: string; b64_json?: string }>; resultUrls?: string[]; url?: string };
     const urls = body.resultUrls ?? body.data?.map((item) => item.url || (item.b64_json ? `data:image/png;base64,${item.b64_json}` : "")).filter(Boolean) ?? (body.url ? [body.url] : []);
     if (!urls.length) throw new Error("Provider 未返回图片结果");
     return Promise.all(urls.map(fetchResult));
 }
+
+async function loadSourceAsset(url:string,userId:string){const match=url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i);if(!match)throw new Error("参考图不是公司素材地址");const result=await db.query<{object_key:string;mime_type:string;filename:string}>("SELECT object_key,mime_type,filename FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",[match[1],userId]);const asset=result.rows[0];if(!asset)throw new Error("参考图不存在或无权访问");const object=await storage.get(asset.object_key);return{bytes:await object.Body!.transformToByteArray(),mimeType:asset.mime_type,filename:asset.filename};}
 
 async function fetchResult(url: string) {
     if (url.startsWith("data:")) {

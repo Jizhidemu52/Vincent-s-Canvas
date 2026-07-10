@@ -21,7 +21,9 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const canManageConfig = useCanManageConfig();
-    const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
+    const [serverModels,setServerModels]=useState<Array<{modelId:string;name:string;creditCost:number;capabilities:string[]}>>([]);
+    useEffect(()=>{if(capability!=="image")return;fetch("/api/models",{credentials:"include"}).then((response)=>response.ok?response.json():Promise.reject()).then((result:{models:Array<{modelId:string;name:string;creditCost:number;capabilities:string[]}>})=>setServerModels(result.models.filter((model)=>model.capabilities.includes("generate")||model.capabilities.includes("edit")))).catch(()=>setServerModels([]));},[capability]);
+    const options = useMemo(() => capability === "image" ? serverModels.map((model)=>model.modelId) : Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, serverModels, value]);
     const current = value || "";
 
     useEffect(() => {
@@ -52,10 +54,10 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 )}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={current ? modelOptionLabel(config, current) : placeholder}
+                title={current ? serverModels.find((model)=>model.modelId===current)?.name||modelOptionLabel(config, current) : placeholder}
             >
                 <ModelIcon model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionLabel(config, current) : placeholder}</span>
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? serverModels.find((model)=>model.modelId===current)?.name||modelOptionLabel(config, current) : placeholder}</span>
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
@@ -70,7 +72,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 {options.length ? (
                     options.map((model) => (
                         <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)}>
-                            <ModelLabel config={config} model={model} />
+                            <ModelLabel config={config} model={model} serverModel={serverModels.find((item)=>item.modelId===model)} />
                         </SelectItem>
                     ))
                 ) : (
@@ -90,11 +92,11 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability, canMana
     return config.models.length ? `暂无匹配的${label}模型` : "请先到配置里添加渠道和模型";
 }
 
-function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
+function ModelLabel({ config, model, serverModel }: { config: AiConfig; model: string; serverModel?: {name:string;creditCost:number} }) {
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
-            <span className="truncate">{modelOptionLabel(config, model)}</span>
+            <span className="truncate">{serverModel?`${serverModel.name} · 模型 ${serverModel.creditCost} 积分`:modelOptionLabel(config, model)}</span>
         </span>
     );
 }
