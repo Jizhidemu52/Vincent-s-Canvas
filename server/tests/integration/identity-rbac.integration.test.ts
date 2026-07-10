@@ -177,8 +177,40 @@ integration("production identity and RBAC", () => {
 
         const publicModels = await api<{ models: Array<{ id: string; modelId: string; creditCost: number }>; prices: Array<{ operationType: string; credits: number }> }>("/api/models", {}, chineseLogin.cookie);
         expect(publicModels.response.status).toBe(200);
-        expect(publicModels.body.models.find((model) => model.modelId === "internal-seamless")?.creditCost).toBe(0);
+        const internalSeamlessModel = publicModels.body.models.find((model) => model.modelId === "internal-seamless");
+        expect(internalSeamlessModel?.creditCost).toBe(0);
         expect(publicModels.body.prices.find((price) => price.operationType === "seamless_stitch")?.credits).toBe(2);
+
+        const duplicateRequestId = "integration-seamless-duplicate-001";
+        const submitSeamless = (cookie: string) =>
+            api<{ task: { id: string; credits: number } }>(
+                "/api/tasks",
+                {
+                    method: "POST",
+                    body: JSON.stringify({ requestId: duplicateRequestId, projectId: "integration-seamless", operationType: "seamless_stitch", modelConfigId: internalSeamlessModel!.id, prompt: '{"rows":2,"cols":2}', sourceUrls: [] }),
+                },
+                cookie,
+            );
+        const firstSubmission = await submitSeamless(chineseLogin.cookie);
+        const duplicateSubmission = await submitSeamless(chineseLogin.cookie);
+        expect(firstSubmission.response.status).toBe(201);
+        expect(duplicateSubmission.response.status).toBe(201);
+        expect(duplicateSubmission.body.task.id).toBe(firstSubmission.body.task.id);
+        expect(firstSubmission.body.task.credits).toBe(2);
+
+        const heldSession = await api<{ user: { creditBalance: number } }>("/api/auth/session", {}, chineseLogin.cookie);
+        expect(heldSession.body.user.creditBalance).toBe(498);
+        const crossAccountDuplicate = await submitSeamless(emailLogin.cookie);
+        expect(crossAccountDuplicate.response.status).toBe(400);
+
+        const cancelTask = await api(`/api/tasks/${firstSubmission.body.task.id}/cancel`, { method: "POST" }, chineseLogin.cookie);
+        expect(cancelTask.response.status).toBe(204);
+        const duplicateCancel = await api(`/api/tasks/${firstSubmission.body.task.id}/cancel`, { method: "POST" }, chineseLogin.cookie);
+        expect(duplicateCancel.response.status).toBe(409);
+        const releasedSession = await api<{ user: { creditBalance: number } }>("/api/auth/session", {}, chineseLogin.cookie);
+        expect(releasedSession.body.user.creditBalance).toBe(500);
+        const ledger = await api<{ entries: Array<{ entryType: string; referenceId: string }> }>("/api/billing/ledger", {}, chineseLogin.cookie);
+        expect(ledger.body.entries.filter((entry) => entry.referenceId === duplicateRequestId).map((entry) => entry.entryType).sort()).toEqual(["hold", "release"]);
 
         const managerAccounts = await api<{ users: Array<{ id: string; departmentId: string; role: string }> }>("/api/admin/accounts", {}, employeeLogin.cookie);
         expect(managerAccounts.response.status).toBe(200);
