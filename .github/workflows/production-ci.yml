@@ -6,13 +6,21 @@ on:
     paths:
       - "server/**"
       - "web/**"
+      - "ops/**"
       - "docker-compose.yml"
+      - "Dockerfile"
+      - "nginx.conf"
+      - ".env.example"
       - ".github/workflows/production-ci.yml"
   pull_request:
     paths:
       - "server/**"
       - "web/**"
+      - "ops/**"
       - "docker-compose.yml"
+      - "Dockerfile"
+      - "nginx.conf"
+      - ".env.example"
       - ".github/workflows/production-ci.yml"
   workflow_dispatch:
 
