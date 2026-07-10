@@ -276,6 +276,9 @@ jobs:
           test "$history" = "$submitted"
           test "$negative_balances" = "0"
           test "$duplicate_requests" = "0"
+      - name: Verify cross-account task history and asset isolation
+        shell: bash
+        run: docker compose exec -T api bun tests/integration/verify-data-isolation.ts
       - name: Print logs and remove test stack
         if: always()
         shell: bash
