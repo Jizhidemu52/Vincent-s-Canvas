@@ -72,8 +72,8 @@ export async function reserveCredits(db: Database, input: { requestId: string; u
                 await client.query("UPDATE departments SET credit_balance=$1,updated_at=now() WHERE id=$2", [departmentBalance, user.department_id]);
             }
         }
-        await client.query(`INSERT INTO credit_reservations(request_id,user_id,department_id,operation_type,model_config_id,quantity,credits,rmb_cost,price_snapshot)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [input.requestId, input.userId, user.department_id, input.operationType, model?.id ?? null, input.quantity, snapshot.totalCredits, snapshot.totalRmb, snapshot]);
+        await client.query(`INSERT INTO credit_reservations(request_id,user_id,department_id,operation_type,model_config_id,quantity,credits,department_credits,rmb_cost,price_snapshot)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [input.requestId, input.userId, user.department_id, input.operationType, model?.id ?? null, input.quantity, snapshot.totalCredits, departmentBalance === null ? 0 : snapshot.totalCredits, snapshot.totalRmb, snapshot]);
         await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason,metadata)
             VALUES($1,$2,$2,'hold',$3,$4,'task',$5,'任务提交冻结积分',$6)`, [`${input.requestId}:user:hold`, input.userId, -snapshot.totalCredits, userBalance, input.requestId, snapshot]);
         if (departmentBalance !== null && user.department_id) {
@@ -86,7 +86,7 @@ export async function reserveCredits(db: Database, input: { requestId: string; u
 
 export async function settleReservation(db: Database, requestId: string, outcome: "capture" | "release", actorId?: string) {
     return withTransaction(db, async (client) => {
-        const result = await client.query<{ id: string; user_id: string; department_id: string | null; credits: number; status: string }>("SELECT id,user_id,department_id,credits,status FROM credit_reservations WHERE request_id=$1 FOR UPDATE", [requestId]);
+        const result = await client.query<{ id: string; user_id: string; department_id: string | null; credits: number; department_credits: number; status: string }>("SELECT id,user_id,department_id,credits,department_credits,status FROM credit_reservations WHERE request_id=$1 FOR UPDATE", [requestId]);
         const reservation = result.rows[0];
         if (!reservation) throw new BillingError("RESERVATION_NOT_FOUND", "额度冻结记录不存在");
         if (reservation.status !== "held") return { status: reservation.status, duplicate: true };
@@ -95,6 +95,11 @@ export async function settleReservation(db: Database, requestId: string, outcome
             await client.query("UPDATE credit_reservations SET status='captured',settled_at=now() WHERE id=$1", [reservation.id]);
             await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
                 VALUES($1,$2,$3,'capture',0,$4,'task',$5,'任务成功结算')`, [`${requestId}:user:capture`, reservation.user_id, actorId ?? reservation.user_id, user.rows[0]!.credit_balance, requestId]);
+            if (reservation.department_id && reservation.department_credits > 0) {
+                const department = await client.query<{ credit_balance: number }>("SELECT credit_balance FROM departments WHERE id=$1", [reservation.department_id]);
+                await client.query(`INSERT INTO credit_ledger(request_id,department_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
+                    VALUES($1,$2,$3,'capture',0,$4,'task',$5,'任务成功结算部门预算')`, [`${requestId}:department:capture`, reservation.department_id, actorId ?? reservation.user_id, department.rows[0]!.credit_balance, requestId]);
+            }
             return { status: "captured", duplicate: false };
         }
         const user = await client.query<{ credit_balance: number }>("SELECT credit_balance FROM users WHERE id=$1 FOR UPDATE", [reservation.user_id]);
@@ -102,13 +107,13 @@ export async function settleReservation(db: Database, requestId: string, outcome
         await client.query("UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2", [userBalance, reservation.user_id]);
         await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
             VALUES($1,$2,$3,'release',$4,$5,'task',$6,'任务失败、取消或超时释放积分')`, [`${requestId}:user:release`, reservation.user_id, actorId ?? reservation.user_id, reservation.credits, userBalance, requestId]);
-        if (reservation.department_id) {
-            const department = await client.query<{ credit_balance: number; credit_limit: number }>("SELECT credit_balance,credit_limit FROM departments WHERE id=$1 FOR UPDATE", [reservation.department_id]);
-            if (department.rows[0] && department.rows[0].credit_limit > 0) {
-                const balance = department.rows[0].credit_balance + reservation.credits;
+        if (reservation.department_id && reservation.department_credits > 0) {
+            const department = await client.query<{ credit_balance: number }>("SELECT credit_balance FROM departments WHERE id=$1 FOR UPDATE", [reservation.department_id]);
+            if (department.rows[0]) {
+                const balance = department.rows[0].credit_balance + reservation.department_credits;
                 await client.query("UPDATE departments SET credit_balance=$1,updated_at=now() WHERE id=$2", [balance, reservation.department_id]);
                 await client.query(`INSERT INTO credit_ledger(request_id,department_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
-                    VALUES($1,$2,$3,'release',$4,$5,'task',$6,'任务释放部门预算')`, [`${requestId}:department:release`, reservation.department_id, actorId ?? reservation.user_id, reservation.credits, balance, requestId]);
+                    VALUES($1,$2,$3,'release',$4,$5,'task',$6,'任务释放部门预算')`, [`${requestId}:department:release`, reservation.department_id, actorId ?? reservation.user_id, reservation.department_credits, balance, requestId]);
             }
         }
         await client.query("UPDATE credit_reservations SET status='released',settled_at=now() WHERE id=$1", [reservation.id]);

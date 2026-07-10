@@ -10,6 +10,12 @@ export type Cache = {
     del(key: string): Promise<unknown>;
     ping(): Promise<string>;
     quit(): Promise<string>;
+    zAdd(key: string, member: { score: number; value: string }): Promise<number>;
+    zRem(key: string, member: string): Promise<number>;
+    zPopMin(key: string): Promise<{ value: string; score: number } | null>;
+    incr(key: string): Promise<number>;
+    decr(key: string): Promise<number>;
+    expire(key: string, seconds: number): Promise<number>;
 };
 
 export function createDatabase(connectionString: string) {

@@ -1,0 +1,9 @@
+export type ServerTask = { id: string; requestId: string; batchId: string | null; userId: string; userName: string; projectId: string; operationType: string; prompt: string; sourceUrls: string[]; resultUrls: string[]; priority: string; status: string; credits: number; rmbCost: number; failureReason: string | null; attempts: number; queuedAt: string };
+export type ServerBatch = { id: string; requestId: string; userId: string; userName: string; projectId: string; operationType: string; modelName: string | null; priority: string; status: string; totalItems: number; completedItems: number; failedItems: number; createdAt: string };
+export type ServerHistory = { id: string; taskId: string; userId: string; userName: string; departmentName: string | null; projectId: string; operationType: string; modelName: string | null; prompt: string; sourceUrls: string[]; resultUrls: string[]; credits: number; rmbCost: number; status: string; failureReason: string | null; createdAt: string };
+
+async function get<T>(path: string): Promise<T> { const response = await fetch(path, { credentials: "include" }); if (!response.ok) { const payload = await response.json().catch(() => ({})) as { message?: string }; throw new Error(payload.message || "数据加载失败"); } return response.json() as Promise<T>; }
+export const listAdminTasks = () => get<{ tasks: ServerTask[] }>("/api/admin/tasks");
+export const listAdminBatches = () => get<{ batches: ServerBatch[] }>("/api/admin/tasks/batches");
+export const listAdminHistory = () => get<{ history: ServerHistory[] }>("/api/admin/history");
+export async function recordHistoryExport(filters: Record<string, string>, rowCount: number) { await fetch("/api/admin/history/export-event", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters, rowCount }) }); }

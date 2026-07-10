@@ -30,6 +30,19 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+  worker:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    command: ["bun", "src/worker.ts"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://wireless_canvas:${POSTGRES_PASSWORD}@postgres:5432/wireless_canvas
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
   postgres:
     image: postgres:17-alpine
     environment:

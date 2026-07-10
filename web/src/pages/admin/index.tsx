@@ -10,6 +10,7 @@ import { type AdminModelCapability, type AdminModelConfig, type AdminOperationTy
 import { ApiProviderPanel } from "@/pages/admin/components/api-provider-panel";
 import { WorkflowManagementPanel } from "@/pages/admin/components/workflow-management-panel";
 import { ModelPricingPanel } from "@/pages/admin/components/model-pricing-panel";
+import { HistoryManagementPanel, TaskManagementPanel } from "@/pages/admin/components/task-history-panels";
 import { useAdminStore } from "@/stores/use-admin-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -524,37 +525,7 @@ export default function AdminPage() {
                             {
                                 key: "history",
                                 label: "历史记录",
-                                children: (
-                                    <div className="grid gap-3">
-                                        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                                            <Space wrap>
-                                                <Select className="w-48" value={historyDesigner} onChange={setHistoryDesigner} options={[{ label: "全部设计师", value: "all" }, ...designerOptions]} />
-                                                <Select className="w-48" value={historyModel} onChange={setHistoryModel} options={[{ label: "全部模型", value: "all" }, ...state.models.map((model) => ({ label: model.name, value: model.id }))]} />
-                                                <Select className="w-48" value={historyOperation} onChange={setHistoryOperation} options={[{ label: "全部操作", value: "all" }, ...operationOptions]} />
-                                            </Space>
-                                            <Button icon={<Download className="size-4" />} onClick={exportHistory}>
-                                                导出历史
-                                            </Button>
-                                        </div>
-                                        <Table
-                                            rowKey="id"
-                                            size="small"
-                                            dataSource={filteredHistory}
-                                            columns={[
-                                                { title: "时间", dataIndex: "createdAt", width: 180 },
-                                                { title: "操作人", render: (_, record) => designerName(state.designers, record.designerId) },
-                                                { title: "项目", dataIndex: "projectId" },
-                                                { title: "操作", render: (_, record) => operationLabel(record.operationType) },
-                                                { title: "模型", render: (_, record) => modelName(state.models, record.modelId) },
-                                                { title: "数量", dataIndex: "quantity" },
-                                                { title: "积分", dataIndex: "credits" },
-                                                { title: "金额", render: (_, record) => `￥${record.rmb.toFixed(2)}` },
-                                                { title: "状态", render: (_, record) => <Tag color={record.status === "success" ? "green" : "red"}>{record.status === "success" ? "成功" : "失败"}</Tag> },
-                                                { title: "提示词", dataIndex: "prompt", ellipsis: true },
-                                            ]}
-                                        />
-                                    </div>
-                                ),
+                                children: <HistoryManagementPanel />,
                             },
                             {
                                 key: "projects",
@@ -603,23 +574,7 @@ export default function AdminPage() {
                             {
                                 key: "batch",
                                 label: "批量任务",
-                                children: (
-                                    <Table
-                                        rowKey="id"
-                                        size="small"
-                                        dataSource={state.batchTasks}
-                                        columns={[
-                                            { title: "任务 ID", dataIndex: "id" },
-                                            { title: "设计师", render: (_, record) => designerName(state.designers, record.designerId) },
-                                            { title: "项目", dataIndex: "projectId" },
-                                            { title: "模型", render: (_, record) => modelName(state.models, record.modelId) },
-                                            { title: "整体状态", dataIndex: "status" },
-                                            { title: "进度", render: (_, record) => `${record.items.filter((item) => item.status === "success").length}/${record.items.length}` },
-                                            { title: "失败", render: (_, record) => record.items.filter((item) => item.status === "failed").length },
-                                            { title: "消耗", render: (_, record) => record.items.reduce((sum, item) => sum + item.credits, 0) },
-                                        ]}
-                                    />
-                                ),
+                                children: <TaskManagementPanel />,
                             },
                             {
                                 key: "audit",
@@ -646,7 +601,7 @@ export default function AdminPage() {
                 </div>
 
                 <div className="rounded-md border border-stone-200 bg-white px-4 py-3 text-xs leading-5 text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">
-                    账号、部门、登录会话和管理审计已由服务端统一管理。模型密钥、正式额度账本、任务队列和公司对象存储将在后续阶段接入同一套权限体系。
+                    账号、会话、模型密钥、价格版本、额度账本、任务队列、生成历史和管理审计已由服务端统一管理。公司对象存储与素材同步将在下一阶段接入。
                 </div>
             </main>
         </div>

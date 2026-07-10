@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS pricing_rule_versions (
     operation_type text NOT NULL CHECK (operation_type IN ('image_generation','upscale','remove_background','inpaint','batch_image','seamless_stitch')),
     label text NOT NULL,
     credits integer NOT NULL CHECK (credits >= 0),
+    department_credits integer NOT NULL DEFAULT 0 CHECK (department_credits >= 0),
     rmb_cost numeric(12,4) NOT NULL CHECK (rmb_cost >= 0),
     version integer NOT NULL,
     status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','testing','published','retired')),

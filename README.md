@@ -93,6 +93,8 @@ http://localhost:3000/login
 
 生产环境不要使用裸 HTTP，也不要把 PostgreSQL、Redis 或 API 服务端口直接暴露到公网。
 
+本地验收任务队列时可暂时设置 `TASK_MOCK_MODE=true`。Worker 会走完整的排队、积分冻结、处理、历史入库和成功结算流程，但返回系统生成的 QA 占位图，不调用外部模型。正式上线必须改回 `false`，并在后台配置 Provider 和模型。
+
 ### 第 2 步：选择身份
 
 1. 普通设计师选择设计师账号。

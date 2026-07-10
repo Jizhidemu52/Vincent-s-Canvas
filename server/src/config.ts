@@ -17,6 +17,8 @@ const schema = z.object({
     WECOM_CALLBACK_URL: z.string().url().optional().or(z.literal("")),
     MFA_ENCRYPTION_KEY: z.string().optional(),
     PROVIDER_ENCRYPTION_KEY: z.string().optional(),
+    WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(40).default(10),
+    TASK_MOCK_MODE: z.enum(["true", "false"]).default("false"),
 });
 
 export type AppConfig = z.infer<typeof schema>;
