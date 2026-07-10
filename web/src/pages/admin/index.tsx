@@ -69,7 +69,7 @@ export default function AdminPage() {
             setAccounts(accountResult.users);
             setDepartments(departmentResult.departments);
             setAuditLogs(auditResult.auditLogs);
-            setTotalCost(historyResult.history.reduce((sum, item) => sum + item.rmbCost, 0));
+            setTotalCost(historyResult.totalRmbCost);
         } catch (error) { message.error(error instanceof Error ? error.message : "账号数据加载失败"); }
         finally { setAccountsLoading(false); }
     };

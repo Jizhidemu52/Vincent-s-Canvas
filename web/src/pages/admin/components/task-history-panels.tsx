@@ -1,18 +1,19 @@
-import { App, Button, Input, Select, Space, Table, Tag, Tooltip } from "antd";
-import { Download, Pause, Play, RefreshCw, XCircle } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { App, Button, DatePicker, Input, Select, Space, Table, Tag, Tooltip } from "antd";
+import { Download, Pause, Play, RefreshCw, Search, XCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { saveAs } from "file-saver";
-import Papa from "papaparse";
 
 import {
     availableBatchActions,
     availableTaskActions,
     controlAdminBatch,
     controlAdminTask,
+    exportAdminHistory,
     listAdminBatches,
     listAdminHistory,
+    listAdminHistoryOptions,
     listAdminTasks,
-    recordHistoryExport,
+    type AdminHistoryFilters,
     type ServerBatch,
     type ServerHistory,
     type ServerTask,
@@ -205,82 +206,134 @@ function actionLabel(action: TaskControlAction) {
 export function HistoryManagementPanel() {
     const { message } = App.useApp();
     const [history, setHistory] = useState<ServerHistory[]>([]);
+    const [designers, setDesigners] = useState<Array<{ value: string; label: string }>>([]);
+    const [models, setModels] = useState<Array<{ value: string; label: string }>>([]);
+    const [operations, setOperations] = useState<Array<{ value: string; label: string }>>([]);
     const [loading, setLoading] = useState(true);
-    const [userId, setUserId] = useState("all");
-    const [operation, setOperation] = useState("all");
-    const [search, setSearch] = useState("");
-    const refresh = async () => {
+    const [exporting, setExporting] = useState(false);
+    const [filters, setFilters] = useState<AdminHistoryFilters>({});
+    const [projectDraft, setProjectDraft] = useState("");
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(50);
+    const [total, setTotal] = useState(0);
+    const requestSequence = useRef(0);
+
+    const refresh = async (nextFilters = filters, nextPage = page, nextPageSize = pageSize) => {
+        const sequence = ++requestSequence.current;
         setLoading(true);
         try {
-            setHistory((await listAdminHistory()).history);
+            const result = await listAdminHistory({ ...nextFilters, page: nextPage, pageSize: nextPageSize });
+            if (sequence !== requestSequence.current) return;
+            setHistory(result.history);
+            setTotal(result.total);
+            setPage(result.page);
+            setPageSize(result.pageSize);
         } catch (error) {
+            if (sequence !== requestSequence.current) return;
             message.error(error instanceof Error ? error.message : "历史加载失败");
         } finally {
-            setLoading(false);
+            if (sequence === requestSequence.current) setLoading(false);
         }
     };
     useEffect(() => {
-        void refresh();
+        void refresh(filters, page, pageSize);
+    }, [filters, page, pageSize]);
+
+    useEffect(() => {
+        listAdminHistoryOptions()
+            .then((result) => {
+                setDesigners(result.users);
+                setModels(result.models);
+                setOperations(result.operations);
+            })
+            .catch((error) => message.error(error instanceof Error ? error.message : "筛选选项加载失败"));
     }, []);
-    const rows = useMemo(
-        () =>
-            history.filter(
-                (row) => (userId === "all" || row.userId === userId) && (operation === "all" || row.operationType === operation) && (!search || `${row.projectId} ${row.prompt} ${row.modelName || ""}`.toLowerCase().includes(search.toLowerCase())),
-            ),
-        [history, operation, search, userId],
-    );
-    const exportCsv = async () => {
-        const csv = Papa.unparse(
-            rows.map((row) => ({
-                时间: row.createdAt,
-                设计师: row.userName,
-                部门: row.departmentName || "",
-                项目: row.projectId,
-                操作: row.operationType,
-                模型: row.modelName || "",
-                提示词: row.prompt,
-                积分: row.credits,
-                人民币成本: row.rmbCost,
-                状态: row.status,
-                失败原因: row.failureReason || "",
-                原图: row.sourceUrls.join(" "),
-                结果图: row.resultUrls.join(" "),
-            })),
-        );
-        await recordHistoryExport({ userId, operation, search }, rows.length);
-        saveAs(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }), `无线画布历史-${Date.now()}.csv`);
+
+    const updateFilters = (patch: Partial<AdminHistoryFilters>) => {
+        setPage(1);
+        setFilters((current) => {
+            const next = { ...current, ...patch };
+            return Object.fromEntries(Object.entries(next).filter(([, value]) => value)) as AdminHistoryFilters;
+        });
     };
-    const users = Array.from(new Map(history.map((row) => [row.userId, row.userName])).entries()).map(([value, label]) => ({ value, label }));
-    const operations = Array.from(new Set(history.map((row) => row.operationType))).map((value) => ({ value, label: value }));
+
+    const applyProjectFilter = () => updateFilters({ projectId: projectDraft.trim() || undefined });
+    const exportCsv = async () => {
+        setExporting(true);
+        try {
+            saveAs(await exportAdminHistory(filters), `无线画布历史-${Date.now()}.csv`);
+            message.success("当前筛选结果已导出并写入审计日志");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "历史导出失败");
+        } finally {
+            setExporting(false);
+        }
+    };
     return (
-        <div className="grid gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-                <Select className="w-44" value={userId} onChange={setUserId} options={[{ value: "all", label: "全部设计师" }, ...users]} />
-                <Select className="w-44" value={operation} onChange={setOperation} options={[{ value: "all", label: "全部操作" }, ...operations]} />
-                <Input className="max-w-sm" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索项目、模型或提示词" />
-                <Button className="ml-auto" icon={<Download className="size-4" />} onClick={exportCsv}>
+        <div className="grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-3">
+            <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2">
+                <Select className="w-44" allowClear placeholder="全部设计师" value={filters.userId} onChange={(value) => updateFilters({ userId: value })} options={designers} />
+                <Select className="w-44" allowClear placeholder="全部模型" value={filters.modelId} onChange={(value) => updateFilters({ modelId: value })} options={models} />
+                <Select className="w-44" allowClear placeholder="全部操作" value={filters.operationType} onChange={(value) => updateFilters({ operationType: value })} options={operations} />
+                <Space.Compact className="w-64">
+                    <Input
+                        allowClear
+                        value={projectDraft}
+                        onChange={(event) => {
+                            setProjectDraft(event.target.value);
+                            if (!event.target.value) updateFilters({ projectId: undefined });
+                        }}
+                        onPressEnter={applyProjectFilter}
+                        placeholder="项目 ID"
+                    />
+                    <Button aria-label="查询项目" icon={<Search className="size-4" />} onClick={applyProjectFilter} />
+                </Space.Compact>
+                <DatePicker.RangePicker
+                    onChange={(dates) =>
+                        updateFilters({
+                            from: dates?.[0]?.startOf("day").toISOString(),
+                            to: dates?.[1]?.endOf("day").toISOString(),
+                        })
+                    }
+                />
+                <Button className="ml-auto" icon={<Download className="size-4" />} loading={exporting} disabled={!total} onClick={exportCsv}>
                     导出当前结果
                 </Button>
             </div>
-            <Table
-                rowKey="id"
-                size="small"
-                loading={loading}
-                dataSource={rows}
-                columns={[
-                    { title: "时间", dataIndex: "createdAt" },
-                    { title: "设计师", dataIndex: "userName" },
-                    { title: "部门", dataIndex: "departmentName" },
-                    { title: "项目", dataIndex: "projectId" },
-                    { title: "操作", dataIndex: "operationType" },
-                    { title: "模型", dataIndex: "modelName" },
-                    { title: "积分", dataIndex: "credits" },
-                    { title: "成本", render: (_, row: ServerHistory) => `￥${row.rmbCost.toFixed(4)}` },
-                    { title: "状态", render: (_, row: ServerHistory) => <Tag color={row.status === "success" ? "green" : "red"}>{row.status}</Tag> },
-                    { title: "提示词", dataIndex: "prompt", ellipsis: true },
-                    { title: "失败原因", dataIndex: "failureReason", ellipsis: true },
-                ]}
-            />
+            <div className="min-w-0 max-w-full overflow-hidden">
+                <Table
+                    rowKey="id"
+                    size="small"
+                    loading={loading}
+                    dataSource={history}
+                    scroll={{ x: 1500 }}
+                    pagination={{
+                        current: page,
+                        pageSize,
+                        total,
+                        showSizeChanger: true,
+                        pageSizeOptions: [20, 50, 100, 200],
+                        showTotal: (value) => `共 ${value} 条`,
+                        onChange: (nextPage, nextPageSize) => {
+                            setPage(nextPageSize === pageSize ? nextPage : 1);
+                            setPageSize(nextPageSize);
+                        },
+                    }}
+                    columns={[
+                        { title: "时间", dataIndex: "createdAt", width: 180 },
+                        { title: "设计师", dataIndex: "userName", width: 120, fixed: "left" },
+                        { title: "部门", dataIndex: "departmentName", width: 120 },
+                        { title: "项目", dataIndex: "projectId", width: 160, ellipsis: true },
+                        { title: "操作", dataIndex: "operationType", width: 130 },
+                        { title: "模型", dataIndex: "modelName", width: 140 },
+                        { title: "积分", dataIndex: "credits", width: 70 },
+                        { title: "成本", width: 100, render: (_, row: ServerHistory) => `￥${row.rmbCost.toFixed(4)}` },
+                        { title: "状态", width: 90, render: (_, row: ServerHistory) => <Tag color={row.status === "success" ? "green" : "red"}>{statusText[row.status] || row.status}</Tag> },
+                        { title: "提示词", dataIndex: "prompt", width: 220, ellipsis: true },
+                        { title: "失败原因", dataIndex: "failureReason", width: 180, ellipsis: true },
+                    ]}
+                />
+            </div>
         </div>
     );
 }

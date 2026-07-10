@@ -61,6 +61,30 @@ export type ServerHistory = {
     createdAt: string;
 };
 
+export type AdminHistoryFilters = {
+    userId?: string;
+    projectId?: string;
+    modelId?: string;
+    operationType?: string;
+    from?: string;
+    to?: string;
+};
+
+export type AdminHistoryPage = {
+    history: ServerHistory[];
+    total: number;
+    totalCredits: number;
+    totalRmbCost: number;
+    page: number;
+    pageSize: number;
+};
+
+export type AdminHistoryOptions = {
+    users: Array<{ value: string; label: string }>;
+    models: Array<{ value: string; label: string }>;
+    operations: Array<{ value: string; label: string }>;
+};
+
 async function get<T>(path: string): Promise<T> {
     const response = await fetch(path, { credentials: "include" });
     if (!response.ok) {
@@ -81,9 +105,19 @@ async function post<T>(path: string): Promise<T> {
 export type TaskControlAction = "pause" | "resume" | "cancel";
 export const listAdminTasks = () => get<{ tasks: ServerTask[] }>("/api/admin/tasks");
 export const listAdminBatches = () => get<{ batches: ServerBatch[] }>("/api/admin/tasks/batches");
-export const listAdminHistory = () => get<{ history: ServerHistory[] }>("/api/admin/history");
+export const listAdminHistory = (filters: AdminHistoryFilters & { page?: number; pageSize?: number } = {}) => get<AdminHistoryPage>(`/api/admin/history?${serializeApiParams(filters)}`);
+export const listAdminHistoryOptions = () => get<AdminHistoryOptions>("/api/admin/history/options");
 export const controlAdminTask = (id: string, action: TaskControlAction) => post<void>(`/api/admin/tasks/${id}/${action}`);
 export const controlAdminBatch = (id: string, action: TaskControlAction) => post<{ changed: number }>(`/api/admin/tasks/batches/${id}/${action}`);
+
+export async function exportAdminHistory(filters: AdminHistoryFilters) {
+    const response = await fetch(`/api/admin/history/export?${serializeApiParams(filters)}`, { credentials: "include" });
+    if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(payload.message || "历史导出失败");
+    }
+    return response.blob();
+}
 
 export function availableTaskActions(status: string): TaskControlAction[] {
     if (status === "waiting") return ["pause", "cancel"];
@@ -98,6 +132,4 @@ export function availableBatchActions(batch: Pick<ServerBatch, "waitingItems" | 
     if (batch.waitingItems + batch.pausedItems > 0) actions.push("cancel");
     return actions;
 }
-export async function recordHistoryExport(filters: Record<string, string>, rowCount: number) {
-    await fetch("/api/admin/history/export-event", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters, rowCount }) });
-}
+import { serializeApiParams } from "@/services/api/request";
