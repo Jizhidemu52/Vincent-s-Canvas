@@ -15,8 +15,8 @@ const baseUrl = __ENV.BASE_URL;
 const sessions = JSON.parse(__ENV.SESSION_COOKIES || "[]");
 const modelId = __ENV.MODEL_CONFIG_ID;
 
-if (!baseUrl || !modelId || sessions.length === 0) {
-  throw new Error("BASE_URL, MODEL_CONFIG_ID and at least one SESSION_COOKIES entry are required");
+if (!baseUrl || !modelId || sessions.length !== 40) {
+  throw new Error("BASE_URL, MODEL_CONFIG_ID and exactly 40 SESSION_COOKIES entries are required");
 }
 
 export default function () {
@@ -33,6 +33,6 @@ export default function () {
   const response = http.post(`${baseUrl}/api/tasks`, payload, {
     headers: { "content-type": "application/json", Cookie: cookie },
   });
-  check(response, { "task accepted or quota rejected cleanly": (r) => r.status === 201 || r.status === 400 });
+  check(response, { "task accepted": (r) => r.status === 201 });
   sleep(1);
 }

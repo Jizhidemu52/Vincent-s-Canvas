@@ -131,7 +131,7 @@ jobs:
           BOOTSTRAP_ADMIN_PASSWORD=ComposeAdmin2026
           MFA_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
           PROVIDER_ENCRYPTION_KEY=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
-          WORKER_CONCURRENCY=10
+          WORKER_CONCURRENCY=40
           TASK_MOCK_MODE=true
           S3_ENDPOINT=http://minio:9000
           S3_REGION=us-east-1
@@ -218,6 +218,64 @@ jobs:
           done
           echo "API did not recover after database restore" >&2
           exit 1
+      - name: Prepare 40 isolated designer sessions
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose exec -T redis redis-cli FLUSHDB
+          docker compose exec -T api bun tests/load/prepare-40-sessions.ts
+          docker compose cp api:/tmp/load-config.json /tmp/load-config.json
+          test "$(jq '.sessionCookies | length' /tmp/load-config.json)" = "40"
+      - name: Run 40-designer submission load test
+        shell: bash
+        run: |
+          set -euo pipefail
+          model_config_id=$(jq -r '.modelConfigId' /tmp/load-config.json)
+          session_cookies=$(jq -c '.sessionCookies' /tmp/load-config.json)
+          docker run --rm --network host \
+            -e BASE_URL=http://127.0.0.1:3000 \
+            -e MODEL_CONFIG_ID="$model_config_id" \
+            -e SESSION_COOKIES="$session_cookies" \
+            -v "$PWD:/work:ro" \
+            grafana/k6:2.0.0 run /work/ops/load/k6-40-submitters.js
+      - name: Verify queue, billing and generated assets after load
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 180); do
+            pending=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc \
+              "SELECT COUNT(*) FROM tasks WHERE status IN ('waiting','processing')")
+            if [ "$pending" = "0" ]; then
+              break
+            fi
+            if [ "$attempt" -eq 180 ]; then
+              echo "Task queue did not drain within 6 minutes; pending=$pending" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          submitted=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc "SELECT COUNT(*) FROM tasks")
+          designers=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc "SELECT COUNT(DISTINCT user_id) FROM tasks")
+          failed=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc "SELECT COUNT(*) FROM tasks WHERE status<>'success'")
+          captured=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc "SELECT COUNT(*) FROM credit_reservations WHERE status='captured'")
+          held=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc "SELECT COUNT(*) FROM credit_reservations WHERE status='held'")
+          assets=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc "SELECT COUNT(*) FROM assets WHERE status='ready' AND source='generation'")
+          history=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc "SELECT COUNT(*) FROM generation_history WHERE status='success'")
+          negative_balances=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc "SELECT COUNT(*) FROM users WHERE credit_balance<0")
+          duplicate_requests=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc "SELECT COUNT(*) FROM (SELECT request_id FROM tasks GROUP BY request_id HAVING COUNT(*)>1) duplicates")
+
+          printf 'submitted=%s designers=%s failed=%s captured=%s held=%s assets=%s history=%s negative_balances=%s duplicate_requests=%s\n' \
+            "$submitted" "$designers" "$failed" "$captured" "$held" "$assets" "$history" "$negative_balances" "$duplicate_requests"
+          test "$submitted" -ge 1000
+          test "$designers" = "40"
+          test "$failed" = "0"
+          test "$captured" = "$submitted"
+          test "$held" = "0"
+          test "$assets" = "$submitted"
+          test "$history" = "$submitted"
+          test "$negative_balances" = "0"
+          test "$duplicate_requests" = "0"
       - name: Print logs and remove test stack
         if: always()
         shell: bash
