@@ -11,6 +11,7 @@ import { sessionMiddleware, setSessionCookie } from "../session";
 import type { AuthenticatedRequest } from "../types";
 import { mapUser, userSelect, type UserRow } from "../user-mapper";
 import { rateLimit } from "../http-security";
+import { createWeComAuthorizationUrl, exchangeWeComCode, WeComError } from "../wecom";
 
 const loginSchema = z.object({
     identifier: z.string().trim().min(1).max(200),
@@ -141,14 +142,16 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
     });
 
     router.get("/wecom/start", async (request, response) => {
-        if (!config.WECOM_CORP_ID || !config.WECOM_AGENT_ID || !config.WECOM_SECRET || !config.WECOM_CALLBACK_URL) {
-            response.status(503).json({ error: "WECOM_NOT_CONFIGURED", message: "企业微信登录尚未由公司 IT 配置" }); return;
+        try {
+            const state = randomBytes(24).toString("base64url");
+            const portal = request.query.portal === "admin" ? "admin" : "designer";
+            const authorizationUrl = createWeComAuthorizationUrl(config, state);
+            await cache.set(`wecom-state:${state}`, portal, { EX: 300 });
+            response.json({ authorizationUrl });
+        } catch (error) {
+            if (error instanceof WeComError) { response.status(503).json({ error: error.code, message: error.message }); return; }
+            throw error;
         }
-        const state = randomBytes(24).toString("base64url");
-        const portal = request.query.portal === "admin" ? "admin" : "designer";
-        await cache.set(`wecom-state:${state}`, portal, { EX: 300 });
-        const params = new URLSearchParams({ appid: config.WECOM_CORP_ID, agentid: config.WECOM_AGENT_ID, redirect_uri: config.WECOM_CALLBACK_URL, state });
-        response.json({ authorizationUrl: `https://open.work.weixin.qq.com/wwopen/sso/qrConnect?${params}` });
     });
 
     router.get("/wecom/callback", async (request, response, next) => {
@@ -158,41 +161,52 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             const portal = state ? await cache.get(`wecom-state:${state}`) : null;
             if (!code || !state || !portal) { response.status(400).send("企业微信登录请求已失效，请返回登录页重试"); return; }
             await cache.del(`wecom-state:${state}`);
-            if (!config.WECOM_CORP_ID || !config.WECOM_SECRET) { response.status(503).send("企业微信登录尚未配置"); return; }
-
-            const tokenUrl = new URL("https://qyapi.weixin.qq.com/cgi-bin/gettoken");
-            tokenUrl.searchParams.set("corpid", config.WECOM_CORP_ID);
-            tokenUrl.searchParams.set("corpsecret", config.WECOM_SECRET);
-            const tokenPayload = await fetch(tokenUrl).then((result) => result.json()) as { errcode: number; errmsg?: string; access_token?: string };
-            if (tokenPayload.errcode !== 0 || !tokenPayload.access_token) throw new Error(`WeCom token failed: ${tokenPayload.errmsg || tokenPayload.errcode}`);
-            const userInfoUrl = new URL("https://qyapi.weixin.qq.com/cgi-bin/auth/getuserinfo");
-            userInfoUrl.searchParams.set("access_token", tokenPayload.access_token);
-            userInfoUrl.searchParams.set("code", code);
-            const userPayload = await fetch(userInfoUrl).then((result) => result.json()) as { errcode: number; errmsg?: string; userid?: string };
-            if (userPayload.errcode !== 0 || !userPayload.userid) throw new Error(`WeCom user lookup failed: ${userPayload.errmsg || userPayload.errcode}`);
+            const { userId } = await exchangeWeComCode(config, code);
 
             const result = await db.query<UserRow>(
                 `SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id
                  LEFT JOIN external_identities e ON e.user_id=u.id AND e.provider='wecom'
-                 WHERE e.subject=$1 OR u.employee_no=$1 ORDER BY (e.subject=$1) DESC LIMIT 1`, [userPayload.userid],
+                 WHERE e.subject=$1 OR u.employee_no=$1 ORDER BY (e.subject=$1) DESC LIMIT 1`, [userId],
             );
             const row = result.rows[0];
             if (!row || row.status !== "active" || !canUsePortal(row.role, portal as "designer" | "admin")) {
                 response.status(403).send("该企业微信成员尚未开通对应平台权限"); return;
             }
-            await db.query(`INSERT INTO external_identities(user_id,provider,subject) VALUES($1,'wecom',$2)
-                ON CONFLICT(provider,subject) DO NOTHING`, [row.id, userPayload.userid]);
             const session = createSessionToken();
-            await db.query(`INSERT INTO sessions(id,user_id,token_hash,ip_address,user_agent,expires_at)
-                VALUES($1,$2,$3,$4,$5,now()+($6 * interval '1 second'))`, [session.id, row.id, hashToken(session.token), request.ip, request.get("user-agent"), config.SESSION_TTL_SECONDS]);
-            await db.query("UPDATE users SET last_login_at=now(),failed_login_count=0,locked_until=NULL WHERE id=$1", [row.id]);
+            const client = await db.connect();
+            try {
+                await client.query("BEGIN");
+                await client.query(`INSERT INTO external_identities(user_id,provider,subject) VALUES($1,'wecom',$2)
+                    ON CONFLICT DO NOTHING`, [row.id, userId]);
+                const binding = await client.query<{ user_id: string; subject: string }>("SELECT user_id,subject FROM external_identities WHERE provider='wecom' AND (subject=$1 OR user_id=$2) FOR UPDATE", [userId, row.id]);
+                if (binding.rows.length !== 1 || binding.rows[0]!.user_id !== row.id || binding.rows[0]!.subject !== userId) {
+                    await client.query("ROLLBACK");
+                    await writeAudit(db, { action: "auth.wecom_binding_conflict", targetType: "user", targetId: row.id, result: "denied", detail: { portal }, ip: request.ip }).catch(() => undefined);
+                    response.status(409).send("该企业微信成员与内部账号的绑定发生冲突，请联系超级管理员处理");
+                    return;
+                }
+                await client.query(`INSERT INTO sessions(id,user_id,token_hash,ip_address,user_agent,expires_at)
+                    VALUES($1,$2,$3,$4,$5,now()+($6 * interval '1 second'))`, [session.id, row.id, hashToken(session.token), request.ip, request.get("user-agent"), config.SESSION_TTL_SECONDS]);
+                await client.query("UPDATE users SET last_login_at=now(),failed_login_count=0,locked_until=NULL WHERE id=$1", [row.id]);
+                await client.query("COMMIT");
+            } catch (error) {
+                await client.query("ROLLBACK").catch(() => undefined);
+                throw error;
+            } finally { client.release(); }
             await cache.set(`session:${hashToken(session.token)}`, session.id, { EX: config.SESSION_TTL_SECONDS });
             setSessionCookie(response, config, session.token);
             const user = mapUser(row);
             await writeAudit(db, { actor: user, action: "auth.wecom_login", targetType: "session", targetId: session.id, result: "success", ip: request.ip });
             const destination = user.mustChangePassword ? "/change-password" : user.role === "designer" ? "/" : "/admin";
             response.redirect(302, destination);
-        } catch (error) { next(error); }
+        } catch (error) {
+            if (error instanceof WeComError) {
+                await writeAudit(db, { action: "auth.wecom_callback", targetType: "external_identity", result: "failed", detail: { code: error.code }, ip: request.ip }).catch(() => undefined);
+                response.status(502).send(error.message);
+                return;
+            }
+            next(error);
+        }
     });
 
     return router;

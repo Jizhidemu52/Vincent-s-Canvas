@@ -12,6 +12,7 @@ import { WorkflowManagementPanel } from "@/pages/admin/components/workflow-manag
 import { ModelPricingPanel } from "@/pages/admin/components/model-pricing-panel";
 import { HistoryManagementPanel, TaskManagementPanel } from "@/pages/admin/components/task-history-panels";
 import { AdminAssetsPanel } from "@/pages/admin/components/admin-assets-panel";
+import { IntegrationStatusPanel } from "@/pages/admin/components/integration-status-panel";
 import { useAdminStore } from "@/stores/use-admin-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -182,6 +183,7 @@ export default function AdminPage() {
         { key: "projects", label: "项目素材" },
         { key: "batch", label: "批量任务" },
         { key: "audit", label: "审计日志" },
+        { key: "integrations", label: "系统集成" },
     ].filter((tab) => isAdmin || tab.key === "accounts");
 
     const submitCreditChange = async (values: CreditFormValues) => {
@@ -559,12 +561,17 @@ export default function AdminPage() {
                                     />
                                 ),
                             },
+                            {
+                                key: "integrations",
+                                label: "系统集成",
+                                children: <IntegrationStatusPanel />,
+                            },
                         ]}
                     />
                 </div>
 
                 <div className="rounded-md border border-stone-200 bg-white px-4 py-3 text-xs leading-5 text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">
-                    账号、会话、模型密钥、价格版本、额度账本、任务队列、生成历史和管理审计已由服务端统一管理。公司对象存储与素材同步将在下一阶段接入。
+                    账号、会话、模型密钥、价格版本、额度账本、任务队列、公司对象存储、生成历史和管理审计均由服务端统一管理。
                 </div>
             </main>
         </div>

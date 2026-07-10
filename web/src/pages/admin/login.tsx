@@ -58,9 +58,6 @@ export default function AdminLoginPage() {
                     <Button size="large" block icon={<UserRound className="size-4" />} onClick={() => navigate("/login")}>
                         返回设计师登录
                     </Button>
-                    <div className="rounded-md bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-900">
-                        演示管理员：admin-1 / 123456。普通设计师账号不能进入后台，也不能修改额度、积分价格、模型/API 或工作流配置。
-                    </div>
                 </div>
             </main>
         </div>

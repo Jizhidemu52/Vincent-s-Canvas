@@ -63,6 +63,11 @@ integration("production identity and RBAC", () => {
         expect(restoredSession.response.status).toBe(200);
         expect(restoredSession.body.user).toMatchObject({ mustChangePassword: false, mfaEnabled: true });
 
+        const integrations = await api<{ wecom: { configured: boolean; missing: string[] }; objectStorage: { configured: boolean } }>("/api/admin/integrations/status", {}, admin.cookie);
+        expect(integrations.response.status).toBe(200);
+        expect(integrations.body.wecom).toMatchObject({ configured: false, missing: ["WECOM_CORP_ID", "WECOM_AGENT_ID", "WECOM_SECRET", "WECOM_CALLBACK_URL"] });
+        expect(JSON.stringify(integrations.body)).not.toContain("server-secret");
+
         const createDepartment = async (name: string, code: string) => {
             const result = await api<{ department: { id: string } }>("/api/admin/departments", {
                 method: "POST",
@@ -151,6 +156,9 @@ integration("production identity and RBAC", () => {
         const designerAdminAttempt = await api<{ error: string }>("/api/admin/accounts", {}, chineseLogin.cookie);
         expect(designerAdminAttempt.response.status).toBe(403);
         expect(designerAdminAttempt.body.error).toBe("FORBIDDEN");
+        const designerIntegrationAttempt = await api<{ error: string }>("/api/admin/integrations/status", {}, chineseLogin.cookie);
+        expect(designerIntegrationAttempt.response.status).toBe(403);
+        expect(designerIntegrationAttempt.body.error).toBe("FORBIDDEN");
 
         const managerAccounts = await api<{ users: Array<{ id: string; departmentId: string; role: string }> }>("/api/admin/accounts", {}, employeeLogin.cookie);
         expect(managerAccounts.response.status).toBe(200);

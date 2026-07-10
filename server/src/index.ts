@@ -20,6 +20,7 @@ import { createWorkflowsRouter } from "./routes/workflows";
 import { createChatRouter } from "./routes/chat";
 import { requireSameOrigin } from "./http-security";
 import { requireAccountReady, sessionMiddleware } from "./session";
+import { createIntegrationsRouter } from "./routes/integrations";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
@@ -58,6 +59,7 @@ app.use("/api/chat", requireSession, requireAccountReady, createChatRouter(db, c
 app.use("/api/admin/accounts", requireSession, requireAccountReady, createAccountsRouter(db));
 app.use("/api/admin/departments", requireSession, requireAccountReady, createDepartmentsRouter(db));
 app.use("/api/admin/audit-logs", requireSession, requireAccountReady, createAuditRouter(db));
+app.use("/api/admin/integrations", requireSession, requireAccountReady, createIntegrationsRouter(config));
 
 app.use((_request, response) => response.status(404).json({ error: "NOT_FOUND", message: "接口不存在" }));
 const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {

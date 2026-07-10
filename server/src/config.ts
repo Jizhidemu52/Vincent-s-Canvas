@@ -31,6 +31,13 @@ export type AppConfig = z.infer<typeof schema>;
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
     const config = schema.parse(env);
+    const weComValues = [config.WECOM_CORP_ID, config.WECOM_AGENT_ID, config.WECOM_SECRET, config.WECOM_CALLBACK_URL].filter(Boolean);
+    if (weComValues.length > 0 && weComValues.length < 4) {
+        throw new Error("WECOM_CORP_ID, WECOM_AGENT_ID, WECOM_SECRET and WECOM_CALLBACK_URL must be configured together");
+    }
+    if (config.NODE_ENV === "production" && config.WECOM_CALLBACK_URL && new URL(config.WECOM_CALLBACK_URL).protocol !== "https:") {
+        throw new Error("WECOM_CALLBACK_URL must use HTTPS in production");
+    }
     if (config.NODE_ENV === "production" && (!config.MFA_ENCRYPTION_KEY || Buffer.from(config.MFA_ENCRYPTION_KEY, "base64").length !== 32)) {
         throw new Error("MFA_ENCRYPTION_KEY must be a base64-encoded 32-byte key in production");
     }
