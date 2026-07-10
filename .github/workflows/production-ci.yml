@@ -167,8 +167,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker compose run --rm --no-deps \
-            -e BACKUP_RUN_ONCE=true -e BACKUP_STAMP=ci-recovery backup
+          set +e
+          backup_output=$(docker compose run --rm --no-deps \
+            -e BACKUP_RUN_ONCE=true -e BACKUP_STAMP=ci-recovery backup 2>&1)
+          backup_status=$?
+          set -e
+          printf '%s\n' "$backup_output"
+          if [ "$backup_status" -ne 0 ]; then
+            annotation=${backup_output//'%'/'%25'}
+            annotation=${annotation//$'\r'/'%0D'}
+            annotation=${annotation//$'\n'/'%0A'}
+            echo "::error title=One-shot backup failed::$annotation"
+            exit "$backup_status"
+          fi
       - name: Verify backup object exists
         shell: bash
         run: |
