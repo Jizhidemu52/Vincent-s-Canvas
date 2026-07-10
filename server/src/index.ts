@@ -1,0 +1,56 @@
+import cookieParser from "cookie-parser";
+import express, { type ErrorRequestHandler } from "express";
+import helmet from "helmet";
+import { ZodError } from "zod";
+
+import { loadConfig } from "./config";
+import { createCache, createDatabase } from "./db";
+import { createAccountsRouter } from "./routes/accounts";
+import { createAuditRouter } from "./routes/audit-logs";
+import { createAuthRouter } from "./routes/auth";
+import { createDepartmentsRouter } from "./routes/departments";
+import { sessionMiddleware } from "./session";
+
+const config = loadConfig();
+const db = createDatabase(config.DATABASE_URL);
+const cache = await createCache(config.REDIS_URL);
+const app = express();
+
+if (config.TRUST_PROXY === "true") app.set("trust proxy", 1);
+app.disable("x-powered-by");
+app.use(helmet());
+app.use(express.json({ limit: "2mb" }));
+app.use(cookieParser());
+
+app.get("/api/health", async (_request, response, next) => {
+    try {
+        await Promise.all([db.query("SELECT 1"), cache.ping()]);
+        response.json({ status: "ok" });
+    } catch (error) { next(error); }
+});
+app.use("/api/auth", createAuthRouter(db, cache, config));
+app.use("/api/admin/accounts", sessionMiddleware(db, cache, config), createAccountsRouter(db));
+app.use("/api/admin/departments", sessionMiddleware(db, cache, config), createDepartmentsRouter(db));
+app.use("/api/admin/audit-logs", sessionMiddleware(db, cache, config), createAuditRouter(db));
+
+app.use((_request, response) => response.status(404).json({ error: "NOT_FOUND", message: "接口不存在" }));
+const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
+    if (error instanceof ZodError) {
+        response.status(400).json({ error: "VALIDATION_ERROR", message: "提交内容不符合要求", issues: error.issues }); return;
+    }
+    if (typeof error === "object" && error && "code" in error && error.code === "23505") {
+        response.status(409).json({ error: "DUPLICATE", message: "账号、邮箱、工号或部门编码已存在" }); return;
+    }
+    console.error(error);
+    response.status(500).json({ error: "INTERNAL_ERROR", message: "服务器处理失败" });
+};
+app.use(errorHandler);
+
+const server = app.listen(config.PORT, () => console.log(`Wireless Canvas API listening on ${config.PORT}`));
+const shutdown = async () => {
+    server.close();
+    await Promise.all([db.end(), cache.quit()]);
+    process.exit(0);
+};
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
