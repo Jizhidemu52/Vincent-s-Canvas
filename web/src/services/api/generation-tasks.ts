@@ -6,7 +6,7 @@ import { imageToDataUrl } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
-type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image";
+type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
 type Task = { id: string; requestId: string; status: string; resultUrls: string[]; failureReason: string | null };
 

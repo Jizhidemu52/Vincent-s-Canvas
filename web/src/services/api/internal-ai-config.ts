@@ -14,16 +14,16 @@ type ApiErrorPayload = {
     err_msg?: string;
 };
 
-const adminHeaders = { "x-admin-role": "admin" };
+const root = "/api/admin/internal-ai";
 
 export async function getInternalAiConfig() {
-    const response = await axios.get<InternalAiConfigStatus>("/api/internal-ai/config");
+    const response = await axios.get<InternalAiConfigStatus>(root, { withCredentials: true });
     return response.data;
 }
 
 export async function saveInternalAiConfig(input: { seamlessUrl: string; appKey?: string; clearAppKey?: boolean }) {
     try {
-        const response = await axios.put<InternalAiConfigStatus>("/api/internal-ai/config", input, { headers: adminHeaders });
+        const response = await axios.put<InternalAiConfigStatus>(root, input, { withCredentials: true });
         return response.data;
     } catch (error) {
         throw new Error(readApiError(error, "内部 AI 配置保存失败"));
@@ -32,7 +32,7 @@ export async function saveInternalAiConfig(input: { seamlessUrl: string; appKey?
 
 export async function testInternalAiConfig() {
     try {
-        const response = await axios.post<{ ok: boolean; message: string }>("/api/internal-ai/config/test", {}, { headers: adminHeaders });
+        const response = await axios.post<{ ok: boolean; message: string }>(`${root}/test`, {}, { withCredentials: true });
         return response.data;
     } catch (error) {
         throw new Error(readApiError(error, "内部 AI 连接测试失败"));

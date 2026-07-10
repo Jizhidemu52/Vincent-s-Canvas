@@ -159,6 +159,26 @@ integration("production identity and RBAC", () => {
         const designerIntegrationAttempt = await api<{ error: string }>("/api/admin/integrations/status", {}, chineseLogin.cookie);
         expect(designerIntegrationAttempt.response.status).toBe(403);
         expect(designerIntegrationAttempt.body.error).toBe("FORBIDDEN");
+        const designerInternalAiAttempt = await api<{ error: string }>("/api/admin/internal-ai", {}, chineseLogin.cookie);
+        expect(designerInternalAiAttempt.response.status).toBe(403);
+        expect(designerInternalAiAttempt.body.error).toBe("FORBIDDEN");
+
+        const configureInternalAi = await api<{ seamlessUrl: string; hasAppKey: boolean; appKeyPreview: string }>(
+            "/api/admin/internal-ai",
+            {
+                method: "PUT",
+                body: JSON.stringify({ seamlessUrl: "https://internal-ai.company.test/std/tohwkdpj", appKey: "integration-internal-app-key" }),
+            },
+            admin.cookie,
+        );
+        expect(configureInternalAi.response.status).toBe(200);
+        expect(configureInternalAi.body).toMatchObject({ seamlessUrl: "https://internal-ai.company.test/std/tohwkdpj", hasAppKey: true });
+        expect(JSON.stringify(configureInternalAi.body)).not.toContain("integration-internal-app-key");
+
+        const publicModels = await api<{ models: Array<{ id: string; modelId: string; creditCost: number }>; prices: Array<{ operationType: string; credits: number }> }>("/api/models", {}, chineseLogin.cookie);
+        expect(publicModels.response.status).toBe(200);
+        expect(publicModels.body.models.find((model) => model.modelId === "internal-seamless")?.creditCost).toBe(0);
+        expect(publicModels.body.prices.find((price) => price.operationType === "seamless_stitch")?.credits).toBe(2);
 
         const managerAccounts = await api<{ users: Array<{ id: string; departmentId: string; role: string }> }>("/api/admin/accounts", {}, employeeLogin.cookie);
         expect(managerAccounts.response.status).toBe(200);

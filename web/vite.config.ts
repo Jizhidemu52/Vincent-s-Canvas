@@ -5,7 +5,6 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 
 import { parseChangelog } from "./src/lib/release";
-import { internalAiProxyPlugin } from "./internal-ai-proxy";
 import { companyAssetDatabaseProxyPlugin } from "./company-asset-database-proxy";
 
 const webDir = dirname(fileURLToPath(import.meta.url));
@@ -17,13 +16,6 @@ export default defineConfig(({ mode }) => {
     return {
         plugins: [
             react(),
-            internalAiProxyPlugin({
-                appKey: env.INTERNAL_AI_APP_KEY,
-                seamlessUrl: env.INTERNAL_AI_SEAMLESS_URL,
-                configPath: resolve(webDir, "../data/internal-ai-config.json"),
-                configToken: env.INTERNAL_AI_CONFIG_TOKEN,
-                mock: env.INTERNAL_AI_MOCK === "true",
-            }),
             companyAssetDatabaseProxyPlugin({
                 configPath: resolve(webDir, "../data/company-asset-database-config.json"),
                 baseUrl: env.COMPANY_ASSET_DATABASE_URL,
