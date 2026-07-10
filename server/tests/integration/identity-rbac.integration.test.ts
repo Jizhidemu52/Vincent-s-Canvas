@@ -68,7 +68,9 @@ integration("production identity and RBAC", () => {
                 method: "POST",
                 body: JSON.stringify({ name, code }),
             }, admin.cookie);
-            expect(result.response.status).toBe(201);
+            if (result.response.status !== 201) {
+                throw new Error(`Account creation failed (${result.response.status}): ${JSON.stringify(result.body)}`);
+            }
             return result.body.department.id;
         };
         const departmentA = await createDepartment("设计一部", "design-a");

@@ -59,19 +59,23 @@ export function createAccountsRouter(db: Database) {
                 response.status(400).json({ error: "INVALID_CREDIT", message: "初始积分不能超过积分上限" }); return;
             }
             const client = await db.connect();
-            let result;
+            let createdRow: UserRow;
             try {
                 await client.query("BEGIN");
-                result = await client.query<UserRow>(`INSERT INTO users(username,display_name,email,employee_no,password_hash,role,department_id,credit_balance,credit_limit,created_by)
-                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,username,display_name,email,employee_no,role,status,department_id,
-                    (SELECT name FROM departments WHERE departments.id=users.department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`,
+                const inserted = await client.query<{ id: string }>(`INSERT INTO users(username,display_name,email,employee_no,password_hash,role,department_id,credit_balance,credit_limit,created_by)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
                     [input.username, input.displayName, input.email ?? null, input.employeeNo ?? null, await hashPassword(input.password), input.role, input.departmentId ?? null, input.creditBalance, input.creditLimit, actor.id]);
                 await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
-                    VALUES($1,$2,$3,'adjustment',$4,$4,'account',$2,'账号初始额度')`, [`account-create:${result.rows[0].id}`, result.rows[0].id, actor.id, input.creditBalance]);
+                    VALUES($1,$2,$3,'adjustment',$4,$4,'account',$2,'账号初始额度')`, [`account-create:${inserted.rows[0].id}`, inserted.rows[0].id, actor.id, input.creditBalance]);
+                const selected = await client.query<UserRow>(
+                    `SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`,
+                    [inserted.rows[0].id],
+                );
+                createdRow = selected.rows[0];
                 await client.query("COMMIT");
             } catch (error) { await client.query("ROLLBACK"); throw error; }
             finally { client.release(); }
-            const user = mapUser(result.rows[0]);
+            const user = mapUser(createdRow!);
             await writeAudit(db, { actor, action: "account.created", targetType: "user", targetId: user.id, departmentId: user.departmentId, result: "success", detail: { role: user.role }, ip: request.ip });
             response.status(201).json({ user });
         } catch (error) { next(error); }
@@ -91,12 +95,15 @@ export function createAccountsRouter(db: Database) {
             if (actor.role === "department_admin" && role !== "designer") { response.status(403).json({ error: "FORBIDDEN", message: "部门管理员不能提升账号角色" }); return; }
             if (role === "department_admin" && !departmentId) { response.status(400).json({ error: "DEPARTMENT_REQUIRED", message: "部门管理员必须属于一个部门" }); return; }
             if (input.creditLimit !== undefined && input.creditLimit < current.creditBalance) { response.status(400).json({ error: "INVALID_CREDIT", message: "额度上限不能低于当前剩余积分" }); return; }
-            const result = await db.query<UserRow>(
+            await db.query(
                 `UPDATE users SET display_name=$1,email=$2,employee_no=$3,role=$4,department_id=$5,status=$6,credit_limit=$7,updated_at=now()
-                 WHERE id=$8 RETURNING id,username,display_name,email,employee_no,role,status,department_id,
-                 (SELECT name FROM departments WHERE departments.id=users.department_id) department_name,must_change_password,mfa_enabled,credit_balance,credit_limit`,
+                 WHERE id=$8`,
                 [input.displayName ?? current.displayName, input.email === undefined ? current.email : input.email, input.employeeNo === undefined ? current.employeeNo : input.employeeNo,
                     role, departmentId, input.status ?? current.status, input.creditLimit ?? current.creditLimit, current.id],
+            );
+            const result = await db.query<UserRow>(
+                `SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`,
+                [current.id],
             );
             const user = mapUser(result.rows[0]);
             await writeAudit(db, { actor, action: "account.updated", targetType: "user", targetId: user.id, departmentId: user.departmentId, result: "success", detail: input, ip: request.ip });
