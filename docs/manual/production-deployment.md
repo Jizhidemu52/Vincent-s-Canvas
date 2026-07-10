@@ -2,7 +2,33 @@
 
 ## 1. 服务器准备
 
-建议准备一台安装了 Docker Engine 与 Docker Compose 的 Linux 服务器。正式环境仅向公网开放 Nginx 的 `3000` 端口，再由公司域名和 HTTPS 网关反向代理。PostgreSQL、Redis、MinIO、API 和 Worker 不应直接暴露到公网。
+建议准备一台安装了 Docker Engine 与 Docker Compose 的 Linux 服务器。正式环境只让公司的 HTTPS 网关、负载均衡或反向代理访问容器的 `3000` 端口；用户只访问域名的 `443` 端口。PostgreSQL、Redis、MinIO、API 和 Worker 不应直接暴露到公网。
+
+公司没有 VPN 时，推荐使用“公司现有 HTTPS 网关 + 正式域名 + 企业微信登录”的方式：
+
+```mermaid
+flowchart LR
+    U[设计师浏览器] -->|HTTPS 443| G[公司网关 / WAF / 反向代理]
+    W[企业微信] -->|扫码授权| G
+    G -->|内网 3000| WEB[Wireless Canvas Web]
+    WEB --> API[API]
+    API --> PG[(PostgreSQL)]
+    API --> R[(Redis)]
+    API --> S[(MinIO / 公司对象存储)]
+    R --> WK[Worker]
+    WK --> S
+    WK --> P[外部或内部模型 Provider]
+```
+
+需要公司 IT 提供：
+
+- 一台 Linux 服务器或私有云主机，以及 SSH/控制台权限。
+- 一个正式域名，例如 `canvas.company.com`。
+- 该域名的 HTTPS 证书或公司现有自动签发网关。
+- 允许网关转发到服务器 `3000` 端口的规则。
+- 企业微信自建应用的 Corp ID、Agent ID、Secret 和可信回调域配置权限。
+
+如果公司已有统一入口网关、WAF、零信任访问平台或内网域名，优先复用，不需要为了本项目单独购买 VPN。不要把 `3000`、`3100`、`5432`、`6379`、`9000` 或 `9001` 直接开放到公网。
 
 ```bash
 git clone https://github.com/Jizhidemu52/Vincent-s-Canvas.git
@@ -24,6 +50,23 @@ cp .env.example .env
 openssl rand -base64 32
 openssl rand -base64 32
 ```
+
+启动前运行生产预检。已安装 Bun 时：
+
+```bash
+bun ops/preflight/production-preflight.ts --require-wecom
+```
+
+服务器只有 Docker 时：
+
+```bash
+docker run --rm --env-file .env \
+  -v "$PWD:/workspace:ro" -w /workspace \
+  oven/bun:1.3.13 \
+  bun ops/preflight/production-preflight.ts --require-wecom
+```
+
+预检只输出通过项、缺失变量名和修复提示，不打印密码、Secret 或加密密钥。必须达到 `0 项错误` 才进入正式启动；首次管理员创建后的“删除初始密码”属于提醒项。
 
 ## 2. 启动
 

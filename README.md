@@ -6,6 +6,8 @@
 
 生产服务器部署、企业微信、工作流、备份恢复和 40 人压测请参阅：[生产部署与验收手册](docs/manual/production-deployment.md)。
 
+正式上线前可运行 `bun ops/preflight/production-preflight.ts --require-wecom`，在不打印任何 Secret 的前提下检查生产环境变量、HTTPS 回调、对象存储、加密密钥、Worker 并发与模拟任务模式。
+
 最新生产式自动验收：40 位设计师持续提交 2 分钟，共成功提交并完成 4,573 个模拟出图任务，请求失败率 0.00%，P95 为 106.77 ms；任务、额度结算、素材和历史记录数量完全一致。查看 [GitHub Actions 验证记录](https://github.com/Jizhidemu52/Vincent-s-Canvas/actions/runs/29092186577)。
 
 ![项目工作台首页](docs/assets/github/project-dashboard.png)
