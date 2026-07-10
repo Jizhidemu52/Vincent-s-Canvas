@@ -13,7 +13,7 @@ export async function enqueueTask(db: Database, cache: Cache, input: TaskInput) 
     const taskId = randomUUID();
     try {
         await db.query(`INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,priority,credits,rmb_cost)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, [taskId, input.requestId, input.batchId ?? null, input.userId, input.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, input.sourceUrls, input.priority, reservation.credits, reservation.rmbCost]);
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, [taskId, input.requestId, input.batchId ?? null, input.userId, input.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, JSON.stringify(input.sourceUrls), input.priority, reservation.credits, reservation.rmbCost]);
         await cache.zAdd("tasks:queue", { score: queueScore(input.priority), value: taskId });
         return { id: taskId, requestId: input.requestId, status: "waiting", credits: reservation.credits, rmbCost: reservation.rmbCost };
     } catch (error) {

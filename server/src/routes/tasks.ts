@@ -42,10 +42,10 @@ export function createTasksRouter(db: Database, cache: Cache) {
                         await db.query("UPDATE tasks SET status='failed',credits=0,rmb_cost=0,failure_reason=$1,completed_at=now(),updated_at=now() WHERE id=$2", [reason, failedId]);
                     } else {
                         await db.query(`INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,priority,status,credits,rmb_cost,failure_reason,completed_at)
-                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'failed',0,0,$12,now())`, [failedId, itemRequestId, batchId, actor.id, actor.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, item.sourceUrls, input.priority, reason]);
+                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'failed',0,0,$12,now())`, [failedId, itemRequestId, batchId, actor.id, actor.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, JSON.stringify(item.sourceUrls), input.priority, reason]);
                     }
                     await db.query(`INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,result_urls,credits,rmb_cost,status,failure_reason)
-                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,'[]',0,0,'failed',$9) ON CONFLICT(task_id) DO UPDATE SET status='failed',failure_reason=EXCLUDED.failure_reason,credits=0,rmb_cost=0`, [failedId, actor.id, actor.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, item.sourceUrls, reason]);
+                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,'[]',0,0,'failed',$9) ON CONFLICT(task_id) DO UPDATE SET status='failed',failure_reason=EXCLUDED.failure_reason,credits=0,rmb_cost=0`, [failedId, actor.id, actor.departmentId, input.projectId, input.operationType, input.modelConfigId ?? null, input.prompt, JSON.stringify(item.sourceUrls), reason]);
                     failures.push({ index, reason });
                 }
             }

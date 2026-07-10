@@ -47,7 +47,7 @@ async function runTask(taskId: string) {
         const client = await db.connect();
         try {
             await client.query("BEGIN");
-            await client.query("UPDATE tasks SET status='success',result_urls=$1,completed_at=now(),updated_at=now() WHERE id=$2", [resultUrls, task.id]);
+            await client.query("UPDATE tasks SET status='success',result_urls=$1,completed_at=now(),updated_at=now() WHERE id=$2", [JSON.stringify(resultUrls), task.id]);
             await client.query(`INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,result_urls,credits,rmb_cost,status)
                 SELECT id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,result_urls,credits,rmb_cost,'success' FROM tasks WHERE id=$1 ON CONFLICT(task_id) DO NOTHING`, [task.id]);
             await client.query("COMMIT");
@@ -64,7 +64,7 @@ async function runTask(taskId: string) {
             await db.query(`INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,result_urls,credits,rmb_cost,status,failure_reason)
                 SELECT id,user_id,department_id,project_id,operation_type,model_config_id,prompt,source_urls,'[]',0,0,'failed',$2 FROM tasks WHERE id=$1 ON CONFLICT(task_id) DO NOTHING`, [task.id, reason]);
             await db.query(`INSERT INTO audit_logs(actor_user_id,action,target_type,target_id,result,detail)
-                SELECT user_id,'task.failed','task',id::text,'failed',jsonb_build_object('reason',$2,'attempts',attempts) FROM tasks WHERE id=$1`, [task.id, reason]);
+                SELECT user_id,'task.failed','task',id::text,'failed',jsonb_build_object('reason',$2::text,'attempts',attempts) FROM tasks WHERE id=$1`, [task.id, reason]);
         }
     } finally {
         await cache.decr(semaphoreKey);
@@ -122,9 +122,11 @@ async function storeResults(task: WorkRow, results: Array<{ bytes: Uint8Array; m
         const key = `users/${task.user_id}/generated/${task.id}/${filename}`;
         await storage.put(key, result.bytes, result.mimeType);
         const kind=result.mimeType.startsWith("video/")?"video":"image";
-        await db.query(`INSERT INTO assets(id,owner_user_id,department_id,project_external_id,task_id,object_key,filename,mime_type,byte_size,kind,source,operation_type,prompt,model_config_id,status)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'ready')`, [id, task.user_id, task.department_id, task.project_id, task.id, key, filename, result.mimeType, result.bytes.byteLength,kind, task.operation_type === "image_generation"||task.operation_type==="video_generation" ? "generation" : "edit", task.operation_type, task.prompt, task.model_config_id]);
-        urls.push(`/api/assets/${id}/content`);
+        const asset = await db.query<{ id: string }>(`INSERT INTO assets(id,owner_user_id,department_id,project_external_id,task_id,object_key,filename,mime_type,byte_size,kind,source,operation_type,prompt,model_config_id,status)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'ready')
+            ON CONFLICT(object_key) DO UPDATE SET status='ready',byte_size=EXCLUDED.byte_size,mime_type=EXCLUDED.mime_type,updated_at=now()
+            RETURNING id`, [id, task.user_id, task.department_id, task.project_id, task.id, key, filename, result.mimeType, result.bytes.byteLength,kind, task.operation_type === "image_generation"||task.operation_type==="video_generation" ? "generation" : "edit", task.operation_type, task.prompt, task.model_config_id]);
+        urls.push(`/api/assets/${asset.rows[0]!.id}/content`);
     }
     return urls;
 }

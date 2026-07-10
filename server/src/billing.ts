@@ -23,10 +23,23 @@ export function calculatePrice(input: Omit<PriceSnapshot, "totalCredits" | "tota
 }
 
 async function withTransaction<T>(db: Database, operation: (client: PoolClient) => Promise<T>) {
-    const client = await db.connect();
-    try { await client.query("BEGIN"); const result = await operation(client); await client.query("COMMIT"); return result; }
-    catch (error) { await client.query("ROLLBACK"); throw error; }
-    finally { client.release(); }
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+        const client = await db.connect();
+        try {
+            await client.query("BEGIN");
+            const result = await operation(client);
+            await client.query("COMMIT");
+            return result;
+        } catch (error) {
+            await client.query("ROLLBACK").catch(() => undefined);
+            const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+            if ((code !== "40P01" && code !== "40001") || attempt === 3) throw error;
+            await Bun.sleep(20 * (attempt + 1));
+        } finally {
+            client.release();
+        }
+    }
+    throw new Error("Transaction retry limit reached");
 }
 
 export async function adjustCredits(db: Database, input: { requestId: string; actorId: string; userId: string; amount: number; reason: string }) {
@@ -56,22 +69,26 @@ export async function reserveCredits(db: Database, input: { requestId: string; u
         if (input.modelConfigId && !modelResult?.rows[0]) throw new BillingError("MODEL_DISABLED", "模型不存在或未启用");
         const model = modelResult?.rows[0];
         const snapshot = calculatePrice({ operationType: input.operationType, operationCredits: price.credits, operationRmb: Number(price.rmb_cost), modelId: model?.id ?? null, modelCredits: model?.credit_cost ?? 0, modelRmb: Number(model?.rmb_cost ?? 0), quantity: input.quantity, priceVersion: price.version });
-        const userResult = await client.query<{ credit_balance: number; department_id: string | null }>("SELECT credit_balance,department_id FROM users WHERE id=$1 AND status='active' FOR UPDATE", [input.userId]);
-        const user = userResult.rows[0];
-        if (!user) throw new BillingError("ACCOUNT_DISABLED", "账号不存在或已停用");
-        if (user.credit_balance < snapshot.totalCredits) throw new BillingError("INSUFFICIENT_CREDIT", "个人剩余积分不足");
-        const userBalance = user.credit_balance - snapshot.totalCredits;
-        await client.query("UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2", [userBalance, input.userId]);
+        const identityResult = await client.query<{ department_id: string | null }>("SELECT department_id FROM users WHERE id=$1 AND status='active'", [input.userId]);
+        const identity = identityResult.rows[0];
+        if (!identity) throw new BillingError("ACCOUNT_DISABLED", "账号不存在或已停用");
         let departmentBalance: number | null = null;
-        if (user.department_id) {
-            const departmentResult = await client.query<{ credit_balance: number; credit_limit: number }>("SELECT credit_balance,credit_limit FROM departments WHERE id=$1 FOR UPDATE", [user.department_id]);
+        if (identity.department_id) {
+            const departmentResult = await client.query<{ credit_balance: number; credit_limit: number }>("SELECT credit_balance,credit_limit FROM departments WHERE id=$1 FOR UPDATE", [identity.department_id]);
             const department = departmentResult.rows[0];
             if (department && department.credit_limit > 0) {
                 if (department.credit_balance < snapshot.totalCredits) throw new BillingError("DEPARTMENT_CREDIT_EXHAUSTED", "部门预算积分不足");
                 departmentBalance = department.credit_balance - snapshot.totalCredits;
-                await client.query("UPDATE departments SET credit_balance=$1,updated_at=now() WHERE id=$2", [departmentBalance, user.department_id]);
+                await client.query("UPDATE departments SET credit_balance=$1,updated_at=now() WHERE id=$2", [departmentBalance, identity.department_id]);
             }
         }
+        const userResult = await client.query<{ credit_balance: number; department_id: string | null }>("SELECT credit_balance,department_id FROM users WHERE id=$1 AND status='active' FOR UPDATE", [input.userId]);
+        const user = userResult.rows[0];
+        if (!user) throw new BillingError("ACCOUNT_DISABLED", "账号不存在或已停用");
+        if (user.department_id !== identity.department_id) throw new BillingError("ACCOUNT_CHANGED", "账号部门刚刚发生变更，请重试");
+        if (user.credit_balance < snapshot.totalCredits) throw new BillingError("INSUFFICIENT_CREDIT", "个人剩余积分不足");
+        const userBalance = user.credit_balance - snapshot.totalCredits;
+        await client.query("UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2", [userBalance, input.userId]);
         await client.query(`INSERT INTO credit_reservations(request_id,user_id,department_id,operation_type,model_config_id,quantity,credits,department_credits,rmb_cost,price_snapshot)
             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [input.requestId, input.userId, user.department_id, input.operationType, model?.id ?? null, input.quantity, snapshot.totalCredits, departmentBalance === null ? 0 : snapshot.totalCredits, snapshot.totalRmb, snapshot]);
         await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason,metadata)
@@ -91,22 +108,17 @@ export async function settleReservation(db: Database, requestId: string, outcome
         if (!reservation) throw new BillingError("RESERVATION_NOT_FOUND", "额度冻结记录不存在");
         if (reservation.status !== "held") return { status: reservation.status, duplicate: true };
         if (outcome === "capture") {
-            const user = await client.query<{ credit_balance: number }>("SELECT credit_balance FROM users WHERE id=$1", [reservation.user_id]);
             await client.query("UPDATE credit_reservations SET status='captured',settled_at=now() WHERE id=$1", [reservation.id]);
-            await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
-                VALUES($1,$2,$3,'capture',0,$4,'task',$5,'任务成功结算')`, [`${requestId}:user:capture`, reservation.user_id, actorId ?? reservation.user_id, user.rows[0]!.credit_balance, requestId]);
             if (reservation.department_id && reservation.department_credits > 0) {
-                const department = await client.query<{ credit_balance: number }>("SELECT credit_balance FROM departments WHERE id=$1", [reservation.department_id]);
+                const department = await client.query<{ credit_balance: number }>("SELECT credit_balance FROM departments WHERE id=$1 FOR SHARE", [reservation.department_id]);
                 await client.query(`INSERT INTO credit_ledger(request_id,department_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
                     VALUES($1,$2,$3,'capture',0,$4,'task',$5,'任务成功结算部门预算')`, [`${requestId}:department:capture`, reservation.department_id, actorId ?? reservation.user_id, department.rows[0]!.credit_balance, requestId]);
             }
+            const user = await client.query<{ credit_balance: number }>("SELECT credit_balance FROM users WHERE id=$1 FOR SHARE", [reservation.user_id]);
+            await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
+                VALUES($1,$2,$3,'capture',0,$4,'task',$5,'任务成功结算')`, [`${requestId}:user:capture`, reservation.user_id, actorId ?? reservation.user_id, user.rows[0]!.credit_balance, requestId]);
             return { status: "captured", duplicate: false };
         }
-        const user = await client.query<{ credit_balance: number }>("SELECT credit_balance FROM users WHERE id=$1 FOR UPDATE", [reservation.user_id]);
-        const userBalance = user.rows[0]!.credit_balance + reservation.credits;
-        await client.query("UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2", [userBalance, reservation.user_id]);
-        await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
-            VALUES($1,$2,$3,'release',$4,$5,'task',$6,'任务失败、取消或超时释放积分')`, [`${requestId}:user:release`, reservation.user_id, actorId ?? reservation.user_id, reservation.credits, userBalance, requestId]);
         if (reservation.department_id && reservation.department_credits > 0) {
             const department = await client.query<{ credit_balance: number }>("SELECT credit_balance FROM departments WHERE id=$1 FOR UPDATE", [reservation.department_id]);
             if (department.rows[0]) {
@@ -116,6 +128,11 @@ export async function settleReservation(db: Database, requestId: string, outcome
                     VALUES($1,$2,$3,'release',$4,$5,'task',$6,'任务释放部门预算')`, [`${requestId}:department:release`, reservation.department_id, actorId ?? reservation.user_id, reservation.department_credits, balance, requestId]);
             }
         }
+        const user = await client.query<{ credit_balance: number }>("SELECT credit_balance FROM users WHERE id=$1 FOR UPDATE", [reservation.user_id]);
+        const userBalance = user.rows[0]!.credit_balance + reservation.credits;
+        await client.query("UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2", [userBalance, reservation.user_id]);
+        await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
+            VALUES($1,$2,$3,'release',$4,$5,'task',$6,'任务失败、取消或超时释放积分')`, [`${requestId}:user:release`, reservation.user_id, actorId ?? reservation.user_id, reservation.credits, userBalance, requestId]);
         await client.query("UPDATE credit_reservations SET status='released',settled_at=now() WHERE id=$1", [reservation.id]);
         return { status: "released", duplicate: false };
     });
