@@ -230,6 +230,11 @@ integration("production identity and RBAC", () => {
       "DesignerStart2026",
       "designer",
     );
+    const englishUsernameLogin = await login(
+      "designer-b",
+      "DesignerStart2026",
+      "designer",
+    );
     const employeeLogin = await login("M-A-001", "ManagerStart2026", "admin");
 
     const designerBeforePassword = await api<{ error: string }>(
@@ -248,6 +253,13 @@ integration("production identity and RBAC", () => {
       "DesignerStart2026",
       "DesignerBReady2026",
     );
+    const revokedEnglishUsernameSession = await api<{ error: string }>(
+      "/api/auth/session",
+      {},
+      englishUsernameLogin.cookie,
+    );
+    expect(revokedEnglishUsernameSession.response.status).toBe(401);
+    expect(revokedEnglishUsernameSession.body.error).toBe("SESSION_EXPIRED");
     await changePassword(
       employeeLogin.cookie,
       "ManagerStart2026",
@@ -591,6 +603,64 @@ integration("production identity and RBAC", () => {
       projectA.body.project.id,
     ]);
 
+    const crossDepartmentReset = await api<{ error: string }>(
+      `/api/admin/accounts/${designerB.id}/reset-password`,
+      {
+        method: "POST",
+        body: JSON.stringify({ password: "CrossDepartmentReset2026" }),
+      },
+      employeeLogin.cookie,
+    );
+    expect(crossDepartmentReset.response.status).toBe(403);
+    expect(crossDepartmentReset.body.error).toBe("FORBIDDEN");
+
+    const resetDesignerA = await api(
+      `/api/admin/accounts/${designerA.id}/reset-password`,
+      {
+        method: "POST",
+        body: JSON.stringify({ password: "DesignerReset2026" }),
+      },
+      employeeLogin.cookie,
+    );
+    expect(resetDesignerA.response.status).toBe(204);
+    const revokedDesignerSession = await api<{ error: string }>(
+      "/api/auth/session",
+      {},
+      chineseLogin.cookie,
+    );
+    expect(revokedDesignerSession.response.status).toBe(401);
+    expect(revokedDesignerSession.body.error).toBe("SESSION_EXPIRED");
+    const oldPasswordLogin = await api<{ error: string }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        identifier: "设计师甲",
+        password: "DesignerReady2026",
+        portal: "designer",
+      }),
+    });
+    expect(oldPasswordLogin.response.status).toBe(401);
+    expect(oldPasswordLogin.body.error).toBe("INVALID_CREDENTIALS");
+    const resetLogin = await login("设计师甲", "DesignerReset2026", "designer");
+    expect(resetLogin.user.mustChangePassword).toBe(true);
+    const resetBusinessAttempt = await api<{ error: string }>(
+      "/api/projects",
+      {},
+      resetLogin.cookie,
+    );
+    expect(resetBusinessAttempt.response.status).toBe(403);
+    expect(resetBusinessAttempt.body.error).toBe("PASSWORD_CHANGE_REQUIRED");
+    await changePassword(
+      resetLogin.cookie,
+      "DesignerReset2026",
+      "DesignerReadyAgain2026",
+    );
+    const resetReady = await api<{ projects: unknown[] }>(
+      "/api/projects",
+      {},
+      resetLogin.cookie,
+    );
+    expect(resetReady.response.status).toBe(200);
+
     const disableDesignerB = await api(
       `/api/admin/accounts/${designerB.id}`,
       {
@@ -626,6 +696,11 @@ integration("production identity and RBAC", () => {
     ).toBe(true);
     expect(
       audit.body.auditLogs.some((entry) => entry.action === "account.updated"),
+    ).toBe(true);
+    expect(
+      audit.body.auditLogs.some(
+        (entry) => entry.action === "account.password_reset",
+      ),
     ).toBe(true);
 
     expect(designerA.departmentId).toBe(departmentA);
