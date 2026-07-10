@@ -157,19 +157,24 @@ jobs:
             sleep 2
           done
           curl --fail --silent http://127.0.0.1:3000/ | grep -q '<div id="root">'
-      - name: Create and locate a database backup
+      - name: Insert database recovery marker
         shell: bash
         run: |
           set -euo pipefail
           docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas \
             -c "INSERT INTO departments(name,code) VALUES('Recovery Marker','recovery-marker')"
-          docker compose run --rm --no-deps -e BACKUP_RUN_ONCE=true backup
-          backup_key=$(docker compose run --rm --no-deps --entrypoint /bin/sh minio-init -c \
-            'mc alias set local http://minio:9000 "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" >/dev/null && mc find "local/$S3_BUCKET/backups/postgres" --name "*.dump"' \
-            | tail -n 1)
-          test -n "$backup_key"
-          backup_path=${backup_key#local/wireless-canvas/}
-          echo "BACKUP_PATH=$backup_path" >>"$GITHUB_ENV"
+      - name: Create one-shot database backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose run --rm --no-deps \
+            -e BACKUP_RUN_ONCE=true -e BACKUP_STAMP=ci-recovery backup
+      - name: Verify backup object exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose run --rm --no-deps --entrypoint /bin/sh minio-init -c \
+            'mc alias set local http://minio:9000 "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" >/dev/null && mc stat "local/$S3_BUCKET/backups/postgres/ci-recovery.dump"'
       - name: Restore the backup and verify recovered data
         shell: bash
         run: |
@@ -177,7 +182,7 @@ jobs:
           docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas \
             -c "DELETE FROM departments WHERE code='recovery-marker'"
           docker compose stop web api worker backup
-          docker compose run --rm --no-deps backup restore.sh "$BACKUP_PATH"
+          docker compose run --rm --no-deps backup restore.sh "backups/postgres/ci-recovery.dump"
           restored=$(docker compose exec -T postgres psql -U wireless_canvas -d wireless_canvas -Atc \
             "SELECT COUNT(*) FROM departments WHERE code='recovery-marker'")
           test "$restored" = "1"
