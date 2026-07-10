@@ -4,7 +4,7 @@
 
 一句话理解：这是一个“设计师前台创作工具 + 管理员后台管控中心”。
 
-生产服务器部署、企业微信、工作流、备份恢复和 40 人压测请参阅：[生产部署与验收手册](docs/manual/production-deployment.md)。
+生产服务器部署、企业微信、工作流、备份恢复和 40 人压测请参阅：[生产部署与验收手册](docs/manual/production-deployment.md)。第一阶段每项需求的实现与证据见：[第一阶段验收矩阵](docs/manual/phase-one-acceptance.md)。
 
 正式上线前可运行 `bun ops/preflight/production-preflight.ts --require-wecom`，在不打印任何 Secret 的前提下检查生产环境变量、HTTPS 回调、对象存储、加密密钥、Worker 并发与模拟任务模式。
 

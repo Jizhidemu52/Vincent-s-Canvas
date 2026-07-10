@@ -10,6 +10,7 @@
 ## 操作手册
 
 - [完整新手操作手册](manual/operation-manual.md)
+- [第一阶段验收矩阵](manual/phase-one-acceptance.md)
 - [画布节点操作手册](/docs/canvas/canvas-node-manual)
 - [画布快捷键](/docs/canvas/canvas-shortcuts)
 
