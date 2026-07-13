@@ -31,6 +31,9 @@ import { requireSameOrigin } from "./http-security";
 import { requireAccountReady, sessionMiddleware } from "./session";
 import { createIntegrationsRouter } from "./routes/integrations";
 import { createInternalAiConfigurationRouter } from "./routes/internal-ai-configuration";
+import { createGroupsRouter, createTeamRouter } from "./routes/groups";
+import { createAdminModuleFlagsRouter, createModuleFlagsRouter } from "./routes/module-flags";
+import { ModuleDisabledError } from "./module-flags";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
@@ -66,6 +69,18 @@ app.use(
   requireSession,
   requireAccountReady,
   createPublicModelRouter(db),
+);
+app.use(
+  "/api/modules",
+  requireSession,
+  requireAccountReady,
+  createModuleFlagsRouter(db),
+);
+app.use(
+  "/api/admin/modules",
+  requireSession,
+  requireAccountReady,
+  createAdminModuleFlagsRouter(db),
 );
 app.use(
   "/api/admin/model-configuration",
@@ -146,6 +161,18 @@ app.use(
   createDepartmentsRouter(db),
 );
 app.use(
+  "/api/admin/groups",
+  requireSession,
+  requireAccountReady,
+  createGroupsRouter(db),
+);
+app.use(
+  "/api/team",
+  requireSession,
+  requireAccountReady,
+  createTeamRouter(db),
+);
+app.use(
   "/api/admin/audit-logs",
   requireSession,
   requireAccountReady,
@@ -179,6 +206,10 @@ const errorHandler: ErrorRequestHandler = (
       message: "提交内容不符合要求",
       issues: error.issues,
     });
+    return;
+  }
+  if (error instanceof ModuleDisabledError) {
+    response.status(error.status).json({ error: error.code, message: error.message, moduleKey: error.moduleKey });
     return;
   }
   if (

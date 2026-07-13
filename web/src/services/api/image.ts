@@ -25,7 +25,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[] };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image" };
+type RequestOptions = { signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "function_call"; call_id: string; name: string; arguments: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -37,6 +37,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         prompt: withSystemPrompt(config, prompt),
         count,
         operationType: options?.operationType || "image_generation",
+        tool: options?.tool,
         signal: options?.signal,
     });
 }
@@ -48,6 +49,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         prompt: withSystemPrompt(config, buildImageReferencePromptText(prompt, references)),
         count,
         operationType: options?.operationType || "inpaint",
+        tool: options?.tool,
         references: [...references, ...(mask ? [mask] : [])],
         signal: options?.signal,
     });

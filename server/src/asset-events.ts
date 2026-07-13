@@ -89,6 +89,7 @@ type AssetSnapshot = {
   id: string;
   owner_user_id: string;
   department_id: string | null;
+  group_id: string | null;
   project_id: string | null;
   project_external_id: string | null;
   task_id: string | null;
@@ -97,6 +98,7 @@ type AssetSnapshot = {
   credits: number;
   rmb_cost: string;
   visibility_scope: "private" | "company";
+  created_at: string;
 };
 
 export function projectAssetEvents(events: AssetEventRecord[]): AssetProjection {
@@ -132,9 +134,10 @@ export function projectAssetEvents(events: AssetEventRecord[]): AssetProjection 
   };
 }
 
-export function canManageResultState(actor: SessionUser, ownerUserId: string, departmentId: string | null) {
+export function canManageResultState(actor: SessionUser, ownerUserId: string, departmentId: string | null, groupId: string | null = null) {
   if (actor.role === "super_admin") return true;
-  return actor.role === "department_admin" && actor.departmentId !== null && actor.departmentId === departmentId && actor.id !== ownerUserId;
+  if (actor.role === "department_admin") return actor.departmentId !== null && actor.departmentId === departmentId && actor.id !== ownerUserId;
+  return actor.groupRole === "leader" && actor.groupId !== null && actor.groupId === groupId;
 }
 
 export async function recordAssetEvent(
@@ -177,16 +180,17 @@ export async function recordAssetEvent(
       !(await hasEffectiveEvent(client, input.assetId, input.eventType));
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO asset_events(
-        asset_id,designer_user_id,actor_user_id,department_id,project_id,
+        asset_id,designer_user_id,actor_user_id,department_id,group_id,project_id,
         project_external_id,task_id,model_config_id,event_type,prompt,credits,
         rmb_cost,first_effective,idempotency_key,metadata,occurred_at
-      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
       RETURNING id`,
       [
         asset.id,
         asset.owner_user_id,
         input.actor?.id ?? null,
         asset.department_id,
+        asset.group_id,
         asset.project_id,
         asset.project_external_id,
         asset.task_id,
@@ -212,18 +216,19 @@ export async function recordAssetEvent(
 }
 
 export async function reverseAssetEvent(db: Database, actor: SessionUser, assetId: string, eventId: string, idempotencyKey: string, reason: string) {
-  if (actor.role === "designer") throw new AssetEventError("FORBIDDEN", "权限不足", 403);
+  if (actor.role === "designer" && actor.groupRole !== "leader") throw new AssetEventError("FORBIDDEN", "权限不足", 403);
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    const source = await client.query<{ asset_id: string; department_id: string | null; event_type: AssetEventType }>(
-      "SELECT asset_id,department_id,event_type FROM asset_events WHERE id=$1 FOR UPDATE",
+    const source = await client.query<{ asset_id: string; department_id: string | null; group_id: string | null; event_type: AssetEventType }>(
+      "SELECT asset_id,department_id,group_id,event_type FROM asset_events WHERE id=$1 FOR UPDATE",
       [eventId],
     );
     const event = source.rows[0];
     if (!event || event.event_type === "asset.event_reversed") throw new AssetEventError("NOT_FOUND", "成果事件不存在", 404);
     if (event.asset_id !== assetId) throw new AssetEventError("NOT_FOUND", "成果事件不存在", 404);
     if (actor.role === "department_admin" && actor.departmentId !== event.department_id) throw new AssetEventError("FORBIDDEN", "权限不足", 403);
+    if (actor.role === "designer" && (actor.groupRole !== "leader" || actor.groupId !== event.group_id)) throw new AssetEventError("FORBIDDEN", "权限不足", 403);
     const existingKey = await client.query<{ id: string; source_event_id: string }>(
       "SELECT id,source_event_id FROM asset_events WHERE idempotency_key=$1",
       [idempotencyKey],
@@ -238,10 +243,10 @@ export async function reverseAssetEvent(db: Database, actor: SessionUser, assetI
     const asset = await loadAssetSnapshot(client, event.asset_id, true);
     if (!asset) throw new AssetEventError("NOT_FOUND", "素材不存在", 404);
     const result = await client.query<{ id: string }>(
-      `INSERT INTO asset_events(asset_id,designer_user_id,actor_user_id,department_id,project_id,project_external_id,task_id,model_config_id,event_type,prompt,credits,rmb_cost,first_effective,idempotency_key,source_event_id,metadata)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,'asset.event_reversed',$9,$10,$11,false,$12,$13,$14)
+      `INSERT INTO asset_events(asset_id,designer_user_id,actor_user_id,department_id,group_id,project_id,project_external_id,task_id,model_config_id,event_type,prompt,credits,rmb_cost,first_effective,idempotency_key,source_event_id,metadata)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'asset.event_reversed',$10,$11,$12,false,$13,$14,$15)
        RETURNING id`,
-      [asset.id, asset.owner_user_id, actor.id, asset.department_id, asset.project_id, asset.project_external_id, asset.task_id, asset.model_config_id, asset.prompt ?? "", Number(asset.credits), Number(asset.rmb_cost), idempotencyKey, eventId, JSON.stringify({ reason })],
+      [asset.id, asset.owner_user_id, actor.id, asset.department_id, event.group_id, asset.project_id, asset.project_external_id, asset.task_id, asset.model_config_id, asset.prompt ?? "", Number(asset.credits), Number(asset.rmb_cost), idempotencyKey, eventId, JSON.stringify({ reason })],
     );
     await client.query("COMMIT");
     return result.rows[0]!.id;
@@ -284,9 +289,14 @@ export async function listAssetEvents(db: Database, assetIds: string[]) {
 
 async function loadAssetSnapshot(client: PoolClient, assetId: string, lock: boolean) {
   const result = await client.query<AssetSnapshot>(
-    `SELECT a.id,a.owner_user_id,a.department_id,a.project_id,a.project_external_id,
+    `SELECT a.id,a.owner_user_id,a.department_id,
+            (SELECT gm.group_id FROM group_memberships gm
+              WHERE gm.user_id=a.owner_user_id AND gm.effective_at<=a.created_at
+                AND (gm.ended_at IS NULL OR gm.ended_at>a.created_at)
+              ORDER BY gm.effective_at DESC LIMIT 1) AS group_id,
+            a.project_id,a.project_external_id,
             a.task_id,a.model_config_id,a.prompt,a.visibility_scope,COALESCE(t.credits,0)::int AS credits,
-            COALESCE(t.rmb_cost,0)::text AS rmb_cost
+            COALESCE(t.rmb_cost,0)::text AS rmb_cost,a.created_at
        FROM assets a LEFT JOIN tasks t ON t.id=a.task_id
       WHERE a.id=$1 AND a.deleted_at IS NULL ${lock ? "FOR UPDATE OF a" : ""}`,
     [assetId],
@@ -308,6 +318,14 @@ async function hasEffectiveEvent(client: PoolClient, assetId: string, eventType:
 async function canAccessAsset(client: PoolClient, actor: SessionUser, asset: AssetSnapshot) {
   if (actor.role === "super_admin" || actor.id === asset.owner_user_id || asset.visibility_scope === "company") return true;
   if (actor.role === "department_admin" && actor.departmentId === asset.department_id) return true;
+  if (actor.groupRole === "leader" && actor.groupId) {
+    const group = await client.query(
+      `SELECT 1 FROM group_memberships gm WHERE gm.group_id=$1 AND gm.user_id=$2
+        AND gm.effective_at<=$3 AND (gm.ended_at IS NULL OR gm.ended_at>$3) LIMIT 1`,
+      [actor.groupId, asset.owner_user_id, asset.created_at],
+    );
+    if (group.rows[0]) return true;
+  }
   const result = await client.query(
     `SELECT 1 FROM asset_shares s
       WHERE s.asset_id=$1 AND (
@@ -349,7 +367,7 @@ function assertEventPermission(actor: SessionUser | null, eventType: AssetEventT
   }
   if (!actor) throw new AssetEventError("UNAUTHENTICATED", "请先登录", 401);
   if (["asset.adopted", "asset.delivered", "asset.pending", "asset.rejected"].includes(eventType)) {
-    if (!canManageResultState(actor, asset.owner_user_id, asset.department_id)) throw new AssetEventError("FORBIDDEN", "只有对应管理员可以管理成果状态", 403);
+    if (!canManageResultState(actor, asset.owner_user_id, asset.department_id, asset.group_id)) throw new AssetEventError("FORBIDDEN", "只有对应管理员或组长可以管理成果状态", 403);
     return;
   }
   if (eventType === "asset.reused") return;

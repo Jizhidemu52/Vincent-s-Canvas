@@ -1,4 +1,4 @@
-import { Box, FileText, Grid2x2, ImageIcon, ImagePlus, Images, MessageSquare, ShieldCheck, Sparkles, Video, Zap } from "lucide-react";
+import { Box, FileText, Grid2x2, ImageIcon, ImagePlus, Images, MessageSquare, ShieldCheck, Sparkles, UserRoundCog, Video, Zap } from "lucide-react";
 
 import type { AdminOperationType } from "@/lib/admin-domain";
 
@@ -72,6 +72,13 @@ export const navigationTools = [
         label: "无线画布",
         icon: Box,
         group: "online",
+    },
+    {
+        slug: "team",
+        path: "/team",
+        label: "我的小组",
+        icon: UserRoundCog,
+        group: "admin",
     },
     {
         slug: "admin",

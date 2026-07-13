@@ -2,9 +2,11 @@ import { Drawer } from "antd";
 import { Link } from "react-router-dom";
 
 import { navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
-import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { isAdminRole, useUserStore } from "@/stores/use-user-store";
+import { useModuleStore } from "@/stores/use-module-store";
+import type { ModuleKey } from "@/services/api/modules";
 
 type MobileNavDrawerProps = {
     open: boolean;
@@ -20,7 +22,9 @@ const groupLabels: Record<NavigationGroup, string> = {
 
 export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDrawerProps) {
     const estimate = useBusinessConfigStore((state) => state.estimate);
-    const adminVisible = useCanManageConfig();
+    const adminVisible = useUserStore((state) => isAdminRole(state.user?.role));
+    const teamVisible = useUserStore((state) => state.user?.groupRole === "leader");
+    const flags = useModuleStore((state) => state.flags);
     const getToolBadge = (slug: NavigationToolSlug) => {
         const billing = navigationToolBilling[slug];
         if (billing) {
@@ -29,6 +33,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
         }
         if (slug === "prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
         if (slug === "admin") return "管理员";
+        if (slug === "team") return "组长";
         return undefined;
     };
 
@@ -36,7 +41,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
         <Drawer title="功能模块" placement="left" size={300} open={open} onClose={onClose} className="md:hidden">
             <div className="space-y-6">
                 {(["local", "online", "admin"] as const).map((group) => {
-                    const tools = navigationTools.filter((tool) => tool.group === group && (adminVisible || tool.group !== "admin"));
+                    const tools = navigationTools.filter((tool) => tool.group === group && (tool.slug === "admin" || flags[tool.slug as ModuleKey]) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
                     if (!tools.length) return null;
 
                     return (

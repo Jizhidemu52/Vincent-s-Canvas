@@ -105,6 +105,12 @@ export function createAccountsRouter(db: Database) {
                     role, departmentId, input.status ?? current.status, input.creditLimit ?? current.creditLimit,
                     input.monthlyCreditLimit ?? current.monthlyCreditLimit, current.id],
             );
+            if (departmentId !== current.departmentId || role !== "designer" || (input.status ?? current.status) !== "active") {
+                await db.query(
+                    "UPDATE group_memberships SET ended_at=now(),ended_by=$1 WHERE user_id=$2 AND ended_at IS NULL",
+                    [actor.id, current.id],
+                );
+            }
             const result = await db.query<UserRow>(
                 `SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`,
                 [current.id],

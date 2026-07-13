@@ -4,11 +4,13 @@ import { useEffect } from "react";
 import { useUserStore } from "@/stores/use-user-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { useModuleStore } from "@/stores/use-module-store";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const authStatus = useUserStore((state) => state.status);
     const hydrateSession = useUserStore((state) => state.hydrateSession);
     const refreshBusinessConfig = useBusinessConfigStore((state) => state.refresh);
+    const refreshModules = useModuleStore((state) => state.refresh);
 
     useEffect(() => {
         if (authStatus !== "authenticated") return;
@@ -22,6 +24,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         const refresh = () => {
             void hydrateSession();
             void refreshBusinessConfig().catch(() => undefined);
+            void refreshModules().catch(() => undefined);
             void syncProjects();
         };
         refresh();
@@ -34,7 +37,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             window.clearInterval(timer);
             document.removeEventListener("visibilitychange", onVisibility);
         };
-    }, [authStatus, hydrateSession, refreshBusinessConfig]);
+    }, [authStatus, hydrateSession, refreshBusinessConfig, refreshModules]);
 
     return <>{children}</>;
 }

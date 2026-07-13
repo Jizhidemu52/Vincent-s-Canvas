@@ -33,6 +33,7 @@ const event = (
 const actor = (id: string, role: SessionUser["role"], departmentId: string | null): SessionUser => ({
   id, role, departmentId, username: id, displayName: id, email: null, employeeNo: null,
   departmentName: null, status: "active", mustChangePassword: false, mfaEnabled: false,
+  groupId: null, groupName: null, groupRole: null,
   creditBalance: 0, creditLimit: 0, monthlyCreditLimit: 0, temporaryCreditAdjustment: 0,
   creditPeriodStart: "2026-07-01", creditResetAt: "2026-08-01",
 });
@@ -76,5 +77,9 @@ describe("asset event projections", () => {
     expect(canManageResultState(actor("manager", "department_admin", "dept-a"), "designer-a", "dept-a")).toBe(true);
     expect(canManageResultState(actor("manager", "department_admin", "dept-b"), "designer-a", "dept-a")).toBe(false);
     expect(canManageResultState(actor("designer-a", "designer", "dept-a"), "designer-a", "dept-a")).toBe(false);
+    const leader = { ...actor("leader", "designer", "dept-a"), groupId: "group-a", groupName: "A组", groupRole: "leader" as const };
+    expect(canManageResultState(leader, "designer-a", "dept-a", "group-a")).toBe(true);
+    expect(canManageResultState(leader, "designer-b", "dept-a", "group-b")).toBe(false);
+    expect(canManageResultState({ ...leader, groupRole: "member" }, "designer-a", "dept-a", "group-a")).toBe(false);
   });
 });

@@ -14,6 +14,7 @@ import {
   type QueueTaskAction,
 } from "../tasks";
 import type { AuthenticatedRequest } from "../types";
+import { assertModuleEnabled, moduleForOperation } from "../module-flags";
 
 const base = z.object({
   requestId: z.string().min(8).max(200),
@@ -57,6 +58,7 @@ export function createTasksRouter(db: Database, cache: Cache) {
   router.post("/", async (request, response, next) => {
     try {
       const input = singleSchema.parse(request.body);
+      await assertModuleEnabled(db, moduleForOperation(input.operationType, input.parameters));
       const actor = (request as unknown as AuthenticatedRequest).auth;
       if (input.priority === "urgent" && actor.role !== "super_admin") {
         response.status(403).json({
@@ -92,6 +94,7 @@ export function createTasksRouter(db: Database, cache: Cache) {
   router.post("/batch", async (request, response, next) => {
     try {
       const input = batchSchema.parse(request.body);
+      await assertModuleEnabled(db, moduleForOperation(input.operationType, input.parameters));
       const actor = (request as unknown as AuthenticatedRequest).auth;
       if (input.priority !== "normal" && actor.role === "designer") {
         response

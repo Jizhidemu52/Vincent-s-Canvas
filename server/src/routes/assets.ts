@@ -45,8 +45,12 @@ const assetSelect = `a.id,a.owner_user_id AS "ownerUserId",u.display_name AS "ow
 function accessClause(actor: SessionUser, alias = "a") {
   if (actor.role === "super_admin") return { sql: "TRUE", values: [] as unknown[] };
   const values: unknown[] = [actor.id, actor.departmentId];
+  if (actor.groupRole === "leader") values.push(actor.groupId);
+  const leaderScope = actor.groupRole === "leader"
+    ? ` OR EXISTS(SELECT 1 FROM group_memberships gm WHERE gm.group_id=$3 AND gm.user_id=${alias}.owner_user_id AND gm.effective_at<=${alias}.created_at AND (gm.ended_at IS NULL OR gm.ended_at>${alias}.created_at))`
+    : "";
   return {
-    sql: `(${alias}.owner_user_id=$1 OR ${alias}.visibility_scope='company' OR (${alias}.department_id=$2 AND $2::uuid IS NOT NULL AND EXISTS(SELECT 1 FROM asset_shares s WHERE s.asset_id=${alias}.id AND s.department_id=$2)) OR EXISTS(SELECT 1 FROM asset_shares s JOIN project_members pm ON pm.project_id=s.project_id WHERE s.asset_id=${alias}.id AND pm.user_id=$1) OR EXISTS(SELECT 1 FROM asset_shares s WHERE s.asset_id=${alias}.id AND s.user_id=$1)${actor.role === "department_admin" ? ` OR ${alias}.department_id=$2` : ""})`,
+    sql: `(${alias}.owner_user_id=$1 OR ${alias}.visibility_scope='company' OR (${alias}.department_id=$2 AND $2::uuid IS NOT NULL AND EXISTS(SELECT 1 FROM asset_shares s WHERE s.asset_id=${alias}.id AND s.department_id=$2)) OR EXISTS(SELECT 1 FROM asset_shares s JOIN project_members pm ON pm.project_id=s.project_id WHERE s.asset_id=${alias}.id AND pm.user_id=$1) OR EXISTS(SELECT 1 FROM asset_shares s WHERE s.asset_id=${alias}.id AND s.user_id=$1)${actor.role === "department_admin" ? ` OR ${alias}.department_id=$2` : ""}${leaderScope})`,
     values,
   };
 }

@@ -12,6 +12,8 @@ import { ModelPricingPanel } from "@/pages/admin/components/model-pricing-panel"
 import { HistoryManagementPanel, TaskManagementPanel } from "@/pages/admin/components/task-history-panels";
 import { AdminAssetsPanel } from "@/pages/admin/components/admin-assets-panel";
 import { IntegrationStatusPanel } from "@/pages/admin/components/integration-status-panel";
+import { GroupManagementPanel } from "@/pages/admin/components/group-management-panel";
+import { ModuleSwitchPanel } from "@/pages/admin/components/module-switch-panel";
 import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, listAccounts, listAuditLogs, listDepartments, resetAccountPassword, updateAccount, type AccountInput, type AuditLog, type Department } from "@/services/api/admin-accounts";
 import { listAdminHistory } from "@/services/api/task-history";
 import type { ApiUser, ApiUserRole } from "@/services/api/auth";
@@ -61,6 +63,8 @@ export default function AdminPage() {
     const currentOperator = signedInUser;
     const isAdmin = signedInUser?.role === "super_admin";
     const canManageAccounts = isAdminRole(signedInUser?.role);
+    const requestedAdminTab = searchParams.get("tab") || "accounts";
+    const activeAdminTab = isAdmin || requestedAdminTab === "groups" ? requestedAdminTab : "accounts";
 
     const refreshAccounts = async () => {
         setAccountsLoading(true);
@@ -83,22 +87,22 @@ export default function AdminPage() {
 
     const activeDesigner = accounts.find((designer) => designer.role === "designer");
     useEffect(() => {
-        if (!activeDesigner) return;
+        if (!activeDesigner || activeAdminTab !== "accounts") return;
         if (!creditForm.getFieldValue("designerId")) creditForm.setFieldValue("designerId", activeDesigner.id);
         if (!limitForm.getFieldValue("designerId")) {
             limitForm.setFieldsValue({ designerId: activeDesigner.id, monthlyCreditLimit: activeDesigner.monthlyCreditLimit });
         }
-    }, [activeDesigner, creditForm, limitForm]);
+    }, [activeAdminTab, activeDesigner, creditForm, limitForm]);
     const totalRemaining = accounts.reduce((sum, designer) => sum + designer.creditBalance, 0);
     const totalUsed = accounts.reduce((sum, designer) => sum + Math.max(0, designer.creditLimit - designer.creditBalance), 0);
 
-    const requestedAdminTab = searchParams.get("tab") || "accounts";
-    const activeAdminTab = isAdmin ? requestedAdminTab : "accounts";
     const changeAdminTab = (tab: string) => {
         setSearchParams(tab === "accounts" ? {} : { tab }, { replace: true });
     };
     const adminTabOptions = [
         { key: "accounts", label: "账号额度" },
+        { key: "groups", label: "设计师分组" },
+        { key: "modules", label: "模块开关" },
         { key: "pricing", label: "积分价格" },
         { key: "providers", label: "API Provider" },
         { key: "workflows", label: "工作流管理" },
@@ -108,7 +112,7 @@ export default function AdminPage() {
         { key: "batch", label: "批量任务" },
         { key: "audit", label: "审计日志" },
         { key: "integrations", label: "系统集成" },
-    ].filter((tab) => isAdmin || tab.key === "accounts");
+    ].filter((tab) => isAdmin || tab.key === "accounts" || tab.key === "groups");
 
     const submitCreditChange = async (values: CreditFormValues) => {
         try { await adjustAccountCredits(values.designerId, values.amount, values.reason || "管理员调整"); message.success("额度已调整"); await refreshAccounts(); }
@@ -394,6 +398,16 @@ export default function AdminPage() {
                                         </div>
                                     </div>
                                 ),
+                            },
+                            {
+                                key: "groups",
+                                label: "设计师分组",
+                                children: <GroupManagementPanel accounts={accounts} departments={isAdmin ? departments : departments.filter((department) => department.id === signedInUser.departmentId)} />,
+                            },
+                            {
+                                key: "modules",
+                                label: "模块开关",
+                                children: <ModuleSwitchPanel />,
                             },
                             {
                                 key: "pricing",

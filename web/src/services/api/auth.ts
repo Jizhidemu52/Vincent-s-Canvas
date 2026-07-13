@@ -10,6 +10,9 @@ export type ApiUser = {
     status: "active" | "disabled" | "locked";
     departmentId: string | null;
     departmentName: string | null;
+    groupId: string | null;
+    groupName: string | null;
+    groupRole: "member" | "leader" | null;
     mustChangePassword: boolean;
     mfaEnabled: boolean;
     creditBalance: number;

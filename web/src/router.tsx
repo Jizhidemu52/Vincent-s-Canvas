@@ -3,6 +3,8 @@ import { createBrowserRouter, Outlet } from "react-router-dom";
 
 import UserLayout from "@/layouts/user-layout";
 import { AuthGate } from "@/components/auth/auth-gate";
+import { ModuleGate } from "@/components/auth/module-gate";
+import type { ModuleKey } from "@/services/api/modules";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
 const AdminLoginPage = lazy(() => import("@/pages/admin/login"));
@@ -16,6 +18,7 @@ const LoginPage = lazy(() => import("@/pages/login"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const PromptsPage = lazy(() => import("@/pages/prompts"));
 const SetupMfaPage = lazy(() => import("@/pages/setup-mfa"));
+const TeamPage = lazy(() => import("@/pages/team"));
 const VideoPage = lazy(() => import("@/pages/video"));
 
 type RoutePage = LazyExoticComponent<ComponentType>;
@@ -40,6 +43,19 @@ function protectedRoute(Page: RoutePage, admin = false) {
     return <AuthGate admin={admin}>{routeElement(Page)}</AuthGate>;
 }
 
+function moduleRoute(Page: RoutePage, moduleKey: ModuleKey | ((search: string) => ModuleKey)) {
+    return <AuthGate><ModuleGate moduleKey={moduleKey}>{routeElement(Page)}</ModuleGate></AuthGate>;
+}
+
+function imageModule(search: string): ModuleKey {
+    const tool = new URLSearchParams(search).get("tool");
+    return tool === "detail-enhance" || tool === "image-edit" || tool === "angle-control" || tool === "seamless-stitch" ? tool : "image";
+}
+
+function canvasModule(search: string): ModuleKey {
+    return new URLSearchParams(search).get("tool") === "gpt-chat" ? "gpt-chat" : "canvas";
+}
+
 export const router = createBrowserRouter([
     {
         element: (
@@ -52,14 +68,15 @@ export const router = createBrowserRouter([
             { path: "/login", element: routeElement(LoginPage) },
             { path: "/change-password", element: protectedRoute(ChangePasswordPage) },
             { path: "/setup-mfa", element: protectedRoute(SetupMfaPage, true) },
-            { path: "/image", element: protectedRoute(ImagePage) },
-            { path: "/video", element: protectedRoute(VideoPage) },
-            { path: "/assets", element: protectedRoute(AssetsPage) },
-            { path: "/prompts", element: protectedRoute(PromptsPage) },
+            { path: "/image", element: moduleRoute(ImagePage, imageModule) },
+            { path: "/video", element: moduleRoute(VideoPage, "video") },
+            { path: "/assets", element: moduleRoute(AssetsPage, "assets") },
+            { path: "/team", element: moduleRoute(TeamPage, "team") },
+            { path: "/prompts", element: moduleRoute(PromptsPage, "prompts") },
             { path: "/admin", element: protectedRoute(AdminPage, true) },
             { path: "/admin/login", element: routeElement(AdminLoginPage) },
-            { path: "/canvas", element: protectedRoute(CanvasPage) },
-            { path: "/canvas/:id", element: protectedRoute(CanvasProjectPage) },
+            { path: "/canvas", element: moduleRoute(CanvasPage, canvasModule) },
+            { path: "/canvas/:id", element: moduleRoute(CanvasProjectPage, "canvas") },
         ],
     },
     { path: "*", element: routeElement(NotFound) },

@@ -268,6 +268,83 @@ integration("production identity and RBAC", () => {
       "ManagerReady2026",
     );
 
+    const groupA = await api<{ group: { id: string } }>(
+      "/api/admin/groups",
+      { method: "POST", body: JSON.stringify({ name: "花型一组", code: "pattern-a", departmentId: departmentA }) },
+      admin.cookie,
+    );
+    expect(groupA.response.status).toBe(201);
+    const groupB = await api<{ group: { id: string } }>(
+      "/api/admin/groups",
+      { method: "POST", body: JSON.stringify({ name: "商品图组", code: "product-a", departmentId: departmentA }) },
+      admin.cookie,
+    );
+    expect(groupB.response.status).toBe(201);
+    const temporaryGroup = await api<{ group: { id: string } }>(
+      "/api/admin/groups",
+      { method: "POST", body: JSON.stringify({ name: "临时设计组", code: "temporary-a", departmentId: departmentA }) },
+      admin.cookie,
+    );
+    expect(temporaryGroup.response.status).toBe(201);
+    const departmentAccounts = await api<{ users: Array<{ id: string; username: string }> }>("/api/admin/accounts", {}, employeeLogin.cookie);
+    const batchMember = departmentAccounts.body.users.find((user) => user.username === "batch-designer-001")!;
+    const transferredMember = departmentAccounts.body.users.find((user) => user.username === "batch-designer-002")!;
+    expect(batchMember.id).toBeTruthy();
+    expect(transferredMember.id).toBeTruthy();
+    const assignTemporaryMember = await api(
+      `/api/admin/groups/${temporaryGroup.body.group.id}/members`,
+      { method: "POST", body: JSON.stringify({ userId: transferredMember.id, role: "member" }) },
+      employeeLogin.cookie,
+    );
+    expect(assignTemporaryMember.response.status).toBe(204);
+    const disableTemporaryGroup = await api(
+      `/api/admin/groups/${temporaryGroup.body.group.id}`,
+      { method: "PATCH", body: JSON.stringify({ status: "disabled" }) },
+      employeeLogin.cookie,
+    );
+    expect(disableTemporaryGroup.response.status).toBe(200);
+    const assignAfterGroupDisable = await api(
+      `/api/admin/groups/${groupB.body.group.id}/members`,
+      { method: "POST", body: JSON.stringify({ userId: transferredMember.id, role: "member" }) },
+      employeeLogin.cookie,
+    );
+    expect(assignAfterGroupDisable.response.status).toBe(204);
+    const assignLeader = await api(
+      `/api/admin/groups/${groupA.body.group.id}/members`,
+      { method: "POST", body: JSON.stringify({ userId: designerA.id, role: "leader" }) },
+      admin.cookie,
+    );
+    expect(assignLeader.response.status).toBe(204);
+    const assignMember = await api(
+      `/api/admin/groups/${groupA.body.group.id}/members`,
+      { method: "POST", body: JSON.stringify({ userId: batchMember.id, role: "member" }) },
+      employeeLogin.cookie,
+    );
+    expect(assignMember.response.status).toBe(204);
+    const duplicateGroup = await api<{ error: string }>(
+      `/api/admin/groups/${groupB.body.group.id}/members`,
+      { method: "POST", body: JSON.stringify({ userId: designerA.id, role: "member" }) },
+      admin.cookie,
+    );
+    expect(duplicateGroup.response.status).toBe(409);
+    expect(duplicateGroup.body.error).toBe("GROUP_MEMBERSHIP_CONFLICT");
+    const crossDepartmentMember = await api<{ error: string }>(
+      `/api/admin/groups/${groupA.body.group.id}/members`,
+      { method: "POST", body: JSON.stringify({ userId: designerB.id, role: "member" }) },
+      admin.cookie,
+    );
+    expect(crossDepartmentMember.response.status).toBe(400);
+    expect(crossDepartmentMember.body.error).toBe("INVALID_GROUP_MEMBER");
+    const leaderSession = await api<{ user: { groupId: string; groupRole: string } }>("/api/auth/session", {}, chineseLogin.cookie);
+    expect(leaderSession.body.user).toMatchObject({ groupId: groupA.body.group.id, groupRole: "leader" });
+    const leaderTeam = await api<{ group: { id: string }; members: unknown[] }>("/api/team", {}, chineseLogin.cookie);
+    expect(leaderTeam.response.status).toBe(200);
+    expect(leaderTeam.body.group.id).toBe(groupA.body.group.id);
+    expect(leaderTeam.body.members).toHaveLength(2);
+    const ordinaryTeamAttempt = await api<{ error: string }>("/api/team", {}, emailLogin.cookie);
+    expect(ordinaryTeamAttempt.response.status).toBe(403);
+    expect(ordinaryTeamAttempt.body.error).toBe("FORBIDDEN");
+
     const designerAdminAttempt = await api<{ error: string }>(
       "/api/admin/accounts",
       {},
@@ -370,6 +447,73 @@ integration("production identity and RBAC", () => {
       admin.cookie,
     );
     expect(audioModel.response.status).toBe(201);
+
+    const designerModules = await api<{ modules: Array<{ moduleKey: string; enabled: boolean }> }>(
+      "/api/modules",
+      {},
+      chineseLogin.cookie,
+    );
+    expect(designerModules.response.status).toBe(200);
+    expect(designerModules.body.modules.find((module) => module.moduleKey === "seamless-stitch")?.enabled).toBe(true);
+    const managerModuleAttempt = await api<{ error: string }>(
+      "/api/admin/modules",
+      { method: "PATCH", body: JSON.stringify({ moduleKey: "seamless-stitch", enabled: false }) },
+      employeeLogin.cookie,
+    );
+    expect(managerModuleAttempt.response.status).toBe(403);
+    expect(managerModuleAttempt.body.error).toBe("FORBIDDEN");
+    const disabledTeamModule = await api(
+      "/api/admin/modules",
+      { method: "PATCH", body: JSON.stringify({ moduleKey: "team", enabled: false }) },
+      admin.cookie,
+    );
+    expect(disabledTeamModule.response.status).toBe(200);
+    const disabledTeamAttempt = await api<{ error: string; moduleKey: string }>("/api/team", {}, chineseLogin.cookie);
+    expect(disabledTeamAttempt.response.status).toBe(403);
+    expect(disabledTeamAttempt.body).toMatchObject({ error: "MODULE_DISABLED", moduleKey: "team" });
+    const reenabledTeamModule = await api(
+      "/api/admin/modules",
+      { method: "PATCH", body: JSON.stringify({ moduleKey: "team", enabled: true }) },
+      admin.cookie,
+    );
+    expect(reenabledTeamModule.response.status).toBe(200);
+    const disabledModule = await api<{ module: { enabled: boolean } }>(
+      "/api/admin/modules",
+      { method: "PATCH", body: JSON.stringify({ moduleKey: "seamless-stitch", enabled: false }) },
+      admin.cookie,
+    );
+    expect(disabledModule.response.status).toBe(200);
+    expect(disabledModule.body.module.enabled).toBe(false);
+    const tasksBeforeDisabledSubmission = await api<{ tasks: unknown[] }>("/api/tasks", {}, chineseLogin.cookie);
+    const balanceBeforeDisabledSubmission = await api<{ user: { creditBalance: number } }>("/api/auth/session", {}, chineseLogin.cookie);
+    const disabledSubmission = await api<{ error: string; moduleKey: string }>(
+      "/api/tasks",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          requestId: "integration-disabled-module-001",
+          projectId: "integration-disabled-module",
+          operationType: "seamless_stitch",
+          modelConfigId: internalSeamlessModel!.id,
+          prompt: '{"rows":2,"cols":2}',
+          sourceUrls: [],
+        }),
+      },
+      chineseLogin.cookie,
+    );
+    expect(disabledSubmission.response.status).toBe(403);
+    expect(disabledSubmission.body).toMatchObject({ error: "MODULE_DISABLED", moduleKey: "seamless-stitch" });
+    const tasksAfterDisabledSubmission = await api<{ tasks: unknown[] }>("/api/tasks", {}, chineseLogin.cookie);
+    const balanceAfterDisabledSubmission = await api<{ user: { creditBalance: number } }>("/api/auth/session", {}, chineseLogin.cookie);
+    expect(tasksAfterDisabledSubmission.body.tasks).toHaveLength(tasksBeforeDisabledSubmission.body.tasks.length);
+    expect(balanceAfterDisabledSubmission.body.user.creditBalance).toBe(balanceBeforeDisabledSubmission.body.user.creditBalance);
+    const enabledModule = await api<{ module: { enabled: boolean } }>(
+      "/api/admin/modules",
+      { method: "PATCH", body: JSON.stringify({ moduleKey: "seamless-stitch", enabled: true }) },
+      admin.cookie,
+    );
+    expect(enabledModule.response.status).toBe(200);
+    expect(enabledModule.body.module.enabled).toBe(true);
 
     const duplicateRequestId = "integration-seamless-duplicate-001";
     const submitSeamless = (cookie: string) =>
@@ -875,12 +1019,13 @@ integration("production identity and RBAC", () => {
       );
       expect(repeatedDownload.body.projection).toMatchObject({ usabilityScore: 20, downloadCount: 2 });
 
-      const designerAdopt = await api<{ error: string }>(
+      const leaderPending = await api<{ projection: { usabilityScore: number; resultStatus: string } }>(
         `/api/assets/${assetId}/events`,
-        { method: "POST", body: JSON.stringify({ eventType: "asset.adopted", idempotencyKey: `integration-adopt-${crypto.randomUUID()}` }) },
+        { method: "POST", body: JSON.stringify({ eventType: "asset.pending", idempotencyKey: `integration-pending-${crypto.randomUUID()}` }) },
         resetLogin.cookie,
       );
-      expect(designerAdopt.response.status).toBe(403);
+      expect(leaderPending.response.status).toBe(201);
+      expect(leaderPending.body.projection).toMatchObject({ usabilityScore: 20, resultStatus: "pending" });
       const managerAdopt = await api<{ eventId: string; projection: { usabilityScore: number; resultStatus: string } }>(
         `/api/assets/${assetId}/events`,
         { method: "POST", body: JSON.stringify({ eventType: "asset.adopted", idempotencyKey: `integration-adopt-${crypto.randomUUID()}` }) },
@@ -892,7 +1037,13 @@ integration("production identity and RBAC", () => {
         { method: "POST", body: JSON.stringify({ idempotencyKey: `integration-reverse-${crypto.randomUUID()}`, reason: "集成测试纠正" }) },
         admin.cookie,
       );
-      expect(reversed.body.projection).toMatchObject({ usabilityScore: 20, resultStatus: "downloaded" });
+      expect(reversed.body.projection).toMatchObject({ usabilityScore: 20, resultStatus: "pending" });
+
+      const groupedEvents = await database.query<{ group_id: string | null }>(
+        "SELECT DISTINCT group_id FROM asset_events WHERE asset_id=$1 AND event_type<>'asset.event_reversed'",
+        [assetId],
+      );
+      expect(groupedEvents.rows.map((row) => row.group_id)).toEqual([groupA.body.group.id]);
 
       const privateReuse = await api<{ error: string }>(
         `/api/assets/${assetId}/events`,
@@ -946,6 +1097,16 @@ integration("production identity and RBAC", () => {
     expect(disabledSession.response.status).toBe(401);
     expect(disabledSession.body.error).toBe("SESSION_EXPIRED");
 
+    const disableGroupMember = await api(
+      `/api/admin/accounts/${batchMember.id}`,
+      { method: "PATCH", body: JSON.stringify({ status: "disabled" }) },
+      employeeLogin.cookie,
+    );
+    expect(disableGroupMember.response.status).toBe(200);
+    const groupsAfterDisable = await api<{ groups: Array<{ id: string; members: Array<{ userId: string }> }> }>("/api/admin/groups", {}, employeeLogin.cookie);
+    const activeGroup = groupsAfterDisable.body.groups.find((group) => group.id === groupA.body.group.id)!;
+    expect(activeGroup.members.map((member) => member.userId)).toEqual([designerA.id]);
+
     const audit = await api<{ auditLogs: Array<{ action: string }> }>(
       "/api/admin/audit-logs?limit=500",
       {},
@@ -973,6 +1134,11 @@ integration("production identity and RBAC", () => {
     expect(
       audit.body.auditLogs.some(
         (entry) => entry.action === "batch.admin_paused",
+      ),
+    ).toBe(true);
+    expect(
+      audit.body.auditLogs.some(
+        (entry) => entry.action === "module.availability_changed",
       ),
     ).toBe(true);
 

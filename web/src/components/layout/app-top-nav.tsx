@@ -11,6 +11,8 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
+import { useModuleStore } from "@/stores/use-module-store";
+import type { ModuleKey } from "@/services/api/modules";
 
 const groupLabels: Record<NavigationGroup, string> = {
     local: "本地功能",
@@ -48,8 +50,9 @@ function SidebarTool({ tool, active, badge }: { tool: (typeof navigationTools)[n
     );
 }
 
-function ToolGroup({ group, activeToolSlug, adminVisible, getToolBadge }: { group: NavigationGroup; activeToolSlug?: NavigationToolSlug; adminVisible: boolean; getToolBadge: (slug: NavigationToolSlug) => string | undefined }) {
-    const tools = navigationTools.filter((tool) => tool.group === group && (adminVisible || tool.group !== "admin"));
+function ToolGroup({ group, activeToolSlug, adminVisible, teamVisible, getToolBadge }: { group: NavigationGroup; activeToolSlug?: NavigationToolSlug; adminVisible: boolean; teamVisible: boolean; getToolBadge: (slug: NavigationToolSlug) => string | undefined }) {
+    const flags = useModuleStore((state) => state.flags);
+    const tools = navigationTools.filter((tool) => tool.group === group && (tool.slug === "admin" || flags[tool.slug as ModuleKey]) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
     if (!tools.length) return null;
 
     return (
@@ -145,7 +148,10 @@ export function AppTopNav() {
     const createProject = useCanvasStore((state) => state.createProject);
     const projectsLength = useCanvasStore((state) => state.projects.length);
     const estimate = useBusinessConfigStore((state) => state.estimate);
-    const adminVisible = useCanManageConfig();
+    const configVisible = useCanManageConfig();
+    const currentRole = useUserStore((state) => state.user?.role);
+    const adminVisible = isAdminRole(currentRole);
+    const teamVisible = useUserStore((state) => state.user?.groupRole === "leader");
 
     const getToolBadge = (slug: NavigationToolSlug) => {
         const billing = navigationToolBilling[slug];
@@ -155,6 +161,7 @@ export function AppTopNav() {
         }
         if (slug === "prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
         if (slug === "admin") return "管理员";
+        if (slug === "team") return "组长";
         return undefined;
     };
 
@@ -183,11 +190,11 @@ export function AppTopNav() {
                                 <Menu className="size-4 text-stone-400" />
                                 项目
                             </Link>
-                            <ToolGroup group="local" activeToolSlug={activeToolSlug} adminVisible={adminVisible} getToolBadge={getToolBadge} />
-                            <ToolGroup group="online" activeToolSlug={activeToolSlug} adminVisible={adminVisible} getToolBadge={getToolBadge} />
-                            <ToolGroup group="admin" activeToolSlug={activeToolSlug} adminVisible={adminVisible} getToolBadge={getToolBadge} />
+                            <ToolGroup group="local" activeToolSlug={activeToolSlug} adminVisible={adminVisible} teamVisible={teamVisible} getToolBadge={getToolBadge} />
+                            <ToolGroup group="online" activeToolSlug={activeToolSlug} adminVisible={adminVisible} teamVisible={teamVisible} getToolBadge={getToolBadge} />
+                            <ToolGroup group="admin" activeToolSlug={activeToolSlug} adminVisible={adminVisible} teamVisible={teamVisible} getToolBadge={getToolBadge} />
                         </nav>
-                        <SidebarFooter adminVisible={adminVisible} />
+                        <SidebarFooter adminVisible={configVisible} />
                     </aside>
 
                     <header className="fixed inset-x-0 top-0 z-20 flex h-14 items-center justify-between border-b border-stone-200 bg-[#f3f3f1]/95 px-4 backdrop-blur-xl md:hidden">
