@@ -16,6 +16,7 @@ const moduleDetails: Record<ModuleKey, { label: string; description: string }> =
     "gpt-chat": { label: "GPT 对话", description: "控制 GPT 对话入口与服务端对话请求" },
     canvas: { label: "无线画布", description: "控制画布入口和画布批量改图任务" },
     team: { label: "我的小组", description: "控制组长端小组看板入口" },
+    performance: { label: "设计效能", description: "控制管理员与组长的设计效能、成本和成果转化看板" },
 };
 
 export function ModuleSwitchPanel() {
@@ -41,7 +42,7 @@ export function ModuleSwitchPanel() {
     return (
         <div className="overflow-hidden rounded-md border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
             <div className="border-b border-stone-200 px-4 py-3 dark:border-stone-800">
-                <h2 className="text-base font-semibold">设计师端模块开关</h2>
+                <h2 className="text-base font-semibold">功能模块开关</h2>
                 <p className="mt-1 text-xs text-stone-500">关闭后入口会隐藏，直达页面和新任务提交也会被拦截；历史、素材数据和后台配置不会删除。</p>
             </div>
             <div className="divide-y divide-stone-100 dark:divide-stone-800">

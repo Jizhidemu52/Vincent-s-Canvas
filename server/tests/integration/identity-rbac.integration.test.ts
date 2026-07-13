@@ -544,6 +544,47 @@ integration("production identity and RBAC", () => {
     );
     expect(designerModules.response.status).toBe(200);
     expect(designerModules.body.modules.find((module) => module.moduleKey === "seamless-stitch")?.enabled).toBe(true);
+    expect(designerModules.body.modules.find((module) => module.moduleKey === "performance")?.enabled).toBe(true);
+    const adminPerformance = await api<{ metrics: { validOutputs: number }; options: { departments: unknown[] } }>(
+      "/api/performance?preset=month", {}, admin.cookie,
+    );
+    expect(adminPerformance.response.status).toBe(200);
+    expect(adminPerformance.body.metrics.validOutputs).toBeGreaterThanOrEqual(0);
+    expect(adminPerformance.body.options.departments.length).toBeGreaterThanOrEqual(2);
+    const managerPerformance = await api<{ options: { departments: unknown[]; users: Array<{ departmentId: string }> } }>(
+      "/api/performance?preset=month", {}, employeeLogin.cookie,
+    );
+    expect(managerPerformance.response.status).toBe(200);
+    expect(managerPerformance.body.options.departments).toHaveLength(0);
+    expect(managerPerformance.body.options.users.every((user) => user.departmentId === departmentA)).toBe(true);
+    const leaderPerformance = await api<{ options: { groups: Array<{ value: string; label: string; departmentId: string }>; users: Array<{ groupId: string }> } }>(
+      "/api/performance?preset=month", {}, chineseLogin.cookie,
+    );
+    expect(leaderPerformance.response.status).toBe(200);
+    expect(leaderPerformance.body.options.groups).toEqual([{ value: groupA.body.group.id, label: "花型一组", departmentId: departmentA }]);
+    expect(leaderPerformance.body.options.users.every((user) => user.groupId === groupA.body.group.id)).toBe(true);
+    const ordinaryPerformance = await api<{ error: string }>("/api/performance?preset=month", {}, emailLogin.cookie);
+    expect(ordinaryPerformance.response.status).toBe(403);
+    expect(ordinaryPerformance.body.error).toBe("FORBIDDEN");
+    const invalidPerformanceRange = await api<{ error: string }>(
+      "/api/performance?preset=custom&from=2026-07-10T00%3A00%3A00.000Z&to=2026-07-01T00%3A00%3A00.000Z", {}, admin.cookie,
+    );
+    expect(invalidPerformanceRange.response.status).toBe(400);
+    const disabledPerformanceModule = await api(
+      "/api/admin/modules",
+      { method: "PATCH", body: JSON.stringify({ moduleKey: "performance", enabled: false }) },
+      admin.cookie,
+    );
+    expect(disabledPerformanceModule.response.status).toBe(200);
+    const disabledPerformance = await api<{ error: string; moduleKey: string }>("/api/performance?preset=month", {}, chineseLogin.cookie);
+    expect(disabledPerformance.response.status).toBe(403);
+    expect(disabledPerformance.body).toMatchObject({ error: "MODULE_DISABLED", moduleKey: "performance" });
+    const reenabledPerformanceModule = await api(
+      "/api/admin/modules",
+      { method: "PATCH", body: JSON.stringify({ moduleKey: "performance", enabled: true }) },
+      admin.cookie,
+    );
+    expect(reenabledPerformanceModule.response.status).toBe(200);
     const managerModuleAttempt = await api<{ error: string }>(
       "/api/admin/modules",
       { method: "PATCH", body: JSON.stringify({ moduleKey: "seamless-stitch", enabled: false }) },
@@ -1190,6 +1231,29 @@ integration("production identity and RBAC", () => {
         [assetId],
       );
       expect(groupedEvents.rows.map((row) => row.group_id)).toEqual([groupA.body.group.id]);
+
+      const updateDirection = await api(
+        `/api/performance/assets/${assetId}/direction`,
+        { method: "PATCH", body: JSON.stringify({ primaryDirection: "pattern", secondaryDirections: ["apparel"], adminTags: ["重点花型"] }) },
+        employeeLogin.cookie,
+      );
+      expect(updateDirection.response.status).toBe(200);
+      const storedDirection = await database.query<{ primary_direction: string; secondary_directions: string[]; admin_direction_tags: string[] }>(
+        "SELECT primary_direction,secondary_directions,admin_direction_tags FROM assets WHERE id=$1", [assetId],
+      );
+      expect(storedDirection.rows[0]).toMatchObject({ primary_direction: "pattern", secondary_directions: ["apparel"], admin_direction_tags: ["重点花型"] });
+      const projectDeadline = await api(
+        "/api/performance/deadline",
+        { method: "PATCH", body: JSON.stringify({ targetType: "project", targetId: projectA.body.project.id, deadlineAt: "2026-07-31T18:00:00+08:00" }) },
+        employeeLogin.cookie,
+      );
+      expect(projectDeadline.response.status).toBe(200);
+      const crossDepartmentDeadline = await api<{ error: string }>(
+        "/api/performance/deadline",
+        { method: "PATCH", body: JSON.stringify({ targetType: "project", targetId: projectB.body.project.id, deadlineAt: "2026-07-31T18:00:00+08:00" }) },
+        employeeLogin.cookie,
+      );
+      expect(crossDepartmentDeadline.response.status).toBe(404);
 
       const privateReuse = await api<{ error: string }>(
         `/api/assets/${assetId}/events`,

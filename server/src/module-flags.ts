@@ -2,7 +2,7 @@ import type { Database } from "./db";
 
 export const moduleKeys = [
   "detail-enhance", "image-edit", "angle-control", "seamless-stitch", "image",
-  "video", "prompts", "assets", "gpt-chat", "canvas", "team",
+  "video", "prompts", "assets", "gpt-chat", "canvas", "team", "performance",
 ] as const;
 export type ModuleKey = (typeof moduleKeys)[number];
 

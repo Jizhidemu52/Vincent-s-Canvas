@@ -14,10 +14,12 @@ import { AdminAssetsPanel } from "@/pages/admin/components/admin-assets-panel";
 import { IntegrationStatusPanel } from "@/pages/admin/components/integration-status-panel";
 import { GroupManagementPanel } from "@/pages/admin/components/group-management-panel";
 import { ModuleSwitchPanel } from "@/pages/admin/components/module-switch-panel";
+import { PerformanceDashboard } from "@/pages/performance/dashboard";
 import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, listAccounts, listAuditLogs, listDepartments, resetAccountPassword, updateAccount, type AccountInput, type AuditLog, type Department } from "@/services/api/admin-accounts";
 import { listAdminHistory } from "@/services/api/task-history";
 import type { ApiUser, ApiUserRole } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
+import { useModuleStore } from "@/stores/use-module-store";
 
 type CreditFormValues = {
     designerId: string;
@@ -59,12 +61,15 @@ export default function AdminPage() {
     const [totalCost, setTotalCost] = useState(0);
     const [searchParams, setSearchParams] = useSearchParams();
     const signedInUser = useUserStore((store) => store.user);
+    const performanceEnabled = useModuleStore((store) => store.flags.performance);
     const clearSession = useUserStore((store) => store.clearSession);
     const currentOperator = signedInUser;
     const isAdmin = signedInUser?.role === "super_admin";
     const canManageAccounts = isAdminRole(signedInUser?.role);
     const requestedAdminTab = searchParams.get("tab") || "accounts";
-    const activeAdminTab = isAdmin || requestedAdminTab === "groups" ? requestedAdminTab : "accounts";
+    const departmentAdminTabs = new Set(["accounts", "groups", "performance"]);
+    const requestedTabAvailable = requestedAdminTab !== "performance" || performanceEnabled;
+    const activeAdminTab = requestedTabAvailable && (isAdmin || departmentAdminTabs.has(requestedAdminTab)) ? requestedAdminTab : "accounts";
 
     const refreshAccounts = async () => {
         setAccountsLoading(true);
@@ -102,6 +107,7 @@ export default function AdminPage() {
     const adminTabOptions = [
         { key: "accounts", label: "账号额度" },
         { key: "groups", label: "设计师分组" },
+        ...(performanceEnabled ? [{ key: "performance", label: "设计效能" }] : []),
         { key: "modules", label: "模块开关" },
         { key: "pricing", label: "积分价格" },
         { key: "providers", label: "API Provider" },
@@ -112,7 +118,7 @@ export default function AdminPage() {
         { key: "batch", label: "批量任务" },
         { key: "audit", label: "审计日志" },
         { key: "integrations", label: "系统集成" },
-    ].filter((tab) => isAdmin || tab.key === "accounts" || tab.key === "groups");
+    ].filter((tab) => isAdmin || departmentAdminTabs.has(tab.key));
 
     const submitCreditChange = async (values: CreditFormValues) => {
         try { await adjustAccountCredits(values.designerId, values.amount, values.reason || "管理员调整"); message.success("额度已调整"); await refreshAccounts(); }
@@ -403,6 +409,11 @@ export default function AdminPage() {
                                 key: "groups",
                                 label: "设计师分组",
                                 children: <GroupManagementPanel accounts={accounts} departments={isAdmin ? departments : departments.filter((department) => department.id === signedInUser.departmentId)} />,
+                            },
+                            {
+                                key: "performance",
+                                label: "设计效能",
+                                children: performanceEnabled ? <PerformanceDashboard /> : null,
                             },
                             {
                                 key: "modules",

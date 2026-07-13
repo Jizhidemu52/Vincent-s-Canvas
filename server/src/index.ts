@@ -40,6 +40,7 @@ import {
   createTeamGroupCreditsRouter,
 } from "./routes/group-credits";
 import { GroupCreditError } from "./group-credits";
+import { createPerformanceRouter } from "./routes/performance";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
@@ -195,6 +196,12 @@ app.use(
   requireSession,
   requireAccountReady,
   createAdminGroupCreditsRouter(db),
+);
+app.use(
+  "/api/performance",
+  requireSession,
+  requireAccountReady,
+  createPerformanceRouter(db),
 );
 app.use(
   "/api/admin/audit-logs",

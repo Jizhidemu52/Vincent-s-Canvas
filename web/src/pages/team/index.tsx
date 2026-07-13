@@ -16,6 +16,8 @@ import {
 import { exportTeamHistory, getTeamAudit, getTeamHistory, getTeamOverview, type TeamAuditLog, type TeamHistory, type TeamOverview } from "@/services/api/groups";
 import { listServerAssets, recordServerAssetEvent, type AssetEventType, type ServerAsset } from "@/services/api/server-assets";
 import { useUserStore } from "@/stores/use-user-store";
+import { useModuleStore } from "@/stores/use-module-store";
+import { PerformanceDashboard } from "@/pages/performance/dashboard";
 
 const statusLabel: Record<string, string> = { unused: "未使用", candidate: "候选", project: "已入项目", editing: "继续编辑", downloaded: "已下载", adopted: "已采用", delivered: "已交付", pending: "待定", rejected: "废弃" };
 const requestStatus: Record<string, { label: string; color: string }> = {
@@ -40,6 +42,7 @@ export default function TeamPage() {
   const [assets, setAssets] = useState<ServerAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const isLeader = user?.groupRole === "leader";
+  const performanceEnabled = useModuleStore((state) => state.flags.performance);
 
   const refresh = async () => {
     if (!user?.groupId) return;
@@ -119,6 +122,7 @@ export default function TeamPage() {
         </section>
 
         {isLeader ? <>
+          {performanceEnabled ? <PerformanceDashboard teamOnly /> : null}
           <section className="bg-white">
             <div className="border-b border-stone-200 px-4 py-3"><div className="font-semibold">共享池审批</div><div className="text-xs text-stone-500">只能审批本组有效成员；单次、每日和每月上限由管理员统一设置</div></div>
             <Table loading={loading} rowKey="id" size="small" scroll={{ x: 720 }} pagination={{ pageSize: 10 }} dataSource={managedCredits?.requests ?? []} columns={[
