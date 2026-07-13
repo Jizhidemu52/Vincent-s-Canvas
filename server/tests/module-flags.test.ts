@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { assertModuleEnabled, isModuleEnabled, ModuleDisabledError, moduleForOperation } from "../src/module-flags";
+import { assertModuleEnabled, isModuleEnabled, ModuleDisabledError, moduleForOperation, moduleKeys } from "../src/module-flags";
 import type { Database } from "../src/db";
 
 describe("module availability", () => {
   test("maps task operations to independently controlled modules", () => {
+    expect(moduleKeys).toContain("performance");
     expect(moduleForOperation("image_generation")).toBe("image");
     expect(moduleForOperation("upscale")).toBe("detail-enhance");
     expect(moduleForOperation("inpaint")).toBe("image-edit");
