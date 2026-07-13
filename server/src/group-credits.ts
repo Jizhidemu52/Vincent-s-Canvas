@@ -93,7 +93,7 @@ async function expireOldPeriods(
       await client.query(
         `INSERT INTO group_credit_ledger(request_id,group_id,user_id,actor_user_id,period_start,
           entry_type,wallet_amount,wallet_balance_after,reference_type,reference_id,reason,metadata)
-         VALUES($1,$2,$3,$4,$5::date,'period_expired',$6,0,'credit_period',$5,
+         VALUES($1,$2,$3,$4,$5::date,'period_expired',$6,0,'credit_period',($5::date)::text,
           '月末清零成员未使用的小组领取额度',$7) ON CONFLICT(request_id) DO NOTHING`,
         [
           `group-period-expire:${group.id}:${period.period_start}:${wallet.user_id}`,
@@ -115,7 +115,7 @@ async function expireOldPeriods(
     await client.query(
       `INSERT INTO group_credit_ledger(request_id,group_id,actor_user_id,period_start,
         entry_type,pool_amount,pool_balance_after,reference_type,reference_id,reason,metadata)
-       VALUES($1,$2,$3,$4::date,'period_expired',$5,0,'credit_period',$4,
+       VALUES($1,$2,$3,$4::date,'period_expired',$5,0,'credit_period',($4::date)::text,
         '月末清零小组共享池余额',$6) ON CONFLICT(request_id) DO NOTHING`,
       [
         `group-period-expire:${group.id}:${period.period_start}:pool`,
@@ -177,7 +177,7 @@ export async function ensureGroupCreditPeriod(
     await client.query(
       `INSERT INTO group_credit_ledger(request_id,group_id,actor_user_id,period_start,
         entry_type,pool_amount,pool_balance_after,reference_type,reference_id,reason,metadata)
-       VALUES($1,$2,$3,$4::date,'period_opened',$5,$5,'credit_period',$4,
+       VALUES($1,$2,$3,$4::date,'period_opened',$5,$5,'credit_period',($4::date)::text,
         '新自然月恢复小组固定共享额度',$6) ON CONFLICT(request_id) DO NOTHING`,
       [
         `group-period-open:${group.id}:${group.current_period_start}`,
@@ -332,7 +332,7 @@ export async function configureGroupCreditPolicy(
       await client.query(
         `INSERT INTO group_credit_ledger(request_id,group_id,actor_user_id,period_start,
           entry_type,pool_amount,pool_balance_after,reference_type,reference_id,reason,metadata)
-         VALUES($1,$2,$3,$4::date,'correction',$5,$6,'group_policy',$2,
+         VALUES($1,$2,$3,$4::date,'correction',$5,$6,'group_policy',($2::uuid)::text,
           '管理员同步调整本月小组固定额度',$7)`,
         [`group-policy:${input.groupId}:${crypto.randomUUID()}`, input.groupId, input.actor.id,
           period.period_start, delta, balance, JSON.stringify({ previousFixedCredits: period.fixed_credits })],
@@ -519,14 +519,14 @@ export async function contributePersonalCredits(
     await client.query(
       `INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,
         reference_type,reference_id,reason,metadata)
-       VALUES($1,$2,$2,'group_contribution',$3,$4,'group',$5,'成员归还本月未使用个人额度到本组共享池',$6)`,
+       VALUES($1,$2,$2,'group_contribution',$3,$4,'group',($5::uuid)::text,'成员归还本月未使用个人额度到本组共享池',$6)`,
       [`${input.requestId}:personal`, input.actor.id, -input.amount, userBalance, membership.group_id,
         JSON.stringify({ periodStart: period.period_start, groupId: membership.group_id })],
     );
     await client.query(
       `INSERT INTO group_credit_ledger(request_id,group_id,user_id,actor_user_id,period_start,
         entry_type,pool_amount,pool_balance_after,reference_type,reference_id,reason,metadata)
-       VALUES($1,$2,$3,$3,$4::date,'contribution',$5,$6,'user',$3,
+       VALUES($1,$2,$3,$3,$4::date,'contribution',$5,$6,'user',($3::uuid)::text,
         '成员归还本月未使用个人额度',$7)`,
       [input.requestId, membership.group_id, input.actor.id, period.period_start,
         input.amount, poolBalance, JSON.stringify({ personalBalanceAfter: userBalance })],
