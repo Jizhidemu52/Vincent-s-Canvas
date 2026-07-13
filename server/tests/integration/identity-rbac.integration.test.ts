@@ -321,6 +321,8 @@ integration("production identity and RBAC", () => {
       employeeLogin.cookie,
     );
     expect(assignMember.response.status).toBe(204);
+    const memberLogin = await login("batch-designer-001", "BatchDesigner2026", "designer");
+    await changePassword(memberLogin.cookie, "BatchDesigner2026", "BatchDesignerReady2026");
     const duplicateGroup = await api<{ error: string }>(
       `/api/admin/groups/${groupB.body.group.id}/members`,
       { method: "POST", body: JSON.stringify({ userId: designerA.id, role: "member" }) },
@@ -344,6 +346,93 @@ integration("production identity and RBAC", () => {
     const ordinaryTeamAttempt = await api<{ error: string }>("/api/team", {}, emailLogin.cookie);
     expect(ordinaryTeamAttempt.response.status).toBe(403);
     expect(ordinaryTeamAttempt.body.error).toBe("FORBIDDEN");
+
+    const configureGroupPool = await api(
+      `/api/admin/group-credits/${groupA.body.group.id}/policy`,
+      { method: "PATCH", body: JSON.stringify({ monthlySharedCreditLimit: 120, perRequestLimit: 40,
+        dailyUserLimit: 50, monthlyUserLimit: 80, applyCurrentPeriod: true }) },
+      employeeLogin.cookie,
+    );
+    expect(configureGroupPool.response.status).toBe(200);
+    const memberPool = await api<{ poolBalance: number; wallet: { availableCredits: number } }>(
+      "/api/group-credits", {}, memberLogin.cookie,
+    );
+    expect(memberPool.response.status).toBe(200);
+    expect(memberPool.body).toMatchObject({ poolBalance: 120, wallet: { availableCredits: 0 } });
+    const claimRequestId = `integration-group-claim-${crypto.randomUUID()}`;
+    const claim = await api<{ id: string; status: string; duplicate: boolean }>(
+      "/api/group-credits/requests",
+      { method: "POST", body: JSON.stringify({ requestId: claimRequestId, amount: 30, reason: "批量商品图任务" }) },
+      memberLogin.cookie,
+    );
+    expect(claim.response.status).toBe(201);
+    expect(claim.body).toMatchObject({ status: "pending", duplicate: false });
+    const duplicateClaim = await api<{ id: string; duplicate: boolean }>(
+      "/api/group-credits/requests",
+      { method: "POST", body: JSON.stringify({ requestId: claimRequestId, amount: 30, reason: "重复提交" }) },
+      memberLogin.cookie,
+    );
+    expect(duplicateClaim.body).toMatchObject({ id: claim.body.id, duplicate: true });
+    const approveClaim = await api<{ status: string; duplicate: boolean }>(
+      `/api/team/group-credits/requests/${claim.body.id}/decision`,
+      { method: "POST", body: JSON.stringify({ decision: "approved" }) },
+      chineseLogin.cookie,
+    );
+    expect(approveClaim.response.status).toBe(200);
+    expect(approveClaim.body).toEqual({ status: "approved", duplicate: false });
+    const duplicateApprove = await api<{ status: string; duplicate: boolean }>(
+      `/api/team/group-credits/requests/${claim.body.id}/decision`,
+      { method: "POST", body: JSON.stringify({ decision: "approved" }) },
+      chineseLogin.cookie,
+    );
+    expect(duplicateApprove.body).toEqual({ status: "approved", duplicate: true });
+    const approvedPool = await api<{ poolBalance: number; wallet: { availableCredits: number } }>(
+      "/api/group-credits", {}, memberLogin.cookie,
+    );
+    expect(approvedPool.body).toMatchObject({ poolBalance: 90, wallet: { availableCredits: 30 } });
+
+    const concurrentClaims = await Promise.all([1, 2].map((index) => api<{ id: string }>(
+      "/api/group-credits/requests",
+      { method: "POST", body: JSON.stringify({ requestId: `integration-concurrent-${index}-${crypto.randomUUID()}`, amount: 20, reason: `并发申请 ${index}` }) },
+      memberLogin.cookie,
+    )));
+    const concurrentDecisions = await Promise.all(concurrentClaims.map((item) => api<{ status?: string; error?: string }>(
+      `/api/team/group-credits/requests/${item.body.id}/decision`,
+      { method: "POST", body: JSON.stringify({ decision: "approved" }) },
+      chineseLogin.cookie,
+    )));
+    expect(concurrentDecisions.map((item) => item.response.status).sort()).toEqual([200, 409]);
+    const afterConcurrent = await api<{ wallet: { availableCredits: number }; poolBalance: number }>(
+      "/api/group-credits", {}, memberLogin.cookie,
+    );
+    expect(afterConcurrent.body).toMatchObject({ wallet: { availableCredits: 50 }, poolBalance: 70 });
+
+    const leaderClaim = await api<{ id: string }>(
+      "/api/group-credits/requests",
+      { method: "POST", body: JSON.stringify({ requestId: `integration-leader-self-${crypto.randomUUID()}`, amount: 10, reason: "组长本人申请" }) },
+      chineseLogin.cookie,
+    );
+    const selfApproval = await api<{ error: string }>(
+      `/api/team/group-credits/requests/${leaderClaim.body.id}/decision`,
+      { method: "POST", body: JSON.stringify({ decision: "approved" }) },
+      chineseLogin.cookie,
+    );
+    expect(selfApproval.response.status).toBe(403);
+    expect(selfApproval.body.error).toBe("SELF_APPROVAL_FORBIDDEN");
+    const rejectLeaderClaim = await api(
+      `/api/admin/group-credits/${groupA.body.group.id}/requests/${leaderClaim.body.id}/decision`,
+      { method: "POST", body: JSON.stringify({ decision: "rejected", note: "测试拒绝" }) },
+      admin.cookie,
+    );
+    expect(rejectLeaderClaim.response.status).toBe(200);
+
+    const contribute = await api<{ poolBalance: number; personalBalance: number }>(
+      "/api/group-credits/contributions",
+      { method: "POST", body: JSON.stringify({ requestId: `integration-contribution-${crypto.randomUUID()}`, amount: 50 }) },
+      memberLogin.cookie,
+    );
+    expect(contribute.response.status).toBe(201);
+    expect(contribute.body).toMatchObject({ poolBalance: 120, personalBalance: 50 });
 
     const designerAdminAttempt = await api<{ error: string }>(
       "/api/admin/accounts",
@@ -514,6 +603,32 @@ integration("production identity and RBAC", () => {
     );
     expect(enabledModule.response.status).toBe(200);
     expect(enabledModule.body.module.enabled).toBe(true);
+
+    const leaveOnePersonalCredit = await api<{ personalBalance: number }>(
+      "/api/group-credits/contributions",
+      { method: "POST", body: JSON.stringify({ requestId: `integration-source-split-${crypto.randomUUID()}`, amount: 49 }) },
+      memberLogin.cookie,
+    );
+    expect(leaveOnePersonalCredit.body.personalBalance).toBe(1);
+    const mixedSourceRequestId = `integration-mixed-source-${crypto.randomUUID()}`;
+    const mixedSourceTask = await api<{ task: { id: string; credits: number } }>(
+      "/api/tasks",
+      { method: "POST", body: JSON.stringify({ requestId: mixedSourceRequestId, projectId: "integration-mixed-source",
+        operationType: "seamless_stitch", modelConfigId: internalSeamlessModel!.id,
+        prompt: '{"rows":2,"cols":2}', sourceUrls: [] }) },
+      memberLogin.cookie,
+    );
+    expect(mixedSourceTask.response.status).toBe(201);
+    const heldMixedSession = await api<{ user: { creditBalance: number } }>("/api/auth/session", {}, memberLogin.cookie);
+    const heldMixedGroup = await api<{ wallet: { availableCredits: number } }>("/api/group-credits", {}, memberLogin.cookie);
+    expect(heldMixedSession.body.user.creditBalance).toBe(0);
+    expect(heldMixedGroup.body.wallet.availableCredits).toBe(49);
+    const releaseMixedTask = await api(`/api/tasks/${mixedSourceTask.body.task.id}/cancel`, { method: "POST" }, memberLogin.cookie);
+    expect(releaseMixedTask.response.status).toBe(204);
+    const releasedMixedSession = await api<{ user: { creditBalance: number } }>("/api/auth/session", {}, memberLogin.cookie);
+    const releasedMixedGroup = await api<{ wallet: { availableCredits: number } }>("/api/group-credits", {}, memberLogin.cookie);
+    expect(releasedMixedSession.body.user.creditBalance).toBe(1);
+    expect(releasedMixedGroup.body.wallet.availableCredits).toBe(50);
 
     const duplicateRequestId = "integration-seamless-duplicate-001";
     const submitSeamless = (cookie: string) =>
@@ -970,8 +1085,8 @@ integration("production identity and RBAC", () => {
 
       const oldReservationId = `old-period-${crypto.randomUUID()}`;
       await database.query(
-        `INSERT INTO credit_reservations(request_id,user_id,operation_type,quantity,credits,rmb_cost,price_snapshot,credit_period_start)
-         VALUES($1,$2,'image_generation',1,100,0,'{}'::jsonb,
+        `INSERT INTO credit_reservations(request_id,user_id,operation_type,quantity,credits,personal_credits,rmb_cost,price_snapshot,credit_period_start)
+         VALUES($1,$2,'image_generation',1,100,100,0,'{}'::jsonb,
            (date_trunc('month', timezone('Asia/Shanghai', now())) - interval '1 month')::date)`,
         [oldReservationId, designerA.id],
       );
@@ -984,6 +1099,37 @@ integration("production identity and RBAC", () => {
         "SELECT amount FROM credit_ledger WHERE request_id=$1", [`${oldReservationId}:user:release`],
       );
       expect(expiredReleaseLedger.rows[0]!.amount).toBe(0);
+
+      await database.query(
+        `UPDATE group_credit_periods SET period_start=(date_trunc('month', timezone('Asia/Shanghai', now())) - interval '1 month')::date
+          WHERE group_id=$1 AND status='active'`,
+        [groupA.body.group.id],
+      );
+      await database.query(
+        `UPDATE group_credit_wallets SET period_start=(date_trunc('month', timezone('Asia/Shanghai', now())) - interval '1 month')::date
+          WHERE group_id=$1`,
+        [groupA.body.group.id],
+      );
+      await database.query(
+        `UPDATE group_credit_requests SET period_start=(date_trunc('month', timezone('Asia/Shanghai', now())) - interval '1 month')::date
+          WHERE group_id=$1 AND period_start=date_trunc('month', timezone('Asia/Shanghai', now()))::date`,
+        [groupA.body.group.id],
+      );
+      const nextGroupPeriod = await api<{ poolBalance: number; wallet: { availableCredits: number } }>(
+        "/api/group-credits", {}, memberLogin.cookie,
+      );
+      expect(nextGroupPeriod.body).toMatchObject({ poolBalance: 120, wallet: { availableCredits: 0 } });
+      const closedGroupPeriod = await database.query<{ pool_balance: number; status: string }>(
+        `SELECT pool_balance,status FROM group_credit_periods
+          WHERE group_id=$1 AND period_start=(date_trunc('month', timezone('Asia/Shanghai', now())) - interval '1 month')::date`,
+        [groupA.body.group.id],
+      );
+      expect(closedGroupPeriod.rows[0]).toMatchObject({ pool_balance: 0, status: "closed" });
+      const expiryLedger = await database.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM group_credit_ledger WHERE group_id=$1 AND entry_type='period_expired'",
+        [groupA.body.group.id],
+      );
+      expect(Number(expiryLedger.rows[0]!.count)).toBeGreaterThanOrEqual(2);
 
       const assetId = crypto.randomUUID();
       await database.query(
@@ -1106,6 +1252,28 @@ integration("production identity and RBAC", () => {
     const groupsAfterDisable = await api<{ groups: Array<{ id: string; members: Array<{ userId: string }> }> }>("/api/admin/groups", {}, employeeLogin.cookie);
     const activeGroup = groupsAfterDisable.body.groups.find((group) => group.id === groupA.body.group.id)!;
     expect(activeGroup.members.map((member) => member.userId)).toEqual([designerA.id]);
+
+    const disableGroup = await api(
+      `/api/admin/groups/${groupA.body.group.id}`,
+      { method: "PATCH", body: JSON.stringify({ status: "disabled" }) },
+      employeeLogin.cookie,
+    );
+    expect(disableGroup.response.status).toBe(200);
+    const verificationDatabase = new Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      const closedPeriodsAfterDisable = await verificationDatabase.query<{ active_count: number; remaining_balance: number }>(
+        `SELECT count(*) FILTER (WHERE status='active')::int AS active_count,
+                coalesce(sum(pool_balance),0)::int AS remaining_balance
+           FROM group_credit_periods WHERE group_id=$1`,
+        [groupA.body.group.id],
+      );
+      expect(closedPeriodsAfterDisable.rows[0]).toEqual({ active_count: 0, remaining_balance: 0 });
+    } finally {
+      await verificationDatabase.end();
+    }
+    const memberPoolAfterDisable = await api<{ error: string }>("/api/group-credits", {}, memberLogin.cookie);
+    expect(memberPoolAfterDisable.response.status).toBe(409);
+    expect(memberPoolAfterDisable.body.error).toBe("GROUP_REQUIRED");
 
     const audit = await api<{ auditLogs: Array<{ action: string }> }>(
       "/api/admin/audit-logs?limit=500",

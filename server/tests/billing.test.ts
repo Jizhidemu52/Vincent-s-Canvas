@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { calculatePrice, modelSupportsOperation } from "../src/billing";
+import { calculatePrice, modelSupportsOperation, splitCreditSources } from "../src/billing";
 
 describe("billing price snapshots", () => {
   test("combines operation and model prices for every output", () => {
@@ -36,5 +36,11 @@ describe("billing price snapshots", () => {
     expect(modelSupportsOperation("seamless_stitch", ["edit"])).toBe(true);
     expect(modelSupportsOperation("upscale", ["edit"])).toBe(true);
     expect(modelSupportsOperation("batch_image", ["edit"])).toBe(true);
+  });
+
+  test("uses personal monthly credits before group allocation credits", () => {
+    expect(splitCreditSources(20, 8)).toEqual({ personalCredits: 8, groupCredits: 0 });
+    expect(splitCreditSources(3, 8)).toEqual({ personalCredits: 3, groupCredits: 5 });
+    expect(splitCreditSources(0, 8)).toEqual({ personalCredits: 0, groupCredits: 8 });
   });
 });

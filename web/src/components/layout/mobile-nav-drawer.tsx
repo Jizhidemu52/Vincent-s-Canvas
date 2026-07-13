@@ -23,7 +23,7 @@ const groupLabels: Record<NavigationGroup, string> = {
 export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDrawerProps) {
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const adminVisible = useUserStore((state) => isAdminRole(state.user?.role));
-    const teamVisible = useUserStore((state) => state.user?.groupRole === "leader");
+    const teamVisible = useUserStore((state) => Boolean(state.user?.groupId));
     const flags = useModuleStore((state) => state.flags);
     const getToolBadge = (slug: NavigationToolSlug) => {
         const billing = navigationToolBilling[slug];
@@ -33,7 +33,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
         }
         if (slug === "prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
         if (slug === "admin") return "管理员";
-        if (slug === "team") return "组长";
+        if (slug === "team") return "本组";
         return undefined;
     };
 

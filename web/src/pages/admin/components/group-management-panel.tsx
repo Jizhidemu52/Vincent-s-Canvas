@@ -1,22 +1,26 @@
-import { App, Button, Form, Input, Modal, Select, Space, Table, Tag } from "antd";
-import { Crown, Plus, Power, Trash2, UserMinus, UserPlus } from "lucide-react";
+import { App, Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag } from "antd";
+import { Crown, HandCoins, Plus, Power, Trash2, UserMinus, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { ApiUser } from "@/services/api/auth";
 import type { Department } from "@/services/api/admin-accounts";
 import { createGroup, deleteGroup, listGroups, putGroupMember, removeGroupMember, updateGroup, type DesignerGroup, type GroupMember } from "@/services/api/groups";
+import { decideAdminGroupCreditRequest, getAdminGroupCredits, updateGroupCreditPolicy, type GroupCreditPolicy, type ManagedGroupCredits } from "@/services/api/group-credits";
 
 type GroupForm = { name: string; code: string; departmentId: string };
 type MemberForm = { userId: string; role: "member" | "leader" };
+type CreditPolicyForm = GroupCreditPolicy & { applyCurrentPeriod: boolean };
 
 export function GroupManagementPanel({ accounts, departments }: { accounts: ApiUser[]; departments: Department[] }) {
   const { message, modal } = App.useApp();
   const [groupForm] = Form.useForm<GroupForm>();
   const [memberForm] = Form.useForm<MemberForm>();
+  const [creditForm] = Form.useForm<CreditPolicyForm>();
   const [groups, setGroups] = useState<DesignerGroup[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [credits, setCredits] = useState<ManagedGroupCredits>();
   const selected = groups.find((group) => group.id === selectedId) ?? groups[0];
 
   const refresh = async () => {
@@ -29,6 +33,13 @@ export function GroupManagementPanel({ accounts, departments }: { accounts: ApiU
     finally { setLoading(false); }
   };
   useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    if (!selected?.id) { setCredits(undefined); return; }
+    void getAdminGroupCredits(selected.id).then((result) => {
+      setCredits(result);
+      creditForm.setFieldsValue({ ...result.policy, applyCurrentPeriod: false });
+    }).catch((error) => message.error(error instanceof Error ? error.message : "共享池数据加载失败"));
+  }, [selected?.id]);
 
   const availableDesigners = useMemo(() => accounts.filter((account) =>
     account.role === "designer" && account.status === "active" && account.departmentId === selected?.departmentId &&
@@ -59,6 +70,23 @@ export function GroupManagementPanel({ accounts, departments }: { accounts: ApiU
     if (!selected) return;
     modal.confirm({ title: `删除小组“${selected.name}”？`, content: "只有从未产生成员和历史记录的小组可以删除；其他小组请停用。", okText: "删除", cancelText: "取消", okButtonProps: { danger: true }, onOk: async () => { await deleteGroup(selected.id); message.success("小组已删除"); await refresh(); } });
   };
+  const saveCreditPolicy = async (values: CreditPolicyForm) => {
+    if (!selected) return;
+    try {
+      await updateGroupCreditPolicy(selected.id, values);
+      message.success(values.applyCurrentPeriod ? "共享额度规则已保存，并同步调整本月共享池" : "共享额度规则已保存，下月固定池按新值恢复");
+      const result = await getAdminGroupCredits(selected.id); setCredits(result);
+      creditForm.setFieldsValue({ ...result.policy, applyCurrentPeriod: false });
+    } catch (error) { message.error(error instanceof Error ? error.message : "共享额度规则保存失败"); }
+  };
+  const decideCredit = async (id: string, decision: "approved" | "rejected") => {
+    if (!selected) return;
+    try {
+      await decideAdminGroupCreditRequest(selected.id, id, decision);
+      message.success(decision === "approved" ? "额度已审批到账" : "申请已拒绝");
+      setCredits(await getAdminGroupCredits(selected.id));
+    } catch (error) { message.error(error instanceof Error ? error.message : "审批失败"); }
+  };
 
   return (
     <div className="grid min-h-[560px] gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -84,6 +112,18 @@ export function GroupManagementPanel({ accounts, departments }: { accounts: ApiU
             <div><h2 className="text-xl font-semibold">{selected.name}</h2><p className="text-sm text-stone-500">{selected.departmentName} · 编码 {selected.code}</p></div>
             <Space wrap><Button icon={<Power className="size-4" />} onClick={() => void toggleGroup()}>{selected.status === "active" ? "停用" : "启用"}</Button><Button danger icon={<Trash2 className="size-4" />} onClick={removeGroup}>删除</Button></Space>
           </div>
+          <section className="mb-5 border border-orange-200 bg-orange-50/40 p-4">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2 font-semibold"><HandCoins className="size-4 text-orange-600" />小组共享积分池</div><p className="mt-1 text-xs text-stone-500">只有管理员可设置总池和上限；领取额度本月有效，月底统一清零</p></div><div className="text-right"><div className="text-xs text-stone-500">本月可用池</div><div className="text-2xl font-semibold text-orange-600">{credits?.period.poolBalance ?? 0} 积分</div></div></div>
+            <Form form={creditForm} layout="vertical" onFinish={saveCreditPolicy}>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Form.Item name="monthlySharedCreditLimit" label="每月固定共享池" rules={[{ required: true }]}><InputNumber className="w-full" min={0} max={10000000} /></Form.Item>
+                <Form.Item name="perRequestLimit" label="单次领取上限" rules={[{ required: true }]}><InputNumber className="w-full" min={0} max={10000000} /></Form.Item>
+                <Form.Item name="dailyUserLimit" label="每人每日上限" rules={[{ required: true }]}><InputNumber className="w-full" min={0} max={10000000} /></Form.Item>
+                <Form.Item name="monthlyUserLimit" label="每人每月上限" rules={[{ required: true }]}><InputNumber className="w-full" min={0} max={10000000} /></Form.Item>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center"><Form.Item name="applyCurrentPeriod" valuePropName="checked" noStyle><Switch /></Form.Item><span className="ml-2 text-sm">同步调整本月固定池</span></div><Button type="primary" htmlType="submit">保存共享额度规则</Button></div>
+            </Form>
+          </section>
           <Form form={memberForm} layout="inline" initialValues={{ role: "member" }} onFinish={submitMember} className="mb-4 flex gap-2">
             <Form.Item name="userId" rules={[{ required: true, message: "请选择设计师" }]} className="min-w-[240px] flex-1"><Select showSearch optionFilterProp="label" placeholder="选择本部门设计师" options={availableDesigners.map((account) => ({ value: account.id, label: `${account.displayName}（${account.username}）` }))} /></Form.Item>
             <Form.Item name="role"><Select className="w-28" options={[{ value: "member", label: "普通成员" }, { value: "leader", label: "任命组长" }]} /></Form.Item>
@@ -96,6 +136,11 @@ export function GroupManagementPanel({ accounts, departments }: { accounts: ApiU
             { title: "加入时间", dataIndex: "effectiveAt", render: (value: string) => new Date(value).toLocaleString("zh-CN") },
             { title: "操作", width: 100, render: (_, member: GroupMember) => <Button size="small" danger icon={<UserMinus className="size-3.5" />} onClick={() => removeMember(member)}>移出</Button> },
           ]} />
+          <div className="mt-5 border-t border-stone-200 pt-4"><div className="mb-3 font-semibold">共享额度申请</div><Table rowKey="id" size="small" pagination={{ pageSize: 8 }} dataSource={credits?.requests ?? []} columns={[
+            { title: "成员", dataIndex: "userName" }, { title: "积分", dataIndex: "amount" }, { title: "用途", dataIndex: "reason" },
+            { title: "状态", dataIndex: "status", render: (value: string) => <Tag color={value === "approved" ? "green" : value === "pending" ? "orange" : value === "rejected" ? "red" : "default"}>{value === "approved" ? "已到账" : value === "pending" ? "待审批" : value === "rejected" ? "已拒绝" : "已过期"}</Tag> },
+            { title: "操作", render: (_, row) => row.status === "pending" ? <Space><Button size="small" type="primary" onClick={() => void decideCredit(row.id, "approved")}>通过</Button><Button size="small" danger onClick={() => void decideCredit(row.id, "rejected")}>拒绝</Button></Space> : "-" },
+          ]} /></div>
         </> : <div className="flex h-full items-center justify-center text-stone-500">请先创建或选择小组</div>}
       </section>
 

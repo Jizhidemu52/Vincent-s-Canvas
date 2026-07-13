@@ -1,5 +1,12 @@
-import type { PoolClient } from "pg";
 import type { Database } from "./db";
+import { withTransaction } from "./db-transaction";
+import { ensureGroupCreditPeriod } from "./group-credits";
+import {
+  ensureMonthlyCreditPeriod,
+  refreshMonthlyCreditPeriod,
+} from "./monthly-credits";
+
+export { ensureMonthlyCreditPeriod, refreshMonthlyCreditPeriod };
 
 export type PriceSnapshot = {
   operationType: string;
@@ -50,83 +57,9 @@ export function modelSupportsOperation(
   );
 }
 
-async function withTransaction<T>(
-  db: Database,
-  operation: (client: PoolClient) => Promise<T>,
-) {
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const client = await db.connect();
-    try {
-      await client.query("BEGIN");
-      const result = await operation(client);
-      await client.query("COMMIT");
-      return result;
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
-      const code =
-        typeof error === "object" && error && "code" in error
-          ? String(error.code)
-          : "";
-      if ((code !== "40P01" && code !== "40001") || attempt === 3) throw error;
-      await Bun.sleep(20 * (attempt + 1));
-    } finally {
-      client.release();
-    }
-  }
-  throw new Error("Transaction retry limit reached");
-}
-
-type CreditPeriodRow = {
-  credit_balance: number;
-  credit_limit: number;
-  monthly_credit_limit: number;
-  temporary_credit_adjustment: number;
-  credit_period_start: string;
-  current_period_start: string;
-};
-
-export async function ensureMonthlyCreditPeriod(
-  client: PoolClient,
-  userId: string,
-  actorId = userId,
-) {
-  const result = await client.query<CreditPeriodRow>(
-    `SELECT credit_balance,credit_limit,monthly_credit_limit,temporary_credit_adjustment,
-            credit_period_start::text,
-            date_trunc('month', timezone('Asia/Shanghai', now()))::date::text AS current_period_start
-       FROM users WHERE id=$1 FOR UPDATE`,
-    [userId],
-  );
-  const user = result.rows[0];
-  if (!user) throw new BillingError("ACCOUNT_NOT_FOUND", "账号不存在");
-  if (user.credit_period_start === user.current_period_start) return user;
-
-  const balance = user.monthly_credit_limit;
-  const requestId = `monthly-reset:${userId}:${user.current_period_start.slice(0, 7)}`;
-  await client.query(
-    `UPDATE users SET credit_balance=$1,credit_limit=$1,temporary_credit_adjustment=0,
-            credit_period_start=$2::date,updated_at=now() WHERE id=$3`,
-    [balance, user.current_period_start, userId],
-  );
-  await client.query(
-    `INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason,metadata)
-     VALUES($1,$2,$3,'monthly_reset',$4,$5,'credit_period',$6,'自然月固定额度重置',$7)
-     ON CONFLICT(request_id) DO NOTHING`,
-    [requestId, userId, actorId, balance - user.credit_balance, balance, user.current_period_start,
-      JSON.stringify({ previousPeriodStart: user.credit_period_start, previousBalance: user.credit_balance,
-        expiredTemporaryAdjustment: user.temporary_credit_adjustment, monthlyCreditLimit: user.monthly_credit_limit,
-        timezone: "Asia/Shanghai" })],
-  );
-  return { ...user, credit_balance: balance, credit_limit: balance,
-    temporary_credit_adjustment: 0, credit_period_start: user.current_period_start };
-}
-
-export async function refreshMonthlyCreditPeriod(
-  db: Database,
-  userId: string,
-  actorId = userId,
-) {
-  return withTransaction(db, (client) => ensureMonthlyCreditPeriod(client, userId, actorId));
+export function splitCreditSources(personalBalance: number, totalCredits: number) {
+  const personalCredits = Math.min(Math.max(0, personalBalance), totalCredits);
+  return { personalCredits, groupCredits: totalCredits - personalCredits };
 }
 
 export async function adjustCredits(
@@ -264,6 +197,15 @@ export async function reserveCredits(
         );
       }
     }
+    const membership = await client.query<{ group_id: string }>(
+      `SELECT gm.group_id FROM group_memberships gm
+        JOIN designer_groups g ON g.id=gm.group_id
+       WHERE gm.user_id=$1 AND gm.ended_at IS NULL AND g.status='active'`,
+      [input.userId],
+    );
+    const groupContext = membership.rows[0]
+      ? await ensureGroupCreditPeriod(client, membership.rows[0].group_id, input.userId)
+      : null;
     const periodUser = await ensureMonthlyCreditPeriod(client, input.userId);
     const userResult = await client.query<{
       credit_balance: number;
@@ -277,16 +219,35 @@ export async function reserveCredits(
     if (!user) throw new BillingError("ACCOUNT_DISABLED", "账号不存在或已停用");
     if (user.department_id !== identity.department_id)
       throw new BillingError("ACCOUNT_CHANGED", "账号部门刚刚发生变更，请重试");
-    if (user.credit_balance < snapshot.totalCredits)
-      throw new BillingError("INSUFFICIENT_CREDIT", "个人剩余积分不足");
-    const userBalance = user.credit_balance - snapshot.totalCredits;
+    const { personalCredits, groupCredits } = splitCreditSources(user.credit_balance, snapshot.totalCredits);
+    let groupWalletBalance: number | null = null;
+    if (groupCredits > 0) {
+      if (!groupContext) throw new BillingError("INSUFFICIENT_CREDIT", "个人和小组可用积分不足");
+      const wallet = await client.query<{ available_credits: number }>(
+        `SELECT available_credits FROM group_credit_wallets
+          WHERE group_id=$1 AND user_id=$2 AND period_start=$3::date FOR UPDATE`,
+        [groupContext.group.id, input.userId, groupContext.period.period_start],
+      );
+      if (!wallet.rows[0] || wallet.rows[0].available_credits < groupCredits) {
+        throw new BillingError("INSUFFICIENT_CREDIT", "个人和小组可用积分不足");
+      }
+      groupWalletBalance = wallet.rows[0].available_credits - groupCredits;
+      await client.query(
+        `UPDATE group_credit_wallets SET available_credits=$1,updated_at=now()
+          WHERE group_id=$2 AND user_id=$3 AND period_start=$4::date`,
+        [groupWalletBalance, groupContext.group.id, input.userId, groupContext.period.period_start],
+      );
+    }
+    const userBalance = user.credit_balance - personalCredits;
     await client.query(
       "UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2",
       [userBalance, input.userId],
     );
     await client.query(
-      `INSERT INTO credit_reservations(request_id,user_id,department_id,operation_type,model_config_id,quantity,credits,department_credits,rmb_cost,price_snapshot,credit_period_start)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::date)`,
+      `INSERT INTO credit_reservations(request_id,user_id,department_id,operation_type,model_config_id,
+            quantity,credits,department_credits,rmb_cost,price_snapshot,credit_period_start,
+            personal_credits,group_credits,group_id,group_period_start)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::date,$12,$13,$14,$15::date)`,
       [
         input.requestId,
         input.userId,
@@ -299,6 +260,10 @@ export async function reserveCredits(
         snapshot.totalRmb,
         snapshot,
         periodUser.credit_period_start,
+        personalCredits,
+        groupCredits,
+        groupCredits > 0 ? groupContext!.group.id : null,
+        groupCredits > 0 ? groupContext!.period.period_start : null,
       ],
     );
     await client.query(
@@ -307,12 +272,23 @@ export async function reserveCredits(
       [
         `${input.requestId}:user:hold`,
         input.userId,
-        -snapshot.totalCredits,
+        -personalCredits,
         userBalance,
         input.requestId,
-        snapshot,
+        JSON.stringify({ ...snapshot, creditSource: { personalCredits, groupCredits } }),
       ],
     );
+    if (groupCredits > 0 && groupContext) {
+      await client.query(
+        `INSERT INTO group_credit_ledger(request_id,group_id,user_id,actor_user_id,period_start,
+          entry_type,wallet_amount,wallet_balance_after,reference_type,reference_id,reason,metadata)
+         VALUES($1,$2,$3,$3,$4::date,'hold',$5,$6,'task',$7,
+          '任务提交冻结已领取的小组额度',$8)`,
+        [`${input.requestId}:group:hold`, groupContext.group.id, input.userId,
+          groupContext.period.period_start, -groupCredits, groupWalletBalance,
+          input.requestId, JSON.stringify(snapshot)],
+      );
+    }
     if (departmentBalance !== null && user.department_id) {
       await client.query(
         `INSERT INTO credit_ledger(request_id,department_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason,metadata)
@@ -351,10 +327,16 @@ export async function settleReservation(
       department_id: string | null;
       credits: number;
       department_credits: number;
+      personal_credits: number;
+      group_credits: number;
+      group_id: string | null;
+      group_period_start: string | null;
       status: string;
       credit_period_start: string;
     }>(
-      "SELECT id,user_id,department_id,credits,department_credits,status,credit_period_start::text FROM credit_reservations WHERE request_id=$1 FOR UPDATE",
+      `SELECT id,user_id,department_id,credits,department_credits,personal_credits,group_credits,
+              group_id,group_period_start::text,status,credit_period_start::text
+         FROM credit_reservations WHERE request_id=$1 FOR UPDATE`,
       [requestId],
     );
     const reservation = result.rows[0];
@@ -396,6 +378,22 @@ export async function settleReservation(
           requestId,
         ],
       );
+      if (reservation.group_id && reservation.group_period_start && reservation.group_credits > 0) {
+        const wallet = await client.query<{ available_credits: number }>(
+          `UPDATE group_credit_wallets SET spent_credits=spent_credits+$1,updated_at=now()
+            WHERE group_id=$2 AND user_id=$3 AND period_start=$4::date
+            RETURNING available_credits`,
+          [reservation.group_credits, reservation.group_id, reservation.user_id, reservation.group_period_start],
+        );
+        await client.query(
+          `INSERT INTO group_credit_ledger(request_id,group_id,user_id,actor_user_id,period_start,
+            entry_type,wallet_amount,wallet_balance_after,reference_type,reference_id,reason)
+           VALUES($1,$2,$3,$4,$5::date,'capture',0,$6,'task',$7,'任务成功结算小组额度')`,
+          [`${requestId}:group:capture`, reservation.group_id, reservation.user_id,
+            actorId ?? reservation.user_id, reservation.group_period_start,
+            wallet.rows[0]?.available_credits ?? 0, requestId],
+        );
+      }
       return { status: "captured", duplicate: false };
     }
     if (reservation.department_id && reservation.department_credits > 0) {
@@ -425,7 +423,7 @@ export async function settleReservation(
       }
     }
     const user = await ensureMonthlyCreditPeriod(client, reservation.user_id, actorId ?? reservation.user_id);
-    const releasedCredits = user.credit_period_start === reservation.credit_period_start ? reservation.credits : 0;
+    const releasedCredits = user.credit_period_start === reservation.credit_period_start ? reservation.personal_credits : 0;
     const userBalance = user.credit_balance + releasedCredits;
     await client.query(
       "UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2",
@@ -443,6 +441,30 @@ export async function settleReservation(
         requestId,
       ],
     );
+    if (reservation.group_id && reservation.group_period_start && reservation.group_credits > 0) {
+      const currentPeriod = await client.query<{ period_start: string }>(
+        "SELECT date_trunc('month', timezone('Asia/Shanghai', now()))::date::text AS period_start",
+      );
+      const groupReleased = currentPeriod.rows[0]!.period_start === reservation.group_period_start
+        ? reservation.group_credits
+        : 0;
+      const wallet = await client.query<{ available_credits: number }>(
+        `UPDATE group_credit_wallets SET available_credits=available_credits+$1,updated_at=now()
+          WHERE group_id=$2 AND user_id=$3 AND period_start=$4::date
+          RETURNING available_credits`,
+        [groupReleased, reservation.group_id, reservation.user_id, reservation.group_period_start],
+      );
+      await client.query(
+        `INSERT INTO group_credit_ledger(request_id,group_id,user_id,actor_user_id,period_start,
+          entry_type,wallet_amount,wallet_balance_after,reference_type,reference_id,reason,metadata)
+         VALUES($1,$2,$3,$4,$5::date,'release',$6,$7,'task',$8,
+          '任务失败、取消或超时按原来源释放小组额度',$9)`,
+        [`${requestId}:group:release`, reservation.group_id, reservation.user_id,
+          actorId ?? reservation.user_id, reservation.group_period_start, groupReleased,
+          wallet.rows[0]?.available_credits ?? 0, requestId,
+          JSON.stringify({ expiredPeriod: groupReleased === 0 })],
+      );
+    }
     await client.query(
       "UPDATE credit_reservations SET status='released',settled_at=now() WHERE id=$1",
       [reservation.id],

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { writeAudit } from "../audit";
 import type { Database } from "../db";
 import { canManageGroup, isGroupLeader } from "../group-scope";
+import { closeActiveGroupCreditPeriods } from "../group-credits";
 import { assertModuleEnabled } from "../module-flags";
 import { requireRole } from "../rbac";
 import type { AuthenticatedRequest, SessionUser } from "../types";
@@ -108,6 +109,7 @@ export function createGroupsRouter(db: Database) {
           [input.name ?? current.rows[0].name, input.code ?? current.rows[0].code, input.status ?? current.rows[0].status, request.params.id],
         );
         if (input.status === "disabled" && current.rows[0].status !== "disabled") {
+          await closeActiveGroupCreditPeriods(client, request.params.id, actor.id);
           await client.query(
             "UPDATE group_memberships SET ended_at=now(),ended_by=$1 WHERE group_id=$2 AND ended_at IS NULL",
             [actor.id, request.params.id],

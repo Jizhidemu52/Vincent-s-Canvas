@@ -151,7 +151,7 @@ export function AppTopNav() {
     const configVisible = useCanManageConfig();
     const currentRole = useUserStore((state) => state.user?.role);
     const adminVisible = isAdminRole(currentRole);
-    const teamVisible = useUserStore((state) => state.user?.groupRole === "leader");
+    const teamVisible = useUserStore((state) => Boolean(state.user?.groupId));
 
     const getToolBadge = (slug: NavigationToolSlug) => {
         const billing = navigationToolBilling[slug];
@@ -161,7 +161,7 @@ export function AppTopNav() {
         }
         if (slug === "prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
         if (slug === "admin") return "管理员";
-        if (slug === "team") return "组长";
+        if (slug === "team") return "本组";
         return undefined;
     };
 

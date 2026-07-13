@@ -34,6 +34,12 @@ import { createInternalAiConfigurationRouter } from "./routes/internal-ai-config
 import { createGroupsRouter, createTeamRouter } from "./routes/groups";
 import { createAdminModuleFlagsRouter, createModuleFlagsRouter } from "./routes/module-flags";
 import { ModuleDisabledError } from "./module-flags";
+import {
+  createAdminGroupCreditsRouter,
+  createGroupCreditsRouter,
+  createTeamGroupCreditsRouter,
+} from "./routes/group-credits";
+import { GroupCreditError } from "./group-credits";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
@@ -167,10 +173,28 @@ app.use(
   createGroupsRouter(db),
 );
 app.use(
+  "/api/team/group-credits",
+  requireSession,
+  requireAccountReady,
+  createTeamGroupCreditsRouter(db),
+);
+app.use(
+  "/api/group-credits",
+  requireSession,
+  requireAccountReady,
+  createGroupCreditsRouter(db),
+);
+app.use(
   "/api/team",
   requireSession,
   requireAccountReady,
   createTeamRouter(db),
+);
+app.use(
+  "/api/admin/group-credits",
+  requireSession,
+  requireAccountReady,
+  createAdminGroupCreditsRouter(db),
 );
 app.use(
   "/api/admin/audit-logs",
@@ -210,6 +234,10 @@ const errorHandler: ErrorRequestHandler = (
   }
   if (error instanceof ModuleDisabledError) {
     response.status(error.status).json({ error: error.code, message: error.message, moduleKey: error.moduleKey });
+    return;
+  }
+  if (error instanceof GroupCreditError) {
+    response.status(error.status).json({ error: error.code, message: error.message });
     return;
   }
   if (
