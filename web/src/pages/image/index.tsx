@@ -21,6 +21,7 @@ import { requestEdit, requestGeneration } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { fetchServerAssetContent, recordServerAssetEvent } from "@/services/api/server-assets";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ReferenceImage } from "@/types/image";
 import { SeamlessStitchPage } from "@/pages/image/seamless-stitch";
@@ -122,6 +123,7 @@ function ImageGenerationPage() {
     const { message } = App.useApp();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const loadedRecreateAssetsRef = useRef(new Set<string>());
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -182,6 +184,24 @@ function ImageGenerationPage() {
         if (presetPrompt) setPrompt(presetPrompt);
         if (presetModel) updateConfig("imageModel", presetModel);
     }, [searchParams, updateConfig]);
+
+    useEffect(() => {
+        const sourceAssetId = searchParams.get("sourceAssetId");
+        if (!sourceAssetId || loadedRecreateAssetsRef.current.has(sourceAssetId)) return;
+        loadedRecreateAssetsRef.current.add(sourceAssetId);
+        void fetchServerAssetContent(sourceAssetId)
+            .then(async (blob) => {
+                const image = await uploadImage(blob);
+                setReferences((value) => [...value, { id: nanoid(), name: "复刻来源.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId }]);
+                const eventType = searchParams.get("sourceOwnerId") === user?.id ? "asset.edited" : "asset.reused";
+                await recordServerAssetEvent(sourceAssetId, eventType, { channel: "one-click-recreate", destination: toolMode });
+                message.success("已带入原素材、提示词和模型");
+            })
+            .catch((error) => {
+                loadedRecreateAssetsRef.current.delete(sourceAssetId);
+                message.error(error instanceof Error ? error.message : "复刻来源加载失败");
+            });
+    }, [message, searchParams, toolMode, user?.id]);
 
     const addReferences = async (files?: FileList | null) => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));

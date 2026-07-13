@@ -7,6 +7,7 @@ import { queueScore, recalculateBatch, type TaskPriority } from "./tasks";
 import { ObjectStorage } from "./object-storage";
 import { normalizeWorkflowOutputs, parsePromptVariables, readPath, renderTemplate } from "./workflow-runtime";
 import { buildOpenAiAudioRequest, buildOpenAiVideoFields, unwrapProviderEnvelope } from "./media-runtime";
+import { recordAssetEvent } from "./asset-events";
 
 type WorkRow = {
     id: string; request_id: string; batch_id: string | null; user_id: string; department_id: string | null; project_id: string; operation_type: string; model_config_id: string | null; prompt: string; parameters: Record<string, unknown>; source_urls: string[]; attempts: number; priority: TaskPriority;
@@ -175,7 +176,15 @@ async function storeResults(task: WorkRow, results: Array<{ bytes: Uint8Array; m
             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'ready')
             ON CONFLICT(object_key) DO UPDATE SET status='ready',byte_size=EXCLUDED.byte_size,mime_type=EXCLUDED.mime_type,updated_at=now()
             RETURNING id`, [id, task.user_id, task.department_id, task.project_id, task.id, key, filename, result.mimeType, result.bytes.byteLength,kind, task.operation_type === "image_generation"||task.operation_type==="video_generation"||task.operation_type==="audio_generation" ? "generation" : "edit", task.operation_type, task.prompt, task.model_config_id]);
-        urls.push(`/api/assets/${asset.rows[0]!.id}/content`);
+        const assetId = asset.rows[0]!.id;
+        await recordAssetEvent(db, {
+            assetId,
+            actor: null,
+            eventType: "asset.generated",
+            idempotencyKey: `task:${task.id}:asset:${assetId}:generated`,
+            metadata: { resultIndex: index, operationType: task.operation_type },
+        });
+        urls.push(`/api/assets/${assetId}/content`);
     }
     return urls;
 }

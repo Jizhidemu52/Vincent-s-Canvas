@@ -146,6 +146,7 @@ export function assetOwnerId(asset: Pick<Asset, "ownerId" | "metadata">) {
 
 export function canUserAccessAsset(asset: Asset, user: LocalUser | null) {
     if (!user) return false;
+    if (typeof asset.metadata?.serverAssetId === "string" && asset.metadata.serverAssetId) return true;
     if (user.role === "super_admin") return true;
     if (user.role === "department_admin") return Boolean(user.departmentId) && asset.metadata?.departmentId === user.departmentId;
     return assetOwnerId(asset) === user.id;

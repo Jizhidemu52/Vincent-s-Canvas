@@ -840,6 +840,91 @@ integration("production identity and RBAC", () => {
         "SELECT amount FROM credit_ledger WHERE request_id=$1", [`${oldReservationId}:user:release`],
       );
       expect(expiredReleaseLedger.rows[0]!.amount).toBe(0);
+
+      const assetId = crypto.randomUUID();
+      await database.query(
+        `INSERT INTO assets(id,owner_user_id,department_id,object_key,filename,mime_type,byte_size,kind,source,prompt,status)
+         VALUES($1,$2,$3,$4,'event-test.png','image/png',128,'image','generation','完整测试提示词','ready')`,
+        [assetId, designerA.id, departmentA, `users/${designerA.id}/integration/${assetId}.png`],
+      );
+      const candidateKey = `integration-candidate-${crypto.randomUUID()}`;
+      const candidate = await api<{ eventId: string; projection: { usabilityScore: number; resultStatus: string; eventCount: number } }>(
+        `/api/assets/${assetId}/events`,
+        { method: "POST", body: JSON.stringify({ eventType: "asset.candidate_added", idempotencyKey: candidateKey }) },
+        resetLogin.cookie,
+      );
+      expect(candidate.response.status).toBe(201);
+      expect(candidate.body.projection).toMatchObject({ usabilityScore: 5, resultStatus: "candidate", eventCount: 1 });
+      const duplicateCandidate = await api<{ projection: { usabilityScore: number; eventCount: number } }>(
+        `/api/assets/${assetId}/events`,
+        { method: "POST", body: JSON.stringify({ eventType: "asset.candidate_added", idempotencyKey: candidateKey }) },
+        resetLogin.cookie,
+      );
+      expect(duplicateCandidate.body.projection).toMatchObject({ usabilityScore: 5, eventCount: 1 });
+
+      const firstDownload = await api<{ projection: { usabilityScore: number; downloadCount: number } }>(
+        `/api/assets/${assetId}/download-receipts`,
+        { method: "POST", body: JSON.stringify({ idempotencyKey: `integration-download-${crypto.randomUUID()}`, filename: "event-test.png" }) },
+        resetLogin.cookie,
+      );
+      expect(firstDownload.body.projection).toMatchObject({ usabilityScore: 20, downloadCount: 1 });
+      const repeatedDownload = await api<{ projection: { usabilityScore: number; downloadCount: number } }>(
+        `/api/assets/${assetId}/download-receipts`,
+        { method: "POST", body: JSON.stringify({ idempotencyKey: `integration-download-${crypto.randomUUID()}`, filename: "event-test.png" }) },
+        resetLogin.cookie,
+      );
+      expect(repeatedDownload.body.projection).toMatchObject({ usabilityScore: 20, downloadCount: 2 });
+
+      const designerAdopt = await api<{ error: string }>(
+        `/api/assets/${assetId}/events`,
+        { method: "POST", body: JSON.stringify({ eventType: "asset.adopted", idempotencyKey: `integration-adopt-${crypto.randomUUID()}` }) },
+        resetLogin.cookie,
+      );
+      expect(designerAdopt.response.status).toBe(403);
+      const managerAdopt = await api<{ eventId: string; projection: { usabilityScore: number; resultStatus: string } }>(
+        `/api/assets/${assetId}/events`,
+        { method: "POST", body: JSON.stringify({ eventType: "asset.adopted", idempotencyKey: `integration-adopt-${crypto.randomUUID()}` }) },
+        employeeLogin.cookie,
+      );
+      expect(managerAdopt.body.projection).toMatchObject({ usabilityScore: 50, resultStatus: "adopted" });
+      const reversed = await api<{ projection: { usabilityScore: number; resultStatus: string } }>(
+        `/api/admin/assets/${assetId}/events/${managerAdopt.body.eventId}/reverse`,
+        { method: "POST", body: JSON.stringify({ idempotencyKey: `integration-reverse-${crypto.randomUUID()}`, reason: "集成测试纠正" }) },
+        admin.cookie,
+      );
+      expect(reversed.body.projection).toMatchObject({ usabilityScore: 20, resultStatus: "downloaded" });
+
+      const privateReuse = await api<{ error: string }>(
+        `/api/assets/${assetId}/events`,
+        { method: "POST", body: JSON.stringify({ eventType: "asset.reused", idempotencyKey: `integration-reuse-${crypto.randomUUID()}` }) },
+        emailLogin.cookie,
+      );
+      expect(privateReuse.response.status).toBe(404);
+      const companyShare = await api(
+        `/api/assets/${assetId}/visibility`,
+        { method: "PATCH", body: JSON.stringify({ visibility: "company" }) },
+        admin.cookie,
+      );
+      expect(companyShare.response.status).toBe(204);
+      const sharedReuse = await api<{ projection: { usabilityScore: number; resultStatus: string } }>(
+        `/api/assets/${assetId}/events`,
+        { method: "POST", body: JSON.stringify({ eventType: "asset.reused", idempotencyKey: `integration-reuse-${crypto.randomUUID()}` }) },
+        emailLogin.cookie,
+      );
+      expect(sharedReuse.body.projection).toMatchObject({ usabilityScore: 35, resultStatus: "editing" });
+      await api(`/api/assets/${assetId}/visibility`, { method: "PATCH", body: JSON.stringify({ visibility: "private" }) }, admin.cookie);
+      const reuseAfterUnshare = await api<{ error: string }>(
+        `/api/assets/${assetId}/events`,
+        { method: "POST", body: JSON.stringify({ eventType: "asset.reused", idempotencyKey: `integration-reuse-${crypto.randomUUID()}` }) },
+        emailLogin.cookie,
+      );
+      expect(reuseAfterUnshare.response.status).toBe(404);
+
+      const eventRows = await database.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM asset_events WHERE asset_id=$1 AND event_type='asset.candidate_added'",
+        [assetId],
+      );
+      expect(Number(eventRows.rows[0]!.count)).toBe(1);
     } finally {
       await database.end();
     }

@@ -1,4 +1,4 @@
-import { Copy, Download, PencilLine, RotateCcw, Search, Trash2, Upload } from "lucide-react";
+import { Check, Copy, Download, PencilLine, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
@@ -11,7 +11,21 @@ import { cn } from "@/lib/utils";
 import { canUserAccessAsset, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
-import { deleteServerAsset, listServerAssets, uploadServerAsset, type ServerAsset } from "@/services/api/server-assets";
+import {
+    deleteServerAsset,
+    fetchServerAssetContent,
+    listServerAssets,
+    listServerProjects,
+    recordServerAssetDownload,
+    recordServerAssetEvent,
+    setServerAssetVisibility,
+    shareServerAssetWithDepartment,
+    unshareServerAssetWithDepartment,
+    uploadServerAsset,
+    type AssetEventType,
+    type ServerAsset,
+    type UserProject,
+} from "@/services/api/server-assets";
 
 type AssetFormValues = {
     kind: AssetKind;
@@ -43,6 +57,7 @@ export default function AssetsPage() {
     const batchImageInputRef = useRef<HTMLInputElement>(null);
     const localAssets = useAssetStore((state) => state.assets);
     const [serverAssets, setServerAssets] = useState<ServerAsset[]>([]);
+    const [serverProjects, setServerProjects] = useState<UserProject[]>([]);
     const [serverAssetIds, setServerAssetIds] = useState<Set<string>>(new Set());
     const user = useUserStore((state) => state.user);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -56,6 +71,8 @@ export default function AssetsPage() {
     const [isAssetOpen, setIsAssetOpen] = useState(false);
     const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
     const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
+    const [projectAsset, setProjectAsset] = useState<Asset | null>(null);
+    const [selectedProjectId, setSelectedProjectId] = useState<string>();
     const [formKind, setFormKind] = useState<AssetKind>("text");
     const [imageDraft, setImageDraft] = useState<ImageDraft>(null);
     const coverUrl = Form.useWatch("coverUrl", form) || "";
@@ -63,10 +80,20 @@ export default function AssetsPage() {
     const tags = Form.useWatch("tags", form) || [];
     const content = Form.useWatch("content", form) || "";
     const refreshServerAssets = async () => {
-        try { const result = await listServerAssets(); setServerAssets(result.assets); setServerAssetIds(new Set(result.assets.map((asset) => asset.id))); }
+        try {
+            const result = await listServerAssets();
+            setServerAssets(result.assets);
+            setServerAssetIds(new Set(result.assets.map((asset) => asset.id)));
+            setPreviewAsset((current) => {
+                if (!current) return current;
+                const refreshed = result.assets.find((asset) => asset.id === current.id);
+                return refreshed ? serverAssetToLocal(refreshed) : current;
+            });
+        }
         catch (error) { message.error(error instanceof Error ? error.message : "公司素材加载失败"); }
     };
     useEffect(() => { void refreshServerAssets(); }, []);
+    useEffect(() => { void listServerProjects().then((result) => setServerProjects(result.projects)).catch(() => setServerProjects([])); }, []);
     const assets = useMemo(() => [...serverAssets.map(serverAssetToLocal), ...localAssets.filter((asset) => !serverAssetIds.has(asset.id))], [localAssets, serverAssetIds, serverAssets]);
     const validAssets = useMemo(() => assets.filter((asset) => canUserAccessAsset(asset, user) && (asset.kind === "text" || asset.kind === "image" || asset.kind === "video")), [assets, user]);
 
@@ -168,9 +195,23 @@ export default function AssetsPage() {
         copyText(asset.data.content, "文本已复制");
     };
 
-    const downloadImage = (asset: Asset) => {
+    const downloadImage = async (asset: Asset) => {
         if (asset.kind !== "image" && asset.kind !== "video") return;
-        saveAs(asset.kind === "video" ? asset.data.url : asset.data.dataUrl, `${asset.title || "asset"}.${asset.data.mimeType.split("/")[1] || "png"}`);
+        const filename = `${asset.title || "asset"}.${asset.data.mimeType.split("/")[1] || "png"}`;
+        if (!serverAssetIds.has(asset.id)) {
+            saveAs(asset.kind === "video" ? asset.data.url : asset.data.dataUrl, filename);
+            return;
+        }
+        try {
+            const receiptKey = `asset.downloaded:${asset.id}:${crypto.randomUUID()}`;
+            const blob = await fetchServerAssetContent(asset.id);
+            saveAs(blob, filename);
+            await recordServerAssetDownload(asset.id, filename, receiptKey);
+            await refreshServerAssets();
+            message.success("下载已开始并记录为首次有效下载");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "素材下载失败");
+        }
     };
 
     const exportAllAssets = async () => {
@@ -179,6 +220,11 @@ export default function AssetsPage() {
             return;
         }
         await exportAssets(validAssets);
+        const recorded = await Promise.allSettled(
+            validAssets.filter((asset) => serverAssetIds.has(asset.id)).map((asset) => recordServerAssetEvent(asset.id, "asset.exported", { channel: "asset-package" })),
+        );
+        if (recorded.some((result) => result.status === "rejected")) message.warning("素材已导出，部分导出记录同步失败");
+        await refreshServerAssets();
     };
 
     const importAssetZip = async (file?: File) => {
@@ -213,13 +259,48 @@ export default function AssetsPage() {
         if (batchImageInputRef.current) batchImageInputRef.current.value = "";
     };
 
-    const replicateAsset = (asset: Asset) => {
+    const replicateAsset = async (asset: Asset) => {
         const url = buildRecreateUrl(asset);
         if (!url) {
             message.warning("这个素材没有可复刻的提示词记录");
             return;
         }
         navigate(url);
+    };
+
+    const recordResultAction = async (asset: Asset, eventType: AssetEventType) => {
+        try {
+            await recordServerAssetEvent(asset.id, eventType, { channel: "asset-library" });
+            await refreshServerAssets();
+            message.success("成果状态已更新");
+        } catch (error) { message.error(error instanceof Error ? error.message : "成果状态更新失败"); }
+    };
+
+    const shareWithDepartment = async (asset: Asset, remove = false) => {
+        if (!user?.departmentId) { message.warning("账号尚未归属部门"); return; }
+        try {
+            await (remove ? unshareServerAssetWithDepartment(asset.id, user.departmentId) : shareServerAssetWithDepartment(asset.id, user.departmentId));
+            message.success(remove ? "已取消部门共享" : "已共享到部门素材库");
+        } catch (error) { message.error(error instanceof Error ? error.message : "共享设置失败"); }
+    };
+
+    const setCompanyVisibility = async (asset: Asset, visibility: "private" | "company") => {
+        try {
+            await setServerAssetVisibility(asset.id, visibility);
+            await refreshServerAssets();
+            message.success(visibility === "company" ? "已加入公司素材库" : "已撤出公司素材库");
+        } catch (error) { message.error(error instanceof Error ? error.message : "共享设置失败"); }
+    };
+
+    const addToProject = async () => {
+        if (!projectAsset || !selectedProjectId) { message.warning("请先选择项目"); return; }
+        try {
+            await recordServerAssetEvent(projectAsset.id, "asset.project_added", { channel: "asset-library" }, selectedProjectId);
+            await refreshServerAssets();
+            setProjectAsset(null);
+            setSelectedProjectId(undefined);
+            message.success("已加入正式项目");
+        } catch (error) { message.error(error instanceof Error ? error.message : "加入项目失败"); }
     };
 
     const confirmDelete = async () => {
@@ -318,7 +399,7 @@ export default function AssetsPage() {
                                 onEdit={() => openEdit(asset)}
                                 onCopy={copyAssetText}
                                 onDownload={downloadImage}
-                                onReplicate={() => replicateAsset(asset)}
+                                onReplicate={() => void replicateAsset(asset)}
                                 onDelete={() => setDeletingAsset(asset)}
                             />
                         ))}
@@ -448,7 +529,20 @@ export default function AssetsPage() {
                 />
             </Modal>
 
-            <AssetDrawer asset={previewAsset} onClose={() => setPreviewAsset(null)} onCopy={copyAssetText} onDownload={downloadImage} onReplicate={replicateAsset} />
+            <AssetDrawer
+                asset={previewAsset}
+                currentUserId={user?.id || ""}
+                currentUserRole={user?.role || "designer"}
+                isServerAsset={Boolean(previewAsset && serverAssetIds.has(previewAsset.id))}
+                onClose={() => setPreviewAsset(null)}
+                onCopy={copyAssetText}
+                onDownload={downloadImage}
+                onReplicate={replicateAsset}
+                onResultAction={recordResultAction}
+                onAddProject={(asset) => { setProjectAsset(asset); setSelectedProjectId(metadataString(asset, "projectId") || undefined); }}
+                onShareDepartment={shareWithDepartment}
+                onSetCompanyVisibility={setCompanyVisibility}
+            />
 
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importAssetZip(event.target.files?.[0])} />
             <input ref={batchImageInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => void importImageFiles(event.target.files)} />
@@ -456,13 +550,22 @@ export default function AssetsPage() {
             <Modal title="删除素材" open={Boolean(deletingAsset)} onCancel={() => setDeletingAsset(null)} onOk={confirmDelete} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除「{deletingAsset?.title}」吗？删除后会从我的素材中移除。
             </Modal>
+            <Modal title="加入正式项目" open={Boolean(projectAsset)} onCancel={() => setProjectAsset(null)} onOk={() => void addToProject()} okText="确认加入" cancelText="取消">
+                <Select
+                    className="w-full"
+                    value={selectedProjectId}
+                    placeholder={serverProjects.length ? "选择项目" : "暂无可加入项目，请先创建项目"}
+                    options={serverProjects.map((project) => ({ label: project.name, value: project.id }))}
+                    onChange={setSelectedProjectId}
+                />
+            </Modal>
         </div>
     );
 }
 
 function serverAssetToLocal(asset: ServerAsset): Asset {
     const title = typeof asset.metadata.title === "string" ? asset.metadata.title : asset.filename;
-    const common = { id: asset.id, ownerId: asset.ownerUserId, title, coverUrl: `/api/assets/${asset.id}/content`, tags: Array.isArray(asset.metadata.tags) ? asset.metadata.tags.map(String) : [], source: asset.source, note: typeof asset.metadata.note === "string" ? asset.metadata.note : undefined, metadata: { ...asset.metadata, designerId: asset.ownerUserId, departmentId: asset.departmentId, projectId: asset.projectId, operationType: asset.operationType, prompt: asset.prompt, modelName: asset.modelName }, createdAt: asset.createdAt, updatedAt: asset.createdAt };
+    const common = { id: asset.id, ownerId: asset.ownerUserId, title, coverUrl: `/api/assets/${asset.id}/content`, tags: Array.isArray(asset.metadata.tags) ? asset.metadata.tags.map(String) : [], source: asset.source, note: typeof asset.metadata.note === "string" ? asset.metadata.note : undefined, metadata: { ...asset.metadata, serverAssetId: asset.id, designerId: asset.ownerUserId, departmentId: asset.departmentId, projectId: asset.projectId, operationType: asset.operationType, module: typeof asset.metadata.module === "string" ? asset.metadata.module : asset.operationType, prompt: asset.prompt, model: typeof asset.metadata.model === "string" ? asset.metadata.model : asset.modelName, modelName: asset.modelName, resultStatus: asset.resultStatus, usabilityScore: asset.usabilityScore, downloadCount: asset.downloadCount, visibilityScope: asset.visibilityScope, firstDownloadedAt: asset.firstDownloadedAt }, createdAt: asset.createdAt, updatedAt: asset.createdAt };
     if (asset.kind === "text") return { ...common, kind: "text", data: { content: typeof asset.metadata.content === "string" ? asset.metadata.content : "" } };
     if (asset.kind === "video") return { ...common, kind: "video", data: { url: common.coverUrl, storageKey: asset.id, width: 0, height: 0, bytes: asset.byteSize, mimeType: asset.mimeType } };
     return { ...common, kind: "image", data: { dataUrl: common.coverUrl, storageKey: asset.id, width: 0, height: 0, bytes: asset.byteSize, mimeType: asset.mimeType } };
@@ -517,6 +620,9 @@ function AssetCard({
                         {summary}
                     </Typography.Paragraph>
                     <div className="mt-3 flex flex-wrap gap-1.5">
+                        <Tag color="orange" className="m-0 text-[11px]">{resultStatusLabel(metadataString(asset, "resultStatus"))}</Tag>
+                        <Tag className="m-0 text-[11px]">可用性 {metadataNumber(asset, "usabilityScore")}/100</Tag>
+                        <Tag className="m-0 text-[11px]">下载 {metadataNumber(asset, "downloadCount")}</Tag>
                         {(asset.tags || []).slice(0, 3).map((tag) => (
                             <Tag key={tag} className="m-0 text-[11px]">
                                 {tag}
@@ -558,8 +664,37 @@ function AssetCard({
     );
 }
 
-function AssetDrawer({ asset, onClose, onCopy, onDownload, onReplicate }: { asset: Asset | null; onClose: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void; onReplicate: (asset: Asset) => void }) {
+function AssetDrawer({
+    asset,
+    currentUserId,
+    currentUserRole,
+    isServerAsset,
+    onClose,
+    onCopy,
+    onDownload,
+    onReplicate,
+    onResultAction,
+    onAddProject,
+    onShareDepartment,
+    onSetCompanyVisibility,
+}: {
+    asset: Asset | null;
+    currentUserId: string;
+    currentUserRole: string;
+    isServerAsset: boolean;
+    onClose: () => void;
+    onCopy: (asset: Asset) => void;
+    onDownload: (asset: Asset) => void | Promise<void>;
+    onReplicate: (asset: Asset) => void | Promise<void>;
+    onResultAction: (asset: Asset, eventType: AssetEventType) => void | Promise<void>;
+    onAddProject: (asset: Asset) => void;
+    onShareDepartment: (asset: Asset, remove?: boolean) => void | Promise<void>;
+    onSetCompanyVisibility: (asset: Asset, visibility: "private" | "company") => void | Promise<void>;
+}) {
     const cover = asset ? asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "") : "";
+    const isOwner = asset?.ownerId === currentUserId;
+    const isAdmin = currentUserRole === "super_admin" || currentUserRole === "department_admin";
+    const visibility = asset ? metadataString(asset, "visibilityScope") : "private";
     return (
         <Drawer title="素材详情" open={Boolean(asset)} size="large" onClose={onClose}>
             {asset ? (
@@ -575,6 +710,9 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload, onReplicate }: { asse
                         </Typography.Title>
                         <Space size={[4, 4]} wrap>
                             <Tag>{asset.kind === "image" ? "图片" : asset.kind === "video" ? "视频" : "文本"}</Tag>
+                            {isServerAsset ? <Tag color="orange">{resultStatusLabel(metadataString(asset, "resultStatus"))}</Tag> : null}
+                            {isServerAsset ? <Tag>可用性 {metadataNumber(asset, "usabilityScore")}/100</Tag> : null}
+                            {isServerAsset ? <Tag>下载 {metadataNumber(asset, "downloadCount")} 次</Tag> : null}
                             {(asset.tags || []).map((tag) => (
                                 <Tag key={tag}>{tag}</Tag>
                             ))}
@@ -618,6 +756,30 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload, onReplicate }: { asse
                             </Button>
                         ) : null}
                     </Space>
+                    {isServerAsset ? (
+                        <div className="rounded-lg border border-orange-200 bg-orange-50/60 p-4 dark:border-orange-900 dark:bg-orange-950/20">
+                            <Typography.Text strong>成果操作</Typography.Text>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                {isOwner ? (
+                                    <Button icon={<Check className="size-4" />} onClick={() => void onResultAction(asset, "asset.candidate_added")}>加入候选</Button>
+                                ) : null}
+                                {isOwner ? <Button onClick={() => onAddProject(asset)}>加入正式项目</Button> : null}
+                                {isOwner ? (
+                                    <Button icon={<Share2 className="size-4" />} onClick={() => void onShareDepartment(asset)}>共享到部门</Button>
+                                ) : null}
+                                {isOwner ? <Button onClick={() => void onShareDepartment(asset, true)}>取消部门共享</Button> : null}
+                                {isAdmin ? <Button onClick={() => void onResultAction(asset, "asset.pending")}>待定</Button> : null}
+                                {isAdmin ? <Button type="primary" onClick={() => void onResultAction(asset, "asset.adopted")}>确认采用</Button> : null}
+                                {isAdmin ? <Button onClick={() => void onResultAction(asset, "asset.delivered")}>最终交付</Button> : null}
+                                {isAdmin ? <Button danger onClick={() => void onResultAction(asset, "asset.rejected")}>标记废弃</Button> : null}
+                                {isAdmin ? (
+                                    <Button icon={<Share2 className="size-4" />} onClick={() => void onSetCompanyVisibility(asset, visibility === "company" ? "private" : "company")}>
+                                        {visibility === "company" ? "撤出公司素材库" : "加入公司素材库"}
+                                    </Button>
+                                ) : null}
+                            </div>
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
         </Drawer>
@@ -678,13 +840,32 @@ function metadataString(asset: Asset, key: string) {
     return typeof value === "string" ? value : "";
 }
 
+function metadataNumber(asset: Asset, key: string) {
+    const value = asset.metadata?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function resultStatusLabel(status: string) {
+    return ({
+        unused: "未使用",
+        candidate: "候选",
+        project: "已入项目",
+        editing: "继续编辑",
+        downloaded: "已下载/导出",
+        adopted: "已采用",
+        delivered: "已交付",
+        pending: "待定",
+        rejected: "已废弃",
+    } as Record<string, string>)[status] || "未使用";
+}
+
 function canReplicate(asset: Asset) {
     return Boolean(buildRecreateUrl(asset));
 }
 
 function buildRecreateUrl(asset: Asset) {
     const explicitPath = metadataString(asset, "recreatePath");
-    if (explicitPath) return explicitPath;
+    if (explicitPath) return appendRecreateSource(explicitPath, asset);
     const prompt = metadataString(asset, "prompt") || (asset.kind === "text" ? asset.data.content : "");
     if (!prompt.trim()) return "";
     const model = metadataString(asset, "model");
@@ -693,7 +874,21 @@ function buildRecreateUrl(asset: Asset) {
     const params = new URLSearchParams();
     params.set("prompt", prompt);
     if (model) params.set("model", model);
+    const serverAssetId = metadataString(asset, "serverAssetId");
+    if (serverAssetId) {
+        params.set("sourceAssetId", serverAssetId);
+        params.set("sourceOwnerId", asset.ownerId);
+    }
     if (source === "video-page") return `/video?${params.toString()}`;
     params.set("tool", toolMode);
     return `/image?${params.toString()}`;
+}
+
+function appendRecreateSource(path: string, asset: Asset) {
+    const serverAssetId = metadataString(asset, "serverAssetId");
+    if (!serverAssetId) return path;
+    const url = new URL(path, window.location.origin);
+    url.searchParams.set("sourceAssetId", serverAssetId);
+    url.searchParams.set("sourceOwnerId", asset.ownerId);
+    return `${url.pathname}${url.search}`;
 }
