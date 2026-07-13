@@ -76,6 +76,8 @@ async function getPerformanceDashboardInternal(db: Database, actor: SessionUser,
     db.query<BatchRow>(
       `SELECT DISTINCT b.id,b.total_items AS "totalItems",b.completed_items AS "completedItems",
               b.failed_items AS "failedItems",b.status FROM batch_tasks b JOIN tasks t ON t.batch_id=b.id
+         LEFT JOIN LATERAL (SELECT group_id FROM group_memberships x WHERE x.user_id=t.user_id
+           AND x.effective_at<=t.queued_at AND (x.ended_at IS NULL OR x.ended_at>t.queued_at) LIMIT 1) gm ON true
         ${taskScope.where} AND t.operation_type IN ('image_generation','upscale','remove_background','inpaint','batch_image','seamless_stitch')`, taskScope.values,
     ),
     getPerformanceOptions(db, actor),
