@@ -76,53 +76,83 @@ async function withTransaction<T>(
   throw new Error("Transaction retry limit reached");
 }
 
+type CreditPeriodRow = {
+  credit_balance: number;
+  credit_limit: number;
+  monthly_credit_limit: number;
+  temporary_credit_adjustment: number;
+  credit_period_start: string;
+  current_period_start: string;
+};
+
+export async function ensureMonthlyCreditPeriod(
+  client: PoolClient,
+  userId: string,
+  actorId = userId,
+) {
+  const result = await client.query<CreditPeriodRow>(
+    `SELECT credit_balance,credit_limit,monthly_credit_limit,temporary_credit_adjustment,
+            credit_period_start::text,
+            date_trunc('month', timezone('Asia/Shanghai', now()))::date::text AS current_period_start
+       FROM users WHERE id=$1 FOR UPDATE`,
+    [userId],
+  );
+  const user = result.rows[0];
+  if (!user) throw new BillingError("ACCOUNT_NOT_FOUND", "账号不存在");
+  if (user.credit_period_start === user.current_period_start) return user;
+
+  const balance = user.monthly_credit_limit;
+  const requestId = `monthly-reset:${userId}:${user.current_period_start.slice(0, 7)}`;
+  await client.query(
+    `UPDATE users SET credit_balance=$1,credit_limit=$1,temporary_credit_adjustment=0,
+            credit_period_start=$2::date,updated_at=now() WHERE id=$3`,
+    [balance, user.current_period_start, userId],
+  );
+  await client.query(
+    `INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason,metadata)
+     VALUES($1,$2,$3,'monthly_reset',$4,$5,'credit_period',$6,'自然月固定额度重置',$7)
+     ON CONFLICT(request_id) DO NOTHING`,
+    [requestId, userId, actorId, balance - user.credit_balance, balance, user.current_period_start,
+      JSON.stringify({ previousPeriodStart: user.credit_period_start, previousBalance: user.credit_balance,
+        expiredTemporaryAdjustment: user.temporary_credit_adjustment, monthlyCreditLimit: user.monthly_credit_limit,
+        timezone: "Asia/Shanghai" })],
+  );
+  return { ...user, credit_balance: balance, credit_limit: balance,
+    temporary_credit_adjustment: 0, credit_period_start: user.current_period_start };
+}
+
+export async function refreshMonthlyCreditPeriod(
+  db: Database,
+  userId: string,
+  actorId = userId,
+) {
+  return withTransaction(db, (client) => ensureMonthlyCreditPeriod(client, userId, actorId));
+}
+
 export async function adjustCredits(
   db: Database,
-  input: {
-    requestId: string;
-    actorId: string;
-    userId: string;
-    amount: number;
-    reason: string;
-  },
+  input: { requestId: string; actorId: string; userId: string; amount: number; reason: string },
 ) {
   return withTransaction(db, async (client) => {
     const duplicate = await client.query<{ balance_after: number }>(
       "SELECT balance_after FROM credit_ledger WHERE request_id=$1",
       [input.requestId],
     );
-    if (duplicate.rows[0])
-      return { balance: duplicate.rows[0].balance_after, duplicate: true };
-    const userResult = await client.query<{
-      credit_balance: number;
-      credit_limit: number;
-    }>("SELECT credit_balance,credit_limit FROM users WHERE id=$1 FOR UPDATE", [
-      input.userId,
-    ]);
-    const user = userResult.rows[0];
-    if (!user) throw new BillingError("ACCOUNT_NOT_FOUND", "账号不存在");
+    if (duplicate.rows[0]) return { balance: duplicate.rows[0].balance_after, duplicate: true };
+    const user = await ensureMonthlyCreditPeriod(client, input.userId, input.actorId);
     const balance = user.credit_balance + input.amount;
-    if (balance < 0 || balance > user.credit_limit)
-      throw new BillingError(
-        "INVALID_CREDIT",
-        "调整后积分必须在 0 和额度上限之间",
-      );
+    if (balance < 0) throw new BillingError("INVALID_CREDIT", "本月临时扣减不能使剩余积分低于 0");
+    const creditLimit = Math.max(user.credit_limit, balance);
     await client.query(
-      "UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2",
-      [balance, input.userId],
+      `UPDATE users SET credit_balance=$1,credit_limit=$2,
+         temporary_credit_adjustment=temporary_credit_adjustment+$3,updated_at=now() WHERE id=$4`,
+      [balance, creditLimit, input.amount, input.userId],
     );
     await client.query(
-      `INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
-            VALUES($1,$2,$3,'adjustment',$4,$5,'user',$7,$6)`,
-      [
-        input.requestId,
-        input.userId,
-        input.actorId,
-        input.amount,
-        balance,
-        input.reason,
-        input.userId,
-      ],
+      `INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason,metadata)
+       VALUES($1,$2,$3,'adjustment',$4,$5,'user',$6,$7,$8)`,
+      [input.requestId, input.userId, input.actorId, input.amount, balance, input.userId, input.reason,
+        JSON.stringify({ scope: "temporary", periodStart: user.credit_period_start })],
     );
     return { balance, duplicate: false };
   });
@@ -234,11 +264,13 @@ export async function reserveCredits(
         );
       }
     }
+    const periodUser = await ensureMonthlyCreditPeriod(client, input.userId);
     const userResult = await client.query<{
       credit_balance: number;
       department_id: string | null;
+      credit_period_start: string;
     }>(
-      "SELECT credit_balance,department_id FROM users WHERE id=$1 AND status='active' FOR UPDATE",
+      "SELECT credit_balance,department_id,credit_period_start::text FROM users WHERE id=$1 AND status='active'",
       [input.userId],
     );
     const user = userResult.rows[0];
@@ -253,8 +285,8 @@ export async function reserveCredits(
       [userBalance, input.userId],
     );
     await client.query(
-      `INSERT INTO credit_reservations(request_id,user_id,department_id,operation_type,model_config_id,quantity,credits,department_credits,rmb_cost,price_snapshot)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      `INSERT INTO credit_reservations(request_id,user_id,department_id,operation_type,model_config_id,quantity,credits,department_credits,rmb_cost,price_snapshot,credit_period_start)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::date)`,
       [
         input.requestId,
         input.userId,
@@ -266,6 +298,7 @@ export async function reserveCredits(
         departmentBalance === null ? 0 : snapshot.totalCredits,
         snapshot.totalRmb,
         snapshot,
+        periodUser.credit_period_start,
       ],
     );
     await client.query(
@@ -319,8 +352,9 @@ export async function settleReservation(
       credits: number;
       department_credits: number;
       status: string;
+      credit_period_start: string;
     }>(
-      "SELECT id,user_id,department_id,credits,department_credits,status FROM credit_reservations WHERE request_id=$1 FOR UPDATE",
+      "SELECT id,user_id,department_id,credits,department_credits,status,credit_period_start::text FROM credit_reservations WHERE request_id=$1 FOR UPDATE",
       [requestId],
     );
     const reservation = result.rows[0];
@@ -350,10 +384,7 @@ export async function settleReservation(
           ],
         );
       }
-      const user = await client.query<{ credit_balance: number }>(
-        "SELECT credit_balance FROM users WHERE id=$1 FOR SHARE",
-        [reservation.user_id],
-      );
+      const user = await ensureMonthlyCreditPeriod(client, reservation.user_id, actorId ?? reservation.user_id);
       await client.query(
         `INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
                 VALUES($1,$2,$3,'capture',0,$4,'task',$5,'任务成功结算')`,
@@ -361,7 +392,7 @@ export async function settleReservation(
           `${requestId}:user:capture`,
           reservation.user_id,
           actorId ?? reservation.user_id,
-          user.rows[0]!.credit_balance,
+          user.credit_balance,
           requestId,
         ],
       );
@@ -393,11 +424,9 @@ export async function settleReservation(
         );
       }
     }
-    const user = await client.query<{ credit_balance: number }>(
-      "SELECT credit_balance FROM users WHERE id=$1 FOR UPDATE",
-      [reservation.user_id],
-    );
-    const userBalance = user.rows[0]!.credit_balance + reservation.credits;
+    const user = await ensureMonthlyCreditPeriod(client, reservation.user_id, actorId ?? reservation.user_id);
+    const releasedCredits = user.credit_period_start === reservation.credit_period_start ? reservation.credits : 0;
+    const userBalance = user.credit_balance + releasedCredits;
     await client.query(
       "UPDATE users SET credit_balance=$1,updated_at=now() WHERE id=$2",
       [userBalance, reservation.user_id],
@@ -409,7 +438,7 @@ export async function settleReservation(
         `${requestId}:user:release`,
         reservation.user_id,
         actorId ?? reservation.user_id,
-        reservation.credits,
+        releasedCredits,
         userBalance,
         requestId,
       ],

@@ -17,6 +17,10 @@ export type SessionUser = {
     mfaEnabled: boolean;
     creditBalance: number;
     creditLimit: number;
+    monthlyCreditLimit: number;
+    temporaryCreditAdjustment: number;
+    creditPeriodStart: string;
+    creditResetAt: string;
 };
 
 export type AuthenticatedRequest = Request & {

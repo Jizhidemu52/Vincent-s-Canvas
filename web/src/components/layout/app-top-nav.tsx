@@ -76,7 +76,7 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
     const buttonClass = "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-[12px] font-semibold !text-stone-500 transition hover:bg-white hover:!text-stone-950";
     const displayName = user?.displayName || "未登录";
     const roleLabel = user?.role === "super_admin" ? "超级管理员" : user?.role === "department_admin" ? "部门管理员" : user?.role === "designer" ? "设计师" : "登录";
-    const credits = user ? `${user.creditBalance} 积分` : "请登录";
+    const credits = user ? `${user.creditBalance}积分 · 月额${user.monthlyCreditLimit}` : "请登录";
 
     return (
         <div className="space-y-1 border-t border-stone-200 pt-3">

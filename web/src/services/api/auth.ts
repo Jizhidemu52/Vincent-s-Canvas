@@ -14,6 +14,10 @@ export type ApiUser = {
     mfaEnabled: boolean;
     creditBalance: number;
     creditLimit: number;
+    monthlyCreditLimit: number;
+    temporaryCreditAdjustment: number;
+    creditPeriodStart: string;
+    creditResetAt: string;
 };
 
 type ErrorPayload = { message?: string };

@@ -4,6 +4,7 @@ import type { Cache, Database } from "./db";
 import { hashToken } from "./security";
 import type { AuthenticatedRequest } from "./types";
 import { mapUser, userSelect, type UserRow } from "./user-mapper";
+import { refreshMonthlyCreditPeriod } from "./billing";
 
 export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig) {
     return async (request: Request, response: Response, next: NextFunction) => {
@@ -24,13 +25,20 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig)
                    AND s.expires_at>now() AND u.status='active'`,
                 [tokenHash, cachedId],
             );
-            const row = result.rows[0];
+            let row = result.rows[0];
             if (!row) {
                 await cache.del(cacheKey);
                 response.clearCookie(config.SESSION_COOKIE_NAME);
                 response.status(401).json({ error: "SESSION_EXPIRED", message: "登录已失效，请重新登录" });
                 return;
             }
+            await refreshMonthlyCreditPeriod(db, row.id);
+            const refreshed = await db.query<UserRow & { session_id: string }>(
+                `SELECT ${userSelect}, s.id AS session_id
+                 FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN departments d ON d.id=u.department_id
+                 WHERE s.id=$1`, [row.session_id],
+            );
+            row = refreshed.rows[0] ?? row;
             await cache.set(cacheKey, row.session_id, { EX: config.SESSION_TTL_SECONDS });
             const authenticated = request as AuthenticatedRequest;
             authenticated.auth = mapUser(row);

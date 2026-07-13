@@ -12,6 +12,7 @@ import type { AuthenticatedRequest } from "../types";
 import { mapUser, userSelect, type UserRow } from "../user-mapper";
 import { rateLimit } from "../http-security";
 import { createWeComAuthorizationUrl, exchangeWeComCode, WeComError } from "../wecom";
+import { refreshMonthlyCreditPeriod } from "../billing";
 
 const loginSchema = z.object({
     identifier: z.string().trim().min(1).max(200),
@@ -75,7 +76,11 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             }
             await cache.set(`session:${hashToken(session.token)}`, session.id, { EX: config.SESSION_TTL_SECONDS });
             setSessionCookie(response, config, session.token);
-            const user = mapUser(row);
+            await refreshMonthlyCreditPeriod(db, row.id);
+            const refreshed = await db.query<UserRow>(
+                `SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`, [row.id],
+            );
+            const user = mapUser(refreshed.rows[0] ?? row);
             await writeAudit(db, { actor: user, action: "auth.login", targetType: "session", targetId: session.id, result: "success", detail: { portal: input.portal }, ip: request.ip });
             response.json({ user });
         } catch (error) { next(error); }

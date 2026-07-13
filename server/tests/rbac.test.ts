@@ -5,7 +5,8 @@ import type { SessionUser } from "../src/types";
 const user = (id: string, role: SessionUser["role"], departmentId: string | null): SessionUser => ({
     id, role, departmentId, username: id, displayName: id, email: null, employeeNo: null,
     departmentName: null, status: "active", mustChangePassword: false, mfaEnabled: false,
-    creditBalance: 0, creditLimit: 0,
+    creditBalance: 0, creditLimit: 0, monthlyCreditLimit: 0, temporaryCreditAdjustment: 0,
+    creditPeriodStart: "2026-07-01", creditResetAt: "2026-08-01",
 });
 
 describe("three-level permissions", () => {

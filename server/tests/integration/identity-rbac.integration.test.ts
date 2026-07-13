@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { Pool } from "pg";
 
 import { totpCode } from "../../src/security";
+import { settleReservation } from "../../src/billing";
 
 const runIntegration = process.env.RUN_INTEGRATION_TESTS === "true";
 const integration = runIntegration ? describe : describe.skip;
@@ -783,6 +785,64 @@ integration("production identity and RBAC", () => {
       resetLogin.cookie,
     );
     expect(resetReady.response.status).toBe(200);
+
+    const database = new Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      await database.query(
+        `UPDATE users SET credit_balance=1000,credit_limit=1000,monthly_credit_limit=1000,
+            temporary_credit_adjustment=0,
+            credit_period_start=date_trunc('month', timezone('Asia/Shanghai', now()))::date
+          WHERE id=$1`, [designerA.id],
+      );
+      const temporaryRequestId = `monthly-test-${crypto.randomUUID()}`;
+      const temporary = await api<{ user: { creditBalance: number; monthlyCreditLimit: number; temporaryCreditAdjustment: number } }>(
+        `/api/admin/accounts/${designerA.id}/credits`,
+        { method: "POST", body: JSON.stringify({ requestId: temporaryRequestId, amount: 500, reason: "本月临时项目补贴" }) },
+        admin.cookie,
+      );
+      expect(temporary.response.status).toBe(200);
+      expect(temporary.body.user).toMatchObject({ creditBalance: 1500, monthlyCreditLimit: 1000, temporaryCreditAdjustment: 500 });
+
+      const duplicateTemporary = await api<{ user: { creditBalance: number } }>(
+        `/api/admin/accounts/${designerA.id}/credits`,
+        { method: "POST", body: JSON.stringify({ requestId: temporaryRequestId, amount: 500, reason: "重复提交" }) },
+        admin.cookie,
+      );
+      expect(duplicateTemporary.body.user.creditBalance).toBe(1500);
+
+      await database.query(
+        `UPDATE users SET credit_period_start=(date_trunc('month', timezone('Asia/Shanghai', now())) - interval '1 month')::date
+          WHERE id=$1`, [designerA.id],
+      );
+      const resetSession = await api<{ user: { creditBalance: number; monthlyCreditLimit: number; temporaryCreditAdjustment: number } }>(
+        "/api/auth/session", {}, resetLogin.cookie,
+      );
+      expect(resetSession.body.user).toMatchObject({ creditBalance: 1000, monthlyCreditLimit: 1000, temporaryCreditAdjustment: 0 });
+      await api("/api/auth/session", {}, resetLogin.cookie);
+      const resetLedger = await database.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM credit_ledger WHERE user_id=$1 AND entry_type='monthly_reset'", [designerA.id],
+      );
+      expect(Number(resetLedger.rows[0]!.count)).toBe(1);
+
+      const oldReservationId = `old-period-${crypto.randomUUID()}`;
+      await database.query(
+        `INSERT INTO credit_reservations(request_id,user_id,operation_type,quantity,credits,rmb_cost,price_snapshot,credit_period_start)
+         VALUES($1,$2,'image_generation',1,100,0,'{}'::jsonb,
+           (date_trunc('month', timezone('Asia/Shanghai', now())) - interval '1 month')::date)`,
+        [oldReservationId, designerA.id],
+      );
+      await settleReservation(database, oldReservationId, "release", admin.user.id);
+      const afterExpiredRelease = await database.query<{ credit_balance: number }>(
+        "SELECT credit_balance FROM users WHERE id=$1", [designerA.id],
+      );
+      expect(afterExpiredRelease.rows[0]!.credit_balance).toBe(1000);
+      const expiredReleaseLedger = await database.query<{ amount: number }>(
+        "SELECT amount FROM credit_ledger WHERE request_id=$1", [`${oldReservationId}:user:release`],
+      );
+      expect(expiredReleaseLedger.rows[0]!.amount).toBe(0);
+    } finally {
+      await database.end();
+    }
 
     const disableDesignerB = await api(
       `/api/admin/accounts/${designerB.id}`,

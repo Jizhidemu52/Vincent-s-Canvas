@@ -25,7 +25,7 @@ type CreditFormValues = {
 
 type LimitFormValues = {
     designerId: string;
-    quotaLimit: number;
+    monthlyCreditLimit: number;
 };
 
 type AccountFormValues = {
@@ -38,7 +38,7 @@ type AccountFormValues = {
     role: ApiUserRole;
     status: ApiUser["status"];
     quotaRemaining: number;
-    quotaLimit: number;
+    monthlyCreditLimit: number;
 };
 
 export default function AdminPage() {
@@ -82,6 +82,13 @@ export default function AdminPage() {
     }));
 
     const activeDesigner = accounts.find((designer) => designer.role === "designer");
+    useEffect(() => {
+        if (!activeDesigner) return;
+        if (!creditForm.getFieldValue("designerId")) creditForm.setFieldValue("designerId", activeDesigner.id);
+        if (!limitForm.getFieldValue("designerId")) {
+            limitForm.setFieldsValue({ designerId: activeDesigner.id, monthlyCreditLimit: activeDesigner.monthlyCreditLimit });
+        }
+    }, [activeDesigner, creditForm, limitForm]);
     const totalRemaining = accounts.reduce((sum, designer) => sum + designer.creditBalance, 0);
     const totalUsed = accounts.reduce((sum, designer) => sum + Math.max(0, designer.creditLimit - designer.creditBalance), 0);
 
@@ -109,22 +116,22 @@ export default function AdminPage() {
     };
 
     const submitLimitChange = async (values: LimitFormValues) => {
-        try { await updateAccount(values.designerId, { creditLimit: values.quotaLimit }); message.success("额度上限已更新"); await refreshAccounts(); }
-        catch (error) { message.error(error instanceof Error ? error.message : "额度上限更新失败"); }
+        try { await updateAccount(values.designerId, { monthlyCreditLimit: values.monthlyCreditLimit }); message.success("每月固定额度已更新，下月重置时生效"); await refreshAccounts(); }
+        catch (error) { message.error(error instanceof Error ? error.message : "每月固定额度更新失败"); }
     };
 
     const submitAccount = async (values: AccountFormValues) => {
         try {
             if (editingAccountId) {
-                await updateAccount(editingAccountId, { displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, role: values.role === "super_admin" ? undefined : values.role, status: values.status, creditLimit: values.quotaLimit });
+                await updateAccount(editingAccountId, { displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, role: values.role === "super_admin" ? undefined : values.role, status: values.status, monthlyCreditLimit: values.monthlyCreditLimit });
                 if (values.password) await resetAccountPassword(editingAccountId, values.password);
             } else {
-                await createAccount({ username: values.loginName, displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, password: values.password || "", role: values.role, creditBalance: values.quotaRemaining, creditLimit: values.quotaLimit });
+                await createAccount({ username: values.loginName, displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, password: values.password || "", role: values.role, creditBalance: values.quotaRemaining, creditLimit: Math.max(values.quotaRemaining, values.monthlyCreditLimit), monthlyCreditLimit: values.monthlyCreditLimit });
             }
             message.success(editingAccountId ? "账号已更新，权限和额度会在重新校验会话后同步" : "账号已开通，首次登录必须修改密码");
             setEditingAccountId(null);
             accountForm.resetFields();
-            accountForm.setFieldsValue({ role: "designer", status: "active", quotaRemaining: 500, quotaLimit: 500 });
+            accountForm.setFieldsValue({ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 });
             await refreshAccounts();
         } catch (error) { message.error(error instanceof Error ? error.message : "账号保存失败"); }
     };
@@ -141,7 +148,7 @@ export default function AdminPage() {
             role: designer.role,
             status: designer.status,
             quotaRemaining: designer.creditBalance,
-            quotaLimit: designer.creditLimit,
+            monthlyCreditLimit: designer.monthlyCreditLimit,
         });
     };
 
@@ -263,9 +270,10 @@ export default function AdminPage() {
                                                 { title: "部门", dataIndex: "departmentName", render: (value: string | null) => value || "未分配" },
                                                 { title: "角色", render: (_, record: ApiUser) => <Tag color={record.role === "super_admin" ? "red" : record.role === "department_admin" ? "blue" : "default"}>{record.role === "super_admin" ? "超级管理员" : record.role === "department_admin" ? "部门管理员" : "设计师"}</Tag> },
                                                 { title: "状态", render: (_, record: ApiUser) => <Tag color={record.status === "active" ? "green" : "red"}>{record.status === "active" ? "启用" : record.status === "locked" ? "锁定" : "停用"}</Tag> },
-                                                { title: "剩余额度", dataIndex: "creditBalance", sorter: (a: ApiUser, b: ApiUser) => a.creditBalance - b.creditBalance },
-                                                { title: "已用额度", render: (_, record: ApiUser) => Math.max(0, record.creditLimit - record.creditBalance) },
-                                                { title: "额度上限", dataIndex: "creditLimit" },
+                                                 { title: "本月剩余", dataIndex: "creditBalance", sorter: (a: ApiUser, b: ApiUser) => a.creditBalance - b.creditBalance },
+                                                 { title: "每月固定额度", dataIndex: "monthlyCreditLimit" },
+                                                 { title: "本月临时调整", dataIndex: "temporaryCreditAdjustment", render: (value: number) => value > 0 ? `+${value}` : value },
+                                                 { title: "下次重置", dataIndex: "creditResetAt" },
                                                 {
                                                     title: "操作",
                                                     render: (_, record: ApiUser) => (
@@ -293,7 +301,7 @@ export default function AdminPage() {
                                                     </Upload>
                                                     <Button icon={<Download className="size-4" />} onClick={downloadAccountTemplate}>下载模板</Button>
                                                 </div>
-                                                <Form form={accountForm} layout="vertical" disabled={!canManageAccounts} initialValues={{ role: "designer", status: "active", quotaRemaining: 500, quotaLimit: 500 }} onFinish={submitAccount}>
+                                                 <Form form={accountForm} layout="vertical" disabled={!canManageAccounts} initialValues={{ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 }} onFinish={submitAccount}>
                                                     <Form.Item name="loginName" label="登录账号" rules={[{ required: true, message: "请输入登录账号" }]}>
                                                         <Input placeholder="例如：张三 / zhangsan / 邮箱 / 工号" disabled={Boolean(editingAccountId)} />
                                                     </Form.Item>
@@ -303,10 +311,13 @@ export default function AdminPage() {
                                                     <Form.Item name="name" label="姓名" rules={[{ required: true, message: "请输入姓名" }]}>
                                                         <Input placeholder="设计师姓名" />
                                                     </Form.Item>
-                                                    <div className="grid grid-cols-2 gap-3">
+                                                     <div className="grid grid-cols-2 gap-3">
                                                         <Form.Item name="email" label="邮箱"><Input placeholder="可用于登录" /></Form.Item>
                                                         <Form.Item name="employeeNo" label="工号"><Input placeholder="可用于登录" /></Form.Item>
-                                                    </div>
+                                                     </div>
+                                                     <Form.Item name="monthlyCreditLimit" label="每月固定额度" rules={[{ required: true }]}>
+                                                         <InputNumber className="w-full" min={0} max={1000000} />
+                                                     </Form.Item>
                                                     <Form.Item name="departmentId" label="所属部门" rules={[{ required: true, message: "请选择部门" }]}>
                                                         <Select options={departments.map((department) => ({ label: department.name, value: department.id }))} />
                                                     </Form.Item>
@@ -330,9 +341,6 @@ export default function AdminPage() {
                                                         <Form.Item name="quotaRemaining" label="当前剩余额度" rules={[{ required: true }]}>
                                                             <InputNumber className="w-full" min={0} max={1000000} />
                                                         </Form.Item>
-                                                        <Form.Item name="quotaLimit" label="额度上限" rules={[{ required: true }]}>
-                                                            <InputNumber className="w-full" min={0} max={1000000} />
-                                                        </Form.Item>
                                                     </div>
                                                     <Space className="w-full" orientation="vertical">
                                                         <Button type="primary" htmlType="submit" icon={<UserPlus className="size-4" />} block>
@@ -344,7 +352,7 @@ export default function AdminPage() {
                                                                 onClick={() => {
                                                                     setEditingAccountId(null);
                                                                     accountForm.resetFields();
-                                                                    accountForm.setFieldsValue({ role: "designer", status: "active", quotaRemaining: 500, quotaLimit: 500 });
+                                                                     accountForm.setFieldsValue({ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 });
                                                                 }}
                                                             >
                                                                 取消编辑
@@ -354,12 +362,12 @@ export default function AdminPage() {
                                                 </Form>
                                                 <Typography.Paragraph className="!mb-0 !mt-3 text-xs !text-stone-500">登录账号支持中文或英文，邮箱和工号也可登录。新账号首次登录必须修改密码；停用和重置密码会使既有会话失效。</Typography.Paragraph>
                                             </Panel>
-                                            <Panel title="调整额度">
+                                             <Panel title="调整本月临时额度">
                                                 <Form form={creditForm} layout="vertical" disabled={!canManageAccounts} initialValues={{ designerId: activeDesigner?.id, amount: 100, reason: "项目补充额度" }} onFinish={submitCreditChange}>
                                                     <Form.Item name="designerId" label="设计师" rules={[{ required: true }]}>
                                                         <Select options={designerOptions.filter((item) => accounts.find((designer) => designer.id === item.value)?.role === "designer")} />
                                                     </Form.Item>
-                                                    <Form.Item name="amount" label="积分变化" rules={[{ required: true }]}>
+                                                     <Form.Item name="amount" label="仅本月有效的积分变化" rules={[{ required: true }]}>
                                                         <InputNumber className="w-full" min={-100000} max={100000} />
                                                     </Form.Item>
                                                     <Form.Item name="reason" label="原因">
@@ -370,16 +378,16 @@ export default function AdminPage() {
                                                     </Button>
                                                 </Form>
                                             </Panel>
-                                            <Panel title="设置额度上限">
-                                                <Form form={limitForm} layout="vertical" disabled={!canManageAccounts} initialValues={{ designerId: activeDesigner?.id, quotaLimit: activeDesigner?.creditLimit || 500 }} onFinish={submitLimitChange}>
+                                             <Panel title="设置每月固定额度">
+                                                 <Form form={limitForm} layout="vertical" disabled={!canManageAccounts} initialValues={{ designerId: activeDesigner?.id, monthlyCreditLimit: activeDesigner?.monthlyCreditLimit || 500 }} onFinish={submitLimitChange}>
                                                     <Form.Item name="designerId" label="设计师" rules={[{ required: true }]}>
                                                         <Select options={designerOptions.filter((item) => accounts.find((designer) => designer.id === item.value)?.role === "designer")} />
                                                     </Form.Item>
-                                                    <Form.Item name="quotaLimit" label="最多可拥有积分" rules={[{ required: true }]}>
+                                                     <Form.Item name="monthlyCreditLimit" label="每月 1 日重置后的积分" rules={[{ required: true }]}>
                                                         <InputNumber className="w-full" min={0} max={1000000} />
                                                     </Form.Item>
                                                     <Button htmlType="submit" block>
-                                                        更新上限
+                                                         保存每月固定额度
                                                     </Button>
                                                 </Form>
                                             </Panel>
