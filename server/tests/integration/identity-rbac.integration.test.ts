@@ -1271,7 +1271,7 @@ integration("production identity and RBAC", () => {
     } finally {
       await verificationDatabase.end();
     }
-    const memberPoolAfterDisable = await api<{ error: string }>("/api/group-credits", {}, chineseLogin.cookie);
+    const memberPoolAfterDisable = await api<{ error: string }>("/api/group-credits", {}, resetLogin.cookie);
     expect(memberPoolAfterDisable.response.status).toBe(409);
     expect(memberPoolAfterDisable.body.error).toBe("GROUP_REQUIRED");
 
