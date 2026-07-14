@@ -6,8 +6,7 @@ import { saveAs } from "file-saver";
 import Papa from "papaparse";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
-import { ApiProviderPanel } from "@/pages/admin/components/api-provider-panel";
-import { WorkflowManagementPanel } from "@/pages/admin/components/workflow-management-panel";
+import { ApiConfigurationHub } from "@/pages/admin/components/api-configuration-hub";
 import { ModelPricingPanel } from "@/pages/admin/components/model-pricing-panel";
 import { HistoryManagementPanel, TaskManagementPanel } from "@/pages/admin/components/task-history-panels";
 import { AdminAssetsPanel } from "@/pages/admin/components/admin-assets-panel";
@@ -66,7 +65,8 @@ export default function AdminPage() {
     const currentOperator = signedInUser;
     const isAdmin = signedInUser?.role === "super_admin";
     const canManageAccounts = isAdminRole(signedInUser?.role);
-    const requestedAdminTab = searchParams.get("tab") || "accounts";
+    const requestedAdminTabValue = searchParams.get("tab") || "accounts";
+    const requestedAdminTab = ["providers", "workflows", "models"].includes(requestedAdminTabValue) ? "api" : requestedAdminTabValue;
     const departmentAdminTabs = new Set(["accounts", "groups", "performance"]);
     const requestedTabAvailable = requestedAdminTab !== "performance" || performanceEnabled;
     const activeAdminTab = requestedTabAvailable && (isAdmin || departmentAdminTabs.has(requestedAdminTab)) ? requestedAdminTab : "accounts";
@@ -110,9 +110,7 @@ export default function AdminPage() {
         ...(performanceEnabled ? [{ key: "performance", label: "设计效能" }] : []),
         { key: "modules", label: "模块开关" },
         { key: "pricing", label: "积分价格" },
-        { key: "providers", label: "API Provider" },
-        { key: "workflows", label: "工作流管理" },
-        { key: "models", label: "模型 API" },
+        { key: "api", label: "板块 API 配置" },
         { key: "history", label: "历史记录" },
         { key: "projects", label: "项目素材" },
         { key: "batch", label: "批量任务" },
@@ -426,19 +424,9 @@ export default function AdminPage() {
                                 children: <ModelPricingPanel mode="prices" />,
                             },
                             {
-                                key: "providers",
-                                label: "API Provider",
-                                children: <ApiProviderPanel isAdmin={isAdmin} />,
-                            },
-                            {
-                                key: "workflows",
-                                label: "工作流管理",
-                                children: <WorkflowManagementPanel isAdmin={isAdmin} />,
-                            },
-                            {
-                                key: "models",
-                                label: "模型 API",
-                                children: <ModelPricingPanel mode="models" />,
+                                key: "api",
+                                label: "板块 API 配置",
+                                children: <ApiConfigurationHub isAdmin={isAdmin} />,
                             },
                             {
                                 key: "history",

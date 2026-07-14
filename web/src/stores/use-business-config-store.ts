@@ -6,7 +6,7 @@ type BusinessConfigStore = BusinessConfig & {
     status: "idle" | "loading" | "ready" | "error";
     error: string | null;
     refresh: () => Promise<void>;
-    estimate: (input: { operationType: string; modelId?: string; quantity?: number }) => ReturnType<typeof estimateServerUsage>;
+    estimate: (input: { operationType: string; modelId?: string; toolKey?: string; quantity?: number }) => ReturnType<typeof estimateServerUsage>;
 };
 
 let refreshPromise: Promise<void> | null = null;
@@ -14,6 +14,7 @@ let refreshPromise: Promise<void> | null = null;
 export const useBusinessConfigStore = create<BusinessConfigStore>((set, get) => ({
     models: [],
     prices: [],
+    tools: [],
     status: "idle",
     error: null,
     refresh: async () => {

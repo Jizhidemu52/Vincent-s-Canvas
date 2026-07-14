@@ -16,6 +16,16 @@ const providerUpdate = providerInput.partial();
 const modelInput = z.object({ providerId: z.string().uuid(), workflowConfigId: z.string().uuid().nullish(), replacementModelConfigId: z.string().uuid().nullish(), name: z.string().trim().min(1).max(120), modelId: z.string().trim().min(1).max(200), capabilities, creditCost: z.number().int().nonnegative(), rmbCost: z.number().nonnegative(), concurrencyLimit: z.number().int().min(1).max(100).default(5), enabled: z.boolean().default(true) });
 const modelUpdate = modelInput.partial();
 const priceInput = z.object({ operationType: z.enum(["image_generation", "video_generation", "audio_generation", "upscale", "remove_background", "inpaint", "batch_image", "seamless_stitch"]), label: z.string().trim().min(1).max(100), credits: z.number().int().nonnegative(), rmbCost: z.number().nonnegative() });
+const toolDefinitions = [
+    { toolKey: "detail-enhance", label: "细节增强", operationType: "upscale", capabilities: ["upscale", "edit"] },
+    { toolKey: "image-edit", label: "图片编辑", operationType: "inpaint", capabilities: ["edit"] },
+    { toolKey: "angle-control", label: "角度控制", operationType: "inpaint", capabilities: ["edit"] },
+    { toolKey: "seamless-stitch", label: "无缝拼接", operationType: "seamless_stitch", capabilities: ["edit"] },
+    { toolKey: "image", label: "文生图", operationType: "image_generation", capabilities: ["generate"] },
+    { toolKey: "video", label: "视频创作", operationType: "video_generation", capabilities: ["video"] },
+] as const;
+const toolKey = z.enum(toolDefinitions.map((item) => item.toolKey) as [typeof toolDefinitions[number]["toolKey"], ...Array<typeof toolDefinitions[number]["toolKey"]>]);
+const toolConfigurationInput = z.object({ modelConfigId: z.string().uuid(), enabled: z.boolean().default(true) });
 
 const providerSelect = `id,name,protocol,base_url AS "baseUrl",enabled,(encrypted_credentials IS NOT NULL) AS "hasCredentials",created_at AS "createdAt",updated_at AS "updatedAt"`;
 const modelSelect = `m.id,m.provider_id AS "providerId",p.name AS "providerName",m.workflow_config_id AS "workflowConfigId",w.name AS "workflowName",m.replacement_model_config_id AS "replacementModelConfigId",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",m.concurrency_limit AS "concurrencyLimit",m.enabled,m.created_at AS "createdAt",m.updated_at AS "updatedAt"`;
@@ -85,6 +95,45 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
         } catch (error) { next(error); }
     });
 
+    router.get("/tool-configurations", async (_request, response, next) => {
+        try {
+            const rows = (await db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.enabled,
+                m.name AS "modelName",m.model_id AS "modelId",m.capabilities,m.credit_cost AS "modelCreditCost",
+                m.rmb_cost::float8 AS "modelRmbCost",m.enabled AS "modelEnabled",p.id AS "providerId",p.name AS "providerName",
+                p.protocol,p.base_url AS "baseUrl",p.enabled AS "providerEnabled",(p.encrypted_credentials IS NOT NULL) AS "hasCredentials",
+                m.workflow_config_id AS "workflowConfigId",w.name AS "workflowName",w.enabled AS "workflowEnabled"
+                FROM tool_api_configurations t JOIN model_configs m ON m.id=t.model_config_id
+                JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id`)).rows as Array<Record<string, unknown>>;
+            const prices = (await db.query(`SELECT operation_type AS "operationType",credits,rmb_cost::float8 AS "rmbCost",version
+                FROM pricing_rule_versions WHERE status='published'`)).rows as Array<Record<string, unknown>>;
+            response.json({ tools: toolDefinitions.map((definition) => ({
+                ...definition,
+                ...(rows.find((row) => row.toolKey === definition.toolKey) || { modelConfigId: null, enabled: false }),
+                price: prices.find((price) => price.operationType === definition.operationType) || null,
+            })) });
+        } catch (error) { next(error); }
+    });
+    router.put("/tool-configurations/:toolKey", async (request, response, next) => {
+        try {
+            const selectedTool = toolKey.parse(request.params.toolKey);
+            const input = toolConfigurationInput.parse(request.body);
+            const definition = toolDefinitions.find((item) => item.toolKey === selectedTool)!;
+            const model = await db.query<{ capabilities: string[] }>(`SELECT m.capabilities FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [input.modelConfigId]);
+            if (!model.rows[0]) { response.status(400).json({ error: "MODEL_NOT_FOUND", message: "所选模型不存在" }); return; }
+            if (!definition.capabilities.some((capability) => model.rows[0]!.capabilities.includes(capability))) {
+                response.status(400).json({ error: "MODEL_CAPABILITY_MISMATCH", message: `所选模型不支持${definition.label}` }); return;
+            }
+            const actor = (request as unknown as AuthenticatedRequest).auth;
+            const result = await db.query(`INSERT INTO tool_api_configurations(tool_key,model_config_id,enabled,updated_by)
+                VALUES($1,$2,$3,$4) ON CONFLICT(tool_key) DO UPDATE SET model_config_id=EXCLUDED.model_config_id,
+                enabled=EXCLUDED.enabled,updated_by=EXCLUDED.updated_by,updated_at=now()
+                RETURNING tool_key AS "toolKey",model_config_id AS "modelConfigId",enabled,updated_at AS "updatedAt"`,
+                [selectedTool, input.modelConfigId, input.enabled, actor.id]);
+            await writeAudit(db, { actor, action: "tool_api_configuration.updated", targetType: "tool", targetId: selectedTool, result: "success", detail: { modelConfigId: input.modelConfigId, enabled: input.enabled }, ip: request.ip });
+            response.json({ tool: result.rows[0] });
+        } catch (error) { next(error); }
+    });
+
     router.get("/prices", async (_request, response, next) => {
         try { response.json({ prices: (await db.query(`SELECT id,operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version,status,created_at AS "createdAt",published_at AS "publishedAt" FROM pricing_rule_versions ORDER BY operation_type,version DESC`)).rows }); }
         catch (error) { next(error); }
@@ -130,11 +179,16 @@ export function createPublicModelRouter(db: Database) {
     const router = Router();
     router.get("/", async (_request, response, next) => {
         try {
-            const [models, prices] = await Promise.all([
+            const [models, prices, tools] = await Promise.all([
                 db.query(`SELECT m.id,m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost" FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=true AND p.enabled=true ORDER BY m.name`),
                 db.query(`SELECT operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version FROM pricing_rule_versions WHERE status='published' ORDER BY operation_type`),
+                db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId"
+                    FROM tool_api_configurations t JOIN model_configs m ON m.id=t.model_config_id
+                    JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id
+                    WHERE t.enabled=true AND m.enabled=true AND p.enabled=true
+                    AND (m.workflow_config_id IS NULL OR w.enabled=true)`),
             ]);
-            response.json({ models: models.rows, prices: prices.rows });
+            response.json({ models: models.rows, prices: prices.rows, tools: tools.rows });
         } catch (error) { next(error); }
     });
     return router;

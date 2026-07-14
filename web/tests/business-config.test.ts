@@ -6,6 +6,7 @@ import { stripClientProviderSecrets } from "../src/stores/use-config-store";
 const config: BusinessConfig = {
     models: [{ id: "model-id", name: "公司生图模型", modelId: "image-v1", capabilities: ["generate"], creditCost: 3, rmbCost: 0.25 }],
     prices: [{ operationType: "image_generation", label: "生成图片", credits: 2, rmbCost: 0.1, version: 4 }],
+    tools: [{ toolKey: "image", modelConfigId: "model-id" }],
 };
 
 describe("server-synchronized usage estimates", () => {
@@ -15,6 +16,11 @@ describe("server-synchronized usage estimates", () => {
 
     test("supports operations that do not require a model", () => {
         expect(estimateServerUsage(config, { operationType: "image_generation", quantity: 1 })).toEqual({ credits: 2, rmbCost: 0.1, configured: true });
+    });
+
+    test("uses the administrator model binding for a tool badge", () => {
+        expect(estimateServerUsage(config, { operationType: "image_generation", toolKey: "image" })).toEqual({ credits: 5, rmbCost: 0.35, configured: true });
+        expect(estimateServerUsage(config, { operationType: "image_generation", toolKey: "video" }).configured).toBe(false);
     });
 
     test("marks missing published prices or models as unconfigured", () => {

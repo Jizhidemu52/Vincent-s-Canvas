@@ -84,7 +84,7 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
     return (
         <div className="space-y-1 border-t border-stone-200 pt-3">
             {adminVisible ? (
-                <button type="button" className={buttonClass} onClick={() => navigate("/admin?tab=providers")}>
+                <button type="button" className={buttonClass} onClick={() => navigate("/admin?tab=api")}>
                     <Link2 className="size-4 text-stone-400" />
                     API 设置
                 </button>
@@ -148,6 +148,7 @@ export function AppTopNav() {
     const createProject = useCanvasStore((state) => state.createProject);
     const projectsLength = useCanvasStore((state) => state.projects.length);
     const estimate = useBusinessConfigStore((state) => state.estimate);
+    const businessConfigStatus = useBusinessConfigStore((state) => state.status);
     const configVisible = useCanManageConfig();
     const currentRole = useUserStore((state) => state.user?.role);
     const adminVisible = isAdminRole(currentRole);
@@ -156,6 +157,7 @@ export function AppTopNav() {
     const getToolBadge = (slug: NavigationToolSlug) => {
         const billing = navigationToolBilling[slug];
         if (billing) {
+            if (businessConfigStatus === "idle" || businessConfigStatus === "loading") return "同步中";
             const usage = estimate({ ...billing, quantity: 1 });
             return usage.configured ? `${usage.credits}积分${slug === "video" ? "起" : ""}` : "待配置";
         }

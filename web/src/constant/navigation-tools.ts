@@ -103,11 +103,11 @@ export function navigationModuleKey(slug: NavigationToolSlug) {
     return slug === "my-prompts" ? "prompts" : slug;
 }
 
-export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operationType: AdminOperationType; modelId?: string }>> = {
-    image: { operationType: "image_generation", modelId: "gpt-image-2" },
-    "detail-enhance": { operationType: "upscale", modelId: "gpt-image-2" },
-    "image-edit": { operationType: "inpaint", modelId: "gpt-image-2" },
-    "angle-control": { operationType: "inpaint", modelId: "gpt-image-2" },
-    "seamless-stitch": { operationType: "seamless_stitch", modelId: "internal-seamless" },
-    video: { operationType: "video_generation" },
+export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operationType: AdminOperationType; toolKey: string }>> = {
+    image: { operationType: "image_generation", toolKey: "image" },
+    "detail-enhance": { operationType: "upscale", toolKey: "detail-enhance" },
+    "image-edit": { operationType: "inpaint", toolKey: "image-edit" },
+    "angle-control": { operationType: "inpaint", toolKey: "angle-control" },
+    "seamless-stitch": { operationType: "seamless_stitch", toolKey: "seamless-stitch" },
+    video: { operationType: "video_generation", toolKey: "video" },
 };

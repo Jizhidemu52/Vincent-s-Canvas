@@ -18,6 +18,7 @@ export type PublicPrice = {
 export type BusinessConfig = {
     models: PublicModel[];
     prices: PublicPrice[];
+    tools: Array<{ toolKey: string; modelConfigId: string }>;
 };
 
 export type UsageEstimate = {
@@ -35,13 +36,15 @@ export async function getBusinessConfig(): Promise<BusinessConfig> {
     return response.json() as Promise<BusinessConfig>;
 }
 
-export function estimateServerUsage(config: BusinessConfig, input: { operationType: string; modelId?: string; quantity?: number }): UsageEstimate {
+export function estimateServerUsage(config: BusinessConfig, input: { operationType: string; modelId?: string; toolKey?: string; quantity?: number }): UsageEstimate {
     const quantity = Math.max(1, Math.floor(input.quantity || 1));
     const price = config.prices.find((item) => item.operationType === input.operationType);
-    const model = input.modelId ? config.models.find((item) => item.id === input.modelId || item.modelId === input.modelId || item.name === input.modelId) : undefined;
+    const boundModelId = input.toolKey ? config.tools.find((item) => item.toolKey === input.toolKey)?.modelConfigId : undefined;
+    const requestedModelId = input.modelId || boundModelId;
+    const model = requestedModelId ? config.models.find((item) => item.id === requestedModelId || item.modelId === requestedModelId || item.name === requestedModelId) : undefined;
     return {
         credits: ((price?.credits || 0) + (model?.creditCost || 0)) * quantity,
         rmbCost: Math.round(((price?.rmbCost || 0) + (model?.rmbCost || 0)) * quantity * 10_000) / 10_000,
-        configured: Boolean(price && (!input.modelId || model)),
+        configured: Boolean(price && (!input.toolKey || boundModelId) && (!requestedModelId || model)),
     };
 }

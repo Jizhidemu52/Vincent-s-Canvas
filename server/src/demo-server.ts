@@ -2,6 +2,18 @@ import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
 
 const sessions = new Map<string, string>();
 const modules = ["detail-enhance", "image-edit", "angle-control", "seamless-stitch", "image", "video", "prompts", "assets", "gpt-chat", "canvas", "team", "performance"];
+const toolDefinitions = [
+    { toolKey: "detail-enhance", label: "细节增强", operationType: "upscale", capabilities: ["upscale", "edit"] },
+    { toolKey: "image-edit", label: "图片编辑", operationType: "inpaint", capabilities: ["edit"] },
+    { toolKey: "angle-control", label: "角度控制", operationType: "inpaint", capabilities: ["edit"] },
+    { toolKey: "seamless-stitch", label: "无缝拼接", operationType: "seamless_stitch", capabilities: ["edit"] },
+    { toolKey: "image", label: "文生图", operationType: "image_generation", capabilities: ["generate"] },
+    { toolKey: "video", label: "视频创作", operationType: "video_generation", capabilities: ["video"] },
+] as const;
+const demoProviders: Array<Record<string, unknown>> = [{ id: "30000000-0000-4000-8000-000000000001", name: "本地模拟 API", protocol: "custom", baseUrl: "http://127.0.0.1:3100/mock-provider", enabled: true, hasCredentials: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+const demoModels: Array<Record<string, unknown>> = toolDefinitions.map((tool, index) => ({ id: `40000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, providerId: demoProviders[0]!.id, providerName: demoProviders[0]!.name, workflowConfigId: null, workflowName: null, replacementModelConfigId: null, name: `${tool.label}模拟模型`, modelId: `demo-${tool.toolKey}`, capabilities: tool.capabilities, creditCost: tool.toolKey === "video" ? 4 : 2, rmbCost: tool.toolKey === "video" ? 0.4 : 0.2, concurrencyLimit: 5, enabled: true }));
+const demoPrices: Array<Record<string, unknown>> = Array.from(new Map(toolDefinitions.map((tool) => [tool.operationType, tool])).values()).map((tool, index) => ({ id: `50000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, operationType: tool.operationType, label: tool.label, credits: tool.toolKey === "video" ? 6 : 2, rmbCost: tool.toolKey === "video" ? 0.6 : 0.2, version: 1, status: "published", publishedAt: new Date().toISOString() }));
+const demoToolConfigurations = toolDefinitions.map((tool, index) => ({ toolKey: tool.toolKey, modelConfigId: demoModels[index]!.id as string, enabled: true }));
 const now = () => new Date().toISOString();
 const headers = { "content-type": "application/json; charset=utf-8" };
 const json = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { ...headers, ...extra } });
@@ -44,13 +56,9 @@ Bun.serve({
 
         if (path === "/api/modules") return json({ modules: modules.map((moduleKey) => ({ moduleKey, enabled: true, updatedAt: now() })) });
         if (path === "/api/models") return json({
-            models: [{ id: "demo-image", name: "测试图片模型", modelId: "demo-image-v1", capabilities: ["generate", "edit", "batch"], creditCost: 2, rmbCost: 0.2 }],
-            prices: [
-                { operationType: "image_generation", label: "生成图片", credits: 2, rmbCost: 0.2, version: 1 },
-                { operationType: "image_edit", label: "图片编辑", credits: 2, rmbCost: 0.2, version: 1 },
-                { operationType: "batch_edit", label: "批量改图", credits: 2, rmbCost: 0.2, version: 1 },
-                { operationType: "seamless_stitch", label: "无缝拼接", credits: 2, rmbCost: 0.2, version: 1 },
-            ],
+            models: demoModels.filter((model) => model.enabled).map(({ id, name, modelId, capabilities, creditCost, rmbCost }) => ({ id, name, modelId, capabilities, creditCost, rmbCost })),
+            prices: demoPrices.filter((price) => price.status === "published").map(({ operationType, label, credits, rmbCost, version }) => ({ operationType, label, credits, rmbCost, version })),
+            tools: demoToolConfigurations.filter((tool) => tool.enabled),
         });
         if (path === "/api/prompt-templates" && request.method === "GET") return json({ templates: [], total: 0, page: 1, pageSize: 24 });
 
@@ -86,9 +94,69 @@ Bun.serve({
         if (path === "/api/admin/tasks/batches") return json({ batches: [] });
         if (path === "/api/admin/groups") return json({ groups: [] });
         if (path === "/api/admin/workflows") return json({ workflows: [] });
-        if (path === "/api/admin/model-configuration/providers") return json({ providers: [] });
-        if (path === "/api/admin/model-configuration/models") return json({ models: [] });
-        if (path === "/api/admin/model-configuration/prices") return json({ prices: [] });
+        if (path === "/api/admin/model-configuration/providers" && request.method === "GET") return json({ providers: demoProviders });
+        if (path === "/api/admin/model-configuration/providers" && request.method === "POST") {
+            const input = await request.json() as Record<string, unknown>;
+            const provider: Record<string, unknown> = { ...input, id: crypto.randomUUID(), hasCredentials: Boolean(input.credentials), createdAt: now(), updatedAt: now() };
+            delete provider.credentials;
+            demoProviders.push(provider);
+            return json({ provider }, 201);
+        }
+        if (/^\/api\/admin\/model-configuration\/providers\/[^/]+$/.test(path) && request.method === "PATCH") {
+            const provider = demoProviders.find((item) => item.id === path.split("/").at(-1));
+            if (!provider) return json({ message: "API 服务不存在" }, 404);
+            const input = await request.json() as Record<string, unknown>;
+            Object.assign(provider, input, input.credentials ? { hasCredentials: true } : {}, { updatedAt: now() });
+            delete provider.credentials;
+            return json({ provider });
+        }
+        if (path === "/api/admin/model-configuration/models" && request.method === "GET") return json({ models: demoModels });
+        if (path === "/api/admin/model-configuration/models" && request.method === "POST") {
+            const input = await request.json() as Record<string, unknown>;
+            const provider = demoProviders.find((item) => item.id === input.providerId);
+            const model = { ...input, id: crypto.randomUUID(), providerName: provider?.name || "未知 API", workflowName: null };
+            demoModels.push(model);
+            return json({ model }, 201);
+        }
+        if (/^\/api\/admin\/model-configuration\/models\/[^/]+$/.test(path) && request.method === "PATCH") {
+            const model = demoModels.find((item) => item.id === path.split("/").at(-1));
+            if (!model) return json({ message: "模型不存在" }, 404);
+            const input = await request.json() as Record<string, unknown>;
+            const provider = demoProviders.find((item) => item.id === input.providerId);
+            Object.assign(model, input, provider ? { providerName: provider.name } : {});
+            return json({ model });
+        }
+        if (path === "/api/admin/model-configuration/prices" && request.method === "GET") return json({ prices: demoPrices });
+        if (path === "/api/admin/model-configuration/prices" && request.method === "POST") {
+            const input = await request.json() as Record<string, unknown>;
+            const version = Math.max(0, ...demoPrices.filter((price) => price.operationType === input.operationType).map((price) => Number(price.version))) + 1;
+            const price = { ...input, id: crypto.randomUUID(), version, status: "draft" };
+            demoPrices.push(price);
+            return json({ price }, 201);
+        }
+        if (/^\/api\/admin\/model-configuration\/prices\/[^/]+\/publish$/.test(path) && request.method === "POST") {
+            const id = path.split("/")[5];
+            const target = demoPrices.find((price) => price.id === id);
+            if (!target) return json({ message: "价格不存在" }, 404);
+            demoPrices.forEach((price) => { if (price.operationType === target.operationType && price.status === "published") price.status = "retired"; });
+            target.status = "published"; target.publishedAt = now();
+            return empty();
+        }
+        if (/^\/api\/admin\/model-configuration\/prices\/[^/]+\/test$/.test(path) && request.method === "POST") return empty();
+        if (path === "/api/admin/model-configuration/tool-configurations" && request.method === "GET") return json({ tools: toolDefinitions.map((definition) => {
+            const binding = demoToolConfigurations.find((item) => item.toolKey === definition.toolKey);
+            const model = demoModels.find((item) => item.id === binding?.modelConfigId);
+            const provider = demoProviders.find((item) => item.id === model?.providerId);
+            const price = demoPrices.find((item) => item.operationType === definition.operationType && item.status === "published");
+            return { ...definition, ...binding, modelName: model?.name, modelId: model?.modelId, modelCreditCost: model?.creditCost, modelRmbCost: model?.rmbCost, modelEnabled: model?.enabled, providerId: provider?.id, providerName: provider?.name, protocol: provider?.protocol, baseUrl: provider?.baseUrl, providerEnabled: provider?.enabled, hasCredentials: provider?.hasCredentials, workflowConfigId: null, workflowName: null, workflowEnabled: null, price: price ? { operationType: price.operationType, credits: price.credits, rmbCost: price.rmbCost, version: price.version } : null };
+        }) });
+        if (/^\/api\/admin\/model-configuration\/tool-configurations\/[^/]+$/.test(path) && request.method === "PUT") {
+            const selectedTool = path.split("/").at(-1)!;
+            const input = await request.json() as { modelConfigId: string; enabled: boolean };
+            const existing = demoToolConfigurations.find((item) => item.toolKey === selectedTool);
+            if (existing) Object.assign(existing, input); else demoToolConfigurations.push({ toolKey: selectedTool as typeof demoToolConfigurations[number]["toolKey"], ...input });
+            return json({ tool: { toolKey: selectedTool, ...input, updatedAt: now() } });
+        }
         if (path === "/api/admin/assets") return json({ assets: [] });
         if (path === "/api/admin/projects") return json({ projects: [] });
         if (path === "/api/admin/modules" && request.method === "PATCH") {

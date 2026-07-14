@@ -481,6 +481,16 @@ integration("production identity and RBAC", () => {
       )?.credits,
     ).toBe(10);
 
+    const bindSeamlessTool = await api<{ tool: { toolKey: string; modelConfigId: string } }>(
+      "/api/admin/model-configuration/tool-configurations/seamless-stitch",
+      { method: "PUT", body: JSON.stringify({ modelConfigId: internalSeamlessModel!.id, enabled: true }) },
+      admin.cookie,
+    );
+    expect(bindSeamlessTool.response.status).toBe(200);
+    expect(bindSeamlessTool.body.tool).toMatchObject({ toolKey: "seamless-stitch", modelConfigId: internalSeamlessModel!.id });
+    const boundPublicModels = await api<{ tools: Array<{ toolKey: string; modelConfigId: string }> }>("/api/models", {}, chineseLogin.cookie);
+    expect(boundPublicModels.body.tools).toContainEqual({ toolKey: "seamless-stitch", modelConfigId: internalSeamlessModel!.id });
+
     const audioProvider = await api<{ provider: { id: string } }>(
       "/api/admin/model-configuration/providers",
       {
