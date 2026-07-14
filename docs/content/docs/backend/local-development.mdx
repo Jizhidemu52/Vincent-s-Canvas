@@ -24,7 +24,7 @@ curl http://localhost:3000/api/health
 管理员入口：http://localhost:3000/admin/login
 ```
 
-首次管理员登录后必须修改密码并启用 MFA。开发环境需要模拟生成时可暂时设置 `TASK_MOCK_MODE=true`，它仍会走 Redis 队列、额度冻结、Worker、对象存储、历史和结算，只是不调用外部模型。
+首次管理员登录后必须修改初始密码。开发环境需要模拟生成时可暂时设置 `TASK_MOCK_MODE=true`，它仍会走 Redis 队列、额度冻结、Worker、对象存储、历史和结算，只是不调用外部模型。
 
 ## 分开启动前端
 

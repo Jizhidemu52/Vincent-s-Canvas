@@ -59,13 +59,6 @@ export function requireAccountReady(request: Request, response: Response, next: 
         });
         return;
     }
-    if (authenticated.auth.role === "super_admin" && !authenticated.auth.mfaEnabled) {
-        response.status(403).json({
-            error: "MFA_SETUP_REQUIRED",
-            message: "超级管理员必须先启用二次验证",
-        });
-        return;
-    }
     next();
 }
 

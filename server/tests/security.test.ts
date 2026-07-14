@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { NextFunction, Request, Response } from "express";
 import type { Cache } from "../src/db";
 import { rateLimit, requireSameOrigin } from "../src/http-security";
-import { createSessionToken, createTotpSecret, decryptSecret, encryptSecret, hashPassword, hashToken, totpCode, validatePassword, verifyPassword, verifyTotp } from "../src/security";
+import { createSessionToken, decryptSecret, encryptSecret, hashPassword, hashToken, validatePassword, verifyPassword } from "../src/security";
 import { requireAccountReady } from "../src/session";
 import type { SessionUser } from "../src/types";
 
@@ -31,15 +31,12 @@ describe("identity security", () => {
         expect(validatePassword("onlyletterslong")).not.toBeNull();
         expect(validatePassword("CompanyCanvas2026")).toBeNull();
     });
-    test("encrypts MFA secrets and verifies time-based codes", () => {
-        const secret = createTotpSecret();
+    test("encrypts provider secrets", () => {
+        const secret = "provider-api-key";
         const key = Buffer.alloc(32, 7).toString("base64");
         const encrypted = encryptSecret(secret, key);
         expect(encrypted).not.toContain(secret);
         expect(decryptSecret(encrypted, key)).toBe(secret);
-        const now = 1_750_000_000_000;
-        expect(verifyTotp(secret, totpCode(secret, now), now)).toBe(true);
-        expect(verifyTotp(secret, "000000", now)).toBe(false);
     });
     test("hashes passwords and session tokens", async () => {
         const passwordHash = await hashPassword("CompanyCanvas2026");
@@ -106,7 +103,7 @@ describe("HTTP security", () => {
         expect(blocked.result.headers["retry-after"]).toBe("300");
     });
 
-    test("blocks normal APIs until password change and super-admin MFA enrollment", () => {
+    test("blocks normal APIs until the initial password is changed", () => {
         const user = (overrides: Partial<SessionUser>): SessionUser => ({
             id: "user-1",
             username: "user-1",
@@ -138,8 +135,7 @@ describe("HTTP security", () => {
         };
 
         expect(check(user({ mustChangePassword: true }))).toMatchObject({ statusCode: 403, allowed: false, body: { error: "PASSWORD_CHANGE_REQUIRED" } });
-        expect(check(user({ role: "super_admin" }))).toMatchObject({ statusCode: 403, allowed: false, body: { error: "MFA_SETUP_REQUIRED" } });
-        expect(check(user({ role: "super_admin", mfaEnabled: true })).allowed).toBe(true);
+        expect(check(user({ role: "super_admin" })).allowed).toBe(true);
         expect(check(user({ role: "designer" })).allowed).toBe(true);
     });
 });

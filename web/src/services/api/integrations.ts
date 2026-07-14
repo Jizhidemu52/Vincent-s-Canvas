@@ -2,7 +2,6 @@ export type IntegrationStatus = {
     wecom: { configured: boolean; missing: string[]; callbackUrl: string | null; callbackUsesHttps: boolean };
     objectStorage: { configured: boolean; endpoint: string | null; bucket: string };
     providerEncryption: { configured: boolean };
-    mfaEncryption: { configured: boolean };
     taskRuntime: { mockMode: boolean; workerConcurrency: number };
     ldap: { configured: boolean; status: "reserved" };
     oidc: { configured: boolean; status: "reserved" };

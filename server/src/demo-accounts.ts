@@ -35,7 +35,7 @@ const period = { creditPeriodStart: "2026-07-01T00:00:00+08:00", creditResetAt: 
 export const demoAccounts: DemoAccount[] = [
     {
         id: "00000000-0000-4000-8000-000000000001", identifier: "admin", password: "Canvas2026!#", label: "超级管理员", portal: "admin",
-        user: { id: "00000000-0000-4000-8000-000000000001", username: "admin", displayName: "测试超级管理员", email: "admin@canvas.local", employeeNo: "A001", role: "super_admin", status: "active", departmentId: null, departmentName: null, groupId: null, groupName: null, groupRole: null, mustChangePassword: false, mfaEnabled: true, creditBalance: 0, creditLimit: 0, monthlyCreditLimit: 0, temporaryCreditAdjustment: 0, ...period },
+        user: { id: "00000000-0000-4000-8000-000000000001", username: "admin", displayName: "测试超级管理员", email: "admin@canvas.local", employeeNo: "A001", role: "super_admin", status: "active", departmentId: null, departmentName: null, groupId: null, groupName: null, groupRole: null, mustChangePassword: false, mfaEnabled: false, creditBalance: 0, creditLimit: 0, monthlyCreditLimit: 0, temporaryCreditAdjustment: 0, ...period },
     },
     {
         id: "00000000-0000-4000-8000-000000000002", identifier: "leader01", password: "Canvas2026!#", label: "设计组长", portal: "designer",

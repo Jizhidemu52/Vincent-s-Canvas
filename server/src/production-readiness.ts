@@ -5,7 +5,7 @@ type Options = { requireWeCom?: boolean; allowMockMode?: boolean };
 const required = [
     "POSTGRES_PASSWORD", "NODE_ENV", "SESSION_COOKIE_NAME", "SESSION_TTL_SECONDS", "TRUST_PROXY",
     "BOOTSTRAP_ADMIN_USERNAME", "BOOTSTRAP_ADMIN_DISPLAY_NAME", "BOOTSTRAP_ADMIN_PASSWORD",
-    "MFA_ENCRYPTION_KEY", "PROVIDER_ENCRYPTION_KEY", "WORKER_CONCURRENCY", "TASK_MOCK_MODE",
+    "PROVIDER_ENCRYPTION_KEY", "WORKER_CONCURRENCY", "TASK_MOCK_MODE",
     "S3_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY",
 ] as const;
 const weComFields = ["WECOM_CORP_ID", "WECOM_AGENT_ID", "WECOM_SECRET", "WECOM_CALLBACK_URL"] as const;
@@ -29,7 +29,6 @@ export function validateProductionEnvironment(env: Record<string, string | undef
     if (present("POSTGRES_PASSWORD")) validateLength(env, "POSTGRES_PASSWORD", 16, add);
     if (present("BOOTSTRAP_ADMIN_PASSWORD")) validateLength(env, "BOOTSTRAP_ADMIN_PASSWORD", 12, add);
     if (present("S3_SECRET_ACCESS_KEY")) validateLength(env, "S3_SECRET_ACCESS_KEY", 16, add);
-    if (present("MFA_ENCRYPTION_KEY")) validateBase64Key(env, "MFA_ENCRYPTION_KEY", add);
     if (present("PROVIDER_ENCRYPTION_KEY")) validateBase64Key(env, "PROVIDER_ENCRYPTION_KEY", add);
     if (present("S3_ENDPOINT")) validateUrl(env, "S3_ENDPOINT", false, add);
 

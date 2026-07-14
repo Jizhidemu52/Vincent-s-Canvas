@@ -15,7 +15,6 @@ const schema = z.object({
     WECOM_AGENT_ID: z.string().optional(),
     WECOM_SECRET: z.string().optional(),
     WECOM_CALLBACK_URL: z.string().url().optional().or(z.literal("")),
-    MFA_ENCRYPTION_KEY: z.string().optional(),
     PROVIDER_ENCRYPTION_KEY: z.string().optional(),
     WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(40).default(10),
     TASK_MOCK_MODE: z.enum(["true", "false"]).default("false"),
@@ -37,9 +36,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     }
     if (config.NODE_ENV === "production" && config.WECOM_CALLBACK_URL && new URL(config.WECOM_CALLBACK_URL).protocol !== "https:") {
         throw new Error("WECOM_CALLBACK_URL must use HTTPS in production");
-    }
-    if (config.NODE_ENV === "production" && (!config.MFA_ENCRYPTION_KEY || Buffer.from(config.MFA_ENCRYPTION_KEY, "base64").length !== 32)) {
-        throw new Error("MFA_ENCRYPTION_KEY must be a base64-encoded 32-byte key in production");
     }
     if (config.NODE_ENV === "production" && (!config.PROVIDER_ENCRYPTION_KEY || Buffer.from(config.PROVIDER_ENCRYPTION_KEY, "base64").length !== 32)) {
         throw new Error("PROVIDER_ENCRYPTION_KEY must be a base64-encoded 32-byte key in production");

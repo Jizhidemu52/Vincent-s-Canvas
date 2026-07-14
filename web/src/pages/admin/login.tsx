@@ -13,14 +13,13 @@ export default function AdminLoginPage() {
     const login = useUserStore((state) => state.loginWithPassword);
     const [loginName, setLoginName] = useState("");
     const [password, setPassword] = useState("");
-    const [mfaCode, setMfaCode] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
     const submit = async () => {
         if (!loginName.trim() || !password) { message.warning("请输入管理员账号和密码"); return; }
         setSubmitting(true);
         try {
-            const user = await login(loginName, password, "admin", mfaCode);
+            const user = await login(loginName, password, "admin");
             message.success("已进入管理员后台");
             navigate(user.mustChangePassword ? "/change-password" : "/admin", { replace: true });
         } catch (error) { message.error(error instanceof Error ? error.message : "登录失败"); }
@@ -51,8 +50,6 @@ export default function AdminLoginPage() {
                     <Input size="large" value={loginName} onChange={(event) => setLoginName(event.target.value)} placeholder="请输入管理员账号" />
                     <label className="block text-sm font-medium">登录密码</label>
                     <Input.Password size="large" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" onPressEnter={submit} />
-                    <label className="block text-sm font-medium">动态验证码（已启用时填写）</label>
-                    <Input size="large" value={mfaCode} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6 位验证码" inputMode="numeric" maxLength={6} onPressEnter={submit} />
                     <Button type="primary" size="large" block loading={submitting} icon={<LockKeyhole className="size-4" />} onClick={submit}>
                         登录后台
                     </Button>

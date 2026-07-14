@@ -40,8 +40,8 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
 
-export async function loginWithPassword(identifier: string, password: string, portal: "designer" | "admin", mfaCode?: string) {
-    return apiRequest<{ user: ApiUser }>("/api/auth/login", { method: "POST", body: JSON.stringify({ identifier, password, portal, mfaCode: mfaCode || undefined }) });
+export async function loginWithPassword(identifier: string, password: string, portal: "designer" | "admin") {
+    return apiRequest<{ user: ApiUser }>("/api/auth/login", { method: "POST", body: JSON.stringify({ identifier, password, portal }) });
 }
 
 export async function getCurrentSession() {
@@ -63,6 +63,3 @@ export async function changeOwnPassword(currentPassword: string, newPassword: st
 export async function getWeComLoginUrl(portal: "designer" | "admin" = "designer") {
     return apiRequest<{ authorizationUrl: string }>(`/api/auth/wecom/start?portal=${portal}`);
 }
-
-export const beginMfaSetup = () => apiRequest<{ secret: string; otpauthUrl: string }>("/api/auth/mfa/setup", { method: "POST" });
-export const enableMfa = (code: string) => apiRequest<void>("/api/auth/mfa/enable", { method: "POST", body: JSON.stringify({ code }) });

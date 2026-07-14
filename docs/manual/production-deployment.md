@@ -40,14 +40,12 @@ cp .env.example .env
 
 - `POSTGRES_PASSWORD`
 - `BOOTSTRAP_ADMIN_PASSWORD`
-- `MFA_ENCRYPTION_KEY`
 - `PROVIDER_ENCRYPTION_KEY`
 - `S3_SECRET_ACCESS_KEY`
 
-两把加密密钥必须分别生成，不能相同：
+生成 Provider 加密密钥：
 
 ```bash
-openssl rand -base64 32
 openssl rand -base64 32
 ```
 
@@ -82,8 +80,7 @@ curl http://localhost:3000/api/health
 
 1. 使用 `.env` 中的超级管理员账号和初始密码登录。
 2. 按页面要求修改密码。
-3. 在验证器中录入 MFA 密钥并输入六位动态码。
-4. 成功后从 `.env` 删除 `BOOTSTRAP_ADMIN_PASSWORD`。
+3. 成功后从 `.env` 删除 `BOOTSTRAP_ADMIN_PASSWORD`。
 
 ## 3. 开通设计师
 
@@ -216,7 +213,7 @@ docker compose up -d api worker
 
 1. 构建并启动 Web、API、Worker、PostgreSQL、Redis、MinIO 和 Backup。
 2. 写入恢复标记，创建数据库备份，删除标记后执行恢复，再确认标记恢复成功。
-3. 通过管理员 API 完成首次改密和 MFA，创建测试部门、模拟 Provider、模拟模型和 40 个相互隔离的设计师账号。
+3. 通过管理员 API 完成首次改密，创建测试部门、模拟 Provider、模拟模型和 40 个相互隔离的设计师账号。
 4. 40 个设计师分别登录并完成首次改密，获得 40 份独立 Session。
 5. k6 使用 40 个并发用户持续提交 2 分钟；Worker 生成 QA 占位图并走真实队列、积分、对象存储、素材和历史链路。
 6. 等待队列清空，核对成功任务、已结算额度、素材、历史、负余额和重复请求。
@@ -271,4 +268,4 @@ docker compose logs --tail=200 api worker postgres redis minio backup
 curl https://正式域名/api/health
 ```
 
-确认 HTTPS、MFA、企业微信回调、备份、审计导出、素材隔离和额度结算后，再从 10 位试点设计师逐步开放到约 100 人。
+确认 HTTPS、企业微信回调、备份、审计导出、素材隔离和额度结算后，再从 10 位试点设计师逐步开放到约 100 人。

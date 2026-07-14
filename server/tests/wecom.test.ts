@@ -17,7 +17,6 @@ describe("WeCom identity integration", () => {
             NODE_ENV: "production",
             DATABASE_URL: "postgres://test",
             REDIS_URL: "redis://test",
-            MFA_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             PROVIDER_ENCRYPTION_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
             S3_ENDPOINT: "http://minio:9000",
             S3_ACCESS_KEY_ID: "storage-user",

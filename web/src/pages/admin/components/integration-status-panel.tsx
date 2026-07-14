@@ -29,7 +29,6 @@ export function IntegrationStatusPanel() {
         },
         { key: "storage", name: "公司对象存储", ready: status.objectStorage.configured, detail: status.objectStorage.configured ? `${status.objectStorage.endpoint} / ${status.objectStorage.bucket}` : "未配置" },
         { key: "provider", name: "Provider 密钥加密", ready: status.providerEncryption.configured, detail: status.providerEncryption.configured ? "已配置服务端加密密钥" : "未配置" },
-        { key: "mfa", name: "管理员 MFA 加密", ready: status.mfaEncryption.configured, detail: status.mfaEncryption.configured ? "已配置服务端加密密钥" : "未配置" },
         { key: "ldap", name: "LDAP", ready: false, detail: "接口已预留" },
         { key: "oidc", name: "OIDC", ready: false, detail: "接口已预留" },
     ] : [], [status]);

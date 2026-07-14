@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Pool } from "pg";
 
-import { totpCode } from "../../src/security";
 import { settleReservation } from "../../src/billing";
 
 const runIntegration = process.env.RUN_INTEGRATION_TESTS === "true";
@@ -80,37 +79,19 @@ integration("production identity and RBAC", () => {
     expect(beforePassword.body.error).toBe("PASSWORD_CHANGE_REQUIRED");
 
     await changePassword(admin.cookie, "AdminStart2026", "AdminReady2026");
-    const beforeMfa = await api<{ error: string }>(
+    const afterPassword = await api<{ departments: unknown[] }>(
       "/api/admin/departments",
       {},
       admin.cookie,
     );
-    expect(beforeMfa.response.status).toBe(403);
-    expect(beforeMfa.body.error).toBe("MFA_SETUP_REQUIRED");
-
-    const setup = await api<{ secret: string }>(
-      "/api/auth/mfa/setup",
-      { method: "POST" },
-      admin.cookie,
-    );
-    expect(setup.response.status).toBe(200);
-    const enable = await api(
-      "/api/auth/mfa/enable",
-      {
-        method: "POST",
-        body: JSON.stringify({ code: totpCode(setup.body.secret) }),
-      },
-      admin.cookie,
-    );
-    expect(enable.response.status).toBe(204);
+    expect(afterPassword.response.status).toBe(200);
 
     const restoredSession = await api<{
-      user: { mustChangePassword: boolean; mfaEnabled: boolean };
+      user: { mustChangePassword: boolean };
     }>("/api/auth/session", {}, admin.cookie);
     expect(restoredSession.response.status).toBe(200);
     expect(restoredSession.body.user).toMatchObject({
       mustChangePassword: false,
-      mfaEnabled: true,
     });
 
     const integrations = await api<{

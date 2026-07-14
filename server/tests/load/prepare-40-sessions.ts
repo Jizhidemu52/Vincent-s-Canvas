@@ -1,4 +1,4 @@
-import { totpCode } from "../../src/security";
+export {};
 
 const baseUrl = process.env.LOAD_PREP_BASE_URL ?? "http://127.0.0.1:3100";
 const outputPath = process.env.LOAD_CONFIG_PATH ?? "/tmp/load-config.json";
@@ -83,22 +83,6 @@ async function changePassword(
 const adminLogin = await login("admin", adminInitialPassword, "admin");
 let adminCookie = adminLogin.cookie;
 await changePassword(adminCookie, adminInitialPassword, adminReadyPassword);
-
-const mfaSetup = await api<{ secret: string }>(
-  "/api/auth/mfa/setup",
-  { method: "POST" },
-  adminCookie,
-);
-assertStatus(mfaSetup, 200, "Administrator MFA setup");
-const mfaEnable = await api(
-  "/api/auth/mfa/enable",
-  {
-    method: "POST",
-    body: JSON.stringify({ code: totpCode(mfaSetup.body.secret) }),
-  },
-  adminCookie,
-);
-assertStatus(mfaEnable, 204, "Administrator MFA enablement");
 
 const departmentResult = await api<{ department: { id: string } }>(
   "/api/admin/departments",

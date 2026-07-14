@@ -18,7 +18,6 @@ const LoginPage = lazy(() => import("@/pages/login"));
 const MyPromptsPage = lazy(() => import("@/pages/my-prompts"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const PromptsPage = lazy(() => import("@/pages/prompts"));
-const SetupMfaPage = lazy(() => import("@/pages/setup-mfa"));
 const TeamPage = lazy(() => import("@/pages/team"));
 const VideoPage = lazy(() => import("@/pages/video"));
 
@@ -68,7 +67,6 @@ export const router = createBrowserRouter([
             { path: "/", element: protectedRoute(HomePage) },
             { path: "/login", element: routeElement(LoginPage) },
             { path: "/change-password", element: protectedRoute(ChangePasswordPage) },
-            { path: "/setup-mfa", element: protectedRoute(SetupMfaPage, true) },
             { path: "/image", element: moduleRoute(ImagePage, imageModule) },
             { path: "/video", element: moduleRoute(VideoPage, "video") },
             { path: "/assets", element: moduleRoute(AssetsPage, "assets") },
