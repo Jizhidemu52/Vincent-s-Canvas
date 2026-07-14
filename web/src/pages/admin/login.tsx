@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { useUserStore } from "@/stores/use-user-store";
 import { getWeComLoginUrl } from "@/services/api/auth";
+import { DemoAccountList } from "@/components/demo-account-list";
 
 export default function AdminLoginPage() {
     const { message } = App.useApp();
@@ -45,6 +46,7 @@ export default function AdminLoginPage() {
                 </div>
 
                 <div className="mt-6 space-y-3">
+                    <DemoAccountList portal="admin" onSelect={(account) => { setLoginName(account.identifier); setPassword(account.password); }} />
                     <label className="block text-sm font-medium">管理员账号</label>
                     <Input size="large" value={loginName} onChange={(event) => setLoginName(event.target.value)} placeholder="请输入管理员账号" />
                     <label className="block text-sm font-medium">登录密码</label>

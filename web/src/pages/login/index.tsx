@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { getWeComLoginUrl } from "@/services/api/auth";
+import { DemoAccountList } from "@/components/demo-account-list";
 import { useUserStore } from "@/stores/use-user-store";
 
 export default function LoginPage() {
@@ -64,6 +65,7 @@ export default function LoginPage() {
                             </div>
                         </div>
                         <div className="mt-5 space-y-3">
+                            <DemoAccountList portal="designer" onSelect={(account) => { setLoginName(account.identifier); setPassword(account.password); }} />
                             <label className="block text-sm font-bold text-stone-700">设计师账号</label>
                             <Input size="large" value={loginName} onChange={(event) => setLoginName(event.target.value)} placeholder="中文名 / 英文账号 / 邮箱 / 工号" />
                             <label className="block text-sm font-bold text-stone-700">登录密码</label>

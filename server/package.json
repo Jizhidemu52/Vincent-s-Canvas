@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/index.ts",
+    "dev:demo": "bun --watch src/demo-server.ts",
     "start": "bun src/index.ts",
     "migrate": "bun src/migrate.ts",
     "bootstrap": "bun src/bootstrap.ts",

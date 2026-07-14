@@ -192,6 +192,26 @@ bun run dev
 http://localhost:3000/login
 ```
 
+如果电脑暂时没有 Docker、PostgreSQL 或 Redis，可以在另一个终端启动仅供本机验收的演示 API：
+
+```bash
+cd server
+bun run dev:demo
+```
+
+演示 API 只监听 `127.0.0.1:3100`，使用内存 Session，重启后会恢复默认数据。登录页检测到演示 API 后会自动显示以下可点击填入的账号：
+
+| 身份 | 登录入口 | 账号 | 密码 |
+| --- | --- | --- | --- |
+| 超级管理员 | `/admin/login` | `admin` | `Canvas2026!#` |
+| 设计组长 | `/login` | `leader01` | `Canvas2026!#` |
+| 英文设计师账号 | `/login` | `designer01` | `Canvas2026!#` |
+| 中文设计师账号 | `/login` | `小林` | `Canvas2026!#` |
+
+![本地测试账号登录入口](docs/screenshots/demo-login-accounts.png)
+
+演示 API 用来检查登录分流、角色菜单、额度展示和页面交互，不保存正式公司数据，也不能替代 PostgreSQL、Redis、对象存储和正式任务 Worker。生产环境只能运行 `bun run start` 或 Docker Compose，不能运行 `bun run dev:demo`。
+
 生产环境不要使用裸 HTTP，也不要把 PostgreSQL、Redis 或 API 服务端口直接暴露到公网。
 
 本地验收任务队列时可暂时设置 `TASK_MOCK_MODE=true`。Worker 会走完整的排队、积分冻结、处理、历史入库和成功结算流程，但返回系统生成的 QA 占位图，不调用外部模型。正式上线必须改回 `false`，并在后台配置 Provider 和模型。

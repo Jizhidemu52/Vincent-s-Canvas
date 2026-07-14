@@ -25,6 +25,8 @@ export type ApiUser = {
 
 type ErrorPayload = { message?: string };
 
+export type DemoLoginAccount = { identifier: string; password: string; label: string; portal: "designer" | "admin" };
+
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(path, {
         ...init,
@@ -44,6 +46,10 @@ export async function loginWithPassword(identifier: string, password: string, po
 
 export async function getCurrentSession() {
     return apiRequest<{ user: ApiUser }>("/api/auth/session");
+}
+
+export async function getDemoAccounts() {
+    return apiRequest<{ accounts: DemoLoginAccount[] }>("/api/demo/accounts");
 }
 
 export async function logoutSession() {
