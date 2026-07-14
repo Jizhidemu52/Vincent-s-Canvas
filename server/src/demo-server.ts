@@ -15,9 +15,11 @@ const demoModels: Array<Record<string, unknown>> = toolDefinitions.map((tool, in
 const demoPrices: Array<Record<string, unknown>> = Array.from(new Map(toolDefinitions.map((tool) => [tool.operationType, tool])).values()).map((tool, index) => ({ id: `50000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, operationType: tool.operationType, label: tool.label, credits: tool.toolKey === "video" ? 6 : 2, rmbCost: tool.toolKey === "video" ? 0.6 : 0.2, version: 1, status: "published", publishedAt: new Date().toISOString() }));
 const demoToolConfigurations = toolDefinitions.map((tool, index) => ({ toolKey: tool.toolKey, modelConfigId: demoModels[index]!.id as string, enabled: true }));
 type DemoAsset = { id: string; ownerUserId: string; filename: string; mimeType: string; bytes: Uint8Array; createdAt: string };
-type DemoTask = { id: string; requestId: string; ownerUserId: string; status: "processing" | "success" | "failed"; resultUrls: string[]; failureReason: string | null; credits: number; createdAt: string };
+type DemoTask = { id: string; requestId: string; ownerUserId: string; operationType: string; status: "processing" | "success" | "failed"; resultUrls: string[]; failureReason: string | null; credits: number; createdAt: string };
+type DemoInternalAiConfig = { seamlessUrl: string; appKey: string | null; updatedAt: string | null };
 const demoAssets = new Map<string, DemoAsset>();
 const demoTasks = new Map<string, DemoTask>();
+const internalAiConfig: DemoInternalAiConfig = { seamlessUrl: "", appKey: null, updatedAt: null };
 const now = () => new Date().toISOString();
 const headers = { "content-type": "application/json; charset=utf-8" };
 const json = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { ...headers, ...extra } });
@@ -107,19 +109,10 @@ Bun.serve({
             const price = demoPrices.find((item) => item.operationType === "seamless_stitch" && item.status === "published");
             const credits = Number(price?.credits || 0) + Number(model.creditCost || 0);
             if (user.creditBalance < credits) return json({ error: "INSUFFICIENT_CREDITS", message: `额度不足：本次需要 ${credits} 积分` }, 400);
-            const task: DemoTask = { id: crypto.randomUUID(), requestId: input.requestId || crypto.randomUUID(), ownerUserId: user.id, status: "processing", resultUrls: [], failureReason: null, credits, createdAt: now() };
+            const task: DemoTask = { id: crypto.randomUUID(), requestId: input.requestId || crypto.randomUUID(), ownerUserId: user.id, operationType: input.operationType, status: "processing", resultUrls: [], failureReason: null, credits, createdAt: now() };
             demoTasks.set(task.id, task);
             user.creditBalance -= credits;
-            setTimeout(() => {
-                try {
-                    task.resultUrls = [createSeamlessPreview(source, parameters.previewRows, parameters.previewCols)];
-                    task.status = "success";
-                } catch (error) {
-                    task.status = "failed";
-                    task.failureReason = error instanceof Error ? error.message : "无缝拼接模拟失败";
-                    user.creditBalance += credits;
-                }
-            }, 900);
+            void runInternalAiSeamlessTask(task, user, source, parameters);
             return json({ task }, 201);
         }
         if (path === "/api/tasks" && request.method === "GET") return json({ tasks: Array.from(demoTasks.values()).filter((task) => task.ownerUserId === user.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) });
@@ -133,6 +126,26 @@ Bun.serve({
         }
 
         if (path === "/api/admin/accounts" && request.method === "GET") return json({ users: demoAccounts.map((account) => account.user) });
+        if (path === "/api/admin/internal-ai" && request.method === "GET") return json(internalAiStatus());
+        if (path === "/api/admin/internal-ai" && request.method === "PUT") {
+            const input = await request.json() as { seamlessUrl?: string; appKey?: string; clearAppKey?: boolean };
+            const seamlessUrl = input.seamlessUrl?.trim();
+            if (!seamlessUrl || !/^https?:\/\//i.test(seamlessUrl)) return json({ error: { message: "请输入有效的内部 AI HTTP 地址" } }, 400);
+            internalAiConfig.seamlessUrl = seamlessUrl;
+            if (input.clearAppKey) internalAiConfig.appKey = null;
+            else if (input.appKey?.trim()) internalAiConfig.appKey = input.appKey.trim();
+            internalAiConfig.updatedAt = now();
+            return json(internalAiStatus());
+        }
+        if (path === "/api/admin/internal-ai/test" && request.method === "POST") {
+            if (!internalAiConfig.seamlessUrl || !internalAiConfig.appKey) return json({ error: { message: "请先保存内部 AI 地址和 App Key" } }, 400);
+            try {
+                await callInternalAiSeamless({ id: crypto.randomUUID() }, tinyTestImage, { cutWidth: 100, redrawWidth: 100, blurAmount: 50, redrawStrength: 0.5, steps: 12 });
+                return json({ ok: true, message: "真实内部 AI 已返回图片结果" });
+            } catch (error) {
+                return json({ error: { message: error instanceof Error ? error.message : "内部 AI 测试失败" } }, 502);
+            }
+        }
         if (/^\/api\/admin\/accounts\/[^/]+\/credits$/.test(path) && request.method === "POST") {
             const id = path.split("/")[4];
             const account = demoAccounts.find((item) => item.id === id);
@@ -240,21 +253,41 @@ function readSeamlessParameters(value?: Record<string, unknown>) {
     const steps = Number(value?.steps);
     const validInteger = (item: number, max = 2_000) => Number.isInteger(item) && item >= 1 && item <= max;
     if (!validInteger(cutWidth) || !validInteger(redrawWidth) || !validInteger(blurAmount) || !Number.isFinite(redrawStrength) || redrawStrength < 0 || redrawStrength > 1 || !validInteger(steps, 100)) return null;
-    return { previewRows: cutWidth <= 100 ? 3 : 2, previewCols: redrawWidth <= 100 ? 3 : 2 };
+    return { cutWidth, redrawWidth, blurAmount, redrawStrength, steps };
 }
 
-function createSeamlessPreview(source: DemoAsset, rows: number, cols: number) {
-    const sourceData = `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`;
-    const width = 1200;
-    const height = 800;
-    const tileWidth = width / rows;
-    const tileHeight = height / cols;
-    const tiles: string[] = [];
-    for (let y = 0; y < cols; y += 1) {
-        for (let x = 0; x < rows; x += 1) {
-            tiles.push(`<use href="#source-tile" x="${x * tileWidth}" y="${y * tileHeight}"/>`);
-        }
-    }
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><image id="source-tile" href="${sourceData}" width="${tileWidth}" height="${tileHeight}" preserveAspectRatio="xMidYMid slice"/></defs><rect width="100%" height="100%" fill="#fff"/>${tiles.join("")}</svg>`;
-    return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+function internalAiStatus() {
+    const preview = internalAiConfig.appKey ? `${internalAiConfig.appKey.slice(0, 4)}...${internalAiConfig.appKey.slice(-4)}` : "";
+    return { seamlessUrl: internalAiConfig.seamlessUrl, hasAppKey: Boolean(internalAiConfig.appKey), appKeyPreview: preview, updatedAt: internalAiConfig.updatedAt, protocol: "app-key-json" as const };
 }
+
+async function runInternalAiSeamlessTask(task: DemoTask, user: DemoTask extends never ? never : typeof demoAccounts[number]["user"], source: DemoAsset, parameters: NonNullable<ReturnType<typeof readSeamlessParameters>>) {
+    try {
+        task.resultUrls = [await callInternalAiSeamless(task, source, parameters)];
+        task.status = "success";
+    } catch (error) {
+        task.status = "failed";
+        task.failureReason = error instanceof Error ? error.message : "内部 AI 无缝拼接失败";
+        user.creditBalance += task.credits;
+    }
+}
+
+async function callInternalAiSeamless(task: Pick<DemoTask, "id">, source: Pick<DemoAsset, "bytes">, parameters: NonNullable<ReturnType<typeof readSeamlessParameters>>) {
+    if (!internalAiConfig.seamlessUrl || !internalAiConfig.appKey) throw new Error("管理员尚未在服务端配置内部 AI App Key");
+    const response = await fetch(internalAiConfig.seamlessUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model_code: "sflxjj", task_id: task.id, app_key: internalAiConfig.appKey, input_image: Buffer.from(source.bytes).toString("base64"), ...parameters }),
+        signal: AbortSignal.timeout(180_000),
+    });
+    if (!response.ok) throw new Error(`内部 AI 返回 ${response.status}`);
+    const payload = await response.json() as { data?: { data?: { list?: unknown[] } } };
+    const output = payload.data?.data?.list?.[0];
+    if (typeof output !== "string" || !output.trim()) throw new Error("内部 AI 未返回图片结果");
+    if (/^https?:\/\//i.test(output) || output.startsWith("data:image/")) return output;
+    const bytes = Buffer.from(output.replace(/^data:[^,]+,/, ""), "base64");
+    const mimeType = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? "image/png" : "image/jpeg";
+    return `data:${mimeType};base64,${bytes.toString("base64")}`;
+}
+
+const tinyTestImage = { bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL0VQAAAABJRU5ErkJggg==", "base64") };

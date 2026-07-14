@@ -9,7 +9,7 @@ import type { ReferenceImage } from "@/types/image";
 
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
-export type QueuedTask = { id: string; requestId: string; status: string; resultUrls: string[]; failureReason: string | null };
+export type QueuedTask = { id: string; requestId: string; operationType?: string; status: string; resultUrls: string[]; failureReason: string | null; createdAt?: string };
 export type QueuedMediaInput = { modelId: string; prompt: string; operationType: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; signal?: AbortSignal };
 export type QueuedBatchItem = QueuedTask & { itemIndex: number };
 export type QueuedBatchFailure = { index: number; reason: string };
@@ -163,6 +163,11 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
 export async function getQueuedTask(id: string) {
     const result = await request<{ tasks: QueuedTask[] }>("/api/tasks");
     return result.tasks.find((task) => task.id === id) || null;
+}
+
+export async function listQueuedTasks() {
+    const result = await request<{ tasks: QueuedTask[] }>("/api/tasks");
+    return result.tasks;
 }
 
 export async function requestQueuedMedia(input: QueuedMediaInput) {

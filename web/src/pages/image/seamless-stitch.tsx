@@ -8,6 +8,7 @@ import { useSearchParams } from "react-router-dom";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { resolveToolModel } from "@/services/api/business-config";
 import { DEFAULT_SEAMLESS_STITCH_PARAMETERS, requestSeamlessStitch, type SeamlessStitchParameters } from "@/services/api/internal-ai";
+import { listQueuedTasks, type QueuedTask } from "@/services/api/generation-tasks";
 import { fetchServerAssetContent } from "@/services/api/server-assets";
 import { hydratePromptReuse } from "@/services/api/prompts";
 import { uploadImage, type UploadedImage } from "@/services/image-storage";
@@ -44,9 +45,25 @@ export function SeamlessStitchPage() {
     const [result, setResult] = useState<StitchResult>({ status: "idle" });
     const [running, setRunning] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [history, setHistory] = useState<QueuedTask[]>([]);
     const seamlessModel = resolveToolModel({ models, tools, prices: [] }, "seamless-stitch");
     const estimatedUsage = estimate({ operationType: "seamless_stitch", toolKey: "seamless-stitch", quantity: 1 });
     const quotaBlocked = Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
+
+    const refreshHistory = async () => {
+        try {
+            const tasks = await listQueuedTasks();
+            setHistory(tasks.filter((task) => task.operationType === "seamless_stitch").slice(0, 20));
+        } catch {
+            // The result panel remains usable if history is temporarily unavailable.
+        }
+    };
+
+    useEffect(() => {
+        void refreshHistory();
+        const timer = window.setInterval(() => void refreshHistory(), 2_000);
+        return () => window.clearInterval(timer);
+    }, []);
 
     const setSourceFromBlob = async (blob: Blob, name: string) => {
         const uploaded = await uploadImage(blob);
@@ -154,6 +171,7 @@ export function SeamlessStitchPage() {
             message.error(reason);
         } finally {
             setRunning(false);
+            void refreshHistory();
         }
     };
     runStitchRef.current = runStitch;
@@ -185,7 +203,7 @@ export function SeamlessStitchPage() {
 
     return (
         <div className="flex h-full min-h-0 flex-col overflow-hidden bg-stone-50 text-stone-950 dark:bg-stone-950 dark:text-stone-100">
-            <main className="grid min-h-0 flex-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[390px_minmax(0,1fr)] lg:overflow-hidden">
+            <main className="grid min-h-0 flex-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[390px_minmax(0,1fr)_280px] lg:overflow-hidden">
                 <section className="thin-scrollbar flex min-h-0 flex-col overflow-y-auto rounded-lg border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-800 dark:bg-stone-900">
                     <div className="flex items-start justify-between gap-3">
                         <div>
@@ -322,6 +340,43 @@ export function SeamlessStitchPage() {
                         </div>
                     )}
                 </section>
+
+                <aside className="thin-scrollbar min-h-0 overflow-y-auto rounded-lg border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-base font-semibold">历史出图</h2>
+                            <p className="mt-1 text-xs text-stone-500">最近 20 条无缝拼接任务</p>
+                        </div>
+                        <Tag color="orange">{history.length}</Tag>
+                    </div>
+                    {history.length ? (
+                        <div className="space-y-3">
+                            {history.map((task) => {
+                                const imageUrl = task.resultUrls[0];
+                                const time = task.createdAt ? new Date(task.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "刚刚";
+                                return (
+                                    <article key={task.id} className="overflow-hidden rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-950">
+                                        {task.status === "success" && imageUrl ? <img src={imageUrl} alt="无缝拼接历史结果" className="aspect-square w-full object-cover" /> : (
+                                            <div className="flex aspect-square flex-col items-center justify-center gap-2 px-3 text-center text-xs text-stone-500">
+                                                {task.status === "processing" ? <LoaderCircle className="size-5 animate-spin text-orange-500" /> : <Grid2x2 className="size-5 text-red-400" />}
+                                                <span>{task.status === "processing" ? "正在等待内部 AI 返回" : task.failureReason || "处理失败"}</span>
+                                            </div>
+                                        )}
+                                        <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+                                            <span className={task.status === "success" ? "text-emerald-600" : task.status === "processing" ? "text-orange-600" : "text-red-500"}>{task.status === "success" ? "已完成" : task.status === "processing" ? "处理中" : "失败"}</span>
+                                            <span className="text-stone-400">{time}</span>
+                                        </div>
+                                    </article>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="flex min-h-48 flex-col items-center justify-center text-center">
+                            <Grid2x2 className="mb-3 size-8 text-stone-300" />
+                            <p className="text-sm text-stone-500">提交后的任务会保留在这里</p>
+                        </div>
+                    )}
+                </aside>
             </main>
 
             <input
