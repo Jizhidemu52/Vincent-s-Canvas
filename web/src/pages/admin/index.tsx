@@ -60,6 +60,7 @@ export default function AdminPage() {
     const [totalCost, setTotalCost] = useState(0);
     const [searchParams, setSearchParams] = useSearchParams();
     const signedInUser = useUserStore((store) => store.user);
+    const hydrateSession = useUserStore((store) => store.hydrateSession);
     const performanceEnabled = useModuleStore((store) => store.flags.performance);
     const clearSession = useUserStore((store) => store.clearSession);
     const currentOperator = signedInUser;
@@ -119,7 +120,12 @@ export default function AdminPage() {
     ].filter((tab) => isAdmin || departmentAdminTabs.has(tab.key));
 
     const submitCreditChange = async (values: CreditFormValues) => {
-        try { await adjustAccountCredits(values.designerId, values.amount, values.reason || "管理员调整"); message.success("额度已调整"); await refreshAccounts(); }
+        try {
+            const result = await adjustAccountCredits(values.designerId, values.amount, values.reason || "管理员调整");
+            if (result.user.id === signedInUser?.id) await hydrateSession();
+            message.success(result.user.id === signedInUser?.id ? "本月临时额度已调整，当前会话已同步" : "本月临时额度已调整");
+            await refreshAccounts();
+        }
         catch (error) { message.error(error instanceof Error ? error.message : "额度调整失败"); }
     };
 
@@ -131,12 +137,17 @@ export default function AdminPage() {
     const submitAccount = async (values: AccountFormValues) => {
         try {
             if (editingAccountId) {
+                const currentAccount = accounts.find((account) => account.id === editingAccountId);
+                if (!currentAccount) throw new Error("账号不存在或已更新，请刷新后重试");
                 await updateAccount(editingAccountId, { displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, role: values.role === "super_admin" ? undefined : values.role, status: values.status, monthlyCreditLimit: values.monthlyCreditLimit });
+                const creditDelta = values.quotaRemaining - currentAccount.creditBalance;
+                if (creditDelta) await adjustAccountCredits(editingAccountId, creditDelta, "管理员在账号编辑中调整本月余额");
                 if (values.password) await resetAccountPassword(editingAccountId, values.password);
+                if (editingAccountId === signedInUser?.id) await hydrateSession();
             } else {
                 await createAccount({ username: values.loginName, displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, password: values.password || "", role: values.role, creditBalance: values.quotaRemaining, creditLimit: Math.max(values.quotaRemaining, values.monthlyCreditLimit), monthlyCreditLimit: values.monthlyCreditLimit });
             }
-            message.success(editingAccountId ? "账号已更新，权限和额度会在重新校验会话后同步" : "账号已开通，首次登录必须修改密码");
+            message.success(editingAccountId ? "账号和当前额度已更新" : "账号已开通，首次登录必须修改密码");
             setEditingAccountId(null);
             accountForm.resetFields();
             accountForm.setFieldsValue({ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 });

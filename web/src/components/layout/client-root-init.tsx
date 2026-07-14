@@ -28,7 +28,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             void syncProjects();
         };
         refresh();
-        const timer = window.setInterval(refresh, 30_000);
+        const timer = window.setInterval(refresh, 10_000);
         const onVisibility = () => {
             if (document.visibilityState === "visible") refresh();
         };

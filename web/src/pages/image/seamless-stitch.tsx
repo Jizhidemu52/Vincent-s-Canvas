@@ -33,6 +33,7 @@ export function SeamlessStitchPage() {
     const runStitchRef = useRef<() => Promise<void>>(async () => undefined);
     const sourceRef = useRef<ReferenceImage | null>(null);
     const user = useUserStore((state) => state.user);
+    const hydrateSession = useUserStore((state) => state.hydrateSession);
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const models = useBusinessConfigStore((state) => state.models);
     const tools = useBusinessConfigStore((state) => state.tools);
@@ -100,7 +101,9 @@ export function SeamlessStitchPage() {
             message.error("请先上传一张需要无缝拼接的图片");
             return;
         }
-        if (!user || user.status !== "active") {
+        await hydrateSession();
+        const currentUser = useUserStore.getState().user;
+        if (!currentUser || currentUser.status !== "active") {
             message.error("当前设计师账号不可用");
             return;
         }
@@ -108,8 +111,8 @@ export function SeamlessStitchPage() {
             message.error("管理员尚未启用无缝拼接模型或价格");
             return;
         }
-        if (quotaBlocked) {
-            message.error(`额度不足：需要 ${estimatedUsage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
+        if (estimatedUsage.configured && currentUser.creditBalance < estimatedUsage.credits) {
+            message.error(`额度不足：需要 ${estimatedUsage.credits} 积分，当前剩余 ${currentUser.creditBalance} 积分`);
             return;
         }
 
@@ -133,7 +136,7 @@ export function SeamlessStitchPage() {
                     toolMode: "seamless-stitch",
                     operationType: "seamless_stitch",
                     projectId: "tool-seamless-stitch",
-                    designerId: user.id,
+                    designerId: currentUser.id,
                     prompt,
                     model: seamlessModel.name,
                     modelId: seamlessModel.modelId,
@@ -262,7 +265,7 @@ export function SeamlessStitchPage() {
                             </div>
                             {quotaBlocked ? <div className="mt-1 text-red-500">额度不足，无法提交任务。</div> : null}
                         </div>
-                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!estimatedUsage.configured || !seamlessModel || quotaBlocked || running} onClick={() => void runStitch()}>
+                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!estimatedUsage.configured || !seamlessModel || running} onClick={() => void runStitch()}>
                             开始无缝拼接
                         </Button>
                     </div>
