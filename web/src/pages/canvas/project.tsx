@@ -20,6 +20,7 @@ import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "@/lib/canvas/canvas-image-data";
+import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { App, Button, Dropdown, Input, Modal, Progress } from "antd";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
@@ -1076,7 +1077,7 @@ function WirelessCanvasPage() {
 
     const setZoomScale = useCallback(
         (scale: number) => {
-            const nextScale = Math.min(Math.max(scale, 0.05), 5);
+            const nextScale = clampCanvasZoom(scale);
             setViewport((prev) => ({
                 x: size.width / 2 - ((size.width / 2 - prev.x) / prev.k) * nextScale,
                 y: size.height / 2 - ((size.height / 2 - prev.y) / prev.k) * nextScale,
@@ -1131,10 +1132,19 @@ function WirelessCanvasPage() {
     }, [createProject, navigate]);
 
     const deleteCurrentProject = useCallback(() => {
-        deleteProjects([projectId]);
-        cleanupAssetImages();
-        navigate("/canvas");
-    }, [cleanupAssetImages, deleteProjects, navigate, projectId]);
+        modal.confirm({
+            title: "删除整个画布？",
+            content: "这会删除当前画布中的所有图片、节点和连线，并返回画布列表。删除单张图片请使用图片工具条中的“删除”。",
+            okText: "删除整个画布",
+            cancelText: "取消",
+            okButtonProps: { danger: true },
+            onOk: () => {
+                deleteProjects([projectId]);
+                cleanupAssetImages();
+                navigate("/canvas");
+            },
+        });
+    }, [cleanupAssetImages, deleteProjects, modal, navigate, projectId]);
 
     const handleCanvasMouseDown = useCallback(
         (event: ReactPointerEvent<HTMLDivElement>) => {

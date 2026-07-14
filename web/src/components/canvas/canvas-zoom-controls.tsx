@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button, Modal, Tooltip } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { MAX_CANVAS_ZOOM, MIN_CANVAS_ZOOM } from "@/lib/canvas/canvas-zoom";
 import { useThemeStore } from "@/stores/use-theme-store";
 
 type CanvasZoomControlsProps = {
@@ -40,8 +41,8 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
                 <Tooltip title="放大/缩小画布">
                     <input
                         type="range"
-                        min="5"
-                        max="500"
+                        min={MIN_CANVAS_ZOOM * 100}
+                        max={MAX_CANVAS_ZOOM * 100}
                         step="1"
                         value={Math.round(scale * 100)}
                         className="w-24"

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
+import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ViewportTransform } from "@/types/canvas";
 
@@ -67,7 +68,7 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
 
         const delta = -event.deltaY;
         const factor = Math.pow(1.1, delta / 100);
-        const newScale = Math.min(Math.max(viewport.k * factor, 0.05), 5);
+        const newScale = clampCanvasZoom(viewport.k * factor);
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
 
