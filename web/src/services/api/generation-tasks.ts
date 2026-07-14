@@ -28,7 +28,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
 
-export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; references?: ReferenceImage[]; signal?: AbortSignal }) {
+export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; references?: ReferenceImage[]; signal?: AbortSignal }) {
     const model = await resolvePublicModel(input.modelId);
     const sourceUrls: string[] = [];
     for (const reference of input.references || []) {
@@ -44,13 +44,13 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
     if (input.count === 1) {
         const result = await request<{ task: { id: string } }>("/api/tasks", {
             method: "POST",
-            body: JSON.stringify({ requestId: rootRequestId, projectId, operationType: input.operationType, modelConfigId: model.id, prompt: input.prompt, parameters: input.tool ? { tool: input.tool } : {}, sourceUrls, priority: "normal" }),
+            body: JSON.stringify({ requestId: rootRequestId, projectId, operationType: input.operationType, modelConfigId: model.id, prompt: input.prompt, parameters: { ...input.parameters, ...(input.tool ? { tool: input.tool } : {}) }, sourceUrls, priority: "normal" }),
         });
         ids = [result.task.id];
     } else {
         const result = await request<{ tasks: Array<{ id: string }>; failures: Array<{ reason: string }> }>("/api/tasks/batch", {
             method: "POST",
-            body: JSON.stringify({ requestId: rootRequestId, projectId, operationType: input.operationType, modelConfigId: model.id, prompt: input.prompt, parameters: input.tool ? { tool: input.tool } : {}, priority: "normal", items: Array.from({ length: input.count }, () => ({ sourceUrls })) }),
+            body: JSON.stringify({ requestId: rootRequestId, projectId, operationType: input.operationType, modelConfigId: model.id, prompt: input.prompt, parameters: { ...input.parameters, ...(input.tool ? { tool: input.tool } : {}) }, priority: "normal", items: Array.from({ length: input.count }, () => ({ sourceUrls })) }),
         });
         if (result.failures.length && !result.tasks.length) throw new Error(result.failures[0]!.reason);
         ids = result.tasks.map((task) => task.id);

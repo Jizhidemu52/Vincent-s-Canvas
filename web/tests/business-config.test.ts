@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { estimateServerUsage, type BusinessConfig } from "../src/services/api/business-config";
+import { estimateServerUsage, resolveToolModel, type BusinessConfig } from "../src/services/api/business-config";
 import { stripClientProviderSecrets } from "../src/stores/use-config-store";
 
 const config: BusinessConfig = {
@@ -21,6 +21,11 @@ describe("server-synchronized usage estimates", () => {
     test("uses the administrator model binding for a tool badge", () => {
         expect(estimateServerUsage(config, { operationType: "image_generation", toolKey: "image" })).toEqual({ credits: 5, rmbCost: 0.35, configured: true });
         expect(estimateServerUsage(config, { operationType: "image_generation", toolKey: "video" }).configured).toBe(false);
+    });
+
+    test("resolves the exact model selected by the administrator", () => {
+        expect(resolveToolModel(config, "image")?.modelId).toBe("image-v1");
+        expect(resolveToolModel(config, "video")).toBeUndefined();
     });
 
     test("marks missing published prices or models as unconfigured", () => {

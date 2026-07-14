@@ -11,9 +11,13 @@ const toolDefinitions = [
     { toolKey: "video", label: "视频创作", operationType: "video_generation", capabilities: ["video"] },
 ] as const;
 const demoProviders: Array<Record<string, unknown>> = [{ id: "30000000-0000-4000-8000-000000000001", name: "本地模拟 API", protocol: "custom", baseUrl: "http://127.0.0.1:3100/mock-provider", enabled: true, hasCredentials: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
-const demoModels: Array<Record<string, unknown>> = toolDefinitions.map((tool, index) => ({ id: `40000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, providerId: demoProviders[0]!.id, providerName: demoProviders[0]!.name, workflowConfigId: null, workflowName: null, replacementModelConfigId: null, name: `${tool.label}模拟模型`, modelId: `demo-${tool.toolKey}`, capabilities: tool.capabilities, creditCost: tool.toolKey === "video" ? 4 : 2, rmbCost: tool.toolKey === "video" ? 0.4 : 0.2, concurrencyLimit: 5, enabled: true }));
+const demoModels: Array<Record<string, unknown>> = toolDefinitions.map((tool, index) => ({ id: `40000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, providerId: demoProviders[0]!.id, providerName: demoProviders[0]!.name, workflowConfigId: null, workflowName: null, replacementModelConfigId: null, name: `${tool.label}模拟模型`, modelId: `demo-${tool.toolKey}`, capabilities: tool.capabilities, creditCost: tool.toolKey === "seamless-stitch" ? 0 : tool.toolKey === "video" ? 4 : 2, rmbCost: tool.toolKey === "seamless-stitch" ? 0 : tool.toolKey === "video" ? 0.4 : 0.2, concurrencyLimit: 5, enabled: true }));
 const demoPrices: Array<Record<string, unknown>> = Array.from(new Map(toolDefinitions.map((tool) => [tool.operationType, tool])).values()).map((tool, index) => ({ id: `50000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, operationType: tool.operationType, label: tool.label, credits: tool.toolKey === "video" ? 6 : 2, rmbCost: tool.toolKey === "video" ? 0.6 : 0.2, version: 1, status: "published", publishedAt: new Date().toISOString() }));
 const demoToolConfigurations = toolDefinitions.map((tool, index) => ({ toolKey: tool.toolKey, modelConfigId: demoModels[index]!.id as string, enabled: true }));
+type DemoAsset = { id: string; ownerUserId: string; filename: string; mimeType: string; bytes: Uint8Array; createdAt: string };
+type DemoTask = { id: string; requestId: string; ownerUserId: string; status: "processing" | "success" | "failed"; resultUrls: string[]; failureReason: string | null; credits: number; createdAt: string };
+const demoAssets = new Map<string, DemoAsset>();
+const demoTasks = new Map<string, DemoTask>();
 const now = () => new Date().toISOString();
 const headers = { "content-type": "application/json; charset=utf-8" };
 const json = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { ...headers, ...extra } });
@@ -61,6 +65,64 @@ Bun.serve({
             tools: demoToolConfigurations.filter((tool) => tool.enabled),
         });
         if (path === "/api/prompt-templates" && request.method === "GET") return json({ templates: [], total: 0, page: 1, pageSize: 24 });
+
+        if (path === "/api/assets/upload-request" && request.method === "POST") {
+            const input = await request.json() as { filename?: string; mimeType?: string; byteSize?: number };
+            if (!input.mimeType?.startsWith("image/")) return json({ error: "INVALID_ASSET", message: "无缝拼接测试只支持图片文件" }, 400);
+            if (!Number.isFinite(input.byteSize) || Number(input.byteSize) <= 0 || Number(input.byteSize) > 15 * 1024 * 1024) return json({ error: "INVALID_ASSET_SIZE", message: "图片大小必须在 15MB 以内" }, 400);
+            const assetId = crypto.randomUUID();
+            demoAssets.set(assetId, { id: assetId, ownerUserId: user.id, filename: input.filename || "source-image", mimeType: input.mimeType, bytes: new Uint8Array(), createdAt: now() });
+            return json({ assetId, uploadUrl: `/api/assets/${assetId}/content-upload` }, 201);
+        }
+        if (/^\/api\/assets\/[^/]+\/content-upload$/.test(path) && request.method === "PUT") {
+            const assetId = path.split("/")[3]!;
+            const asset = demoAssets.get(assetId);
+            if (!asset || asset.ownerUserId !== user.id) return json({ error: "NOT_FOUND", message: "上传素材不存在" }, 404);
+            const bytes = new Uint8Array(await request.arrayBuffer());
+            if (!bytes.byteLength || bytes.byteLength > 15 * 1024 * 1024) return json({ error: "INVALID_ASSET_SIZE", message: "图片大小必须在 15MB 以内" }, 400);
+            asset.bytes = bytes;
+            return empty();
+        }
+        if (/^\/api\/assets\/[^/]+\/content$/.test(path) && request.method === "GET") {
+            const asset = demoAssets.get(path.split("/")[3]!);
+            if (!asset || asset.ownerUserId !== user.id || !asset.bytes.byteLength) return json({ error: "NOT_FOUND", message: "素材不存在或无权访问" }, 404);
+            return new Response(Uint8Array.from(asset.bytes).buffer, { headers: { "content-type": asset.mimeType, "cache-control": "private, max-age=60" } });
+        }
+        if (path === "/api/tasks" && request.method === "POST") {
+            const input = await request.json() as { requestId?: string; operationType?: string; modelConfigId?: string; prompt?: string; parameters?: Record<string, unknown>; sourceUrls?: string[] };
+            if (input.operationType !== "seamless_stitch") return json({ error: "DEMO_OPERATION_UNAVAILABLE", message: "本地演示任务目前仅开放无缝拼接" }, 400);
+            const duplicate = input.requestId ? Array.from(demoTasks.values()).find((task) => task.requestId === input.requestId) : undefined;
+            if (duplicate) {
+                if (duplicate.ownerUserId !== user.id) return json({ error: "DUPLICATE_REQUEST", message: "任务请求标识已被使用" }, 400);
+                return json({ task: duplicate });
+            }
+            const model = demoModels.find((item) => item.id === input.modelConfigId && item.enabled);
+            const binding = demoToolConfigurations.find((item) => item.toolKey === "seamless-stitch" && item.enabled && item.modelConfigId === model?.id);
+            if (!model || !binding) return json({ error: "MODEL_DISABLED", message: "管理员尚未启用无缝拼接模型" }, 400);
+            const sourceMatch = input.sourceUrls?.[0]?.match(/^\/api\/assets\/([0-9a-f-]+)\/content$/i);
+            const source = sourceMatch ? demoAssets.get(sourceMatch[1]!) : undefined;
+            if (!source || source.ownerUserId !== user.id || !source.bytes.byteLength) return json({ error: "INVALID_SOURCE", message: "请先上传一张有效的源图片" }, 400);
+            const parameters = readSeamlessParameters(input.parameters);
+            if (!parameters) return json({ error: "INVALID_SEAMLESS_PARAMETERS", message: "请检查切割宽度、重绘宽度、羽化、重绘强度和步数" }, 400);
+            const price = demoPrices.find((item) => item.operationType === "seamless_stitch" && item.status === "published");
+            const credits = Number(price?.credits || 0) + Number(model.creditCost || 0);
+            if (user.creditBalance < credits) return json({ error: "INSUFFICIENT_CREDITS", message: `额度不足：本次需要 ${credits} 积分` }, 400);
+            const task: DemoTask = { id: crypto.randomUUID(), requestId: input.requestId || crypto.randomUUID(), ownerUserId: user.id, status: "processing", resultUrls: [], failureReason: null, credits, createdAt: now() };
+            demoTasks.set(task.id, task);
+            user.creditBalance -= credits;
+            setTimeout(() => {
+                try {
+                    task.resultUrls = [createSeamlessPreview(source, parameters.previewRows, parameters.previewCols)];
+                    task.status = "success";
+                } catch (error) {
+                    task.status = "failed";
+                    task.failureReason = error instanceof Error ? error.message : "无缝拼接模拟失败";
+                    user.creditBalance += credits;
+                }
+            }, 900);
+            return json({ task }, 201);
+        }
+        if (path === "/api/tasks" && request.method === "GET") return json({ tasks: Array.from(demoTasks.values()).filter((task) => task.ownerUserId === user.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) });
 
         if (!user.role.includes("admin")) {
             if (path === "/api/projects") return json({ projects: [] });
@@ -168,3 +230,31 @@ Bun.serve({
 });
 
 console.log("Local demo API listening on http://127.0.0.1:3100");
+
+function readSeamlessParameters(value?: Record<string, unknown>) {
+    const readInteger = (key: "cutWidth" | "redrawWidth" | "blurAmount") => Number(value?.[key]);
+    const cutWidth = readInteger("cutWidth");
+    const redrawWidth = readInteger("redrawWidth");
+    const blurAmount = readInteger("blurAmount");
+    const redrawStrength = Number(value?.redrawStrength);
+    const steps = Number(value?.steps);
+    const validInteger = (item: number, max = 2_000) => Number.isInteger(item) && item >= 1 && item <= max;
+    if (!validInteger(cutWidth) || !validInteger(redrawWidth) || !validInteger(blurAmount) || !Number.isFinite(redrawStrength) || redrawStrength < 0 || redrawStrength > 1 || !validInteger(steps, 100)) return null;
+    return { previewRows: cutWidth <= 100 ? 3 : 2, previewCols: redrawWidth <= 100 ? 3 : 2 };
+}
+
+function createSeamlessPreview(source: DemoAsset, rows: number, cols: number) {
+    const sourceData = `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`;
+    const width = 1200;
+    const height = 800;
+    const tileWidth = width / rows;
+    const tileHeight = height / cols;
+    const tiles: string[] = [];
+    for (let y = 0; y < cols; y += 1) {
+        for (let x = 0; x < rows; x += 1) {
+            tiles.push(`<use href="#source-tile" x="${x * tileWidth}" y="${y * tileHeight}"/>`);
+        }
+    }
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><image id="source-tile" href="${sourceData}" width="${tileWidth}" height="${tileHeight}" preserveAspectRatio="xMidYMid slice"/></defs><rect width="100%" height="100%" fill="#fff"/>${tiles.join("")}</svg>`;
+    return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+}

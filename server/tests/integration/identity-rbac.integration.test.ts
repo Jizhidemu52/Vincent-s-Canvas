@@ -446,7 +446,7 @@ integration("production identity and RBAC", () => {
       {
         method: "PUT",
         body: JSON.stringify({
-          seamlessUrl: "https://internal-ai.company.test/std/tohwkdpj",
+          seamlessUrl: "https://internal-ai.company.test/std/comfy_generate",
           appKey: "integration-internal-app-key",
         }),
       },
@@ -454,7 +454,7 @@ integration("production identity and RBAC", () => {
     );
     expect(configureInternalAi.response.status).toBe(200);
     expect(configureInternalAi.body).toMatchObject({
-      seamlessUrl: "https://internal-ai.company.test/std/tohwkdpj",
+      seamlessUrl: "https://internal-ai.company.test/std/comfy_generate",
       hasAppKey: true,
     });
     expect(JSON.stringify(configureInternalAi.body)).not.toContain(
@@ -467,7 +467,7 @@ integration("production identity and RBAC", () => {
     }>("/api/models", {}, chineseLogin.cookie);
     expect(publicModels.response.status).toBe(200);
     const internalSeamlessModel = publicModels.body.models.find(
-      (model) => model.modelId === "internal-seamless",
+      (model) => model.modelId === "sflxjj",
     );
     expect(internalSeamlessModel?.creditCost).toBe(0);
     expect(

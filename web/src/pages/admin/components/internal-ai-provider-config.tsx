@@ -9,7 +9,7 @@ type InternalAiFormValues = {
     appKey?: string;
 };
 
-const DEFAULT_SEAMLESS_URL = "http://122.247.78.91:8101/std/tohwkdpj";
+const DEFAULT_SEAMLESS_URL = "http://122.247.78.91:8101/std/comfy_generate";
 
 export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
     const { message } = App.useApp();
@@ -93,14 +93,14 @@ export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <Typography.Title level={3} className="!mb-1 !text-base">
-                        内部 AI · App Key JSON 协议
+                        内部 AI · 四方连续进阶
                     </Typography.Title>
                     <Space wrap size={[6, 6]}>
                         <Tag icon={<Server className="size-3" />} color="orange">
-                            无缝拼接
+                            无缝拼接 · sflxjj
                         </Tag>
                         <Tag>POST JSON</Tag>
-                        <Tag>rows / cols：2 的倍数</Tag>
+                        <Tag>真实工作流出图</Tag>
                     </Space>
                 </div>
                 <Space wrap>
@@ -138,7 +138,7 @@ export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
                             </Button>
                         ) : null}
                         <Button icon={<PlugZap className="size-4" />} onClick={testConnection} disabled={!isAdmin || loading} loading={testing}>
-                            测试连接
+                            真实测试出图
                         </Button>
                         <Button type="primary" htmlType="submit" icon={<Save className="size-4" />} loading={saving}>
                             保存到服务端
@@ -146,6 +146,9 @@ export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
                     </Space>
                 </div>
             </Form>
+            <Typography.Text type="secondary" className="mt-3 block text-xs leading-5">
+                测试会提交一张服务端测试图并检查是否返回图片结果，通常需要几十秒。App Key 不会返回浏览器，也不会写入日志或 Git。
+            </Typography.Text>
             {testResult ? <Alert className="mt-3" type={testResult.type} showIcon message={testResult.message} /> : null}
         </section>
     );

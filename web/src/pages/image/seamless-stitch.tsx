@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { App, Button, Empty, Image, Segmented, Tag } from "antd";
+import { App, Button, Empty, Image, InputNumber, Segmented, Tag } from "antd";
 import { ClipboardPaste, Download, FolderPlus, Grid2x2, ImagePlus, LoaderCircle, RotateCcw, Upload } from "lucide-react";
 import { saveAs } from "file-saver";
 import { nanoid } from "nanoid";
 import { useSearchParams } from "react-router-dom";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
-import { requestSeamlessStitch } from "@/services/api/internal-ai";
+import { resolveToolModel } from "@/services/api/business-config";
+import { DEFAULT_SEAMLESS_STITCH_PARAMETERS, requestSeamlessStitch, type SeamlessStitchParameters } from "@/services/api/internal-ai";
 import { fetchServerAssetContent } from "@/services/api/server-assets";
 import { hydratePromptReuse } from "@/services/api/prompts";
 import { uploadImage, type UploadedImage } from "@/services/image-storage";
@@ -15,8 +16,12 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
-const INTERNAL_SEAMLESS_MODEL_ID = "internal-seamless";
-const MULTIPLIER_OPTIONS = [2, 4, 6, 8];
+const SEAMLESS_PRESETS = {
+    small: { cutWidth: 100, redrawWidth: 100, blurAmount: 50, redrawStrength: 0.5, steps: 12 },
+    large: DEFAULT_SEAMLESS_STITCH_PARAMETERS,
+} as const;
+
+type StitchPreset = keyof typeof SEAMLESS_PRESETS | "custom";
 
 type StitchResult = { status: "idle" } | { status: "pending" } | { status: "failed"; error: string } | { status: "success"; image: UploadedImage; durationMs: number };
 
@@ -26,21 +31,27 @@ export function SeamlessStitchPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const loadedReuseTokenRef = useRef(new Set<string>());
     const runStitchRef = useRef<() => Promise<void>>(async () => undefined);
+    const sourceRef = useRef<ReferenceImage | null>(null);
     const user = useUserStore((state) => state.user);
     const estimate = useBusinessConfigStore((state) => state.estimate);
+    const models = useBusinessConfigStore((state) => state.models);
+    const tools = useBusinessConfigStore((state) => state.tools);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [source, setSource] = useState<ReferenceImage | null>(null);
-    const [rows, setRows] = useState(() => readMultiplier(searchParams.get("rows")));
-    const [cols, setCols] = useState(() => readMultiplier(searchParams.get("cols")));
+    const [preset, setPreset] = useState<StitchPreset>(() => searchParams.get("preset") === "small" ? "small" : "large");
+    const [parameters, setParameters] = useState<SeamlessStitchParameters>(() => readSeamlessParameters(searchParams));
     const [result, setResult] = useState<StitchResult>({ status: "idle" });
     const [running, setRunning] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
-    const estimatedUsage = estimate({ operationType: "seamless_stitch", modelId: INTERNAL_SEAMLESS_MODEL_ID, quantity: 1 });
+    const seamlessModel = resolveToolModel({ models, tools, prices: [] }, "seamless-stitch");
+    const estimatedUsage = estimate({ operationType: "seamless_stitch", toolKey: "seamless-stitch", quantity: 1 });
     const quotaBlocked = Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
 
     const setSourceFromBlob = async (blob: Blob, name: string) => {
         const uploaded = await uploadImage(blob);
-        setSource({ id: nanoid(), name, type: uploaded.mimeType, dataUrl: uploaded.url, url: uploaded.url, storageKey: uploaded.storageKey });
+        const nextSource = { id: nanoid(), name, type: uploaded.mimeType, dataUrl: uploaded.url, url: uploaded.url, storageKey: uploaded.storageKey };
+        sourceRef.current = nextSource;
+        setSource(nextSource);
         setResult({ status: "idle" });
     };
 
@@ -84,7 +95,8 @@ export function SeamlessStitchPage() {
 
     const runStitch = async () => {
         if (running) return;
-        if (!source) {
+        const activeSource = sourceRef.current || source;
+        if (!activeSource) {
             message.error("请先上传一张需要无缝拼接的图片");
             return;
         }
@@ -92,21 +104,25 @@ export function SeamlessStitchPage() {
             message.error("当前设计师账号不可用");
             return;
         }
+        if (!estimatedUsage.configured || !seamlessModel) {
+            message.error("管理员尚未启用无缝拼接模型或价格");
+            return;
+        }
         if (quotaBlocked) {
             message.error(`额度不足：需要 ${estimatedUsage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
             return;
         }
 
-        const prompt = `无缝拼接，横向倍率 ${rows}，纵向倍率 ${cols}`;
+        const prompt = `无缝拼接：切割 ${parameters.cutWidth}，重绘 ${parameters.redrawWidth}，羽化 ${parameters.blurAmount}，强度 ${parameters.redrawStrength}，步数 ${parameters.steps}`;
         const startedAt = performance.now();
         setRunning(true);
         setResult({ status: "pending" });
         try {
-            const response = await requestSeamlessStitch(source, rows, cols);
+            const response = await requestSeamlessStitch(activeSource, parameters, seamlessModel.id);
             const uploaded = await uploadImage(response.dataUrl);
             addAsset({
                 kind: "image",
-                title: `${source.name.replace(/\.[^.]+$/, "")} 无缝拼接`,
+                title: `${activeSource.name.replace(/\.[^.]+$/, "")} 无缝拼接`,
                 coverUrl: uploaded.url,
                 tags: ["无缝拼接"],
                 source: "无缝拼接",
@@ -119,13 +135,12 @@ export function SeamlessStitchPage() {
                     projectId: "tool-seamless-stitch",
                     designerId: user.id,
                     prompt,
-                    model: INTERNAL_SEAMLESS_MODEL_ID,
-                    modelId: INTERNAL_SEAMLESS_MODEL_ID,
-                    sourceFile: source.name,
-                    sourceImage: source.storageKey || source.url || source.dataUrl,
-                    rows,
-                    cols,
-                    recreatePath: `/image?tool=seamless-stitch&rows=${rows}&cols=${cols}`,
+                    model: seamlessModel.name,
+                    modelId: seamlessModel.modelId,
+                    sourceFile: activeSource.name,
+                    sourceImage: activeSource.storageKey || activeSource.url || activeSource.dataUrl,
+                    ...parameters,
+                    recreatePath: `/image?tool=seamless-stitch&preset=${preset}&cutWidth=${parameters.cutWidth}&redrawWidth=${parameters.redrawWidth}&blurAmount=${parameters.blurAmount}&redrawStrength=${parameters.redrawStrength}&steps=${parameters.steps}`,
                 },
             });
             setResult({ status: "success", image: uploaded, durationMs: performance.now() - startedAt });
@@ -146,8 +161,11 @@ export function SeamlessStitchPage() {
         loadedReuseTokenRef.current.add(token);
         void hydratePromptReuse(token).then(async (payload) => {
             const parameters = payload.template.parameters;
-            if (typeof parameters.rows === "number" && MULTIPLIER_OPTIONS.includes(parameters.rows)) setRows(parameters.rows);
-            if (typeof parameters.cols === "number" && MULTIPLIER_OPTIONS.includes(parameters.cols)) setCols(parameters.cols);
+            const reusedParameters = readTemplateParameters(parameters);
+            if (reusedParameters) {
+                setParameters(reusedParameters);
+                setPreset(matchesPreset(reusedParameters, SEAMLESS_PRESETS.small) ? "small" : matchesPreset(reusedParameters, SEAMLESS_PRESETS.large) ? "large" : "custom");
+            }
             const firstAssetId = payload.template.referenceAssetIds[0];
             if (firstAssetId) await setSourceFromBlob(await fetchServerAssetContent(firstAssetId), "模板参考图.png");
             payload.warnings.forEach((warning) => message.warning(warning));
@@ -213,17 +231,28 @@ export function SeamlessStitchPage() {
                         {source ? <div className="mt-2 truncate text-xs text-stone-500">{source.name}</div> : null}
                     </div>
 
-                    <div className="mt-5 grid grid-cols-2 gap-3">
-                        <label className="min-w-0">
-                            <span className="mb-2 block text-sm font-semibold">横向倍率</span>
-                            <Segmented block value={rows} options={MULTIPLIER_OPTIONS} disabled={running} onChange={(value) => setRows(Number(value))} />
-                        </label>
-                        <label className="min-w-0">
-                            <span className="mb-2 block text-sm font-semibold">纵向倍率</span>
-                            <Segmented block value={cols} options={MULTIPLIER_OPTIONS} disabled={running} onChange={(value) => setCols(Number(value))} />
-                        </label>
+                    <div className="mt-5">
+                        <span className="mb-2 block text-sm font-semibold">花型预设</span>
+                        <Segmented
+                            block
+                            value={preset}
+                            disabled={running}
+                            options={[{ label: "小花", value: "small" }, { label: "大花", value: "large" }, { label: "自定义", value: "custom" }]}
+                            onChange={(value) => {
+                                const nextPreset = value as StitchPreset;
+                                setPreset(nextPreset);
+                                if (nextPreset !== "custom") setParameters(SEAMLESS_PRESETS[nextPreset]);
+                            }}
+                        />
                     </div>
-                    <div className="mt-2 text-xs text-stone-400">倍率必须是 2 的倍数。</div>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                        <ParameterField label="切割宽度" value={parameters.cutWidth} disabled={running} onChange={(value) => updateParameter(setParameters, setPreset, "cutWidth", value)} />
+                        <ParameterField label="重绘宽度" value={parameters.redrawWidth} disabled={running} onChange={(value) => updateParameter(setParameters, setPreset, "redrawWidth", value)} />
+                        <ParameterField label="羽化" value={parameters.blurAmount} disabled={running} onChange={(value) => updateParameter(setParameters, setPreset, "blurAmount", value)} />
+                        <ParameterField label="重绘强度" value={parameters.redrawStrength} disabled={running} min={0} max={1} step={0.1} onChange={(value) => updateParameter(setParameters, setPreset, "redrawStrength", value)} />
+                        <ParameterField label="步数" value={parameters.steps} disabled={running} max={100} onChange={(value) => updateParameter(setParameters, setPreset, "steps", value)} />
+                    </div>
+                    <div className="mt-2 text-xs leading-5 text-stone-400">小花推荐 100 / 100 / 50 / 0.5；大花推荐 200 / 200 / 100 / 1。参数由真实内部工作流处理。</div>
 
                     <div className="mt-auto pt-6">
                         <div className="mb-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs dark:border-stone-800 dark:bg-stone-950">
@@ -233,7 +262,7 @@ export function SeamlessStitchPage() {
                             </div>
                             {quotaBlocked ? <div className="mt-1 text-red-500">额度不足，无法提交任务。</div> : null}
                         </div>
-                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={quotaBlocked || running} onClick={() => void runStitch()}>
+                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!estimatedUsage.configured || !seamlessModel || quotaBlocked || running} onClick={() => void runStitch()}>
                             开始无缝拼接
                         </Button>
                     </div>
@@ -262,7 +291,9 @@ export function SeamlessStitchPage() {
                                     <Button
                                         icon={<RotateCcw className="size-4" />}
                                         onClick={() => {
-                                            setSource({ id: nanoid(), name: "seamless-result.png", type: result.image.mimeType, dataUrl: result.image.url, url: result.image.url, storageKey: result.image.storageKey });
+                                            const nextSource = { id: nanoid(), name: "seamless-result.png", type: result.image.mimeType, dataUrl: result.image.url, url: result.image.url, storageKey: result.image.storageKey };
+                                            sourceRef.current = nextSource;
+                                            setSource(nextSource);
                                             setResult({ status: "idle" });
                                         }}
                                     >
@@ -305,7 +336,44 @@ export function SeamlessStitchPage() {
     );
 }
 
-function readMultiplier(value: string | null) {
+function ParameterField({ label, value, min = 1, max = 2_000, step = 1, disabled, onChange }: { label: string; value: number; min?: number; max?: number; step?: number; disabled: boolean; onChange: (value: number | null) => void }) {
+    return <label className="min-w-0"><span className="mb-2 block text-xs font-medium text-stone-600 dark:text-stone-300">{label}</span><InputNumber className="w-full" value={value} min={min} max={max} step={step} disabled={disabled} onChange={onChange} /></label>;
+}
+
+function updateParameter(setParameters: React.Dispatch<React.SetStateAction<SeamlessStitchParameters>>, setPreset: React.Dispatch<React.SetStateAction<StitchPreset>>, key: keyof SeamlessStitchParameters, value: number | null) {
+    if (value === null || !Number.isFinite(value)) return;
+    setPreset("custom");
+    setParameters((current) => ({ ...current, [key]: value }));
+}
+
+function readSeamlessParameters(searchParams: URLSearchParams): SeamlessStitchParameters {
+    const preset = searchParams.get("preset") === "small" ? SEAMLESS_PRESETS.small : SEAMLESS_PRESETS.large;
+    return {
+        cutWidth: readNumber(searchParams.get("cutWidth"), preset.cutWidth, 1, 2_000),
+        redrawWidth: readNumber(searchParams.get("redrawWidth"), preset.redrawWidth, 1, 2_000),
+        blurAmount: readNumber(searchParams.get("blurAmount"), preset.blurAmount, 1, 2_000),
+        redrawStrength: readNumber(searchParams.get("redrawStrength"), preset.redrawStrength, 0, 1),
+        steps: readNumber(searchParams.get("steps"), preset.steps, 1, 100),
+    };
+}
+
+function readTemplateParameters(value: Record<string, unknown>): SeamlessStitchParameters | null {
+    const parsed = {
+        cutWidth: value.cutWidth,
+        redrawWidth: value.redrawWidth,
+        blurAmount: value.blurAmount,
+        redrawStrength: value.redrawStrength,
+        steps: value.steps,
+    };
+    return Object.values(parsed).every((item) => typeof item === "number") ? parsed as SeamlessStitchParameters : null;
+}
+
+function matchesPreset(parameters: SeamlessStitchParameters, preset: SeamlessStitchParameters) {
+    return Object.entries(preset).every(([key, value]) => parameters[key as keyof SeamlessStitchParameters] === value);
+}
+
+function readNumber(value: string | null, fallback: number, min: number, max: number) {
+    if (value === null || value.trim() === "") return fallback;
     const parsed = Number(value);
-    return MULTIPLIER_OPTIONS.includes(parsed) ? parsed : 2;
+    return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }

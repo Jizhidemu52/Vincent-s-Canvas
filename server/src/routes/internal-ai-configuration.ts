@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { writeAudit } from "../audit";
@@ -7,12 +8,22 @@ import type { Database } from "../db";
 import { requireRole } from "../rbac";
 import { decryptSecret, encryptSecret } from "../security";
 import type { AuthenticatedRequest } from "../types";
+import { normalizeWorkflowOutputs, readPath } from "../workflow-runtime";
 
 const PROVIDER_NAME = "内部 AI";
 const WORKFLOW_NAME = "无缝拼接";
-const MODEL_ID = "internal-seamless";
+const MODEL_ID = "sflxjj";
+const WORKFLOW_OUTPUT_PATH = "data.data.list";
 const TEST_IMAGE_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6iXQAAAAASUVORK5CYII=";
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAJdSURBVHhe7daxbRgwEARBtab+XJ0rcQcyGBwgLwaGCvhgksdewogff359ftXv/1Bf2o360m7Ul3bT9h6gh0fDUV/ajfrSbtSXdtP2HqCHR8NRX9qN+tJu1Jd20/bjJ9F36ku7UV/ajfrSbtreA/TwaDjqS7tRX9qN+tJu2t4D9PBoOOpLu1Ff2o360m7a3gP08Gg46ku7UV/ajfrSbtreP6CHR8NRX9qN+tJu1Jd20/YeoIdHw1Ff2o360m7Ul3bT9h6gh0fDUV/ajfrSbtSXdtP2HqCHR8NRX9qN+tJu1Jd20/Ye4CfRd+pLu1Ff2o360m7a3gP08Gg46ku7UV/ajfrSbtreA/TwaDjqS7tRX9qN+tJu2t4/oIdHw1Ff2o360m7Ul3bT9h6gh0fDUV/ajfrSbtSXdtP2HqCHR8NRX9qN+tJu1Jd20/YeoIdHw1Ff2o360m7Ul3bT9h7gJ9F36ku7UV/ajfrSbtreA/TwaDjqS7tRX9qN+tJu2t4D9PBoOOpLu1Ff2o360m7a3gP08Gg46ku7UV/ajfrSbtreP6CHR8NRX9qN+tJu1Jd20/YeoIdHw1Ff2o360m7Ul3bT9h6gh0fDUV/ajfrSbtSXdtP2HuAn0XfqS7tRX9qN+tJu2t4D9PBoOOpLu1Ff2o360m7a3gP08Gg46ku7UV/ajfrSbtreA/TwaDjqS7tRX9qN+tJu2t4/oIdHw1Ff2o360m7Ul3bT9h6gh0fDUV/ajfrSbtSXdtP2HqCHR8NRX9qN+tJu1Jd20/YeoIdHw1Ff2o360m7Ul3bT9h7gJ9F36ku7UV/ajfrSbtreA/TwaDjqS7tRX9qN+tJu2t4D9PBoOOpLu1Ff2o360m7a3gP08Gg46ku7UV/ajfrSbtreP6CHR8NRX9qN+tJu1Jd20/YeoIdHw1Ff2o360m7Ul3bzb/v59RdKUNY3YGxaTQAAAABJRU5ErkJggg==";
+
+export const internalAiSeamlessDefaults = {
+  cutWidth: 200,
+  redrawWidth: 200,
+  blurAmount: 100,
+  redrawStrength: 1,
+  steps: 12,
+} as const;
 const configInput = z.object({
   seamlessUrl: z
     .string()
@@ -82,22 +93,30 @@ export function createInternalAiConfigurationRouter(
       const providerId = provider.rows[0]!.id;
       const workflow = await client.query<{ id: string }>(
         `INSERT INTO workflow_configs(provider_id,name,protocol,capability,submit_path,request_template,output_path,poll_interval_ms,timeout_seconds,enabled,created_by)
-                 VALUES($1,$2,'custom','edit',$3,$4,'data.list',2000,180,true,$5)
-                 ON CONFLICT(provider_id,name) DO UPDATE SET protocol='custom',capability='edit',submit_path=EXCLUDED.submit_path,request_template=EXCLUDED.request_template,output_path='data.list',enabled=true,updated_at=now()
+                 VALUES($1,$2,'custom','edit',$3,$4,$5,2000,180,true,$6)
+                 ON CONFLICT(provider_id,name) DO UPDATE SET protocol='custom',capability='edit',submit_path=EXCLUDED.submit_path,request_template=EXCLUDED.request_template,output_path=EXCLUDED.output_path,enabled=true,updated_at=now()
                  RETURNING id`,
         [
           providerId,
           WORKFLOW_NAME,
           endpoint.submitPath,
           internalAiRequestTemplate(),
+          WORKFLOW_OUTPUT_PATH,
           actor.id,
         ],
       );
-      await client.query(
+      const model = await client.query<{ id: string }>(
         `INSERT INTO model_configs(provider_id,workflow_config_id,name,model_id,capabilities,credit_cost,rmb_cost,concurrency_limit,enabled,created_by)
                  VALUES($1,$2,$3,$4,ARRAY['edit'],0,0,5,true,$5)
-                 ON CONFLICT(provider_id,model_id) DO UPDATE SET workflow_config_id=EXCLUDED.workflow_config_id,name=EXCLUDED.name,capabilities=EXCLUDED.capabilities,enabled=true,updated_at=now()`,
-        [providerId, workflow.rows[0]!.id, "内部无缝拼接", MODEL_ID, actor.id],
+                 ON CONFLICT(provider_id,model_id) DO UPDATE SET workflow_config_id=EXCLUDED.workflow_config_id,name=EXCLUDED.name,capabilities=EXCLUDED.capabilities,enabled=true,updated_at=now()
+                 RETURNING id`,
+        [providerId, workflow.rows[0]!.id, "四方连续进阶", MODEL_ID, actor.id],
+      );
+      await client.query(
+        `INSERT INTO tool_api_configurations(tool_key,model_config_id,enabled,updated_by)
+         VALUES('seamless-stitch',$1,true,$2)
+         ON CONFLICT(tool_key) DO UPDATE SET model_config_id=EXCLUDED.model_config_id,enabled=true,updated_by=EXCLUDED.updated_by,updated_at=now()`,
+        [model.rows[0]!.id, actor.id],
       );
       await client.query("COMMIT");
       await writeAudit(db, {
@@ -129,7 +148,11 @@ export function createInternalAiConfigurationRouter(
       const upstream = await callInternalAi(
         resolved.seamlessUrl,
         resolved.appKey,
-        { image: TEST_IMAGE_BASE64, rows: 2, cols: 2 },
+        {
+          image: TEST_IMAGE_BASE64,
+          taskId: randomUUID(),
+          ...internalAiSeamlessDefaults,
+        },
       );
       await writeAudit(db, {
         actor,
@@ -137,10 +160,10 @@ export function createInternalAiConfigurationRouter(
         targetType: "provider",
         targetId: resolved.providerId,
         result: "success",
-        detail: { status: upstream.status },
+        detail: { status: upstream.status, resultCount: upstream.resultCount },
         ip: request.ip,
       });
-      response.json({ ok: true, message: "内部 AI 无缝拼接接口连接成功" });
+      response.json({ ok: true, message: `内部 AI 无缝拼接已完成真实测试出图（${upstream.resultCount} 张）` });
     } catch (error) {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       await writeAudit(db, {
@@ -167,10 +190,15 @@ export function splitInternalAiUrl(value: string) {
 
 export function internalAiRequestTemplate() {
   return {
+    model_code: MODEL_ID,
+    task_id: "$taskId",
     app_key: "$appKey",
-    image: "$sourceBase64",
-    rows: "$rows",
-    cols: "$cols",
+    input_image: "$sourceBase64",
+    cut_width: "$cutWidth",
+    redraw_width: "$redrawWidth",
+    blur_amount: "$blurAmount",
+    redraw_strength: "$redrawStrength",
+    steps: "$steps",
   };
 }
 
@@ -218,13 +246,31 @@ async function readResolvedConfig(db: Database, config: AppConfig) {
 async function callInternalAi(
   url: string,
   appKey: string,
-  input: { image: string; rows: number; cols: number },
+  input: {
+    image: string;
+    taskId: string;
+    cutWidth: number;
+    redrawWidth: number;
+    blurAmount: number;
+    redrawStrength: number;
+    steps: number;
+  },
 ) {
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ app_key: appKey, ...input }),
-    signal: AbortSignal.timeout(120_000),
+    body: JSON.stringify({
+      model_code: MODEL_ID,
+      task_id: input.taskId,
+      app_key: appKey,
+      input_image: input.image,
+      cut_width: input.cutWidth,
+      redraw_width: input.redrawWidth,
+      blur_amount: input.blurAmount,
+      redraw_strength: input.redrawStrength,
+      steps: input.steps,
+    }),
+    signal: AbortSignal.timeout(180_000),
   });
   const text = await response.text();
   const payload = text
@@ -240,7 +286,9 @@ async function callInternalAi(
         payload.error_msg ||
         `内部 AI 接口返回 HTTP ${response.status}`,
     );
-  return { status: response.status };
+  const outputs = normalizeWorkflowOutputs(readPath(payload, WORKFLOW_OUTPUT_PATH));
+  if (!outputs.length) throw new Error("内部 AI 接口未返回图片结果");
+  return { status: response.status, resultCount: outputs.length };
 }
 
 function readAppKey(encrypted: string, key: string) {

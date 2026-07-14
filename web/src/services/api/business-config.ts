@@ -48,3 +48,8 @@ export function estimateServerUsage(config: BusinessConfig, input: { operationTy
         configured: Boolean(price && (!input.toolKey || boundModelId) && (!requestedModelId || model)),
     };
 }
+
+export function resolveToolModel(config: BusinessConfig, toolKey: string) {
+    const modelConfigId = config.tools.find((item) => item.toolKey === toolKey)?.modelConfigId;
+    return modelConfigId ? config.models.find((item) => item.id === modelConfigId) : undefined;
+}
