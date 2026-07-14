@@ -545,6 +545,150 @@ integration("production identity and RBAC", () => {
     expect(designerModules.response.status).toBe(200);
     expect(designerModules.body.modules.find((module) => module.moduleKey === "seamless-stitch")?.enabled).toBe(true);
     expect(designerModules.body.modules.find((module) => module.moduleKey === "performance")?.enabled).toBe(true);
+    const promptModel = internalSeamlessModel!;
+    const invalidPromptTemplate = await api<{ error: string }>(
+      "/api/prompt-templates",
+      { method: "POST", body: JSON.stringify({ title: "", prompt: "", targetTool: "image-edit" }) },
+      memberLogin.cookie,
+    );
+    expect(invalidPromptTemplate.response.status).toBe(400);
+    expect(invalidPromptTemplate.body.error).toBe("VALIDATION_ERROR");
+    const createPromptTemplate = await api<{ template: { id: string; currentVersionId: string } }>(
+      "/api/prompt-templates",
+      { method: "POST", body: JSON.stringify({
+        title: "白底商品图", prompt: "保持服装结构与面料，生成干净的白底商品图", targetTool: "image-edit",
+        modelConfigId: promptModel.id, parameters: { width: 1024, height: 1024, quantity: 2 },
+        category: "商品图", tags: ["白底", "电商"], notes: "组内测试模板",
+      }) },
+      memberLogin.cookie,
+    );
+    expect(createPromptTemplate.response.status).toBe(201);
+    const promptTemplateId = createPromptTemplate.body.template.id;
+    const ownPromptList = await api<{ templates: Array<{ id: string; title: string }>; total: number }>(
+      "/api/prompt-templates?scope=personal&favorite=false", {}, memberLogin.cookie,
+    );
+    expect(ownPromptList.response.status).toBe(200);
+    expect(ownPromptList.body.templates).toContainEqual(expect.objectContaining({ id: promptTemplateId, title: "白底商品图" }));
+    const crossDesignerPromptCopy = await api<{ error: string }>(
+      `/api/prompt-templates/${promptTemplateId}/copy`, { method: "POST" }, chineseLogin.cookie,
+    );
+    expect(crossDesignerPromptCopy.response.status).toBe(404);
+    expect(crossDesignerPromptCopy.body.error).toBe("NOT_FOUND");
+    const auditedPromptView = await api<{ template: { id: string; prompt: string } }>(
+      `/api/admin/prompt-templates/${promptTemplateId}/audit-view`, {}, employeeLogin.cookie,
+    );
+    expect(auditedPromptView.response.status).toBe(200);
+    expect(auditedPromptView.body.template).toMatchObject({ id: promptTemplateId, prompt: "保持服装结构与面料，生成干净的白底商品图" });
+    const submitRequestId = `integration-prompt-submit-${crypto.randomUUID()}`;
+    const promptSubmission = await api<{ submission: { id: string; duplicate: boolean } }>(
+      `/api/prompt-templates/${promptTemplateId}/submit`,
+      { method: "POST", body: JSON.stringify({ requestId: submitRequestId }) }, memberLogin.cookie,
+    );
+    expect(promptSubmission.response.status).toBe(201);
+    expect(promptSubmission.body.submission.duplicate).toBe(false);
+    const duplicatePromptSubmission = await api<{ submission: { id: string; duplicate: boolean } }>(
+      `/api/prompt-templates/${promptTemplateId}/submit`,
+      { method: "POST", body: JSON.stringify({ requestId: submitRequestId }) }, memberLogin.cookie,
+    );
+    expect(duplicatePromptSubmission.response.status).toBe(200);
+    expect(duplicatePromptSubmission.body.submission).toMatchObject({ id: promptSubmission.body.submission.id, duplicate: true });
+    const leaderPromptQueue = await api<{ submissions: Array<{ id: string; prompt: string }> }>(
+      "/api/prompt-templates/review/submissions", {}, chineseLogin.cookie,
+    );
+    expect(leaderPromptQueue.response.status).toBe(200);
+    expect(leaderPromptQueue.body.submissions).toContainEqual(expect.objectContaining({ id: promptSubmission.body.submission.id, prompt: "保持服装结构与面料，生成干净的白底商品图" }));
+    const approvePrompt = await api<{ submission: { status: string; publication: { templateId: string } } }>(
+      `/api/prompt-templates/review/submissions/${promptSubmission.body.submission.id}`,
+      { method: "POST", body: JSON.stringify({ decision: "approve", note: "可供本组复用" }) }, chineseLogin.cookie,
+    );
+    expect(approvePrompt.response.status).toBe(200);
+    expect(approvePrompt.body.submission.status).toBe("approved");
+    const duplicatePromptReview = await api<{ error: string }>(
+      `/api/prompt-templates/review/submissions/${promptSubmission.body.submission.id}`,
+      { method: "POST", body: JSON.stringify({ decision: "approve" }) }, chineseLogin.cookie,
+    );
+    expect(duplicatePromptReview.response.status).toBe(409);
+    expect(duplicatePromptReview.body.error).toBe("SUBMISSION_ALREADY_REVIEWED");
+    const teamPromptId = approvePrompt.body.submission.publication.templateId;
+    const memberTeamPrompts = await api<{ templates: Array<{ id: string }> }>(
+      "/api/prompt-templates?scope=team", {}, memberLogin.cookie,
+    );
+    expect(memberTeamPrompts.body.templates.map((item) => item.id)).toContain(teamPromptId);
+    const otherDepartmentTeamPrompts = await api<{ templates: Array<{ id: string }> }>(
+      "/api/prompt-templates?scope=team", {}, emailLogin.cookie,
+    );
+    expect(otherDepartmentTeamPrompts.body.templates).toHaveLength(0);
+    const resolveRequestId = `integration-prompt-resolve-${crypto.randomUUID()}`;
+    const resolvedPrompt = await api<{ reuseToken: string; pricing: { modelChanged: boolean; estimate: { totalCredits: number } } }>(
+      `/api/prompt-templates/${teamPromptId}/resolve`,
+      { method: "POST", body: JSON.stringify({ requestId: resolveRequestId, mode: "fill" }) }, memberLogin.cookie,
+    );
+    expect(resolvedPrompt.response.status).toBe(200);
+    expect(resolvedPrompt.body.pricing.modelChanged).toBe(false);
+    const initialPromptCredits = resolvedPrompt.body.pricing.estimate.totalCredits;
+    const hydratedPrompt = await api<{ template: { prompt: string; parameters: { quantity: number } }; mode: string }>(
+      `/api/prompt-templates/reuse/${resolvedPrompt.body.reuseToken}`, {}, memberLogin.cookie,
+    );
+    expect(hydratedPrompt.response.status).toBe(200);
+    expect(hydratedPrompt.body).toMatchObject({ mode: "fill", template: { prompt: "保持服装结构与面料，生成干净的白底商品图", parameters: { quantity: 2 } } });
+    const updatePromptPrice = await api(
+      `/api/admin/model-configuration/models/${promptModel.id}`,
+      { method: "PATCH", body: JSON.stringify({ creditCost: promptModel.creditCost + 3 }) }, admin.cookie,
+    );
+    expect(updatePromptPrice.response.status).toBe(200);
+    const repricedPrompt = await api<{ pricing: { estimate: { totalCredits: number } } }>(
+      `/api/prompt-templates/${teamPromptId}/resolve`,
+      { method: "POST", body: JSON.stringify({ requestId: `integration-prompt-reprice-${crypto.randomUUID()}`, mode: "fill" }) }, memberLogin.cookie,
+    );
+    expect(repricedPrompt.body.pricing.estimate.totalCredits).toBe(initialPromptCredits + 6);
+    const replacementModel = await api<{ model: { id: string } }>(
+      "/api/admin/model-configuration/models",
+      { method: "POST", body: JSON.stringify({ providerId: audioProvider.body.provider.id, name: "Integration Prompt Replacement", modelId: "integration-prompt-replacement", capabilities: ["edit"], creditCost: 1, rmbCost: 0.05, concurrencyLimit: 2, enabled: true }) },
+      admin.cookie,
+    );
+    expect(replacementModel.response.status).toBe(201);
+    const disablePromptModel = await api(
+      `/api/admin/model-configuration/models/${promptModel.id}`,
+      { method: "PATCH", body: JSON.stringify({ enabled: false, replacementModelConfigId: replacementModel.body.model.id }) }, admin.cookie,
+    );
+    expect(disablePromptModel.response.status).toBe(200);
+    const replacedPrompt = await api<{ pricing: { modelChanged: boolean; reason: string; selectedModel: { id: string } } }>(
+      `/api/prompt-templates/${teamPromptId}/resolve`,
+      { method: "POST", body: JSON.stringify({ requestId: `integration-prompt-replacement-${crypto.randomUUID()}`, mode: "fill" }) }, memberLogin.cookie,
+    );
+    expect(replacedPrompt.body.pricing).toMatchObject({ modelChanged: true, reason: "replacement", selectedModel: { id: replacementModel.body.model.id } });
+    const publicationRequestId = `integration-prompt-public-${crypto.randomUUID()}`;
+    const publicPrompt = await api<{ publication: { templateId: string; duplicate: boolean } }>(
+      `/api/prompt-templates/${teamPromptId}/promote-public`,
+      { method: "POST", body: JSON.stringify({ requestId: publicationRequestId }) }, admin.cookie,
+    );
+    expect(publicPrompt.response.status).toBe(201);
+    const duplicatePublicPrompt = await api<{ publication: { templateId: string; duplicate: boolean } }>(
+      `/api/prompt-templates/${teamPromptId}/promote-public`,
+      { method: "POST", body: JSON.stringify({ requestId: publicationRequestId }) }, admin.cookie,
+    );
+    expect(duplicatePublicPrompt.response.status).toBe(200);
+    expect(duplicatePublicPrompt.body.publication).toMatchObject({ templateId: publicPrompt.body.publication.templateId, duplicate: true });
+    const publicPromptList = await api<{ templates: Array<{ id: string }> }>(
+      "/api/prompt-templates?scope=public", {}, emailLogin.cookie,
+    );
+    expect(publicPromptList.body.templates.map((item) => item.id)).toContain(publicPrompt.body.publication.templateId);
+    const disablePrompts = await api(
+      "/api/admin/modules", { method: "PATCH", body: JSON.stringify({ moduleKey: "prompts", enabled: false }) }, admin.cookie,
+    );
+    expect(disablePrompts.response.status).toBe(200);
+    const disabledPromptList = await api<{ error: string }>("/api/prompt-templates?scope=public", {}, memberLogin.cookie);
+    expect(disabledPromptList.response.status).toBe(403);
+    expect(disabledPromptList.body.error).toBe("MODULE_DISABLED");
+    const reenablePrompts = await api(
+      "/api/admin/modules", { method: "PATCH", body: JSON.stringify({ moduleKey: "prompts", enabled: true }) }, admin.cookie,
+    );
+    expect(reenablePrompts.response.status).toBe(200);
+    const restorePromptModel = await api(
+      `/api/admin/model-configuration/models/${promptModel.id}`,
+      { method: "PATCH", body: JSON.stringify({ enabled: true, replacementModelConfigId: null, creditCost: promptModel.creditCost }) }, admin.cookie,
+    );
+    expect(restorePromptModel.response.status).toBe(200);
     const adminPerformance = await api<{ metrics: { validOutputs: number }; options: { departments: unknown[] } }>(
       "/api/performance?preset=month", {}, admin.cookie,
     );

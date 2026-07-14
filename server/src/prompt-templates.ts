@@ -148,3 +148,24 @@ export async function resolveCurrentPromptPricing(
   };
 }
 
+export async function assertValidModelReplacement(db: Database, modelId: string, replacementId: string | null | undefined) {
+  if (!replacementId) return;
+  const result = await db.query<{ id: string; replacementModelConfigId: string | null }>(
+    `SELECT id,replacement_model_config_id AS "replacementModelConfigId" FROM model_configs`,
+  );
+  const byId = new Map(result.rows.map((model) => [model.id, model.replacementModelConfigId]));
+  if (!byId.has(replacementId)) throw new PromptTemplateError("INVALID_MODEL_REPLACEMENT", "替代模型不存在", 400);
+  const visited = new Set<string>();
+  let cursor: string | null = replacementId;
+  while (cursor) {
+    if (cursor === modelId || visited.has(cursor)) throw new PromptTemplateError("INVALID_MODEL_REPLACEMENT", "替代模型不能形成循环", 400);
+    visited.add(cursor);
+    cursor = byId.get(cursor) ?? null;
+  }
+}
+
+export class PromptTemplateError extends Error {
+  constructor(public code: string, message: string, public status = 400) {
+    super(message);
+  }
+}

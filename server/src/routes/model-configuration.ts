@@ -6,18 +6,19 @@ import type { AppConfig } from "../config";
 import type { Database } from "../db";
 import { requireRole } from "../rbac";
 import { encryptSecret } from "../security";
+import { assertValidModelReplacement } from "../prompt-templates";
 import type { AuthenticatedRequest } from "../types";
 
 const protocol = z.enum(["openai", "gemini", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
 const providerInput = z.object({ name: z.string().trim().min(1).max(100), protocol, baseUrl: z.string().url(), enabled: z.boolean().default(true), credentials: z.record(z.string(), z.string().max(10_000)).optional() });
 const providerUpdate = providerInput.partial();
-const modelInput = z.object({ providerId: z.string().uuid(), workflowConfigId: z.string().uuid().nullish(), name: z.string().trim().min(1).max(120), modelId: z.string().trim().min(1).max(200), capabilities, creditCost: z.number().int().nonnegative(), rmbCost: z.number().nonnegative(), concurrencyLimit: z.number().int().min(1).max(100).default(5), enabled: z.boolean().default(true) });
+const modelInput = z.object({ providerId: z.string().uuid(), workflowConfigId: z.string().uuid().nullish(), replacementModelConfigId: z.string().uuid().nullish(), name: z.string().trim().min(1).max(120), modelId: z.string().trim().min(1).max(200), capabilities, creditCost: z.number().int().nonnegative(), rmbCost: z.number().nonnegative(), concurrencyLimit: z.number().int().min(1).max(100).default(5), enabled: z.boolean().default(true) });
 const modelUpdate = modelInput.partial();
 const priceInput = z.object({ operationType: z.enum(["image_generation", "video_generation", "audio_generation", "upscale", "remove_background", "inpaint", "batch_image", "seamless_stitch"]), label: z.string().trim().min(1).max(100), credits: z.number().int().nonnegative(), rmbCost: z.number().nonnegative() });
 
 const providerSelect = `id,name,protocol,base_url AS "baseUrl",enabled,(encrypted_credentials IS NOT NULL) AS "hasCredentials",created_at AS "createdAt",updated_at AS "updatedAt"`;
-const modelSelect = `m.id,m.provider_id AS "providerId",p.name AS "providerName",m.workflow_config_id AS "workflowConfigId",w.name AS "workflowName",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",m.concurrency_limit AS "concurrencyLimit",m.enabled,m.created_at AS "createdAt",m.updated_at AS "updatedAt"`;
+const modelSelect = `m.id,m.provider_id AS "providerId",p.name AS "providerName",m.workflow_config_id AS "workflowConfigId",w.name AS "workflowName",m.replacement_model_config_id AS "replacementModelConfigId",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",m.concurrency_limit AS "concurrencyLimit",m.enabled,m.created_at AS "createdAt",m.updated_at AS "updatedAt"`;
 
 export function createModelConfigurationRouter(db: Database, config: AppConfig) {
     const router = Router();
@@ -61,8 +62,9 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     router.post("/models", async (request, response, next) => {
         try {
             const input = modelInput.parse(request.body); const actor = (request as unknown as AuthenticatedRequest).auth;
-            const result = await db.query(`INSERT INTO model_configs(provider_id,workflow_config_id,name,model_id,capabilities,credit_cost,rmb_cost,concurrency_limit,enabled,created_by)
-                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [input.providerId, input.workflowConfigId ?? null, input.name, input.modelId, input.capabilities, input.creditCost, input.rmbCost, input.concurrencyLimit, input.enabled, actor.id]);
+            if (input.replacementModelConfigId && !(await db.query("SELECT 1 FROM model_configs WHERE id=$1", [input.replacementModelConfigId])).rows[0]) { response.status(400).json({ error: "INVALID_MODEL_REPLACEMENT", message: "替代模型不存在" }); return; }
+            const result = await db.query(`INSERT INTO model_configs(provider_id,workflow_config_id,replacement_model_config_id,name,model_id,capabilities,credit_cost,rmb_cost,concurrency_limit,enabled,created_by)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [input.providerId, input.workflowConfigId ?? null, input.replacementModelConfigId ?? null, input.name, input.modelId, input.capabilities, input.creditCost, input.rmbCost, input.concurrencyLimit, input.enabled, actor.id]);
             const model = (await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [result.rows[0].id])).rows[0];
             await writeAudit(db, { actor, action: "model.created", targetType: "model", targetId: model.id, result: "success", detail: { modelId: input.modelId }, ip: request.ip });
             response.status(201).json({ model });
@@ -74,8 +76,9 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
             const current = await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [request.params.id]);
             if (!current.rows[0]) { response.status(404).json({ error: "NOT_FOUND", message: "模型不存在" }); return; }
             const value = { ...current.rows[0], ...input };
-            await db.query(`UPDATE model_configs SET provider_id=$1,workflow_config_id=$2,name=$3,model_id=$4,capabilities=$5,credit_cost=$6,rmb_cost=$7,concurrency_limit=$8,enabled=$9,updated_at=now() WHERE id=$10`,
-                [value.providerId, value.workflowConfigId ?? null, value.name, value.modelId, value.capabilities, value.creditCost, value.rmbCost, value.concurrencyLimit, value.enabled, request.params.id]);
+            await assertValidModelReplacement(db, request.params.id, value.replacementModelConfigId ?? null);
+            await db.query(`UPDATE model_configs SET provider_id=$1,workflow_config_id=$2,replacement_model_config_id=$3,name=$4,model_id=$5,capabilities=$6,credit_cost=$7,rmb_cost=$8,concurrency_limit=$9,enabled=$10,updated_at=now() WHERE id=$11`,
+                [value.providerId, value.workflowConfigId ?? null, value.replacementModelConfigId ?? null, value.name, value.modelId, value.capabilities, value.creditCost, value.rmbCost, value.concurrencyLimit, value.enabled, request.params.id]);
             const model = (await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [request.params.id])).rows[0];
             await writeAudit(db, { actor, action: "model.updated", targetType: "model", targetId: model.id, result: "success", detail: { fields: Object.keys(input) }, ip: request.ip });
             response.json({ model });

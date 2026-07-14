@@ -41,6 +41,8 @@ import {
 } from "./routes/group-credits";
 import { GroupCreditError } from "./group-credits";
 import { createPerformanceRouter } from "./routes/performance";
+import { createAdminPromptTemplatesRouter, createPromptTemplatesRouter } from "./routes/prompt-templates";
+import { PromptTemplateError } from "./prompt-templates";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
@@ -204,6 +206,18 @@ app.use(
   createPerformanceRouter(db),
 );
 app.use(
+  "/api/prompt-templates",
+  requireSession,
+  requireAccountReady,
+  createPromptTemplatesRouter(db),
+);
+app.use(
+  "/api/admin/prompt-templates",
+  requireSession,
+  requireAccountReady,
+  createAdminPromptTemplatesRouter(db),
+);
+app.use(
   "/api/admin/audit-logs",
   requireSession,
   requireAccountReady,
@@ -244,6 +258,10 @@ const errorHandler: ErrorRequestHandler = (
     return;
   }
   if (error instanceof GroupCreditError) {
+    response.status(error.status).json({ error: error.code, message: error.message });
+    return;
+  }
+  if (error instanceof PromptTemplateError) {
     response.status(error.status).json({ error: error.code, message: error.message });
     return;
   }
