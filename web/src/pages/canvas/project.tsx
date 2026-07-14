@@ -352,6 +352,7 @@ function WirelessCanvasPage() {
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
+    const [maskEditModel, setMaskEditModel] = useState("");
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
     const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
     const [superResolveNodeId, setSuperResolveNodeId] = useState<string | null>(null);
@@ -371,6 +372,12 @@ function WirelessCanvasPage() {
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
 
+    const selectedMaskEditModel = maskEditModel || effectiveConfig.imageModel || effectiveConfig.model;
+    const maskEditEstimate = useMemo(
+        () => estimateUsage({ operationType: "inpaint", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }),
+        [estimateUsage, selectedMaskEditModel],
+    );
+
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
@@ -389,6 +396,10 @@ function WirelessCanvasPage() {
         setQuickGenerateModel((current) => current || effectiveConfig.imageModel || effectiveConfig.model);
         setQuickGenerateSize((current) => current || effectiveConfig.size || defaultConfig.size);
     }, [effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size]);
+
+    useEffect(() => {
+        if (maskEditNodeId) setMaskEditModel(effectiveConfig.imageModel || effectiveConfig.model);
+    }, [effectiveConfig.imageModel, effectiveConfig.model, maskEditNodeId]);
 
     const handleMissingModelConfig = useCallback(() => {
         if (canManageConfig) {
@@ -1805,9 +1816,23 @@ function WirelessCanvasPage() {
     const maskEditImageNode = useCallback(
         async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
-            const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1", size: node.metadata?.size || "auto" };
+            const selectedModel = payload.model || effectiveConfig.imageModel || effectiveConfig.model;
+            const usage = estimateUsage({ operationType: "inpaint", modelId: modelOptionName(selectedModel), quantity: 1 });
+            const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), model: selectedModel, imageModel: selectedModel, count: "1", size: node.metadata?.size || "auto" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
+                return;
+            }
+            if (!usage.configured) {
+                message.error("管理员尚未为该局部编辑模型启用价格或接口");
+                return;
+            }
+            if (!user || user.status !== "active") {
+                message.error("当前设计师账号不可用");
+                return;
+            }
+            if (user.creditBalance < usage.credits) {
+                message.error(`额度不足：本次局部编辑需要 ${usage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
                 return;
             }
             const userPrompt = payload.prompt.trim();
@@ -1866,7 +1891,7 @@ function WirelessCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [addAsset, effectiveConfig, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, projectId, startGenerationRequest],
+        [addAsset, effectiveConfig, estimateUsage, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, projectId, startGenerationRequest, user],
     );
 
     const upscaleImageNode = useCallback(async (node: CanvasNodeData, params: CanvasImageUpscaleParams) => {
@@ -3616,7 +3641,16 @@ function WirelessCanvasPage() {
                 {cropNode?.metadata?.content ? <CanvasNodeCropDialog dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={(crop) => void cropImageNode(cropNode!, crop)} /> : null}
 
                 {maskEditNode?.metadata?.content ? (
-                    <CanvasNodeMaskEditDialog dataUrl={maskEditNode.metadata.content} open={Boolean(maskEditNode)} onClose={() => setMaskEditNodeId(null)} onConfirm={(payload) => void maskEditImageNode(maskEditNode!, payload)} />
+                    <CanvasNodeMaskEditDialog
+                        dataUrl={maskEditNode.metadata.content}
+                        open={Boolean(maskEditNode)}
+                        config={effectiveConfig}
+                        model={selectedMaskEditModel}
+                        estimatedCredits={maskEditEstimate.configured ? maskEditEstimate.credits : undefined}
+                        onModelChange={setMaskEditModel}
+                        onClose={() => setMaskEditNodeId(null)}
+                        onConfirm={(payload) => void maskEditImageNode(maskEditNode!, payload)}
+                    />
                 ) : null}
 
                 {splitNode?.metadata?.content ? <CanvasNodeSplitDialog dataUrl={splitNode.metadata.content} open={Boolean(splitNode)} onClose={() => setSplitNodeId(null)} onConfirm={(params) => void splitImageNode(splitNode!, params)} /> : null}

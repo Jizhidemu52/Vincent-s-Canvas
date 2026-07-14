@@ -3,10 +3,13 @@ import { Button, Input, Modal, Slider } from "antd";
 import { Brush, Eraser, RotateCcw, WandSparkles, X } from "lucide-react";
 
 import { readImageMeta } from "@/lib/image-utils";
+import { ModelPicker } from "@/components/model-picker";
+import type { AiConfig } from "@/stores/use-config-store";
 
 export type CanvasImageMaskEditPayload = {
     prompt: string;
     maskDataUrl: string;
+    model: string;
 };
 
 type DrawMode = "paint" | "erase";
@@ -15,7 +18,25 @@ const defaultBrushSize = 100;
 const maskFillColor = "rgba(37, 99, 235, .38)";
 const maskBorderColor = "rgba(255, 255, 255, .72)";
 
-export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (payload: CanvasImageMaskEditPayload) => void }) {
+export function CanvasNodeMaskEditDialog({
+    dataUrl,
+    open,
+    config,
+    model,
+    estimatedCredits,
+    onModelChange,
+    onClose,
+    onConfirm,
+}: {
+    dataUrl: string;
+    open: boolean;
+    config: AiConfig;
+    model: string;
+    estimatedCredits?: number;
+    onModelChange: (model: string) => void;
+    onClose: () => void;
+    onConfirm: (payload: CanvasImageMaskEditPayload) => void;
+}) {
     const maskCanvasRef = useRef<HTMLCanvasElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
     const drawingRef = useRef<{ active: boolean; last: { x: number; y: number } | null }>({ active: false, last: null });
@@ -95,7 +116,8 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
         if (!nextPrompt) return setError("请输入修改要求");
         if (!canvas) return;
         if (!canvasHasPaint(canvas)) return setError("请先涂抹局部区域");
-        onConfirm({ prompt: nextPrompt, maskDataUrl: buildEditMask(canvas) });
+        if (!model) return setError("请选择用于局部编辑的模型");
+        onConfirm({ prompt: nextPrompt, maskDataUrl: buildEditMask(canvas), model });
     };
 
     return (
@@ -143,6 +165,14 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
                             <span className="font-semibold">{brushSize}px</span>
                         </div>
                         <Slider min={8} max={160} step={2} value={brushSize} onChange={setBrushSize} />
+                    </div>
+
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                            <span className="font-medium opacity-75">编辑模型</span>
+                            {typeof estimatedCredits === "number" ? <span className="shrink-0 text-xs font-medium text-orange-600">预计 {estimatedCredits} 积分</span> : null}
+                        </div>
+                        <ModelPicker config={config} value={model} onChange={onModelChange} capability="image" fullWidth placeholder="选择局部编辑模型" />
                     </div>
 
                     <div className="space-y-2">

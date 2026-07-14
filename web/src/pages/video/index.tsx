@@ -80,6 +80,7 @@ export default function VideoPage() {
     const activeLogIdsRef = useRef<Set<string>>(new Set());
     const loadedReuseTokenRef = useRef(new Set<string>());
     const generateRef = useRef<() => Promise<void>>(async () => undefined);
+    const restoredInitialResultRef = useRef(false);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -129,6 +130,14 @@ export default function VideoPage() {
     useEffect(() => {
         void refreshLogs();
     }, []);
+
+    useEffect(() => {
+        if (restoredInitialResultRef.current || running || !logs.length || results.length) return;
+        restoredInitialResultRef.current = true;
+        const latest = logs.find((log) => log.status === "成功" && log.video);
+        if (!latest?.video) return;
+        setResults([{ id: latest.video.id, status: "success", video: latest.video }]);
+    }, [logs, results.length, running]);
 
     useEffect(() => {
         const presetPrompt = searchParams.get("prompt");

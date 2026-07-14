@@ -31,6 +31,7 @@ export function SeamlessStitchPage() {
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const loadedReuseTokenRef = useRef(new Set<string>());
+    const restoredHistoryTaskIdRef = useRef<string | null>(null);
     const runStitchRef = useRef<() => Promise<void>>(async () => undefined);
     const sourceRef = useRef<ReferenceImage | null>(null);
     const user = useUserStore((state) => state.user);
@@ -59,18 +60,36 @@ export function SeamlessStitchPage() {
         }
     };
 
+    const openHistoryTask = async (task: QueuedTask) => {
+        const imageUrl = task.resultUrls[0];
+        if (!imageUrl) return;
+        try {
+            const image = await uploadImage(imageUrl);
+            restoredHistoryTaskIdRef.current = task.id;
+            setResult({ status: "success", image, durationMs: 0 });
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "历史图片读取失败");
+        }
+    };
+
     useEffect(() => {
         void refreshHistory();
         const timer = window.setInterval(() => void refreshHistory(), 2_000);
         return () => window.clearInterval(timer);
     }, []);
 
+    useEffect(() => {
+        if (running || result.status !== "idle") return;
+        const latest = history.find((task) => task.status === "success" && task.resultUrls[0]);
+        if (!latest || latest.id === restoredHistoryTaskIdRef.current) return;
+        void openHistoryTask(latest);
+    }, [history, result.status, running]);
+
     const setSourceFromBlob = async (blob: Blob, name: string) => {
         const uploaded = await uploadImage(blob);
         const nextSource = { id: nanoid(), name, type: uploaded.mimeType, dataUrl: uploaded.url, url: uploaded.url, storageKey: uploaded.storageKey };
         sourceRef.current = nextSource;
         setSource(nextSource);
-        setResult({ status: "idle" });
     };
 
     const uploadSource = async (files?: FileList | null) => {
@@ -306,7 +325,7 @@ export function SeamlessStitchPage() {
                             </div>
                             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                                 <div className="text-xs text-stone-500">
-                                    {result.image.width}×{result.image.height} · {(result.durationMs / 1000).toFixed(1)} 秒
+                                    {result.durationMs ? `${result.image.width}×${result.image.height} · ${(result.durationMs / 1000).toFixed(1)} 秒` : "历史处理结果"}
                                 </div>
                                 <div className="flex gap-2">
                                     <Button
@@ -315,7 +334,6 @@ export function SeamlessStitchPage() {
                                             const nextSource = { id: nanoid(), name: "seamless-result.png", type: result.image.mimeType, dataUrl: result.image.url, url: result.image.url, storageKey: result.image.storageKey };
                                             sourceRef.current = nextSource;
                                             setSource(nextSource);
-                                            setResult({ status: "idle" });
                                         }}
                                     >
                                         继续拼接
@@ -356,7 +374,7 @@ export function SeamlessStitchPage() {
                                 const time = task.createdAt ? new Date(task.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "刚刚";
                                 return (
                                     <article key={task.id} className="overflow-hidden rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-950">
-                                        {task.status === "success" && imageUrl ? <img src={imageUrl} alt="无缝拼接历史结果" className="aspect-square w-full object-cover" /> : (
+                                        {task.status === "success" && imageUrl ? <button type="button" className="block w-full" onClick={() => void openHistoryTask(task)} title="查看处理结果"><img src={imageUrl} alt="无缝拼接历史结果" className="aspect-square w-full object-cover transition hover:opacity-80" /></button> : (
                                             <div className="flex aspect-square flex-col items-center justify-center gap-2 px-3 text-center text-xs text-stone-500">
                                                 {task.status === "processing" ? <LoaderCircle className="size-5 animate-spin text-orange-500" /> : <Grid2x2 className="size-5 text-red-400" />}
                                                 <span>{task.status === "processing" ? "正在等待内部 AI 返回" : task.failureReason || "处理失败"}</span>
@@ -364,7 +382,10 @@ export function SeamlessStitchPage() {
                                         )}
                                         <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
                                             <span className={task.status === "success" ? "text-emerald-600" : task.status === "processing" ? "text-orange-600" : "text-red-500"}>{task.status === "success" ? "已完成" : task.status === "processing" ? "处理中" : "失败"}</span>
-                                            <span className="text-stone-400">{time}</span>
+                                            <div className="flex items-center gap-2">
+                                                {task.status === "success" && imageUrl ? <><button type="button" className="text-stone-500 hover:text-orange-600" onClick={() => void openHistoryTask(task)}>查看</button><button type="button" className="text-stone-500 hover:text-orange-600" onClick={() => saveAs(imageUrl, `seamless-stitch-${task.id.slice(0, 8)}.png`)}>下载</button></> : null}
+                                                <span className="text-stone-400">{time}</span>
+                                            </div>
                                         </div>
                                     </article>
                                 );
