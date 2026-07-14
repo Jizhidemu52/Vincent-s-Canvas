@@ -1,4 +1,4 @@
-import { Check, Copy, Download, PencilLine, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
+import { BookmarkPlus, Check, Copy, Download, PencilLine, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
@@ -26,6 +26,7 @@ import {
     type ServerAsset,
     type UserProject,
 } from "@/services/api/server-assets";
+import { savePromptFromAsset } from "@/services/api/prompts";
 
 type AssetFormValues = {
     kind: AssetKind;
@@ -266,6 +267,15 @@ export default function AssetsPage() {
             return;
         }
         navigate(url);
+    };
+
+    const saveAssetPrompt = async (asset: Asset) => {
+        try {
+            await savePromptFromAsset(asset.id);
+            message.success("已保存到我的提示词");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "保存提示词失败");
+        }
     };
 
     const recordResultAction = async (asset: Asset, eventType: AssetEventType) => {
@@ -538,6 +548,7 @@ export default function AssetsPage() {
                 onCopy={copyAssetText}
                 onDownload={downloadImage}
                 onReplicate={replicateAsset}
+                onSavePrompt={saveAssetPrompt}
                 onResultAction={recordResultAction}
                 onAddProject={(asset) => { setProjectAsset(asset); setSelectedProjectId(metadataString(asset, "projectId") || undefined); }}
                 onShareDepartment={shareWithDepartment}
@@ -673,6 +684,7 @@ function AssetDrawer({
     onCopy,
     onDownload,
     onReplicate,
+    onSavePrompt,
     onResultAction,
     onAddProject,
     onShareDepartment,
@@ -686,6 +698,7 @@ function AssetDrawer({
     onCopy: (asset: Asset) => void;
     onDownload: (asset: Asset) => void | Promise<void>;
     onReplicate: (asset: Asset) => void | Promise<void>;
+    onSavePrompt: (asset: Asset) => void | Promise<void>;
     onResultAction: (asset: Asset, eventType: AssetEventType) => void | Promise<void>;
     onAddProject: (asset: Asset) => void;
     onShareDepartment: (asset: Asset, remove?: boolean) => void | Promise<void>;
@@ -753,6 +766,11 @@ function AssetDrawer({
                         {canReplicate(asset) ? (
                             <Button icon={<RotateCcw className="size-4" />} onClick={() => onReplicate(asset)}>
                                 一键复刻
+                            </Button>
+                        ) : null}
+                        {isServerAsset && canReplicate(asset) ? (
+                            <Button icon={<BookmarkPlus className="size-4" />} onClick={() => onSavePrompt(asset)}>
+                                保存到我的提示词
                             </Button>
                         ) : null}
                     </Space>

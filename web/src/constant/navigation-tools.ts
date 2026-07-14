@@ -1,4 +1,4 @@
-import { Box, FileText, Grid2x2, ImageIcon, ImagePlus, Images, MessageSquare, ShieldCheck, Sparkles, UserRoundCog, Video, Zap } from "lucide-react";
+import { BookMarked, Box, FileText, Grid2x2, ImageIcon, ImagePlus, Images, MessageSquare, ShieldCheck, Sparkles, UserRoundCog, Video, Zap } from "lucide-react";
 
 import type { AdminOperationType } from "@/lib/admin-domain";
 
@@ -53,6 +53,13 @@ export const navigationTools = [
         group: "local",
     },
     {
+        slug: "my-prompts",
+        path: "/my-prompts",
+        label: "我的提示词",
+        icon: BookMarked,
+        group: "local",
+    },
+    {
         slug: "assets",
         path: "/assets",
         label: "素材库",
@@ -91,6 +98,10 @@ export const navigationTools = [
 
 export type NavigationGroup = (typeof navigationTools)[number]["group"];
 export type NavigationToolSlug = (typeof navigationTools)[number]["slug"];
+
+export function navigationModuleKey(slug: NavigationToolSlug) {
+    return slug === "my-prompts" ? "prompts" : slug;
+}
 
 export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operationType: AdminOperationType; modelId?: string }>> = {
     image: { operationType: "image_generation", modelId: "gpt-image-2" },

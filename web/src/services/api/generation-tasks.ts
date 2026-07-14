@@ -61,7 +61,7 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
         const tasks = await waitForTasks(ids, input.signal);
         const failed = tasks.find((task) => task.status === "failed" || task.status === "cancelled");
         if (failed) throw new Error(failed.failureReason || "生成任务失败");
-        return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl })));
+        return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id })));
     } catch (error) {
         if (input.signal?.aborted) await cancelTasks(ids);
         throw error;

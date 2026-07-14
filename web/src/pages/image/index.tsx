@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { useSearchParams } from "react-router-dom";
@@ -25,6 +25,7 @@ import { fetchServerAssetContent, recordServerAssetEvent } from "@/services/api/
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ReferenceImage } from "@/types/image";
 import { SeamlessStitchPage } from "@/pages/image/seamless-stitch";
+import { hydratePromptReuse, savePromptFromTask } from "@/services/api/prompts";
 
 type GeneratedImage = {
     id: string;
@@ -35,6 +36,7 @@ type GeneratedImage = {
     height: number;
     bytes: number;
     mimeType?: string;
+    sourceTaskId?: string;
 };
 
 type GenerationResult = {
@@ -120,10 +122,12 @@ export default function ImagePage() {
 }
 
 function ImageGenerationPage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const loadedRecreateAssetsRef = useRef(new Set<string>());
+    const loadedReuseTokenRef = useRef(new Set<string>());
+    const generateRef = useRef<() => Promise<void>>(async () => undefined);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -202,6 +206,33 @@ function ImageGenerationPage() {
                 message.error(error instanceof Error ? error.message : "复刻来源加载失败");
             });
     }, [message, searchParams, toolMode, user?.id]);
+
+    useEffect(() => {
+        const token = searchParams.get("reuseToken");
+        if (!token || loadedReuseTokenRef.current.has(token)) return;
+        loadedReuseTokenRef.current.add(token);
+        void hydratePromptReuse(token).then(async (payload) => {
+            setPrompt(payload.template.prompt);
+            const parameters = payload.template.parameters;
+            const selectedModel = payload.pricing.selectedModel?.modelId;
+            if (selectedModel) updateConfig("imageModel", selectedModel);
+            if (typeof parameters.size === "string") updateConfig("size", parameters.size);
+            if (typeof parameters.quality === "string") updateConfig("quality", parameters.quality);
+            const quantity = typeof parameters.quantity === "number" ? parameters.quantity : typeof parameters.count === "number" ? parameters.count : null;
+            if (quantity) updateConfig("count", String(Math.min(10, Math.max(1, quantity))));
+            const nextReferences = await Promise.all(payload.template.referenceAssetIds.map(async (assetId) => {
+                const blob = await fetchServerAssetContent(assetId); const image = await uploadImage(blob);
+                return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
+            }));
+            setReferences(nextReferences);
+            payload.warnings.forEach((warning) => message.warning(warning));
+            if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请先选择管理员当前启用的模型");
+            const cost = payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准";
+            if (payload.mode === "fill_and_generate") {
+                modal.confirm({ title: "确认使用当前配置生成？", content: `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
+            } else message.success(`模板已填入，当前预计 ${cost}`);
+        }).catch((error) => { loadedReuseTokenRef.current.delete(token); message.error(error instanceof Error ? error.message : "模板复用失败"); });
+    }, [message, modal, searchParams, updateConfig]);
 
     const addReferences = async (files?: FileList | null) => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
@@ -300,6 +331,7 @@ function ImageGenerationPage() {
             setRunning(false);
         }
     };
+    generateRef.current = generate;
 
     const downloadImage = (image: GeneratedImage, index: number) => {
         saveAs(image.dataUrl, `image-${index + 1}.png`);
@@ -334,6 +366,19 @@ function ImageGenerationPage() {
             },
         });
         message.success("已加入我的素材");
+    };
+
+    const saveResultPrompt = async (image: GeneratedImage) => {
+        if (!image.sourceTaskId) {
+            message.warning("旧记录没有服务端任务编号，请先保存到素材库后再保存提示词");
+            return;
+        }
+        try {
+            await savePromptFromTask(image.sourceTaskId);
+            message.success("已保存到我的提示词");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "保存提示词失败");
+        }
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
@@ -404,7 +449,7 @@ function ImageGenerationPage() {
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
+            const nextImage = { id: image.id, dataUrl: image.dataUrl, sourceTaskId: image.sourceTaskId, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
@@ -550,7 +595,7 @@ function ImageGenerationPage() {
                             <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
+                                        <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} />
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => retryResult(index)} />
                                     ) : (
@@ -625,12 +670,14 @@ function ResultImageCard({
     onEdit,
     onDownload,
     onSaveAsset,
+    onSavePrompt,
 }: {
     image: GeneratedImage;
     index: number;
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
+    onSavePrompt: (image: GeneratedImage) => void;
 }) {
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
@@ -643,7 +690,7 @@ function ResultImageCard({
                     <span>{formatBytes(image.bytes)}</span>
                     <span>{formatDuration(image.durationMs)}</span>
                 </div>
-                <div className="grid min-w-0 grid-cols-3 gap-2">
+                <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4">
                     <Tooltip title="添加到素材">
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)}>
                             添加到素材
@@ -657,6 +704,11 @@ function ResultImageCard({
                     <Tooltip title="下载">
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)}>
                             下载
+                        </Button>
+                    </Tooltip>
+                    <Tooltip title="保存为个人提示词模板">
+                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<BookmarkPlus className="size-3.5" />} onClick={() => void onSavePrompt(image)}>
+                            存为提示词
                         </Button>
                     </Tooltip>
                 </div>

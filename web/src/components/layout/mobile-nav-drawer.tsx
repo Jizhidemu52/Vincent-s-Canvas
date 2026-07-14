@@ -1,7 +1,7 @@
 import { Drawer } from "antd";
 import { Link } from "react-router-dom";
 
-import { navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
+import { navigationModuleKey, navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { cn } from "@/lib/utils";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
@@ -31,7 +31,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
             const usage = estimate({ ...billing, quantity: 1 });
             return usage.configured ? `${usage.credits}积分${slug === "video" ? "起" : ""}` : "待配置";
         }
-        if (slug === "prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
+        if (slug === "prompts" || slug === "my-prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
         if (slug === "admin") return "管理员";
         if (slug === "team") return "本组";
         return undefined;
@@ -41,7 +41,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
         <Drawer title="功能模块" placement="left" size={300} open={open} onClose={onClose} className="md:hidden">
             <div className="space-y-6">
                 {(["local", "online", "admin"] as const).map((group) => {
-                    const tools = navigationTools.filter((tool) => tool.group === group && (tool.slug === "admin" || flags[tool.slug as ModuleKey]) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
+                    const tools = navigationTools.filter((tool) => tool.group === group && (tool.slug === "admin" || flags[navigationModuleKey(tool.slug) as ModuleKey]) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
                     if (!tools.length) return null;
 
                     return (

@@ -17,6 +17,8 @@ import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceRefe
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { fetchServerAssetContent } from "@/services/api/server-assets";
+import { hydratePromptReuse } from "@/services/api/prompts";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -72,10 +74,12 @@ const LOG_STORE_KEY = "wireless-canvas:video_generation_logs";
 const logStore = localforage.createInstance({ name: "wireless-canvas", storeName: "video_generation_logs" });
 
 export default function VideoPage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const activeLogIdsRef = useRef<Set<string>>(new Set());
+    const loadedReuseTokenRef = useRef(new Set<string>());
+    const generateRef = useRef<() => Promise<void>>(async () => undefined);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -132,6 +136,35 @@ export default function VideoPage() {
         if (presetPrompt) setPrompt(presetPrompt);
         if (presetModel) updateConfig("videoModel", presetModel);
     }, [searchParams, updateConfig]);
+
+    useEffect(() => {
+        const token = searchParams.get("reuseToken");
+        if (!token || loadedReuseTokenRef.current.has(token)) return;
+        loadedReuseTokenRef.current.add(token);
+        void hydratePromptReuse(token).then(async (payload) => {
+            setPrompt(payload.template.prompt);
+            const parameters = payload.template.parameters;
+            if (payload.pricing.selectedModel?.modelId) updateConfig("videoModel", payload.pricing.selectedModel.modelId);
+            if (typeof parameters.size === "string") updateConfig("size", parameters.size);
+            if (typeof parameters.resolution === "string") updateConfig("vquality", parameters.resolution);
+            if (typeof parameters.seconds === "string") updateConfig("videoSeconds", parameters.seconds);
+            const nextReferences = await Promise.all(payload.template.referenceAssetIds.map(async (assetId) => {
+                const blob = await fetchServerAssetContent(assetId);
+                const image = await uploadImage(blob);
+                return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
+            }));
+            setReferences(nextReferences);
+            payload.warnings.forEach((warning) => message.warning(warning));
+            if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请先选择管理员当前启用的视频模型");
+            const cost = payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准";
+            if (payload.mode === "fill_and_generate") {
+                modal.confirm({ title: "确认使用当前配置生成视频？", content: `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
+            } else message.success(`模板已填入，当前预计 ${cost}`);
+        }).catch((error) => {
+            loadedReuseTokenRef.current.delete(token);
+            message.error(error instanceof Error ? error.message : "模板复用失败");
+        });
+    }, [message, modal, searchParams, updateConfig]);
 
     const addReferences = async (files?: FileList | null) => {
         const selectedFiles = Array.from(files || []);
@@ -224,6 +257,7 @@ export default function VideoPage() {
             setRunning(false);
         }
     };
+    generateRef.current = generate;
 
     const buildRequestSnapshot = () => {
         const text = prompt.trim();

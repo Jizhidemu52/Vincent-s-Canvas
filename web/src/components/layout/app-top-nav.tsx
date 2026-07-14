@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
-import { navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
+import { navigationModuleKey, navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -52,7 +52,7 @@ function SidebarTool({ tool, active, badge }: { tool: (typeof navigationTools)[n
 
 function ToolGroup({ group, activeToolSlug, adminVisible, teamVisible, getToolBadge }: { group: NavigationGroup; activeToolSlug?: NavigationToolSlug; adminVisible: boolean; teamVisible: boolean; getToolBadge: (slug: NavigationToolSlug) => string | undefined }) {
     const flags = useModuleStore((state) => state.flags);
-    const tools = navigationTools.filter((tool) => tool.group === group && (tool.slug === "admin" || flags[tool.slug as ModuleKey]) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
+    const tools = navigationTools.filter((tool) => tool.group === group && (tool.slug === "admin" || flags[navigationModuleKey(tool.slug) as ModuleKey]) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
     if (!tools.length) return null;
 
     return (
@@ -159,7 +159,7 @@ export function AppTopNav() {
             const usage = estimate({ ...billing, quantity: 1 });
             return usage.configured ? `${usage.credits}积分${slug === "video" ? "起" : ""}` : "待配置";
         }
-        if (slug === "prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
+        if (slug === "prompts" || slug === "my-prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
         if (slug === "admin") return "管理员";
         if (slug === "team") return "本组";
         return undefined;

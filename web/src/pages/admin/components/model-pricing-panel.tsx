@@ -98,6 +98,7 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
         modelForm.setFieldsValue({
             providerId: model.providerId,
             workflowConfigId: model.workflowConfigId,
+            replacementModelConfigId: model.replacementModelConfigId ?? null,
             name: model.name,
             modelId: model.modelId,
             capabilities: model.capabilities,
@@ -207,6 +208,9 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                     </Form.Item>
                     <Form.Item name="workflowConfigId" label="工作流（可选）">
                         <Select allowClear options={workflows.map((item) => ({ label: `${item.name} · ${item.protocol}`, value: item.id }))} />
+                    </Form.Item>
+                    <Form.Item name="replacementModelConfigId" label="停用后的替代模型">
+                        <Select allowClear placeholder="不自动替代，由设计师选择" options={models.filter((item) => item.id !== editingModelId).map((item) => ({ label: `${item.name} · ${item.modelId}`, value: item.id }))} />
                     </Form.Item>
                     <Form.Item name="name" label="显示名称" rules={[{ required: true }]}>
                         <Input />

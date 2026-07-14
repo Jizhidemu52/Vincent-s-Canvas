@@ -1,126 +1,68 @@
-import { FolderPlus, Search } from "lucide-react";
-import { type UIEvent, useEffect, useState } from "react";
-import { App, Button, Empty, Input, Spin, Tag } from "antd";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { App, Button, Empty, Input, Modal, Segmented, Spin, Tag } from "antd";
+import { Check, Plus, Search, X } from "lucide-react";
 
-import { PromptCard } from "@/components/prompts/prompt-card";
-import { usePromptList } from "@/components/prompts/use-prompt-list";
-import { PromptDetailDialog } from "./components/prompt-detail-dialog";
-import { useCopyText } from "@/hooks/use-copy-text";
-import { cn } from "@/lib/utils";
-import { useAssetStore } from "@/stores/use-asset-store";
-import { ALL_PROMPTS_OPTION, type Prompt } from "@/services/api/prompts";
+import { PromptTemplateCard } from "@/components/prompts/prompt-template-card";
+import { PromptTemplateEditor } from "@/components/prompts/prompt-template-editor";
+import {
+    archiveSharedPrompt, copyPromptTemplate, createPublicPrompt, listPromptSubmissions, listPromptTemplates,
+    promotePromptPublic, promptDestination, resolvePromptReuse, reviewPromptSubmission, setPromptFavorite, updatePublicPrompt,
+    type PromptSnapshotInput, type PromptSubmission, type PromptTemplate,
+} from "@/services/api/prompts";
+import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 
 export default function PromptsPage() {
-    const { message } = App.useApp();
-    const [titleKeyword, setTitleKeyword] = useState("");
-    const [selectedTags, setSelectedTags] = useState<string[]>([]);
-    const [selectedCategory, setSelectedCategory] = useState(ALL_PROMPTS_OPTION);
-    const [selectedPrompt, setSelectedPrompt] = useState<Prompt | null>(null);
-    const addAsset = useAssetStore((state) => state.addAsset);
-    const copyText = useCopyText();
-    const { query, items: promptItems, tags: promptTags, categories: promptCategoryOptions, total: totalPrompts } = usePromptList({ keyword: titleKeyword, tags: selectedTags, category: selectedCategory });
+    const { message, modal } = App.useApp(); const navigate = useNavigate();
+    const user = useUserStore((state) => state.user);
+    const [scope, setScope] = useState<"team" | "public">(user?.groupId ? "team" : "public");
+    const [items, setItems] = useState<PromptTemplate[]>([]); const [submissions, setSubmissions] = useState<PromptSubmission[]>([]);
+    const [query, setQuery] = useState(""); const [loading, setLoading] = useState(true);
+    const [editorOpen, setEditorOpen] = useState(false); const [editing, setEditing] = useState<PromptTemplate | null>(null);
+    const canReview = user?.groupRole === "leader" || isAdminRole(user?.role); const isSuper = user?.role === "super_admin";
 
-    useEffect(() => {
-        if (query.isError) {
-            message.error(query.error instanceof Error ? query.error.message : "获取提示词失败");
-        }
-    }, [message, query.error, query.isError]);
+    const load = useCallback(async () => {
+        setLoading(true);
+        try {
+            const [templates, queue] = await Promise.all([listPromptTemplates({ scope, query, pageSize: 100 }), canReview ? listPromptSubmissions() : Promise.resolve({ submissions: [] })]);
+            setItems(templates.templates); setSubmissions(queue.submissions.filter((item) => item.status === "pending"));
+        } catch (error) { message.error(error instanceof Error ? error.message : "加载提示词库失败"); }
+        finally { setLoading(false); }
+    }, [canReview, message, query, scope]);
+    useEffect(() => { const timer = window.setTimeout(() => void load(), 250); return () => window.clearTimeout(timer); }, [load]);
 
-    const toggleTag = (tag: string) => {
-        if (tag === ALL_PROMPTS_OPTION) return setSelectedTags([]);
-        setSelectedTags((items) => (items.includes(tag) ? items.filter((item) => item !== tag) : [...items, tag]));
+    const reuse = async (item: PromptTemplate, mode: "fill" | "fill_and_generate") => {
+        try { const result = await resolvePromptReuse(item.id, mode); if (result.pricing.modelChanged) message.warning(result.pricing.selectedModel ? `模型已变更，当前使用 ${result.pricing.selectedModel.name}` : "模型已变更，请在目标页选择替代模型"); navigate(promptDestination(item.targetTool, result.reuseToken)); }
+        catch (error) { message.error(error instanceof Error ? error.message : "复用失败"); }
     };
-
-    const savePromptAsset = (item: Prompt) => {
-        addAsset({ kind: "text", title: item.title, coverUrl: item.coverUrl, tags: item.tags, source: item.category, data: { content: item.prompt }, metadata: { source: "prompt-library", promptId: item.id } });
-        message.success("已加入我的素材");
-    };
-
-    const handleListScroll = (event: UIEvent<HTMLDivElement>) => {
-        const target = event.currentTarget;
-        if (query.hasNextPage && !query.isFetchingNextPage && target.scrollTop + target.clientHeight >= target.scrollHeight - 160) {
-            void query.fetchNextPage();
-        }
-    };
+    const savePublic = async (input: PromptSnapshotInput) => { if (editing) await updatePublicPrompt(editing.id, input); else await createPublicPrompt(input); message.success(editing ? "公共模板已生成新版本" : "公共模板已发布"); setEditorOpen(false); setEditing(null); await load(); };
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-background text-stone-800 dark:text-stone-100">
-            <main
-                className="min-h-0 flex-1 overflow-y-auto bg-background bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] px-6 py-8 [background-size:16px_16px] dark:bg-[radial-gradient(rgba(245,245,244,.16)_1px,transparent_1px)]"
-                onScroll={handleListScroll}
-            >
-                <div className="pb-8">
-                    <div className="mx-auto max-w-5xl text-center">
-                        <h1 className="text-4xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">提示词中心</h1>
-                        <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">共 {totalPrompts} 条提示词，按标题、标签与分类快速查找灵感。</p>
-                    </div>
-                    {query.isLoading ? (
-                        <div className="flex h-60 items-center justify-center">
-                            <Spin />
-                        </div>
-                    ) : null}
-                    {!query.isLoading ? (
-                        <>
-                            <div className="mx-auto mt-8 w-full max-w-2xl">
-                                <Input size="large" className="w-full" prefix={<Search className="size-4 text-stone-400" />} value={titleKeyword} placeholder="按标题查询" onChange={(event) => setTitleKeyword(event.target.value)} />
-                            </div>
-                            <div className="mx-auto mt-6 grid max-w-6xl gap-3 text-left">
-                                <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-start">
-                                    <div className="pt-2 text-xs font-medium text-stone-500 dark:text-stone-400">分类</div>
-                                    <div className="flex flex-wrap gap-2">
-                                        {promptCategoryOptions.map((category) => (
-                                            <Tag.CheckableTag key={category} checked={selectedCategory === category} className={cn("prompt-filter-tag", selectedCategory === category && "is-active")} onChange={() => setSelectedCategory(category)}>
-                                                {category}
-                                            </Tag.CheckableTag>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-start">
-                                    <div className="pt-2 text-xs font-medium text-stone-500 dark:text-stone-400">标签</div>
-                                    <div className="flex flex-wrap gap-2">
-                                        {promptTags.map((tag) => (
-                                            <Tag.CheckableTag
-                                                key={tag}
-                                                checked={tag === ALL_PROMPTS_OPTION ? selectedTags.length === 0 : selectedTags.includes(tag)}
-                                                className={cn("prompt-filter-tag", (tag === ALL_PROMPTS_OPTION ? selectedTags.length === 0 : selectedTags.includes(tag)) && "is-active")}
-                                                onChange={() => toggleTag(tag)}
-                                            >
-                                                {tag}
-                                            </Tag.CheckableTag>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </>
-                    ) : null}
-                </div>
-
-                {!query.isLoading ? (
-                    <div>
-                        <div className="mx-auto grid max-w-7xl gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                            {promptItems.map((item) => (
-                                <PromptCard
-                                    key={item.id}
-                                    item={item}
-                                    onOpen={() => setSelectedPrompt(item)}
-                                    onCopy={() => copyText(item.prompt, "提示词已复制")}
-                                    extraAction={
-                                        <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => savePromptAsset(item)}>
-                                            加入我的素材
-                                        </Button>
-                                    }
-                                />
-                            ))}
-                        </div>
-                        {promptItems.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有找到匹配的提示词" className="py-16" /> : null}
-                        <div className="mx-auto mt-6 max-w-7xl text-center text-xs text-stone-500 dark:text-stone-400">
-                            {query.isFetchingNextPage ? "加载中..." : query.hasNextPage ? "继续向下滚动加载更多" : promptItems.length > 0 ? "已经到底了" : null}
-                        </div>
-                    </div>
+        <main className="h-full overflow-y-auto bg-[#f6f6f4] px-5 py-8 text-stone-950 dark:bg-stone-950 dark:text-white">
+            <div className="mx-auto max-w-7xl">
+                <header className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-6 dark:border-stone-800">
+                    <div><p className="text-xs font-semibold text-orange-600">共享经验</p><h1 className="mt-2 text-3xl font-semibold">提示词库</h1><p className="mt-2 text-sm text-stone-500">团队内容经过组内审核，公共内容由管理员统一维护。</p></div>
+                    {isSuper && scope === "public" ? <Button type="primary" icon={<Plus className="size-4" />} onClick={() => { setEditing(null); setEditorOpen(true); }}>新建公共模板</Button> : null}
+                </header>
+                <section className="my-6 flex flex-wrap items-center gap-3">
+                    <Segmented value={scope} onChange={(value) => setScope(value as "team" | "public")} options={[...(user?.groupId || isAdminRole(user?.role) ? [{ value: "team", label: "团队提示词" }] : []), { value: "public", label: "公共提示词库" }]} />
+                    <Input className="max-w-md" allowClear prefix={<Search className="size-4 text-stone-400" />} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、完整提示词或分类" />
+                    <span className="ml-auto text-xs text-stone-500">共 {items.length} 个已发布模板</span>
+                </section>
+                {canReview && scope === "team" && submissions.length ? (
+                    <section className="mb-7 border-y border-orange-200 bg-orange-50/70 py-4 dark:border-orange-900 dark:bg-orange-950/20">
+                        <div className="mb-3 flex items-center gap-2 px-4"><h2 className="text-sm font-semibold">待审核模板</h2><Tag color="orange">{submissions.length}</Tag></div>
+                        <div className="grid gap-3 px-4 md:grid-cols-2">{submissions.map((item) => <div key={item.id} className="rounded-lg border border-orange-200 bg-white p-4 dark:border-orange-900 dark:bg-stone-950"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold">{item.title}</h3><p className="mt-1 text-xs text-stone-500">提交人：{item.submitterName}</p></div><div className="flex gap-1"><Button size="small" type="primary" icon={<Check className="size-3.5" />} onClick={() => modal.confirm({ title: "通过并发布到本组？", content: "将形成独立团队版本，个人后续修改不会覆盖它。", onOk: async () => { await reviewPromptSubmission(item.id, "approve", "审核通过"); message.success("团队模板已发布"); await load(); } })}>通过</Button><Button size="small" danger icon={<X className="size-3.5" />} onClick={() => openReject(item, modal, message, load)}>驳回</Button></div></div><p className="mt-3 line-clamp-2 text-xs leading-5 text-stone-600 dark:text-stone-300">{item.prompt}</p></div>)}</div>
+                    </section>
                 ) : null}
-            </main>
-
-            <PromptDetailDialog prompt={selectedPrompt} onClose={() => setSelectedPrompt(null)} onCopy={(prompt) => copyText(prompt, "提示词已复制")} onSaveAsset={savePromptAsset} />
-        </div>
+                {loading ? <div className="flex min-h-80 items-center justify-center"><Spin /></div> : items.length ? <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{items.map((item) => <PromptTemplateCard key={item.id} item={item} editable={isSuper && item.scope === "public"} onReuse={(mode) => void reuse(item, mode)} onCopy={async () => { await copyPromptTemplate(item.id); message.success("已复制到我的提示词"); }} onFavorite={async () => { await setPromptFavorite(item.id, !item.favorite); await load(); }} onEdit={isSuper && item.scope === "public" ? () => { setEditing(item); setEditorOpen(true); } : undefined} onPromote={isSuper && item.scope === "team" ? async () => { await promotePromptPublic(item.id); message.success("已发布到公共提示词库"); } : undefined} onArchive={isAdminRole(user?.role) ? () => modal.confirm({ title: "下架这个共享模板？", onOk: async () => { await archiveSharedPrompt(item.id); message.success("模板已下架"); await load(); } }) : undefined} />)}</section> : <Empty className="py-24" description={scope === "team" ? "本组暂无已发布模板" : "暂无公共模板"} />}
+            </div>
+            <PromptTemplateEditor open={editorOpen} initial={editing} title={editing ? "编辑公共模板" : "新建公共模板"} onCancel={() => { setEditorOpen(false); setEditing(null); }} onSubmit={savePublic} />
+        </main>
     );
+}
+
+function openReject(item: PromptSubmission, modal: ReturnType<typeof App.useApp>["modal"], message: ReturnType<typeof App.useApp>["message"], reload: () => Promise<void>) {
+    let note = "";
+    modal.confirm({ title: `驳回“${item.title}”`, content: <Input.TextArea rows={4} maxLength={1_000} placeholder="填写修改建议" onChange={(event) => { note = event.target.value; }} />, okText: "确认驳回", okButtonProps: { danger: true }, onOk: async () => { await reviewPromptSubmission(item.id, "reject", note); message.success("已驳回并保留审核意见"); await reload(); } });
 }

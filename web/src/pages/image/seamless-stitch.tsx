@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { App, Button, Empty, Image, Segmented, Tag } from "antd";
 import { ClipboardPaste, Download, FolderPlus, Grid2x2, ImagePlus, LoaderCircle, RotateCcw, Upload } from "lucide-react";
 import { saveAs } from "file-saver";
@@ -7,6 +7,8 @@ import { useSearchParams } from "react-router-dom";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { requestSeamlessStitch } from "@/services/api/internal-ai";
+import { fetchServerAssetContent } from "@/services/api/server-assets";
+import { hydratePromptReuse } from "@/services/api/prompts";
 import { uploadImage, type UploadedImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -19,9 +21,11 @@ const MULTIPLIER_OPTIONS = [2, 4, 6, 8];
 type StitchResult = { status: "idle" } | { status: "pending" } | { status: "failed"; error: string } | { status: "success"; image: UploadedImage; durationMs: number };
 
 export function SeamlessStitchPage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const loadedReuseTokenRef = useRef(new Set<string>());
+    const runStitchRef = useRef<() => Promise<void>>(async () => undefined);
     const user = useUserStore((state) => state.user);
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -134,6 +138,29 @@ export function SeamlessStitchPage() {
             setRunning(false);
         }
     };
+    runStitchRef.current = runStitch;
+
+    useEffect(() => {
+        const token = searchParams.get("reuseToken");
+        if (!token || loadedReuseTokenRef.current.has(token)) return;
+        loadedReuseTokenRef.current.add(token);
+        void hydratePromptReuse(token).then(async (payload) => {
+            const parameters = payload.template.parameters;
+            if (typeof parameters.rows === "number" && MULTIPLIER_OPTIONS.includes(parameters.rows)) setRows(parameters.rows);
+            if (typeof parameters.cols === "number" && MULTIPLIER_OPTIONS.includes(parameters.cols)) setCols(parameters.cols);
+            const firstAssetId = payload.template.referenceAssetIds[0];
+            if (firstAssetId) await setSourceFromBlob(await fetchServerAssetContent(firstAssetId), "模板参考图.png");
+            payload.warnings.forEach((warning) => message.warning(warning));
+            const cost = payload.pricing.estimate?.totalCredits ?? estimatedUsage.credits;
+            if (payload.mode === "fill_and_generate") {
+                if (!firstAssetId) message.info("模板参数已填入，请先选择一张图片后再生成。");
+                else modal.confirm({ title: "确认开始无缝拼接？", content: `当前实际消耗 ${cost} 积分。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => runStitchRef.current() });
+            } else message.success(`模板已填入，当前消耗 ${cost} 积分/次`);
+        }).catch((error) => {
+            loadedReuseTokenRef.current.delete(token);
+            message.error(error instanceof Error ? error.message : "模板复用失败");
+        });
+    }, [estimatedUsage.credits, message, modal, searchParams]);
 
     return (
         <div className="flex h-full min-h-0 flex-col overflow-hidden bg-stone-50 text-stone-950 dark:bg-stone-950 dark:text-stone-100">

@@ -8,6 +8,8 @@ import { requestBatchEdit, requestEdit, requestGeneration, requestImageQuestion 
 import { controlQueuedBatch, type QueuedBatchAction } from "@/services/api/generation-tasks";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
+import { fetchServerAssetContent } from "@/services/api/server-assets";
+import { hydratePromptReuse } from "@/services/api/prompts";
 import { defaultConfig, modelOptionName, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
@@ -380,6 +382,8 @@ function WirelessCanvasPage() {
     const agentCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
+    const loadedReuseTokenRef = useRef(new Set<string>());
+    const quickGenerateRef = useRef<() => Promise<void>>(async () => undefined);
 
     useEffect(() => {
         setQuickGenerateModel((current) => current || effectiveConfig.imageModel || effectiveConfig.model);
@@ -2273,6 +2277,45 @@ function WirelessCanvasPage() {
         startGenerationRequest,
         user,
     ]);
+    quickGenerateRef.current = runQuickCanvasGeneration;
+
+    useEffect(() => {
+        const token = searchParams.get("reuseToken");
+        if (!projectLoaded || !token || loadedReuseTokenRef.current.has(token)) return;
+        loadedReuseTokenRef.current.add(token);
+        void hydratePromptReuse(token).then(async (payload) => {
+            const parameters = payload.template.parameters;
+            const isBatch = payload.template.targetTool === "batch-edit" || searchParams.get("promptTool") === "batch-edit";
+            if (isBatch) {
+                setBatchEditPrompt(payload.template.prompt);
+                setBatchEditOpen(true);
+            } else {
+                setQuickGeneratePrompt(payload.template.prompt);
+                if (payload.pricing.selectedModel?.modelId) setQuickGenerateModel(payload.pricing.selectedModel.modelId);
+                if (typeof parameters.size === "string") setQuickGenerateSize(parameters.size);
+                const quantity = typeof parameters.quantity === "number" ? parameters.quantity : typeof parameters.count === "number" ? parameters.count : 1;
+                setQuickGenerateCount(Math.min(4, Math.max(1, quantity)));
+                const nextReferences = await Promise.all(payload.template.referenceAssetIds.map(async (assetId) => {
+                    const blob = await fetchServerAssetContent(assetId);
+                    const image = await uploadImage(blob);
+                    return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
+                }));
+                setQuickGenerateReferences(nextReferences);
+                setQuickGenerateOpen(true);
+            }
+            payload.warnings.forEach((warning) => message.warning(warning));
+            if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请选择管理员当前启用的模型");
+            const cost = payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准";
+            if (payload.mode === "fill_and_generate" && !isBatch) {
+                modal.confirm({ title: "确认在画布生成？", content: `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => quickGenerateRef.current() });
+            } else if (payload.mode === "fill_and_generate" && isBatch) {
+                message.info(`模板已填入，当前预计 ${cost}。请先选择文件夹，再确认批量生成。`);
+            } else message.success(`模板已填入，当前预计 ${cost}`);
+        }).catch((error) => {
+            loadedReuseTokenRef.current.delete(token);
+            message.error(error instanceof Error ? error.message : "模板复用失败");
+        });
+    }, [message, modal, projectLoaded, searchParams]);
 
     const applyBatchEditFiles = useCallback((files: FileList | File[] | null) => {
         const imageFiles = Array.from(files || [])

@@ -1,4 +1,81 @@
-import localforage from "localforage";
+export const ALL_PROMPTS_OPTION = "全部";
+
+export type PromptScope = "personal" | "team" | "public";
+export type PromptTargetTool = "image-generation" | "detail-enhance" | "image-edit" | "angle-control" | "batch-edit" | "seamless-stitch" | "video" | "canvas";
+export const promptTargetLabels: Record<PromptTargetTool, string> = {
+    "image-generation": "文生图", "detail-enhance": "细节增强", "image-edit": "图片编辑", "angle-control": "角度控制",
+    "batch-edit": "批量改图", "seamless-stitch": "无缝拼接", video: "视频创作", canvas: "无线画布",
+};
+export type PromptTemplate = {
+    id: string;
+    scope: PromptScope;
+    ownerUserId: string | null;
+    groupId: string | null;
+    departmentId: string | null;
+    currentVersionId: string;
+    version: number;
+    title: string;
+    prompt: string;
+    targetTool: PromptTargetTool;
+    modelConfigId: string | null;
+    modelSnapshot: { id?: string; name?: string; modelId?: string; capabilities?: string[] };
+    parameters: Record<string, unknown>;
+    referenceAssetIds: string[];
+    category: string;
+    tags: string[];
+    notes: string;
+    sourceTaskId: string | null;
+    sourceAssetId: string | null;
+    favorite: boolean;
+    useCount: number;
+    lastUsedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type PromptSnapshotInput = Pick<PromptTemplate, "title" | "prompt" | "targetTool" | "parameters" | "referenceAssetIds" | "category" | "tags" | "notes"> & {
+    modelConfigId?: string | null;
+    sourceTaskId?: string | null;
+    sourceAssetId?: string | null;
+};
+
+export type PromptSubmission = {
+    id: string;
+    status: "pending" | "approved" | "rejected" | "withdrawn";
+    reviewNote: string;
+    createdAt: string;
+    reviewedAt: string | null;
+    sourceTemplateId: string;
+    sourceVersionId: string;
+    targetGroupId: string;
+    submitterName: string;
+    title: string;
+    prompt: string;
+};
+
+export type PromptPriceEstimate = {
+    operationType: string;
+    totalCredits: number;
+    totalRmb: number;
+    quantity: number;
+    priceVersion: number;
+};
+
+export type PromptPricingResolution = {
+    operationType: string;
+    modelChanged: boolean;
+    reason: string | null;
+    selectedModel: { id: string; name: string; modelId: string } | null;
+    estimate: PromptPriceEstimate | null;
+    alternatives: Array<{ model: { id: string; name: string; modelId: string }; estimate: PromptPriceEstimate }>;
+};
+
+export type PromptReusePayload = {
+    template: PromptTemplate;
+    mode: "fill" | "fill_and_generate";
+    pricing: PromptPricingResolution;
+    warnings: string[];
+};
 
 export type Prompt = {
     id: string;
@@ -10,230 +87,93 @@ export type Prompt = {
     preview: string;
     createdAt: string;
     updatedAt: string;
+    targetTool: PromptTargetTool;
+    modelId: string;
 };
 
-type PromptCategory = {
-    category: string;
-    build: () => Promise<Omit<Prompt, "category">[]>;
-};
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+    const headers = new Headers(init?.headers);
+    if (init?.body && !headers.has("content-type")) headers.set("content-type", "application/json");
+    const response = await fetch(path, { ...init, headers, credentials: "include" });
+    if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(payload.message || `提示词请求失败（${response.status}）`);
+    }
+    return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
+}
 
-export const ALL_PROMPTS_OPTION = "全部";
+export function listPromptTemplates(input: { scope: PromptScope; query?: string; category?: string; tag?: string; favorite?: boolean; sort?: "updated" | "recent" | "used"; page?: number; pageSize?: number } ) {
+    const params = new URLSearchParams({ scope: input.scope, page: String(input.page ?? 1), pageSize: String(input.pageSize ?? 24) });
+    if (input.query) params.set("query", input.query);
+    if (input.category) params.set("category", input.category);
+    if (input.tag) params.set("tag", input.tag);
+    if (input.favorite !== undefined) params.set("favorite", String(input.favorite));
+    if (input.sort) params.set("sort", input.sort);
+    return request<{ templates: PromptTemplate[]; total: number; page: number; pageSize: number }>(`/api/prompt-templates?${params}`);
+}
 
-export type PromptListResponse = {
-    items: Prompt[];
-    tags: string[];
-    categories: string[];
-    total: number;
-};
+export const createPromptTemplate = (input: PromptSnapshotInput) => request<{ template: { id: string; currentVersionId: string } }>("/api/prompt-templates", { method: "POST", body: JSON.stringify(input) });
+export const updatePromptTemplate = (id: string, input: PromptSnapshotInput) => request<{ template: PromptTemplate }>(`/api/prompt-templates/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+export const copyPromptTemplate = (id: string) => request<{ template: PromptTemplate }>(`/api/prompt-templates/${id}/copy`, { method: "POST" });
+export const deletePromptTemplate = (id: string) => request<void>(`/api/prompt-templates/${id}`, { method: "DELETE" });
+export const setPromptFavorite = (id: string, favorite: boolean) => request<{ favorite: boolean }>(`/api/prompt-templates/${id}/favorite`, { method: "PUT", body: JSON.stringify({ favorite }) });
+export const savePromptFromTask = (taskId: string) => request<{ template: PromptTemplate }>(`/api/prompt-templates/from-task/${taskId}`, { method: "POST" });
+export const savePromptFromAsset = (assetId: string) => request<{ template: PromptTemplate }>(`/api/prompt-templates/from-asset/${assetId}`, { method: "POST" });
+export const submitPromptToTeam = (id: string, requestId = crypto.randomUUID()) => request<{ submission: PromptSubmission & { duplicate: boolean } }>(`/api/prompt-templates/${id}/submit`, { method: "POST", body: JSON.stringify({ requestId: `prompt-submit:${requestId}` }) });
+export const listPromptSubmissions = () => request<{ submissions: PromptSubmission[] }>("/api/prompt-templates/review/submissions");
+export const reviewPromptSubmission = (id: string, decision: "approve" | "reject", note = "") => request<{ submission: PromptSubmission }>(`/api/prompt-templates/review/submissions/${id}`, { method: "POST", body: JSON.stringify({ decision, note }) });
+export const promotePromptPublic = (id: string, requestId = crypto.randomUUID()) => request<{ publication: { templateId: string; versionId: string; duplicate: boolean } }>(`/api/prompt-templates/${id}/promote-public`, { method: "POST", body: JSON.stringify({ requestId: `prompt-public:${requestId}` }) });
+export const createPublicPrompt = (input: PromptSnapshotInput) => request<{ template: PromptTemplate }>("/api/admin/prompt-templates/public", { method: "POST", body: JSON.stringify(input) });
+export const updatePublicPrompt = (id: string, input: PromptSnapshotInput) => request<{ template: PromptTemplate }>(`/api/admin/prompt-templates/public/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+export const archiveSharedPrompt = (id: string) => request<{ status: string }>(`/api/admin/prompt-templates/${id}/archive`, { method: "POST" });
 
-const awesomeGptImageRawBase = "https://raw.githubusercontent.com/ZeroLu/awesome-gpt-image/main";
-const awesomeGpt4oImagePromptsBase = "https://raw.githubusercontent.com/ImgEdify/Awesome-GPT4o-Image-Prompts/main";
-const youMindGptImage2RawBase = "https://raw.githubusercontent.com/YouMind-OpenLab/awesome-gpt-image-2/main";
-const youMindNanoBananaProRawBase = "https://raw.githubusercontent.com/YouMind-OpenLab/awesome-nano-banana-pro-prompts/main";
-const davidWuGptImage2RawBase = "https://raw.githubusercontent.com/davidwuw0811-boop/awesome-gpt-image2-prompts/main";
-const cacheTtlMs = 1000 * 60 * 60;
-const promptCacheKey = "third-party-prompts";
-const promptCacheStore = localforage.createInstance({ name: "wireless-canvas", storeName: "prompt_cache" });
-
-const categories: PromptCategory[] = [
-    { category: "awesome-gpt-image", build: buildAwesomeGptImagePrompts },
-    { category: "awesome-gpt4o-image-prompts", build: buildAwesomeGpt4oImagePrompts },
-    { category: "youmind-gpt-image-2", build: () => buildYouMindPrompts(youMindGptImage2RawBase, "youmind-gpt-image-2", "gpt-image-2") },
-    { category: "youmind-nano-banana-pro", build: () => buildYouMindPrompts(youMindNanoBananaProRawBase, "youmind-nano-banana-pro", "nano-banana-pro") },
-    { category: "davidwu-gpt-image2-prompts", build: buildDavidWuGptImage2Prompts },
-];
-
-let loadingPrompts: Promise<Prompt[]> | null = null;
+export const resolvePromptReuse = (id: string, mode: "fill" | "fill_and_generate", requestId = crypto.randomUUID()) =>
+    request<{ reuseToken: string; expiresInSeconds: number; mode: "fill" | "fill_and_generate"; pricing: PromptPricingResolution }>(`/api/prompt-templates/${id}/resolve`, { method: "POST", body: JSON.stringify({ mode, requestId: `prompt-reuse:${requestId}` }) });
+export const hydratePromptReuse = (token: string) => request<PromptReusePayload>(`/api/prompt-templates/reuse/${encodeURIComponent(token)}`);
 
 export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROMPTS_OPTION, page = 1, pageSize = 20 }: { keyword?: string; tag?: string[]; category?: string; page?: number; pageSize?: number } = {}) {
-    const items = await getPrompts();
-    const normalizedKeyword = keyword.trim().toLowerCase();
-    const normalizedPage = Math.max(1, page);
-    const normalizedPageSize = Math.max(1, Math.min(100, pageSize));
-    const withoutTagFilter = filterPrompts(items, { keyword: normalizedKeyword, category, tags: [] });
-    const filtered = filterPrompts(items, { keyword: normalizedKeyword, category, tags: tag });
-
+    const activeCategory = category && category !== ALL_PROMPTS_OPTION ? category : undefined;
+    const [team, publicItems] = await Promise.all([
+        listPromptTemplates({ scope: "team", query: keyword, category: activeCategory, tag: tag[0], page: 1, pageSize: 100 }),
+        listPromptTemplates({ scope: "public", query: keyword, category: activeCategory, tag: tag[0], page: 1, pageSize: 100 }),
+    ]);
+    const templates = [...team.templates, ...publicItems.templates];
+    const items = templates.map(toLegacyPrompt);
+    const start = (Math.max(1, page) - 1) * pageSize;
     return {
-        items: filtered.slice((normalizedPage - 1) * normalizedPageSize, normalizedPage * normalizedPageSize),
-        tags: collectTags(withoutTagFilter),
-        categories: categories.map((item) => item.category),
-        total: filtered.length,
+        items: items.slice(start, start + pageSize),
+        tags: Array.from(new Set(templates.flatMap((item) => item.tags))),
+        categories: Array.from(new Set(templates.map((item) => item.category).filter(Boolean))),
+        total: items.length,
     };
 }
 
-async function getPrompts() {
-    const cached = await promptCacheStore.getItem<{ items?: Prompt[]; fetchedAt?: number }>(promptCacheKey);
-    if (cached?.items?.length && cached.fetchedAt && Date.now() - cached.fetchedAt < cacheTtlMs) return cached.items;
-    if (loadingPrompts) return loadingPrompts;
-    loadingPrompts = loadPrompts().finally(() => {
-        loadingPrompts = null;
-    });
-    return loadingPrompts;
+function toLegacyPrompt(template: PromptTemplate): Prompt {
+    return {
+        id: template.id,
+        title: template.title,
+        coverUrl: "",
+        prompt: template.prompt,
+        tags: template.tags,
+        category: template.category || (template.scope === "team" ? "团队提示词" : "公共提示词"),
+        preview: template.notes,
+        createdAt: template.createdAt,
+        updatedAt: template.updatedAt,
+        targetTool: template.targetTool,
+        modelId: template.modelSnapshot.modelId || "",
+    };
 }
 
-async function loadPrompts() {
-    const settled = await Promise.all(
-        categories.map(async (category) => {
-            try {
-                const items = await category.build();
-                return items.map((item) => ({ ...item, category: category.category }));
-            } catch {
-                return [];
-            }
-        }),
-    );
-    const items = settled.flat();
-    await promptCacheStore.setItem(promptCacheKey, { items, fetchedAt: Date.now() });
-    return items;
-}
-
-function filterPrompts(items: Prompt[], options: { keyword: string; category: string; tags: string[] }) {
-    return items.filter((item) => {
-        if (isActiveOption(options.category) && item.category !== options.category) return false;
-        if (options.tags.length && !options.tags.some((tag) => item.tags.includes(tag))) return false;
-        if (!options.keyword) return true;
-        return [item.title, item.prompt, item.category, ...item.tags].join(" ").toLowerCase().includes(options.keyword);
-    });
-}
-
-async function buildAwesomeGptImagePrompts() {
-    const markdown = await fetchText(awesomeGptImageRawBase, "README.zh-CN.md");
-    const items: Omit<Prompt, "category">[] = [];
-    for (const section of splitBeforeHeading(markdown, "## ")) {
-        const tags = tagsFromHeading(firstMatch(section, /^##\s+(.+)$/m));
-        for (const block of splitBeforeHeading(section, "### ")) {
-            const title = firstMatch(block, /^###\s+(.+)$/m).replace(/\[([^\]]+)]\([^)]+\)/g, "$1").trim();
-            const prompt = firstMatch(block, /\*\*提示词:\*\*\s*\r?\n\s*```[\w-]*\r?\n(.*?)\r?\n```/s).trim();
-            if (!title || !prompt) continue;
-            const images = extractMarkdownImages(awesomeGptImageRawBase, block);
-            items.push(defaultPrompt(`awesome-gpt-image-${leftPad(items.length + 1)}`, title, prompt, images[0] || "", tags, markdownPreview(images)));
-        }
+export function promptDestination(targetTool: PromptTargetTool, reuseToken: string) {
+    const params = new URLSearchParams({ reuseToken });
+    if (targetTool === "video") return `/video?${params}`;
+    if (targetTool === "canvas" || targetTool === "batch-edit") {
+        params.set("mode", "new");
+        params.set("promptTool", targetTool);
+        return `/canvas?${params}`;
     }
-    return items;
-}
-
-async function buildAwesomeGpt4oImagePrompts() {
-    const markdown = await fetchText(awesomeGpt4oImagePromptsBase, "README.zh-CN.md");
-    const items: Omit<Prompt, "category">[] = [];
-    for (const block of splitBeforeHeading(markdown, "### ")) {
-        const title = firstMatch(block, /^###\s+(.+)$/m).trim();
-        const prompt = firstMatch(block, /- \*\*提示词文本：\*\*\s*`(.*?)`/s).trim();
-        if (!title || !prompt) continue;
-        const images = extractMarkdownImages(awesomeGpt4oImagePromptsBase, block);
-        items.push(defaultPrompt(`awesome-gpt4o-image-prompts-${leftPad(items.length + 1)}`, title, prompt, images[0] || "", ["gpt4o"], markdownPreview(images)));
-    }
-    return items;
-}
-
-async function buildYouMindPrompts(baseUrl: string, idPrefix: string, modelTag: string) {
-    const markdown = await fetchText(baseUrl, "README_zh.md");
-    const items: Omit<Prompt, "category">[] = [];
-    for (const block of splitBeforeHeading(markdown, "### ")) {
-        const title = firstMatch(block, /^###\s+No\.\s*\d+:\s*(.+)$/m).trim();
-        const prompt = firstMatch(block, /#### .*?提示词\s*\r?\n\s*```[\w-]*\r?\n(.*?)\r?\n```/s).trim();
-        if (!title || !prompt) continue;
-        const images = extractMarkdownImages(baseUrl, block);
-        items.push(defaultPrompt(`${idPrefix}-${leftPad(items.length + 1)}`, title, prompt, images[0] || "", youMindTags(title, modelTag), markdownPreview(images)));
-    }
-    return items;
-}
-
-async function buildDavidWuGptImage2Prompts() {
-    const data = await fetchJson<Array<{ id?: number; title_en?: string; title_cn?: string; category?: string; category_cn?: string; prompt?: string; note?: string; author?: string; source?: string; needs_ref?: boolean; image?: string }>>(davidWuGptImage2RawBase, "prompts.json");
-    return data
-        .map((item, index) => {
-            const title = (item.title_cn || item.title_en || "").trim();
-            const prompt = (item.prompt || "").trim();
-            if (!title || !prompt) return null;
-            const image = absoluteImage(davidWuGptImage2RawBase, item.image || "");
-            const preview = [item.title_en, item.note, image ? `![](${image})` : ""].filter(Boolean).join("\n\n");
-            return defaultPrompt(`davidwu-gpt-image2-prompts-${leftPad(item.id || index + 1)}`, title, prompt, image, davidWuTags(item), preview);
-        })
-        .filter((item): item is Omit<Prompt, "category"> => Boolean(item));
-}
-
-function defaultPrompt(id: string, title: string, prompt: string, coverUrl: string, tags: string[], preview: string): Omit<Prompt, "category"> {
-    return { id, title, coverUrl, prompt, tags, preview, createdAt: "", updatedAt: "" };
-}
-
-async function fetchText(baseUrl: string, file: string) {
-    const response = await fetch(`${baseUrl}/${file}`, { cache: "no-store" });
-    if (!response.ok) throw new Error(`${file} 拉取失败`);
-    return response.text();
-}
-
-async function fetchJson<T>(baseUrl: string, file: string) {
-    return JSON.parse(await fetchText(baseUrl, file)) as T;
-}
-
-function splitBeforeHeading(markdown: string, prefix: string) {
-    const blocks: string[] = [];
-    let current: string[] = [];
-    for (const line of markdown.split("\n")) {
-        if (line.startsWith(prefix) && current.length) {
-            blocks.push(current.join("\n"));
-            current = [];
-        }
-        current.push(line);
-    }
-    blocks.push(current.join("\n"));
-    return blocks;
-}
-
-function firstMatch(value: string, pattern: RegExp) {
-    return pattern.exec(value)?.[1] || "";
-}
-
-function extractMarkdownImages(baseUrl: string, markdown: string) {
-    return Array.from(markdown.matchAll(/!\[[^\]]*]\(([^)]+)\)/g), (match) => absoluteImage(baseUrl, match[1])).filter(Boolean);
-}
-
-function absoluteImage(baseUrl: string, image: string) {
-    if (!image) return "";
-    if (/^https?:\/\//i.test(image)) return image;
-    return `${baseUrl}/${image.replace(/^\.?\//, "")}`;
-}
-
-function tagsFromCategory(category: string) {
-    return splitTags(category.replace(/\s+Cases$/i, ""), /\s*(?:&|and)\s*/);
-}
-
-function tagsFromHeading(heading: string) {
-    return splitTags(heading.replace(/[^\p{L}\p{N}/&、与 ]/gu, ""), /\s*(?:\/|&|、|与)\s*/);
-}
-
-function youMindTags(title: string, modelTag: string) {
-    const [, prefix] = title.match(/^(.+?) - /) || [];
-    return [modelTag, ...tagsFromHeading(prefix || "")];
-}
-
-function davidWuTags(item: { category_cn?: string; category?: string; author?: string; source?: string; needs_ref?: boolean }) {
-    const tags = splitTags([item.category_cn, item.category, item.author, item.source].filter(Boolean).join("/"), /\//);
-    if (item.needs_ref) tags.push("需要参考图");
-    return tags;
-}
-
-function splitTags(value: string, pattern: RegExp) {
-    return value
-        .split(pattern)
-        .map((tag) => tag.trim().toLowerCase())
-        .filter(Boolean);
-}
-
-function markdownPreview(images: string[]) {
-    return images.filter(Boolean).map((image) => `![](${image})`).join("\n\n");
-}
-
-function collectTags(items: Prompt[]) {
-    return Array.from(new Set(items.flatMap((item) => item.tags).filter(Boolean)));
-}
-
-function leftPad(value: number) {
-    return String(value).padStart(4, "0");
-}
-
-function isActiveOption(value: string) {
-    return value && value !== "全部" && value !== "all";
+    if (targetTool !== "image-generation") params.set("tool", targetTool);
+    return `/image?${params}`;
 }
 
 export function formatPromptDate(value: string) {
