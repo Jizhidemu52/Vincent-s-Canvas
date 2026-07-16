@@ -44,13 +44,31 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
     if (input.count === 1) {
         const result = await request<{ task: { id: string } }>("/api/tasks", {
             method: "POST",
-            body: JSON.stringify({ requestId: rootRequestId, projectId, operationType: input.operationType, modelConfigId: model.id, prompt: input.prompt, parameters: { ...input.parameters, ...(input.tool ? { tool: input.tool } : {}) }, sourceUrls, priority: "normal" }),
+            body: JSON.stringify({
+                requestId: rootRequestId,
+                projectId,
+                operationType: input.operationType,
+                modelConfigId: model.id,
+                prompt: input.prompt,
+                parameters: { ...input.parameters, count: input.count, ...(input.tool ? { tool: input.tool } : {}) },
+                sourceUrls,
+                priority: "normal",
+            }),
         });
         ids = [result.task.id];
     } else {
         const result = await request<{ tasks: Array<{ id: string }>; failures: Array<{ reason: string }> }>("/api/tasks/batch", {
             method: "POST",
-            body: JSON.stringify({ requestId: rootRequestId, projectId, operationType: input.operationType, modelConfigId: model.id, prompt: input.prompt, parameters: { ...input.parameters, ...(input.tool ? { tool: input.tool } : {}) }, priority: "normal", items: Array.from({ length: input.count }, () => ({ sourceUrls })) }),
+            body: JSON.stringify({
+                requestId: rootRequestId,
+                projectId,
+                operationType: input.operationType,
+                modelConfigId: model.id,
+                prompt: input.prompt,
+                parameters: { ...input.parameters, count: 1, ...(input.tool ? { tool: input.tool } : {}) },
+                priority: "normal",
+                items: Array.from({ length: input.count }, () => ({ sourceUrls })),
+            }),
         });
         if (result.failures.length && !result.tasks.length) throw new Error(result.failures[0]!.reason);
         ids = result.tasks.map((task) => task.id);

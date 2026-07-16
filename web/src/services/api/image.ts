@@ -38,6 +38,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         count,
         operationType: options?.operationType || "image_generation",
         tool: options?.tool,
+        parameters: imageTaskParameters(config),
         signal: options?.signal,
     });
 }
@@ -50,9 +51,30 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         count,
         operationType: options?.operationType || "inpaint",
         tool: options?.tool,
+        parameters: imageTaskParameters(config),
         references: [...references, ...(mask ? [mask] : [])],
         signal: options?.signal,
     });
+}
+
+export function imageTaskParameters(config: AiConfig) {
+    const value = String(config.size || "1:1").toLowerCase();
+    const resolution = value.includes("4k") || /(^|x)3840x2160$|^2160x3840$/.test(value) ? "4k" : value.includes("2k") || /^2048x/.test(value) || /x2048$/.test(value) ? "2k" : "1k";
+    const size =
+        value.includes("16:9") || /^1824x1024$|^2048x1152$|^3840x2160$/.test(value)
+            ? "16:9"
+            : value.includes("9:16") || /^1024x1824$|^1152x2048$|^2160x3840$/.test(value)
+              ? "9:16"
+              : value.includes("3:2") || /^1536x1024$/.test(value)
+                ? "3:2"
+                : value.includes("2:3") || /^1024x1536$/.test(value)
+                  ? "2:3"
+                  : value.includes("4:3") || /^1360x1024$/.test(value)
+                    ? "4:3"
+                    : value.includes("3:4") || /^1024x1360$/.test(value)
+                      ? "3:4"
+                      : "1:1";
+    return { size, resolution };
 }
 
 export async function requestBatchEdit(config: AiConfig, prompt: string, files: Array<{ file: File; title: string }>, options?: { signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {

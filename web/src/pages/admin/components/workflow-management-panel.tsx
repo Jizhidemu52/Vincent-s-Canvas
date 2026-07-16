@@ -1,6 +1,231 @@
-import { App,Button,Form,Input,InputNumber,Select,Switch,Table,Tag } from "antd";
-import { useEffect,useState } from "react";
-import { createServerWorkflow,listServerProviders,listServerWorkflows,updateServerWorkflow,type ServerProvider,type ServerWorkflow } from "@/services/api/model-configuration";
+import { App, Button, Form, Input, InputNumber, Select, Switch, Table, Tag } from "antd";
+import { useEffect, useState } from "react";
+import { createServerWorkflow, listServerProviders, listServerWorkflows, updateServerWorkflow, type ServerProvider, type ServerWorkflow } from "@/services/api/model-configuration";
 
-type Values={providerId:string;name:string;protocol:ServerWorkflow["protocol"];capability:ServerWorkflow["capability"];workflowId?:string;submitPath:string;statusPath?:string;externalTaskPath?:string;statusValuePath?:string;outputPath:string;requestTemplate:string;successValues:string[];failureValues:string[];pollIntervalMs:number;timeoutSeconds:number;enabled:boolean};
-export function WorkflowManagementPanel({isAdmin}:{isAdmin:boolean}){const{message}=App.useApp();const[form]=Form.useForm<Values>();const[providers,setProviders]=useState<ServerProvider[]>([]);const[workflows,setWorkflows]=useState<ServerWorkflow[]>([]);const[selectedId,setSelectedId]=useState<string|null>(null);const[loading,setLoading]=useState(true);const refresh=async()=>{setLoading(true);try{const[p,w]=await Promise.all([listServerProviders(),listServerWorkflows()]);setProviders(p.providers);setWorkflows(w.workflows);}catch(error){message.error(error instanceof Error?error.message:"工作流加载失败");}finally{setLoading(false);}};useEffect(()=>{void refresh();},[]);const edit=(workflow:ServerWorkflow)=>{setSelectedId(workflow.id);form.setFieldsValue({...workflow,workflowId:workflow.workflowId||undefined,statusPath:workflow.statusPath||undefined,externalTaskPath:workflow.externalTaskPath||undefined,statusValuePath:workflow.statusValuePath||undefined,requestTemplate:JSON.stringify(workflow.requestTemplate,null,2)});};const submit=async(values:Values)=>{try{const input={...values,workflowId:values.workflowId||null,statusPath:values.statusPath||null,cancelPath:null,externalTaskPath:values.externalTaskPath||null,statusValuePath:values.statusValuePath||null,requestTemplate:JSON.parse(values.requestTemplate||"{}") as Record<string,unknown>};if(selectedId)await updateServerWorkflow(selectedId,input);else await createServerWorkflow(input);message.success("工作流已保存到服务端");setSelectedId(null);form.resetFields();await refresh();}catch(error){message.error(error instanceof Error?error.message:"工作流保存失败");}};return <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_440px]"><Table rowKey="id" size="small" loading={loading} dataSource={workflows} columns={[{title:"工作流",dataIndex:"name"},{title:"Provider",dataIndex:"providerName"},{title:"协议",dataIndex:"protocol"},{title:"能力",dataIndex:"capability"},{title:"工作流 ID",dataIndex:"workflowId"},{title:"状态",render:(_,row:ServerWorkflow)=><Tag color={row.enabled?"green":"red"}>{row.enabled?"启用":"停用"}</Tag>},{title:"操作",render:(_,row:ServerWorkflow)=><Button size="small" onClick={()=>edit(row)}>编辑</Button>}]}/><section className="rounded-md border border-stone-200 bg-white p-4"><div className="mb-4 flex items-center justify-between"><h3 className="text-base font-semibold">{selectedId?"编辑工作流":"新增工作流"}</h3>{selectedId?<Button size="small" onClick={()=>{setSelectedId(null);form.resetFields();}}>取消</Button>:null}</div><Form form={form} layout="vertical" disabled={!isAdmin} initialValues={{protocol:"runninghub",capability:"edit",requestTemplate:'{"workflowId":"$workflowId","prompt":"$prompt","sourceUrls":"$sourceUrls"}',successValues:["success","completed"],failureValues:["failed","error"],pollIntervalMs:2000,timeoutSeconds:600,enabled:true}} onFinish={submit}><Form.Item name="providerId" label="Provider" rules={[{required:true}]}><Select options={providers.map((item)=>({label:item.name,value:item.id}))}/></Form.Item><div className="grid grid-cols-2 gap-2"><Form.Item name="name" label="名称" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="workflowId" label="工作流 ID"><Input/></Form.Item></div><div className="grid grid-cols-2 gap-2"><Form.Item name="protocol" label="协议" rules={[{required:true}]}><Select options={["runninghub","comfyui","custom"].map((value)=>({label:value,value}))}/></Form.Item><Form.Item name="capability" label="能力" rules={[{required:true}]}><Select options={["generate","edit","upscale","batch"].map((value)=>({label:value,value}))}/></Form.Item></div><Form.Item name="submitPath" label="提交路径" rules={[{required:true}]}><Input placeholder="/api/task/submit"/></Form.Item><Form.Item name="statusPath" label="状态路径"><Input placeholder="/api/task/{taskId}"/></Form.Item><div className="grid grid-cols-2 gap-2"><Form.Item name="externalTaskPath" label="任务 ID JSON 路径"><Input placeholder="data.taskId"/></Form.Item><Form.Item name="statusValuePath" label="状态 JSON 路径"><Input placeholder="data.status"/></Form.Item></div><Form.Item name="outputPath" label="结果 JSON 路径" rules={[{required:true}]}><Input placeholder="data.outputs"/></Form.Item><Form.Item name="requestTemplate" label="提交 JSON 模板" rules={[{required:true}]}><Input.TextArea rows={8} className="font-mono"/></Form.Item><div className="grid grid-cols-2 gap-2"><Form.Item name="successValues" label="成功状态"><Select mode="tags" open={false}/></Form.Item><Form.Item name="failureValues" label="失败状态"><Select mode="tags" open={false}/></Form.Item></div><div className="grid grid-cols-2 gap-2"><Form.Item name="pollIntervalMs" label="轮询毫秒"><InputNumber className="w-full" min={500}/></Form.Item><Form.Item name="timeoutSeconds" label="超时秒数"><InputNumber className="w-full" min={30}/></Form.Item></div><Form.Item name="enabled" label="启用" valuePropName="checked"><Switch/></Form.Item><Button type="primary" htmlType="submit" block>保存工作流</Button></Form></section></div>;}
+type Values = {
+    providerId: string;
+    name: string;
+    protocol: ServerWorkflow["protocol"];
+    capability: ServerWorkflow["capability"];
+    workflowId?: string;
+    submitPath: string;
+    statusPath?: string;
+    externalTaskPath?: string;
+    statusValuePath?: string;
+    outputPath: string;
+    requestTemplate: string;
+    successValues: string[];
+    failureValues: string[];
+    pollIntervalMs: number;
+    timeoutSeconds: number;
+    enabled: boolean;
+};
+export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
+    const { message } = App.useApp();
+    const [form] = Form.useForm<Values>();
+    const [providers, setProviders] = useState<ServerProvider[]>([]);
+    const [workflows, setWorkflows] = useState<ServerWorkflow[]>([]);
+    const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
+    const applyGptImage2Preset = () => {
+        setSelectedId(null);
+        form.setFieldsValue({
+            name: "GPT-Image-2",
+            protocol: "custom",
+            capability: "generate",
+            workflowId: undefined,
+            submitPath: "/images/generations",
+            statusPath: "/tasks/{taskId}",
+            externalTaskPath: "data.0.task_id",
+            statusValuePath: "data.status",
+            outputPath: "data.result.images.0.url",
+            requestTemplate: JSON.stringify(
+                {
+                    model: "$modelId",
+                    prompt: "$prompt",
+                    n: "$count",
+                    size: "$size",
+                    resolution: "$resolution",
+                    image_urls: "$sourceDataUrls",
+                },
+                null,
+                2,
+            ),
+            successValues: ["completed"],
+            failureValues: ["failed"],
+            pollIntervalMs: 2000,
+            timeoutSeconds: 900,
+            enabled: true,
+        });
+    };
+    const refresh = async () => {
+        setLoading(true);
+        try {
+            const [p, w] = await Promise.all([listServerProviders(), listServerWorkflows()]);
+            setProviders(p.providers);
+            setWorkflows(w.workflows);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "工作流加载失败");
+        } finally {
+            setLoading(false);
+        }
+    };
+    useEffect(() => {
+        void refresh();
+    }, []);
+    const edit = (workflow: ServerWorkflow) => {
+        setSelectedId(workflow.id);
+        form.setFieldsValue({
+            ...workflow,
+            workflowId: workflow.workflowId || undefined,
+            statusPath: workflow.statusPath || undefined,
+            externalTaskPath: workflow.externalTaskPath || undefined,
+            statusValuePath: workflow.statusValuePath || undefined,
+            requestTemplate: JSON.stringify(workflow.requestTemplate, null, 2),
+        });
+    };
+    const submit = async (values: Values) => {
+        try {
+            const input = {
+                ...values,
+                workflowId: values.workflowId || null,
+                statusPath: values.statusPath || null,
+                cancelPath: null,
+                externalTaskPath: values.externalTaskPath || null,
+                statusValuePath: values.statusValuePath || null,
+                requestTemplate: JSON.parse(values.requestTemplate || "{}") as Record<string, unknown>,
+            };
+            if (selectedId) await updateServerWorkflow(selectedId, input);
+            else await createServerWorkflow(input);
+            message.success("工作流已保存到服务端");
+            setSelectedId(null);
+            form.resetFields();
+            await refresh();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "工作流保存失败");
+        }
+    };
+    return (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
+            <Table
+                rowKey="id"
+                size="small"
+                loading={loading}
+                dataSource={workflows}
+                columns={[
+                    { title: "工作流", dataIndex: "name" },
+                    { title: "Provider", dataIndex: "providerName" },
+                    { title: "协议", dataIndex: "protocol" },
+                    { title: "能力", dataIndex: "capability" },
+                    { title: "工作流 ID", dataIndex: "workflowId" },
+                    { title: "状态", render: (_, row: ServerWorkflow) => <Tag color={row.enabled ? "green" : "red"}>{row.enabled ? "启用" : "停用"}</Tag> },
+                    {
+                        title: "操作",
+                        render: (_, row: ServerWorkflow) => (
+                            <Button size="small" onClick={() => edit(row)}>
+                                编辑
+                            </Button>
+                        ),
+                    },
+                ]}
+            />
+            <section className="rounded-md border border-stone-200 bg-white p-4">
+                <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-base font-semibold">{selectedId ? "编辑工作流" : "新增工作流"}</h3>
+                    {selectedId ? (
+                        <Button
+                            size="small"
+                            onClick={() => {
+                                setSelectedId(null);
+                                form.resetFields();
+                            }}
+                        >
+                            取消
+                        </Button>
+                    ) : null}
+                </div>
+                <Button className="mb-3" size="small" onClick={applyGptImage2Preset} disabled={!isAdmin}>
+                    GPT-Image-2 preset
+                </Button>
+                <Form
+                    form={form}
+                    layout="vertical"
+                    disabled={!isAdmin}
+                    initialValues={{
+                        protocol: "runninghub",
+                        capability: "edit",
+                        requestTemplate: '{"workflowId":"$workflowId","prompt":"$prompt","sourceUrls":"$sourceUrls"}',
+                        successValues: ["success", "completed"],
+                        failureValues: ["failed", "error"],
+                        pollIntervalMs: 2000,
+                        timeoutSeconds: 600,
+                        enabled: true,
+                    }}
+                    onFinish={submit}
+                >
+                    <Form.Item name="providerId" label="Provider" rules={[{ required: true }]}>
+                        <Select options={providers.map((item) => ({ label: item.name, value: item.id }))} />
+                    </Form.Item>
+                    <div className="grid grid-cols-2 gap-2">
+                        <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+                            <Input />
+                        </Form.Item>
+                        <Form.Item name="workflowId" label="工作流 ID">
+                            <Input />
+                        </Form.Item>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <Form.Item name="protocol" label="协议" rules={[{ required: true }]}>
+                            <Select options={["runninghub", "comfyui", "custom"].map((value) => ({ label: value, value }))} />
+                        </Form.Item>
+                        <Form.Item name="capability" label="能力" rules={[{ required: true }]}>
+                            <Select options={["generate", "edit", "upscale", "batch"].map((value) => ({ label: value, value }))} />
+                        </Form.Item>
+                    </div>
+                    <Form.Item name="submitPath" label="提交路径" rules={[{ required: true }]}>
+                        <Input placeholder="/api/task/submit" />
+                    </Form.Item>
+                    <Form.Item name="statusPath" label="状态路径">
+                        <Input placeholder="/api/task/{taskId}" />
+                    </Form.Item>
+                    <div className="grid grid-cols-2 gap-2">
+                        <Form.Item name="externalTaskPath" label="任务 ID JSON 路径">
+                            <Input placeholder="data.taskId" />
+                        </Form.Item>
+                        <Form.Item name="statusValuePath" label="状态 JSON 路径">
+                            <Input placeholder="data.status" />
+                        </Form.Item>
+                    </div>
+                    <Form.Item name="outputPath" label="结果 JSON 路径" rules={[{ required: true }]}>
+                        <Input placeholder="data.outputs" />
+                    </Form.Item>
+                    <Form.Item name="requestTemplate" label="提交 JSON 模板" rules={[{ required: true }]}>
+                        <Input.TextArea rows={8} className="font-mono" />
+                    </Form.Item>
+                    <div className="grid grid-cols-2 gap-2">
+                        <Form.Item name="successValues" label="成功状态">
+                            <Select mode="tags" open={false} />
+                        </Form.Item>
+                        <Form.Item name="failureValues" label="失败状态">
+                            <Select mode="tags" open={false} />
+                        </Form.Item>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <Form.Item name="pollIntervalMs" label="轮询毫秒">
+                            <InputNumber className="w-full" min={500} />
+                        </Form.Item>
+                        <Form.Item name="timeoutSeconds" label="超时秒数">
+                            <InputNumber className="w-full" min={30} />
+                        </Form.Item>
+                    </div>
+                    <Form.Item name="enabled" label="启用" valuePropName="checked">
+                        <Switch />
+                    </Form.Item>
+                    <Button type="primary" htmlType="submit" block>
+                        保存工作流
+                    </Button>
+                </Form>
+            </section>
+        </div>
+    );
+}

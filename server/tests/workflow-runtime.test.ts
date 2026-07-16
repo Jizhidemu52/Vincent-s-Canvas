@@ -1,3 +1,82 @@
-import{describe,expect,test}from"bun:test";
-import{decodeWorkflowImage,normalizeWorkflowOutputs,parsePromptVariables,readPath,renderTemplate}from"../src/workflow-runtime";
-describe("workflow runtime",()=>{test("renders structured variables without stringifying arrays",()=>{expect(renderTemplate({prompt:"$prompt",images:"$sourceUrls",label:"job-${workflowId}"},{prompt:"增强细节",sourceUrls:["a.png","b.png"],workflowId:"wf-1"})).toEqual({prompt:"增强细节",images:["a.png","b.png"],label:"job-wf-1"});});test("reads nested response paths",()=>{expect(readPath({data:{task:{id:"abc"}}},"data.task.id")).toBe("abc");});test("normalizes workflow output shapes",()=>{expect(normalizeWorkflowOutputs([{url:"a.png"},{output:{imageUrl:"b.png"}}])).toEqual(["a.png","b.png"]);});test("reads the internal seamless image list",()=>{expect(normalizeWorkflowOutputs(readPath({data:{data:{list:["raw-base64-image"]}}},"data.data.list"))).toEqual(["raw-base64-image"]);});test("decodes raw provider image Base64",()=>{const image=decodeWorkflowImage("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6iXQAAAAASUVORK5CYII=");expect(image?.mimeType).toBe("image/png");expect(image?.bytes.length).toBeGreaterThan(8);expect(decodeWorkflowImage("not an image")).toBeNull();});test("parses primitive workflow variables without accepting nested payloads",()=>{expect(parsePromptVariables('{"rows":2,"cols":4,"nested":{"appKey":"bad"}}')).toEqual({rows:2,cols:4});expect(parsePromptVariables("普通提示词")).toEqual({});});});
+import { describe, expect, test } from "bun:test";
+import {
+  decodeWorkflowImage,
+  normalizeWorkflowOutputs,
+  parsePromptVariables,
+  readPath,
+  renderTemplate,
+} from "../src/workflow-runtime";
+describe("workflow runtime", () => {
+  test("renders structured variables without stringifying arrays", () => {
+    expect(
+      renderTemplate(
+        {
+          prompt: "$prompt",
+          images: "$sourceUrls",
+          label: "job-${workflowId}",
+        },
+        {
+          prompt: "增强细节",
+          sourceUrls: ["a.png", "b.png"],
+          workflowId: "wf-1",
+        },
+      ),
+    ).toEqual({
+      prompt: "增强细节",
+      images: ["a.png", "b.png"],
+      label: "job-wf-1",
+    });
+  });
+  test("reads nested response paths", () => {
+    expect(readPath({ data: { task: { id: "abc" } } }, "data.task.id")).toBe(
+      "abc",
+    );
+  });
+  test("reads async task IDs and result URLs from array paths", () => {
+    expect(readPath({ data: [{ task_id: "task-1" }] }, "data.0.task_id")).toBe(
+      "task-1",
+    );
+    expect(
+      readPath(
+        {
+          data: {
+            result: { images: [{ url: ["https://result.example/image.png"] }] },
+          },
+        },
+        "data.result.images.0.url",
+      ),
+    ).toEqual(["https://result.example/image.png"]);
+  });
+  test("normalizes workflow output shapes", () => {
+    expect(
+      normalizeWorkflowOutputs([
+        { url: "a.png" },
+        { output: { imageUrl: "b.png" } },
+      ]),
+    ).toEqual(["a.png", "b.png"]);
+  });
+  test("reads the internal seamless image list", () => {
+    expect(
+      normalizeWorkflowOutputs(
+        readPath(
+          { data: { data: { list: ["raw-base64-image"] } } },
+          "data.data.list",
+        ),
+      ),
+    ).toEqual(["raw-base64-image"]);
+  });
+  test("decodes raw provider image Base64", () => {
+    const image = decodeWorkflowImage(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6iXQAAAAASUVORK5CYII=",
+    );
+    expect(image?.mimeType).toBe("image/png");
+    expect(image?.bytes.length).toBeGreaterThan(8);
+    expect(decodeWorkflowImage("not an image")).toBeNull();
+  });
+  test("parses primitive workflow variables without accepting nested payloads", () => {
+    expect(
+      parsePromptVariables('{"rows":2,"cols":4,"nested":{"appKey":"bad"}}'),
+    ).toEqual({ rows: 2, cols: 4 });
+    expect(parsePromptVariables("普通提示词")).toEqual({});
+  });
+});
