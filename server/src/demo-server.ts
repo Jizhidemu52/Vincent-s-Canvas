@@ -1187,9 +1187,11 @@ function validateHappyHorseRequest(
 
 async function uploadHappyHorseImage(source: DemoAsset) {
   const form = new FormData();
+  const bytes = new Uint8Array(source.bytes.byteLength);
+  bytes.set(source.bytes);
   form.set(
     "file",
-    new File([source.bytes], source.filename, { type: source.mimeType }),
+    new File([bytes.buffer], source.filename, { type: source.mimeType }),
   );
   const response = await fetch(`${apiMartBaseUrl}/uploads/images`, {
     method: "POST",
