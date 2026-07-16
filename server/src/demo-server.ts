@@ -1108,7 +1108,9 @@ async function callHappyHorse(
     signal: AbortSignal.timeout(180_000),
   });
   if (!submitted.ok)
-    throw new Error(`HappyHorse submission failed: ${submitted.status}`);
+    throw new Error(
+      `HappyHorse submission failed: ${submitted.status}${await providerErrorDetail(submitted)}`,
+    );
   const created = (await submitted.json()) as {
     data?: Array<{ task_id?: string }>;
   };
@@ -1198,6 +1200,32 @@ function extractHappyHorseVideoUrl(items: unknown[] | undefined) {
     }
   }
   return "";
+}
+
+async function providerErrorDetail(response: Response) {
+  const text = (await response.text()).trim();
+  if (!text) return "";
+  try {
+    const payload = JSON.parse(text) as {
+      message?: unknown;
+      error?: { message?: unknown } | unknown;
+      detail?: unknown;
+      code?: unknown;
+    };
+    const message =
+      typeof payload.message === "string"
+        ? payload.message
+        : payload.error && typeof payload.error === "object" &&
+            typeof (payload.error as { message?: unknown }).message === "string"
+          ? (payload.error as { message: string }).message
+          : typeof payload.detail === "string"
+            ? payload.detail
+            : "";
+    const code = typeof payload.code === "string" || typeof payload.code === "number" ? ` (${payload.code})` : "";
+    return message ? `${code}: ${message}` : code;
+  } catch {
+    return `: ${text.slice(0, 500)}`;
+  }
 }
 
 async function callGptImage2(
