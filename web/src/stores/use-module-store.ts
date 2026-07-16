@@ -17,7 +17,10 @@ export const useModuleStore = create<ModuleStore>((set) => ({
     status: "idle",
     refresh: async () => {
         if (refreshPromise) return refreshPromise;
-        set({ status: "loading" });
+        // Module flags are refreshed in the background while a designer works.
+        // Only the first load may block a gated route; otherwise changing this
+        // to `loading` would unmount the current tool and discard form input.
+        set((state) => (state.status === "idle" ? { status: "loading" } : {}));
         refreshPromise = listModuleFlags()
             .then(({ modules }) => set((state) => ({
                 flags: { ...state.flags, ...Object.fromEntries(modules.map((item) => [item.moduleKey, item.enabled])) },
