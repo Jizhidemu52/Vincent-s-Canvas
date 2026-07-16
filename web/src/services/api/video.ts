@@ -3,6 +3,7 @@ import { getQueuedTask, requestQueuedMedia, submitQueuedMediaTask } from "@/serv
 import { getMediaBlob, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
+import { isHappyHorseVideoConfig, normalizeHappyHorseDuration, normalizeHappyHorseRatio, normalizeHappyHorseResolution, type HappyHorseMode } from "@/lib/happyhorse-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -18,8 +19,8 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
     return { url, mimeType: "video/mp4" };
 }
 
-export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationTask> {
-    const task = await submitQueuedMediaTask(await queuedVideoInput(config, prompt, references, videoReferences, audioReferences, options));
+export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions, happyHorseMode?: HappyHorseMode): Promise<VideoGenerationTask> {
+    const task = await submitQueuedMediaTask(await queuedVideoInput(config, prompt, references, videoReferences, audioReferences, options, happyHorseMode));
     return { id: task.id, provider: "server", model: modelOptionName(config.model || config.videoModel) };
 }
 
@@ -39,7 +40,7 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
     throw new Error("视频接口没有返回可播放的视频");
 }
 
-async function queuedVideoInput(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions) {
+async function queuedVideoInput(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions, happyHorseMode?: HappyHorseMode) {
     const sourceFiles: File[] = [];
     const sourceUrls: string[] = [];
     for (const image of references) sourceFiles.push(dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) }));
@@ -57,18 +58,34 @@ async function queuedVideoInput(config: AiConfig, prompt: string, references: Re
         modelId: modelOptionName(config.model || config.videoModel),
         prompt,
         operationType: "video_generation",
-        parameters: {
-            seconds: clampNumber(config.videoSeconds, 6, 1, 20),
-            size: normalizeVideoSize(config.size),
-            resolution: normalizeVideoResolution(config.vquality),
-            preset: "normal",
-            generateAudio: config.videoGenerateAudio === "true",
-            watermark: config.videoWatermark === "true",
-        },
+        parameters: isHappyHorseVideoConfig(config)
+            ? {
+                happyHorseMode: happyHorseMode || inferHappyHorseMode(references, videoReferences),
+                seconds: Number(normalizeHappyHorseDuration(config.videoSeconds)),
+                size: normalizeHappyHorseRatio(config.size),
+                resolution: normalizeHappyHorseResolution(config.vquality),
+                audioSetting: config.videoGenerateAudio === "true" ? "origin" : "auto",
+                watermark: config.videoWatermark === "true",
+            }
+            : {
+                seconds: clampNumber(config.videoSeconds, 6, 1, 20),
+                size: normalizeVideoSize(config.size),
+                resolution: normalizeVideoResolution(config.vquality),
+                preset: "normal",
+                generateAudio: config.videoGenerateAudio === "true",
+                watermark: config.videoWatermark === "true",
+            },
         sourceFiles,
         sourceUrls,
         signal: options?.signal,
     };
+}
+
+function inferHappyHorseMode(references: ReferenceImage[], videos: ReferenceVideo[]): HappyHorseMode {
+    if (videos.length) return "edit";
+    if (references.length === 1) return "first-frame";
+    if (references.length > 1) return "reference";
+    return "text";
 }
 
 function normalizeVideoSize(value: string) {

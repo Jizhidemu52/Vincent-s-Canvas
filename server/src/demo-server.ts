@@ -54,11 +54,12 @@ const toolDefinitions = [
   },
 ] as const;
 const apiMartBaseUrl = (
-  process.env.GPT_IMAGE_2_BASE_URL || "https://api.apimart.ai/v1"
+  process.env.APIMART_BASE_URL || process.env.GPT_IMAGE_2_BASE_URL || "https://api.apimart.ai/v1"
 ).replace(/\/$/, "");
-const apiMartApiKey = process.env.GPT_IMAGE_2_API_KEY?.trim() || "";
+const apiMartApiKey = process.env.APIMART_API_KEY?.trim() || process.env.GPT_IMAGE_2_API_KEY?.trim() || "";
 const gptImage2ProviderId = "30000000-0000-4000-8000-000000000002";
 const gptImage2ModelId = "40000000-0000-4000-8000-000000000099";
+const happyHorseModelId = "40000000-0000-4000-8000-000000000100";
 const demoProviders: Array<Record<string, unknown>> = [
   {
     id: "30000000-0000-4000-8000-000000000001",
@@ -120,6 +121,21 @@ if (apiMartApiKey) {
     concurrencyLimit: 2,
     enabled: true,
   });
+  demoModels.push({
+    id: happyHorseModelId,
+    providerId: gptImage2ProviderId,
+    providerName: "APIMart",
+    workflowConfigId: "happyhorse-1.0",
+    workflowName: "HappyHorse 1.0 async",
+    replacementModelConfigId: null,
+    name: "HappyHorse 1.0",
+    modelId: "happyhorse-1.0",
+    capabilities: ["video"],
+    creditCost: 0,
+    rmbCost: 0,
+    concurrencyLimit: 2,
+    enabled: true,
+  });
 }
 const demoPrices: Array<Record<string, unknown>> = Array.from(
   new Map(toolDefinitions.map((tool) => [tool.operationType, tool])).values(),
@@ -135,7 +151,7 @@ const demoPrices: Array<Record<string, unknown>> = Array.from(
 }));
 const demoToolConfigurations = toolDefinitions.map((tool, index) => ({
   toolKey: tool.toolKey,
-  modelConfigId: demoModels[index]!.id as string,
+  modelConfigId: tool.toolKey === "video" && apiMartApiKey ? happyHorseModelId : demoModels[index]!.id as string,
   enabled: true,
 }));
 type DemoAsset = {
@@ -367,6 +383,99 @@ Bun.serve({
         parameters?: Record<string, unknown>;
         sourceUrls?: string[];
       };
+      if (input.operationType === "video_generation") {
+        if (!apiMartApiKey)
+          return json(
+            {
+              error: "PROVIDER_NOT_CONFIGURED",
+              message: "APIMart server credential is not configured",
+            },
+            503,
+          );
+        const duplicate = input.requestId
+          ? Array.from(demoTasks.values()).find(
+              (task) => task.requestId === input.requestId,
+            )
+          : undefined;
+        if (duplicate)
+          return duplicate.ownerUserId === user.id
+            ? json({ task: duplicate })
+            : json(
+                {
+                  error: "DUPLICATE_REQUEST",
+                  message: "Request identifier has already been used",
+                },
+                400,
+              );
+        const model = demoModels.find(
+          (item) =>
+            item.id === input.modelConfigId &&
+            item.modelId === "happyhorse-1.0" &&
+            item.enabled,
+        );
+        if (!model)
+          return json(
+            {
+              error: "MODEL_DISABLED",
+              message: "HappyHorse 1.0 is not enabled for video creation",
+            },
+            400,
+          );
+        const sources: DemoAsset[] = [];
+        for (const sourceUrl of input.sourceUrls || []) {
+          const assetId = sourceUrl.match(
+            /^\/api\/assets\/([0-9a-f-]+)\/content$/i,
+          )?.[1];
+          const source = assetId ? demoAssets.get(assetId) : undefined;
+          if (
+            !source ||
+            source.ownerUserId !== user.id ||
+            !source.bytes.byteLength
+          )
+            return json(
+              {
+                error: "INVALID_SOURCE",
+                message: "A selected video reference is unavailable",
+              },
+              400,
+            );
+          sources.push(source);
+        }
+        const parameters = readHappyHorseParameters(input.parameters);
+        const validationError = validateHappyHorseRequest(parameters, sources);
+        if (validationError)
+          return json({ error: "INVALID_VIDEO_INPUT", message: validationError }, 400);
+        const price = demoPrices.find(
+          (item) =>
+            item.operationType === "video_generation" &&
+            item.status === "published",
+        );
+        const credits =
+          Number(price?.credits || 0) + Number(model.creditCost || 0);
+        if (user.creditBalance < credits)
+          return json(
+            {
+              error: "INSUFFICIENT_CREDITS",
+              message: `Insufficient credits: ${credits} required`,
+            },
+            400,
+          );
+        const task: DemoTask = {
+          id: crypto.randomUUID(),
+          requestId: input.requestId || crypto.randomUUID(),
+          ownerUserId: user.id,
+          operationType: "video_generation",
+          status: "processing",
+          resultUrls: [],
+          failureReason: null,
+          credits,
+          createdAt: now(),
+        };
+        demoTasks.set(task.id, task);
+        user.creditBalance -= credits;
+        void runHappyHorseTask(task, user, input.prompt || "", parameters, sources);
+        return json({ task }, 201);
+      }
       if (
         ["image_generation", "inpaint", "upscale"].includes(
           input.operationType || "",
@@ -933,6 +1042,162 @@ async function runGptImage2Task(
       error instanceof Error ? error.message : "GPT-Image-2 task failed";
     user.creditBalance += task.credits;
   }
+}
+
+type HappyHorseParameters = {
+  mode: "text" | "first-frame" | "reference" | "edit";
+  duration: number;
+  size: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
+  resolution: "720P" | "1080P";
+  watermark: boolean;
+  audioSetting: "auto" | "origin";
+};
+
+async function runHappyHorseTask(
+  task: DemoTask,
+  user: (typeof demoAccounts)[number]["user"],
+  prompt: string,
+  parameters: HappyHorseParameters,
+  sources: DemoAsset[],
+) {
+  try {
+    task.resultUrls = [await callHappyHorse(prompt, parameters, sources)];
+    task.status = "success";
+  } catch (error) {
+    task.status = "failed";
+    task.failureReason =
+      error instanceof Error ? error.message : "HappyHorse task failed";
+    user.creditBalance += task.credits;
+  }
+}
+
+async function callHappyHorse(
+  prompt: string,
+  parameters: HappyHorseParameters,
+  sources: DemoAsset[],
+) {
+  const imageSources = sources.filter((source) => source.mimeType.startsWith("image/"));
+  const videoSource = sources.find((source) => source.mimeType.startsWith("video/"));
+  const body: Record<string, unknown> = {
+    model: "happyhorse-1.0",
+    prompt,
+    resolution: parameters.resolution,
+    watermark: parameters.watermark,
+  };
+  if (parameters.mode === "first-frame") {
+    body.first_frame_image = assetDataUrl(imageSources[0]!);
+  } else if (parameters.mode === "reference") {
+    body.image_urls = imageSources.map(assetDataUrl);
+  } else if (parameters.mode === "edit") {
+    if (!videoSource) throw new Error("A source video is required for video editing");
+    // The upstream service needs a URL it can fetch. Demo assets are private to
+    // this local server, so an object-storage public URL is required in production.
+    throw new Error("Video editing requires a publicly reachable HTTPS source video URL. Configure company object storage before using this mode.");
+  }
+  if (parameters.mode === "text" || parameters.mode === "reference") {
+    body.size = parameters.size;
+    body.duration = parameters.duration;
+  }
+  const submitted = await fetch(`${apiMartBaseUrl}/videos/generations`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiMartApiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!submitted.ok)
+    throw new Error(`HappyHorse submission failed: ${submitted.status}`);
+  const created = (await submitted.json()) as {
+    data?: Array<{ task_id?: string }>;
+  };
+  const taskId = created.data?.[0]?.task_id;
+  if (!taskId) throw new Error("HappyHorse did not return a task ID");
+  const deadline = Date.now() + 20 * 60_000;
+  while (Date.now() < deadline) {
+    await Bun.sleep(2_000);
+    const statusResponse = await fetch(
+      `${apiMartBaseUrl}/tasks/${encodeURIComponent(taskId)}?language=zh`,
+      {
+        headers: { authorization: `Bearer ${apiMartApiKey}` },
+        signal: AbortSignal.timeout(60_000),
+      },
+    );
+    if (!statusResponse.ok)
+      throw new Error(
+        `HappyHorse status check failed: ${statusResponse.status}`,
+      );
+    const status = (await statusResponse.json()) as {
+      data?: {
+        status?: string;
+        result?: { videos?: unknown[] };
+        error?: { message?: string };
+      };
+    };
+    if (["failed", "cancelled"].includes(status.data?.status || ""))
+      throw new Error(status.data?.error?.message || "HappyHorse generation failed");
+    if (status.data?.status !== "completed") continue;
+    const outputUrl = extractHappyHorseVideoUrl(status.data?.result?.videos);
+    if (!outputUrl) throw new Error("HappyHorse completed without an output video");
+    return outputUrl;
+  }
+  throw new Error("HappyHorse generation timed out");
+}
+
+function readHappyHorseParameters(
+  value?: Record<string, unknown>,
+): HappyHorseParameters {
+  const mode = ["text", "first-frame", "reference", "edit"].includes(
+    String(value?.happyHorseMode),
+  )
+    ? (value!.happyHorseMode as HappyHorseParameters["mode"])
+    : "text";
+  const duration = Math.floor(Number(value?.seconds) || 5);
+  const size = String(value?.size || "16:9");
+  return {
+    mode,
+    duration: Math.max(3, Math.min(15, duration)),
+    size: (["16:9", "9:16", "1:1", "4:3", "3:4"].includes(size)
+      ? size
+      : "16:9") as HappyHorseParameters["size"],
+    resolution: String(value?.resolution).toUpperCase() === "720P" ? "720P" : "1080P",
+    watermark: value?.watermark === true,
+    audioSetting: value?.audioSetting === "origin" ? "origin" : "auto",
+  };
+}
+
+function validateHappyHorseRequest(
+  parameters: HappyHorseParameters,
+  sources: DemoAsset[],
+) {
+  const images = sources.filter((source) => source.mimeType.startsWith("image/"));
+  const videos = sources.filter((source) => source.mimeType.startsWith("video/"));
+  if (parameters.mode === "text" && sources.length) return "Text-to-video cannot include reference media";
+  if (parameters.mode === "first-frame" && (images.length !== 1 || videos.length)) return "First-frame mode requires exactly one image";
+  if (parameters.mode === "reference" && (images.length < 1 || images.length > 9 || videos.length)) return "Reference mode requires 1-9 images";
+  if (parameters.mode === "edit" && (videos.length !== 1 || images.length > 5)) return "Edit mode requires one source video and up to five reference images";
+  if (images.some((source) => source.bytes.byteLength > 10 * 1024 * 1024)) return "Each image must be 10MB or smaller";
+  if (videos.some((source) => source.bytes.byteLength > 100 * 1024 * 1024)) return "The source video must be 100MB or smaller";
+  return "";
+}
+
+function assetDataUrl(source: DemoAsset) {
+  return `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`;
+}
+
+function extractHappyHorseVideoUrl(items: unknown[] | undefined) {
+  for (const item of items || []) {
+    if (typeof item === "string" && /^https?:\/\//.test(item)) return item;
+    if (item && typeof item === "object") {
+      const value = item as { url?: string | string[]; video_url?: string; output_url?: string };
+      if (typeof value.url === "string") return value.url;
+      if (Array.isArray(value.url) && typeof value.url[0] === "string") return value.url[0];
+      if (typeof value.video_url === "string") return value.video_url;
+      if (typeof value.output_url === "string") return value.output_url;
+    }
+  }
+  return "";
 }
 
 async function callGptImage2(

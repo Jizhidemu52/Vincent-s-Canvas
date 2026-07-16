@@ -14,6 +14,7 @@ import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
+import { happyHorseModes, isHappyHorseVideoConfig, normalizeHappyHorseDuration, normalizeHappyHorseRatio, normalizeHappyHorseResolution, type HappyHorseMode } from "@/lib/happyhorse-video";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
@@ -69,6 +70,7 @@ type GenerationLog = {
 type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+type UploadTarget = "generic" | "image" | "video";
 
 const LOG_STORE_KEY = "wireless-canvas:video_generation_logs";
 const logStore = localforage.createInstance({ name: "wireless-canvas", storeName: "video_generation_logs" });
@@ -89,6 +91,7 @@ export default function VideoPage() {
     const canManageConfig = useCanManageConfig();
     const addAsset = useAssetStore((state) => state.addAsset);
     const estimate = useBusinessConfigStore((state) => state.estimate);
+    const configuredModels = useBusinessConfigStore((state) => state.models);
     const user = useUserStore((state) => state.user);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
@@ -106,11 +109,14 @@ export default function VideoPage() {
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [happyHorseMode, setHappyHorseMode] = useState<HappyHorseMode>("text");
+    const [uploadTarget, setUploadTarget] = useState<UploadTarget>("generic");
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
+    const isHappyHorse = isHappyHorseVideoConfig({ ...effectiveConfig, model, videoModel: model });
     const estimatedUsage = estimate({ operationType: "video_generation", modelId: modelOptionName(model), quantity: 1 });
     const quotaBlocked = Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
-    const canGenerate = Boolean(prompt.trim()) && !quotaBlocked;
+    const canGenerate = Boolean(prompt.trim() || (isHappyHorse && happyHorseMode === "first-frame")) && !quotaBlocked;
 
     const handleMissingModelConfig = () => {
         if (canManageConfig) {
@@ -126,6 +132,12 @@ export default function VideoPage() {
         const timer = window.setInterval(() => setElapsedMs(performance.now() - startedAt), 1000);
         return () => window.clearInterval(timer);
     }, [running, startedAt]);
+
+    useEffect(() => {
+        const happyHorse = configuredModels.find((item) => item.modelId === "happyhorse-1.0");
+        const currentEnabled = configuredModels.some((item) => item.modelId === model);
+        if (happyHorse && !currentEnabled) updateConfig("videoModel", happyHorse.modelId);
+    }, [configuredModels, model, updateConfig]);
 
     useEffect(() => {
         void refreshLogs();
@@ -177,6 +189,10 @@ export default function VideoPage() {
 
     const addReferences = async (files?: FileList | null) => {
         const selectedFiles = Array.from(files || []);
+        if (isHappyHorse) {
+            await addHappyHorseReferences(selectedFiles);
+            return;
+        }
         const unsupported = selectedFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/") && !isSupportedAudioFile(file));
         if (unsupported.length) message.warning("已忽略不支持的参考素材，请使用图片、mp4/mov 视频或 mp3/wav 音频");
         const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.images - references.length);
@@ -212,6 +228,60 @@ export default function VideoPage() {
         setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
     };
 
+    const addHappyHorseReferences = async (files: File[]) => {
+        const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+        const videoFiles = files.filter((file) => file.type === "video/mp4" || file.type === "video/quicktime");
+        if (happyHorseMode === "first-frame" || happyHorseMode === "reference") {
+            if (!imageFiles.length) {
+                message.warning("请选择图片文件");
+                return;
+            }
+            const max = happyHorseMode === "first-frame" ? 1 : 9;
+            const next = await Promise.all(imageFiles.slice(0, max).map(async (file) => {
+                if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} 超过 10MB`);
+                const image = await uploadImage(file);
+                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
+            }));
+            setReferences(next);
+            return;
+        }
+        if (happyHorseMode === "edit") {
+            if (uploadTarget === "video") {
+                const file = videoFiles[0];
+                if (!file) {
+                    message.warning("视频编辑仅支持 mp4 或 mov 源视频");
+                    return;
+                }
+                if (file.size > 100 * 1024 * 1024) throw new Error("源视频不能超过 100MB");
+                const video = await uploadMediaFile(file, "video-reference");
+                setVideoReferences([{ id: nanoid(), name: file.name, type: video.mimeType, url: video.url, storageKey: video.storageKey, bytes: video.bytes, width: video.width, height: video.height, durationMs: video.durationMs }]);
+                return;
+            }
+            const next = await Promise.all(imageFiles.slice(0, Math.max(0, 5 - references.length)).map(async (file) => {
+                if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} 超过 10MB`);
+                const image = await uploadImage(file);
+                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
+            }));
+            setReferences((current) => [...current, ...next].slice(0, 5));
+        }
+    };
+
+    const switchHappyHorseMode = (next: HappyHorseMode) => {
+        setHappyHorseMode(next);
+        if (next === "text") {
+            setReferences([]);
+            setVideoReferences([]);
+        } else if (next === "first-frame") {
+            setReferences((current) => current.slice(0, 1));
+            setVideoReferences([]);
+        } else if (next === "reference") {
+            setReferences((current) => current.slice(0, 9));
+            setVideoReferences([]);
+        } else {
+            setReferences((current) => current.slice(0, 5));
+        }
+    };
+
     const addReferencesFromClipboard = async () => {
         try {
             const items = await navigator.clipboard.read();
@@ -242,7 +312,7 @@ export default function VideoPage() {
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
         try {
-            const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences);
+            const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences, undefined, snapshot.happyHorseMode);
             const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", task });
             await saveLog(log);
             void pollGenerationLog(log, snapshot.config);
@@ -270,7 +340,7 @@ export default function VideoPage() {
 
     const buildRequestSnapshot = () => {
         const text = prompt.trim();
-        if (!text) {
+        if (!text && !(isHappyHorse && happyHorseMode === "first-frame")) {
             message.error("请输入视频提示词");
             return null;
         }
@@ -286,12 +356,24 @@ export default function VideoPage() {
             message.error(`额度不足：预计需要 ${estimatedUsage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
             return null;
         }
-        const videoReferenceError = seedanceVideoReferenceError(videoReferences);
+        if (isHappyHorse && happyHorseMode === "first-frame" && references.length !== 1) {
+            message.error("首帧图生视频需要上传一张首帧图片");
+            return null;
+        }
+        if (isHappyHorse && happyHorseMode === "reference" && (references.length < 1 || references.length > 9)) {
+            message.error("参考图生视频需要上传 1-9 张图片");
+            return null;
+        }
+        if (isHappyHorse && happyHorseMode === "edit" && videoReferences.length !== 1) {
+            message.error("视频编辑需要上传一段源视频");
+            return null;
+        }
+        const videoReferenceError = isHappyHorse ? "" : seedanceVideoReferenceError(videoReferences);
         if (videoReferenceError) {
             message.error(`${videoReferenceError}。${seedanceVideoReferenceHint}`);
             return null;
         }
-        return { text, config: buildVideoConfig(effectiveConfig, model), references: [...references], videoReferences: [...videoReferences], audioReferences: [...audioReferences] };
+        return { text, config: buildVideoConfig(effectiveConfig, model), references: [...references], videoReferences: [...videoReferences], audioReferences: isHappyHorse ? [] : [...audioReferences], happyHorseMode: isHappyHorse ? happyHorseMode : undefined };
     };
 
     const retryResult = () => {
@@ -486,6 +568,22 @@ export default function VideoPage() {
                                 <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder="描述镜头运动、主体动作、场景氛围和画面风格" />
                             </div>
 
+                            {isHappyHorse ? (
+                                <HappyHorseInputs
+                                    mode={happyHorseMode}
+                                    references={references}
+                                    videos={videoReferences}
+                                    onModeChange={switchHappyHorseMode}
+                                    onUpload={(target) => {
+                                        setUploadTarget(target);
+                                        fileInputRef.current?.click();
+                                    }}
+                                    onRemoveImage={(id) => setReferences((current) => current.filter((item) => item.id !== id))}
+                                    onRemoveVideo={(id) => setVideoReferences((current) => current.filter((item) => item.id !== id))}
+                                    keepSourceAudio={effectiveConfig.videoGenerateAudio === "true"}
+                                    onKeepSourceAudioChange={(value) => updateConfig("videoGenerateAudio", String(value))}
+                                />
+                            ) : <>
                             <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">参考图</span>
@@ -544,6 +642,7 @@ export default function VideoPage() {
                                     {!videoReferences.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考视频，最多 3 个</div> : null}
                                 </div>
                             </div>
+                            </>}
 
                             <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
@@ -630,8 +729,8 @@ export default function VideoPage() {
             <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,video/mp4,video/quicktime,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav"
-                multiple
+                accept={isHappyHorse ? (uploadTarget === "video" ? "video/mp4,video/quicktime,.mp4,.mov" : "image/jpeg,image/png,image/bmp,image/webp") : "image/*,video/mp4,video/quicktime,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav"}
+                multiple={!isHappyHorse || happyHorseMode === "reference" || (happyHorseMode === "edit" && uploadTarget === "image")}
                 className="hidden"
                 onChange={(event) => {
                     void addReferences(event.target.files);
@@ -661,6 +760,35 @@ export default function VideoPage() {
             </Modal>
         </div>
     );
+}
+
+function HappyHorseInputs({ mode, references, videos, onModeChange, onUpload, onRemoveImage, onRemoveVideo, keepSourceAudio, onKeepSourceAudioChange }: { mode: HappyHorseMode; references: ReferenceImage[]; videos: ReferenceVideo[]; onModeChange: (mode: HappyHorseMode) => void; onUpload: (target: UploadTarget) => void; onRemoveImage: (id: string) => void; onRemoveVideo: (id: string) => void; keepSourceAudio: boolean; onKeepSourceAudioChange: (value: boolean) => void }) {
+    const active = happyHorseModes.find((item) => item.value === mode)!;
+    return (
+        <div className="space-y-4">
+            <div>
+                <div className="mb-2 text-base font-semibold">生成方式</div>
+                <div className="grid grid-cols-2 gap-2">
+                    {happyHorseModes.map((item) => <button key={item.value} type="button" className={`rounded-lg border px-3 py-2 text-left text-sm transition ${mode === item.value ? "border-orange-500 bg-orange-50 text-orange-800 dark:bg-orange-950/20 dark:text-orange-200" : "border-stone-200 hover:border-orange-300 dark:border-stone-800"}`} onClick={() => onModeChange(item.value)}><span className="block font-medium">{item.label}</span><span className="mt-0.5 block text-xs opacity-65">{item.description}</span></button>)}
+                </div>
+            </div>
+            {mode === "text" ? <div className="rounded-lg border border-dashed border-stone-300 px-3 py-4 text-sm text-stone-500 dark:border-stone-700">{active.description}。支持 3-15 秒，输出比例和分辨率在下方设置。</div> : null}
+            {mode === "first-frame" || mode === "reference" ? <MediaStrip title={mode === "first-frame" ? "首帧图片" : "参考图片"} hint={mode === "first-frame" ? "上传 1 张图片，jpg/png/bmp/webp，单张不超过 10MB" : "上传 1-9 张图片，jpg/png/bmp/webp，单张不超过 10MB"} images={references} onUpload={() => onUpload("image")} onRemoveImage={onRemoveImage} /> : null}
+            {mode === "edit" ? <>
+                <VideoStrip videos={videos} onUpload={() => onUpload("video")} onRemove={onRemoveVideo} />
+                <MediaStrip title="风格参考图（可选）" hint="最多 5 张图片；视频编辑将使用公司对象存储提供的 HTTPS 地址。" images={references} onUpload={() => onUpload("image")} onRemoveImage={onRemoveImage} />
+                <label className="flex items-center justify-between rounded-lg border border-stone-200 px-3 py-2 text-sm dark:border-stone-800"><span>保留源视频原声</span><input type="checkbox" checked={keepSourceAudio} onChange={(event) => onKeepSourceAudioChange(event.target.checked)} /></label>
+            </> : null}
+        </div>
+    );
+}
+
+function MediaStrip({ title, hint, images, onUpload, onRemoveImage }: { title: string; hint: string; images: ReferenceImage[]; onUpload: () => void; onRemoveImage: (id: string) => void }) {
+    return <div className="min-w-0"><div className="mb-2 flex items-center justify-between gap-3"><span className="text-base font-semibold">{title}</span><Button size="small" icon={<Upload className="size-3.5" />} onClick={onUpload}>上传</Button></div><div className="flex min-h-24 gap-2 overflow-x-auto rounded-lg border border-dashed border-stone-300 p-2 dark:border-stone-700">{images.map((item) => <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800"><img src={item.dataUrl} alt={item.name} className="size-full object-cover" /><button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => onRemoveImage(item.id)} aria-label="移除图片"><Trash2 className="size-3.5" /></button></div>)}{!images.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">{hint}</div> : null}</div></div>;
+}
+
+function VideoStrip({ videos, onUpload, onRemove }: { videos: ReferenceVideo[]; onUpload: () => void; onRemove: (id: string) => void }) {
+    return <div className="min-w-0"><div className="mb-2 flex items-center justify-between gap-3"><span className="text-base font-semibold">源视频</span><Button size="small" icon={<Upload className="size-3.5" />} onClick={onUpload}>上传</Button></div><div className="flex min-h-24 gap-2 overflow-x-auto rounded-lg border border-dashed border-stone-300 p-2 dark:border-stone-700">{videos.map((item) => <div key={item.id} className="group relative h-20 w-32 shrink-0 overflow-hidden rounded-md border border-stone-200 bg-black dark:border-stone-800"><video src={item.url} className="size-full object-cover" muted preload="metadata" /><button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => onRemove(item.id)} aria-label="移除源视频"><Trash2 className="size-3.5" /></button></div>)}{!videos.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">上传 mp4/mov，3-60 秒、100MB 内；生成最多处理前 15 秒。</div> : null}</div></div>;
 }
 
 function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
@@ -995,13 +1123,14 @@ function buildLog({
 
 function buildVideoConfig(config: AiConfig, model: string): AiConfig {
     const seedance = isSeedanceVideoConfig({ ...config, model });
+    const happyHorse = isHappyHorseVideoConfig({ ...config, model, videoModel: model });
     return {
         ...config,
         model,
         videoModel: model,
-        size: seedance ? normalizeSeedanceRatio(config.size) : normalizeVideoSize(config.size),
-        videoSeconds: normalizeVideoSeconds(config.videoSeconds),
-        vquality: normalizeResolution(config.vquality),
+        size: happyHorse ? normalizeHappyHorseRatio(config.size) : seedance ? normalizeSeedanceRatio(config.size) : normalizeVideoSize(config.size),
+        videoSeconds: happyHorse ? normalizeHappyHorseDuration(config.videoSeconds) : normalizeVideoSeconds(config.videoSeconds),
+        vquality: happyHorse ? normalizeHappyHorseResolution(config.vquality) : normalizeResolution(config.vquality),
         videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),
         videoWatermark: String(boolConfig(config.videoWatermark, false)),
     };
