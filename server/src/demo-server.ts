@@ -1078,6 +1078,7 @@ async function callHappyHorse(
 ) {
   const imageSources = sources.filter((source) => source.mimeType.startsWith("image/"));
   const videoSource = sources.find((source) => source.mimeType.startsWith("video/"));
+  const uploadedImageUrls = await Promise.all(imageSources.map(uploadHappyHorseImage));
   const body: Record<string, unknown> = {
     model: "happyhorse-1.0",
     prompt,
@@ -1085,9 +1086,9 @@ async function callHappyHorse(
     watermark: parameters.watermark,
   };
   if (parameters.mode === "first-frame") {
-    body.first_frame_image = assetDataUrl(imageSources[0]!);
+    body.first_frame_image = uploadedImageUrls[0];
   } else if (parameters.mode === "reference") {
-    body.image_urls = imageSources.map(assetDataUrl);
+    body.image_urls = uploadedImageUrls;
   } else if (parameters.mode === "edit") {
     if (!videoSource) throw new Error("A source video is required for video editing");
     // The upstream service needs a URL it can fetch. Demo assets are private to
@@ -1184,8 +1185,26 @@ function validateHappyHorseRequest(
   return "";
 }
 
-function assetDataUrl(source: DemoAsset) {
-  return `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`;
+async function uploadHappyHorseImage(source: DemoAsset) {
+  const form = new FormData();
+  form.set(
+    "file",
+    new File([source.bytes], source.filename, { type: source.mimeType }),
+  );
+  const response = await fetch(`${apiMartBaseUrl}/uploads/images`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiMartApiKey}` },
+    body: form,
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!response.ok)
+    throw new Error(
+      `HappyHorse image upload failed: ${response.status}${await providerErrorDetail(response)}`,
+    );
+  const uploaded = (await response.json()) as { url?: unknown };
+  if (typeof uploaded.url !== "string" || !/^https?:\/\//.test(uploaded.url))
+    throw new Error("HappyHorse image upload did not return an HTTP URL");
+  return uploaded.url;
 }
 
 function extractHappyHorseVideoUrl(items: unknown[] | undefined) {
