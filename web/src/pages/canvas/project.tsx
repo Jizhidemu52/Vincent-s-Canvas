@@ -1515,6 +1515,11 @@ function WirelessCanvasPage() {
             }
 
             if (event.key === "Delete" || event.key === "Backspace") {
+                const target = event.target;
+                if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return;
+                // Backspace otherwise triggers the browser's navigation history,
+                // which can take the designer out of the current canvas.
+                event.preventDefault();
                 if (selectedNodeIdsRef.current.size) {
                     deleteNodes(new Set(selectedNodeIdsRef.current));
                 } else if (selectedConnectionId) {
