@@ -8,7 +8,6 @@ const tabs = [
   { title: '项目介绍', href: '/docs/overview/quick-start', prefix: '/docs/overview' },
   { title: '操作手册', href: '/docs/canvas/canvas-node-manual', prefix: '/docs/canvas' },
   { title: '开发文档', href: '/docs/backend/local-development', prefix: '/docs/backend' },
-  { title: '项目进度', href: '/docs/progress/changelog', prefix: '/docs/progress' },
   { title: '安全', href: '/docs/support/security', prefix: '/docs/support' },
 ];
 

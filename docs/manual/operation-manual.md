@@ -521,7 +521,6 @@ Provider 就是模型接口来源，例如：
 - Gemini
 - 火山引擎
 - RunningHub
-- Codex
 - 公司内部模型
 - 其他第三方 API
 

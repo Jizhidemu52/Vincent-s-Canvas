@@ -31,9 +31,3 @@
 ## 安全
 
 - [漏洞提交](/docs/support/security)
-
-## 项目进度
-
-- [更新日志](/docs/progress/changelog)
-- [待测试](/docs/progress/pending-test)
-- [TODO](/docs/progress/todo)
