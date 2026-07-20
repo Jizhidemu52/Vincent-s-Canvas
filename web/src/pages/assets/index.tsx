@@ -1,4 +1,4 @@
-import { BookmarkPlus, Check, Copy, Download, PencilLine, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
+import { BookmarkPlus, Check, CloudCheck, CloudUpload, Copy, Download, PencilLine, RefreshCw, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
@@ -8,7 +8,7 @@ import { useCopyText } from "@/hooks/use-copy-text";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
 import { uploadImage } from "@/services/image-storage";
 import { cn } from "@/lib/utils";
-import { canUserAccessAsset, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
+import { canUserAccessAsset, companyDatabaseStatus, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
 import {
@@ -64,6 +64,7 @@ export default function AssetsPage() {
     const addAsset = useAssetStore((state) => state.addAsset);
     const updateAsset = useAssetStore((state) => state.updateAsset);
     const removeAsset = useAssetStore((state) => state.removeAsset);
+    const syncAssetToCompanyDatabase = useAssetStore((state) => state.syncAssetToCompanyDatabase);
     const [keyword, setKeyword] = useState("");
     const [kindFilter, setKindFilter] = useState<AssetKind | "all">("all");
     const [page, setPage] = useState(1);
@@ -74,6 +75,7 @@ export default function AssetsPage() {
     const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
     const [projectAsset, setProjectAsset] = useState<Asset | null>(null);
     const [selectedProjectId, setSelectedProjectId] = useState<string>();
+    const [syncingAssetId, setSyncingAssetId] = useState<string | null>(null);
     const [formKind, setFormKind] = useState<AssetKind>("text");
     const [imageDraft, setImageDraft] = useState<ImageDraft>(null);
     const coverUrl = Form.useWatch("coverUrl", form) || "";
@@ -95,7 +97,7 @@ export default function AssetsPage() {
     };
     useEffect(() => { void refreshServerAssets(); }, []);
     useEffect(() => { void listServerProjects().then((result) => setServerProjects(result.projects)).catch(() => setServerProjects([])); }, []);
-    const assets = useMemo(() => [...serverAssets.map(serverAssetToLocal), ...localAssets.filter((asset) => !serverAssetIds.has(asset.id))], [localAssets, serverAssetIds, serverAssets]);
+    const assets = useMemo(() => [...serverAssets.map(serverAssetToLocal), ...localAssets.filter((asset) => !serverAssetIds.has(asset.id) && !serverAssetIds.has(metadataString(asset, "serverAssetId")))], [localAssets, serverAssetIds, serverAssets]);
     const validAssets = useMemo(() => assets.filter((asset) => canUserAccessAsset(asset, user) && (asset.kind === "text" || asset.kind === "image" || asset.kind === "video")), [assets, user]);
 
     const filteredAssets = useMemo(() => {
@@ -302,6 +304,19 @@ export default function AssetsPage() {
         } catch (error) { message.error(error instanceof Error ? error.message : "共享设置失败"); }
     };
 
+    const syncAsset = async (asset: Asset) => {
+        setSyncingAssetId(asset.id);
+        try {
+            await syncAssetToCompanyDatabase(asset.id);
+            await refreshServerAssets();
+            message.success("已上传到公司数据库，可在素材库和后台监管中复用");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "上传公司数据库失败，可稍后重试");
+        } finally {
+            setSyncingAssetId(null);
+        }
+    };
+
     const addToProject = async () => {
         if (!projectAsset || !selectedProjectId) { message.warning("请先选择项目"); return; }
         try {
@@ -411,6 +426,9 @@ export default function AssetsPage() {
                                 onDownload={downloadImage}
                                 onReplicate={() => void replicateAsset(asset)}
                                 onDelete={() => setDeletingAsset(asset)}
+                                isServerAsset={serverAssetIds.has(asset.id)}
+                                syncing={syncingAssetId === asset.id}
+                                onSync={() => void syncAsset(asset)}
                             />
                         ))}
                     </div>
@@ -553,6 +571,8 @@ export default function AssetsPage() {
                 onAddProject={(asset) => { setProjectAsset(asset); setSelectedProjectId(metadataString(asset, "projectId") || undefined); }}
                 onShareDepartment={shareWithDepartment}
                 onSetCompanyVisibility={setCompanyVisibility}
+                onSyncCompany={(asset) => void syncAsset(asset)}
+                syncing={Boolean(previewAsset && syncingAssetId === previewAsset.id)}
             />
 
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importAssetZip(event.target.files?.[0])} />
@@ -590,6 +610,9 @@ function AssetCard({
     onDownload,
     onReplicate,
     onDelete,
+    isServerAsset,
+    syncing,
+    onSync,
 }: {
     asset: Asset;
     onOpen: () => void;
@@ -598,9 +621,13 @@ function AssetCard({
     onDownload: (asset: Asset) => void;
     onReplicate: () => void;
     onDelete: () => void;
+    isServerAsset: boolean;
+    syncing: boolean;
+    onSync: () => void;
 }) {
     const cover = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "");
     const summary = assetSummary(asset);
+    const syncStatus = companyDatabaseStatus(asset);
     return (
         <Card
             hoverable
@@ -667,6 +694,11 @@ function AssetCard({
                         复刻
                     </Button>
                 ) : null}
+                {!isServerAsset ? (
+                    <Button className="shrink-0" size="small" loading={syncing || syncStatus === "syncing"} icon={syncStatus === "synced" ? <CloudCheck className="size-3.5" /> : syncStatus === "failed" ? <RefreshCw className="size-3.5" /> : <CloudUpload className="size-3.5" />} onClick={onSync}>
+                        {syncStatus === "failed" ? "重试上传" : syncStatus === "synced" ? "已同步" : "上传公司库"}
+                    </Button>
+                ) : <Tag color="green">已存入公司库</Tag>}
                 <Button className="shrink-0" size="small" danger icon={<Trash2 className="size-3.5" />} onClick={onDelete}>
                     删除
                 </Button>
@@ -689,6 +721,8 @@ function AssetDrawer({
     onAddProject,
     onShareDepartment,
     onSetCompanyVisibility,
+    onSyncCompany,
+    syncing,
 }: {
     asset: Asset | null;
     currentUserId: string;
@@ -703,6 +737,8 @@ function AssetDrawer({
     onAddProject: (asset: Asset) => void;
     onShareDepartment: (asset: Asset, remove?: boolean) => void | Promise<void>;
     onSetCompanyVisibility: (asset: Asset, visibility: "private" | "company") => void | Promise<void>;
+    onSyncCompany: (asset: Asset) => void;
+    syncing: boolean;
 }) {
     const cover = asset ? asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "") : "";
     const isOwner = asset?.ownerId === currentUserId;
@@ -753,6 +789,11 @@ function AssetDrawer({
                         </div>
                     ) : null}
                     <Space>
+                        {!isServerAsset ? (
+                            <Button icon={<CloudUpload className="size-4" />} loading={syncing || companyDatabaseStatus(asset) === "syncing"} onClick={() => onSyncCompany(asset)}>
+                                {companyDatabaseStatus(asset) === "failed" ? "重试上传公司数据库" : "上传公司数据库"}
+                            </Button>
+                        ) : <Tag color="green" icon={<CloudCheck className="size-3.5" />}>已存入公司数据库</Tag>}
                         {asset.kind === "text" ? (
                             <Button type="primary" icon={<Copy className="size-4" />} onClick={() => onCopy(asset)}>
                                 复制文本

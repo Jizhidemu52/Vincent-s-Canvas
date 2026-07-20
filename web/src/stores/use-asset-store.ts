@@ -35,6 +35,7 @@ type AssetStore = {
     addAsset: (asset: Omit<Asset, "id" | "ownerId" | "createdAt" | "updatedAt"> & { ownerId?: string }) => string;
     updateAsset: (id: string, patch: Partial<Omit<Asset, "id" | "createdAt">>) => void;
     removeAsset: (id: string) => void;
+    syncAssetToCompanyDatabase: (id: string) => Promise<string>;
     replaceAssets: (assets: Asset[]) => void;
     cleanupImages: (extra?: unknown) => void;
 };
@@ -81,33 +82,7 @@ export const useAssetStore = create<AssetStore>()(
                 const created = { ...asset, id, ownerId, createdAt: now, updatedAt: now, metadata: { ...asset.metadata, designerId: ownerId } } as Asset;
                 set((state) => ({ assets: [created, ...state.assets] }));
                 const user = useUserStore.getState().user;
-                if (user) {
-                    void syncAssetToServerStorage(created)
-                        .then((serverAssetId) => {
-                            set((state) => ({
-                                assets: state.assets.map((item) =>
-                                    item.id === id
-                                        ? {
-                                              ...item,
-                                              metadata: { ...item.metadata, serverAssetId, companyDatabaseStatus: "synced", companyDatabaseSyncedAt: new Date().toISOString() },
-                                          }
-                                        : item,
-                                ),
-                            }));
-                        })
-                        .catch((error) => {
-                            set((state) => ({
-                                assets: state.assets.map((item) =>
-                                    item.id === id
-                                        ? {
-                                              ...item,
-                                              metadata: { ...item.metadata, companyDatabaseStatus: "failed", companyDatabaseError: error instanceof Error ? error.message : "同步失败" },
-                                          }
-                                        : item,
-                                ),
-                            }));
-                        });
-                }
+                if (user) void get().syncAssetToCompanyDatabase(id).catch(() => undefined);
                 return id;
             },
             updateAsset: (id, patch) =>
@@ -120,6 +95,25 @@ export const useAssetStore = create<AssetStore>()(
                     get().cleanupImages({ assets });
                     return { assets };
                 }),
+            syncAssetToCompanyDatabase: async (id) => {
+                const asset = get().assets.find((item) => item.id === id);
+                if (!asset) throw new Error("素材不存在，无法上传到公司数据库");
+                if (!canCurrentUserManageAsset(asset)) throw new Error("无权上传该素材到公司数据库");
+                const existingId = serverAssetIdFromAsset(asset);
+                if (existingId) {
+                    setCompanyDatabaseState(set, id, { serverAssetId: existingId, companyDatabaseStatus: "synced", companyDatabaseSyncedAt: new Date().toISOString(), companyDatabaseError: undefined });
+                    return existingId;
+                }
+                setCompanyDatabaseState(set, id, { companyDatabaseStatus: "syncing", companyDatabaseError: undefined });
+                try {
+                    const serverAssetId = await syncAssetToServerStorage(asset);
+                    setCompanyDatabaseState(set, id, { serverAssetId, companyDatabaseStatus: "synced", companyDatabaseSyncedAt: new Date().toISOString(), companyDatabaseError: undefined });
+                    return serverAssetId;
+                } catch (error) {
+                    setCompanyDatabaseState(set, id, { companyDatabaseStatus: "failed", companyDatabaseError: error instanceof Error ? error.message : "同步失败" });
+                    throw error;
+                }
+            },
             replaceAssets: (assets) => set({ assets }),
             cleanupImages: (extra) => {
                 window.setTimeout(async () => {
@@ -152,6 +146,12 @@ export function canUserAccessAsset(asset: Asset, user: LocalUser | null) {
     return assetOwnerId(asset) === user.id;
 }
 
+export function companyDatabaseStatus(asset: Asset): "not_synced" | "syncing" | "synced" | "failed" {
+    if (serverAssetIdFromAsset(asset)) return "synced";
+    const value = asset.metadata?.companyDatabaseStatus;
+    return value === "syncing" || value === "failed" || value === "synced" ? value : "not_synced";
+}
+
 function canCurrentUserManageAsset(asset: Asset) {
     return canUserAccessAsset(asset, useUserStore.getState().user);
 }
@@ -165,14 +165,20 @@ async function syncAssetToServerStorage(asset: Asset) {
     if (existingId) return existingId;
     const metadata = { ...asset.metadata, localAssetId: asset.id, title: asset.title, tags: asset.tags, source: asset.source || "local-cache", note: asset.note || "" };
     if (asset.kind === "text") {
-        return uploadServerAsset(new File([asset.data.content], `${safeFilename(asset.title)}.txt`, { type: "text/plain;charset=utf-8" }), metadata);
+        return uploadServerAsset(new File([asset.data.content], `${safeFilename(asset.title)}.txt`, { type: "text/plain;charset=utf-8" }), metadata, { clientReferenceId: asset.id });
     }
     const sourceUrl = asset.kind === "image" ? asset.data.dataUrl : asset.data.url;
     const response = await fetch(sourceUrl, { credentials: "include" });
     if (!response.ok) throw new Error(`素材读取失败（${response.status}）`);
     const blob = await response.blob();
     const extension = asset.kind === "video" ? "mp4" : blob.type.includes("jpeg") ? "jpg" : "png";
-    return uploadServerAsset(new File([blob], `${safeFilename(asset.title)}.${extension}`, { type: blob.type || asset.data.mimeType }), metadata);
+    return uploadServerAsset(new File([blob], `${safeFilename(asset.title)}.${extension}`, { type: blob.type || asset.data.mimeType }), metadata, { clientReferenceId: asset.id });
+}
+
+function setCompanyDatabaseState(set: (partial: Partial<AssetStore> | ((state: AssetStore) => Partial<AssetStore>), replace?: false) => void, id: string, patch: Record<string, unknown>) {
+    set((state) => ({
+        assets: state.assets.map((item) => item.id === id ? { ...item, metadata: { ...item.metadata, ...patch } } : item),
+    }));
 }
 
 function serverAssetIdFromAsset(asset: Asset) {

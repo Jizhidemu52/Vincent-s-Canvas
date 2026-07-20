@@ -161,6 +161,7 @@ type DemoAsset = {
   mimeType: string;
   bytes: Uint8Array;
   createdAt: string;
+  clientReferenceId?: string;
 };
 type DemoTask = {
   id: string;
@@ -308,6 +309,7 @@ Bun.serve({
         filename?: string;
         mimeType?: string;
         byteSize?: number;
+        clientReferenceId?: string;
       };
       if (!input.mimeType?.startsWith("image/"))
         return json(
@@ -323,6 +325,11 @@ Bun.serve({
           { error: "INVALID_ASSET_SIZE", message: "图片大小必须在 15MB 以内" },
           400,
         );
+      const existing = input.clientReferenceId
+        ? [...demoAssets.values()].find((asset) => asset.ownerUserId === user.id && asset.clientReferenceId === input.clientReferenceId)
+        : undefined;
+      if (existing)
+        return json({ assetId: existing.id, uploadUrl: existing.bytes.byteLength ? null : `/api/assets/${existing.id}/content-upload`, reused: true }, 201);
       const assetId = crypto.randomUUID();
       demoAssets.set(assetId, {
         id: assetId,
@@ -331,6 +338,7 @@ Bun.serve({
         mimeType: input.mimeType,
         bytes: new Uint8Array(),
         createdAt: now(),
+        clientReferenceId: input.clientReferenceId,
       });
       return json(
         { assetId, uploadUrl: `/api/assets/${assetId}/content-upload` },

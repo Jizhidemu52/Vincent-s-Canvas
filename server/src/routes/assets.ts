@@ -21,6 +21,7 @@ const createSchema = z.object({
   byteSize: z.number().int().min(1).max(100 * 1024 * 1024),
   kind: z.enum(["image", "video", "text", "other"]).default("image"),
   projectId: z.string().uuid().nullish(),
+  clientReferenceId: z.string().trim().min(8).max(160).optional(),
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
 const shareSchema = z.object({ scope: z.enum(["department", "project", "user"]), targetId: z.string().uuid() });
@@ -94,12 +95,23 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
         response.status(503).json({ error: "STORAGE_NOT_CONFIGURED", message: "公司对象存储尚未配置" });
         return;
       }
+      if (input.clientReferenceId) {
+        const existing = await db.query<{ id: string; status: string }>(
+          "SELECT id,status FROM assets WHERE owner_user_id=$1 AND client_reference_id=$2 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
+          [actor.id, input.clientReferenceId],
+        );
+        const asset = existing.rows[0];
+        if (asset) {
+          response.status(201).json({ assetId: asset.id, uploadUrl: asset.status === "ready" ? null : `/api/assets/${asset.id}/upload`, reused: true });
+          return;
+        }
+      }
       const id = randomUUID();
       const safe = input.filename.replace(/[^A-Za-z0-9._-]/g, "_");
       const key = `users/${actor.id}/${id}/${safe}`;
       await db.query(
-        `INSERT INTO assets(id,owner_user_id,department_id,project_id,object_key,filename,mime_type,byte_size,kind,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [id, actor.id, actor.departmentId, input.projectId ?? null, key, input.filename, input.mimeType, input.byteSize, input.kind, JSON.stringify(input.metadata)],
+        `INSERT INTO assets(id,owner_user_id,department_id,project_id,object_key,filename,mime_type,byte_size,kind,client_reference_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [id, actor.id, actor.departmentId, input.projectId ?? null, key, input.filename, input.mimeType, input.byteSize, input.kind, input.clientReferenceId ?? null, JSON.stringify(input.metadata)],
       );
       response.status(201).json({ assetId: id, uploadUrl: `/api/assets/${id}/upload` });
     } catch (error) { next(error); }

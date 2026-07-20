@@ -45,13 +45,13 @@ export const listAdminServerAssets = () => request<{ assets: ServerAsset[] }>("/
 export const listAdminServerProjects = () => request<{ projects: ServerProject[] }>("/api/admin/projects");
 export const listServerProjects = () => request<{ projects: UserProject[] }>("/api/projects");
 
-export async function uploadServerAsset(file: File, metadata: Record<string, unknown> = {}) {
-    const created = await request<{ assetId: string; uploadUrl: string }>("/api/assets/upload-request", {
+export async function uploadServerAsset(file: File, metadata: Record<string, unknown> = {}, options: { projectId?: string; clientReferenceId?: string } = {}) {
+    const created = await request<{ assetId: string; uploadUrl: string | null }>("/api/assets/upload-request", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ filename: file.name, mimeType: file.type || "application/octet-stream", byteSize: file.size, kind: file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : file.type.startsWith("text/") ? "text" : "other", metadata }),
+        body: JSON.stringify({ filename: file.name, mimeType: file.type || "application/octet-stream", byteSize: file.size, kind: file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : file.type.startsWith("text/") ? "text" : "other", metadata, ...options }),
     });
-    await request<void>(created.uploadUrl, { method: "PUT", headers: { "content-type": file.type || "application/octet-stream" }, body: file });
+    if (created.uploadUrl) await request<void>(created.uploadUrl, { method: "PUT", headers: { "content-type": file.type || "application/octet-stream" }, body: file });
     return created.assetId;
 }
 

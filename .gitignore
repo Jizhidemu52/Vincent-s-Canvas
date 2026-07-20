@@ -7,6 +7,7 @@ web/.env
 data/
 *.log
 *.log.err
+*.log.out
 .tmp-*.log
 .playwright-cli/
 *.tsbuildinfo
