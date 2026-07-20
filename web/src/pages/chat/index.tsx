@@ -3,15 +3,16 @@ import { Bot, CheckCircle2, ChevronDown, CornerDownLeft, FileText, ImagePlus, Me
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
-import { requestImageQuestion, type AiTextMessage } from "@/services/api/image";
+import { requestEdit, requestGeneration, requestImageQuestion, type AiTextMessage } from "@/services/api/image";
 import { useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import type { ReferenceImage } from "@/types/image";
 
 type ChatModel = { modelId: string; name: string; creditCost: number; capabilities: string[] };
 type ChatAttachment = { id: string; name: string; mimeType: string; size: number; dataUrl?: string; textContent?: string };
-type ChatMessage = { id: string; role: "user" | "assistant" | "error"; content: string; attachments?: ChatAttachment[]; createdAt: string };
+type ChatMessage = { id: string; role: "user" | "assistant" | "error"; content: string; attachments?: ChatAttachment[]; generatedImages?: Array<{ id: string; dataUrl: string }>; createdAt: string };
 type ChatSession = { id: string; title: string; mode: ChatMode; messages: ChatMessage[]; updatedAt: string };
-type ChatMode = "chat" | "agent";
+type ChatMode = "chat" | "agent" | "create";
 type AgentTask = "brief" | "prompt" | "plan";
 
 const storagePrefix = "wireless-canvas:llm-chat:";
@@ -119,7 +120,7 @@ export default function ChatPage() {
             .then((response) => response.ok ? response.json() : Promise.reject(new Error("无法加载对话模型")))
             .then((data: { models: ChatModel[] }) => {
                 const available = data.models.filter((item) => item.capabilities.includes("chat"));
-                setModels(available);
+                setModels(data.models);
                 setSelectedModel((current) => current && available.some((item) => item.modelId === current) ? current : available[0]?.modelId || "");
             })
             .catch(() => setModels([]));
@@ -130,7 +131,10 @@ export default function ChatPage() {
     }, [sessions, activeSessionId, isSending]);
 
     const activeSession = useMemo(() => sessions.find((item) => item.id === activeSessionId) || sessions[0], [activeSessionId, sessions]);
-    const selected = models.find((item) => item.modelId === selectedModel);
+    const chatModels = useMemo(() => models.filter((item) => item.capabilities.includes("chat")), [models]);
+    const imageModels = useMemo(() => models.filter((item) => item.capabilities.some((capability) => ["generate", "edit"].includes(capability))), [models]);
+    const availableModels = mode === "create" ? imageModels : chatModels;
+    const selected = availableModels.find((item) => item.modelId === selectedModel);
     const agent = agentTasks.find((item) => item.id === agentTask)!;
 
     const updateSession = (id: string, update: (session: ChatSession) => ChatSession) => {
@@ -146,6 +150,12 @@ export default function ChatPage() {
         setAttachments([]);
     };
 
+    const switchMode = (nextMode: ChatMode) => {
+        setMode(nextMode);
+        const available = nextMode === "create" ? imageModels : chatModels;
+        setSelectedModel((current) => available.some((item) => item.modelId === current) ? current : available[0]?.modelId || "");
+    };
+
     const removeSession = (id: string) => {
         setSessions((current) => {
             const next = current.filter((item) => item.id !== id);
@@ -159,8 +169,13 @@ export default function ChatPage() {
     const send = async () => {
         const text = draft.trim();
         if ((!text && !attachments.length) || isSending || !activeSession) return;
-        if (!selectedModel) {
-            message.warning("管理员尚未启用可用的对话模型");
+        if (!selectedModel || !selected) {
+            message.warning(mode === "create" ? "管理员尚未启用可用的图像生成模型" : "管理员尚未启用可用的对话模型");
+            return;
+        }
+
+        if (mode === "create" && !text) {
+            message.warning("请输入图片生成或编辑要求");
             return;
         }
 
@@ -177,6 +192,22 @@ export default function ChatPage() {
         setAttachments([]);
         setIsSending(true);
         try {
+            if (mode === "create") {
+                const references: ReferenceImage[] = attachments
+                    .filter((item): item is ChatAttachment & { dataUrl: string } => Boolean(item.dataUrl))
+                    .map((item) => ({ id: item.id, name: item.name, type: item.mimeType, dataUrl: item.dataUrl }));
+                const imageConfig = { ...config, model: selectedModel, imageModel: selectedModel, count: "1" };
+                const generated = references.length
+                    ? await requestEdit(imageConfig, text, references, undefined, { operationType: "inpaint", tool: "gpt-chat" })
+                    : await requestGeneration(imageConfig, text, { operationType: "image_generation", tool: "gpt-chat" });
+                if (!generated.length) throw new Error("图像模型没有返回图片");
+                updateSession(sessionId, (session) => ({
+                    ...session,
+                    messages: [...session.messages, { id: assistantId, role: "assistant", content: `已生成 ${generated.length} 张图片`, generatedImages: generated.map((item) => ({ id: item.id, dataUrl: item.dataUrl })), createdAt: new Date().toISOString() }],
+                    updatedAt: new Date().toISOString(),
+                }));
+                return;
+            }
             const response = await requestImageQuestion(
                 { ...config, model: selectedModel, textModel: selectedModel, systemPrompt: taskInstruction },
                 [...history, { role: "user", content: messageContent(userMessage) }],
@@ -255,17 +286,17 @@ export default function ChatPage() {
                 <section className="flex min-w-0 flex-1 flex-col">
                     <header className="flex min-h-16 items-center gap-3 border-b border-orange-100 px-4 md:px-6">
                         <Tooltip title={sidebarOpen ? "收起会话" : "展开会话"}><button type="button" onClick={() => setSidebarOpen((value) => !value)} className="grid size-8 place-items-center rounded-md text-stone-500 hover:bg-orange-50 hover:text-orange-700">{sidebarOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}</button></Tooltip>
-                        <div className="min-w-0 flex-1"><h1 className="text-sm font-bold text-stone-900">LLM 对话</h1><p className="mt-0.5 truncate text-[11px] text-stone-400">{mode === "agent" ? `Agent · ${agent.description}` : "一问一答 · 设计思路与提示词协作"}</p></div>
-                        <div className="hidden items-center gap-2 sm:flex"><span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700"><CheckCircle2 className="size-3.5" /> 服务端已连接</span><div className="relative"><select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} className="h-8 max-w-[220px] appearance-none rounded-md border border-orange-200 bg-white py-0 pl-3 pr-8 text-xs font-semibold text-stone-700 outline-none focus:border-orange-500"><option value="">选择模型</option>{models.map((item) => <option key={item.modelId} value={item.modelId}>{item.name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-2 top-2 size-3.5 text-stone-400" /></div></div>
+                        <div className="min-w-0 flex-1"><h1 className="text-sm font-bold text-stone-900">LLM 对话</h1><p className="mt-0.5 truncate text-[11px] text-stone-400">{mode === "agent" ? `Agent · ${agent.description}` : mode === "create" ? "调用图像模型 · 生成与改图" : "一问一答 · 设计思路与提示词协作"}</p></div>
+                        <div className="hidden items-center gap-2 sm:flex"><span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700"><CheckCircle2 className="size-3.5" /> 服务端已连接</span><div className="relative"><select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} className="h-8 max-w-[220px] appearance-none rounded-md border border-orange-200 bg-white py-0 pl-3 pr-8 text-xs font-semibold text-stone-700 outline-none focus:border-orange-500"><option value="">选择模型</option>{availableModels.map((item) => <option key={item.modelId} value={item.modelId}>{item.name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-2 top-2 size-3.5 text-stone-400" /></div></div>
                     </header>
 
-                    <div className="border-b border-orange-100 px-4 py-3 md:px-6"><div className="inline-flex rounded-md bg-orange-50 p-1"><button type="button" onClick={() => setMode("chat")} className={cn("flex h-8 items-center gap-2 rounded px-3 text-xs font-bold transition", mode === "chat" ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-800")}><Bot className="size-3.5" /> 聊天</button><button type="button" onClick={() => setMode("agent")} className={cn("flex h-8 items-center gap-2 rounded px-3 text-xs font-bold transition", mode === "agent" ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-800")}><WandSparkles className="size-3.5" /> Agent</button></div>{mode === "agent" ? <div className="mt-3 flex flex-wrap gap-2">{agentTasks.map((item) => <button key={item.id} type="button" onClick={() => setAgentTask(item.id)} className={cn("rounded-full border px-3 py-1.5 text-xs font-semibold transition", agentTask === item.id ? "border-orange-500 bg-orange-600 text-white" : "border-orange-200 bg-white text-stone-600 hover:border-orange-400")}>{item.label}</button>)}</div> : null}</div>
+                    <div className="border-b border-orange-100 px-4 py-3 md:px-6"><div className="inline-flex rounded-md bg-orange-50 p-1"><button type="button" onClick={() => switchMode("chat")} className={cn("flex h-8 items-center gap-2 rounded px-3 text-xs font-bold transition", mode === "chat" ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-800")}><Bot className="size-3.5" /> 聊天</button><button type="button" onClick={() => switchMode("create")} className={cn("flex h-8 items-center gap-2 rounded px-3 text-xs font-bold transition", mode === "create" ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-800")}><ImagePlus className="size-3.5" /> 创作</button><button type="button" onClick={() => switchMode("agent")} className={cn("flex h-8 items-center gap-2 rounded px-3 text-xs font-bold transition", mode === "agent" ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-800")}><WandSparkles className="size-3.5" /> Agent</button></div>{mode === "agent" ? <div className="mt-3 flex flex-wrap gap-2">{agentTasks.map((item) => <button key={item.id} type="button" onClick={() => setAgentTask(item.id)} className={cn("rounded-full border px-3 py-1.5 text-xs font-semibold transition", agentTask === item.id ? "border-orange-500 bg-orange-600 text-white" : "border-orange-200 bg-white text-stone-600 hover:border-orange-400")}>{item.label}</button>)}</div> : mode === "create" ? <p className="mt-3 text-xs text-stone-500">不上传图片时为文生图；上传图片后为图片编辑。生成会按后台价格扣除积分，并进入历史与素材库。</p> : null}</div>
 
                     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-8 md:px-[10%]">
-                        {!activeSession?.messages.length ? <div className="mx-auto flex max-w-xl flex-col items-center pt-[10vh] text-center"><div className="grid size-12 place-items-center rounded-lg bg-orange-600 text-white shadow-lg shadow-orange-200"><Bot className="size-6" /></div><h2 className="mt-5 text-2xl font-bold text-stone-900">{mode === "agent" ? "开始一项设计任务" : "从一个问题开始"}</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone-500">{mode === "agent" ? agent.description : "向已启用的 LLM 询问设计方向、提示词、项目拆解或素材分析。"}</p><div className="mt-6 flex flex-wrap justify-center gap-2">{(mode === "agent" ? agentTasks : agentTasks.slice(0, 2)).map((item) => <button key={item.id} type="button" onClick={() => { if (mode === "agent") setAgentTask(item.id); setDraft(item.prompt); }} className="rounded-md border border-orange-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600 hover:border-orange-400 hover:text-orange-700">{item.label}</button>)}</div></div> : <div className="mx-auto max-w-3xl space-y-6">{activeSession.messages.map((item) => <ChatBubble key={item.id} message={item} />)}{isSending ? <div className="flex items-center gap-2 text-sm text-stone-400"><span className="size-4 animate-spin rounded-full border-2 border-orange-200 border-t-orange-600" /> 正在思考…</div> : null}</div>}
+                        {!activeSession?.messages.length ? <div className="mx-auto flex max-w-xl flex-col items-center pt-[10vh] text-center"><div className="grid size-12 place-items-center rounded-lg bg-orange-600 text-white shadow-lg shadow-orange-200">{mode === "create" ? <ImagePlus className="size-6" /> : <Bot className="size-6" />}</div><h2 className="mt-5 text-2xl font-bold text-stone-900">{mode === "agent" ? "开始一项设计任务" : mode === "create" ? "描述你要生成的图片" : "从一个问题开始"}</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone-500">{mode === "agent" ? agent.description : mode === "create" ? "选择后台启用的图像模型；上传图片可直接进行 AI 改图。" : "向已启用的 LLM 询问设计方向、提示词、项目拆解或素材分析。"}</p><div className="mt-6 flex flex-wrap justify-center gap-2">{mode === "create" ? <button type="button" onClick={() => setDraft("为这件服装生成一组高级感棚拍主图") } className="rounded-md border border-orange-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600 hover:border-orange-400 hover:text-orange-700">试试图片创作</button> : (mode === "agent" ? agentTasks : agentTasks.slice(0, 2)).map((item) => <button key={item.id} type="button" onClick={() => { if (mode === "agent") setAgentTask(item.id); setDraft(item.prompt); }} className="rounded-md border border-orange-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600 hover:border-orange-400 hover:text-orange-700">{item.label}</button>)}</div></div> : <div className="mx-auto max-w-3xl space-y-6">{activeSession.messages.map((item) => <ChatBubble key={item.id} message={item} />)}{isSending ? <div className="flex items-center gap-2 text-sm text-stone-400"><span className="size-4 animate-spin rounded-full border-2 border-orange-200 border-t-orange-600" /> {mode === "create" ? "正在生成图片…" : "正在思考…"}</div> : null}</div>}
                     </div>
 
-                    <div className="border-t border-orange-100 bg-[#fffdf8] px-4 py-4 md:px-[10%]"><div className="mx-auto max-w-3xl"><div className="rounded-lg border border-orange-200 bg-white p-2 shadow-sm focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-100">{attachments.length ? <div className="flex flex-wrap gap-2 px-1 pb-2">{attachments.map((item) => <div key={item.id} className="group relative flex h-14 max-w-[170px] items-center gap-2 rounded-md border border-orange-100 bg-orange-50/60 p-1.5">{item.dataUrl ? <img src={item.dataUrl} alt="" className="size-10 rounded object-cover" /> : <span className="grid size-10 place-items-center rounded bg-white text-orange-600"><FileText className="size-4" /></span>}<span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-stone-600">{item.name}</span><button type="button" aria-label={`移除 ${item.name}`} onClick={() => setAttachments((current) => current.filter((attachment) => attachment.id !== item.id))} className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-orange-200 bg-white text-stone-500 shadow-sm hover:text-red-600"><X className="size-3" /></button></div>)}</div> : null}<textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void send(); } }} placeholder={mode === "agent" ? `${agent.prompt}…` : "输入你的问题，或上传图片/文本文件…"} className="min-h-[78px] w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 text-stone-800 outline-none placeholder:text-stone-400" /><div className="flex items-center justify-between gap-3 border-t border-stone-100 px-1 pt-2"><div className="flex items-center gap-1"><Tooltip title="上传图片或文本文件"><button type="button" onClick={() => fileInputRef.current?.click()} className="grid size-8 place-items-center rounded-md text-stone-500 hover:bg-orange-50 hover:text-orange-700" aria-label="上传文件"><Paperclip className="size-4" /></button></Tooltip><Tooltip title="上传图片"><button type="button" onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "image/*"; fileInputRef.current.click(); } }} className="grid size-8 place-items-center rounded-md text-stone-500 hover:bg-orange-50 hover:text-orange-700" aria-label="上传图片"><ImagePlus className="size-4" /></button></Tooltip><span className="hidden text-[11px] text-stone-400 sm:inline">图片 / 文本文件 · 最多 5 个</span></div><Button type="primary" disabled={(!draft.trim() && !attachments.length) || isSending || !selectedModel} loading={isSending} onClick={() => void send()} icon={<Send className="size-3.5" />} className="!h-8 !border-0 !bg-orange-600 !px-3 !text-xs !font-bold hover:!bg-orange-700">发送</Button></div><input ref={fileInputRef} type="file" multiple accept="image/*,.txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" className="hidden" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} /></div><p className="mt-2 flex items-center gap-1.5 text-[11px] text-stone-400"><CornerDownLeft className="size-3" /> 对话消耗与模型权限由管理员后台统一配置。</p></div></div>
+                    <div className="border-t border-orange-100 bg-[#fffdf8] px-4 py-4 md:px-[10%]"><div className="mx-auto max-w-3xl"><div className="rounded-lg border border-orange-200 bg-white p-2 shadow-sm focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-100">{attachments.length ? <div className="flex flex-wrap gap-2 px-1 pb-2">{attachments.map((item) => <div key={item.id} className="group relative flex h-14 max-w-[170px] items-center gap-2 rounded-md border border-orange-100 bg-orange-50/60 p-1.5">{item.dataUrl ? <img src={item.dataUrl} alt="" className="size-10 rounded object-cover" /> : <span className="grid size-10 place-items-center rounded bg-white text-orange-600"><FileText className="size-4" /></span>}<span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-stone-600">{item.name}</span><button type="button" aria-label={`移除 ${item.name}`} onClick={() => setAttachments((current) => current.filter((attachment) => attachment.id !== item.id))} className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-orange-200 bg-white text-stone-500 shadow-sm hover:text-red-600"><X className="size-3" /></button></div>)}</div> : null}<textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void send(); } }} placeholder={mode === "create" ? "描述要生成的图片；上传图片后可直接写改图要求…" : mode === "agent" ? `${agent.prompt}…` : "输入你的问题，或上传图片/文本文件…"} className="min-h-[78px] w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 text-stone-800 outline-none placeholder:text-stone-400" /><div className="flex items-center justify-between gap-3 border-t border-stone-100 px-1 pt-2"><div className="flex items-center gap-1"><Tooltip title="上传图片或文本文件"><button type="button" onClick={() => fileInputRef.current?.click()} className="grid size-8 place-items-center rounded-md text-stone-500 hover:bg-orange-50 hover:text-orange-700" aria-label="上传文件"><Paperclip className="size-4" /></button></Tooltip><Tooltip title="上传图片"><button type="button" onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "image/*"; fileInputRef.current.click(); } }} className="grid size-8 place-items-center rounded-md text-stone-500 hover:bg-orange-50 hover:text-orange-700" aria-label="上传图片"><ImagePlus className="size-4" /></button></Tooltip><span className="hidden text-[11px] text-stone-400 sm:inline">图片 / 文本文件 · 最多 5 个</span></div><Button type="primary" disabled={(!draft.trim() && !attachments.length) || isSending || !selectedModel} loading={isSending} onClick={() => void send()} icon={mode === "create" ? <Sparkles className="size-3.5" /> : <Send className="size-3.5" />} className="!h-8 !border-0 !bg-orange-600 !px-3 !text-xs !font-bold hover:!bg-orange-700">{mode === "create" ? `生成图片${selected ? ` · ${selected.creditCost}积分` : ""}` : "发送"}</Button></div><input ref={fileInputRef} type="file" multiple accept="image/*,.txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" className="hidden" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} /></div><p className="mt-2 flex items-center gap-1.5 text-[11px] text-stone-400"><CornerDownLeft className="size-3" /> {mode === "create" ? "调用图像模型才会扣积分；上传、预览和输入提示词不扣费。" : "模型和权限由管理员后台统一配置。"}</p></div></div>
                 </section>
             </div>
         </main>
@@ -281,5 +312,5 @@ function messageContent(message: ChatMessage): AiTextMessage["content"] {
 
 function ChatBubble({ message }: { message: ChatMessage }) {
     const isUser = message.role === "user";
-    return <div className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")}><div className={cn("grid size-8 shrink-0 place-items-center rounded-md", isUser ? "order-2 bg-stone-900 text-white" : message.role === "error" ? "bg-red-50 text-red-600" : "bg-orange-100 text-orange-700")}>{isUser ? <span className="text-xs font-bold">我</span> : message.role === "error" ? <span className="text-xs font-bold">!</span> : <Bot className="size-4" />}</div><div className={cn("max-w-[86%] rounded-lg px-4 py-3 text-sm leading-7", isUser ? "order-1 bg-stone-900 text-white" : message.role === "error" ? "border border-red-100 bg-red-50 text-red-700" : "border border-orange-100 bg-white text-stone-700 shadow-sm")}><div className="whitespace-pre-wrap">{message.content}</div>{message.attachments?.length ? <div className="mt-3 flex flex-wrap gap-2">{message.attachments.map((item) => item.dataUrl ? <img key={item.id} src={item.dataUrl} alt={item.name} className="max-h-40 rounded-md border border-white/20 object-cover" /> : <span key={item.id} className={cn("inline-flex items-center gap-1 rounded px-2 py-1 text-xs", isUser ? "bg-white/10" : "bg-orange-50 text-orange-700")}><FileText className="size-3.5" />{item.name}</span>)}</div> : null}</div></div>;
+    return <div className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")}><div className={cn("grid size-8 shrink-0 place-items-center rounded-md", isUser ? "order-2 bg-stone-900 text-white" : message.role === "error" ? "bg-red-50 text-red-600" : "bg-orange-100 text-orange-700")}>{isUser ? <span className="text-xs font-bold">我</span> : message.role === "error" ? <span className="text-xs font-bold">!</span> : <Bot className="size-4" />}</div><div className={cn("max-w-[86%] rounded-lg px-4 py-3 text-sm leading-7", isUser ? "order-1 bg-stone-900 text-white" : message.role === "error" ? "border border-red-100 bg-red-50 text-red-700" : "border border-orange-100 bg-white text-stone-700 shadow-sm")}><div className="whitespace-pre-wrap">{message.content}</div>{message.generatedImages?.length ? <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">{message.generatedImages.map((item) => <a key={item.id} href={item.dataUrl} download="wireless-canvas.png" className="block overflow-hidden rounded-md border border-orange-100 bg-orange-50/30"><img src={item.dataUrl} alt="生成结果" className="aspect-square w-full object-cover" /><span className="block border-t border-orange-100 px-2 py-1 text-[11px] font-semibold text-orange-700">点击下载原图</span></a>)}</div> : null}{message.attachments?.length ? <div className="mt-3 flex flex-wrap gap-2">{message.attachments.map((item) => item.dataUrl ? <img key={item.id} src={item.dataUrl} alt={item.name} className="max-h-40 rounded-md border border-white/20 object-cover" /> : <span key={item.id} className={cn("inline-flex items-center gap-1 rounded px-2 py-1 text-xs", isUser ? "bg-white/10" : "bg-orange-50 text-orange-700")}><FileText className="size-3.5" />{item.name}</span>)}</div> : null}</div></div>;
 }

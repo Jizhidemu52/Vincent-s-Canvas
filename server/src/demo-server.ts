@@ -1167,8 +1167,9 @@ async function runGptImage2Task(
     task.status = "success";
   } catch (error) {
     task.status = "failed";
-    task.failureReason =
-      error instanceof Error ? error.message : "GPT-Image-2 task failed";
+    task.failureReason = isProviderNetworkError(error)
+      ? "无法与图像服务建立安全连接。请检查服务器外网、TLS 证书策略或稍后重试；本次积分已自动退还。"
+      : error instanceof Error ? error.message : "GPT-Image-2 task failed";
     user.creditBalance += task.credits;
   }
 }
@@ -1383,6 +1384,19 @@ async function callGptImage2(
   parameters: Record<string, unknown>,
   sources: DemoAsset[],
 ) {
+  try {
+    return await callGptImage2WithBun(prompt, parameters, sources);
+  } catch (error) {
+    if (!isLocalCertificateError(error)) throw error;
+    return callGptImage2WithNode(prompt, parameters, sources);
+  }
+}
+
+async function callGptImage2WithBun(
+  prompt: string,
+  parameters: Record<string, unknown>,
+  sources: DemoAsset[],
+) {
   const size = normalizeGptImageSize(parameters.size);
   const resolution = normalizeGptImageResolution(parameters.resolution);
   const submitted = await fetch(`${apiMartBaseUrl}/images/generations`, {
@@ -1454,6 +1468,90 @@ async function callGptImage2(
     return `data:${mimeType};base64,${Buffer.from(await image.arrayBuffer()).toString("base64")}`;
   }
   throw new Error("GPT-Image-2 generation timed out");
+}
+
+function isLocalCertificateError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /unknown certificate verification error|socket connection was closed unexpectedly/i.test(message);
+}
+
+function isProviderNetworkError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return isLocalCertificateError(error) || /ECONNRESET|secure TLS connection|fetch failed|TLS handshake/i.test(message);
+}
+
+// Local-demo-only fallback for Windows machines where Bun cannot reach a TLS
+// endpoint because certificate-revocation lookup is unavailable on the host.
+async function callGptImage2WithNode(
+  prompt: string,
+  parameters: Record<string, unknown>,
+  sources: DemoAsset[],
+) {
+  const node = Bun.which("node");
+  if (!node) throw new Error("本机 Node.js 不可用，无法完成 GPT-Image-2 本地 HTTPS 回退请求");
+  const script = `
+    let raw = "";
+    for await (const chunk of process.stdin) raw += chunk;
+    const input = JSON.parse(raw);
+    const request = (path, init = {}) => fetch(process.env.APIMART_BASE_URL + path, {
+      ...init,
+      headers: { authorization: \`Bearer \${process.env.APIMART_API_KEY}\`, ...(init.headers || {}) },
+    });
+    const submitted = await request("/images/generations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-image-2", prompt: input.prompt, n: 1,
+        size: input.size, resolution: input.resolution,
+        ...(input.imageUrls.length ? { image_urls: input.imageUrls } : {}),
+      }),
+      signal: AbortSignal.timeout(180000),
+    });
+    const createdText = await submitted.text();
+    if (!submitted.ok) throw new Error(\`GPT-Image-2 submission failed: \${submitted.status}: \${createdText.slice(0, 500)}\`);
+    const taskId = JSON.parse(createdText).data?.[0]?.task_id;
+    if (!taskId) throw new Error("GPT-Image-2 did not return a task ID");
+    const deadline = Date.now() + 15 * 60_000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const statusResponse = await request(\`/tasks/\${encodeURIComponent(taskId)}\`, { signal: AbortSignal.timeout(60000) });
+      const statusText = await statusResponse.text();
+      if (!statusResponse.ok) throw new Error(\`GPT-Image-2 status check failed: \${statusResponse.status}\`);
+      const status = JSON.parse(statusText);
+      if (status.data?.status === "failed") throw new Error(status.data?.error?.message || "GPT-Image-2 generation failed");
+      if (status.data?.status !== "completed") continue;
+      const outputUrl = status.data?.result?.images?.[0]?.url?.[0];
+      if (!outputUrl) throw new Error("GPT-Image-2 completed without an output image");
+      const image = await fetch(outputUrl, { signal: AbortSignal.timeout(120000) });
+      if (!image.ok) throw new Error(\`GPT-Image-2 image download failed: \${image.status}\`);
+      const mimeType = image.headers.get("content-type")?.split(";")[0] || "image/png";
+      const data = Buffer.from(await image.arrayBuffer()).toString("base64");
+      process.stdout.write(JSON.stringify({ mimeType, data }));
+      process.exit(0);
+    }
+    throw new Error("GPT-Image-2 generation timed out");
+  `;
+  const input = {
+    prompt,
+    size: normalizeGptImageSize(parameters.size),
+    resolution: normalizeGptImageResolution(parameters.resolution),
+    imageUrls: sources.map((source) => `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`),
+  };
+  const child = Bun.spawn([node, "--input-type=module", "-e", script], {
+    stdin: new Blob([JSON.stringify(input)]),
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, APIMART_API_KEY: apiMartApiKey, APIMART_BASE_URL: apiMartBaseUrl },
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0) throw new Error(stderr.trim() || "GPT-Image-2 本地 HTTPS 回退请求失败");
+  const output = JSON.parse(stdout) as { mimeType?: string; data?: string };
+  if (!output.mimeType || !output.data) throw new Error("GPT-Image-2 本地 HTTPS 回退没有返回图片");
+  return `data:${output.mimeType};base64,${output.data}`;
 }
 
 function normalizeGptImageSize(value: unknown) {
