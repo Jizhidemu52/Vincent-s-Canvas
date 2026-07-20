@@ -818,6 +818,19 @@ LDAP 和 OIDC 当前显示“接口已预留”，首版仍推荐使用企业微
 8. 点击 `保存并同步到设计师端`。系统会保存服务端密钥、模型绑定并发布当前操作价格。
 9. 左侧菜单会立即从 `待配置` 变为实际积分；设计师重新进入页面后看到同样结果。
 
+### APIMart Gemini 3.1 Pro 对话配置
+
+![板块 API 配置](docs/assets/github/api-module-configuration.png)
+
+`gemini-3.1-pro-preview` 使用 Gemini 原生协议，不要把它当作 OpenAI `Responses` 模型填写。超级管理员按下面步骤配置后，设计师只会在对话模型下拉中看到模型名称和积分，不会看到 Base URL 或 API Key：
+
+1. 进入 `后台管理 -> 板块 API 配置`，新增 API 服务。
+2. 协议选择 `Gemini`，Base URL 填 `https://api.apimart.ai`；API Key 只填写在管理员表单。
+3. 新增模型，显示名称可填 `Gemini 3.1 Pro`，模型 ID 必须填 `gemini-3.1-pro-preview`，能力勾选 `chat`。
+4. 设置该模型的积分、人民币成本和启用状态后保存；在 GPT 对话或画布文本节点中选择它进行验证。
+
+服务端会调用 `POST /v1beta/models/gemini-3.1-pro-preview:generateContent`，并将网页端的对话转换为 Gemini 的 `contents[].parts[]` 格式。文本和 data URL 图片可以直接使用；当前原生快速接入不混用本项目的 Responses 函数工具调用，携带工具时系统会明确提示改用无工具对话或支持工具调用的模型，而不会悄悄丢弃操作。
+
 页面中的高级项含义：
 
 - `API 服务与密钥`：维护接口地址和服务端密钥。

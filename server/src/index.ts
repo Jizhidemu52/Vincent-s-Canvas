@@ -26,7 +26,7 @@ import {
   createProjectsRouter,
 } from "./routes/projects";
 import { createWorkflowsRouter } from "./routes/workflows";
-import { createChatRouter } from "./routes/chat";
+import { ChatProtocolError, createChatRouter } from "./routes/chat";
 import { requireSameOrigin } from "./http-security";
 import { requireAccountReady, sessionMiddleware } from "./session";
 import { createIntegrationsRouter } from "./routes/integrations";
@@ -263,6 +263,11 @@ const errorHandler: ErrorRequestHandler = (
   }
   if (error instanceof PromptTemplateError) {
     response.status(error.status).json({ error: error.code, message: error.message });
+    return;
+  }
+  if (error instanceof ChatProtocolError) {
+    const status = error.code === "UPSTREAM_REQUEST_FAILED" ? 502 : 400;
+    response.status(status).json({ error: error.code, message: error.message });
     return;
   }
   if (
