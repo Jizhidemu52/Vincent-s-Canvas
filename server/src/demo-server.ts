@@ -60,6 +60,8 @@ const apiMartApiKey = process.env.APIMART_API_KEY?.trim() || process.env.GPT_IMA
 const gptImage2ProviderId = "30000000-0000-4000-8000-000000000002";
 const gptImage2ModelId = "40000000-0000-4000-8000-000000000099";
 const happyHorseModelId = "40000000-0000-4000-8000-000000000100";
+const geminiProviderId = "30000000-0000-4000-8000-000000000003";
+const geminiModelId = "40000000-0000-4000-8000-000000000101";
 const demoProviders: Array<Record<string, unknown>> = [
   {
     id: "30000000-0000-4000-8000-000000000001",
@@ -131,6 +133,31 @@ if (apiMartApiKey) {
     name: "HappyHorse 1.0",
     modelId: "happyhorse-1.0",
     capabilities: ["video"],
+    creditCost: 0,
+    rmbCost: 0,
+    concurrencyLimit: 2,
+    enabled: true,
+  });
+  demoProviders.push({
+    id: geminiProviderId,
+    name: "APIMart Gemini",
+    protocol: "gemini",
+    baseUrl: apiMartBaseUrl.replace(/\/v1$/, ""),
+    enabled: true,
+    hasCredentials: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  demoModels.push({
+    id: geminiModelId,
+    providerId: geminiProviderId,
+    providerName: "APIMart Gemini",
+    workflowConfigId: null,
+    workflowName: null,
+    replacementModelConfigId: null,
+    name: "Gemini 3.1 Pro",
+    modelId: "gemini-3.1-pro-preview",
+    capabilities: ["chat"],
     creditCost: 0,
     rmbCost: 0,
     concurrencyLimit: 2,
@@ -219,6 +246,80 @@ function publicAccounts() {
   }));
 }
 
+type DemoResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
+type DemoResponseInput =
+  | { role: "system" | "user" | "assistant"; content: string | DemoResponseContent[] }
+  | { type: "function_call"; call_id: string; name: string; arguments: string }
+  | { type: "function_call_output"; call_id: string; output: string };
+
+function toGeminiDemoContents(input: DemoResponseInput[]) {
+  return input
+    .filter((item): item is Extract<DemoResponseInput, { role: string }> => "role" in item)
+    .map((item) => ({
+      role: item.role === "assistant" ? "model" : "user",
+      parts: typeof item.content === "string"
+        ? [{ text: item.content }]
+        : item.content.map((part) => {
+            if (part.type === "input_text") return { text: part.text };
+            const dataUrl = /^data:([^;,]+);base64,([a-z0-9+/=]+)$/i.exec(part.image_url);
+            if (!dataUrl) throw new Error("Gemini 原生对话仅支持 data URL 图片");
+            return { inlineData: { mimeType: dataUrl[1], data: dataUrl[2] } };
+          }),
+    }));
+}
+
+type DemoGeminiPayload = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+
+async function callDemoGemini(contents: ReturnType<typeof toGeminiDemoContents>): Promise<DemoGeminiPayload> {
+  const endpoint = `${apiMartBaseUrl.replace(/\/v1$/, "")}/v1beta/models/gemini-3.1-pro-preview:generateContent`;
+  const body = { contents };
+  try {
+    const upstream = await fetch(endpoint, {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiMartApiKey}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!upstream.ok) throw new Error(`Gemini Provider ${upstream.status}: ${(await upstream.text()).slice(0, 500)}`);
+    return await upstream.json() as DemoGeminiPayload;
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes("socket connection was closed unexpectedly")) throw error;
+    return callDemoGeminiWithNode(endpoint, body);
+  }
+}
+
+// This is local-demo-only: Windows hosts without certificate-revocation access can make Bun fetch fail.
+async function callDemoGeminiWithNode(endpoint: string, body: unknown): Promise<DemoGeminiPayload> {
+  const node = Bun.which("node");
+  if (!node) throw new Error("本机 Node.js 不可用，无法完成 Gemini 本地 HTTPS 回退请求");
+  const script = `
+    let input = "";
+    for await (const chunk of process.stdin) input += chunk;
+    const response = await fetch(process.env.APIMART_ENDPOINT, {
+      method: "POST",
+      headers: { authorization: \`Bearer \${process.env.APIMART_API_KEY}\`, "content-type": "application/json" },
+      body: input,
+      signal: AbortSignal.timeout(180000),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(\`Gemini Provider \${response.status}: \${text.slice(0, 500)}\`);
+    process.stdout.write(text);
+  `;
+  const child = Bun.spawn([node, "--input-type=module", "-e", script], {
+    stdin: new Blob([JSON.stringify(body)]),
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, APIMART_API_KEY: apiMartApiKey, APIMART_ENDPOINT: endpoint },
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0) throw new Error(stderr.trim() || "Gemini 本地 HTTPS 回退请求失败");
+  return JSON.parse(stdout) as DemoGeminiPayload;
+}
+
 Bun.serve({
   port: 3100,
   hostname: "127.0.0.1",
@@ -301,6 +402,26 @@ Bun.serve({
           })),
         tools: demoToolConfigurations.filter((tool) => tool.enabled),
       });
+    if (path === "/api/chat/responses" && request.method === "POST") {
+      const input = (await request.json()) as {
+        modelId?: string;
+        input?: DemoResponseInput[];
+        tools?: unknown[];
+      };
+      if (input.modelId !== "gemini-3.1-pro-preview")
+        return json({ error: "MODEL_DISABLED", message: "管理员尚未启用该对话模型" }, 400);
+      if (!apiMartApiKey)
+        return json({ error: "PROVIDER_NOT_CONFIGURED", message: "本地服务端尚未配置 APIMart 密钥" }, 503);
+      if ((input.tools?.length || 0) > 0 || input.input?.some((item) => "type" in item && item.type.startsWith("function_call")))
+        return json({ error: "GEMINI_TOOLS_NOT_SUPPORTED", message: "Gemini 原生对话测试不支持画布助手的函数工具调用；请选择普通 GPT 对话或文本节点。" }, 400);
+      try {
+        const payload = await callDemoGemini(toGeminiDemoContents(input.input || []));
+        const content = (payload.candidates || []).flatMap((candidate) => candidate.content?.parts || []).map((part) => part.text || "").join("");
+        return json({ content, toolCalls: [] });
+      } catch (error) {
+        return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "Gemini request failed" }, 502);
+      }
+    }
     if (path === "/api/prompt-templates" && request.method === "GET")
       return json({ templates: [], total: 0, page: 1, pageSize: 24 });
 
