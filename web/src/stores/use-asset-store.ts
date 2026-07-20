@@ -146,12 +146,6 @@ export function canUserAccessAsset(asset: Asset, user: LocalUser | null) {
     return assetOwnerId(asset) === user.id;
 }
 
-export function companyDatabaseStatus(asset: Asset): "not_synced" | "syncing" | "synced" | "failed" {
-    if (serverAssetIdFromAsset(asset)) return "synced";
-    const value = asset.metadata?.companyDatabaseStatus;
-    return value === "syncing" || value === "failed" || value === "synced" ? value : "not_synced";
-}
-
 function canCurrentUserManageAsset(asset: Asset) {
     return canUserAccessAsset(asset, useUserStore.getState().user);
 }
