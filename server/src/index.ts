@@ -53,6 +53,7 @@ const app = express();
 if (config.TRUST_PROXY === "true") app.set("trust proxy", 1);
 app.disable("x-powered-by");
 app.use(helmet());
+app.use("/api/chat", express.json({ limit: "12mb" }));
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 app.use(requireSameOrigin);

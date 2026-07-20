@@ -11,6 +11,7 @@ const AdminLoginPage = lazy(() => import("@/pages/admin/login"));
 const AssetsPage = lazy(() => import("@/pages/assets"));
 const CanvasPage = lazy(() => import("@/pages/canvas"));
 const CanvasProjectPage = lazy(() => import("@/pages/canvas/project"));
+const ChatPage = lazy(() => import("@/pages/chat"));
 const ChangePasswordPage = lazy(() => import("@/pages/change-password"));
 const HomePage = lazy(() => import("@/pages/home"));
 const ImagePage = lazy(() => import("@/pages/image"));
@@ -76,6 +77,7 @@ export const router = createBrowserRouter([
             { path: "/admin", element: protectedRoute(AdminPage, true) },
             { path: "/admin/login", element: routeElement(AdminLoginPage) },
             { path: "/canvas", element: moduleRoute(CanvasPage, canvasModule) },
+            { path: "/chat", element: moduleRoute(ChatPage, "gpt-chat") },
             { path: "/canvas/:id", element: moduleRoute(CanvasProjectPage, "canvas") },
         ],
     },

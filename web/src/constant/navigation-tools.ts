@@ -68,8 +68,8 @@ export const navigationTools = [
     },
     {
         slug: "gpt-chat",
-        path: "/canvas?tool=gpt-chat",
-        label: "GPT 对话",
+        path: "/chat",
+        label: "LLM 对话",
         icon: MessageSquare,
         group: "online",
     },
