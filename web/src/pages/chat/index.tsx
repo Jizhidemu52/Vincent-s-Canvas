@@ -132,7 +132,9 @@ export default function ChatPage() {
 
     const activeSession = useMemo(() => sessions.find((item) => item.id === activeSessionId) || sessions[0], [activeSessionId, sessions]);
     const chatModels = useMemo(() => models.filter((item) => item.capabilities.includes("chat")), [models]);
-    const imageModels = useMemo(() => models.filter((item) => item.capabilities.some((capability) => ["generate", "edit"].includes(capability))), [models]);
+    // Demo-only models are useful in their dedicated workbenches, but the chat
+    // creation mode submits real provider tasks and must never select one first.
+    const imageModels = useMemo(() => models.filter((item) => !item.modelId.startsWith("demo-") && item.capabilities.some((capability) => ["generate", "edit"].includes(capability))), [models]);
     const availableModels = mode === "create" ? imageModels : chatModels;
     const selected = availableModels.find((item) => item.modelId === selectedModel);
     const agent = agentTasks.find((item) => item.id === agentTask)!;
