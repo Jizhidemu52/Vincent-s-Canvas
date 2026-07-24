@@ -5,6 +5,7 @@
 - [快速开始](/docs/overview/quick-start)
 - [功能介绍](/docs/overview/features)
 - [Docker 部署](/docs/overview/docker)
+- [无脑部署手册](manual/beginner-deployment.md)
 - [生产部署与验收](manual/production-deployment.md)
 
 ## 操作手册

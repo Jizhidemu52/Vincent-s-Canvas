@@ -1,5 +1,7 @@
 # 无线画布生产部署与验收
 
+> 第一次部署、只想尽快把系统运行起来时，先看 [无脑部署手册](beginner-deployment.md)。本篇用于正式上线：企业微信、HTTPS、对象存储、备份恢复和并发验收。
+
 ## 1. 服务器准备
 
 建议准备一台安装了 Docker Engine 与 Docker Compose 的 Linux 服务器。正式环境只让公司的 HTTPS 网关、负载均衡或反向代理访问容器的 `3000` 端口；用户只访问域名的 `443` 端口。PostgreSQL、Redis、MinIO、API 和 Worker 不应直接暴露到公网。
