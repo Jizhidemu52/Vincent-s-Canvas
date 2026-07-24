@@ -27,7 +27,7 @@ export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
 type RequestOptions = { signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
-type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "function_call"; call_id: string; name: string; arguments: string } | { type: "function_call_output"; call_id: string; output: string };
+type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions, references?: ReferenceImage[]) {
@@ -132,7 +132,7 @@ function withSystemMessage<T extends ResponseInputMessage>(config: AiConfig, mes
 
 function toResponseInput(messages: ResponseInputMessage[]): ResponseInputItem[] {
     return messages.flatMap((message): ResponseInputItem[] => {
-        if ("type" in message) return [{ type: "function_call", call_id: message.call_id, name: message.name, arguments: message.arguments }];
+        if ("type" in message) return [{ type: "function_call", call_id: message.call_id, name: message.name, arguments: message.arguments, ...(message.thoughtSignature ? { thoughtSignature: message.thoughtSignature } : {}) }];
         if (message.role === "tool") return [{ type: "function_call_output", call_id: message.tool_call_id, output: message.content }];
         return [{ role: message.role, content: toResponseContent(message.content || "") }];
     });

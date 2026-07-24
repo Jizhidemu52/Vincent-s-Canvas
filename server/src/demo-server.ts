@@ -1,5 +1,6 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
 import { apiMartImageModel, buildApiMartImageRequest, runApiMartImageTask } from "./apimart-image";
+import { buildGeminiRequestBody, readGeminiResponse } from "./routes/chat";
 
 const sessions = new Map<string, string>();
 const modules = [
@@ -303,7 +304,7 @@ function publicAccounts() {
 type DemoResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type DemoResponseInput =
   | { role: "system" | "user" | "assistant"; content: string | DemoResponseContent[] }
-  | { type: "function_call"; call_id: string; name: string; arguments: string }
+  | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string }
   | { type: "function_call_output"; call_id: string; output: string };
 
 function toGeminiDemoContents(input: DemoResponseInput[]) {
@@ -322,11 +323,12 @@ function toGeminiDemoContents(input: DemoResponseInput[]) {
     }));
 }
 
-type DemoGeminiPayload = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+type DemoGeminiPayload = { candidates?: Array<{ content?: { parts?: Array<{ text?: string; thoughtSignature?: string; functionCall?: { name?: string; args?: Record<string, unknown> } }> } }> };
+type DemoResponseTool = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 
-async function callDemoGemini(contents: ReturnType<typeof toGeminiDemoContents>): Promise<DemoGeminiPayload> {
+async function callDemoGemini(input: { input: DemoResponseInput[]; tools: DemoResponseTool[]; toolChoice?: unknown }) {
   const endpoint = `${apiMartBaseUrl.replace(/\/v1$/, "")}/v1beta/models/gemini-3.1-pro-preview:generateContent`;
-  const body = { contents };
+  const body = buildGeminiRequestBody(input);
   try {
     const upstream = await fetch(endpoint, {
       method: "POST",
@@ -335,10 +337,10 @@ async function callDemoGemini(contents: ReturnType<typeof toGeminiDemoContents>)
       signal: AbortSignal.timeout(180_000),
     });
     if (!upstream.ok) throw new Error(`Gemini Provider ${upstream.status}: ${(await upstream.text()).slice(0, 500)}`);
-    return await upstream.json() as DemoGeminiPayload;
+    return readGeminiResponse(await upstream.json() as DemoGeminiPayload);
   } catch (error) {
     if (!(error instanceof Error) || !error.message.includes("socket connection was closed unexpectedly")) throw error;
-    return callDemoGeminiWithNode(endpoint, body);
+    return readGeminiResponse(await callDemoGeminiWithNode(endpoint, body));
   }
 }
 
@@ -460,18 +462,15 @@ Bun.serve({
       const input = (await request.json()) as {
         modelId?: string;
         input?: DemoResponseInput[];
-        tools?: unknown[];
+        tools?: DemoResponseTool[];
+        toolChoice?: unknown;
       };
       if (input.modelId !== "gemini-3.1-pro-preview")
         return json({ error: "MODEL_DISABLED", message: "管理员尚未启用该对话模型" }, 400);
       if (!apiMartApiKey)
         return json({ error: "PROVIDER_NOT_CONFIGURED", message: "本地服务端尚未配置 APIMart 密钥" }, 503);
-      if ((input.tools?.length || 0) > 0 || input.input?.some((item) => "type" in item && item.type.startsWith("function_call")))
-        return json({ error: "GEMINI_TOOLS_NOT_SUPPORTED", message: "Gemini 原生对话测试不支持画布助手的函数工具调用；请选择普通 GPT 对话或文本节点。" }, 400);
       try {
-        const payload = await callDemoGemini(toGeminiDemoContents(input.input || []));
-        const content = (payload.candidates || []).flatMap((candidate) => candidate.content?.parts || []).map((part) => part.text || "").join("");
-        return json({ content, toolCalls: [] });
+        return json(await callDemoGemini({ input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice }));
       } catch (error) {
         return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "Gemini request failed" }, 502);
       }

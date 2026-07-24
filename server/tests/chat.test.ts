@@ -3,6 +3,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
     buildGeminiGenerateUrl,
     ChatProtocolError,
+    buildGeminiRequestBody,
+    readGeminiResponse,
     requestChatCompletion,
     toGeminiContents,
 } from "../src/routes/chat";
@@ -37,6 +39,31 @@ describe("Gemini native chat protocol", () => {
         expect(() => toGeminiContents([
             { role: "user", content: [{ type: "input_image", image_url: "https://example.com/image.png" }] },
         ])).toThrow(ChatProtocolError);
+    });
+
+    test("maps canvas tools and tool results to Gemini native function calls", () => {
+        const tool = { type: "function" as const, name: "canvas_get_state", description: "Read canvas", parameters: { type: "object", properties: {} } };
+        const body = buildGeminiRequestBody({
+            input: [
+                { role: "user", content: "Read the canvas" },
+                { type: "function_call", call_id: "call-1", name: "canvas_get_state", arguments: "{}", thoughtSignature: "signature-1" },
+                { type: "function_call_output", call_id: "call-1", output: '{"nodes":2}' },
+            ],
+            tools: [tool],
+            toolChoice: "required",
+        });
+        expect(body).toMatchObject({
+            tools: [{ functionDeclarations: [{ name: "canvas_get_state" }] }],
+            toolConfig: { functionCallingConfig: { mode: "ANY" } },
+            contents: [
+                { role: "user", parts: [{ text: "Read the canvas" }] },
+                { role: "model", parts: [{ functionCall: { name: "canvas_get_state", args: {} }, thoughtSignature: "signature-1" }] },
+                { role: "user", parts: [{ functionResponse: { name: "canvas_get_state", response: { nodes: 2 } } }] },
+            ],
+        });
+        const response = readGeminiResponse({ candidates: [{ content: { parts: [{ functionCall: { name: "canvas_get_state", args: { scope: "selected" } }, thoughtSignature: "signature-2" }] } }] });
+        expect(response.toolCalls[0]?.function).toEqual({ name: "canvas_get_state", arguments: '{"scope":"selected"}' });
+        expect(response.toolCalls[0]?.thoughtSignature).toBe("signature-2");
     });
 
     test("sends Gemini native request and reads a direct native response", async () => {

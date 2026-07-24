@@ -11,7 +11,7 @@ import type { AuthenticatedRequest } from "../types";
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInput =
     | { role: "system" | "user" | "assistant"; content: string | ResponseContent[] }
-    | { type: "function_call"; call_id: string; name: string; arguments: string }
+    | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string }
     | { type: "function_call_output"; call_id: string; output: string };
 type ResponseTool = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string }; thoughtSignature?: string };
@@ -129,27 +129,15 @@ async function requestGeminiCompletion(
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[] },
 ) {
-    if (input.tools.length > 0 || input.input.some((item) => "type" in item && item.type.startsWith("function_call"))) {
-        throw new ChatProtocolError(
-            "GEMINI_TOOLS_NOT_SUPPORTED",
-            "当前 Gemini 原生对话配置不支持函数工具调用；请改用无工具对话，或在管理员后台选择支持 Responses 工具调用的模型。",
-        );
-    }
-
     const upstream = await fetch(buildGeminiGenerateUrl(model.base_url, model.model_id), {
         method: "POST",
         headers: requestHeaders(credentials),
-        body: JSON.stringify({ contents: toGeminiContents(input.input) }),
+        body: JSON.stringify(buildGeminiRequestBody(input)),
         signal: AbortSignal.timeout(180000),
     });
     if (!upstream.ok) throw await upstreamError("Gemini Provider", upstream);
 
-    const body = await upstream.json() as GeminiResponse;
-    const content = (body.data?.candidates || body.candidates || [])
-        .flatMap((candidate) => candidate.content?.parts || [])
-        .map((part) => part.text || "")
-        .join("");
-    return { content, toolCalls: [] };
+    return readGeminiResponse(await upstream.json() as GeminiResponse);
 }
 
 export function buildGeminiGenerateUrl(baseUrl: string, modelId: string) {
@@ -157,13 +145,63 @@ export function buildGeminiGenerateUrl(baseUrl: string, modelId: string) {
     return `${root}/v1beta/models/${encodeURIComponent(modelId)}:generateContent`;
 }
 
-export function toGeminiContents(input: ResponseInput[]) {
-    return input
-        .filter((item): item is Extract<ResponseInput, { role: string }> => "role" in item)
-        .map((item) => ({
-            role: item.role === "assistant" ? "model" : "user",
-            parts: toGeminiParts(item.content),
-        }));
+export function toGeminiContents(input: ResponseInput[]): Array<{ role: string; parts: Array<Record<string, unknown>> }> {
+    const calls = new Map<string, { name: string }>();
+    return input.flatMap((item) => {
+        if ("type" in item && item.type === "function_call_output") {
+            const call = calls.get(item.call_id);
+            return call ? [{ role: "user", parts: [{ functionResponse: { name: call.name, response: parseJsonObject(item.output, "result") } }] }] : [];
+        }
+        if ("role" in item) {
+            return [{ role: item.role === "assistant" ? "model" : "user", parts: toGeminiParts(item.content) as Array<Record<string, unknown>> }];
+        }
+        if (item.type === "function_call") {
+            calls.set(item.call_id, { name: item.name });
+            return [{
+                role: "model",
+                parts: [{
+                    functionCall: { name: item.name, args: parseJsonObject(item.arguments) },
+                    ...(item.thoughtSignature ? { thoughtSignature: item.thoughtSignature } : {}),
+                }],
+            }];
+        }
+        return [];
+    });
+}
+
+export function buildGeminiRequestBody(input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown }) {
+    const declarations = input.tools.map((tool) => ({
+        name: tool.name,
+        ...(tool.description ? { description: tool.description } : {}),
+        parameters: tool.parameters,
+    }));
+    return {
+        contents: toGeminiContents(input.input),
+        ...(declarations.length ? {
+            tools: [{ functionDeclarations: declarations }],
+            toolConfig: { functionCallingConfig: { mode: input.toolChoice === "required" ? "ANY" : "AUTO" } },
+        } : {}),
+    };
+}
+
+export function readGeminiResponse(body: GeminiResponse): { content: string; toolCalls: ToolCall[] } {
+    const parts = (body.data?.candidates || body.candidates || []).flatMap((candidate) => candidate.content?.parts || []);
+    return {
+        content: parts.map((part) => part.text || "").join(""),
+        toolCalls: parts.flatMap((part) => part.functionCall?.name ? [{
+            id: crypto.randomUUID(), type: "function" as const,
+            function: { name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args || {}) },
+            ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+        }] : []),
+    };
+}
+
+function parseJsonObject(value: string, fallbackKey?: string): Record<string, unknown> {
+    try {
+        const parsed = JSON.parse(value) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+    } catch { /* Plain text tool output is wrapped below. */ }
+    return fallbackKey ? { [fallbackKey]: value } : {};
 }
 
 function toGeminiParts(content: string | ResponseContent[]) {
@@ -199,4 +237,4 @@ type GeminiResponse = {
     data?: { candidates?: GeminiCandidate[] };
     candidates?: GeminiCandidate[];
 };
-type GeminiCandidate = { content?: { parts?: Array<{ text?: string }> } };
+type GeminiCandidate = { content?: { parts?: Array<{ text?: string; thoughtSignature?: string; functionCall?: { name?: string; args?: Record<string, unknown> } }> } };

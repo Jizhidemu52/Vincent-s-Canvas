@@ -58,6 +58,7 @@ export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+const DEFAULT_SERVER_TEXT_MODEL = "gemini-3.1-pro-preview";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -71,13 +72,13 @@ export const defaultConfig: AiConfig = {
             baseUrl: OPENAI_BASE_URL,
             apiKey: "",
             apiFormat: "openai",
-            models: ["gpt-image-2", "grok-imagine-video", "gpt-5.5", "gpt-4o-mini-tts"],
+            models: ["gpt-image-2", "grok-imagine-video", DEFAULT_SERVER_TEXT_MODEL, "gpt-5.5", "gpt-4o-mini-tts"],
         },
     ],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
     videoModel: "default::grok-imagine-video",
-    textModel: "default::gpt-5.5",
+    textModel: `default::${DEFAULT_SERVER_TEXT_MODEL}`,
     audioModel: "default::gpt-4o-mini-tts",
     audioVoice: "alloy",
     audioFormat: "mp3",
@@ -88,10 +89,10 @@ export const defaultConfig: AiConfig = {
     videoGenerateAudio: "true",
     videoWatermark: "false",
     systemPrompt: "",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
+    models: ["default::gpt-image-2", "default::grok-imagine-video", `default::${DEFAULT_SERVER_TEXT_MODEL}`, "default::gpt-5.5", "default::gpt-4o-mini-tts"],
     imageModels: ["default::gpt-image-2"],
     videoModels: ["default::grok-imagine-video"],
-    textModels: ["default::gpt-5.5"],
+    textModels: [`default::${DEFAULT_SERVER_TEXT_MODEL}`, "default::gpt-5.5"],
     audioModels: ["default::gpt-4o-mini-tts"],
     quality: "auto",
     size: "1:1",
@@ -213,7 +214,7 @@ export const useConfigStore = create<ConfigStore>()(
                 const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
                 const config = { ...defaultConfig, ...persistedConfig };
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
-                const channels = normalizeChannels(config);
+                const channels = ensureServerTextModel(normalizeChannels(config));
                 const models = modelOptionsFromChannels(channels);
                 return {
                     ...current,
@@ -226,7 +227,9 @@ export const useConfigStore = create<ConfigStore>()(
                         models,
                         imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
                         videoModel: normalizeModelOptionValue(config.videoModel || "grok-imagine-video", channels),
-                        textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
+                        textModel: shouldUpgradeDefaultTextModel(config.textModel)
+                            ? encodeChannelModel("default", DEFAULT_SERVER_TEXT_MODEL)
+                            : normalizeModelOptionValue(config.textModel || config.model, channels),
                         audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
                         audioVoice: config.audioVoice || defaultConfig.audioVoice,
                         audioFormat: config.audioFormat || defaultConfig.audioFormat,
@@ -239,7 +242,10 @@ export const useConfigStore = create<ConfigStore>()(
                         canvasImageCount: config.canvasImageCount || "3",
                         imageModels: Array.isArray(persistedConfig.imageModels) ? normalizeModelList(config.imageModels, channels) : filterModelsByCapability(models, "image"),
                         videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels, channels) : filterModelsByCapability(models, "video"),
-                        textModels: Array.isArray(persistedConfig.textModels) ? normalizeModelList(config.textModels, channels) : filterModelsByCapability(models, "text"),
+                        textModels: uniqueRawModels([
+                            ...(Array.isArray(persistedConfig.textModels) ? normalizeModelList(config.textModels, channels) : filterModelsByCapability(models, "text")),
+                            encodeChannelModel("default", DEFAULT_SERVER_TEXT_MODEL),
+                        ]),
                         audioModels: Array.isArray(persistedConfig.audioModels) ? normalizeModelList(config.audioModels, channels) : filterModelsByCapability(models, "audio"),
                     },
                 };
@@ -247,6 +253,16 @@ export const useConfigStore = create<ConfigStore>()(
         },
     ),
 );
+
+function ensureServerTextModel(channels: ModelChannel[]) {
+    return channels.map((channel) => channel.id === "default"
+        ? { ...channel, models: uniqueRawModels([...channel.models, DEFAULT_SERVER_TEXT_MODEL]) }
+        : channel);
+}
+
+function shouldUpgradeDefaultTextModel(value: string | undefined) {
+    return !value || value === "gpt-5.5" || value === "default::gpt-5.5";
+}
 
 function normalizeModelList(models: string[], channels: ModelChannel[]) {
     const allModelOptions = channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model)));
