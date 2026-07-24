@@ -19,6 +19,7 @@ import {
 } from "./media-runtime";
 import { recordAssetEvent } from "./asset-events";
 import { classifyDesignDirection } from "./design-direction";
+import { runApiMartImageTask } from "./apimart-image";
 
 type WorkRow = {
   id: string;
@@ -167,6 +168,8 @@ async function executeProvider(task: WorkRow) {
   ) as Record<string, string>;
   if (task.workflow_config_id && task.submit_path && task.output_path)
     return executeWorkflow(task, credentials);
+  if (task.protocol === "apimart")
+    return executeApiMartImage(task, credentials);
   const authorization: Record<string, string> = credentials.apiKey
     ? { authorization: `Bearer ${credentials.apiKey}` }
     : {};
@@ -250,6 +253,24 @@ async function executeProvider(task: WorkRow) {
     (body.url ? [body.url] : []);
   if (!urls.length) throw new Error("Provider 未返回图片结果");
   return Promise.all(urls.map(fetchResult));
+}
+
+async function executeApiMartImage(
+  task: WorkRow,
+  credentials: Record<string, string>,
+) {
+  const sourceAssets = await Promise.all(
+    task.source_urls.map((url) => loadSourceAsset(url, task.user_id)),
+  );
+  const outputUrls = await runApiMartImageTask({
+    baseUrl: task.base_url!,
+    apiKey: credentials.apiKey || "",
+    modelId: task.model_id!,
+    prompt: task.prompt,
+    parameters: task.parameters,
+    sourceDataUrls: sourceAssets.map((asset) => `data:${asset.mimeType};base64,${Buffer.from(asset.bytes).toString("base64")}`),
+  });
+  return Promise.all(outputUrls.map(fetchResult));
 }
 
 async function executeOpenAiAudio(

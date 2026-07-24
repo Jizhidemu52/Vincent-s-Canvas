@@ -70,6 +70,21 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
+type ImageModelProfile = {
+    kind: "standard" | "gpt" | "midjourney" | "midjourney-blend" | "gemini";
+    maxCount: number;
+    tip: string;
+};
+
+function imageModelProfile(model: string): ImageModelProfile {
+    const normalized = model.toLowerCase();
+    if (normalized.includes("midjourney-blend")) return { kind: "midjourney-blend", maxCount: 1, tip: "Midjourney Blend merges 2 to 4 reference images. The prompt is not sent to the model." };
+    if (normalized.includes("midjourney")) return { kind: "midjourney", maxCount: 1, tip: "Midjourney only supports text-to-image here. Reference images are not sent." };
+    if (normalized.includes("gemini-3.1-flash") || normalized.includes("nano-banana-2")) return { kind: "gemini", maxCount: 10, tip: "Gemini 3.1 Flash supports multiple images, up to 10 outputs per submission, with up to 14 reference images." };
+    if (normalized.includes("gpt-image-2")) return { kind: "gpt", maxCount: 10, tip: "GPT-Image-2 supports 1K / 2K / 4K, 15 aspect ratios or custom pixel sizes, up to 10 outputs and 16 references." };
+    return { kind: "standard", maxCount: 10, tip: "The available options follow the administrator-selected model configuration." };
+}
+
 const LOG_STORE_KEY = "wireless-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
 const logStore = localforage.createInstance({ name: "wireless-canvas", storeName: "image_generation_logs" });
@@ -159,10 +174,14 @@ function ImageGenerationPage() {
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
     const adminModelId = modelOptionName(model);
+    const selectedModelProfile = imageModelProfile(adminModelId);
     const estimatedUsage = estimate({ operationType, modelId: adminModelId, quantity: generationCount });
     const quotaBlocked = Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const missingReference = toolModeConfig.requiresReference && references.length === 0;
-    const canGenerate = Boolean(prompt.trim()) && !quotaBlocked && !missingReference;
+    const unsupportedMidjourneyReferences = selectedModelProfile.kind === "midjourney" && references.length > 0;
+    const invalidBlendReferences = selectedModelProfile.kind === "midjourney-blend" && (references.length < 2 || references.length > 4);
+    const requiresPrompt = selectedModelProfile.kind !== "midjourney-blend";
+    const canGenerate = (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !unsupportedMidjourneyReferences && !invalidBlendReferences;
 
     const handleMissingModelConfig = () => {
         if (canManageConfig) {
@@ -277,7 +296,7 @@ function ImageGenerationPage() {
 
     const generate = async () => {
         const text = prompt.trim();
-        if (!text) {
+        if (!text && requiresPrompt) {
             message.error("请输入生图提示词");
             return;
         }
@@ -447,14 +466,24 @@ function ImageGenerationPage() {
             message.error("请输入生图提示词");
             return null;
         }
-        return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        if (unsupportedMidjourneyReferences) {
+            message.error("Midjourney does not support reference images in text-to-image mode. Remove them or choose GPT-Image-2 / Gemini.");
+            return null;
+        }
+        if (invalidBlendReferences) {
+            message.error("Midjourney Blend requires two to four reference images.");
+            return null;
+        }
+        return { text: text || "Blend reference images", config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
     const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
             const requestOptions = { operationType, tool: toolMode };
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
+            const result = selectedModelProfile.kind === "midjourney-blend"
+                ? await requestGeneration(snapshot.config, snapshot.text, requestOptions, snapshot.references)
+                : snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
@@ -659,15 +688,17 @@ function ImageGenerationPage() {
 
 function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const profile = imageModelProfile(modelOptionName(model));
 
     return (
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <span className="mt-2 block text-xs leading-5 text-stone-500 dark:text-stone-400">{profile.tip}</span>
             </label>
             <div className="col-span-2">
-                <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
+                <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={profile.maxCount} quickCount={profile.maxCount === 1 ? 1 : 10} profile={profile.kind} />
             </div>
         </>
     );

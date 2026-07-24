@@ -18,8 +18,16 @@ const aspectOptions = [
     { value: "2:3", label: "2:3", width: 1024, height: 1536, icon: "portrait" },
     { value: "4:3", label: "4:3", width: 1360, height: 1024, icon: "landscape" },
     { value: "3:4", label: "3:4", width: 1024, height: 1360, icon: "portrait" },
+    { value: "5:4", label: "5:4", width: 1280, height: 1024, icon: "landscape" },
+    { value: "4:5", label: "4:5", width: 1024, height: 1280, icon: "portrait" },
     { value: "16:9", label: "16:9", width: 1824, height: 1024, icon: "landscape" },
     { value: "9:16", label: "9:16", width: 1024, height: 1824, icon: "portrait" },
+    { value: "2:1", label: "2:1", width: 2048, height: 1024, icon: "landscape" },
+    { value: "1:2", label: "1:2", width: 1024, height: 2048, icon: "portrait" },
+    { value: "3:1", label: "3:1", width: 1881, height: 836, icon: "landscape" },
+    { value: "1:3", label: "1:3", width: 887, height: 1774, icon: "portrait" },
+    { value: "21:9", label: "21:9", width: 2016, height: 864, icon: "landscape" },
+    { value: "9:21", label: "9:21", width: 864, height: 2016, icon: "portrait" },
     { value: "1:1-2k", label: "1:1(2k)", size: "2048x2048", width: 2048, height: 2048, icon: "square" },
     { value: "16:9-2k", label: "16:9(2k)", size: "2048x1152", width: 2048, height: 1152, icon: "landscape" },
     { value: "9:16-2k", label: "9:16(2k)", size: "1152x2048", width: 1152, height: 2048, icon: "portrait" },
@@ -36,9 +44,10 @@ type ImageSettingsPanelProps = {
     className?: string;
     maxCount?: number;
     quickCount?: number;
+    profile?: "standard" | "gpt" | "midjourney" | "midjourney-blend" | "gemini";
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, profile = "standard" }: ImageSettingsPanelProps) {
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = config.quality || "auto";
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
@@ -55,6 +64,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
         const height = key === "height" ? next : dimensions.height;
         onConfigChange("size", `${alignDimension(width, snapDimensionToStep)}x${alignDimension(height, snapDimensionToStep)}`);
     };
+    const visibleAspectOptions = profile === "midjourney" || profile === "midjourney-blend" || profile === "gemini" ? aspectOptions.filter((item) => item.value !== "auto" && !item.value.includes("-2k") && !item.value.includes("-4k")) : aspectOptions;
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -68,7 +78,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 }}
             >
                 {showTitle ? <div className="text-lg font-semibold">图像设置</div> : null}
-                <div className="space-y-2.5">
+                {profile === "standard" ? <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>质量</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
                         {qualityOptions.map((item) => (
@@ -77,8 +87,27 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                             </OptionPill>
                         ))}
                     </div>
-                </div>
-                <div className="space-y-2.5">
+                </div> : null}
+                {profile === "gpt" || profile === "gemini" ? <div className="space-y-2.5">
+                    <SettingTitle color={theme.node.muted}>分辨率</SettingTitle>
+                    <div className="grid grid-cols-4 gap-2.5">
+                        {(profile === "gemini" ? [
+                            { value: "0.5k", label: "0.5K" },
+                            { value: "1k", label: "1K" },
+                            { value: "2k", label: "2K" },
+                            { value: "4k", label: "4K" },
+                        ] : [
+                            { value: "1k", label: "1K" },
+                            { value: "2k", label: "2K" },
+                            { value: "4k", label: "4K" },
+                        ]).map((item) => (
+                            <OptionPill key={item.value} selected={quality === item.value} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
+                                {item.label}
+                            </OptionPill>
+                        ))}
+                    </div>
+                </div> : null}
+                {profile === "standard" || profile === "gpt" ? <div className="space-y-2.5">
                     <div className="flex items-center justify-between gap-3">
                         <SettingTitle color={theme.node.muted}>尺寸</SettingTitle>
                         <div className="flex items-center gap-2">
@@ -95,11 +124,11 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <span className="text-lg opacity-45">↔</span>
                         <DimensionInput prefix="H" value={dimensions.height} disabled={activeSize === "auto"} theme={theme} alignToStep={snapDimensionToStep} onChange={(value) => updateDimension("height", value)} />
                     </div>
-                </div>
+                </div> : null}
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>宽高比</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {aspectOptions.map((item) => (
+                        {visibleAspectOptions.map((item) => (
                             <button
                                 key={item.value}
                                 type="button"

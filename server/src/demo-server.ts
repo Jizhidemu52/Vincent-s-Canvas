@@ -1,4 +1,5 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
+import { apiMartImageModel, buildApiMartImageRequest, runApiMartImageTask } from "./apimart-image";
 
 const sessions = new Map<string, string>();
 const modules = [
@@ -62,6 +63,9 @@ const gptImage2ModelId = "40000000-0000-4000-8000-000000000099";
 const happyHorseModelId = "40000000-0000-4000-8000-000000000100";
 const geminiProviderId = "30000000-0000-4000-8000-000000000003";
 const geminiModelId = "40000000-0000-4000-8000-000000000101";
+const geminiFlashImageModelId = "40000000-0000-4000-8000-000000000102";
+const midjourneyModelId = "40000000-0000-4000-8000-000000000103";
+const midjourneyBlendModelId = "40000000-0000-4000-8000-000000000104";
 const demoProviders: Array<Record<string, unknown>> = [
   {
     id: "30000000-0000-4000-8000-000000000001",
@@ -100,8 +104,8 @@ const demoModels: Array<Record<string, unknown>> = toolDefinitions.map(
 if (apiMartApiKey) {
   demoProviders.push({
     id: gptImage2ProviderId,
-    name: "GPT-Image-2",
-    protocol: "custom",
+    name: "APIMart 图片服务",
+    protocol: "apimart",
     baseUrl: apiMartBaseUrl,
     enabled: true,
     hasCredentials: true,
@@ -118,6 +122,51 @@ if (apiMartApiKey) {
     name: "GPT-Image-2",
     modelId: "gpt-image-2",
     capabilities: ["generate", "edit", "upscale"],
+    creditCost: 4,
+    rmbCost: 0,
+    concurrencyLimit: 2,
+    enabled: true,
+  });
+  demoModels.push({
+    id: geminiFlashImageModelId,
+    providerId: gptImage2ProviderId,
+    providerName: "APIMart 图片服务",
+    workflowConfigId: null,
+    workflowName: null,
+    replacementModelConfigId: null,
+    name: "Gemini 3.1 Flash 图片",
+    modelId: "gemini-3.1-flash-image-preview",
+    capabilities: ["generate", "edit"],
+    creditCost: 4,
+    rmbCost: 0,
+    concurrencyLimit: 2,
+    enabled: true,
+  });
+  demoModels.push({
+    id: midjourneyModelId,
+    providerId: gptImage2ProviderId,
+    providerName: "APIMart 图片服务",
+    workflowConfigId: null,
+    workflowName: null,
+    replacementModelConfigId: null,
+    name: "Midjourney",
+    modelId: "midjourney",
+    capabilities: ["generate"],
+    creditCost: 4,
+    rmbCost: 0,
+    concurrencyLimit: 2,
+    enabled: true,
+  });
+  demoModels.push({
+    id: midjourneyBlendModelId,
+    providerId: gptImage2ProviderId,
+    providerName: "APIMart image service",
+    workflowConfigId: null,
+    workflowName: null,
+    replacementModelConfigId: null,
+    name: "Midjourney Blend",
+    modelId: "midjourney-blend",
+    capabilities: ["generate"],
     creditCost: 4,
     rmbCost: 0,
     concurrencyLimit: 2,
@@ -636,14 +685,15 @@ Bun.serve({
         const model = demoModels.find(
           (item) =>
             item.id === input.modelConfigId &&
-            item.modelId === "gpt-image-2" &&
+            typeof item.modelId === "string" &&
+            apiMartImageModel(item.modelId) &&
             item.enabled,
         );
         if (!model)
           return json(
             {
               error: "MODEL_DISABLED",
-              message: "GPT-Image-2 is not enabled for this tool",
+              message: "所选 APIMart 图片模型未启用",
             },
             400,
           );
@@ -667,11 +717,22 @@ Bun.serve({
             );
           sources.push(source);
         }
-        if (sources.length > 16)
+        const imageModelId = String(model.modelId);
+        if ((imageModelId === "midjourney" || imageModelId === "midjourney-blend") && input.operationType !== "image_generation")
+          return json({ error: "MODEL_CAPABILITY_MISMATCH", message: "Midjourney 当前只支持文生图，请选择 GPT-Image-2 或 Gemini 图片模型进行编辑" }, 400);
+        if (sources.length > (imageModelId === "gpt-image-2" ? 16 : imageModelId === "midjourney" ? 0 : imageModelId === "midjourney-blend" ? 4 : 14))
           return json(
             {
               error: "TOO_MANY_REFERENCES",
-              message: "GPT-Image-2 accepts at most 16 reference images",
+              message: imageModelId === "gpt-image-2" ? "GPT-Image-2 最多支持 16 张参考图" : imageModelId === "midjourney" ? "Midjourney 文生图不支持上传参考图" : "Gemini 3.1 Flash 最多支持 14 张参考图",
+            },
+            400,
+          );
+        if (imageModelId === "midjourney-blend" && sources.length < 2)
+          return json(
+            {
+              error: "INSUFFICIENT_REFERENCES",
+              message: "Midjourney Blend requires two to four reference images",
             },
             400,
           );
@@ -703,9 +764,10 @@ Bun.serve({
         };
         demoTasks.set(task.id, task);
         user.creditBalance -= credits;
-        void runGptImage2Task(
+        void runApiMartImageTaskForDemo(
           task,
           user,
+          imageModelId,
           input.prompt || "",
           input.parameters || {},
           sources,
@@ -1155,23 +1217,133 @@ Bun.serve({
 
 console.log("Local demo API listening on http://127.0.0.1:3100");
 
-async function runGptImage2Task(
+async function runApiMartImageTaskForDemo(
   task: DemoTask,
   user: (typeof demoAccounts)[number]["user"],
+  modelId: string,
   prompt: string,
   parameters: Record<string, unknown>,
   sources: DemoAsset[],
 ) {
   try {
-    task.resultUrls = [await callGptImage2(prompt, parameters, sources)];
+    task.resultUrls = [await callApiMartImage(modelId, prompt, parameters, sources)];
     task.status = "success";
   } catch (error) {
     task.status = "failed";
     task.failureReason = isProviderNetworkError(error)
       ? "无法与图像服务建立安全连接。请检查服务器外网、TLS 证书策略或稍后重试；本次积分已自动退还。"
-      : error instanceof Error ? error.message : "GPT-Image-2 task failed";
+      : error instanceof Error ? error.message : "APIMart 图片任务失败";
     user.creditBalance += task.credits;
   }
+}
+
+async function callApiMartImage(
+  modelId: string,
+  prompt: string,
+  parameters: Record<string, unknown>,
+  sources: DemoAsset[],
+) {
+  try {
+    const urls = await runApiMartImageTask({
+      baseUrl: apiMartBaseUrl,
+      apiKey: apiMartApiKey,
+      modelId,
+      prompt,
+      parameters,
+      sourceDataUrls: sources.map((source) => `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`),
+    });
+    const first = urls[0];
+    if (!first) throw new Error("APIMart 图片任务完成但没有结果图片");
+    return downloadApiMartImage(first);
+  } catch (error) {
+    if (!isLocalCertificateError(error)) throw error;
+    return callApiMartImageWithNode(modelId, prompt, parameters, sources);
+  }
+}
+
+// The fallback keeps the exact APIMart request contract when Bun cannot
+// validate the provider certificate on a Windows development machine.
+async function callApiMartImageWithNode(
+  modelId: string,
+  prompt: string,
+  parameters: Record<string, unknown>,
+  sources: DemoAsset[],
+) {
+  const node = Bun.which("node");
+  if (!node) throw new Error("Node.js is unavailable, so the APIMart HTTPS fallback cannot run");
+  const request = buildApiMartImageRequest({
+    modelId,
+    prompt,
+    parameters,
+    sourceDataUrls: sources.map(
+      (source) => `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`,
+    ),
+  });
+  const script = `
+    let raw = "";
+    for await (const chunk of process.stdin) raw += chunk;
+    const input = JSON.parse(raw);
+    const request = (path, init = {}) => fetch(process.env.APIMART_BASE_URL + path, {
+      ...init,
+      headers: { authorization: \`Bearer \${process.env.APIMART_API_KEY}\`, ...(init.headers || {}) },
+    });
+    const submitted = await request(input.path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input.payload),
+      signal: AbortSignal.timeout(180000),
+    });
+    const createdText = await submitted.text();
+    if (!submitted.ok) throw new Error(\`APIMart image submission failed: \${submitted.status}: \${createdText.slice(0, 500)}\`);
+    const created = JSON.parse(createdText);
+    const first = Array.isArray(created.data) ? created.data[0] : created.data;
+    const taskId = first?.task_id || first?.id || created.task_id || created.id;
+    if (!taskId) throw new Error("APIMart did not return a task ID");
+    const deadline = Date.now() + input.timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, input.pollIntervalMs));
+      const statusResponse = await request(\`/tasks/\${encodeURIComponent(taskId)}\`, { signal: AbortSignal.timeout(60000) });
+      const statusText = await statusResponse.text();
+      if (!statusResponse.ok) throw new Error(\`APIMart task status failed: \${statusResponse.status}\`);
+      const status = JSON.parse(statusText);
+      const data = status.data || status;
+      const state = String(data.status || status.status || "").toLowerCase();
+      const images = Array.isArray((data.result || status.result || {}).images) ? (data.result || status.result).images : [];
+      const outputUrl = images.flatMap((image) => Array.isArray(image?.url) ? image.url : typeof image?.url === "string" ? [image.url] : [])[0];
+      if (outputUrl) {
+        const image = await fetch(outputUrl, { signal: AbortSignal.timeout(120000) });
+        if (!image.ok) throw new Error(\`APIMart image download failed: \${image.status}\`);
+        const mimeType = image.headers.get("content-type")?.split(";")[0] || "image/png";
+        const data = Buffer.from(await image.arrayBuffer()).toString("base64");
+        process.stdout.write(JSON.stringify({ mimeType, data }));
+        process.exit(0);
+      }
+      if (["failed", "cancelled", "canceled"].includes(state)) throw new Error(data.error?.message || data.message || "APIMart image generation failed");
+    }
+    throw new Error("APIMart image generation timed out");
+  `;
+  const child = Bun.spawn([node, "--input-type=module", "-e", script], {
+    stdin: new Blob([JSON.stringify(request)]),
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, APIMART_API_KEY: apiMartApiKey, APIMART_BASE_URL: apiMartBaseUrl },
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0) throw new Error(stderr.trim() || "APIMart local HTTPS fallback failed");
+  const output = JSON.parse(stdout) as { mimeType?: string; data?: string };
+  if (!output.mimeType || !output.data) throw new Error("APIMart local HTTPS fallback returned no image");
+  return `data:${output.mimeType};base64,${output.data}`;
+}
+
+async function downloadApiMartImage(url: string) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+  if (!response.ok) throw new Error(`APIMart 图片下载失败：${response.status}`);
+  const mimeType = response.headers.get("content-type")?.split(";")[0] || "image/png";
+  return `data:${mimeType};base64,${Buffer.from(await response.arrayBuffer()).toString("base64")}`;
 }
 
 type HappyHorseParameters = {
@@ -1472,7 +1644,7 @@ async function callGptImage2WithBun(
 
 function isLocalCertificateError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return /unknown certificate verification error|socket connection was closed unexpectedly/i.test(message);
+  return /unknown certificate|certificate verification|certificate verify|unable to verify|socket connection was closed unexpectedly|secure TLS connection|TLS handshake/i.test(message);
 }
 
 function isProviderNetworkError(error: unknown) {

@@ -4,7 +4,7 @@ ALTER TABLE departments ADD COLUMN IF NOT EXISTS credit_limit integer NOT NULL D
 CREATE TABLE IF NOT EXISTS providers (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name text NOT NULL UNIQUE,
-    protocol text NOT NULL CHECK (protocol IN ('openai','gemini','volcengine','runninghub','comfyui','custom')),
+    protocol text NOT NULL CHECK (protocol IN ('openai','gemini','apimart','volcengine','runninghub','comfyui','custom')),
     base_url text NOT NULL,
     enabled boolean NOT NULL DEFAULT true,
     encrypted_credentials text,

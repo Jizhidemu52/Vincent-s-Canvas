@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { createServerProvider, listServerProviders, updateServerProvider, type ProviderProtocol, type ServerProvider } from "@/services/api/model-configuration";
 
 type Values = { name: string; protocol: ProviderProtocol; baseUrl: string; enabled: boolean; apiKey?: string; walletApiKey?: string; accessKeyId?: string; secretAccessKey?: string };
-const protocolOptions = ["openai", "gemini", "volcengine", "runninghub", "comfyui", "custom"].map((value) => ({ label: value, value }));
+const protocolOptions = ["openai", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"].map((value) => ({ label: value === "apimart" ? "APIMart 图片异步" : value, value }));
 
 export function ApiProviderPanel({ isAdmin }: { isAdmin: boolean }) {
     const { message } = App.useApp();

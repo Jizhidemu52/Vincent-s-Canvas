@@ -47,6 +47,7 @@ type QuickValues = {
 const protocolOptions = [
     { value: "openai", label: "OpenAI 兼容" },
     { value: "gemini", label: "Gemini" },
+    { value: "apimart", label: "APIMart 图片异步（GPT / Gemini / Midjourney）" },
     { value: "volcengine", label: "火山引擎" },
     { value: "runninghub", label: "RunningHub" },
     { value: "comfyui", label: "ComfyUI" },

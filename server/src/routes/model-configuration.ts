@@ -9,7 +9,7 @@ import { encryptSecret } from "../security";
 import { assertValidModelReplacement } from "../prompt-templates";
 import type { AuthenticatedRequest } from "../types";
 
-const protocol = z.enum(["openai", "gemini", "volcengine", "runninghub", "comfyui", "custom"]);
+const protocol = z.enum(["openai", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
 const providerInput = z.object({ name: z.string().trim().min(1).max(100), protocol, baseUrl: z.string().url(), enabled: z.boolean().default(true), credentials: z.record(z.string(), z.string().max(10_000)).optional() });
 const providerUpdate = providerInput.partial();

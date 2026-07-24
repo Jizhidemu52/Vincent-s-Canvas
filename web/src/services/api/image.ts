@@ -30,7 +30,7 @@ type ResponseInputContent = { type: "input_text"; text: string } | { type: "inpu
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "function_call"; call_id: string; name: string; arguments: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 
-export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions, references?: ReferenceImage[]) {
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     return requestQueuedImages({
         modelId: modelOptionName(config.model || config.imageModel),
@@ -39,6 +39,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         operationType: options?.operationType || "image_generation",
         tool: options?.tool,
         parameters: imageTaskParameters(config),
+        references,
         signal: options?.signal,
     });
 }
@@ -59,7 +60,10 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 
 export function imageTaskParameters(config: AiConfig) {
     const value = String(config.size || "1:1").toLowerCase();
-    const resolution = value.includes("4k") || /(^|x)3840x2160$|^2160x3840$/.test(value) ? "4k" : value.includes("2k") || /^2048x/.test(value) || /x2048$/.test(value) ? "2k" : "1k";
+    const configuredResolution = String(config.quality || "").toLowerCase();
+    const resolution = configuredResolution === "0.5k" || configuredResolution === "1k" || configuredResolution === "2k" || configuredResolution === "4k"
+        ? configuredResolution
+        : value.includes("4k") || /(^|x)3840x2160$|^2160x3840$/.test(value) ? "4k" : value.includes("2k") || /^2048x/.test(value) || /x2048$/.test(value) ? "2k" : "1k";
     const size =
         value.includes("16:9") || /^1824x1024$|^2048x1152$|^3840x2160$/.test(value)
             ? "16:9"
