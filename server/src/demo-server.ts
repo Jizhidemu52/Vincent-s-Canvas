@@ -227,7 +227,12 @@ const demoPrices: Array<Record<string, unknown>> = Array.from(
 }));
 const demoToolConfigurations = toolDefinitions.map((tool, index) => ({
   toolKey: tool.toolKey,
-  modelConfigId: tool.toolKey === "video" && apiMartApiKey ? happyHorseModelId : demoModels[index]!.id as string,
+  modelConfigId:
+    tool.toolKey === "video" && apiMartApiKey
+      ? happyHorseModelId
+      : tool.toolKey === "image" && apiMartApiKey
+        ? gptImage2ModelId
+        : demoModels[index]!.id as string,
   enabled: true,
 }));
 type DemoAsset = {
