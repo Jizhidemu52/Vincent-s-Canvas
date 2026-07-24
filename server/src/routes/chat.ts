@@ -22,6 +22,7 @@ const schema = z.object({
     input: z.array(z.unknown()).max(200),
     tools: z.array(z.unknown()).max(100).default([]),
     toolChoice: z.unknown().optional(),
+    webSearch: z.boolean().optional(),
 });
 
 export function createChatRouter(db: Database, config: AppConfig) {
@@ -34,6 +35,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 input: ResponseInput[];
                 tools: ResponseTool[];
                 toolChoice?: unknown;
+                webSearch?: boolean;
             };
             await assertModuleEnabled(db, "gpt-chat");
 
@@ -80,7 +82,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
 export async function requestChatCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown },
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean },
 ): Promise<{ content: string; toolCalls: ToolCall[] }> {
     if (model.protocol === "gemini") return requestGeminiCompletion(model, credentials, input);
     if (model.protocol === "openai" || model.protocol === "custom") return requestOpenAiCompletion(model, credentials, input);
@@ -90,7 +92,7 @@ export async function requestChatCompletion(
 async function requestOpenAiCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown },
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean },
 ) {
     const upstream = await fetch(`${model.base_url.replace(/\/$/, "")}/responses`, {
         method: "POST",
@@ -127,7 +129,7 @@ async function requestOpenAiCompletion(
 async function requestGeminiCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[] },
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean },
 ) {
     const upstream = await fetch(buildGeminiGenerateUrl(model.base_url, model.model_id), {
         method: "POST",
@@ -169,31 +171,48 @@ export function toGeminiContents(input: ResponseInput[]): Array<{ role: string; 
     });
 }
 
-export function buildGeminiRequestBody(input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown }) {
+export function buildGeminiRequestBody(input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean }) {
     const declarations = input.tools.map((tool) => ({
         name: tool.name,
         ...(tool.description ? { description: tool.description } : {}),
         parameters: tool.parameters,
     }));
+    const tools = [
+        ...(declarations.length ? [{ functionDeclarations: declarations }] : []),
+        ...(input.webSearch ? [{ googleSearch: {} }] : []),
+    ];
     return {
         contents: toGeminiContents(input.input),
-        ...(declarations.length ? {
-            tools: [{ functionDeclarations: declarations }],
+        ...(tools.length ? {
+            tools,
+            ...(declarations.length ? {
             toolConfig: { functionCallingConfig: { mode: input.toolChoice === "required" ? "ANY" : "AUTO" } },
+            } : {}),
         } : {}),
     };
 }
 
 export function readGeminiResponse(body: GeminiResponse): { content: string; toolCalls: ToolCall[] } {
-    const parts = (body.data?.candidates || body.candidates || []).flatMap((candidate) => candidate.content?.parts || []);
+    const candidates = body.data?.candidates || body.candidates || [];
+    const parts = candidates.flatMap((candidate) => candidate.content?.parts || []);
     return {
-        content: parts.map((part) => part.text || "").join(""),
+        content: withGroundingSources(parts.map((part) => part.text || "").join(""), candidates),
         toolCalls: parts.flatMap((part) => part.functionCall?.name ? [{
             id: crypto.randomUUID(), type: "function" as const,
             function: { name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args || {}) },
             ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
         }] : []),
     };
+}
+
+function withGroundingSources(content: string, candidates: GeminiCandidate[]) {
+    if (!content.trim()) return content;
+    const sources = Array.from(new Map(
+        candidates.flatMap((candidate) => candidate.groundingMetadata?.groundingChunks || [])
+            .flatMap((chunk) => chunk.web?.uri ? [[chunk.web.uri, chunk.web.title || chunk.web.uri] as const] : []),
+    ).entries()).slice(0, 5);
+    if (!sources.length) return content;
+    return `${content}\n\n联网参考：\n${sources.map(([uri, title]) => `- ${title}: ${uri}`).join("\n")}`;
 }
 
 function parseJsonObject(value: string, fallbackKey?: string): Record<string, unknown> {
@@ -237,4 +256,7 @@ type GeminiResponse = {
     data?: { candidates?: GeminiCandidate[] };
     candidates?: GeminiCandidate[];
 };
-type GeminiCandidate = { content?: { parts?: Array<{ text?: string; thoughtSignature?: string; functionCall?: { name?: string; args?: Record<string, unknown> } }> } };
+type GeminiCandidate = {
+    content?: { parts?: Array<{ text?: string; thoughtSignature?: string; functionCall?: { name?: string; args?: Record<string, unknown> } }> };
+    groundingMetadata?: { groundingChunks?: Array<{ web?: { uri?: string; title?: string } }> };
+};

@@ -51,9 +51,10 @@ describe("Gemini native chat protocol", () => {
             ],
             tools: [tool],
             toolChoice: "required",
+            webSearch: true,
         });
         expect(body).toMatchObject({
-            tools: [{ functionDeclarations: [{ name: "canvas_get_state" }] }],
+            tools: [{ functionDeclarations: [{ name: "canvas_get_state" }] }, { googleSearch: {} }],
             toolConfig: { functionCallingConfig: { mode: "ANY" } },
             contents: [
                 { role: "user", parts: [{ text: "Read the canvas" }] },
@@ -80,5 +81,25 @@ describe("Gemini native chat protocol", () => {
             { input: [{ role: "user", content: "ping" }], tools: [] },
         );
         expect(result).toEqual({ content: "pong", toolCalls: [] });
+    });
+
+    test("keeps grounded web sources with the final assistant answer", () => {
+        const result = readGeminiResponse({
+            candidates: [
+                {
+                    content: { parts: [{ text: "建议采用针织撞色条纹。" }] },
+                    groundingMetadata: {
+                        groundingChunks: [
+                            { web: { title: "H&M knitwear trends", uri: "https://example.com/knitwear" } },
+                            { web: { title: "H&M knitwear trends", uri: "https://example.com/knitwear" } },
+                        ],
+                    },
+                },
+            ],
+        });
+
+        expect(result.content).toContain("建议采用针织撞色条纹。");
+        expect(result.content).toContain("联网参考：");
+        expect(result.content).toContain("H&M knitwear trends: https://example.com/knitwear");
     });
 });

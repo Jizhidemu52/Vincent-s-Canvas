@@ -25,7 +25,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[] };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string };
+type RequestOptions = { signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; webSearch?: boolean };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -110,7 +110,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ modelId: modelOptionName(config.model || config.textModel), input, tools, toolChoice }),
+        body: JSON.stringify({ modelId: modelOptionName(config.model || config.textModel), input, tools, toolChoice, webSearch: options?.webSearch === true }),
         signal: options?.signal,
     });
     if (!response.ok) {

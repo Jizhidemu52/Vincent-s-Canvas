@@ -326,7 +326,7 @@ function toGeminiDemoContents(input: DemoResponseInput[]) {
 type DemoGeminiPayload = { candidates?: Array<{ content?: { parts?: Array<{ text?: string; thoughtSignature?: string; functionCall?: { name?: string; args?: Record<string, unknown> } }> } }> };
 type DemoResponseTool = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 
-async function callDemoGemini(input: { input: DemoResponseInput[]; tools: DemoResponseTool[]; toolChoice?: unknown }) {
+async function callDemoGemini(input: { input: DemoResponseInput[]; tools: DemoResponseTool[]; toolChoice?: unknown; webSearch?: boolean }) {
   const endpoint = `${apiMartBaseUrl.replace(/\/v1$/, "")}/v1beta/models/gemini-3.1-pro-preview:generateContent`;
   const body = buildGeminiRequestBody(input);
   try {
@@ -464,13 +464,14 @@ Bun.serve({
         input?: DemoResponseInput[];
         tools?: DemoResponseTool[];
         toolChoice?: unknown;
+        webSearch?: boolean;
       };
       if (input.modelId !== "gemini-3.1-pro-preview")
         return json({ error: "MODEL_DISABLED", message: "管理员尚未启用该对话模型" }, 400);
       if (!apiMartApiKey)
         return json({ error: "PROVIDER_NOT_CONFIGURED", message: "本地服务端尚未配置 APIMart 密钥" }, 503);
       try {
-        return json(await callDemoGemini({ input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice }));
+        return json(await callDemoGemini({ input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, webSearch: input.webSearch }));
       } catch (error) {
         return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "Gemini request failed" }, 502);
       }

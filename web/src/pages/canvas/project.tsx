@@ -1075,6 +1075,18 @@ function WirelessCanvasPage() {
         setContextMenu(null);
     }, [size.height, size.width]);
 
+    const focusCanvasArea = useCallback(
+        (position: Position, width: number, height: number) => {
+            const current = viewportRef.current;
+            setViewport({
+                x: size.width / 2 - (position.x + width / 2) * current.k,
+                y: size.height / 2 - (position.y + height / 2) * current.k,
+                k: current.k,
+            });
+        },
+        [size.height, size.width],
+    );
+
     const setZoomScale = useCallback(
         (scale: number) => {
             const nextScale = clampCanvasZoom(scale);
@@ -2888,6 +2900,11 @@ function WirelessCanvasPage() {
                                         return node;
                                     });
                                 });
+                                // Keep the first completed result in view, including Agent-created edit flows.
+                                if (targetId === rootId || !hasSuccess) {
+                                    const target = targetId === rootId ? rootNode : childNodes.find((node) => node.id === targetId) || rootNode;
+                                    focusCanvasArea(target.position, imageSize.width, imageSize.height);
+                                }
                                 addAsset({
                                     kind: "image",
                                     title: effectivePrompt.slice(0, 24) || "画布生成图片",
