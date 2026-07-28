@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Bot, Home, ImageIcon, Images, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
+import { Bot, Download, Home, ImageIcon, Images, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Share2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { requestBatchEdit, requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
@@ -41,6 +41,7 @@ import { Minimap } from "@/components/canvas/canvas-mini-map";
 import { CanvasNode } from "@/components/canvas/canvas-node";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
+import { CanvasAssetsSidebar, type CanvasSidebarAsset } from "@/components/canvas/canvas-assets-sidebar";
 import { ModelPicker } from "@/components/model-picker";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
@@ -52,6 +53,7 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "@/lib/canvas/canvas-resource-references";
+import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
 import {
     CanvasNodeType,
@@ -331,7 +333,7 @@ function WirelessCanvasPage() {
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
-    const [quickGenerateOpen, setQuickGenerateOpen] = useState(false);
+    const [quickGenerateOpen, setQuickGenerateOpen] = useState(true);
     const [quickGeneratePrompt, setQuickGeneratePrompt] = useState("");
     const [quickGenerateModel, setQuickGenerateModel] = useState(effectiveConfig.imageModel || effectiveConfig.model);
     const [quickGenerateSize, setQuickGenerateSize] = useState(effectiveConfig.size || defaultConfig.size);
@@ -3388,10 +3390,60 @@ function WirelessCanvasPage() {
         }, CANVAS_AGENT_PANEL_MOTION_MS);
     };
 
+    const exportCurrentCanvas = () => {
+        if (!currentProject) return;
+        void exportCanvasProjects([currentProject], currentProject.title || "无线画布");
+    };
+
+    const shareCurrentCanvas = async () => {
+        try {
+            await navigator.clipboard.writeText(window.location.href);
+            message.success("画布链接已复制");
+        } catch {
+            message.warning("无法复制链接，请从地址栏复制");
+        }
+    };
+
+    const insertSidebarAsset = (asset: CanvasSidebarAsset) => {
+        handleAssetInsert(asset);
+    };
+
     if (!projectLoaded) return <CanvasRefreshShell />;
 
     return (
         <main className="flex h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.background, color: theme.node.text }}>
+            <aside className="hidden w-[286px] shrink-0 border-r border-stone-200 bg-white/95 p-3 dark:border-stone-800 dark:bg-stone-950/95 lg:block">
+                <div className="mb-3 flex items-center justify-between px-1">
+                    <div className="text-sm font-semibold">AI 生成</div>
+                    <button type="button" className="grid size-7 place-items-center rounded-md border border-stone-200 text-stone-500 transition hover:border-orange-400 hover:text-orange-600 dark:border-stone-800" onClick={() => setQuickGenerateOpen(true)} title="新建生成">
+                        <Plus className="size-4" />
+                    </button>
+                </div>
+                <CanvasQuickGeneratePanel
+                    embedded
+                    open={quickGenerateOpen}
+                    prompt={quickGeneratePrompt}
+                    model={quickGenerateModel}
+                    size={quickGenerateSize}
+                    count={quickGenerateCount}
+                    references={quickGenerateReferences}
+                    running={quickGenerateRunning}
+                    estimateCredits={quickGenerateEstimate.credits}
+                    estimateRmb={quickGenerateEstimate.rmbCost}
+                    remainingCredits={user?.creditBalance}
+                    config={effectiveConfig}
+                    onClose={() => setQuickGenerateOpen(false)}
+                    onPromptChange={setQuickGeneratePrompt}
+                    onModelChange={setQuickGenerateModel}
+                    onSizeChange={setQuickGenerateSize}
+                    onCountChange={setQuickGenerateCount}
+                    onPickReferences={() => quickReferenceInputRef.current?.click()}
+                    onRemoveReference={(id) => setQuickGenerateReferences((current) => current.filter((reference) => reference.id !== id))}
+                    onClearReferences={() => setQuickGenerateReferences([])}
+                    onMissingConfig={handleMissingModelConfig}
+                    onGenerate={() => void runQuickCanvasGeneration()}
+                />
+            </aside>
             <section className="relative min-w-0 flex-1 overflow-hidden">
                 <CanvasTopBar
                     title={currentProject?.title || "未命名画布"}
@@ -3410,6 +3462,8 @@ function WirelessCanvasPage() {
                     onImportImage={() => handleUploadRequest()}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
+                    onExport={exportCurrentCanvas}
+                    onShare={() => void shareCurrentCanvas()}
                     agentOpen={assistantOpen}
                     compactAgentStatus={codexCompactAgent ? { connected: localAgentConnected, enabled: localAgentEnabled, activity: localAgentActivity } : undefined}
                     onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
@@ -3617,8 +3671,16 @@ function WirelessCanvasPage() {
                     }}
                 />
 
+                <CanvasInspectorPanel
+                    selectedNode={selectedNodeIds.size === 1 ? nodes.find((node) => selectedNodeIds.has(node.id)) || null : null}
+                    backgroundMode={backgroundMode}
+                    showImageInfo={showImageInfo}
+                    onBackgroundModeChange={setBackgroundMode}
+                    onShowImageInfoChange={setShowImageInfo}
+                />
+
                 <CanvasQuickGeneratePanel
-                    open={quickGenerateOpen}
+                    open={false}
                     prompt={quickGeneratePrompt}
                     model={quickGenerateModel}
                     size={quickGenerateSize}
@@ -3824,6 +3886,7 @@ function WirelessCanvasPage() {
                 <input ref={batchFilesInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBatchFolderInputChange} />
                 {codexCompactAgent && !assistantMounted ? <CanvasLocalAgentPanel headless snapshot={agentSnapshot} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} autoConnect={codexAutoConnect} /> : null}
             </section>
+            <CanvasAssetsSidebar onInsert={insertSidebarAsset} />
             {assistantMounted ? (
                 <CanvasAssistantPanel
                     nodes={nodes}
@@ -3848,7 +3911,35 @@ function WirelessCanvasPage() {
     );
 }
 
+function CanvasInspectorPanel({
+    selectedNode,
+    backgroundMode,
+    showImageInfo,
+    onBackgroundModeChange,
+    onShowImageInfoChange,
+}: {
+    selectedNode: CanvasNodeData | null;
+    backgroundMode: CanvasBackgroundMode;
+    showImageInfo: boolean;
+    onBackgroundModeChange: (mode: CanvasBackgroundMode) => void;
+    onShowImageInfoChange: (value: boolean) => void;
+}) {
+    return (
+        <aside className="pointer-events-auto absolute right-4 top-16 z-40 w-[204px] overflow-hidden rounded-lg border border-stone-200 bg-white/95 text-stone-900 shadow-lg backdrop-blur-xl dark:border-stone-800 dark:bg-stone-950/95 dark:text-stone-100">
+            <div className="border-b border-stone-200 px-3 py-2 dark:border-stone-800">
+                <div className="text-xs font-semibold">{selectedNode ? selectedNode.title || "当前对象" : "画布设置"}</div>
+                <div className="mt-0.5 truncate text-[10px] text-stone-400">{selectedNode ? `${selectedNode.type} · ${Math.round(selectedNode.width)} × ${Math.round(selectedNode.height)}` : "对象未选中时调整画布外观"}</div>
+            </div>
+            <div className="space-y-2 p-2.5 text-xs">
+                <div className="flex items-center justify-between gap-2"><span className="text-stone-500">背景</span><div className="flex rounded-md bg-stone-100 p-0.5 dark:bg-stone-900"><button type="button" className={`rounded px-2 py-1 ${backgroundMode === "lines" ? "bg-white text-orange-600 shadow-sm dark:bg-stone-800" : "text-stone-400"}`} onClick={() => onBackgroundModeChange("lines")}>线</button><button type="button" className={`rounded px-2 py-1 ${backgroundMode === "dots" ? "bg-white text-orange-600 shadow-sm dark:bg-stone-800" : "text-stone-400"}`} onClick={() => onBackgroundModeChange("dots")}>点</button></div></div>
+                <button type="button" className="flex w-full items-center justify-between rounded-md border border-stone-200 px-2.5 py-2 text-left transition hover:border-orange-300 dark:border-stone-800" onClick={() => onShowImageInfoChange(!showImageInfo)}><span>显示素材信息</span><span className={showImageInfo ? "text-orange-600" : "text-stone-400"}>{showImageInfo ? "已开启" : "已关闭"}</span></button>
+            </div>
+        </aside>
+    );
+}
+
 function CanvasQuickGeneratePanel({
+    embedded = false,
     open,
     prompt,
     model,
@@ -3871,6 +3962,7 @@ function CanvasQuickGeneratePanel({
     onMissingConfig,
     onGenerate,
 }: {
+    embedded?: boolean;
     open: boolean;
     prompt: string;
     model: string;
@@ -3899,7 +3991,7 @@ function CanvasQuickGeneratePanel({
         <div
             data-testid="canvas-quick-generate-panel"
             data-canvas-no-zoom
-            className="pointer-events-auto absolute left-4 right-4 top-[76px] z-[70] w-auto rounded-[20px] border border-orange-200 bg-white/95 p-3.5 text-stone-950 shadow-[0_24px_70px_rgba(124,45,18,.20)] backdrop-blur-xl sm:right-auto sm:w-[420px]"
+            className={`pointer-events-auto ${embedded ? "relative h-full w-full overflow-y-auto rounded-xl border-stone-200 bg-transparent p-0 shadow-none" : "absolute left-4 right-4 top-[76px] z-[70] w-auto rounded-[20px] border border-orange-200 bg-white/95 p-3.5 text-stone-950 shadow-[0_24px_70px_rgba(124,45,18,.20)] backdrop-blur-xl sm:right-auto sm:w-[420px]"}`}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
@@ -3914,7 +4006,7 @@ function CanvasQuickGeneratePanel({
                         <div className="truncate text-[11px] text-stone-500">结果直接生成在当前视野</div>
                     </div>
                 </div>
-                <Button type="text" shape="circle" aria-label="关闭画布生图" title="关闭" icon={<X className="size-4" />} disabled={running} onClick={onClose} />
+                {!embedded ? <Button type="text" shape="circle" aria-label="关闭画布生图" title="关闭" icon={<X className="size-4" />} disabled={running} onClick={onClose} /> : null}
             </div>
 
             <Input.TextArea
@@ -4045,6 +4137,8 @@ function CanvasTopBar({
     onImportImage,
     onUndo,
     onRedo,
+    onExport,
+    onShare,
     agentOpen,
     compactAgentStatus,
     onToggleAgent,
@@ -4065,6 +4159,8 @@ function CanvasTopBar({
     onImportImage: () => void;
     onUndo: () => void;
     onRedo: () => void;
+    onExport: () => void;
+    onShare: () => void;
     agentOpen: boolean;
     compactAgentStatus?: { connected: boolean; enabled: boolean; activity: string };
     onToggleAgent: () => void;
@@ -4085,7 +4181,7 @@ function CanvasTopBar({
 
     return (
         <>
-            <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between px-4">
+            <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-12 items-center justify-between border-b border-stone-200/80 bg-white/85 px-3 backdrop-blur-xl dark:border-stone-800/80 dark:bg-stone-950/85">
                 <div className="pointer-events-auto flex min-w-0 items-center gap-3">
                     <Dropdown
                         trigger={["click"]}
@@ -4140,9 +4236,15 @@ function CanvasTopBar({
                     {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} /> : null}
                     <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} />
                     <span className="h-6 w-px" style={{ background: theme.toolbar.border }} />
+                    <Button type="text" className="!h-8 !rounded-lg !px-2.5 !text-xs !font-medium" icon={<Download className="size-3.5" />} onClick={onExport}>
+                        导出
+                    </Button>
+                    <Button type="text" className="!h-8 !rounded-lg !px-2.5 !text-xs !font-medium" icon={<Share2 className="size-3.5" />} onClick={onShare}>
+                        分享
+                    </Button>
                     <Button
                         type="text"
-                        className="!h-10 !rounded-xl !px-3 !font-medium"
+                        className="!h-8 !rounded-lg !px-2.5 !text-xs !font-medium"
                         style={{ background: agentOpen ? theme.toolbar.activeBg : theme.toolbar.panel, color: theme.node.text, boxShadow: "0 10px 30px rgba(28,25,23,.10)" }}
                         icon={<Bot className="size-4" />}
                         onClick={onToggleAgent}
