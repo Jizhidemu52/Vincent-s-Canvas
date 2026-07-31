@@ -10,12 +10,13 @@ import type { AuthenticatedRequest, SessionUser } from "../src/types";
 type QueryResult = { rows: Array<Record<string, unknown>> };
 type ProjectRow = { id: string; owner_user_id: string; department_id: string | null };
 type SnapshotRow = { snapshot: Record<string, unknown>; revision: number; updatedAt: string };
+type AssetReferenceRow = { ownerUserId: string; departmentId: string | null; visibilityScope: "private" | "company" };
 
 class FakeProjectsDb {
   projects = new Map<string, ProjectRow>();
   members = new Set<string>();
   snapshots = new Map<string, SnapshotRow>();
-  accessibleReferences = new Set<string>();
+  assetReferences = new Map<string, AssetReferenceRow>();
   audits: Array<{ action: string; detail: Record<string, unknown> }> = [];
   writes = 0;
 
@@ -36,7 +37,15 @@ class FakeProjectsDb {
 
     if (sql.includes("FROM assets a") && sql.includes("count(*)::int AS count")) {
       const keys = values[0] as string[];
-      return { rows: [{ count: keys.filter((key) => this.accessibleReferences.has(key)).length }] };
+      const actorId = String(values[1]);
+      const departmentId = values[2] === null ? null : String(values[2]);
+      const superAdminCanReadAnyAsset = sql.includes("TRUE");
+      const count = keys.filter((key) => {
+        const asset = this.assetReferences.get(key);
+        if (!asset) return false;
+        return superAdminCanReadAnyAsset || asset.ownerUserId === actorId || asset.visibilityScope === "company" || (asset.departmentId !== null && asset.departmentId === departmentId);
+      }).length;
+      return { rows: [{ count }] };
     }
 
     if (sql.includes("INSERT INTO project_canvas_snapshots")) {
@@ -99,6 +108,8 @@ const actor = (id: string): SessionUser => ({
   creditResetAt: "2026-08-01",
 });
 
+const superAdmin = (id: string): SessionUser => ({ ...actor(id), role: "super_admin", departmentId: null, departmentName: null });
+
 function canvasSnapshot(overrides: Record<string, unknown> = {}) {
   return {
     id: "canvas-1",
@@ -156,7 +167,8 @@ function seededDb() {
   const db = new FakeProjectsDb();
   db.projects.set("project-1", { id: "project-1", owner_user_id: "owner-1", department_id: "department-a" });
   db.members.add("project-1:member-1");
-  db.accessibleReferences.add("image:allowed");
+  db.members.add("project-1:admin-1");
+  db.assetReferences.set("image:allowed", { ownerUserId: "owner-1", departmentId: "department-a", visibilityScope: "private" });
   return db;
 }
 
@@ -252,5 +264,47 @@ describe("project canvas snapshot routes", () => {
     expect(result.body.error).toBe("CANVAS_REFERENCE_FORBIDDEN");
     expect(db.writes).toBe(0);
     expect(db.audits).toEqual([]);
+  });
+
+  test("rejects embedded data image payloads before writing", async () => {
+    const db = seededDb();
+
+    const result = await request(db, actor("owner-1"), "/api/projects/project-1/canvas", {
+      method: "PUT",
+      body: JSON.stringify({ revision: 0, snapshot: canvasSnapshot({ nodes: [{ id: "node-1", metadata: { content: "data:image/png;base64,AAAA" } }] }) }),
+    });
+
+    expect(result.response.status).toBe(400);
+    expect(result.body.error).toBe("CANVAS_EMBEDDED_MEDIA");
+    expect(db.writes).toBe(0);
+    expect(db.audits).toEqual([]);
+  });
+
+  test("rejects embedded data video payloads before writing", async () => {
+    const db = seededDb();
+
+    const result = await request(db, actor("owner-1"), "/api/projects/project-1/canvas", {
+      method: "PUT",
+      body: JSON.stringify({ revision: 0, snapshot: canvasSnapshot({ nodes: [{ id: "node-1", metadata: { preview: "data:video/mp4;base64,AAAA" } }] }) }),
+    });
+
+    expect(result.response.status).toBe(400);
+    expect(result.body.error).toBe("CANVAS_EMBEDDED_MEDIA");
+    expect(db.writes).toBe(0);
+    expect(db.audits).toEqual([]);
+  });
+
+  test("allows a super administrator project member to reference any ready asset", async () => {
+    const db = seededDb();
+    db.assetReferences.set("image:admin-visible", { ownerUserId: "other-user", departmentId: "other-department", visibilityScope: "private" });
+
+    const result = await request(db, superAdmin("admin-1"), "/api/projects/project-1/canvas", {
+      method: "PUT",
+      body: JSON.stringify({ revision: 0, snapshot: canvasSnapshot({ nodes: [{ id: "node-1", metadata: { storageKey: "image:admin-visible" } }] }) }),
+    });
+
+    expect(result.response.status).toBe(200);
+    expect(result.body.canvas).toMatchObject({ revision: 1 });
+    expect(db.writes).toBe(1);
   });
 });

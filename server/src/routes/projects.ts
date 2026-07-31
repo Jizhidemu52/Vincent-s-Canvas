@@ -54,6 +54,7 @@ type CanvasSnapshotRow = {
 };
 
 const canvasStorageKeyPattern = /^(image|video|audio|file|video-reference|audio-reference):/;
+const embeddedCanvasMediaPattern = /^data:(image|video|audio)\//i;
 
 export async function findVisibleProject(db: Database, projectId: string, userId: string) {
     const result = await db.query<VisibleProject>(
@@ -86,11 +87,19 @@ function collectCanvasStorageKeys(value: unknown, keys = new Set<string>()) {
     return keys;
 }
 
+function hasEmbeddedCanvasMedia(value: unknown): boolean {
+    if (typeof value === "string") return embeddedCanvasMediaPattern.test(value);
+    if (!value || typeof value !== "object") return false;
+    return Object.values(value).some((item) => Array.isArray(item)
+        ? item.some((child) => hasEmbeddedCanvasMedia(child))
+        : hasEmbeddedCanvasMedia(item));
+}
+
 async function validateCanvasReferences(db: Database, snapshot: z.infer<typeof canvasSnapshotSchema>, actor: AuthenticatedRequest["auth"]) {
     const keys = [...collectCanvasStorageKeys(snapshot)];
     if (!keys.length) return true;
     const values: unknown[] = [keys, actor.id, actor.departmentId];
-    const leaderScope = actor.groupRole === "leader"
+    const leaderScope = actor.role !== "super_admin" && actor.groupRole === "leader"
         ? (values.push(actor.groupId), ` OR EXISTS(
             SELECT 1 FROM group_memberships gm
             WHERE gm.group_id=$4 AND gm.user_id=a.owner_user_id
@@ -98,6 +107,21 @@ async function validateCanvasReferences(db: Database, snapshot: z.infer<typeof c
         )`)
         : "";
     const adminScope = actor.role === "department_admin" ? " OR a.department_id=$3" : "";
+    const accessScope = actor.role === "super_admin"
+        ? "TRUE"
+        : `(
+            a.owner_user_id=$2 OR a.visibility_scope='company'
+            OR (a.department_id=$3 AND $3::uuid IS NOT NULL AND EXISTS(
+                SELECT 1 FROM asset_shares s WHERE s.asset_id=a.id AND s.department_id=$3
+            ))
+            OR EXISTS(SELECT 1 FROM asset_shares s WHERE s.asset_id=a.id AND s.user_id=$2)
+            OR EXISTS(
+                SELECT 1 FROM asset_shares s
+                JOIN project_members pm ON pm.project_id=s.project_id
+                WHERE s.asset_id=a.id AND pm.user_id=$2
+            )
+            ${adminScope}${leaderScope}
+        )`;
     const result = await db.query<{ count: number }>(
         `WITH refs(key) AS (SELECT unnest($1::text[]))
          SELECT count(*)::int AS count
@@ -109,19 +133,7 @@ async function validateCanvasReferences(db: Database, snapshot: z.infer<typeof c
                 a.id::text=r.key OR a.client_reference_id=r.key OR a.object_key=r.key
                 OR a.metadata->>'storageKey'=r.key
               )
-              AND (
-                a.owner_user_id=$2 OR a.visibility_scope='company'
-                OR (a.department_id=$3 AND $3::uuid IS NOT NULL AND EXISTS(
-                    SELECT 1 FROM asset_shares s WHERE s.asset_id=a.id AND s.department_id=$3
-                ))
-                OR EXISTS(SELECT 1 FROM asset_shares s WHERE s.asset_id=a.id AND s.user_id=$2)
-                OR EXISTS(
-                    SELECT 1 FROM asset_shares s
-                    JOIN project_members pm ON pm.project_id=s.project_id
-                    WHERE s.asset_id=a.id AND pm.user_id=$2
-                )
-                ${adminScope}${leaderScope}
-              )
+              AND ${accessScope}
          )`,
         values,
     );
@@ -209,6 +221,10 @@ export function createProjectsRouter(db: Database) {
             const project = await findVisibleProject(db, request.params.id, actor.id);
             if (!project) {
                 sendProjectNotFound(response);
+                return;
+            }
+            if (hasEmbeddedCanvasMedia(input.snapshot)) {
+                response.status(400).json({ error: "CANVAS_EMBEDDED_MEDIA", message: "画布快照不能包含内嵌媒体数据" });
                 return;
             }
             if (!(await validateCanvasReferences(db, input.snapshot, actor))) {
