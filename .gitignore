@@ -10,4 +10,5 @@ data/
 *.log.out
 .tmp-*.log
 .playwright-cli/
+.worktrees/
 *.tsbuildinfo
