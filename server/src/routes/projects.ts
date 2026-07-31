@@ -16,6 +16,136 @@ const memberSchema = z.object({
     role: z.enum(["editor", "member"]).default("member"),
 });
 
+const viewportSchema = z.object({
+    x: z.number(),
+    y: z.number(),
+    scale: z.number(),
+});
+
+const canvasSnapshotSchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    nodes: z.array(z.unknown()),
+    connections: z.array(z.unknown()),
+    chatSessions: z.array(z.unknown()),
+    activeChatId: z.string().nullable(),
+    backgroundMode: z.enum(["dots", "lines", "blank"]),
+    showImageInfo: z.boolean(),
+    viewport: viewportSchema,
+    createdAt: z.string(),
+    updatedAt: z.string(),
+});
+
+const canvasSaveSchema = z.object({
+    revision: z.number().int().min(0),
+    snapshot: canvasSnapshotSchema,
+});
+
+type VisibleProject = {
+    id: string;
+    ownerUserId: string;
+    departmentId: string | null;
+};
+
+type CanvasSnapshotRow = {
+    snapshot: unknown;
+    revision: number;
+    updatedAt: string;
+};
+
+const canvasStorageKeyPattern = /^(image|video|audio|file|video-reference|audio-reference):/;
+
+export async function findVisibleProject(db: Database, projectId: string, userId: string) {
+    const result = await db.query<VisibleProject>(
+        `SELECT p.id,p.owner_user_id AS "ownerUserId",p.department_id AS "departmentId"
+         FROM projects p
+         WHERE p.id=$1 AND (
+            p.owner_user_id=$2 OR EXISTS(
+                SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$2
+            )
+         )
+         LIMIT 1`,
+        [projectId, userId],
+    );
+    return result.rows[0] ?? null;
+}
+
+function collectCanvasStorageKeys(value: unknown, keys = new Set<string>()) {
+    if (typeof value === "string") {
+        if (canvasStorageKeyPattern.test(value)) keys.add(value);
+        return keys;
+    }
+    if (!value || typeof value !== "object") return keys;
+    if ("storageKey" in value && typeof value.storageKey === "string" && canvasStorageKeyPattern.test(value.storageKey)) {
+        keys.add(value.storageKey);
+    }
+    for (const item of Object.values(value)) {
+        if (Array.isArray(item)) item.forEach((child) => collectCanvasStorageKeys(child, keys));
+        else collectCanvasStorageKeys(item, keys);
+    }
+    return keys;
+}
+
+async function validateCanvasReferences(db: Database, snapshot: z.infer<typeof canvasSnapshotSchema>, actor: AuthenticatedRequest["auth"]) {
+    const keys = [...collectCanvasStorageKeys(snapshot)];
+    if (!keys.length) return true;
+    const values: unknown[] = [keys, actor.id, actor.departmentId];
+    const leaderScope = actor.groupRole === "leader"
+        ? (values.push(actor.groupId), ` OR EXISTS(
+            SELECT 1 FROM group_memberships gm
+            WHERE gm.group_id=$4 AND gm.user_id=a.owner_user_id
+              AND gm.effective_at<=a.created_at AND (gm.ended_at IS NULL OR gm.ended_at>a.created_at)
+        )`)
+        : "";
+    const adminScope = actor.role === "department_admin" ? " OR a.department_id=$3" : "";
+    const result = await db.query<{ count: number }>(
+        `WITH refs(key) AS (SELECT unnest($1::text[]))
+         SELECT count(*)::int AS count
+         FROM refs r
+         WHERE EXISTS(
+            SELECT 1 FROM assets a
+            WHERE a.deleted_at IS NULL AND a.status='ready'
+              AND (
+                a.id::text=r.key OR a.client_reference_id=r.key OR a.object_key=r.key
+                OR a.metadata->>'storageKey'=r.key
+              )
+              AND (
+                a.owner_user_id=$2 OR a.visibility_scope='company'
+                OR (a.department_id=$3 AND $3::uuid IS NOT NULL AND EXISTS(
+                    SELECT 1 FROM asset_shares s WHERE s.asset_id=a.id AND s.department_id=$3
+                ))
+                OR EXISTS(SELECT 1 FROM asset_shares s WHERE s.asset_id=a.id AND s.user_id=$2)
+                OR EXISTS(
+                    SELECT 1 FROM asset_shares s
+                    JOIN project_members pm ON pm.project_id=s.project_id
+                    WHERE s.asset_id=a.id AND pm.user_id=$2
+                )
+                ${adminScope}${leaderScope}
+              )
+         )`,
+        values,
+    );
+    return Number(result.rows[0]?.count ?? 0) === keys.length;
+}
+
+async function readCanvasSnapshot(db: Database, projectId: string) {
+    const result = await db.query<CanvasSnapshotRow>(
+        `SELECT snapshot,revision,updated_at AS "updatedAt"
+         FROM project_canvas_snapshots
+         WHERE project_id=$1`,
+        [projectId],
+    );
+    return result.rows[0] ?? null;
+}
+
+function sendProjectNotFound(response: { status: (code: number) => { json: (body: unknown) => unknown } }) {
+    response.status(404).json({ error: "NOT_FOUND", message: "项目不存在或无权访问" });
+}
+
+function canvasResponse(row: CanvasSnapshotRow | null) {
+    return row ? { snapshot: row.snapshot, revision: row.revision, updatedAt: row.updatedAt } : null;
+}
+
 export function createProjectsRouter(db: Database) {
     const router = Router();
 
@@ -53,6 +183,86 @@ export function createProjectsRouter(db: Database) {
                 [result.rows[0].id, actor.id],
             );
             response.json({ project: result.rows[0] });
+        } catch (error) {
+            next(error);
+        }
+    });
+
+    router.get("/:id/canvas", async (request, response, next) => {
+        try {
+            const actor = (request as unknown as AuthenticatedRequest).auth;
+            const project = await findVisibleProject(db, request.params.id, actor.id);
+            if (!project) {
+                sendProjectNotFound(response);
+                return;
+            }
+            response.json({ canvas: canvasResponse(await readCanvasSnapshot(db, project.id)) });
+        } catch (error) {
+            next(error);
+        }
+    });
+
+    router.put("/:id/canvas", async (request, response, next) => {
+        try {
+            const input = canvasSaveSchema.parse(request.body);
+            const actor = (request as unknown as AuthenticatedRequest).auth;
+            const project = await findVisibleProject(db, request.params.id, actor.id);
+            if (!project) {
+                sendProjectNotFound(response);
+                return;
+            }
+            if (!(await validateCanvasReferences(db, input.snapshot, actor))) {
+                response.status(403).json({ error: "CANVAS_REFERENCE_FORBIDDEN", message: "画布引用的素材不存在或无权访问" });
+                return;
+            }
+
+            const client = await db.connect();
+            try {
+                await client.query("BEGIN");
+                const snapshotJson = JSON.stringify(input.snapshot);
+                const saved = input.revision === 0
+                    ? await client.query<CanvasSnapshotRow>(
+                        `INSERT INTO project_canvas_snapshots(project_id,owner_user_id,revision,snapshot)
+                         SELECT $1,$2,1,$3::jsonb
+                         WHERE $4::int=0
+                         ON CONFLICT(project_id) DO NOTHING
+                         RETURNING snapshot,revision,updated_at AS "updatedAt"`,
+                        [project.id, project.ownerUserId, snapshotJson, input.revision],
+                    )
+                    : await client.query<CanvasSnapshotRow>(
+                        `UPDATE project_canvas_snapshots
+                         SET snapshot=$3::jsonb,revision=revision+1,updated_at=now()
+                         WHERE project_id=$1 AND revision=$2
+                         RETURNING snapshot,revision,updated_at AS "updatedAt"`,
+                        [project.id, input.revision, snapshotJson],
+                    );
+                const row = saved.rows[0];
+                if (!row) {
+                    await client.query("ROLLBACK");
+                    response.status(409).json({
+                        error: "CANVAS_CONFLICT",
+                        canvas: canvasResponse(await readCanvasSnapshot(db, project.id)),
+                    });
+                    return;
+                }
+                await writeAudit(client, {
+                    actor,
+                    action: "project.canvas_saved",
+                    targetType: "project",
+                    targetId: project.id,
+                    departmentId: project.departmentId,
+                    result: "success",
+                    detail: { revision: row.revision, nodeCount: input.snapshot.nodes.length },
+                    ip: request.ip,
+                });
+                await client.query("COMMIT");
+                response.json({ canvas: canvasResponse(row) });
+            } catch (error) {
+                await client.query("ROLLBACK");
+                throw error;
+            } finally {
+                client.release();
+            }
         } catch (error) {
             next(error);
         }
