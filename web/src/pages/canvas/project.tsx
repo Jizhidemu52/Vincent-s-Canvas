@@ -53,6 +53,8 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "@/lib/canvas/canvas-resource-references";
+import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
+import { validateImageReferences } from "@/lib/image-reference-policy";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
 import {
@@ -2779,7 +2781,15 @@ function WirelessCanvasPage() {
                         isImageNode && sourceNode?.metadata?.content
                             ? [{ id: sourceNode.id, name: `${sourceNode.title || sourceNode.id}.png`, type: sourceNode.metadata.mimeType || "image/png", dataUrl: sourceNode.metadata.content, storageKey: sourceNode.metadata.storageKey }]
                             : [];
-                    const referenceImages = sourceReference.length ? sourceReference : generationContext.referenceImages;
+                    const savedReferences = sourceNode ? resolveCanvasImageReferences(sourceNode, nodesRef.current, connectionsRef.current) : [];
+                    const referenceImages = sourceReference.length ? [...sourceReference, ...savedReferences] : savedReferences.length ? savedReferences : generationContext.referenceImages;
+                    const referenceValidation = validateImageReferences(modelOptionName(generationConfig.model), referenceImages);
+                    if (!referenceValidation.valid) {
+                        message.error(referenceValidation.message);
+                        finishGenerationRequest(nodeId, runController);
+                        setRunningNodeId(null);
+                        return;
+                    }
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
                     const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages);
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
@@ -3555,6 +3565,8 @@ function WirelessCanvasPage() {
                                         onConfigChange={handleConfigNodeChange}
                                         onGenerate={handleGenerateNode}
                                         onStop={confirmStopGeneration}
+                                        canvasNodes={nodes}
+                                        canvasConnections={connections}
                                         onImageSettingsOpenChange={(open) => {
                                             setNodeImageSettingsOpen(open);
                                             if (open) setToolbarNodeId(null);

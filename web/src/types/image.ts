@@ -7,3 +7,11 @@ export type ReferenceImage = {
     storageKey?: string;
     sourceAssetId?: string;
 };
+
+export type ImageReferenceOrigin = "upload" | "asset" | "canvas" | "connection" | "clipboard" | "generated" | "template";
+
+export type ImageReferenceItem = ReferenceImage & {
+    referenceKey: string;
+    origin: ImageReferenceOrigin;
+    originLabel: string;
+};

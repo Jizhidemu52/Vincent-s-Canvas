@@ -21,6 +21,17 @@ export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 
+export type CanvasStoredImageReference = {
+    referenceKey: string;
+    id: string;
+    name: string;
+    type: string;
+    content: string;
+    storageKey?: string;
+    sourceNodeId?: string;
+    origin: "upload" | "asset" | "canvas";
+};
+
 export type CanvasNodeMetadata = {
     content?: string;
     composerContent?: string;
@@ -43,6 +54,9 @@ export type CanvasNodeMetadata = {
     audioSpeed?: string;
     audioInstructions?: string;
     references?: string[];
+    manualImageReferences?: CanvasStoredImageReference[];
+    excludedConnectedImageReferenceKeys?: string[];
+    imageReferenceOrder?: string[];
     naturalWidth?: number;
     naturalHeight?: number;
     freeResize?: boolean;

@@ -6,13 +6,14 @@ import localforage from "localforage";
 import { saveAs } from "file-saver";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { ReferenceImageTray } from "@/components/reference-images/reference-image-tray";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { toolModeOperation, type AdminToolMode } from "@/lib/admin-domain";
-import { imageReferenceLabel } from "@/lib/image-reference-prompt";
+import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
 import { modelOptionLabel, modelOptionName, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
@@ -23,7 +24,7 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { fetchServerAssetContent, recordServerAssetEvent } from "@/services/api/server-assets";
 import { useAssetStore } from "@/stores/use-asset-store";
-import type { ReferenceImage } from "@/types/image";
+import type { ImageReferenceItem, ImageReferenceOrigin, ReferenceImage } from "@/types/image";
 import { SeamlessStitchPage } from "@/pages/image/seamless-stitch";
 import { hydratePromptReuse, savePromptFromTask } from "@/services/api/prompts";
 
@@ -154,7 +155,7 @@ function ImageGenerationPage() {
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
-    const [references, setReferences] = useState<ReferenceImage[]>([]);
+    const [references, setReferences] = useState<ImageReferenceItem[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [running, setRunning] = useState(false);
@@ -162,6 +163,7 @@ function ImageGenerationPage() {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [referenceAssetPickerOpen, setReferenceAssetPickerOpen] = useState(false);
     const [startedAt, setStartedAt] = useState(0);
     const [elapsedMs, setElapsedMs] = useState(0);
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
@@ -175,13 +177,17 @@ function ImageGenerationPage() {
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
     const adminModelId = modelOptionName(model);
     const selectedModelProfile = imageModelProfile(adminModelId);
+    const referenceValidation = validateImageReferences(adminModelId, references);
     const estimatedUsage = estimate({ operationType, modelId: adminModelId, quantity: generationCount });
     const quotaBlocked = Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const missingReference = toolModeConfig.requiresReference && references.length === 0;
     const unsupportedMidjourneyReferences = selectedModelProfile.kind === "midjourney" && references.length > 0;
     const invalidBlendReferences = selectedModelProfile.kind === "midjourney-blend" && (references.length < 2 || references.length > 4);
     const requiresPrompt = selectedModelProfile.kind !== "midjourney-blend";
-    const canGenerate = (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !unsupportedMidjourneyReferences && !invalidBlendReferences;
+    const canGenerate = (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !unsupportedMidjourneyReferences && !invalidBlendReferences && referenceValidation.valid;
+
+    const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))]));
+    const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin))));
 
     const handleMissingModelConfig = () => {
         if (canManageConfig) {
@@ -224,7 +230,7 @@ function ImageGenerationPage() {
         void fetchServerAssetContent(sourceAssetId)
             .then(async (blob) => {
                 const image = await uploadImage(blob);
-                setReferences((value) => [...value, { id: nanoid(), name: "复刻来源.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId }]);
+                appendReferences([{ id: nanoid(), name: "复刻来源.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId }], "asset");
                 const eventType = searchParams.get("sourceOwnerId") === user?.id ? "asset.edited" : "asset.reused";
                 await recordServerAssetEvent(sourceAssetId, eventType, { channel: "one-click-recreate", destination: toolMode });
                 message.success("已带入原素材、提示词和模型");
@@ -252,7 +258,7 @@ function ImageGenerationPage() {
                 const blob = await fetchServerAssetContent(assetId); const image = await uploadImage(blob);
                 return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
             }));
-            setReferences(nextReferences);
+            restoreReferences(nextReferences, "template");
             payload.warnings.forEach((warning) => message.warning(warning));
             if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请先选择管理员当前启用的模型");
             const cost = payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准";
@@ -270,7 +276,7 @@ function ImageGenerationPage() {
                 return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
             }),
         );
-        setReferences((value) => [...value, ...nextReferences]);
+        appendReferences(nextReferences, "upload");
     };
 
     const addReferencesFromClipboard = async () => {
@@ -287,7 +293,7 @@ function ImageGenerationPage() {
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
             );
-            setReferences((value) => [...value, ...nextReferences]);
+            appendReferences(nextReferences, "clipboard");
             message.success(`已读取 ${nextReferences.length} 张参考图`);
         } catch {
             message.error("剪切板里没有可读取的图片");
@@ -367,7 +373,7 @@ function ImageGenerationPage() {
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
         const stored = await uploadImage(image.dataUrl);
-        setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
+        appendReferences([{ id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }], "generated");
         message.success("已加入参考图");
     };
 
@@ -414,7 +420,7 @@ function ImageGenerationPage() {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
-            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
+            appendReferences([{ id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }], "asset");
         } else {
             message.warning("生图工作台只能使用文本或图片素材");
         }
@@ -452,7 +458,7 @@ function ImageGenerationPage() {
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
-        setReferences(log.references || []);
+        restoreReferences(log.references || [], "template");
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
@@ -472,6 +478,10 @@ function ImageGenerationPage() {
         }
         if (invalidBlendReferences) {
             message.error("Midjourney Blend requires two to four reference images.");
+            return null;
+        }
+        if (!referenceValidation.valid) {
+            message.error(referenceValidation.message);
             return null;
         }
         return { text: text || "Blend reference images", config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
@@ -554,44 +564,14 @@ function ImageGenerationPage() {
                                 <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={toolModeConfig.placeholder} />
                             </div>
 
-                            <div className="min-w-0">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">参考图</span>
-                                    <div className="flex gap-2">
-                                        <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
-                                            剪切板
-                                        </Button>
-                                        <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
-                                            上传
-                                        </Button>
-                                    </div>
-                                </div>
-                                <div
-                                    className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700"
-                                    onWheel={(event) => {
-                                        if (event.currentTarget.scrollWidth <= event.currentTarget.clientWidth) return;
-                                        event.preventDefault();
-                                        event.currentTarget.scrollLeft += event.deltaY;
-                                    }}
-                                >
-                                    {references.map((item, index) => (
-                                        <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800">
-                                            <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{imageReferenceLabel(index)}</span>
-                                            <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
-                                            <button
-                                                type="button"
-                                                className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
-                                                onClick={() => setReferences((value) => value.filter((ref) => ref.id !== item.id))}
-                                                aria-label="移除参考图"
-                                            >
-                                                <Trash2 className="size-3.5" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图</div> : null}
-                                </div>
-                            </div>
+                            <ReferenceImageTray
+                                references={references}
+                                validation={referenceValidation}
+                                onChange={(next) => setReferences(dedupeImageReferences(next))}
+                                onRequestUpload={() => fileInputRef.current?.click()}
+                                onRequestAssets={() => setReferenceAssetPickerOpen(true)}
+                                onRequestClipboard={() => void addReferencesFromClipboard()}
+                            />
 
                             <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
@@ -614,6 +594,7 @@ function ImageGenerationPage() {
                                     <span>{user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录"}</span>
                                 </div>
                                 {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{toolModeConfig.title}需要先添加至少一张参考图。</div> : null}
+                                {!referenceValidation.valid ? <div className="mt-1 text-red-500">{referenceValidation.message}</div> : null}
                                 {quotaBlocked ? <div className="mt-1 text-red-500">额度不足，无法提交生成任务。</div> : null}
                             </div>
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
@@ -679,6 +660,19 @@ function ImageGenerationPage() {
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
+            <AssetPickerModal
+                open={referenceAssetPickerOpen}
+                defaultTab="my-assets"
+                selectionMode="multiple-images"
+                onInsertMany={(payloads) => {
+                    void Promise.all(payloads.filter((payload): payload is Extract<InsertAssetPayload, { kind: "image" }> => payload.kind === "image").map(async (payload) => {
+                        const stored = await uploadImage(payload.dataUrl);
+                        return { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey };
+                    })).then((items) => appendReferences(items, "asset"));
+                    setReferenceAssetPickerOpen(false);
+                }}
+                onClose={() => setReferenceAssetPickerOpen(false)}
+            />
             <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedLogIds.length} 条生成记录吗？
             </Modal>
