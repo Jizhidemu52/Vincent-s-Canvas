@@ -38,7 +38,9 @@ export function getCanvasAgentMediaWorkflowCardState(workflow: CanvasAgentMediaW
 type CanvasAgentMediaWorkflowCardContractActions = {
     imageModels: string[];
     videoModels: string[];
+    hasImageModelChange?: boolean;
     hasImageAction: boolean;
+    hasVideoModelChange?: boolean;
     hasVideoAction: boolean;
     hasCandidateAction: boolean;
     hasRetryAction: boolean;
@@ -48,6 +50,8 @@ export function getCanvasAgentMediaWorkflowCardContract(workflow: CanvasAgentMed
     const imageModel = actions.imageModels.includes(workflow.imageModel) ? workflow.imageModel : undefined;
     const videoModel = actions.videoModels.includes(workflow.videoModel) ? workflow.videoModel : undefined;
     const videoState = getCanvasAgentMediaWorkflowCardState(workflow, { hasVideoAction: actions.hasVideoAction && Boolean(videoModel) });
+    const canGenerateImages = workflow.intent !== "video" && Boolean(imageModel) && actions.hasImageAction && workflow.imageStatus !== "running";
+    const canGenerateVideo = workflow.intent !== "image" && Boolean(videoModel) && videoState.canGenerateVideo;
     const candidates = workflow.candidates
         .filter((candidate) => candidate.status === "success")
         .map((candidate, index) => ({
@@ -55,7 +59,7 @@ export function getCanvasAgentMediaWorkflowCardContract(workflow: CanvasAgentMed
             id: `${workflow.id}-candidate-${index + 1}`,
             name: `${workflow.id}-candidate`,
             label: `候选图 ${index + 1}`,
-            selected: candidate.nodeId === workflow.selectedCandidateNodeId,
+            checked: candidate.nodeId === workflow.selectedCandidateNodeId,
             disabled: !actions.hasCandidateAction,
         }));
 
@@ -63,12 +67,16 @@ export function getCanvasAgentMediaWorkflowCardContract(workflow: CanvasAgentMed
         imageModel,
         videoModel,
         selectedCandidateNodeId: workflow.selectedCandidateNodeId,
-        canGenerateImages: workflow.intent !== "video" && Boolean(imageModel) && actions.hasImageAction && workflow.imageStatus !== "running",
-        canGenerateVideo: workflow.intent !== "image" && Boolean(videoModel) && videoState.canGenerateVideo,
+        imageModelSelect: { value: imageModel, disabled: !actions.hasImageModelChange },
+        videoModelSelect: { value: videoModel, disabled: !actions.hasVideoModelChange },
+        imageGenerateButton: { disabled: !canGenerateImages },
+        videoGenerateButton: { disabled: !canGenerateVideo },
+        canGenerateImages,
+        canGenerateVideo,
         videoDisabledMessage: videoModel ? videoState.videoDisabledMessage : "请选择视频模型",
         candidates,
-        imageError: workflow.imageStatus === "failed" ? { message: workflow.error || "图片生成失败，请重试。", role: "alert" as const, canRetry: actions.hasRetryAction } : undefined,
-        videoError: workflow.videoStatus === "failed" ? { message: workflow.error || "视频生成失败，请重试。", role: "alert" as const, canRetry: actions.hasRetryAction } : undefined,
+        imageError: workflow.imageStatus === "failed" ? { message: workflow.error || "图片生成失败，请重试。", role: "alert" as const, canRetry: actions.hasRetryAction, retryVisible: actions.hasRetryAction } : undefined,
+        videoError: workflow.videoStatus === "failed" ? { message: workflow.error || "视频生成失败，请重试。", role: "alert" as const, canRetry: actions.hasRetryAction, retryVisible: actions.hasRetryAction } : undefined,
     };
 }
 
@@ -86,7 +94,9 @@ export function CanvasAgentMediaWorkflowCard({
     const card = getCanvasAgentMediaWorkflowCardContract(workflow, {
         imageModels,
         videoModels,
+        hasImageModelChange: Boolean(onImageModelChange),
         hasImageAction: Boolean(onGenerateImages),
+        hasVideoModelChange: Boolean(onVideoModelChange),
         hasVideoAction: Boolean(onGenerateVideo),
         hasCandidateAction: Boolean(onSelectCandidate),
         hasRetryAction: Boolean(onRetry),
@@ -99,11 +109,11 @@ export function CanvasAgentMediaWorkflowCard({
             {showImageStage ? (
                 <div className="space-y-3 p-3">
                     <WorkflowStageTitle icon={<ImageIcon className="size-3.5" />} title="第一步：生成候选图" status={workflow.imageStatus} />
-                    <ModelSelect ariaLabel="选择图片模型" emptyLabel="暂无图片模型" models={imageModels} value={card.imageModel} disabled={!onImageModelChange} onChange={onImageModelChange} />
-                    <Button block type="primary" disabled={!card.canGenerateImages} icon={workflow.imageStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImageIcon className="size-3.5" />} onClick={onGenerateImages}>
+                    <ModelSelect ariaLabel="选择图片模型" emptyLabel="暂无图片模型" models={imageModels} value={card.imageModelSelect.value} disabled={card.imageModelSelect.disabled} onChange={onImageModelChange} />
+                    <Button block type="primary" disabled={card.imageGenerateButton.disabled} icon={workflow.imageStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImageIcon className="size-3.5" />} onClick={onGenerateImages}>
                         {workflow.imageStatus === "running" ? "正在生成候选图" : "生成候选图"}
                     </Button>
-                    {card.imageError ? <WorkflowError error={card.imageError.message} role={card.imageError.role} onRetry={card.imageError.canRetry ? () => onRetry?.("image") : undefined} /> : null}
+                    {card.imageError ? <WorkflowError error={card.imageError.message} role={card.imageError.role} onRetry={card.imageError.retryVisible ? () => onRetry?.("image") : undefined} /> : null}
                     {card.candidates.length ? (
                         <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="成功候选图">
                             {card.candidates.map((candidate) => {
@@ -111,12 +121,12 @@ export function CanvasAgentMediaWorkflowCard({
                                     <label
                                         key={candidate.nodeId}
                                         htmlFor={candidate.id}
-                                        className={`group relative aspect-square cursor-pointer overflow-hidden rounded-lg border text-left transition focus-within:ring-2 focus-within:ring-primary/25 ${candidate.selected ? "border-primary ring-2 ring-primary/25" : "border-black/10 hover:border-primary/50 dark:border-white/15"} ${candidate.disabled ? "cursor-not-allowed opacity-60" : ""}`}
+                                        className={`group relative aspect-square cursor-pointer overflow-hidden rounded-lg border text-left transition focus-within:ring-2 focus-within:ring-primary/25 ${candidate.checked ? "border-primary ring-2 ring-primary/25" : "border-black/10 hover:border-primary/50 dark:border-white/15"} ${candidate.disabled ? "cursor-not-allowed opacity-60" : ""}`}
                                     >
-                                        <input id={candidate.id} className="sr-only" type="radio" name={candidate.name} checked={candidate.selected} disabled={candidate.disabled} onChange={() => onSelectCandidate?.(candidate.nodeId)} />
+                                        <input id={candidate.id} className="sr-only" type="radio" name={candidate.name} checked={candidate.checked} disabled={candidate.disabled} onChange={() => onSelectCandidate?.(candidate.nodeId)} />
                                         {candidate.url ? <img src={candidate.url} alt="" className="size-full object-cover" /> : <span aria-hidden className="grid size-full place-items-center bg-black/5 px-2 text-center text-xs opacity-65 dark:bg-white/10">{candidate.label}</span>}
                                         <span className="sr-only">{candidate.label}</span>
-                                        <span className={`absolute right-1 top-1 size-3 rounded-full border-2 border-white ${candidate.selected ? "bg-primary" : "bg-black/25 dark:bg-white/25"}`} />
+                                        <span className={`absolute right-1 top-1 size-3 rounded-full border-2 border-white ${candidate.checked ? "bg-primary" : "bg-black/25 dark:bg-white/25"}`} />
                                     </label>
                                 );
                             })}
@@ -130,12 +140,12 @@ export function CanvasAgentMediaWorkflowCard({
             {showVideoStage ? (
                 <div className="space-y-3 p-3">
                     <WorkflowStageTitle icon={<Video className="size-3.5" />} title={showImageStage ? "第二步：生成视频" : "生成视频"} status={workflow.videoStatus} />
-                    <ModelSelect ariaLabel="选择视频模型" emptyLabel="暂无视频模型" models={videoModels} value={card.videoModel} disabled={!onVideoModelChange} onChange={onVideoModelChange} />
-                    <Button block disabled={!card.canGenerateVideo} icon={workflow.videoStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Video className="size-3.5" />} onClick={onGenerateVideo}>
+                    <ModelSelect ariaLabel="选择视频模型" emptyLabel="暂无视频模型" models={videoModels} value={card.videoModelSelect.value} disabled={card.videoModelSelect.disabled} onChange={onVideoModelChange} />
+                    <Button block disabled={card.videoGenerateButton.disabled} icon={workflow.videoStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Video className="size-3.5" />} onClick={onGenerateVideo}>
                         {workflow.videoStatus === "running" ? "正在生成视频" : "生成视频"}
                     </Button>
                     {card.videoDisabledMessage ? <p className="text-xs opacity-65">{card.videoDisabledMessage}</p> : null}
-                    {card.videoError ? <WorkflowError error={card.videoError.message} role={card.videoError.role} onRetry={card.videoError.canRetry ? () => onRetry?.("video") : undefined} /> : null}
+                    {card.videoError ? <WorkflowError error={card.videoError.message} role={card.videoError.role} onRetry={card.videoError.retryVisible ? () => onRetry?.("video") : undefined} /> : null}
                 </div>
             ) : null}
         </section>

@@ -141,6 +141,69 @@ test("card contract retains selected image and model state while exposing stage 
     });
 });
 
+test("card view model carries the JSX control props for selection, handlers, and retries", () => {
+    const workflow = selectWorkflowCandidate(
+        createAgentMediaWorkflow({
+            id: "workflow-view-model",
+            intent: "image_to_video",
+            prompt: "lookbook",
+            imageModel: "image-model",
+            videoModel: "video-model",
+            candidates: [
+                { nodeId: "image-1", status: "success" },
+                { nodeId: "image-2", status: "success" },
+            ],
+            imageStatus: "failed",
+            error: "generation failed",
+        }),
+        "image-2",
+    );
+    const withoutHandlers = getCanvasAgentMediaWorkflowCardContract(workflow, {
+        imageModels: ["image-model"],
+        videoModels: ["video-model"],
+        hasImageModelChange: false,
+        hasImageAction: false,
+        hasVideoModelChange: false,
+        hasVideoAction: false,
+        hasCandidateAction: false,
+        hasRetryAction: false,
+    });
+    const withHandlers = getCanvasAgentMediaWorkflowCardContract(workflow, {
+        imageModels: ["image-model"],
+        videoModels: ["video-model"],
+        hasImageModelChange: true,
+        hasImageAction: true,
+        hasVideoModelChange: true,
+        hasVideoAction: true,
+        hasCandidateAction: true,
+        hasRetryAction: true,
+    });
+
+    expect(withoutHandlers).toMatchObject({
+        imageModelSelect: { value: "image-model", disabled: true },
+        videoModelSelect: { value: "video-model", disabled: true },
+        imageGenerateButton: { disabled: true },
+        videoGenerateButton: { disabled: true },
+        candidates: [
+            { nodeId: "image-1", id: "workflow-view-model-candidate-1", label: "候选图 1", checked: false, disabled: true },
+            { nodeId: "image-2", id: "workflow-view-model-candidate-2", label: "候选图 2", checked: true, disabled: true },
+        ],
+        imageError: { retryVisible: false },
+    });
+    expect(withHandlers).toMatchObject({
+        imageModelSelect: { value: "image-model", disabled: false },
+        videoModelSelect: { value: "video-model", disabled: false },
+        imageGenerateButton: { disabled: false },
+        videoGenerateButton: { disabled: false },
+        candidates: [
+            { nodeId: "image-1", checked: false, disabled: false },
+            { nodeId: "image-2", checked: true, disabled: false },
+        ],
+        selectedCandidateNodeId: "image-2",
+        imageError: { retryVisible: true },
+    });
+});
+
 test("preserves selected candidate and model choices through serialization", () => {
     const workflow = selectWorkflowCandidate(
         {
