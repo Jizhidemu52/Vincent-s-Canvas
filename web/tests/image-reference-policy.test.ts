@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { dedupeImageReferences, moveImageReference, validateImageReferences } from "../src/lib/image-reference-policy";
+import { createImageReferenceItem, dedupeImageReferences, moveImageReference, validateImageReferences } from "../src/lib/image-reference-policy";
 
 const ref = (id: string, origin: "upload" | "canvas" | "asset" = "upload") => ({
     id,
@@ -23,6 +23,11 @@ test("moves one reference without disturbing the other visual positions", () => 
 test("preserves a mixed-source order after a reorder", () => {
     const ordered = dedupeImageReferences([ref("upload", "upload"), ref("asset", "asset"), ref("upload", "upload")]);
     expect(moveImageReference(ordered, 1, 0).map((item) => item.referenceKey)).toEqual(["asset:asset", "upload:upload"]);
+});
+
+test("labels and keys an asset reference independently from an upload", () => {
+    const asset = createImageReferenceItem({ id: "asset-1", name: "look.png", type: "image/png", dataUrl: "https://images.test/look.png", storageKey: "image:look" }, "asset");
+    expect(asset).toMatchObject({ referenceKey: "asset:asset-1", origin: "asset", originLabel: "素材库" });
 });
 
 test("enforces documented GPT, Gemini and Midjourney reference limits", () => {

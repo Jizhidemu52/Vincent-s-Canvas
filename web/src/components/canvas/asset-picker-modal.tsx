@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Empty, Input, Modal, Pagination, Tag } from "antd";
+import { Button, Empty, Input, Modal, Pagination, Tag } from "antd";
 import { Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -14,14 +14,16 @@ export type InsertAssetPayload =
 type Props = {
     open: boolean;
     defaultTab?: string;
-    onInsert: (payload: InsertAssetPayload) => void;
+    onInsert?: (payload: InsertAssetPayload) => void;
+    onInsertMany?: (payloads: InsertAssetPayload[]) => void;
+    selectionMode?: "single" | "multiple-images";
     onClose: () => void;
 };
 
-export function AssetPickerModal({ open, onInsert, onClose }: Props) {
+export function AssetPickerModal({ open, onInsert, onInsertMany, onClose, selectionMode = "single" }: Props) {
     return (
         <Modal title="选择素材" open={open} onCancel={onClose} footer={null} width={860} destroyOnHidden styles={{ body: { padding: "0 24px 24px", minHeight: 480 } }}>
-            <MyAssetsTab onInsert={onInsert} />
+            <MyAssetsTab onInsert={onInsert} onInsertMany={onInsertMany} selectionMode={selectionMode} />
         </Modal>
     );
 }
@@ -35,11 +37,11 @@ const kindOptions = [
     { label: "视频", value: "video" },
 ];
 
-function PickerCard({ title, kind, cover, onClick }: { title: string; kind: string; cover: string; onClick: () => void }) {
+function PickerCard({ title, kind, cover, selected, onClick }: { title: string; kind: string; cover: string; selected?: boolean; onClick: () => void }) {
     return (
         <button
             type="button"
-            className="group relative cursor-pointer overflow-hidden rounded-lg border border-stone-200 bg-white text-left transition hover:border-stone-400 hover:shadow-md dark:border-stone-700 dark:bg-stone-900 dark:hover:border-stone-500"
+            className={`group relative cursor-pointer overflow-hidden rounded-lg border bg-white text-left transition hover:shadow-md dark:bg-stone-900 ${selected ? "border-blue-500 ring-2 ring-blue-200 dark:ring-blue-900" : "border-stone-200 hover:border-stone-400 dark:border-stone-700 dark:hover:border-stone-500"}`}
             onClick={onClick}
         >
             {cover ? (
@@ -58,18 +60,19 @@ function PickerCard({ title, kind, cover, onClick }: { title: string; kind: stri
     );
 }
 
-function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => void }) {
+function MyAssetsTab({ onInsert, onInsertMany, selectionMode }: { onInsert?: (payload: InsertAssetPayload) => void; onInsertMany?: (payloads: InsertAssetPayload[]) => void; selectionMode: "single" | "multiple-images" }) {
     const assets = useAssetStore((state) => state.assets);
     const user = useUserStore((state) => state.user);
     const [keyword, setKeyword] = useState("");
     const [kindFilter, setKindFilter] = useState("all");
     const [page, setPage] = useState(1);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
     const filtered = useMemo(() => {
         const query = keyword.trim().toLowerCase();
         return assets
             .filter((asset) => canUserAccessAsset(asset, user))
-            .filter((a) => a.kind === "text" || a.kind === "image" || a.kind === "video")
+            .filter((a) => selectionMode === "multiple-images" ? a.kind === "image" : a.kind === "text" || a.kind === "image" || a.kind === "video")
             .filter((a) => kindFilter === "all" || a.kind === kindFilter)
             .filter((a) => !query || [a.title, ...(a.tags || [])].join(" ").toLowerCase().includes(query));
     }, [assets, keyword, kindFilter, user]);
@@ -81,17 +84,28 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
         setPage((v) => Math.min(v, maxPage));
     }, [filtered.length]);
 
-    const handleInsert = (asset: Asset) => {
+    const toPayload = (asset: Asset): InsertAssetPayload => {
         if (asset.kind === "text") {
-            onInsert({ kind: "text", content: asset.data.content, title: asset.title });
-        } else {
-            onInsert(
-                asset.kind === "video"
-                    ? { kind: "video", url: asset.data.url, storageKey: asset.data.storageKey, title: asset.title, width: asset.data.width, height: asset.data.height }
-                    : { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, title: asset.title },
-            );
+            return { kind: "text", content: asset.data.content, title: asset.title };
         }
+        return asset.kind === "video"
+            ? { kind: "video", url: asset.data.url, storageKey: asset.data.storageKey, title: asset.title, width: asset.data.width, height: asset.data.height }
+            : { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, title: asset.title };
     };
+
+    const handleInsert = (asset: Asset) => {
+        if (selectionMode === "multiple-images") {
+            setSelectedIds((current) => {
+                const next = new Set(current);
+                if (next.has(asset.id)) next.delete(asset.id); else next.add(asset.id);
+                return next;
+            });
+            return;
+        }
+        onInsert?.(toPayload(asset));
+    };
+
+    const confirmMultiple = () => onInsertMany?.(filtered.filter((asset) => selectedIds.has(asset.id)).map(toPayload));
 
     return (
         <div className="space-y-4">
@@ -123,12 +137,13 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
                         </Tag.CheckableTag>
                     ))}
                 </div>
+                {selectionMode === "multiple-images" ? <Button type="primary" size="small" disabled={!selectedIds.size} onClick={confirmMultiple}>加入 {selectedIds.size} 张参考图</Button> : null}
             </div>
 
             {visible.length ? (
                 <div className="grid grid-cols-4 gap-3">
                     {visible.map((asset) => (
-                        <PickerCard key={asset.id} title={asset.title} kind={asset.kind} cover={asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "")} onClick={() => handleInsert(asset)} />
+                        <PickerCard key={asset.id} title={asset.title} kind={asset.kind} cover={asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "")} selected={selectedIds.has(asset.id)} onClick={() => handleInsert(asset)} />
                     ))}
                 </div>
             ) : (

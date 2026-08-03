@@ -1,4 +1,4 @@
-import type { ImageReferenceItem } from "@/types/image";
+import type { ImageReferenceItem, ImageReferenceOrigin, ReferenceImage } from "@/types/image";
 
 export type ImageReferenceValidation = {
     valid: boolean;
@@ -51,4 +51,23 @@ export function imageReferenceIdentity(reference: ImageReferenceItem) {
     if (reference.dataUrl && !reference.dataUrl.startsWith("data:")) return `url:${reference.dataUrl}`;
     if (reference.sourceAssetId) return `asset:${reference.sourceAssetId}`;
     return `reference:${reference.referenceKey}`;
+}
+
+export function createImageReferenceItem(reference: ReferenceImage, origin: ImageReferenceOrigin): ImageReferenceItem {
+    return {
+        ...reference,
+        referenceKey: `${origin}:${reference.id}`,
+        origin,
+        originLabel: referenceOriginLabel(origin),
+    };
+}
+
+function referenceOriginLabel(origin: ImageReferenceOrigin) {
+    if (origin === "asset") return "素材库";
+    if (origin === "canvas") return "画布";
+    if (origin === "connection") return "已连接";
+    if (origin === "clipboard") return "剪切板";
+    if (origin === "generated") return "生成结果";
+    if (origin === "template") return "模板";
+    return "上传";
 }
