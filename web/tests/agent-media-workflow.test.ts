@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { canGenerateWorkflowVideo, classifyAgentMediaIntent, createAgentMediaWorkflow, selectWorkflowCandidate } from "../src/lib/canvas/agent-media-workflow";
+import type { CanvasAssistantMessage } from "../src/types/canvas";
 
 test("routes runway motion requests to video even when clothing is mentioned", () => {
     expect(classifyAgentMediaIntent("让模特穿这件衣服在秀场走秀")).toBe("video");
@@ -29,4 +30,57 @@ test("does not select failed candidates for image-to-video", () => {
 
 test("keeps video disabled when there are no candidates", () => {
     expect(canGenerateWorkflowVideo(createAgentMediaWorkflow({ intent: "image_to_video", prompt: "走秀" }))).toBe(false);
+});
+
+test("preserves selected candidate and model choices through serialization", () => {
+    const workflow = selectWorkflowCandidate(
+        {
+            ...createAgentMediaWorkflow({ intent: "image_to_video", prompt: "走秀", imageModel: "gpt-image-2", videoModel: "happyhorse-1.0" }),
+            candidates: [{ nodeId: "image-2", status: "success" }],
+        },
+        "image-2",
+    );
+
+    expect(JSON.parse(JSON.stringify(workflow))).toMatchObject({
+        selectedCandidateNodeId: "image-2",
+        imageModel: "gpt-image-2",
+        videoModel: "happyhorse-1.0",
+    });
+});
+
+test("preserves failed-stage recovery state in an assistant message detail", () => {
+    const message: CanvasAssistantMessage = {
+        id: "message-1",
+        role: "assistant",
+        text: "图片生成失败，可重试。",
+        detail: {
+            toolCalls: [{ name: "canvas_generate_image" }],
+            mediaWorkflow: {
+                id: "workflow-1",
+                intent: "image_to_video",
+                prompt: "走秀",
+                imageModel: "gpt-image-2",
+                videoModel: "happyhorse-1.0",
+                candidates: [{ nodeId: "image-2", status: "success", url: "https://example.test/image-2.png" }],
+                selectedCandidateNodeId: "image-2",
+                imageStatus: "failed",
+                videoStatus: "idle",
+                error: "证书校验失败",
+            },
+        },
+    };
+
+    expect(JSON.parse(JSON.stringify(message))).toMatchObject({
+        detail: {
+            toolCalls: [{ name: "canvas_generate_image" }],
+            mediaWorkflow: {
+                selectedCandidateNodeId: "image-2",
+                imageModel: "gpt-image-2",
+                videoModel: "happyhorse-1.0",
+                imageStatus: "failed",
+                videoStatus: "idle",
+                error: "证书校验失败",
+            },
+        },
+    });
 });

@@ -1,21 +1,24 @@
-export type AgentMediaIntent = "image" | "video" | "image_to_video";
+import type {
+    CanvasAgentMediaIntent,
+    CanvasAgentMediaWorkflow,
+    CanvasAgentMediaWorkflowCandidate,
+    CanvasAgentMediaWorkflowStageStatus,
+} from "@/types/canvas";
 
-export type CanvasAgentMediaWorkflowCandidate = {
-    nodeId: string;
-    status: string;
-};
+export type {
+    CanvasAgentMediaIntent,
+    CanvasAgentMediaWorkflow,
+    CanvasAgentMediaWorkflowCandidate,
+    CanvasAgentMediaWorkflowStageStatus,
+} from "@/types/canvas";
 
-export type CanvasAgentMediaWorkflow = {
-    intent: AgentMediaIntent;
-    prompt: string;
-    imageModel?: string;
-    videoModel?: string;
-    candidates: CanvasAgentMediaWorkflowCandidate[];
-    selectedCandidateNodeId?: string;
-};
+export type AgentMediaIntent = CanvasAgentMediaIntent;
 
-export type CreateAgentMediaWorkflowInput = Omit<CanvasAgentMediaWorkflow, "candidates" | "selectedCandidateNodeId"> & {
+export type CreateAgentMediaWorkflowInput = Omit<CanvasAgentMediaWorkflow, "id" | "candidates" | "selectedCandidateNodeId" | "imageStatus" | "videoStatus"> & {
+    id?: string;
     candidates?: CanvasAgentMediaWorkflowCandidate[];
+    imageStatus?: CanvasAgentMediaWorkflowStageStatus;
+    videoStatus?: CanvasAgentMediaWorkflowStageStatus;
 };
 
 export function classifyAgentMediaIntent(prompt: string): AgentMediaIntent {
@@ -26,7 +29,17 @@ export function classifyAgentMediaIntent(prompt: string): AgentMediaIntent {
 }
 
 export function createAgentMediaWorkflow(input: CreateAgentMediaWorkflowInput): CanvasAgentMediaWorkflow {
-    return { ...input, candidates: input.candidates || [] };
+    return {
+        id: input.id || crypto.randomUUID(),
+        intent: input.intent,
+        prompt: input.prompt,
+        imageModel: input.imageModel,
+        videoModel: input.videoModel,
+        candidates: input.candidates || [],
+        imageStatus: input.imageStatus || "idle",
+        videoStatus: input.videoStatus || "idle",
+        ...(input.error ? { error: input.error } : {}),
+    };
 }
 
 export function selectWorkflowCandidate(workflow: CanvasAgentMediaWorkflow, nodeId: string): CanvasAgentMediaWorkflow {
