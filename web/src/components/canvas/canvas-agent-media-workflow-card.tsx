@@ -35,6 +35,43 @@ export function getCanvasAgentMediaWorkflowCardState(workflow: CanvasAgentMediaW
     };
 }
 
+type CanvasAgentMediaWorkflowCardContractActions = {
+    imageModels: string[];
+    videoModels: string[];
+    hasImageAction: boolean;
+    hasVideoAction: boolean;
+    hasCandidateAction: boolean;
+    hasRetryAction: boolean;
+};
+
+export function getCanvasAgentMediaWorkflowCardContract(workflow: CanvasAgentMediaWorkflow, actions: CanvasAgentMediaWorkflowCardContractActions) {
+    const imageModel = actions.imageModels.includes(workflow.imageModel) ? workflow.imageModel : undefined;
+    const videoModel = actions.videoModels.includes(workflow.videoModel) ? workflow.videoModel : undefined;
+    const videoState = getCanvasAgentMediaWorkflowCardState(workflow, { hasVideoAction: actions.hasVideoAction && Boolean(videoModel) });
+    const candidates = workflow.candidates
+        .filter((candidate) => candidate.status === "success")
+        .map((candidate, index) => ({
+            ...candidate,
+            id: `${workflow.id}-candidate-${index + 1}`,
+            name: `${workflow.id}-candidate`,
+            label: `候选图 ${index + 1}`,
+            selected: candidate.nodeId === workflow.selectedCandidateNodeId,
+            disabled: !actions.hasCandidateAction,
+        }));
+
+    return {
+        imageModel,
+        videoModel,
+        selectedCandidateNodeId: workflow.selectedCandidateNodeId,
+        canGenerateImages: workflow.intent !== "video" && Boolean(imageModel) && actions.hasImageAction && workflow.imageStatus !== "running",
+        canGenerateVideo: workflow.intent !== "image" && Boolean(videoModel) && videoState.canGenerateVideo,
+        videoDisabledMessage: videoModel ? videoState.videoDisabledMessage : "请选择视频模型",
+        candidates,
+        imageError: workflow.imageStatus === "failed" ? { message: workflow.error || "图片生成失败，请重试。", role: "alert" as const, canRetry: actions.hasRetryAction } : undefined,
+        videoError: workflow.videoStatus === "failed" ? { message: workflow.error || "视频生成失败，请重试。", role: "alert" as const, canRetry: actions.hasRetryAction } : undefined,
+    };
+}
+
 export function CanvasAgentMediaWorkflowCard({
     workflow,
     imageModels,
@@ -46,38 +83,41 @@ export function CanvasAgentMediaWorkflowCard({
     onGenerateVideo,
     onRetry,
 }: CanvasAgentMediaWorkflowCardProps) {
-    const cardState = getCanvasAgentMediaWorkflowCardState(workflow, { hasVideoAction: Boolean(onGenerateVideo) });
+    const card = getCanvasAgentMediaWorkflowCardContract(workflow, {
+        imageModels,
+        videoModels,
+        hasImageAction: Boolean(onGenerateImages),
+        hasVideoAction: Boolean(onGenerateVideo),
+        hasCandidateAction: Boolean(onSelectCandidate),
+        hasRetryAction: Boolean(onRetry),
+    });
     const showImageStage = workflow.intent !== "video";
     const showVideoStage = workflow.intent !== "image";
-    const successfulCandidates = workflow.candidates.filter((candidate) => candidate.status === "success");
 
     return (
         <section className="overflow-hidden rounded-xl border border-black/10 bg-black/[0.025] text-sm dark:border-white/10 dark:bg-white/[0.04]" aria-label="图片转视频工作流">
             {showImageStage ? (
                 <div className="space-y-3 p-3">
                     <WorkflowStageTitle icon={<ImageIcon className="size-3.5" />} title="第一步：生成候选图" status={workflow.imageStatus} />
-                    <ModelSelect ariaLabel="选择图片模型" emptyLabel="暂无图片模型" models={imageModels} value={workflow.imageModel} disabled={!onImageModelChange} onChange={onImageModelChange} />
-                    <Button block type="primary" disabled={!onGenerateImages || workflow.imageStatus === "running" || !workflow.imageModel} icon={workflow.imageStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImageIcon className="size-3.5" />} onClick={onGenerateImages}>
+                    <ModelSelect ariaLabel="选择图片模型" emptyLabel="暂无图片模型" models={imageModels} value={card.imageModel} disabled={!onImageModelChange} onChange={onImageModelChange} />
+                    <Button block type="primary" disabled={!card.canGenerateImages} icon={workflow.imageStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImageIcon className="size-3.5" />} onClick={onGenerateImages}>
                         {workflow.imageStatus === "running" ? "正在生成候选图" : "生成候选图"}
                     </Button>
-                    {workflow.imageStatus === "failed" ? <WorkflowError error={workflow.error || "图片生成失败，请重试。"} onRetry={onRetry ? () => onRetry("image") : undefined} /> : null}
-                    {successfulCandidates.length ? (
+                    {card.imageError ? <WorkflowError error={card.imageError.message} role={card.imageError.role} onRetry={card.imageError.canRetry ? () => onRetry?.("image") : undefined} /> : null}
+                    {card.candidates.length ? (
                         <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="成功候选图">
-                            {successfulCandidates.map((candidate) => {
-                                const selected = candidate.nodeId === workflow.selectedCandidateNodeId;
+                            {card.candidates.map((candidate) => {
                                 return (
-                                    <button
+                                    <label
                                         key={candidate.nodeId}
-                                        type="button"
-                                        role="radio"
-                                        aria-checked={selected}
-                                        disabled={!onSelectCandidate}
-                                        className={`group relative aspect-square overflow-hidden rounded-lg border text-left transition ${selected ? "border-primary ring-2 ring-primary/25" : "border-black/10 hover:border-primary/50 dark:border-white/15"} disabled:cursor-not-allowed disabled:opacity-60`}
-                                        onClick={() => onSelectCandidate?.(candidate.nodeId)}
+                                        htmlFor={candidate.id}
+                                        className={`group relative aspect-square cursor-pointer overflow-hidden rounded-lg border text-left transition focus-within:ring-2 focus-within:ring-primary/25 ${candidate.selected ? "border-primary ring-2 ring-primary/25" : "border-black/10 hover:border-primary/50 dark:border-white/15"} ${candidate.disabled ? "cursor-not-allowed opacity-60" : ""}`}
                                     >
-                                        {candidate.url ? <img src={candidate.url} alt="成功候选图" className="size-full object-cover" /> : <span className="grid size-full place-items-center bg-black/5 px-2 text-center text-xs opacity-65 dark:bg-white/10">{candidate.nodeId}</span>}
-                                        <span className={`absolute right-1 top-1 size-3 rounded-full border-2 border-white ${selected ? "bg-primary" : "bg-black/25 dark:bg-white/25"}`} />
-                                    </button>
+                                        <input id={candidate.id} className="sr-only" type="radio" name={candidate.name} checked={candidate.selected} disabled={candidate.disabled} onChange={() => onSelectCandidate?.(candidate.nodeId)} />
+                                        {candidate.url ? <img src={candidate.url} alt="" className="size-full object-cover" /> : <span aria-hidden className="grid size-full place-items-center bg-black/5 px-2 text-center text-xs opacity-65 dark:bg-white/10">{candidate.label}</span>}
+                                        <span className="sr-only">{candidate.label}</span>
+                                        <span className={`absolute right-1 top-1 size-3 rounded-full border-2 border-white ${candidate.selected ? "bg-primary" : "bg-black/25 dark:bg-white/25"}`} />
+                                    </label>
                                 );
                             })}
                         </div>
@@ -90,19 +130,19 @@ export function CanvasAgentMediaWorkflowCard({
             {showVideoStage ? (
                 <div className="space-y-3 p-3">
                     <WorkflowStageTitle icon={<Video className="size-3.5" />} title={showImageStage ? "第二步：生成视频" : "生成视频"} status={workflow.videoStatus} />
-                    <ModelSelect ariaLabel="选择视频模型" emptyLabel="暂无视频模型" models={videoModels} value={workflow.videoModel} disabled={!onVideoModelChange} onChange={onVideoModelChange} />
-                    <Button block disabled={!cardState.canGenerateVideo || !workflow.videoModel} icon={workflow.videoStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Video className="size-3.5" />} onClick={onGenerateVideo}>
+                    <ModelSelect ariaLabel="选择视频模型" emptyLabel="暂无视频模型" models={videoModels} value={card.videoModel} disabled={!onVideoModelChange} onChange={onVideoModelChange} />
+                    <Button block disabled={!card.canGenerateVideo} icon={workflow.videoStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Video className="size-3.5" />} onClick={onGenerateVideo}>
                         {workflow.videoStatus === "running" ? "正在生成视频" : "生成视频"}
                     </Button>
-                    {cardState.videoDisabledMessage ? <p className="text-xs opacity-65">{cardState.videoDisabledMessage}</p> : null}
-                    {workflow.videoStatus === "failed" ? <WorkflowError error={workflow.error || "视频生成失败，请重试。"} onRetry={onRetry ? () => onRetry("video") : undefined} /> : null}
+                    {card.videoDisabledMessage ? <p className="text-xs opacity-65">{card.videoDisabledMessage}</p> : null}
+                    {card.videoError ? <WorkflowError error={card.videoError.message} role={card.videoError.role} onRetry={card.videoError.canRetry ? () => onRetry?.("video") : undefined} /> : null}
                 </div>
             ) : null}
         </section>
     );
 }
 
-function ModelSelect({ ariaLabel, emptyLabel, models, value, disabled, onChange }: { ariaLabel: string; emptyLabel: string; models: string[]; value: string; disabled: boolean; onChange?: (model: string) => void }) {
+function ModelSelect({ ariaLabel, emptyLabel, models, value, disabled, onChange }: { ariaLabel: string; emptyLabel: string; models: string[]; value?: string; disabled: boolean; onChange?: (model: string) => void }) {
     return (
         <Select value={value} disabled={disabled} onValueChange={onChange}>
             <SelectTrigger aria-label={ariaLabel} className="h-9 w-full text-sm">
@@ -119,6 +159,6 @@ function WorkflowStageTitle({ icon, title, status }: { icon: React.ReactNode; ti
     return <div className="flex items-center gap-1.5 font-medium"><span className="opacity-70">{icon}</span><span>{title}</span>{status === "success" ? <span className="text-xs opacity-55">已完成</span> : null}</div>;
 }
 
-function WorkflowError({ error, onRetry }: { error: string; onRetry?: () => void }) {
-    return <div className="flex items-center justify-between gap-2 rounded-md bg-red-500/10 px-2 py-1.5 text-xs text-red-600 dark:text-red-300"><span>{error}</span>{onRetry ? <Button size="small" type="text" icon={<RefreshCw className="size-3" />} onClick={onRetry}>重试</Button> : null}</div>;
+function WorkflowError({ error, role, onRetry }: { error: string; role: "alert"; onRetry?: () => void }) {
+    return <div role={role} className="flex items-center justify-between gap-2 rounded-md bg-red-500/10 px-2 py-1.5 text-xs text-red-600 dark:text-red-300"><span>{error}</span>{onRetry ? <Button size="small" type="text" icon={<RefreshCw className="size-3" />} onClick={onRetry}>重试</Button> : null}</div>;
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { getCanvasAgentMediaWorkflowCardState } from "../src/components/canvas/canvas-agent-media-workflow-card";
+import { getCanvasAgentMediaWorkflowCardContract, getCanvasAgentMediaWorkflowCardState } from "../src/components/canvas/canvas-agent-media-workflow-card";
 import { canGenerateWorkflowVideo, classifyAgentMediaIntent, createAgentMediaWorkflow, selectWorkflowCandidate } from "../src/lib/canvas/agent-media-workflow";
 import type { CanvasAssistantSession } from "../src/types/canvas";
 
@@ -51,6 +51,93 @@ test("keeps the card video action disabled with a selection prompt until a succe
     expect(getCanvasAgentMediaWorkflowCardState(selectWorkflowCandidate(workflow, "image-1"), { hasVideoAction: true })).toMatchObject({
         canGenerateVideo: true,
         videoDisabledMessage: undefined,
+    });
+});
+
+test("card contract hides unavailable models and disables both stage submissions", () => {
+    const workflow = selectWorkflowCandidate(
+        createAgentMediaWorkflow({
+            intent: "image_to_video",
+            prompt: "lookbook",
+            imageModel: "stale-image-model",
+            videoModel: "stale-video-model",
+            candidates: [{ nodeId: "image-1", status: "success" }],
+        }),
+        "image-1",
+    );
+
+    expect(getCanvasAgentMediaWorkflowCardContract(workflow, {
+        imageModels: ["available-image-model"],
+        videoModels: ["available-video-model"],
+        hasImageAction: true,
+        hasVideoAction: true,
+        hasCandidateAction: true,
+        hasRetryAction: true,
+    })).toMatchObject({
+        imageModel: undefined,
+        videoModel: undefined,
+        canGenerateImages: false,
+        canGenerateVideo: false,
+    });
+});
+
+test("card contract exposes uniquely named native radio candidates and keeps them disabled without a handler", () => {
+    const workflow = createAgentMediaWorkflow({
+        id: "workflow-choices",
+        intent: "image_to_video",
+        prompt: "lookbook",
+        imageModel: "image-model",
+        videoModel: "video-model",
+        candidates: [
+            { nodeId: "image-1", status: "success" },
+            { nodeId: "image-2", status: "success" },
+        ],
+    });
+
+    expect(getCanvasAgentMediaWorkflowCardContract(workflow, {
+        imageModels: ["image-model"],
+        videoModels: ["video-model"],
+        hasImageAction: false,
+        hasVideoAction: false,
+        hasCandidateAction: false,
+        hasRetryAction: false,
+    })).toMatchObject({
+        canGenerateImages: false,
+        canGenerateVideo: false,
+        candidates: [
+            { nodeId: "image-1", name: "workflow-choices-candidate", label: "候选图 1", disabled: true },
+            { nodeId: "image-2", name: "workflow-choices-candidate", label: "候选图 2", disabled: true },
+        ],
+    });
+});
+
+test("card contract retains selected image and model state while exposing stage errors as alerts", () => {
+    const workflow = selectWorkflowCandidate(
+        createAgentMediaWorkflow({
+            id: "workflow-failed",
+            intent: "image_to_video",
+            prompt: "lookbook",
+            imageModel: "image-model",
+            videoModel: "video-model",
+            candidates: [{ nodeId: "image-1", status: "success" }],
+            imageStatus: "failed",
+            error: "generation failed",
+        }),
+        "image-1",
+    );
+
+    expect(getCanvasAgentMediaWorkflowCardContract(workflow, {
+        imageModels: ["image-model"],
+        videoModels: ["video-model"],
+        hasImageAction: true,
+        hasVideoAction: true,
+        hasCandidateAction: true,
+        hasRetryAction: false,
+    })).toMatchObject({
+        imageModel: "image-model",
+        videoModel: "video-model",
+        selectedCandidateNodeId: "image-1",
+        imageError: { message: "generation failed", role: "alert", canRetry: false },
     });
 });
 
