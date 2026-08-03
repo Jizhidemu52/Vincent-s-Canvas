@@ -1,18 +1,17 @@
-import type {
-    CanvasAgentMediaIntent,
-    CanvasAgentMediaWorkflow,
-    CanvasAgentMediaWorkflowCandidate,
-    CanvasAgentMediaWorkflowStageStatus,
-} from "@/types/canvas";
+import type { CanvasAgentMediaIntent, CanvasAgentMediaWorkflow, CanvasAgentMediaWorkflowCandidate, CanvasAgentMediaWorkflowStageStatus } from "@/types/canvas";
 
-export type {
-    CanvasAgentMediaIntent,
-    CanvasAgentMediaWorkflow,
-    CanvasAgentMediaWorkflowCandidate,
-    CanvasAgentMediaWorkflowStageStatus,
-} from "@/types/canvas";
+export type { CanvasAgentMediaIntent, CanvasAgentMediaWorkflow, CanvasAgentMediaWorkflowCandidate, CanvasAgentMediaWorkflowStageStatus } from "@/types/canvas";
 
 export type AgentMediaIntent = CanvasAgentMediaIntent;
+
+export type AgentMediaWorkflowModels = Pick<CanvasAgentMediaWorkflow, "imageModel" | "videoModel">;
+export type CompleteAgentMediaWorkflowStageInput = {
+    status: CanvasAgentMediaWorkflowStageStatus;
+    error?: unknown;
+    candidates?: CanvasAgentMediaWorkflowCandidate[];
+};
+
+export const AGENT_MEDIA_CERTIFICATE_ERROR = "连接证书校验失败，请检查 API 地址、证书链或网络代理后重试。";
 
 export type CreateAgentMediaWorkflowInput = Omit<CanvasAgentMediaWorkflow, "id" | "candidates" | "selectedCandidateNodeId" | "imageStatus" | "videoStatus"> & {
     id?: string;
@@ -40,6 +39,37 @@ export function createAgentMediaWorkflow(input: CreateAgentMediaWorkflowInput): 
         videoStatus: input.videoStatus || "idle",
         ...(input.error ? { error: input.error } : {}),
     };
+}
+
+export function createAgentMediaWorkflowForPrompt(prompt: string, models: AgentMediaWorkflowModels): CanvasAgentMediaWorkflow {
+    return createAgentMediaWorkflow({ intent: classifyAgentMediaIntent(prompt), prompt, ...models });
+}
+
+export function videoReferenceNodeIds(input: Pick<CanvasAgentMediaWorkflow, "candidates" | "selectedCandidateNodeId">) {
+    const selectedNodeId = input.selectedCandidateNodeId;
+    return selectedNodeId && input.candidates.some((candidate) => candidate.nodeId === selectedNodeId && candidate.status === "success") ? [selectedNodeId] : [];
+}
+
+export function completeAgentMediaWorkflowStage(workflow: CanvasAgentMediaWorkflow, stage: "image" | "video", result: CompleteAgentMediaWorkflowStageInput): CanvasAgentMediaWorkflow {
+    const { error: _previousError, ...withoutPreviousError } = workflow;
+    const candidates = result.candidates ? mergeWorkflowCandidates(workflow.candidates, result.candidates) : workflow.candidates;
+    const next = {
+        ...withoutPreviousError,
+        candidates,
+        [stage === "image" ? "imageStatus" : "videoStatus"]: result.status,
+    };
+    return result.status === "failed" ? { ...next, error: workflowGenerationErrorMessage(result.error) } : next;
+}
+
+export function workflowGenerationErrorMessage(error: unknown) {
+    const message = error instanceof Error ? error.message : typeof error === "string" ? error : "生成失败，请重试。";
+    return /(?:certificate|cert|证书|tls|ssl)/i.test(message) ? AGENT_MEDIA_CERTIFICATE_ERROR : message;
+}
+
+function mergeWorkflowCandidates(current: CanvasAgentMediaWorkflowCandidate[], incoming: CanvasAgentMediaWorkflowCandidate[]) {
+    const candidates = new Map(current.map((candidate) => [candidate.nodeId, candidate]));
+    incoming.forEach((candidate) => candidates.set(candidate.nodeId, candidate));
+    return Array.from(candidates.values());
 }
 
 export function selectWorkflowCandidate(workflow: CanvasAgentMediaWorkflow, nodeId: string): CanvasAgentMediaWorkflow {

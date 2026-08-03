@@ -21,9 +21,10 @@ import { AgentChatComposer, AgentChatMessage, AgentModeSwitch, AgentPanelTabs, A
 import { CanvasLocalAgentPanel } from "./canvas-local-agent-panel";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
-import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasAgentMediaWorkflow, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "@/types/canvas";
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
+import { classifyAgentMediaIntent, createAgentMediaWorkflow } from "@/lib/canvas/agent-media-workflow";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -190,9 +191,23 @@ type OnlineAgentTab = "setup" | "chat" | "history" | "log";
 type OnlineAgentLog = { id: string; time: string; title: string; data?: unknown };
 type OnlineAgentLogContext = { model: string; running: boolean; confirmTools: boolean; messages: number; nodes: number; connections: number };
 type OnlineLoopContext = { step: number };
-type OnlineToolResult = { ok: true; message: string; data?: unknown } | { ok: false; message: string };
+type OnlineToolResult = { ok: true; message: string; data?: unknown; mediaWorkflow?: CanvasAgentMediaWorkflow } | { ok: false; message: string };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
 type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; assistantId: string; step: number };
+
+function mediaWorkflowFromResults(results: OnlineExecutedToolCall[]) {
+    for (const item of results) {
+        if (item.result.ok && item.result.mediaWorkflow) return item.result.mediaWorkflow;
+    }
+    return undefined;
+}
+
+function latestAssistantUserPrompt(messages: CanvasAssistantMessage[]) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        if (messages[index]?.role === "user") return messages[index].text;
+    }
+    return "";
+}
 
 export type CanvasMediaWorkflowAction =
     | { type: "image_model_change"; messageId: string; model: string }
@@ -392,10 +407,17 @@ export function CanvasAssistantPanel({
             const messages = await buildToolAgentMessages(snapshotRef.current, history, userMessage);
             addOnlineLog(`Agent Tool Loop ${loop.step} 开始`, { toolChoice: "required" });
             let streamed = "";
-            const result = await requestToolResponse({ ...requestConfig, systemPrompt: "" }, messages, ONLINE_AGENT_TOOLS, "required", (text) => {
-                streamed = text;
-                if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });
-            }, { webSearch: true });
+            const result = await requestToolResponse(
+                { ...requestConfig, systemPrompt: "" },
+                messages,
+                ONLINE_AGENT_TOOLS,
+                "required",
+                (text) => {
+                    streamed = text;
+                    if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });
+                },
+                { webSearch: true },
+            );
             addOnlineLog("模型工具回复", result);
             if (result.toolCalls.length) {
                 const writableCalls = result.toolCalls.filter(isWritableToolCall);
@@ -425,12 +447,13 @@ export function CanvasAssistantPanel({
     const continueOnlineToolLoop = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], result: { content: string; toolCalls: ResponseToolCall[] }, step: number) => {
         const toolResults = executeOnlineToolCalls(result.toolCalls);
         addOnlineLog("工具执行结果", toolResults);
+        const mediaWorkflow = mediaWorkflowFromResults(toolResults);
         appendMessage(sessionId, {
             id: nanoid(),
             role: "tool",
             title: "工具自动执行完成",
             text: toolResults.map((item) => toolResultText(item.result)).join("\n"),
-            detail: { status: "completed", step, toolCalls: result.toolCalls, results: toolResults },
+            detail: { status: "completed", step, toolCalls: result.toolCalls, results: toolResults, ...(mediaWorkflow ? { mediaWorkflow } : {}) },
         });
         await continueOnlineToolLoopAfterResults(sessionId, assistantId, messages, result.toolCalls, toolResults, step);
     };
@@ -444,10 +467,17 @@ export function CanvasAssistantPanel({
         }
         const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
         let streamed = "";
-        const next = await requestToolResponse({ ...requestConfig, systemPrompt: "" }, nextMessages, ONLINE_AGENT_TOOLS, "auto", (text) => {
-            streamed = text;
-            if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });
-        }, { webSearch: true });
+        const next = await requestToolResponse(
+            { ...requestConfig, systemPrompt: "" },
+            nextMessages,
+            ONLINE_AGENT_TOOLS,
+            "auto",
+            (text) => {
+                streamed = text;
+                if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });
+            },
+            { webSearch: true },
+        );
         addOnlineLog(`Agent Tool Loop ${step + 1} 回复`, next);
         if (next.toolCalls.length) {
             const writableCalls = next.toolCalls.filter(isWritableToolCall);
@@ -485,7 +515,20 @@ export function CanvasAssistantPanel({
                 const ids = new Set(current.selectedNodeIds || []);
                 return { ok: true, message: `当前选中 ${ids.size} 个节点。`, data: { nodes: compactSnapshot({ ...current, nodes: current.nodes.filter((node) => ids.has(node.id)) }).nodes } };
             }
-            const ops = onlineToolToOps(name, args, current, effectiveConfig);
+            const mediaPrompt = stringOptional(args.prompt);
+            const mediaIntent = classifyAgentMediaIntent(`${latestAssistantUserPrompt(safeSessions.find((session) => session.id === localActiveSessionId)?.messages || [])}\n${mediaPrompt}`);
+            if (isAgentMediaGenerationTool(name) && mediaIntent === "image_to_video") {
+                const imageModels = selectableModelsByCapability(effectiveConfig, "image");
+                const videoModels = selectableModelsByCapability(effectiveConfig, "video");
+                const mediaWorkflow = createAgentMediaWorkflow({
+                    intent: "image_to_video",
+                    prompt: mediaPrompt,
+                    imageModel: imageModels.includes(effectiveConfig.imageModel) ? effectiveConfig.imageModel : imageModels[0] || defaultGenerationModel(effectiveConfig, "image"),
+                    videoModel: videoModels.includes(effectiveConfig.videoModel) ? effectiveConfig.videoModel : videoModels[0] || defaultGenerationModel(effectiveConfig, "video"),
+                });
+                return { ok: true, message: "已创建图片到视频工作流，请先在卡片中选择图片模型并生成候选图。", data: { workflowId: mediaWorkflow.id }, mediaWorkflow };
+            }
+            const ops = onlineToolToOps(name, args, current, effectiveConfig, mediaIntent === "video" ? "video" : undefined);
             const result = executeOps(ops);
             return { ok: result.changed, message: result.changed ? summarizeCanvasAgentOps(ops) || "画布操作已执行。" : result.noopReason, data: result };
         } catch (error) {
@@ -535,7 +578,14 @@ export function CanvasAssistantPanel({
             setIsRunning(true);
             const results = executeOnlineToolCalls(toolCalls);
             addOnlineLog("工具执行结果", results);
-            upsertMessage(session.id, { id: messageId, role: "tool", title: "工具执行完成", text: results.map((item) => toolResultText(item.result)).join("\n"), detail: { ...detail, results, status: "completed" } });
+            const mediaWorkflow = mediaWorkflowFromResults(results);
+            upsertMessage(session.id, {
+                id: messageId,
+                role: "tool",
+                title: "工具执行完成",
+                text: results.map((item) => toolResultText(item.result)).join("\n"),
+                detail: { ...detail, results, status: "completed", ...(mediaWorkflow ? { mediaWorkflow } : {}) },
+            });
             pendingToolContextRef.current.delete(messageId);
             await continueOnlineToolLoopAfterResults(session.id, assistantId, previousMessages, toolCalls, results, pendingContext?.step || Number(detail.step) || 1);
         } catch (error) {
@@ -666,10 +716,24 @@ export function CanvasAssistantPanel({
                                             workflow={message.detail.mediaWorkflow}
                                             imageModels={mediaWorkflowImageModels}
                                             videoModels={mediaWorkflowVideoModels}
-                                            onImageModelChange={onMediaWorkflowAction ? (model) => onMediaWorkflowAction({ type: "image_model_change", messageId: message.id, model }) : undefined}
+                                            onImageModelChange={
+                                                onMediaWorkflowAction
+                                                    ? (model) => {
+                                                          updateConfig("imageModel", model);
+                                                          onMediaWorkflowAction({ type: "image_model_change", messageId: message.id, model });
+                                                      }
+                                                    : undefined
+                                            }
                                             onGenerateImages={onMediaWorkflowAction ? () => onMediaWorkflowAction({ type: "generate_images", messageId: message.id }) : undefined}
                                             onSelectCandidate={onMediaWorkflowAction ? (nodeId) => onMediaWorkflowAction({ type: "select_candidate", messageId: message.id, nodeId }) : undefined}
-                                            onVideoModelChange={onMediaWorkflowAction ? (model) => onMediaWorkflowAction({ type: "video_model_change", messageId: message.id, model }) : undefined}
+                                            onVideoModelChange={
+                                                onMediaWorkflowAction
+                                                    ? (model) => {
+                                                          updateConfig("videoModel", model);
+                                                          onMediaWorkflowAction({ type: "video_model_change", messageId: message.id, model });
+                                                      }
+                                                    : undefined
+                                            }
                                             onGenerateVideo={onMediaWorkflowAction ? () => onMediaWorkflowAction({ type: "generate_video", messageId: message.id }) : undefined}
                                             onRetry={onMediaWorkflowAction ? (stage) => onMediaWorkflowAction({ type: "retry", messageId: message.id, stage }) : undefined}
                                         />
@@ -1081,7 +1145,7 @@ function parseToolArguments(value: string) {
     }
 }
 
-function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig): CanvasAgentOp[] {
+function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig, forcedMediaMode?: "video"): CanvasAgentOp[] {
     if (name === "canvas_apply_ops") return requireOps(input.ops);
     if (name === "canvas_create_node") {
         const nodeType = requireNodeType(input.nodeType);
@@ -1105,15 +1169,15 @@ function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot:
             ),
         );
     }
-    if (name === "canvas_create_image_prompt_flow") return generationFlowOps({ ...input, mode: "image" }, snapshot, config);
+    if (name === "canvas_create_image_prompt_flow") return generationFlowOps({ ...input, mode: forcedMediaMode || "image" }, snapshot, config);
     if (name === "canvas_create_config_node") {
         const configId = `config-${nanoid()}`;
         const mode = generationMode(input.mode);
         return [configNodeOp(configId, input, numberOr(input.x, nextCanvasX(snapshot)), numberOr(input.y, 0), config), ...(input.autoRun ? [runGenerationOp(configId, mode, stringOptional(input.prompt))] : [])];
     }
-    if (name === "canvas_create_generation_flow") return generationFlowOps(input, snapshot, config);
+    if (name === "canvas_create_generation_flow") return generationFlowOps(forcedMediaMode ? { ...input, mode: forcedMediaMode } : input, snapshot, config);
     if (name === "canvas_generate_text") return generationFlowOps({ ...input, mode: "text", autoRun: true }, snapshot, config);
-    if (name === "canvas_generate_image") return generationFlowOps({ ...input, mode: "image", autoRun: true }, snapshot, config);
+    if (name === "canvas_generate_image") return generationFlowOps({ ...input, mode: forcedMediaMode || (classifyAgentMediaIntent(stringOptional(input.prompt)) === "video" ? "video" : "image"), autoRun: true }, snapshot, config);
     if (name === "canvas_generate_video") return generationFlowOps({ ...input, mode: "video", autoRun: true }, snapshot, config);
     if (name === "canvas_generate_audio") return generationFlowOps({ ...input, mode: "audio", autoRun: true }, snapshot, config);
     if (name === "canvas_update_node") return [{ type: "update_node", id: requireString(input.id, "id"), patch: recordOptional(input.patch) as Partial<CanvasNodeData> | undefined, metadata: recordOptional(input.metadata) as CanvasNodeData["metadata"] }];
@@ -1142,6 +1206,10 @@ function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot:
     if (name === "canvas_set_viewport") return [{ type: "set_viewport", viewport: requireViewport(input.viewport) }];
     if (name === "canvas_run_generation") return [runGenerationOp(requireString(input.nodeId, "nodeId"), generationMode(input.mode), stringOptional(input.prompt))];
     throw new Error(`不支持的工具：${name}`);
+}
+
+function isAgentMediaGenerationTool(name: string) {
+    return name === "canvas_generate_image" || name === "canvas_generate_video" || name === "canvas_create_image_prompt_flow" || name === "canvas_create_generation_flow";
 }
 
 function generationFlowOps(input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig): CanvasAgentOp[] {
@@ -1433,7 +1501,10 @@ function buildAssistantReferences(nodes: CanvasNodeData[], selectedNodeIds: Set<
 async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage): Promise<ResponseInputMessage[]> {
     const refs = userMessage.references || [];
     return [
-        { role: "system", content: ONLINE_AGENT_PROMPT },
+        {
+            role: "system",
+            content: `${ONLINE_AGENT_PROMPT}\n动态意图（走秀、视频、动作、镜头等）必须调用视频生成；明确“先生成图片、再选一张生成视频”的复合请求必须创建两阶段工作流，只生成用户确认的图片阶段，绝不自动生成视频。`,
+        },
         ...history
             .filter((message) => message.role === "user" || message.role === "assistant" || message.role === "system")
             .slice(-8)

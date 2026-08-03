@@ -27,7 +27,7 @@ import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
 import { ActiveConnectionPath, ConnectionPath } from "@/components/canvas/canvas-connections";
 import { CanvasConfigComposer } from "@/components/canvas/canvas-config-composer";
 import { CanvasConfigNodePanel } from "@/components/canvas/canvas-config-node-panel";
-import { CANVAS_AGENT_PANEL_MOTION_MS, CanvasAssistantPanel } from "@/components/canvas/canvas-assistant-panel";
+import { CANVAS_AGENT_PANEL_MOTION_MS, CanvasAssistantPanel, type CanvasMediaWorkflowAction } from "@/components/canvas/canvas-assistant-panel";
 import { CanvasNodeContextMenu } from "@/components/canvas/canvas-context-menu";
 import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "@/components/canvas/canvas-node-crop-dialog";
@@ -52,6 +52,7 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
+import { completeAgentMediaWorkflowStage, selectWorkflowCandidate, videoReferenceNodeIds } from "@/lib/canvas/agent-media-workflow";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "@/lib/canvas/canvas-resource-references";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { validateImageReferences } from "@/lib/image-reference-policy";
@@ -60,6 +61,7 @@ import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
 import {
     CanvasNodeType,
     type CanvasAssistantImage,
+    type CanvasAgentMediaWorkflow,
     type CanvasAssistantSession,
     type CanvasConnection,
     type CanvasImageGenerationType,
@@ -378,10 +380,7 @@ function WirelessCanvasPage() {
     const [isNodeDragging, setIsNodeDragging] = useState(false);
 
     const selectedMaskEditModel = maskEditModel || effectiveConfig.imageModel || effectiveConfig.model;
-    const maskEditEstimate = useMemo(
-        () => estimateUsage({ operationType: "inpaint", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }),
-        [estimateUsage, selectedMaskEditModel],
-    );
+    const maskEditEstimate = useMemo(() => estimateUsage({ operationType: "inpaint", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }), [estimateUsage, selectedMaskEditModel]);
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
@@ -2339,38 +2338,42 @@ function WirelessCanvasPage() {
         const token = searchParams.get("reuseToken");
         if (!projectLoaded || !token || loadedReuseTokenRef.current.has(token)) return;
         loadedReuseTokenRef.current.add(token);
-        void hydratePromptReuse(token).then(async (payload) => {
-            const parameters = payload.template.parameters;
-            const isBatch = payload.template.targetTool === "batch-edit" || searchParams.get("promptTool") === "batch-edit";
-            if (isBatch) {
-                setBatchEditPrompt(payload.template.prompt);
-                setBatchEditOpen(true);
-            } else {
-                setQuickGeneratePrompt(payload.template.prompt);
-                if (payload.pricing.selectedModel?.modelId) setQuickGenerateModel(payload.pricing.selectedModel.modelId);
-                if (typeof parameters.size === "string") setQuickGenerateSize(parameters.size);
-                const quantity = typeof parameters.quantity === "number" ? parameters.quantity : typeof parameters.count === "number" ? parameters.count : 1;
-                setQuickGenerateCount(Math.min(4, Math.max(1, quantity)));
-                const nextReferences = await Promise.all(payload.template.referenceAssetIds.map(async (assetId) => {
-                    const blob = await fetchServerAssetContent(assetId);
-                    const image = await uploadImage(blob);
-                    return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
-                }));
-                setQuickGenerateReferences(nextReferences);
-                setQuickGenerateOpen(true);
-            }
-            payload.warnings.forEach((warning) => message.warning(warning));
-            if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请选择管理员当前启用的模型");
-            const cost = payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准";
-            if (payload.mode === "fill_and_generate" && !isBatch) {
-                modal.confirm({ title: "确认在画布生成？", content: `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => quickGenerateRef.current() });
-            } else if (payload.mode === "fill_and_generate" && isBatch) {
-                message.info(`模板已填入，当前预计 ${cost}。请先选择文件夹，再确认批量生成。`);
-            } else message.success(`模板已填入，当前预计 ${cost}`);
-        }).catch((error) => {
-            loadedReuseTokenRef.current.delete(token);
-            message.error(error instanceof Error ? error.message : "模板复用失败");
-        });
+        void hydratePromptReuse(token)
+            .then(async (payload) => {
+                const parameters = payload.template.parameters;
+                const isBatch = payload.template.targetTool === "batch-edit" || searchParams.get("promptTool") === "batch-edit";
+                if (isBatch) {
+                    setBatchEditPrompt(payload.template.prompt);
+                    setBatchEditOpen(true);
+                } else {
+                    setQuickGeneratePrompt(payload.template.prompt);
+                    if (payload.pricing.selectedModel?.modelId) setQuickGenerateModel(payload.pricing.selectedModel.modelId);
+                    if (typeof parameters.size === "string") setQuickGenerateSize(parameters.size);
+                    const quantity = typeof parameters.quantity === "number" ? parameters.quantity : typeof parameters.count === "number" ? parameters.count : 1;
+                    setQuickGenerateCount(Math.min(4, Math.max(1, quantity)));
+                    const nextReferences = await Promise.all(
+                        payload.template.referenceAssetIds.map(async (assetId) => {
+                            const blob = await fetchServerAssetContent(assetId);
+                            const image = await uploadImage(blob);
+                            return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
+                        }),
+                    );
+                    setQuickGenerateReferences(nextReferences);
+                    setQuickGenerateOpen(true);
+                }
+                payload.warnings.forEach((warning) => message.warning(warning));
+                if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请选择管理员当前启用的模型");
+                const cost = payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准";
+                if (payload.mode === "fill_and_generate" && !isBatch) {
+                    modal.confirm({ title: "确认在画布生成？", content: `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => quickGenerateRef.current() });
+                } else if (payload.mode === "fill_and_generate" && isBatch) {
+                    message.info(`模板已填入，当前预计 ${cost}。请先选择文件夹，再确认批量生成。`);
+                } else message.success(`模板已填入，当前预计 ${cost}`);
+            })
+            .catch((error) => {
+                loadedReuseTokenRef.current.delete(token);
+                message.error(error instanceof Error ? error.message : "模板复用失败");
+            });
     }, [message, modal, projectLoaded, searchParams]);
 
     const applyBatchEditFiles = useCallback((files: FileList | File[] | null) => {
@@ -2444,9 +2447,7 @@ function WirelessCanvasPage() {
         setBatchEditRunning(true);
         setBatchEditServerId(null);
         setBatchEditAction(null);
-        setBatchEditItems((prev) =>
-            prev.map((item) => ({ ...item, status: "waiting", sourceUrl: undefined, resultUrl: undefined, failureReason: undefined })),
-        );
+        setBatchEditItems((prev) => prev.map((item) => ({ ...item, status: "waiting", sourceUrl: undefined, resultUrl: undefined, failureReason: undefined })));
 
         for (const [index, item] of items.entries()) {
             const sourceId = `${localBatchId}-source-${index + 1}`;
@@ -2489,17 +2490,11 @@ function WirelessCanvasPage() {
                 ]);
                 setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: sourceId, toNodeId: resultId }]);
                 prepared.push({ originalIndex: index, item, sourceId, resultId, uploadedSource });
-                setBatchEditItems((prev) =>
-                    prev.map((entry) => (entry.id === item.id ? { ...entry, status: "waiting", sourceUrl: uploadedSource.url } : entry)),
-                );
+                setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "waiting", sourceUrl: uploadedSource.url } : entry)));
             } catch (error) {
                 localFailures += 1;
                 const reason = error instanceof Error ? error.message : "本地图片读取失败";
-                setBatchEditItems((prev) =>
-                    prev.map((entry) =>
-                        entry.id === item.id ? { ...entry, status: "failed", sourceUrl: `file://${item.relativePath}`, failureReason: reason } : entry,
-                    ),
-                );
+                setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "failed", sourceUrl: `file://${item.relativePath}`, failureReason: reason } : entry)));
             }
         }
 
@@ -2540,14 +2535,8 @@ function WirelessCanvasPage() {
                 const entry = prepared[failure.index];
                 if (!entry) continue;
                 failedCount += 1;
-                setBatchEditItems((prev) =>
-                    prev.map((item) => (item.id === entry.item.id ? { ...item, status: "failed", failureReason: failure.reason } : item)),
-                );
-                setNodes((prev) =>
-                    prev.map((node) =>
-                        node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: failure.reason } } : node,
-                    ),
-                );
+                setBatchEditItems((prev) => prev.map((item) => (item.id === entry.item.id ? { ...item, status: "failed", failureReason: failure.reason } : item)));
+                setNodes((prev) => prev.map((node) => (node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: failure.reason } } : node)));
                 settledResultIds.add(entry.resultId);
             }
 
@@ -2559,16 +2548,8 @@ function WirelessCanvasPage() {
                     if (cancelled) cancelledCount += 1;
                     else failedCount += 1;
                     const reason = task.failureReason || (cancelled ? "任务已取消" : "批量改图失败");
-                    setBatchEditItems((prev) =>
-                        prev.map((item) =>
-                            item.id === entry.item.id ? { ...item, status: cancelled ? "cancelled" : "failed", failureReason: reason } : item,
-                        ),
-                    );
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node,
-                        ),
-                    );
+                    setBatchEditItems((prev) => prev.map((item) => (item.id === entry.item.id ? { ...item, status: cancelled ? "cancelled" : "failed", failureReason: reason } : item)));
+                    setNodes((prev) => prev.map((node) => (node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node)));
                     settledResultIds.add(entry.resultId);
                     continue;
                 }
@@ -2576,14 +2557,8 @@ function WirelessCanvasPage() {
                 if (!resultUrl) {
                     failedCount += 1;
                     const reason = "任务成功但没有返回结果图片";
-                    setBatchEditItems((prev) =>
-                        prev.map((item) => (item.id === entry.item.id ? { ...item, status: "failed", failureReason: reason } : item)),
-                    );
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node,
-                        ),
-                    );
+                    setBatchEditItems((prev) => prev.map((item) => (item.id === entry.item.id ? { ...item, status: "failed", failureReason: reason } : item)));
+                    setNodes((prev) => prev.map((node) => (node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node)));
                     settledResultIds.add(entry.resultId);
                     continue;
                 }
@@ -2645,29 +2620,15 @@ function WirelessCanvasPage() {
                         recreatePath: `/image?tool=image-edit&prompt=${encodeURIComponent(prompt)}&model=${encodeURIComponent(model)}`,
                     },
                 });
-                setBatchEditItems((prev) =>
-                    prev.map((item) => (item.id === entry.item.id ? { ...item, status: "success", resultUrl: uploadedResult.url } : item)),
-                );
+                setBatchEditItems((prev) => prev.map((item) => (item.id === entry.item.id ? { ...item, status: "success", resultUrl: uploadedResult.url } : item)));
                 settledResultIds.add(entry.resultId);
             }
         } catch (error) {
             const reason = error instanceof Error ? error.message : "批量任务提交失败";
             const unresolved = prepared.filter((entry) => !settledResultIds.has(entry.resultId));
             failedCount += unresolved.length;
-            setBatchEditItems((prev) =>
-                prev.map((item) =>
-                    unresolved.some((entry) => entry.item.id === item.id)
-                        ? { ...item, status: "failed", failureReason: reason }
-                        : item,
-                ),
-            );
-            setNodes((prev) =>
-                prev.map((node) =>
-                    unresolved.some((entry) => entry.resultId === node.id)
-                        ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } }
-                        : node,
-                ),
-            );
+            setBatchEditItems((prev) => prev.map((item) => (unresolved.some((entry) => entry.item.id === item.id) ? { ...item, status: "failed", failureReason: reason } : item)));
+            setNodes((prev) => prev.map((node) => (unresolved.some((entry) => entry.resultId === node.id) ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node)));
         } finally {
             setSelectedNodeIds(new Set(selectedResults));
             setBatchEditRunning(false);
@@ -3144,6 +3105,97 @@ function WirelessCanvasPage() {
         generateNodeRef.current = handleGenerateNode;
     }, [handleGenerateNode]);
 
+    const updateMediaWorkflow = useCallback((messageId: string, updater: (workflow: CanvasAgentMediaWorkflow) => CanvasAgentMediaWorkflow) => {
+        setChatSessions((sessions) =>
+            sessions.map((session) => ({
+                ...session,
+                messages: session.messages.map((item) => {
+                    const workflow = item.id === messageId ? item.detail?.mediaWorkflow : undefined;
+                    return workflow ? { ...item, detail: { ...item.detail, mediaWorkflow: updater(workflow) } } : item;
+                }),
+            })),
+        );
+    }, []);
+
+    const runWorkflowImageStage = useCallback(
+        async (messageId: string, workflow: CanvasAgentMediaWorkflow) => {
+            if (workflow.intent === "video") return;
+            updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "image", { status: "running" }));
+            const { configId, ops } = mediaWorkflowStageOps(workflow, "image", nodesRef.current);
+            applyAgentOps(ops);
+            try {
+                await handleGenerateNode(configId, "image", workflow.prompt);
+                const candidates = workflowImageCandidates(configId, nodesRef.current, connectionsRef.current);
+                const firstFailure = candidates.find((candidate) => candidate.status === "failed");
+                updateMediaWorkflow(messageId, (current) =>
+                    completeAgentMediaWorkflowStage(current, "image", {
+                        status: candidates.some((candidate) => candidate.status === "success") ? "success" : "failed",
+                        candidates,
+                        error: firstFailure ? nodesRef.current.find((node) => node.id === firstFailure.nodeId)?.metadata?.errorDetails : "图片生成失败，请重试。",
+                    }),
+                );
+            } catch (error) {
+                updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "image", { status: "failed", error }));
+            }
+        },
+        [applyAgentOps, handleGenerateNode, updateMediaWorkflow],
+    );
+
+    const runWorkflowVideoStage = useCallback(
+        async (messageId: string, workflow: CanvasAgentMediaWorkflow) => {
+            const referenceNodeIds = videoReferenceNodeIds(workflow);
+            if (!referenceNodeIds.length) {
+                message.warning("请先选择一张成功候选图");
+                return;
+            }
+            updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "video", { status: "running" }));
+            const { configId, ops } = mediaWorkflowStageOps(workflow, "video", nodesRef.current, referenceNodeIds[0]);
+            applyAgentOps(ops);
+            try {
+                await handleGenerateNode(configId, "video", workflow.prompt);
+                const videoNode = connectionsRef.current
+                    .filter((connection) => connection.fromNodeId === configId)
+                    .map((connection) => nodesRef.current.find((node) => node.id === connection.toNodeId))
+                    .find((node) => node?.type === CanvasNodeType.Video);
+                const status = videoNode?.metadata?.status === NODE_STATUS_SUCCESS ? "success" : "failed";
+                updateMediaWorkflow(messageId, (current) =>
+                    completeAgentMediaWorkflowStage(current, "video", {
+                        status,
+                        error: videoNode?.metadata?.errorDetails || "视频生成失败，请重试。",
+                    }),
+                );
+            } catch (error) {
+                updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "video", { status: "failed", error }));
+            }
+        },
+        [applyAgentOps, handleGenerateNode, message, updateMediaWorkflow],
+    );
+
+    const handleMediaWorkflowAction = useCallback(
+        (action: CanvasMediaWorkflowAction) => {
+            const workflow = chatSessions.flatMap((session) => session.messages).find((item) => item.id === action.messageId)?.detail?.mediaWorkflow;
+            if (!workflow) return;
+            if (action.type === "image_model_change") {
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, imageModel: action.model }));
+                return;
+            }
+            if (action.type === "video_model_change") {
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, videoModel: action.model }));
+                return;
+            }
+            if (action.type === "select_candidate") {
+                updateMediaWorkflow(action.messageId, (current) => selectWorkflowCandidate(current, action.nodeId));
+                return;
+            }
+            if (action.type === "generate_images" || (action.type === "retry" && action.stage === "image")) {
+                void runWorkflowImageStage(action.messageId, workflow);
+                return;
+            }
+            if (action.type === "generate_video" || (action.type === "retry" && action.stage === "video")) void runWorkflowVideoStage(action.messageId, workflow);
+        },
+        [chatSessions, runWorkflowImageStage, runWorkflowVideoStage, updateMediaWorkflow],
+    );
+
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData) => {
             const sourceNode = findRetrySourceNode(node.id, nodesRef.current, connectionsRef.current) || node;
@@ -3425,7 +3477,12 @@ function WirelessCanvasPage() {
             <aside className="hidden w-[286px] shrink-0 border-r border-stone-200 bg-white/95 p-3 dark:border-stone-800 dark:bg-stone-950/95 lg:block">
                 <div className="mb-3 flex items-center justify-between px-1">
                     <div className="text-sm font-semibold">AI 生成</div>
-                    <button type="button" className="grid size-7 place-items-center rounded-md border border-stone-200 text-stone-500 transition hover:border-orange-400 hover:text-orange-600 dark:border-stone-800" onClick={() => setQuickGenerateOpen(true)} title="新建生成">
+                    <button
+                        type="button"
+                        className="grid size-7 place-items-center rounded-md border border-stone-200 text-stone-500 transition hover:border-orange-400 hover:text-orange-600 dark:border-stone-800"
+                        onClick={() => setQuickGenerateOpen(true)}
+                        title="新建生成"
+                    >
                         <Plus className="size-4" />
                     </button>
                 </div>
@@ -3914,6 +3971,7 @@ function WirelessCanvasPage() {
                     onPasteImage={pasteAssistantImage}
                     agentMode={agentMode}
                     onAgentModeChange={setAgentMode}
+                    onMediaWorkflowAction={handleMediaWorkflowAction}
                     autoConnectLocal={codexAutoConnect}
                     closing={assistantClosing}
                     onCollapse={closeAgent}
@@ -3943,8 +4001,25 @@ function CanvasInspectorPanel({
                 <div className="mt-0.5 truncate text-[10px] text-stone-400">{selectedNode ? `${selectedNode.type} · ${Math.round(selectedNode.width)} × ${Math.round(selectedNode.height)}` : "对象未选中时调整画布外观"}</div>
             </div>
             <div className="space-y-2 p-2.5 text-xs">
-                <div className="flex items-center justify-between gap-2"><span className="text-stone-500">背景</span><div className="flex rounded-md bg-stone-100 p-0.5 dark:bg-stone-900"><button type="button" className={`rounded px-2 py-1 ${backgroundMode === "lines" ? "bg-white text-orange-600 shadow-sm dark:bg-stone-800" : "text-stone-400"}`} onClick={() => onBackgroundModeChange("lines")}>线</button><button type="button" className={`rounded px-2 py-1 ${backgroundMode === "dots" ? "bg-white text-orange-600 shadow-sm dark:bg-stone-800" : "text-stone-400"}`} onClick={() => onBackgroundModeChange("dots")}>点</button></div></div>
-                <button type="button" className="flex w-full items-center justify-between rounded-md border border-stone-200 px-2.5 py-2 text-left transition hover:border-orange-300 dark:border-stone-800" onClick={() => onShowImageInfoChange(!showImageInfo)}><span>显示素材信息</span><span className={showImageInfo ? "text-orange-600" : "text-stone-400"}>{showImageInfo ? "已开启" : "已关闭"}</span></button>
+                <div className="flex items-center justify-between gap-2">
+                    <span className="text-stone-500">背景</span>
+                    <div className="flex rounded-md bg-stone-100 p-0.5 dark:bg-stone-900">
+                        <button type="button" className={`rounded px-2 py-1 ${backgroundMode === "lines" ? "bg-white text-orange-600 shadow-sm dark:bg-stone-800" : "text-stone-400"}`} onClick={() => onBackgroundModeChange("lines")}>
+                            线
+                        </button>
+                        <button type="button" className={`rounded px-2 py-1 ${backgroundMode === "dots" ? "bg-white text-orange-600 shadow-sm dark:bg-stone-800" : "text-stone-400"}`} onClick={() => onBackgroundModeChange("dots")}>
+                            点
+                        </button>
+                    </div>
+                </div>
+                <button
+                    type="button"
+                    className="flex w-full items-center justify-between rounded-md border border-stone-200 px-2.5 py-2 text-left transition hover:border-orange-300 dark:border-stone-800"
+                    onClick={() => onShowImageInfoChange(!showImageInfo)}
+                >
+                    <span>显示素材信息</span>
+                    <span className={showImageInfo ? "text-orange-600" : "text-stone-400"}>{showImageInfo ? "已开启" : "已关闭"}</span>
+                </button>
             </div>
         </aside>
     );
@@ -4382,6 +4457,58 @@ function serverAssetIdFromContentUrl(url: string) {
 
 function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
     return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
+}
+
+function mediaWorkflowStageOps(workflow: CanvasAgentMediaWorkflow, stage: "image" | "video", nodes: CanvasNodeData[], referenceNodeId?: string) {
+    const textId = `workflow-${stage}-prompt-${nanoid()}`;
+    const configId = `workflow-${stage}-config-${nanoid()}`;
+    const x = nodes.length ? Math.max(...nodes.map((node) => node.position.x + node.width)) + 80 : 0;
+    const y = 0;
+    const textSize = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+    const configSize = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
+    const model = stage === "image" ? workflow.imageModel : workflow.videoModel;
+    const ops: CanvasAgentOp[] = [
+        {
+            type: "add_node",
+            id: textId,
+            nodeType: CanvasNodeType.Text,
+            title: stage === "image" ? "工作流图片提示词" : "工作流视频提示词",
+            position: { x, y },
+            width: textSize.width,
+            height: textSize.height,
+            metadata: { content: workflow.prompt, prompt: workflow.prompt, status: NODE_STATUS_SUCCESS, fontSize: 14 },
+        },
+        {
+            type: "add_node",
+            id: configId,
+            nodeType: CanvasNodeType.Config,
+            title: stage === "image" ? "工作流图片生成" : "工作流视频生成",
+            position: { x: x + textSize.width + 80, y },
+            width: configSize.width,
+            height: configSize.height,
+            metadata: { prompt: workflow.prompt, model, status: NODE_STATUS_IDLE },
+        },
+        { type: "connect_nodes", fromNodeId: textId, toNodeId: configId },
+        { type: "select_nodes", ids: [configId] },
+    ];
+    if (referenceNodeId) ops.splice(3, 0, { type: "connect_nodes", fromNodeId: referenceNodeId, toNodeId: configId });
+    return { configId, ops };
+}
+
+function workflowImageCandidates(configId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): CanvasAgentMediaWorkflow["candidates"] {
+    const rootIds = connections.filter((connection) => connection.fromNodeId === configId).map((connection) => connection.toNodeId);
+    const candidateIds = rootIds.flatMap((rootId) => {
+        const root = nodes.find((node) => node.id === rootId);
+        return root?.metadata?.batchChildIds?.length ? root.metadata.batchChildIds : [rootId];
+    });
+    return candidateIds.map((nodeId) => {
+        const node = nodes.find((item) => item.id === nodeId);
+        return {
+            nodeId,
+            status: node?.metadata?.status === NODE_STATUS_SUCCESS ? "success" : "failed",
+            ...(node?.metadata?.content ? { url: node.metadata.content } : {}),
+        };
+    });
 }
 
 function videoMetadata(video: UploadedFile): CanvasNodeMetadata {

@@ -1,11 +1,57 @@
 import { expect, test } from "bun:test";
 
 import { getCanvasAgentMediaWorkflowCardContract, getCanvasAgentMediaWorkflowCardState } from "../src/components/canvas/canvas-agent-media-workflow-card";
-import { canGenerateWorkflowVideo, classifyAgentMediaIntent, createAgentMediaWorkflow, selectWorkflowCandidate } from "../src/lib/canvas/agent-media-workflow";
+import { canGenerateWorkflowVideo, classifyAgentMediaIntent, completeAgentMediaWorkflowStage, createAgentMediaWorkflow, createAgentMediaWorkflowForPrompt, selectWorkflowCandidate, videoReferenceNodeIds } from "../src/lib/canvas/agent-media-workflow";
 import type { CanvasAssistantSession } from "../src/types/canvas";
 
 test("routes runway motion requests to video even when clothing is mentioned", () => {
     expect(classifyAgentMediaIntent("让模特穿这件衣服在秀场走秀")).toBe("video");
+});
+
+test("builds a video workflow for a runway request without an image run", () => {
+    const workflow = createAgentMediaWorkflowForPrompt("让模特在秀场走秀", { imageModel: "gpt-image-2", videoModel: "happyhorse-1.0" });
+
+    expect(workflow.intent).toBe("video");
+    expect(workflow.imageStatus).toBe("idle");
+});
+
+test("builds video input from only the selected image node", () => {
+    expect(
+        videoReferenceNodeIds({
+            selectedCandidateNodeId: "image-2",
+            candidates: [
+                { nodeId: "image-1", status: "success" },
+                { nodeId: "image-2", status: "success" },
+            ],
+        }),
+    ).toEqual(["image-2"]);
+});
+
+test("refuses video input when no successful image candidate is selected", () => {
+    expect(videoReferenceNodeIds({ candidates: [{ nodeId: "image-1", status: "success" }] })).toEqual([]);
+});
+
+test("maps certificate failures to the current stage without losing the selected image or models", () => {
+    const workflow = selectWorkflowCandidate(
+        createAgentMediaWorkflow({
+            intent: "image_to_video",
+            prompt: "lookbook",
+            imageModel: "gpt-image-2",
+            videoModel: "happyhorse-1.0",
+            candidates: [{ nodeId: "image-1", status: "success" }],
+            imageStatus: "success",
+        }),
+        "image-1",
+    );
+
+    expect(completeAgentMediaWorkflowStage(workflow, "video", { status: "failed", error: "certificate verify failed" })).toMatchObject({
+        imageModel: "gpt-image-2",
+        videoModel: "happyhorse-1.0",
+        selectedCandidateNodeId: "image-1",
+        imageStatus: "success",
+        videoStatus: "failed",
+        error: "连接证书校验失败，请检查 API 地址、证书链或网络代理后重试。",
+    });
 });
 
 test("keeps an explicit first-generate-image-then-video request in staged mode", () => {
@@ -66,14 +112,16 @@ test("card contract hides unavailable models and disables both stage submissions
         "image-1",
     );
 
-    expect(getCanvasAgentMediaWorkflowCardContract(workflow, {
-        imageModels: ["available-image-model"],
-        videoModels: ["available-video-model"],
-        hasImageAction: true,
-        hasVideoAction: true,
-        hasCandidateAction: true,
-        hasRetryAction: true,
-    })).toMatchObject({
+    expect(
+        getCanvasAgentMediaWorkflowCardContract(workflow, {
+            imageModels: ["available-image-model"],
+            videoModels: ["available-video-model"],
+            hasImageAction: true,
+            hasVideoAction: true,
+            hasCandidateAction: true,
+            hasRetryAction: true,
+        }),
+    ).toMatchObject({
         imageModel: undefined,
         videoModel: undefined,
         canGenerateImages: false,
@@ -94,14 +142,16 @@ test("card contract exposes uniquely named native radio candidates and keeps the
         ],
     });
 
-    expect(getCanvasAgentMediaWorkflowCardContract(workflow, {
-        imageModels: ["image-model"],
-        videoModels: ["video-model"],
-        hasImageAction: false,
-        hasVideoAction: false,
-        hasCandidateAction: false,
-        hasRetryAction: false,
-    })).toMatchObject({
+    expect(
+        getCanvasAgentMediaWorkflowCardContract(workflow, {
+            imageModels: ["image-model"],
+            videoModels: ["video-model"],
+            hasImageAction: false,
+            hasVideoAction: false,
+            hasCandidateAction: false,
+            hasRetryAction: false,
+        }),
+    ).toMatchObject({
         canGenerateImages: false,
         canGenerateVideo: false,
         candidates: [
@@ -126,14 +176,16 @@ test("card contract retains selected image and model state while exposing stage 
         "image-1",
     );
 
-    expect(getCanvasAgentMediaWorkflowCardContract(workflow, {
-        imageModels: ["image-model"],
-        videoModels: ["video-model"],
-        hasImageAction: true,
-        hasVideoAction: true,
-        hasCandidateAction: true,
-        hasRetryAction: false,
-    })).toMatchObject({
+    expect(
+        getCanvasAgentMediaWorkflowCardContract(workflow, {
+            imageModels: ["image-model"],
+            videoModels: ["video-model"],
+            hasImageAction: true,
+            hasVideoAction: true,
+            hasCandidateAction: true,
+            hasRetryAction: false,
+        }),
+    ).toMatchObject({
         imageModel: "image-model",
         videoModel: "video-model",
         selectedCandidateNodeId: "image-1",
