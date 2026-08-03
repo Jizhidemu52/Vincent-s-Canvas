@@ -16,6 +16,7 @@ import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { DiaTextReveal } from "@/components/ui/dia-text-reveal";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
+import { CanvasAgentMediaWorkflowCard } from "./canvas-agent-media-workflow-card";
 import { AgentChatComposer, AgentChatMessage, AgentModeSwitch, AgentPanelTabs, AgentWorkingMessage, type CanvasAgentChatMessage, type CanvasAgentMode } from "./canvas-agent-chat-ui";
 import { CanvasLocalAgentPanel } from "./canvas-local-agent-panel";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
@@ -193,6 +194,14 @@ type OnlineToolResult = { ok: true; message: string; data?: unknown } | { ok: fa
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
 type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; assistantId: string; step: number };
 
+export type CanvasMediaWorkflowAction =
+    | { type: "image_model_change"; messageId: string; model: string }
+    | { type: "generate_images"; messageId: string }
+    | { type: "select_candidate"; messageId: string; nodeId: string }
+    | { type: "video_model_change"; messageId: string; model: string }
+    | { type: "generate_video"; messageId: string }
+    | { type: "retry"; messageId: string; stage: "image" | "video" };
+
 type CanvasAssistantPanelProps = {
     nodes: CanvasNodeData[];
     selectedNodeIds: Set<string>;
@@ -207,6 +216,7 @@ type CanvasAssistantPanelProps = {
     onPasteImage: (file: File) => void;
     agentMode: CanvasAgentMode;
     onAgentModeChange: (mode: CanvasAgentMode) => void;
+    onMediaWorkflowAction?: (action: CanvasMediaWorkflowAction) => void;
     autoConnectLocal?: boolean;
     closing: boolean;
     onCollapse: () => void;
@@ -226,6 +236,7 @@ export function CanvasAssistantPanel({
     onPasteImage,
     agentMode,
     onAgentModeChange,
+    onMediaWorkflowAction,
     autoConnectLocal,
     closing,
     onCollapse,
@@ -277,6 +288,8 @@ export function CanvasAssistantPanel({
     const messages = activeSession?.messages || [];
     const hasMessages = messages.length > 0;
     const activeModel = effectiveConfig.textModel || effectiveConfig.model;
+    const mediaWorkflowImageModels = useMemo(() => selectableModelsByCapability(effectiveConfig, "image"), [effectiveConfig]);
+    const mediaWorkflowVideoModels = useMemo(() => selectableModelsByCapability(effectiveConfig, "video"), [effectiveConfig]);
     const selectedNodeKey = useMemo(() => Array.from(selectedNodeIds).sort().join(","), [selectedNodeIds]);
     const allSelectedReferences = useMemo(() => buildAssistantReferences(nodes, selectedNodeIds), [nodes, selectedNodeIds]);
     const selectedReferences = useMemo(() => allSelectedReferences.filter((item) => !removedReferenceIds.has(item.id)), [allSelectedReferences, removedReferenceIds]);
@@ -648,6 +661,19 @@ export function CanvasAssistantPanel({
                                 <div key={message.id} className="space-y-2">
                                     <AgentChatMessage item={assistantMessageToChatMessage(message)} theme={theme} user={user} onRejectTool={rejectOnlineTool} onApproveTool={approveOnlineTool} />
                                     {message.references?.length ? <MessageReferences message={message} /> : null}
+                                    {message.detail?.mediaWorkflow ? (
+                                        <CanvasAgentMediaWorkflowCard
+                                            workflow={message.detail.mediaWorkflow}
+                                            imageModels={mediaWorkflowImageModels}
+                                            videoModels={mediaWorkflowVideoModels}
+                                            onImageModelChange={onMediaWorkflowAction ? (model) => onMediaWorkflowAction({ type: "image_model_change", messageId: message.id, model }) : undefined}
+                                            onGenerateImages={onMediaWorkflowAction ? () => onMediaWorkflowAction({ type: "generate_images", messageId: message.id }) : undefined}
+                                            onSelectCandidate={onMediaWorkflowAction ? (nodeId) => onMediaWorkflowAction({ type: "select_candidate", messageId: message.id, nodeId }) : undefined}
+                                            onVideoModelChange={onMediaWorkflowAction ? (model) => onMediaWorkflowAction({ type: "video_model_change", messageId: message.id, model }) : undefined}
+                                            onGenerateVideo={onMediaWorkflowAction ? () => onMediaWorkflowAction({ type: "generate_video", messageId: message.id }) : undefined}
+                                            onRetry={onMediaWorkflowAction ? (stage) => onMediaWorkflowAction({ type: "retry", messageId: message.id, stage }) : undefined}
+                                        />
+                                    ) : null}
                                 </div>
                             ))}
                             {isRunning ? <AgentWorkingMessage theme={theme} /> : null}

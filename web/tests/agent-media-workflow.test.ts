@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 
+import { getCanvasAgentMediaWorkflowCardState } from "../src/components/canvas/canvas-agent-media-workflow-card";
 import { canGenerateWorkflowVideo, classifyAgentMediaIntent, createAgentMediaWorkflow, selectWorkflowCandidate } from "../src/lib/canvas/agent-media-workflow";
 import type { CanvasAssistantSession } from "../src/types/canvas";
 
@@ -32,6 +33,25 @@ test("does not select failed candidates for image-to-video", () => {
 
 test("keeps video disabled when there are no candidates", () => {
     expect(canGenerateWorkflowVideo(createAgentMediaWorkflow({ intent: "image_to_video", prompt: "走秀", imageModel: "gpt-image-2", videoModel: "happyhorse-1.0" }))).toBe(false);
+});
+
+test("keeps the card video action disabled with a selection prompt until a successful candidate is selected", () => {
+    const workflow = createAgentMediaWorkflow({
+        intent: "image_to_video",
+        prompt: "lookbook",
+        imageModel: "gpt-image-2",
+        videoModel: "happyhorse-1.0",
+        candidates: [{ nodeId: "image-1", status: "success" }],
+    });
+
+    expect(getCanvasAgentMediaWorkflowCardState(workflow, { hasVideoAction: true })).toMatchObject({
+        canGenerateVideo: false,
+        videoDisabledMessage: "请选择一张成功候选图",
+    });
+    expect(getCanvasAgentMediaWorkflowCardState(selectWorkflowCandidate(workflow, "image-1"), { hasVideoAction: true })).toMatchObject({
+        canGenerateVideo: true,
+        videoDisabledMessage: undefined,
+    });
 });
 
 test("preserves selected candidate and model choices through serialization", () => {
