@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUp, LoaderCircle, Square } from "lucide-react";
 import { Button } from "antd";
 
@@ -13,7 +13,13 @@ import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
-import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
+import { CanvasImageReferenceDialog } from "./canvas-image-reference-dialog";
+import { ReferenceImageTray } from "@/components/reference-images/reference-image-tray";
+import { AssetPickerModal, type InsertAssetPayload } from "./asset-picker-modal";
+import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
+import { resolveCanvasImageReferences, toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
+import { uploadImage } from "@/services/image-storage";
+import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
@@ -27,9 +33,11 @@ type CanvasNodePromptPanelProps = {
     onStop: (nodeId: string) => void;
     mentionReferences?: CanvasResourceReference[];
     onImageSettingsOpenChange?: (open: boolean) => void;
+    canvasNodes?: CanvasNodeData[];
+    canvasConnections?: CanvasConnection[];
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [] }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -40,6 +48,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
+    const [canvasPickerOpen, setCanvasPickerOpen] = useState(false);
+    const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const uploadInputRef = useRef<HTMLInputElement>(null);
+    const imageReferences = mode === "image" ? resolveCanvasImageReferences(node, canvasNodes, canvasConnections) : [];
+    const referenceValidation = validateImageReferences(modelOptionName(config.model), imageReferences);
     const usage = estimate({ operationType: operationTypeForMode(mode, hasImageContent), modelId: modelOptionName(config.model), quantity: mode === "image" ? Number(config.count) || 1 : 1 });
     const credits = usage.configured ? usage.credits : 0;
 
@@ -54,9 +67,43 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const submit = () => {
         const text = prompt.trim();
-        if (!text || isRunning) return;
+        if (!text || isRunning || !referenceValidation.valid) return;
         onGenerate(node.id, mode, text);
         setPrompt("");
+    };
+
+    const saveReferences = (next: typeof imageReferences) => {
+        const connectedKeys = imageReferences.filter((reference) => reference.origin === "connection").map((reference) => reference.referenceKey);
+        const nextKeys = new Set(next.map((reference) => reference.referenceKey));
+        onConfigChange(node.id, {
+            manualImageReferences: next.filter((reference) => reference.origin !== "connection").map(toCanvasStoredImageReference),
+            excludedConnectedImageReferenceKeys: connectedKeys.filter((key) => !nextKeys.has(key)),
+            imageReferenceOrder: next.map((reference) => reference.referenceKey),
+        });
+    };
+
+    const addCanvasNodes = (nodeIds: string[]) => {
+        const selected = canvasNodes.filter((candidate) => nodeIds.includes(candidate.id) && candidate.type === CanvasNodeType.Image && candidate.metadata?.content)
+            .map((candidate) => createImageReferenceItem({ id: candidate.id, name: `${candidate.title || candidate.id}.png`, type: candidate.metadata?.mimeType || "image/png", dataUrl: candidate.metadata!.content!, storageKey: candidate.metadata?.storageKey }, "canvas"));
+        saveReferences(dedupeImageReferences([...imageReferences, ...selected]));
+        setCanvasPickerOpen(false);
+    };
+
+    const addAssets = (payloads: InsertAssetPayload[]) => {
+        void Promise.all(payloads.filter((payload): payload is Extract<InsertAssetPayload, { kind: "image" }> => payload.kind === "image").map(async (payload) => {
+            const stored = await uploadImage(payload.dataUrl);
+            return createImageReferenceItem({ id: crypto.randomUUID(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "asset");
+        })).then((items) => saveReferences(dedupeImageReferences([...imageReferences, ...items])));
+        setAssetPickerOpen(false);
+    };
+
+    const addUploads = (files: FileList | null) => {
+        if (!files) return;
+        void Promise.all(Array.from(files).filter((file) => file.type.startsWith("image/")).map(async (file) => {
+            const stored = await uploadImage(file);
+            return createImageReferenceItem({ id: crypto.randomUUID(), name: file.name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "upload");
+        })).then((items) => saveReferences(dedupeImageReferences([...imageReferences, ...items])));
+        if (uploadInputRef.current) uploadInputRef.current.value = "";
     };
 
     return (
@@ -76,6 +123,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
+
+            {mode === "image" ? <div className="mt-2"><ReferenceImageTray references={imageReferences} validation={referenceValidation} onChange={saveReferences} onRequestUpload={() => uploadInputRef.current?.click()} onRequestAssets={() => setAssetPickerOpen(true)} onRequestCanvas={() => setCanvasPickerOpen(true)} /></div> : null}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
@@ -110,7 +159,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     type="primary"
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
                     danger={isRunning}
-                    disabled={!isRunning && !prompt.trim()}
+                    disabled={!isRunning && (!prompt.trim() || !referenceValidation.valid)}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={isRunning ? "停止生成" : "生成"}
                 >
@@ -133,6 +182,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     </span>
                 </Button>
             </div>
+            <CanvasImageReferenceDialog open={canvasPickerOpen} nodes={canvasNodes.filter((candidate) => candidate.id !== node.id)} selectedReferenceKeys={imageReferences.map((reference) => reference.referenceKey)} onConfirm={addCanvasNodes} onClose={() => setCanvasPickerOpen(false)} />
+            <AssetPickerModal open={assetPickerOpen} selectionMode="multiple-images" onInsertMany={addAssets} onClose={() => setAssetPickerOpen(false)} />
+            <input ref={uploadInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => addUploads(event.target.files)} />
         </div>
     );
 }

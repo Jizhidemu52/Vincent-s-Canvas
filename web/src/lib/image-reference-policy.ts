@@ -17,7 +17,7 @@ export function referencePolicyForModel(modelId: string): Omit<ImageReferenceVal
     return { label: "当前模型", minimum: 0, maximum: 16, supportsReferences: true };
 }
 
-export function validateImageReferences(modelId: string, references: ImageReferenceItem[]): ImageReferenceValidation {
+export function validateImageReferences(modelId: string, references: ReferenceImage[]): ImageReferenceValidation {
     const policy = referencePolicyForModel(modelId);
     if (!policy.supportsReferences && references.length) return { ...policy, valid: false, message: "当前模型不支持参考图，请移除参考图或切换模型。" };
     if (references.length < policy.minimum || references.length > policy.maximum) {

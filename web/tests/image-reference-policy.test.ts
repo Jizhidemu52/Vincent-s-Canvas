@@ -36,3 +36,8 @@ test("enforces documented GPT, Gemini and Midjourney reference limits", () => {
     expect(validateImageReferences("midjourney-blend", [ref("one")]).message).toContain("2 至 4");
     expect(validateImageReferences("midjourney", [ref("one")]).valid).toBe(false);
 });
+
+test("validates legacy plain reference images used by the canvas generation pipeline", () => {
+    const references = [{ id: "legacy", name: "legacy.png", type: "image/png", dataUrl: "data:image/png;base64,AA==" }];
+    expect(validateImageReferences("gpt-image-2", references).valid).toBe(true);
+});
