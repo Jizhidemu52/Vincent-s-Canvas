@@ -24,7 +24,7 @@ import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { CanvasNodeType, type CanvasAgentMediaWorkflow, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "@/types/canvas";
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
-import { classifyAgentMediaIntent, createAgentMediaWorkflow } from "@/lib/canvas/agent-media-workflow";
+import { classifyAgentMediaIntent, resolveAgentMediaToolDispatch } from "@/lib/canvas/agent-media-workflow";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -516,19 +516,22 @@ export function CanvasAssistantPanel({
                 return { ok: true, message: `当前选中 ${ids.size} 个节点。`, data: { nodes: compactSnapshot({ ...current, nodes: current.nodes.filter((node) => ids.has(node.id)) }).nodes } };
             }
             const mediaPrompt = stringOptional(args.prompt);
-            const mediaIntent = classifyAgentMediaIntent(`${latestAssistantUserPrompt(safeSessions.find((session) => session.id === localActiveSessionId)?.messages || [])}\n${mediaPrompt}`);
-            if (isAgentMediaGenerationTool(name) && mediaIntent === "image_to_video") {
-                const imageModels = selectableModelsByCapability(effectiveConfig, "image");
-                const videoModels = selectableModelsByCapability(effectiveConfig, "video");
-                const mediaWorkflow = createAgentMediaWorkflow({
-                    intent: "image_to_video",
-                    prompt: mediaPrompt,
+            const imageModels = selectableModelsByCapability(effectiveConfig, "image");
+            const videoModels = selectableModelsByCapability(effectiveConfig, "video");
+            const mediaDispatch = resolveAgentMediaToolDispatch({
+                userPrompt: latestAssistantUserPrompt(safeSessions.find((session) => session.id === localActiveSessionId)?.messages || []),
+                toolName: name,
+                toolPrompt: mediaPrompt,
+                requestedMode: stringOptional(args.mode),
+                models: {
                     imageModel: imageModels.includes(effectiveConfig.imageModel) ? effectiveConfig.imageModel : imageModels[0] || defaultGenerationModel(effectiveConfig, "image"),
                     videoModel: videoModels.includes(effectiveConfig.videoModel) ? effectiveConfig.videoModel : videoModels[0] || defaultGenerationModel(effectiveConfig, "video"),
-                });
-                return { ok: true, message: "已创建图片到视频工作流，请先在卡片中选择图片模型并生成候选图。", data: { workflowId: mediaWorkflow.id }, mediaWorkflow };
+                },
+            });
+            if (mediaDispatch?.kind === "workflow") {
+                return { ok: true, message: "已创建图片到视频工作流，请先在卡片中选择图片模型并生成候选图。", data: { workflowId: mediaDispatch.workflow.id }, mediaWorkflow: mediaDispatch.workflow };
             }
-            const ops = onlineToolToOps(name, args, current, effectiveConfig, mediaIntent === "video" ? "video" : undefined);
+            const ops = onlineToolToOps(name, args, current, effectiveConfig, mediaDispatch?.kind === "generation" && mediaDispatch.mode === "video" ? "video" : undefined);
             const result = executeOps(ops);
             return { ok: result.changed, message: result.changed ? summarizeCanvasAgentOps(ops) || "画布操作已执行。" : result.noopReason, data: result };
         } catch (error) {
@@ -1206,10 +1209,6 @@ function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot:
     if (name === "canvas_set_viewport") return [{ type: "set_viewport", viewport: requireViewport(input.viewport) }];
     if (name === "canvas_run_generation") return [runGenerationOp(requireString(input.nodeId, "nodeId"), generationMode(input.mode), stringOptional(input.prompt))];
     throw new Error(`不支持的工具：${name}`);
-}
-
-function isAgentMediaGenerationTool(name: string) {
-    return name === "canvas_generate_image" || name === "canvas_generate_video" || name === "canvas_create_image_prompt_flow" || name === "canvas_create_generation_flow";
 }
 
 function generationFlowOps(input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig): CanvasAgentOp[] {

@@ -52,7 +52,7 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
-import { completeAgentMediaWorkflowStage, selectWorkflowCandidate, videoReferenceNodeIds } from "@/lib/canvas/agent-media-workflow";
+import { buildWorkflowVideoStageDispatch, completeAgentMediaWorkflowStage, selectWorkflowCandidate } from "@/lib/canvas/agent-media-workflow";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "@/lib/canvas/canvas-resource-references";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { validateImageReferences } from "@/lib/image-reference-policy";
@@ -103,6 +103,18 @@ type CanvasGenerationRequest = {
     originNodeId: string;
     runningNodeId: string;
     controller: AbortController;
+};
+
+type CanvasGenerationOutput = {
+    nodeId: string;
+    status: "success" | "failed";
+    url?: string;
+    error?: string;
+};
+
+type CanvasGenerationResult = {
+    mode: CanvasNodeGenerationMode;
+    outputs: CanvasGenerationOutput[];
 };
 
 type BatchEditFileItem = {
@@ -386,7 +398,7 @@ function WirelessCanvasPage() {
     const connectionsRef = useRef(connections);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const viewportRef = useRef(viewport);
-    const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
+    const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void) => Promise<void>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const selectionBoxRef = useRef(selectionBox);
@@ -2701,11 +2713,18 @@ function WirelessCanvasPage() {
     }, []);
 
     const handleGenerateNode = useCallback(
-        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
+        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void) => {
+            let reported = false;
+            const reportResult = (outputs: CanvasGenerationOutput[]) => {
+                if (reported) return;
+                reported = true;
+                onResult?.({ mode, outputs });
+            };
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
+                reportResult([{ nodeId, status: "failed", error: "模型配置不可用" }]);
                 return;
             }
 
@@ -2720,6 +2739,7 @@ function WirelessCanvasPage() {
             if (runController.signal.aborted) {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
+                reportResult([{ nodeId, status: "failed", error: "生成已取消" }]);
                 return;
             }
             const markSourceStatus = sourceNode?.type !== CanvasNodeType.Image && !editingTextNode;
@@ -2727,6 +2747,7 @@ function WirelessCanvasPage() {
             if (!effectivePrompt && (mode === "text" || mode === "audio")) {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
+                reportResult([{ nodeId, status: "failed", error: "缺少生成提示词" }]);
                 return;
             }
             let pendingChildIds: string[] = [];
@@ -2749,6 +2770,7 @@ function WirelessCanvasPage() {
                         message.error(referenceValidation.message);
                         finishGenerationRequest(nodeId, runController);
                         setRunningNodeId(null);
+                        reportResult([{ nodeId, status: "failed", error: referenceValidation.message }]);
                         return;
                     }
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
@@ -2841,6 +2863,7 @@ function WirelessCanvasPage() {
                     if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
                     let hasSuccess = false;
                     let hasFailure = false;
+                    const imageOutputs: CanvasGenerationOutput[] = [];
                     await Promise.all(
                         targetIds.map(async (targetId) => {
                             try {
@@ -2897,12 +2920,14 @@ function WirelessCanvasPage() {
                                     },
                                 });
                                 hasSuccess = true;
+                                imageOutputs.push({ nodeId: targetId, status: "success", url: uploaded.url });
                                 if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
                                 return true;
                             } catch (error) {
                                 if (isGenerationCanceled(error)) return false;
                                 const errorDetails = error instanceof Error ? error.message : "生成失败";
                                 hasFailure = true;
+                                imageOutputs.push({ nodeId: targetId, status: "failed", error: errorDetails });
                                 setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
                             } finally {
                                 finishGenerationRequest(targetId, controller);
@@ -2913,6 +2938,7 @@ function WirelessCanvasPage() {
                     if (count > 1) finishGenerationRequest(rootId, controller);
                     if (controller.signal.aborted) {
                         setNodes((prev) => prev.map((node) => (node.id === nodeId && isConfigNode && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node)));
+                        reportResult(imageOutputs.length ? imageOutputs : [{ nodeId, status: "failed", error: "生成已取消" }]);
                         return;
                     }
                     if (hasFailure) message.error(hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
@@ -2927,6 +2953,7 @@ function WirelessCanvasPage() {
                                     : node,
                         ),
                     );
+                    reportResult(imageOutputs);
                     return;
                 }
 
@@ -2991,6 +3018,7 @@ function WirelessCanvasPage() {
                                     : node,
                             ),
                         );
+                        reportResult([{ nodeId: videoId, status: "success", url: video.url }]);
                     } finally {
                         finishGenerationRequest(videoId, controller);
                     }
@@ -3088,12 +3116,16 @@ function WirelessCanvasPage() {
                     ),
                 );
             } catch (error) {
-                if (isGenerationCanceled(error)) return;
+                if (isGenerationCanceled(error)) {
+                    reportResult((pendingChildIds.length ? pendingChildIds : [nodeId]).map((outputNodeId) => ({ nodeId: outputNodeId, status: "failed", error: "生成已取消" })));
+                    return;
+                }
                 const errorDetails = error instanceof Error ? error.message : "生成失败";
                 message.error(errorDetails);
                 setNodes((prev) =>
                     prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } }) : node)),
                 );
+                reportResult((pendingChildIds.length ? pendingChildIds : [nodeId]).map((outputNodeId) => ({ nodeId: outputNodeId, status: "failed", error: errorDetails })));
             } finally {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
@@ -3124,14 +3156,17 @@ function WirelessCanvasPage() {
             const { configId, ops } = mediaWorkflowStageOps(workflow, "image", nodesRef.current);
             applyAgentOps(ops);
             try {
-                await handleGenerateNode(configId, "image", workflow.prompt);
-                const candidates = workflowImageCandidates(configId, nodesRef.current, connectionsRef.current);
-                const firstFailure = candidates.find((candidate) => candidate.status === "failed");
+                let result: CanvasGenerationResult | undefined;
+                await handleGenerateNode(configId, "image", workflow.prompt, (nextResult) => {
+                    result = nextResult;
+                });
+                const candidates = workflowImageCandidatesFromResult(result);
+                const firstFailure = result?.outputs.find((output) => output.status === "failed");
                 updateMediaWorkflow(messageId, (current) =>
                     completeAgentMediaWorkflowStage(current, "image", {
                         status: candidates.some((candidate) => candidate.status === "success") ? "success" : "failed",
                         candidates,
-                        error: firstFailure ? nodesRef.current.find((node) => node.id === firstFailure.nodeId)?.metadata?.errorDetails : "图片生成失败，请重试。",
+                        error: firstFailure?.error || "图片生成失败，请重试。",
                     }),
                 );
             } catch (error) {
@@ -3143,25 +3178,25 @@ function WirelessCanvasPage() {
 
     const runWorkflowVideoStage = useCallback(
         async (messageId: string, workflow: CanvasAgentMediaWorkflow) => {
-            const referenceNodeIds = videoReferenceNodeIds(workflow);
-            if (!referenceNodeIds.length) {
+            const dispatch = buildWorkflowVideoStageDispatch(workflow);
+            if (!dispatch) {
                 message.warning("请先选择一张成功候选图");
                 return;
             }
             updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "video", { status: "running" }));
-            const { configId, ops } = mediaWorkflowStageOps(workflow, "video", nodesRef.current, referenceNodeIds[0]);
+            const { configId, ops } = mediaWorkflowStageOps(workflow, "video", nodesRef.current, dispatch.referenceNodeIds[0]);
             applyAgentOps(ops);
             try {
-                await handleGenerateNode(configId, "video", workflow.prompt);
-                const videoNode = connectionsRef.current
-                    .filter((connection) => connection.fromNodeId === configId)
-                    .map((connection) => nodesRef.current.find((node) => node.id === connection.toNodeId))
-                    .find((node) => node?.type === CanvasNodeType.Video);
-                const status = videoNode?.metadata?.status === NODE_STATUS_SUCCESS ? "success" : "failed";
+                let result: CanvasGenerationResult | undefined;
+                await handleGenerateNode(configId, "video", workflow.prompt, (nextResult) => {
+                    result = nextResult;
+                });
+                const output = result?.outputs[0];
+                const status = output?.status === "success" ? "success" : "failed";
                 updateMediaWorkflow(messageId, (current) =>
                     completeAgentMediaWorkflowStage(current, "video", {
                         status,
-                        error: videoNode?.metadata?.errorDetails || "视频生成失败，请重试。",
+                        error: output?.error || "视频生成失败，请重试。",
                     }),
                 );
             } catch (error) {
@@ -4495,20 +4530,12 @@ function mediaWorkflowStageOps(workflow: CanvasAgentMediaWorkflow, stage: "image
     return { configId, ops };
 }
 
-function workflowImageCandidates(configId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): CanvasAgentMediaWorkflow["candidates"] {
-    const rootIds = connections.filter((connection) => connection.fromNodeId === configId).map((connection) => connection.toNodeId);
-    const candidateIds = rootIds.flatMap((rootId) => {
-        const root = nodes.find((node) => node.id === rootId);
-        return root?.metadata?.batchChildIds?.length ? root.metadata.batchChildIds : [rootId];
-    });
-    return candidateIds.map((nodeId) => {
-        const node = nodes.find((item) => item.id === nodeId);
-        return {
-            nodeId,
-            status: node?.metadata?.status === NODE_STATUS_SUCCESS ? "success" : "failed",
-            ...(node?.metadata?.content ? { url: node.metadata.content } : {}),
-        };
-    });
+function workflowImageCandidatesFromResult(result: CanvasGenerationResult | undefined): CanvasAgentMediaWorkflow["candidates"] {
+    return (result?.outputs || []).map((output) => ({
+        nodeId: output.nodeId,
+        status: output.status,
+        ...(output.url ? { url: output.url } : {}),
+    }));
 }
 
 function videoMetadata(video: UploadedFile): CanvasNodeMetadata {

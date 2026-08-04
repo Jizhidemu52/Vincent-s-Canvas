@@ -5,6 +5,14 @@ export type { CanvasAgentMediaIntent, CanvasAgentMediaWorkflow, CanvasAgentMedia
 export type AgentMediaIntent = CanvasAgentMediaIntent;
 
 export type AgentMediaWorkflowModels = Pick<CanvasAgentMediaWorkflow, "imageModel" | "videoModel">;
+export type AgentMediaToolDispatchInput = {
+    userPrompt: string;
+    toolName: string;
+    toolPrompt: string;
+    requestedMode?: string;
+    models: AgentMediaWorkflowModels;
+};
+export type AgentMediaToolDispatch = { kind: "workflow"; workflow: CanvasAgentMediaWorkflow } | { kind: "generation"; mode: "image" | "video" };
 export type CompleteAgentMediaWorkflowStageInput = {
     status: CanvasAgentMediaWorkflowStageStatus;
     error?: unknown;
@@ -45,6 +53,26 @@ export function createAgentMediaWorkflowForPrompt(prompt: string, models: AgentM
     return createAgentMediaWorkflow({ intent: classifyAgentMediaIntent(prompt), prompt, ...models });
 }
 
+export function resolveAgentMediaToolDispatch(input: AgentMediaToolDispatchInput): AgentMediaToolDispatch | null {
+    if (!isAgentMediaTool(input.toolName, input.requestedMode)) return null;
+    const intent = classifyAgentMediaIntent(`${input.userPrompt}\n${input.toolPrompt}`);
+    if (intent === "image_to_video") {
+        return {
+            kind: "workflow",
+            workflow: createAgentMediaWorkflow({ intent, prompt: input.toolPrompt, ...input.models }),
+        };
+    }
+    return {
+        kind: "generation",
+        mode: input.toolName === "canvas_generate_video" || input.requestedMode === "video" || intent === "video" ? "video" : "image",
+    };
+}
+
+export function buildWorkflowVideoStageDispatch(workflow: CanvasAgentMediaWorkflow) {
+    const referenceNodeIds = videoReferenceNodeIds(workflow);
+    return referenceNodeIds.length === 1 ? { mode: "video" as const, referenceNodeIds } : null;
+}
+
 export function videoReferenceNodeIds(input: Pick<CanvasAgentMediaWorkflow, "candidates" | "selectedCandidateNodeId">) {
     const selectedNodeId = input.selectedCandidateNodeId;
     return selectedNodeId && input.candidates.some((candidate) => candidate.nodeId === selectedNodeId && candidate.status === "success") ? [selectedNodeId] : [];
@@ -70,6 +98,10 @@ function mergeWorkflowCandidates(current: CanvasAgentMediaWorkflowCandidate[], i
     const candidates = new Map(current.map((candidate) => [candidate.nodeId, candidate]));
     incoming.forEach((candidate) => candidates.set(candidate.nodeId, candidate));
     return Array.from(candidates.values());
+}
+
+function isAgentMediaTool(name: string, requestedMode?: string) {
+    return name === "canvas_generate_image" || name === "canvas_generate_video" || name === "canvas_create_image_prompt_flow" || (name === "canvas_create_generation_flow" && (requestedMode === "image" || requestedMode === "video"));
 }
 
 export function selectWorkflowCandidate(workflow: CanvasAgentMediaWorkflow, nodeId: string): CanvasAgentMediaWorkflow {

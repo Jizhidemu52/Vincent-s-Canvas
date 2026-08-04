@@ -1,7 +1,17 @@
 import { expect, test } from "bun:test";
 
 import { getCanvasAgentMediaWorkflowCardContract, getCanvasAgentMediaWorkflowCardState } from "../src/components/canvas/canvas-agent-media-workflow-card";
-import { canGenerateWorkflowVideo, classifyAgentMediaIntent, completeAgentMediaWorkflowStage, createAgentMediaWorkflow, createAgentMediaWorkflowForPrompt, selectWorkflowCandidate, videoReferenceNodeIds } from "../src/lib/canvas/agent-media-workflow";
+import {
+    buildWorkflowVideoStageDispatch,
+    canGenerateWorkflowVideo,
+    classifyAgentMediaIntent,
+    completeAgentMediaWorkflowStage,
+    createAgentMediaWorkflow,
+    createAgentMediaWorkflowForPrompt,
+    resolveAgentMediaToolDispatch,
+    selectWorkflowCandidate,
+    videoReferenceNodeIds,
+} from "../src/lib/canvas/agent-media-workflow";
 import type { CanvasAssistantSession } from "../src/types/canvas";
 
 test("routes runway motion requests to video even when clothing is mentioned", () => {
@@ -13,6 +23,39 @@ test("builds a video workflow for a runway request without an image run", () => 
 
     expect(workflow.intent).toBe("video");
     expect(workflow.imageStatus).toBe("idle");
+});
+
+test("routes an image tool for a runway prompt to a video generation dispatch", () => {
+    expect(
+        resolveAgentMediaToolDispatch({
+            userPrompt: "让模特在秀场走秀",
+            toolName: "canvas_generate_image",
+            toolPrompt: "模特穿礼服",
+            models: { imageModel: "gpt-image-2", videoModel: "happyhorse-1.0" },
+        }),
+    ).toMatchObject({ kind: "generation", mode: "video" });
+});
+
+test("routes an explicit image-then-video request to a staged workflow without a video run", () => {
+    expect(
+        resolveAgentMediaToolDispatch({
+            userPrompt: "先生成图片，再选一张生成走秀视频",
+            toolName: "canvas_generate_video",
+            toolPrompt: "秀场礼服模特",
+            models: { imageModel: "gpt-image-2", videoModel: "happyhorse-1.0" },
+        }),
+    ).toMatchObject({ kind: "workflow", workflow: { intent: "image_to_video", imageStatus: "idle", videoStatus: "idle" } });
+});
+
+test("keeps direct video as a direct video dispatch", () => {
+    expect(
+        resolveAgentMediaToolDispatch({
+            userPrompt: "生成一段走秀视频",
+            toolName: "canvas_generate_video",
+            toolPrompt: "高级时装秀",
+            models: { imageModel: "gpt-image-2", videoModel: "happyhorse-1.0" },
+        }),
+    ).toEqual({ kind: "generation", mode: "video" });
 });
 
 test("builds video input from only the selected image node", () => {
@@ -29,6 +72,24 @@ test("builds video input from only the selected image node", () => {
 
 test("refuses video input when no successful image candidate is selected", () => {
     expect(videoReferenceNodeIds({ candidates: [{ nodeId: "image-1", status: "success" }] })).toEqual([]);
+});
+
+test("builds a workflow video dispatch from exactly one selected successful node", () => {
+    const workflow = selectWorkflowCandidate(
+        createAgentMediaWorkflow({
+            intent: "image_to_video",
+            prompt: "lookbook",
+            imageModel: "gpt-image-2",
+            videoModel: "happyhorse-1.0",
+            candidates: [
+                { nodeId: "image-1", status: "success" },
+                { nodeId: "image-2", status: "success" },
+            ],
+        }),
+        "image-2",
+    );
+
+    expect(buildWorkflowVideoStageDispatch(workflow)).toEqual({ mode: "video", referenceNodeIds: ["image-2"] });
 });
 
 test("maps certificate failures to the current stage without losing the selected image or models", () => {
