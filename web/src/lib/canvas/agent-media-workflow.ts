@@ -10,6 +10,7 @@ export type AgentMediaToolDispatchInput = {
     toolName: string;
     toolPrompt: string;
     requestedMode?: string;
+    targetGenerationMode?: string;
     autoRun?: boolean;
     ops?: Array<{ type?: unknown; mode?: unknown; prompt?: unknown }>;
     models: AgentMediaWorkflowModels;
@@ -108,11 +109,11 @@ function mergeWorkflowCandidates(current: CanvasAgentMediaWorkflowCandidate[], i
 }
 
 function isAgentMediaTool(input: AgentMediaToolDispatchInput) {
-    const { toolName: name, requestedMode, autoRun, ops } = input;
+    const { toolName: name, requestedMode, targetGenerationMode, autoRun, ops } = input;
     if (name === "canvas_generate_image" || name === "canvas_generate_video" || name === "canvas_create_image_prompt_flow") return true;
     if (name === "canvas_create_generation_flow") return requestedMode === "image" || requestedMode === "video";
     if (name === "canvas_create_config_node") return autoRun === true && isVisualGenerationMode(requestedMode);
-    if (name === "canvas_run_generation") return isVisualGenerationMode(requestedMode);
+    if (name === "canvas_run_generation") return isVisualGenerationMode(requestedMode) || isVisualGenerationMode(targetGenerationMode);
     return name === "canvas_apply_ops" && Boolean(ops?.some((op) => op.type === "run_generation" && isVisualGenerationMode(op.mode)));
 }
 

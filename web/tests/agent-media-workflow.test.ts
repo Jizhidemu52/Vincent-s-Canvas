@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 
 import { getCanvasAgentMediaWorkflowCardContract, getCanvasAgentMediaWorkflowCardState } from "../src/components/canvas/canvas-agent-media-workflow-card";
+import { onlineToolToOps } from "../src/components/canvas/canvas-assistant-panel";
+import { applyCanvasAgentOps, type CanvasAgentSnapshot } from "../src/lib/canvas/canvas-agent-ops";
 import {
     buildWorkflowVideoStageDispatch,
     canGenerateWorkflowVideo,
@@ -13,6 +15,17 @@ import {
     videoReferenceNodeIds,
 } from "../src/lib/canvas/agent-media-workflow";
 import type { CanvasAssistantSession } from "../src/types/canvas";
+import { CanvasNodeType } from "../src/types/canvas";
+import { defaultConfig } from "../src/stores/use-config-store";
+
+const emptyAgentSnapshot: CanvasAgentSnapshot = {
+    projectId: "project-1",
+    title: "Canvas",
+    nodes: [],
+    connections: [],
+    selectedNodeIds: [],
+    viewport: { x: 0, y: 0, k: 1 },
+};
 
 test("routes runway motion requests to video even when clothing is mentioned", () => {
     expect(classifyAgentMediaIntent("让模特穿这件衣服在秀场走秀")).toBe("video");
@@ -51,6 +64,61 @@ test("routes every auto-running Agent generation entry through the media dispatc
     for (const entry of entries) {
         expect(resolveAgentMediaToolDispatch({ userPrompt: "make the model walk a runway", models, ...entry })).toEqual({ kind: "generation", mode: "video" });
     }
+});
+
+test("uses a target Config mode when canvas_run_generation omits mode, but forces direct-video to video", () => {
+    const snapshot: CanvasAgentSnapshot = {
+        ...emptyAgentSnapshot,
+        nodes: [
+            {
+                id: "config-1",
+                type: CanvasNodeType.Config,
+                title: "Image config",
+                position: { x: 0, y: 0 },
+                width: 320,
+                height: 240,
+                metadata: { generationMode: "image", model: defaultConfig.imageModel },
+            },
+        ],
+    };
+
+    expect(onlineToolToOps("canvas_run_generation", { nodeId: "config-1" }, snapshot, defaultConfig)).toEqual([{ type: "run_generation", nodeId: "config-1", mode: "image", prompt: "" }]);
+    expect(
+        resolveAgentMediaToolDispatch({
+            userPrompt: "make the model walk a runway video",
+            toolName: "canvas_run_generation",
+            toolPrompt: "",
+            targetGenerationMode: "image",
+            models: { imageModel: defaultConfig.imageModel, videoModel: defaultConfig.videoModel },
+        }),
+    ).toEqual({ kind: "generation", mode: "video" });
+    expect(onlineToolToOps("canvas_run_generation", { nodeId: "config-1" }, snapshot, defaultConfig, "video")).toEqual([{ type: "run_generation", nodeId: "config-1", mode: "video", prompt: "" }]);
+});
+
+test("converts a same-batch image Config to the selected video model before direct-video generation", () => {
+    const ops = onlineToolToOps(
+        "canvas_apply_ops",
+        {
+            ops: [
+                {
+                    type: "add_node",
+                    id: "config-1",
+                    nodeType: "config",
+                    title: "Image config",
+                    position: { x: 0, y: 0 },
+                    metadata: { generationMode: "image", model: defaultConfig.imageModel },
+                },
+                { type: "run_generation", nodeId: "config-1", mode: "image", prompt: "runway model" },
+            ],
+        },
+        emptyAgentSnapshot,
+        defaultConfig,
+        "video",
+    );
+
+    const configNode = applyCanvasAgentOps(emptyAgentSnapshot, ops.filter((op) => op.type !== "run_generation")).nodes.find((node) => node.id === "config-1");
+    expect(configNode?.metadata).toMatchObject({ generationMode: "video", model: defaultConfig.videoModel });
+    expect(ops.filter((op) => op.type === "run_generation")).toEqual([{ type: "run_generation", nodeId: "config-1", mode: "video", prompt: "runway model" }]);
 });
 
 test("turns explicit image-to-video requests from every auto-running Agent entry into a gated workflow", () => {

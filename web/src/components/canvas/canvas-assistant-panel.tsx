@@ -516,6 +516,7 @@ export function CanvasAssistantPanel({
                 return { ok: true, message: `当前选中 ${ids.size} 个节点。`, data: { nodes: compactSnapshot({ ...current, nodes: current.nodes.filter((node) => ids.has(node.id)) }).nodes } };
             }
             const mediaPrompt = stringOptional(args.prompt);
+            const targetGenerationMode = name === "canvas_run_generation" ? generationModeFromTarget(current, stringOptional(args.nodeId)) : undefined;
             const imageModels = selectableModelsByCapability(effectiveConfig, "image");
             const videoModels = selectableModelsByCapability(effectiveConfig, "video");
             const mediaDispatch = resolveAgentMediaToolDispatch({
@@ -523,6 +524,7 @@ export function CanvasAssistantPanel({
                 toolName: name,
                 toolPrompt: mediaPrompt,
                 requestedMode: stringOptional(args.mode),
+                targetGenerationMode,
                 autoRun: args.autoRun === true,
                 ops: Array.isArray(args.ops) ? args.ops.map((op) => (op && typeof op === "object" ? op as { type?: unknown; mode?: unknown; prompt?: unknown } : {})) : undefined,
                 models: {
@@ -1150,8 +1152,8 @@ function parseToolArguments(value: string) {
     }
 }
 
-function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig, forcedMediaMode?: "video"): CanvasAgentOp[] {
-    if (name === "canvas_apply_ops") return forceGenerationOpsMediaMode(requireOps(input.ops), forcedMediaMode);
+export function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig, forcedMediaMode?: "video"): CanvasAgentOp[] {
+    if (name === "canvas_apply_ops") return forceGenerationOpsMediaMode(requireOps(input.ops), snapshot, config, forcedMediaMode);
     if (name === "canvas_create_node") {
         const nodeType = requireNodeType(input.nodeType);
         const x = numberOr(input.x, nextCanvasX(snapshot));
@@ -1210,13 +1212,42 @@ function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot:
         return requireRecordArray(input.connections, "connections").map((connection) => ({ type: "connect_nodes", fromNodeId: requireString(connection.fromNodeId, "fromNodeId"), toNodeId: requireString(connection.toNodeId, "toNodeId") }));
     if (name === "canvas_select_nodes") return [{ type: "select_nodes", ids: requireStringArray(input.ids, "ids") }];
     if (name === "canvas_set_viewport") return [{ type: "set_viewport", viewport: requireViewport(input.viewport) }];
-    if (name === "canvas_run_generation") return [runGenerationOp(requireString(input.nodeId, "nodeId"), forcedMediaMode || generationMode(input.mode), stringOptional(input.prompt))];
+    if (name === "canvas_run_generation") {
+        const nodeId = requireString(input.nodeId, "nodeId");
+        return [runGenerationOp(nodeId, forcedMediaMode || generationModeFromTarget(snapshot, nodeId) || generationMode(input.mode), stringOptional(input.prompt))];
+    }
     throw new Error(`不支持的工具：${name}`);
 }
 
-function forceGenerationOpsMediaMode(ops: CanvasAgentOp[], forcedMediaMode?: "video") {
+function forceGenerationOpsMediaMode(ops: CanvasAgentOp[], snapshot: CanvasAgentSnapshot, config: AiConfig, forcedMediaMode?: "video") {
     if (!forcedMediaMode) return ops;
-    return ops.map((op) => (op.type === "run_generation" ? { ...op, mode: forcedMediaMode } : op));
+    const generationNodeIds = new Set<string>();
+    ops.forEach((op) => {
+        if (op.type === "run_generation") generationNodeIds.add(op.nodeId);
+    });
+    const configNodeIds = new Set(snapshot.nodes.filter((node) => node.type === CanvasNodeType.Config && generationNodeIds.has(node.id)).map((node) => node.id));
+    ops.forEach((op) => {
+        if (op.type === "add_node" && op.nodeType === CanvasNodeType.Config && op.id && generationNodeIds.has(op.id)) configNodeIds.add(op.id);
+    });
+    const videoMetadata = { generationMode: forcedMediaMode, model: resolveGenerationModel(config, forcedMediaMode) } as CanvasNodeData["metadata"];
+    return ops.reduce<CanvasAgentOp[]>((forcedOps, op) => {
+        if (op.type === "add_node" && op.nodeType === CanvasNodeType.Config && op.id && configNodeIds.has(op.id)) {
+            forcedOps.push({ ...op, metadata: { ...op.metadata, ...videoMetadata } });
+            return forcedOps;
+        }
+        if (op.type === "update_node" && configNodeIds.has(op.id)) {
+            forcedOps.push({ ...op, metadata: { ...op.metadata, ...videoMetadata } });
+            return forcedOps;
+        }
+        if (op.type === "run_generation") {
+            const generation = { ...op, mode: forcedMediaMode };
+            if (configNodeIds.has(op.nodeId)) forcedOps.push({ type: "update_node", id: op.nodeId, metadata: videoMetadata });
+            forcedOps.push(generation);
+            return forcedOps;
+        }
+        forcedOps.push(op);
+        return forcedOps;
+    }, []);
 }
 
 function generationFlowOps(input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig): CanvasAgentOp[] {
@@ -1429,6 +1460,11 @@ function nextCanvasX(snapshot: CanvasAgentSnapshot) {
 
 function generationMode(value: unknown): "text" | "image" | "video" | "audio" {
     return value === "text" || value === "video" || value === "audio" ? value : "image";
+}
+
+function generationModeFromTarget(snapshot: CanvasAgentSnapshot, nodeId: string): "text" | "image" | "video" | "audio" | undefined {
+    const mode = snapshot.nodes.find((node) => node.id === nodeId)?.metadata?.generationMode;
+    return mode === "text" || mode === "image" || mode === "video" || mode === "audio" ? mode : undefined;
 }
 
 function generationTitle(mode: "text" | "image" | "video" | "audio") {
