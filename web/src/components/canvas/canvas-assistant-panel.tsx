@@ -515,27 +515,11 @@ export function CanvasAssistantPanel({
                 const ids = new Set(current.selectedNodeIds || []);
                 return { ok: true, message: `当前选中 ${ids.size} 个节点。`, data: { nodes: compactSnapshot({ ...current, nodes: current.nodes.filter((node) => ids.has(node.id)) }).nodes } };
             }
-            const mediaPrompt = stringOptional(args.prompt);
-            const targetGenerationMode = name === "canvas_run_generation" ? generationModeFromTarget(current, stringOptional(args.nodeId)) : undefined;
-            const imageModels = selectableModelsByCapability(effectiveConfig, "image");
-            const videoModels = selectableModelsByCapability(effectiveConfig, "video");
-            const mediaDispatch = resolveAgentMediaToolDispatch({
-                userPrompt,
-                toolName: name,
-                toolPrompt: mediaPrompt,
-                requestedMode: stringOptional(args.mode),
-                targetGenerationMode,
-                autoRun: args.autoRun === true,
-                ops: Array.isArray(args.ops) ? args.ops.map((op) => (op && typeof op === "object" ? op as { type?: unknown; mode?: unknown; prompt?: unknown } : {})) : undefined,
-                models: {
-                    imageModel: imageModels.includes(effectiveConfig.imageModel) ? effectiveConfig.imageModel : imageModels[0] || defaultGenerationModel(effectiveConfig, "image"),
-                    videoModel: videoModels.includes(effectiveConfig.videoModel) ? effectiveConfig.videoModel : videoModels[0] || defaultGenerationModel(effectiveConfig, "video"),
-                },
-            });
-            if (mediaDispatch?.kind === "workflow") {
-                return { ok: true, message: "已创建图片到视频工作流，请先在卡片中选择图片模型并生成候选图。", data: { workflowId: mediaDispatch.workflow.id }, mediaWorkflow: mediaDispatch.workflow };
+            const execution = resolveOnlineToolExecution(name, args, userPrompt, current, effectiveConfig);
+            if (execution.kind === "workflow") {
+                return { ok: true, message: "已创建图片到视频工作流，请先在卡片中选择图片模型并生成候选图。", data: { workflowId: execution.workflow.id }, mediaWorkflow: execution.workflow };
             }
-            const ops = onlineToolToOps(name, args, current, effectiveConfig, mediaDispatch?.kind === "generation" && mediaDispatch.mode === "video" ? "video" : undefined);
+            const { ops } = execution;
             const result = executeOps(ops);
             return { ok: result.changed, message: result.changed ? summarizeCanvasAgentOps(ops) || "画布操作已执行。" : result.noopReason, data: result };
         } catch (error) {
@@ -1221,6 +1205,31 @@ export function onlineToolToOps(name: string, input: Record<string, unknown>, sn
             : [generation];
     }
     throw new Error(`不支持的工具：${name}`);
+}
+
+export type OnlineToolExecution = { kind: "workflow"; workflow: CanvasAgentMediaWorkflow } | { kind: "ops"; ops: CanvasAgentOp[] };
+
+export function resolveOnlineToolExecution(name: string, input: Record<string, unknown>, userPrompt: string, snapshot: CanvasAgentSnapshot, config: AiConfig): OnlineToolExecution {
+    const imageModels = selectableModelsByCapability(config, "image");
+    const videoModels = selectableModelsByCapability(config, "video");
+    const mediaDispatch = resolveAgentMediaToolDispatch({
+        userPrompt,
+        toolName: name,
+        toolPrompt: stringOptional(input.prompt),
+        requestedMode: stringOptional(input.mode),
+        targetGenerationMode: name === "canvas_run_generation" ? generationModeFromTarget(snapshot, stringOptional(input.nodeId)) : undefined,
+        autoRun: input.autoRun === true,
+        ops: Array.isArray(input.ops) ? input.ops.map((op) => (op && typeof op === "object" ? op as { type?: unknown; mode?: unknown; prompt?: unknown } : {})) : undefined,
+        models: {
+            imageModel: imageModels.includes(config.imageModel) ? config.imageModel : imageModels[0] || defaultGenerationModel(config, "image"),
+            videoModel: videoModels.includes(config.videoModel) ? config.videoModel : videoModels[0] || defaultGenerationModel(config, "video"),
+        },
+    });
+    if (mediaDispatch?.kind === "workflow") return { kind: "workflow", workflow: mediaDispatch.workflow };
+    return {
+        kind: "ops",
+        ops: onlineToolToOps(name, input, snapshot, config, mediaDispatch?.kind === "generation" && mediaDispatch.mode === "video" ? "video" : undefined),
+    };
 }
 
 function forceGenerationOpsMediaMode(ops: CanvasAgentOp[], snapshot: CanvasAgentSnapshot, config: AiConfig, forcedMediaMode?: "video") {

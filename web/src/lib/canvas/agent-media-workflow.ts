@@ -60,7 +60,7 @@ export function createAgentMediaWorkflowForPrompt(prompt: string, models: AgentM
 export function resolveAgentMediaToolDispatch(input: AgentMediaToolDispatchInput): AgentMediaToolDispatch | null {
     const generationPrompts = generationPromptsFromOps(input.ops);
     const intent = classifyAgentMediaIntent([input.userPrompt, input.toolPrompt, ...generationPrompts].join("\n"));
-    if (!isAgentMediaTool(input) && !(intent === "video" && hasModeOmittedBatchGeneration(input))) return null;
+    if (!isAgentMediaTool(input) && !hasModeOmittedBatchGeneration(input)) return null;
     if (intent === "image_to_video") {
         return {
             kind: "workflow",
