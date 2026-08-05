@@ -112,6 +112,13 @@ export type CanvasAgentMediaWorkflowCandidate = {
     nodeId: string;
     status: CanvasAgentMediaWorkflowCandidateStatus;
     url?: string;
+    storageKey?: string;
+};
+
+export type CanvasAgentMediaWorkflowVideoResult = {
+    nodeId: string;
+    url: string;
+    storageKey?: string;
 };
 
 export type CanvasAgentMediaWorkflow = {
@@ -120,10 +127,15 @@ export type CanvasAgentMediaWorkflow = {
     prompt: string;
     imageModel: string;
     videoModel: string;
+    imageCount: number;
+    videoSeconds: string;
+    aspectRatio: string;
+    referenceNodeIds: string[];
     candidates: CanvasAgentMediaWorkflowCandidate[];
     selectedCandidateNodeId?: string;
     imageStatus: CanvasAgentMediaWorkflowStageStatus;
     videoStatus: CanvasAgentMediaWorkflowStageStatus;
+    videoResult?: CanvasAgentMediaWorkflowVideoResult;
     error?: string;
 };
 

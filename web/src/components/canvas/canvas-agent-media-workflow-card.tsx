@@ -11,11 +11,15 @@ type CanvasAgentMediaWorkflowCardProps = {
     imageModels: string[];
     videoModels: string[];
     onImageModelChange?: (model: string) => void;
+    onImageCountChange?: (count: number) => void;
     onGenerateImages?: () => void;
     onSelectCandidate?: (nodeId: string) => void;
     onVideoModelChange?: (model: string) => void;
+    onVideoSecondsChange?: (seconds: string) => void;
+    onAspectRatioChange?: (ratio: string) => void;
     onGenerateVideo?: () => void;
     onRetry?: (stage: "image" | "video") => void;
+    onOpenResult?: () => void;
 };
 
 export function getCanvasAgentMediaWorkflowCardState(workflow: CanvasAgentMediaWorkflow, actions: { hasVideoAction: boolean }) {
@@ -44,6 +48,7 @@ type CanvasAgentMediaWorkflowCardContractActions = {
     hasVideoAction: boolean;
     hasCandidateAction: boolean;
     hasRetryAction: boolean;
+    hasResultAction?: boolean;
 };
 
 export function getCanvasAgentMediaWorkflowCardContract(workflow: CanvasAgentMediaWorkflow, actions: CanvasAgentMediaWorkflowCardContractActions) {
@@ -62,11 +67,17 @@ export function getCanvasAgentMediaWorkflowCardContract(workflow: CanvasAgentMed
             checked: candidate.nodeId === workflow.selectedCandidateNodeId,
             disabled: !actions.hasCandidateAction,
         }));
+    const selectedCandidate = candidates.find((candidate) => candidate.checked);
 
     return {
         imageModel,
         videoModel,
         selectedCandidateNodeId: workflow.selectedCandidateNodeId,
+        imageCount: workflow.imageCount,
+        videoSeconds: workflow.videoSeconds,
+        aspectRatio: workflow.aspectRatio,
+        selectedCandidateSummary: selectedCandidate ? `${selectedCandidate.label} · ${selectedCandidate.nodeId}` : "未选择候选图",
+        videoResult: workflow.videoResult ? { ...workflow.videoResult, canOpen: Boolean(actions.hasResultAction) } : undefined,
         imageModelSelect: { value: imageModel, disabled: !actions.hasImageModelChange },
         videoModelSelect: { value: videoModel, disabled: !actions.hasVideoModelChange },
         imageGenerateButton: { disabled: !canGenerateImages },
@@ -85,11 +96,15 @@ export function CanvasAgentMediaWorkflowCard({
     imageModels,
     videoModels,
     onImageModelChange,
+    onImageCountChange,
     onGenerateImages,
     onSelectCandidate,
     onVideoModelChange,
+    onVideoSecondsChange,
+    onAspectRatioChange,
     onGenerateVideo,
     onRetry,
+    onOpenResult,
 }: CanvasAgentMediaWorkflowCardProps) {
     const card = getCanvasAgentMediaWorkflowCardContract(workflow, {
         imageModels,
@@ -100,6 +115,7 @@ export function CanvasAgentMediaWorkflowCard({
         hasVideoAction: Boolean(onGenerateVideo),
         hasCandidateAction: Boolean(onSelectCandidate),
         hasRetryAction: Boolean(onRetry),
+        hasResultAction: Boolean(onOpenResult),
     });
     const showImageStage = workflow.intent !== "video";
     const showVideoStage = workflow.intent !== "image";
@@ -110,6 +126,7 @@ export function CanvasAgentMediaWorkflowCard({
                 <div className="space-y-3 p-3">
                     <WorkflowStageTitle icon={<ImageIcon className="size-3.5" />} title="第一步：生成候选图" status={workflow.imageStatus} />
                     <ModelSelect ariaLabel="选择图片模型" emptyLabel="暂无图片模型" models={imageModels} value={card.imageModelSelect.value} disabled={card.imageModelSelect.disabled} onChange={onImageModelChange} />
+                    <label className="flex items-center justify-between gap-3 text-xs"><span className="opacity-65">图片数量</span><input aria-label="图片数量" type="number" min={1} max={15} value={card.imageCount} disabled={!onImageCountChange} onChange={(event) => onImageCountChange?.(Number(event.target.value))} className="h-8 w-20 rounded-md border border-black/10 bg-transparent px-2 dark:border-white/15" /></label>
                     <Button block type="primary" disabled={card.imageGenerateButton.disabled} icon={workflow.imageStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImageIcon className="size-3.5" />} onClick={onGenerateImages}>
                         {workflow.imageStatus === "running" ? "正在生成候选图" : "生成候选图"}
                     </Button>
@@ -141,15 +158,25 @@ export function CanvasAgentMediaWorkflowCard({
                 <div className="space-y-3 p-3">
                     <WorkflowStageTitle icon={<Video className="size-3.5" />} title={showImageStage ? "第二步：生成视频" : "生成视频"} status={workflow.videoStatus} />
                     <ModelSelect ariaLabel="选择视频模型" emptyLabel="暂无视频模型" models={videoModels} value={card.videoModelSelect.value} disabled={card.videoModelSelect.disabled} onChange={onVideoModelChange} />
+                    <div className="grid grid-cols-2 gap-2">
+                        <WorkflowValueSelect ariaLabel="视频时长" value={card.videoSeconds} values={["3", "5", "6", "8", "10", "15"]} suffix=" 秒" disabled={!onVideoSecondsChange} onChange={onVideoSecondsChange} />
+                        <WorkflowValueSelect ariaLabel="画面比例" value={card.aspectRatio} values={["1:1", "16:9", "9:16", "4:3", "3:4"]} disabled={!onAspectRatioChange} onChange={onAspectRatioChange} />
+                    </div>
+                    <p className="text-xs opacity-65">已选图片：{card.selectedCandidateSummary}</p>
                     <Button block disabled={card.videoGenerateButton.disabled} icon={workflow.videoStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Video className="size-3.5" />} onClick={onGenerateVideo}>
                         {workflow.videoStatus === "running" ? "正在生成视频" : "生成视频"}
                     </Button>
                     {card.videoDisabledMessage ? <p className="text-xs opacity-65">{card.videoDisabledMessage}</p> : null}
                     {card.videoError ? <WorkflowError error={card.videoError.message} role={card.videoError.role} onRetry={card.videoError.retryVisible ? () => onRetry?.("video") : undefined} /> : null}
+                    {card.videoResult ? <Button block type="link" disabled={!card.videoResult.canOpen} onClick={onOpenResult}>在画布中查看视频结果</Button> : null}
                 </div>
             ) : null}
         </section>
     );
+}
+
+function WorkflowValueSelect({ ariaLabel, value, values, suffix = "", disabled, onChange }: { ariaLabel: string; value: string; values: string[]; suffix?: string; disabled: boolean; onChange?: (value: string) => void }) {
+    return <label className="space-y-1 text-xs"><span className="opacity-65">{ariaLabel}</span><select aria-label={ariaLabel} value={value} disabled={disabled} onChange={(event) => onChange?.(event.target.value)} className="h-8 w-full rounded-md border border-black/10 bg-transparent px-2 dark:border-white/15">{values.map((item) => <option key={item} value={item}>{item}{suffix}</option>)}</select></label>;
 }
 
 function ModelSelect({ ariaLabel, emptyLabel, models, value, disabled, onChange }: { ariaLabel: string; emptyLabel: string; models: string[]; value?: string; disabled: boolean; onChange?: (model: string) => void }) {

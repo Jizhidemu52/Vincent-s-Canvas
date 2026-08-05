@@ -211,11 +211,15 @@ function latestAssistantUserPrompt(messages: CanvasAssistantMessage[]) {
 
 export type CanvasMediaWorkflowAction =
     | { type: "image_model_change"; messageId: string; model: string }
+    | { type: "image_count_change"; messageId: string; count: number }
     | { type: "generate_images"; messageId: string }
     | { type: "select_candidate"; messageId: string; nodeId: string }
     | { type: "video_model_change"; messageId: string; model: string }
+    | { type: "video_seconds_change"; messageId: string; seconds: string }
+    | { type: "aspect_ratio_change"; messageId: string; ratio: string }
     | { type: "generate_video"; messageId: string }
-    | { type: "retry"; messageId: string; stage: "image" | "video" };
+    | { type: "retry"; messageId: string; stage: "image" | "video" }
+    | { type: "open_result"; messageId: string };
 
 type CanvasAssistantPanelProps = {
     nodes: CanvasNodeData[];
@@ -716,6 +720,7 @@ export function CanvasAssistantPanel({
                                                     : undefined
                                             }
                                             onGenerateImages={onMediaWorkflowAction ? () => onMediaWorkflowAction({ type: "generate_images", messageId: message.id }) : undefined}
+                                            onImageCountChange={onMediaWorkflowAction ? (count) => onMediaWorkflowAction({ type: "image_count_change", messageId: message.id, count }) : undefined}
                                             onSelectCandidate={onMediaWorkflowAction ? (nodeId) => onMediaWorkflowAction({ type: "select_candidate", messageId: message.id, nodeId }) : undefined}
                                             onVideoModelChange={
                                                 onMediaWorkflowAction
@@ -726,7 +731,10 @@ export function CanvasAssistantPanel({
                                                     : undefined
                                             }
                                             onGenerateVideo={onMediaWorkflowAction ? () => onMediaWorkflowAction({ type: "generate_video", messageId: message.id }) : undefined}
+                                            onVideoSecondsChange={onMediaWorkflowAction ? (seconds) => onMediaWorkflowAction({ type: "video_seconds_change", messageId: message.id, seconds }) : undefined}
+                                            onAspectRatioChange={onMediaWorkflowAction ? (ratio) => onMediaWorkflowAction({ type: "aspect_ratio_change", messageId: message.id, ratio }) : undefined}
                                             onRetry={onMediaWorkflowAction ? (stage) => onMediaWorkflowAction({ type: "retry", messageId: message.id, stage }) : undefined}
+                                            onOpenResult={onMediaWorkflowAction && message.detail.mediaWorkflow.videoResult ? () => onMediaWorkflowAction({ type: "open_result", messageId: message.id }) : undefined}
                                         />
                                     ) : null}
                                 </div>
@@ -1220,9 +1228,13 @@ export function resolveOnlineToolExecution(name: string, input: Record<string, u
         targetGenerationMode: name === "canvas_run_generation" ? generationModeFromTarget(snapshot, stringOptional(input.nodeId)) : undefined,
         autoRun: input.autoRun === true,
         ops: Array.isArray(input.ops) ? input.ops.map((op) => (op && typeof op === "object" ? op as { type?: unknown; mode?: unknown; prompt?: unknown } : {})) : undefined,
+        referenceNodeIds: Array.isArray(input.referenceNodeIds) ? input.referenceNodeIds.filter((id): id is string => typeof id === "string") : undefined,
         models: {
             imageModel: imageModels.includes(config.imageModel) ? config.imageModel : imageModels[0] || defaultGenerationModel(config, "image"),
             videoModel: videoModels.includes(config.videoModel) ? config.videoModel : videoModels[0] || defaultGenerationModel(config, "video"),
+            imageCount: generationCount(config.canvasImageCount || config.count),
+            videoSeconds: config.videoSeconds,
+            aspectRatio: config.size,
         },
     });
     if (mediaDispatch?.kind === "workflow") return { kind: "workflow", workflow: mediaDispatch.workflow };
@@ -1234,16 +1246,25 @@ export function resolveOnlineToolExecution(name: string, input: Record<string, u
 
 function forceGenerationOpsMediaMode(ops: CanvasAgentOp[], snapshot: CanvasAgentSnapshot, config: AiConfig, forcedMediaMode?: "video") {
     if (!forcedMediaMode) return ops;
-    const generationNodeIds = new Set<string>();
-    ops.forEach((op) => {
-        if (op.type === "run_generation") generationNodeIds.add(op.nodeId);
-    });
-    const configNodeIds = new Set(snapshot.nodes.filter((node) => node.type === CanvasNodeType.Config && generationNodeIds.has(node.id)).map((node) => node.id));
-    ops.forEach((op) => {
-        if (op.type === "add_node" && op.nodeType === CanvasNodeType.Config && op.id && generationNodeIds.has(op.id)) configNodeIds.add(op.id);
+    const targetState = new Map(snapshot.nodes.map((node) => [node.id, { type: node.type, mode: node.metadata?.generationMode }]));
+    const forcedRunIndexes = new Set<number>();
+    const configNodeIds = new Set<string>();
+    ops.forEach((op, index) => {
+        if (op.type === "add_node" && op.id && op.nodeType) targetState.set(op.id, { type: op.nodeType, mode: op.metadata?.generationMode });
+        if (op.type === "update_node") {
+            const current = targetState.get(op.id);
+            if (current && op.metadata?.generationMode) targetState.set(op.id, { ...current, mode: op.metadata.generationMode });
+        }
+        if (op.type !== "run_generation") return;
+        const target = targetState.get(op.nodeId);
+        const isExplicitVisualRun = op.mode === "image" || op.mode === "video";
+        const isOmittedModeVisualConfig = op.mode === undefined && target?.type === CanvasNodeType.Config && (target.mode === "image" || target.mode === "video");
+        if (!isExplicitVisualRun && !isOmittedModeVisualConfig) return;
+        forcedRunIndexes.add(index);
+        if (target?.type === CanvasNodeType.Config) configNodeIds.add(op.nodeId);
     });
     const videoMetadata = generationConfigMetadata(config, forcedMediaMode);
-    return ops.reduce<CanvasAgentOp[]>((forcedOps, op) => {
+    return ops.reduce<CanvasAgentOp[]>((forcedOps, op, index) => {
         if (op.type === "add_node" && op.nodeType === CanvasNodeType.Config && op.id && configNodeIds.has(op.id)) {
             forcedOps.push({ ...op, metadata: { ...op.metadata, ...videoMetadata } });
             return forcedOps;
@@ -1253,6 +1274,10 @@ function forceGenerationOpsMediaMode(ops: CanvasAgentOp[], snapshot: CanvasAgent
             return forcedOps;
         }
         if (op.type === "run_generation") {
+            if (!forcedRunIndexes.has(index)) {
+                forcedOps.push(op);
+                return forcedOps;
+            }
             const generation = { ...op, mode: forcedMediaMode };
             if (configNodeIds.has(op.nodeId)) forcedOps.push({ type: "update_node", id: op.nodeId, metadata: videoMetadata });
             forcedOps.push(generation);

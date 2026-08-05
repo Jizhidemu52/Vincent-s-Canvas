@@ -52,7 +52,8 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
-import { buildWorkflowVideoStageDispatch, completeAgentMediaWorkflowStage, selectWorkflowCandidate } from "@/lib/canvas/agent-media-workflow";
+import { buildWorkflowVideoStageDispatch, completeAgentMediaWorkflowStage, restoreAgentMediaWorkflow, selectWorkflowCandidate } from "@/lib/canvas/agent-media-workflow";
+import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workflow-stage";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "@/lib/canvas/canvas-resource-references";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { validateImageReferences } from "@/lib/image-reference-policy";
@@ -109,6 +110,7 @@ type CanvasGenerationOutput = {
     nodeId: string;
     status: "success" | "failed";
     url?: string;
+    storageKey?: string;
     error?: string;
 };
 
@@ -505,7 +507,7 @@ function WirelessCanvasPage() {
 
         const restore = async () => {
             const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes));
-            const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
+            const restoredSessions = await hydrateAssistantImages(project.chatSessions || [], restoredNodes);
             setNodes(restoredNodes);
             setConnections(project.connections);
             setChatSessions(restoredSessions);
@@ -2920,7 +2922,7 @@ function WirelessCanvasPage() {
                                     },
                                 });
                                 hasSuccess = true;
-                                imageOutputs.push({ nodeId: targetId, status: "success", url: uploaded.url });
+                                imageOutputs.push({ nodeId: targetId, status: "success", url: uploaded.url, storageKey: uploaded.storageKey });
                                 if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
                                 return true;
                             } catch (error) {
@@ -3018,7 +3020,7 @@ function WirelessCanvasPage() {
                                     : node,
                             ),
                         );
-                        reportResult([{ nodeId: videoId, status: "success", url: video.url }]);
+                        reportResult([{ nodeId: videoId, status: "success", url: video.url, storageKey: video.storageKey }]);
                     } finally {
                         finishGenerationRequest(videoId, controller);
                     }
@@ -3153,7 +3155,7 @@ function WirelessCanvasPage() {
         async (messageId: string, workflow: CanvasAgentMediaWorkflow) => {
             if (workflow.intent === "video") return;
             updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "image", { status: "running" }));
-            const { configId, ops } = mediaWorkflowStageOps(workflow, "image", nodesRef.current);
+            const { configId, ops } = buildAgentMediaWorkflowStageOps(workflow, "image", nodesRef.current);
             applyAgentOps(ops);
             try {
                 let result: CanvasGenerationResult | undefined;
@@ -3184,7 +3186,7 @@ function WirelessCanvasPage() {
                 return;
             }
             updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "video", { status: "running" }));
-            const { configId, ops } = mediaWorkflowStageOps(workflow, "video", nodesRef.current, dispatch.referenceNodeIds[0]);
+            const { configId, ops } = buildAgentMediaWorkflowStageOps(workflow, "video", nodesRef.current, dispatch.referenceNodeIds[0]);
             applyAgentOps(ops);
             try {
                 let result: CanvasGenerationResult | undefined;
@@ -3192,10 +3194,11 @@ function WirelessCanvasPage() {
                     result = nextResult;
                 });
                 const output = result?.outputs[0];
-                const status = output?.status === "success" ? "success" : "failed";
+                const status = output?.status === "success" && output.url ? "success" : "failed";
                 updateMediaWorkflow(messageId, (current) =>
                     completeAgentMediaWorkflowStage(current, "video", {
                         status,
+                        ...(status === "success" && output ? { videoResult: { nodeId: output.nodeId, url: output.url!, ...(output.storageKey ? { storageKey: output.storageKey } : {}) } } : {}),
                         error: output?.error || "视频生成失败，请重试。",
                     }),
                 );
@@ -3218,6 +3221,18 @@ function WirelessCanvasPage() {
                 updateMediaWorkflow(action.messageId, (current) => ({ ...current, videoModel: action.model }));
                 return;
             }
+            if (action.type === "image_count_change") {
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, imageCount: Math.max(1, Math.min(15, Math.floor(action.count) || 1)) }));
+                return;
+            }
+            if (action.type === "video_seconds_change") {
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, videoSeconds: action.seconds }));
+                return;
+            }
+            if (action.type === "aspect_ratio_change") {
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, aspectRatio: action.ratio }));
+                return;
+            }
             if (action.type === "select_candidate") {
                 updateMediaWorkflow(action.messageId, (current) => selectWorkflowCandidate(current, action.nodeId));
                 return;
@@ -3226,9 +3241,16 @@ function WirelessCanvasPage() {
                 void runWorkflowImageStage(action.messageId, workflow);
                 return;
             }
+            if (action.type === "open_result") {
+                const node = workflow.videoResult ? nodesRef.current.find((item) => item.id === workflow.videoResult?.nodeId) : undefined;
+                if (!node) return;
+                setSelectedNodeIds(new Set([node.id]));
+                focusCanvasArea(node.position, node.width, node.height);
+                return;
+            }
             if (action.type === "generate_video" || (action.type === "retry" && action.stage === "video")) void runWorkflowVideoStage(action.messageId, workflow);
         },
-        [chatSessions, runWorkflowImageStage, runWorkflowVideoStage, updateMediaWorkflow],
+        [chatSessions, focusCanvasArea, runWorkflowImageStage, runWorkflowVideoStage, updateMediaWorkflow],
     );
 
     const handleRetryNode = useCallback(
@@ -4494,47 +4516,12 @@ function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
     return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
 }
 
-function mediaWorkflowStageOps(workflow: CanvasAgentMediaWorkflow, stage: "image" | "video", nodes: CanvasNodeData[], referenceNodeId?: string) {
-    const textId = `workflow-${stage}-prompt-${nanoid()}`;
-    const configId = `workflow-${stage}-config-${nanoid()}`;
-    const x = nodes.length ? Math.max(...nodes.map((node) => node.position.x + node.width)) + 80 : 0;
-    const y = 0;
-    const textSize = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
-    const configSize = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
-    const model = stage === "image" ? workflow.imageModel : workflow.videoModel;
-    const ops: CanvasAgentOp[] = [
-        {
-            type: "add_node",
-            id: textId,
-            nodeType: CanvasNodeType.Text,
-            title: stage === "image" ? "工作流图片提示词" : "工作流视频提示词",
-            position: { x, y },
-            width: textSize.width,
-            height: textSize.height,
-            metadata: { content: workflow.prompt, prompt: workflow.prompt, status: NODE_STATUS_SUCCESS, fontSize: 14 },
-        },
-        {
-            type: "add_node",
-            id: configId,
-            nodeType: CanvasNodeType.Config,
-            title: stage === "image" ? "工作流图片生成" : "工作流视频生成",
-            position: { x: x + textSize.width + 80, y },
-            width: configSize.width,
-            height: configSize.height,
-            metadata: { prompt: workflow.prompt, model, status: NODE_STATUS_IDLE },
-        },
-        { type: "connect_nodes", fromNodeId: textId, toNodeId: configId },
-        { type: "select_nodes", ids: [configId] },
-    ];
-    if (referenceNodeId) ops.splice(3, 0, { type: "connect_nodes", fromNodeId: referenceNodeId, toNodeId: configId });
-    return { configId, ops };
-}
-
 function workflowImageCandidatesFromResult(result: CanvasGenerationResult | undefined): CanvasAgentMediaWorkflow["candidates"] {
     return (result?.outputs || []).map((output) => ({
         nodeId: output.nodeId,
         status: output.status,
         ...(output.url ? { url: output.url } : {}),
+        ...(output.storageKey ? { storageKey: output.storageKey } : {}),
     }));
 }
 
@@ -4604,7 +4591,7 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     );
 }
 
-async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
+async function hydrateAssistantImages(sessions: CanvasAssistantSession[], nodes: CanvasNodeData[]) {
     const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T) => {
         if (item.storageKey) return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
         if (item.dataUrl?.startsWith("data:image/")) {
@@ -4617,10 +4604,33 @@ async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
         sessions.map(async (session) => ({
             ...session,
             messages: await Promise.all(
-                session.messages.map(async (message) => ({
-                    ...message,
-                    references: await Promise.all((message.references || []).map(hydrateItem)),
-                })),
+                session.messages.map(async (message) => {
+                    const workflow = message.detail?.mediaWorkflow ? restoreAgentMediaWorkflow(message.detail.mediaWorkflow, nodes) : undefined;
+                    const hydratedWorkflow = workflow
+                        ? {
+                              ...workflow,
+                              candidates: await Promise.all(
+                                  workflow.candidates.map(async (candidate) => ({
+                                      ...candidate,
+                                      ...(candidate.storageKey ? { url: await resolveImageUrl(candidate.storageKey, candidate.url) } : {}),
+                                  })),
+                              ),
+                              ...(workflow.videoResult
+                                  ? {
+                                        videoResult: {
+                                            ...workflow.videoResult,
+                                            ...(workflow.videoResult.storageKey ? { url: await resolveMediaUrl(workflow.videoResult.storageKey, workflow.videoResult.url) } : {}),
+                                        },
+                                    }
+                                  : {}),
+                          }
+                        : undefined;
+                    return {
+                        ...message,
+                        references: await Promise.all((message.references || []).map(hydrateItem)),
+                        ...(hydratedWorkflow ? { detail: { ...message.detail, mediaWorkflow: hydratedWorkflow } } : {}),
+                    };
+                }),
             ),
         })),
     );

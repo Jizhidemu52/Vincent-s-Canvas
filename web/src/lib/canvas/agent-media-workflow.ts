@@ -1,10 +1,10 @@
-import type { CanvasAgentMediaIntent, CanvasAgentMediaWorkflow, CanvasAgentMediaWorkflowCandidate, CanvasAgentMediaWorkflowStageStatus } from "@/types/canvas";
+import { CanvasNodeType, type CanvasAgentMediaIntent, type CanvasAgentMediaWorkflow, type CanvasAgentMediaWorkflowCandidate, type CanvasAgentMediaWorkflowStageStatus, type CanvasAgentMediaWorkflowVideoResult, type CanvasNodeData } from "@/types/canvas";
 
 export type { CanvasAgentMediaIntent, CanvasAgentMediaWorkflow, CanvasAgentMediaWorkflowCandidate, CanvasAgentMediaWorkflowStageStatus } from "@/types/canvas";
 
 export type AgentMediaIntent = CanvasAgentMediaIntent;
 
-export type AgentMediaWorkflowModels = Pick<CanvasAgentMediaWorkflow, "imageModel" | "videoModel">;
+export type AgentMediaWorkflowModels = Pick<CanvasAgentMediaWorkflow, "imageModel" | "videoModel"> & Partial<Pick<CanvasAgentMediaWorkflow, "imageCount" | "videoSeconds" | "aspectRatio" | "referenceNodeIds">>;
 export type AgentMediaToolDispatchInput = {
     userPrompt: string;
     toolName: string;
@@ -13,6 +13,7 @@ export type AgentMediaToolDispatchInput = {
     targetGenerationMode?: string;
     autoRun?: boolean;
     ops?: Array<{ type?: unknown; mode?: unknown; prompt?: unknown }>;
+    referenceNodeIds?: string[];
     models: AgentMediaWorkflowModels;
 };
 export type AgentMediaToolDispatch = { kind: "workflow"; workflow: CanvasAgentMediaWorkflow } | { kind: "generation"; mode: "image" | "video" };
@@ -20,20 +21,28 @@ export type CompleteAgentMediaWorkflowStageInput = {
     status: CanvasAgentMediaWorkflowStageStatus;
     error?: unknown;
     candidates?: CanvasAgentMediaWorkflowCandidate[];
+    videoResult?: CanvasAgentMediaWorkflowVideoResult;
 };
 
 export const AGENT_MEDIA_CERTIFICATE_ERROR = "连接证书校验失败，请检查 API 地址、证书链或网络代理后重试。";
 
-export type CreateAgentMediaWorkflowInput = Omit<CanvasAgentMediaWorkflow, "id" | "candidates" | "selectedCandidateNodeId" | "imageStatus" | "videoStatus"> & {
+export type CreateAgentMediaWorkflowInput = Omit<CanvasAgentMediaWorkflow, "id" | "imageCount" | "videoSeconds" | "aspectRatio" | "referenceNodeIds" | "candidates" | "selectedCandidateNodeId" | "imageStatus" | "videoStatus" | "videoResult"> & {
     id?: string;
+    imageCount?: number;
+    videoSeconds?: string;
+    aspectRatio?: string;
+    referenceNodeIds?: string[];
     candidates?: CanvasAgentMediaWorkflowCandidate[];
     imageStatus?: CanvasAgentMediaWorkflowStageStatus;
     videoStatus?: CanvasAgentMediaWorkflowStageStatus;
+    videoResult?: CanvasAgentMediaWorkflowVideoResult;
 };
 
 export function classifyAgentMediaIntent(prompt: string): AgentMediaIntent {
     const normalized = prompt.toLowerCase();
     if (/\bimage[\s_-]*to[\s_-]*video\b/.test(normalized)) return "image_to_video";
+    if (/(?:选图|选一张|选择一张|出图|生成图片|生成图像)[\s\S]{0,24}(?:后|之后|然后|再)[\s\S]{0,32}(?:生成|制作|做)?[\s\S]{0,12}(?:视频|走秀|动画)/.test(normalized)) return "image_to_video";
+    if (/(?:图片|图像)[\s\S]{0,16}(?:完成|生成|选好|确定)?[\s\S]{0,8}(?:后|之后)[\s\S]{0,24}(?:视频|走秀|动画)/.test(normalized)) return "image_to_video";
     if (/(先|first)[\s\S]{0,40}(出图|生成图片|生成图像|image)[\s\S]{0,80}(再|然后|then)[\s\S]{0,40}(视频|走秀|动画|video|runway|motion|animation)/.test(normalized)) return "image_to_video";
     if (/(视频|走秀|运镜|镜头|动态|动画|短片|动作|video|runway|motion|camera|animation|clip|action)/.test(normalized)) return "video";
     return "image";
@@ -46,9 +55,14 @@ export function createAgentMediaWorkflow(input: CreateAgentMediaWorkflowInput): 
         prompt: input.prompt,
         imageModel: input.imageModel,
         videoModel: input.videoModel,
+        imageCount: Math.max(1, Math.min(15, Math.floor(input.imageCount || 3))),
+        videoSeconds: input.videoSeconds || "6",
+        aspectRatio: input.aspectRatio || "1:1",
+        referenceNodeIds: Array.from(new Set(input.referenceNodeIds || [])),
         candidates: input.candidates || [],
         imageStatus: input.imageStatus || (input.candidates?.some((candidate) => candidate.status === "success") ? "success" : "idle"),
         videoStatus: input.videoStatus || "idle",
+        ...(input.videoResult ? { videoResult: input.videoResult } : {}),
         ...(input.error ? { error: input.error } : {}),
     };
 }
@@ -64,7 +78,7 @@ export function resolveAgentMediaToolDispatch(input: AgentMediaToolDispatchInput
     if (intent === "image_to_video") {
         return {
             kind: "workflow",
-            workflow: createAgentMediaWorkflow({ intent, prompt: input.toolPrompt || generationPrompts[0] || input.userPrompt, ...input.models }),
+            workflow: createAgentMediaWorkflow({ intent, prompt: input.toolPrompt || generationPrompts[0] || input.userPrompt, ...input.models, referenceNodeIds: input.referenceNodeIds || input.models.referenceNodeIds }),
         };
     }
     return {
@@ -86,15 +100,54 @@ export function videoReferenceNodeIds(input: Pick<CanvasAgentMediaWorkflow, "can
 export function completeAgentMediaWorkflowStage(workflow: CanvasAgentMediaWorkflow, stage: "image" | "video", result: CompleteAgentMediaWorkflowStageInput): CanvasAgentMediaWorkflow {
     const { error: _previousError, ...withoutPreviousError } = workflow;
     if (stage === "image" && result.status === "running") {
-        return { ...withoutPreviousError, candidates: [], selectedCandidateNodeId: undefined, imageStatus: "running", videoStatus: "idle" };
+        const { videoResult: _previousVideoResult, ...withoutPreviousVideoResult } = withoutPreviousError;
+        return { ...withoutPreviousVideoResult, candidates: [], selectedCandidateNodeId: undefined, imageStatus: "running", videoStatus: "idle" };
     }
     const candidates = result.candidates ? mergeWorkflowCandidates(workflow.candidates, result.candidates) : workflow.candidates;
     const next = {
         ...withoutPreviousError,
         candidates,
         [stage === "image" ? "imageStatus" : "videoStatus"]: result.status,
+        ...(stage === "video" && result.videoResult ? { videoResult: result.videoResult } : {}),
     };
     return result.status === "failed" ? { ...next, error: workflowGenerationErrorMessage(result.error) } : next;
+}
+
+export function restoreAgentMediaWorkflow(workflow: CanvasAgentMediaWorkflow, nodes: CanvasNodeData[]): CanvasAgentMediaWorkflow {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const candidates = workflow.candidates.map((candidate) => {
+        const node = nodeById.get(candidate.nodeId);
+        if (node?.type !== CanvasNodeType.Image) return candidate;
+        return {
+            ...candidate,
+            ...(node.metadata?.content ? { url: node.metadata.content } : {}),
+            ...(node.metadata?.storageKey ? { storageKey: node.metadata.storageKey } : {}),
+        };
+    });
+    const videoNode = workflow.videoResult ? nodeById.get(workflow.videoResult.nodeId) : undefined;
+    const videoResult = workflow.videoResult
+        ? {
+              ...workflow.videoResult,
+              ...(videoNode?.type === CanvasNodeType.Video && videoNode.metadata?.content ? { url: videoNode.metadata.content } : {}),
+              ...(videoNode?.type === CanvasNodeType.Video && videoNode.metadata?.storageKey ? { storageKey: videoNode.metadata.storageKey } : {}),
+          }
+        : undefined;
+    const interruptedStage = workflow.imageStatus === "running" ? "image" : workflow.videoStatus === "running" ? "video" : undefined;
+    return {
+        ...workflow,
+        imageCount: Math.max(1, Math.min(15, Math.floor(workflow.imageCount || 3))),
+        videoSeconds: workflow.videoSeconds || "6",
+        aspectRatio: workflow.aspectRatio || "1:1",
+        referenceNodeIds: Array.from(new Set(workflow.referenceNodeIds || [])),
+        candidates,
+        ...(videoResult ? { videoResult } : {}),
+        ...(interruptedStage
+            ? {
+                  [interruptedStage === "image" ? "imageStatus" : "videoStatus"]: "failed" as const,
+                  error: `页面刷新后${interruptedStage === "image" ? "图片" : "视频"}生成已中断，请重试。`,
+              }
+            : {}),
+    };
 }
 
 export function workflowGenerationErrorMessage(error: unknown) {

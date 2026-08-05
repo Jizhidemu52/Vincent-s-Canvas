@@ -11,9 +11,11 @@ import {
     createAgentMediaWorkflow,
     createAgentMediaWorkflowForPrompt,
     resolveAgentMediaToolDispatch,
+    restoreAgentMediaWorkflow,
     selectWorkflowCandidate,
     videoReferenceNodeIds,
 } from "../src/lib/canvas/agent-media-workflow";
+import { buildAgentMediaWorkflowStageOps } from "../src/lib/canvas/agent-media-workflow-stage";
 import type { CanvasAssistantSession } from "../src/types/canvas";
 import { CanvasNodeType } from "../src/types/canvas";
 import { defaultConfig } from "../src/stores/use-config-store";
@@ -299,6 +301,10 @@ test("maps certificate failures to the current stage without losing the selected
     expect(completeAgentMediaWorkflowStage(workflow, "video", { status: "failed", error: "certificate verify failed" })).toMatchObject({
         imageModel: "gpt-image-2",
         videoModel: "happyhorse-1.0",
+        imageCount: 3,
+        videoSeconds: "6",
+        aspectRatio: "1:1",
+        referenceNodeIds: [],
         selectedCandidateNodeId: "image-1",
         imageStatus: "success",
         videoStatus: "failed",
@@ -363,16 +369,20 @@ test("clears an old candidate selection when starting a new image stage", () => 
             imageModel: "gpt-image-2",
             videoModel: "happyhorse-1.0",
             candidates: [{ nodeId: "previous-image", status: "success" }],
+            videoStatus: "success",
+            videoResult: { nodeId: "previous-video", url: "blob:previous-video" },
         }),
         "previous-image",
     );
 
-    expect(completeAgentMediaWorkflowStage(workflow, "image", { status: "running" })).toMatchObject({
+    const running = completeAgentMediaWorkflowStage(workflow, "image", { status: "running" });
+    expect(running).toMatchObject({
         imageStatus: "running",
         videoStatus: "idle",
         candidates: [],
         selectedCandidateNodeId: undefined,
     });
+    expect(running.videoResult).toBeUndefined();
 });
 
 test("keeps the card video action disabled with a selection prompt until a successful candidate is selected", () => {
@@ -609,10 +619,216 @@ test("restores a factory-built failed workflow from an assistant session", () =>
         prompt: "走秀",
         imageModel: "gpt-image-2",
         videoModel: "happyhorse-1.0",
+        imageCount: 3,
+        videoSeconds: "6",
+        aspectRatio: "1:1",
+        referenceNodeIds: [],
         candidates: [{ nodeId: "image-2", status: "success", url: "https://example.test/image-2.png" }],
         selectedCandidateNodeId: "image-2",
         imageStatus: "failed",
         videoStatus: "idle",
         error: "证书校验失败",
+    });
+});
+
+test("keeps text and audio runs unchanged when a mixed Agent batch is forced to direct video", () => {
+    const snapshot: CanvasAgentSnapshot = {
+        ...emptyAgentSnapshot,
+        nodes: [
+            { id: "text-config", type: CanvasNodeType.Config, title: "Text", position: { x: 0, y: 0 }, width: 320, height: 240, metadata: { generationMode: "text", model: defaultConfig.textModel } },
+            { id: "audio-config", type: CanvasNodeType.Config, title: "Audio", position: { x: 360, y: 0 }, width: 320, height: 240, metadata: { generationMode: "audio", model: defaultConfig.audioModel } },
+            { id: "image-config", type: CanvasNodeType.Config, title: "Image", position: { x: 720, y: 0 }, width: 320, height: 240, metadata: { generationMode: "image", model: defaultConfig.imageModel } },
+        ],
+    };
+    const execution = resolveOnlineToolExecution(
+        "canvas_apply_ops",
+        {
+            ops: [
+                { type: "run_generation", nodeId: "text-config", mode: "text", prompt: "write copy" },
+                { type: "run_generation", nodeId: "audio-config", mode: "audio", prompt: "read copy" },
+                { type: "run_generation", nodeId: "image-config", mode: "image", prompt: "runway motion" },
+            ],
+        },
+        "create a runway video and keep the copy and voice tasks",
+        snapshot,
+        defaultConfig,
+    );
+    expect(execution.kind).toBe("ops");
+    if (execution.kind !== "ops") throw new Error("direct-video batch must execute canvas ops");
+
+    expect(execution.ops.filter((op) => op.type === "run_generation")).toEqual([
+        { type: "run_generation", nodeId: "text-config", mode: "text", prompt: "write copy" },
+        { type: "run_generation", nodeId: "audio-config", mode: "audio", prompt: "read copy" },
+        { type: "run_generation", nodeId: "image-config", mode: "video", prompt: "runway motion" },
+    ]);
+    expect(execution.ops.filter((op) => op.type === "update_node" && (op.id === "text-config" || op.id === "audio-config"))).toEqual([]);
+});
+
+test("recognizes explicit select-image-then-video Chinese phrasing as a staged workflow", () => {
+    for (const prompt of ["选图后生成视频", "选一张后生成视频", "出图之后生成视频", "图片完成之后生成视频", "生成图片，选择一张后再生成视频"]) {
+        expect(classifyAgentMediaIntent(prompt)).toBe("image_to_video");
+    }
+});
+
+test("normalizes older persisted workflows that predate media controls", () => {
+    const legacyWorkflow = {
+        id: "workflow-legacy",
+        intent: "image_to_video",
+        prompt: "lookbook",
+        imageModel: "image-model",
+        videoModel: "video-model",
+        candidates: [],
+        imageStatus: "idle",
+        videoStatus: "idle",
+    } as unknown as ReturnType<typeof createAgentMediaWorkflow>;
+
+    expect(restoreAgentMediaWorkflow(legacyWorkflow, [])).toMatchObject({ imageCount: 3, videoSeconds: "6", aspectRatio: "1:1", referenceNodeIds: [] });
+});
+
+test("persists initial image references and rebuilds them only for the image stage", () => {
+    const workflow = createAgentMediaWorkflow({
+        id: "workflow-references",
+        intent: "image_to_video",
+        prompt: "先改款，选图后生成视频",
+        imageModel: "image-model",
+        videoModel: "video-model",
+        referenceNodeIds: ["reference-1", "reference-2"],
+    });
+    const nodes = [
+        { id: "reference-1", type: CanvasNodeType.Image, title: "Reference 1", position: { x: 0, y: 0 }, width: 240, height: 240, metadata: { status: "success" as const, content: "blob:reference-1" } },
+        { id: "reference-2", type: CanvasNodeType.Image, title: "Reference 2", position: { x: 260, y: 0 }, width: 240, height: 240, metadata: { content: "blob:reference-2" } },
+    ];
+    const imageStage = buildAgentMediaWorkflowStageOps(workflow, "image", nodes);
+    const videoStage = buildAgentMediaWorkflowStageOps(workflow, "video", nodes, "candidate-1");
+
+    expect(imageStage.ops.filter((op) => op.type === "connect_nodes" && op.toNodeId === imageStage.configId).map((op) => op.fromNodeId)).toEqual([imageStage.textId, "reference-1", "reference-2"]);
+    expect(videoStage.ops.filter((op) => op.type === "connect_nodes" && op.toNodeId === videoStage.configId).map((op) => op.fromNodeId)).toEqual([videoStage.textId, "candidate-1"]);
+});
+
+test("writes serializable stage settings and generation mode into workflow Config nodes", () => {
+    const workflow = createAgentMediaWorkflow({
+        id: "workflow-settings",
+        intent: "image_to_video",
+        prompt: "lookbook",
+        imageModel: "image-model",
+        videoModel: "video-model",
+        imageCount: 5,
+        videoSeconds: "8",
+        aspectRatio: "9:16",
+    });
+    const imageStage = buildAgentMediaWorkflowStageOps(workflow, "image", []);
+    const videoStage = buildAgentMediaWorkflowStageOps(workflow, "video", [], "candidate-1");
+    const imageConfig = imageStage.ops.find((op) => op.type === "add_node" && op.id === imageStage.configId);
+    const videoConfig = videoStage.ops.find((op) => op.type === "add_node" && op.id === videoStage.configId);
+
+    expect(imageConfig?.metadata).toMatchObject({ generationMode: "image", model: "image-model", count: 5, size: "9:16" });
+    expect(videoConfig?.metadata).toMatchObject({ generationMode: "video", model: "video-model", seconds: "8", size: "9:16" });
+    const persistedVideoSnapshot = applyCanvasAgentOps(emptyAgentSnapshot, videoStage.ops.filter((op) => op.type !== "select_nodes"));
+    expect(onlineToolToOps("canvas_run_generation", { nodeId: videoStage.configId }, persistedVideoSnapshot, defaultConfig)).toEqual([{ type: "run_generation", nodeId: videoStage.configId, mode: "video", prompt: "" }]);
+    expect(JSON.parse(JSON.stringify(workflow))).toMatchObject({ imageCount: 5, videoSeconds: "8", aspectRatio: "9:16" });
+});
+
+test("restores interrupted workflow stages as retryable failures and hydrates candidate/result URLs from canvas nodes", () => {
+    const workflow = selectWorkflowCandidate(
+        createAgentMediaWorkflow({
+            id: "workflow-interrupted",
+            intent: "image_to_video",
+            prompt: "lookbook",
+            imageModel: "image-model",
+            videoModel: "video-model",
+            candidates: [{ nodeId: "image-1", status: "success", url: "blob:stale-image", storageKey: "image:persisted" }],
+            imageStatus: "success",
+            videoStatus: "running",
+            videoResult: { nodeId: "video-1", url: "blob:stale-video", storageKey: "video:persisted" },
+        }),
+        "image-1",
+    );
+    const restored = restoreAgentMediaWorkflow(workflow, [
+        { id: "image-1", type: CanvasNodeType.Image, title: "Candidate", position: { x: 0, y: 0 }, width: 240, height: 240, metadata: { content: "blob:hydrated-image", storageKey: "image:persisted", status: "success" } },
+        { id: "video-1", type: CanvasNodeType.Video, title: "Result", position: { x: 300, y: 0 }, width: 320, height: 180, metadata: { content: "blob:hydrated-video", storageKey: "video:persisted", status: "success" } },
+    ]);
+
+    expect(restored).toMatchObject({
+        imageModel: "image-model",
+        videoModel: "video-model",
+        selectedCandidateNodeId: "image-1",
+        imageStatus: "success",
+        videoStatus: "failed",
+        error: "页面刷新后视频生成已中断，请重试。",
+        candidates: [{ nodeId: "image-1", status: "success", url: "blob:hydrated-image", storageKey: "image:persisted" }],
+        videoResult: { nodeId: "video-1", url: "blob:hydrated-video", storageKey: "video:persisted" },
+    });
+});
+
+test("card exposes image count, video duration, ratio, selected-image summary, and video result entry", () => {
+    const workflow = selectWorkflowCandidate(
+        createAgentMediaWorkflow({
+            id: "workflow-card-settings",
+            intent: "image_to_video",
+            prompt: "lookbook",
+            imageModel: "image-model",
+            videoModel: "video-model",
+            imageCount: 4,
+            videoSeconds: "10",
+            aspectRatio: "16:9",
+            candidates: [{ nodeId: "image-2", status: "success", url: "blob:image-2", storageKey: "image:2" }],
+            imageStatus: "success",
+            videoStatus: "success",
+            videoResult: { nodeId: "video-3", url: "blob:video-3", storageKey: "video:3" },
+        }),
+        "image-2",
+    );
+    const card = getCanvasAgentMediaWorkflowCardContract(workflow, {
+        imageModels: ["image-model"],
+        videoModels: ["video-model"],
+        hasImageAction: true,
+        hasVideoAction: true,
+        hasCandidateAction: true,
+        hasRetryAction: true,
+        hasResultAction: true,
+    });
+
+    expect(card).toMatchObject({
+        imageCount: 4,
+        videoSeconds: "10",
+        aspectRatio: "16:9",
+        selectedCandidateSummary: "候选图 1 · image-2",
+        videoResult: { nodeId: "video-3", url: "blob:video-3", canOpen: true },
+    });
+});
+
+test("online execution persists reference IDs and media settings into the staged workflow", () => {
+    const execution = resolveOnlineToolExecution(
+        "canvas_generate_image",
+        { prompt: "editorial still", referenceNodeIds: ["reference-1", "reference-2"] },
+        "选图后生成视频",
+        emptyAgentSnapshot,
+        { ...defaultConfig, canvasImageCount: "5", videoSeconds: "8", size: "9:16", textModel: "agent-text-model" },
+    );
+
+    expect(execution).toMatchObject({
+        kind: "workflow",
+        workflow: {
+            referenceNodeIds: ["reference-1", "reference-2"],
+            imageCount: 5,
+            videoSeconds: "8",
+            aspectRatio: "9:16",
+            imageModel: defaultConfig.imageModel,
+            videoModel: defaultConfig.videoModel,
+        },
+    });
+});
+
+test("video-stage success persists the real canvas result node, URL, and storage key", () => {
+    const workflow = createAgentMediaWorkflow({ intent: "image_to_video", prompt: "lookbook", imageModel: "image-model", videoModel: "video-model" });
+
+    expect(
+        completeAgentMediaWorkflowStage(workflow, "video", {
+            status: "success",
+            videoResult: { nodeId: "video-real-id", url: "blob:video", storageKey: "video:persisted" },
+        }),
+    ).toMatchObject({
+        videoStatus: "success",
+        videoResult: { nodeId: "video-real-id", url: "blob:video", storageKey: "video:persisted" },
     });
 });
