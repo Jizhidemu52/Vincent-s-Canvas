@@ -1447,7 +1447,14 @@ function toCanvasAgentOp(value: unknown): CanvasAgentOp {
     if (type === "connect_nodes") return { type, id: stringOptional(item.id), fromNodeId: requireString(item.fromNodeId, "fromNodeId"), toNodeId: requireString(item.toNodeId, "toNodeId") };
     if (type === "set_viewport") return { type, viewport: requireViewport(item.viewport) };
     if (type === "select_nodes") return { type, ids: requireStringArray(item.ids, "ids") };
-    if (type === "run_generation") return { type, nodeId: requireString(item.nodeId, "nodeId"), mode: generationMode(item.mode), prompt: stringOptional(item.prompt) };
+    if (type === "run_generation") {
+        return {
+            type,
+            nodeId: requireString(item.nodeId, "nodeId"),
+            mode: item.mode === undefined ? undefined : generationMode(item.mode),
+            prompt: stringOptional(item.prompt),
+        };
+    }
     throw new Error("不支持的画布操作类型");
 }
 

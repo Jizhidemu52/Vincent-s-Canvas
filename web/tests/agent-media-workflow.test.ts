@@ -664,6 +664,39 @@ test("keeps text and audio runs unchanged when a mixed Agent batch is forced to 
     expect(execution.ops.filter((op) => op.type === "update_node" && (op.id === "text-config" || op.id === "audio-config"))).toEqual([]);
 });
 
+test("keeps omitted-mode text and audio Config runs unchanged while forcing an omitted visual Config through the online bridge", () => {
+    const snapshot: CanvasAgentSnapshot = {
+        ...emptyAgentSnapshot,
+        nodes: [
+            { id: "text-config", type: CanvasNodeType.Config, title: "Text", position: { x: 0, y: 0 }, width: 320, height: 240, metadata: { generationMode: "text", model: defaultConfig.textModel } },
+            { id: "audio-config", type: CanvasNodeType.Config, title: "Audio", position: { x: 360, y: 0 }, width: 320, height: 240, metadata: { generationMode: "audio", model: defaultConfig.audioModel } },
+            { id: "image-config", type: CanvasNodeType.Config, title: "Image", position: { x: 720, y: 0 }, width: 320, height: 240, metadata: { generationMode: "image", model: defaultConfig.imageModel } },
+        ],
+    };
+    const execution = resolveOnlineToolExecution(
+        "canvas_apply_ops",
+        {
+            ops: [
+                { type: "run_generation", nodeId: "text-config", prompt: "write copy" },
+                { type: "run_generation", nodeId: "audio-config", prompt: "read copy" },
+                { type: "run_generation", nodeId: "image-config", prompt: "runway motion" },
+            ],
+        },
+        "create a runway video and keep the copy and voice tasks",
+        snapshot,
+        defaultConfig,
+    );
+    expect(execution.kind).toBe("ops");
+    if (execution.kind !== "ops") throw new Error("direct-video batch must execute canvas ops");
+
+    expect(execution.ops.filter((op) => op.type === "run_generation")).toEqual([
+        { type: "run_generation", nodeId: "text-config", mode: undefined, prompt: "write copy" },
+        { type: "run_generation", nodeId: "audio-config", mode: undefined, prompt: "read copy" },
+        { type: "run_generation", nodeId: "image-config", mode: "video", prompt: "runway motion" },
+    ]);
+    expect(execution.ops.filter((op) => op.type === "update_node" && (op.id === "text-config" || op.id === "audio-config"))).toEqual([]);
+});
+
 test("recognizes explicit select-image-then-video Chinese phrasing as a staged workflow", () => {
     for (const prompt of ["选图后生成视频", "选一张后生成视频", "出图之后生成视频", "图片完成之后生成视频", "生成图片，选择一张后再生成视频"]) {
         expect(classifyAgentMediaIntent(prompt)).toBe("image_to_video");
@@ -795,6 +828,35 @@ test("card exposes image count, video duration, ratio, selected-image summary, a
         selectedCandidateSummary: "候选图 1 · image-2",
         videoResult: { nodeId: "video-3", url: "blob:video-3", canOpen: true },
     });
+});
+
+test("card exposes a separate readable initial-reference summary for the image stage", () => {
+    const workflow = createAgentMediaWorkflow({
+        id: "workflow-initial-references",
+        intent: "image_to_video",
+        prompt: "lookbook",
+        imageModel: "image-model",
+        videoModel: "video-model",
+        referenceNodeIds: ["garment-front-reference-node", "logo-2"],
+    });
+    const card = getCanvasAgentMediaWorkflowCardContract(workflow, {
+        imageModels: ["image-model"],
+        videoModels: ["video-model"],
+        hasImageAction: true,
+        hasVideoAction: true,
+        hasCandidateAction: true,
+        hasRetryAction: true,
+    });
+
+    expect(card.initialReferenceSummary).toEqual({
+        count: 2,
+        label: "初始参考图 2 张",
+        items: [
+            { nodeId: "garment-front-reference-node", label: "参考图 1 · garment-…node" },
+            { nodeId: "logo-2", label: "参考图 2 · logo-2" },
+        ],
+    });
+    expect(card.selectedCandidateSummary).toBe("未选择候选图");
 });
 
 test("online execution persists reference IDs and media settings into the staged workflow", () => {

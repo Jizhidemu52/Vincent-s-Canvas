@@ -68,6 +68,14 @@ export function getCanvasAgentMediaWorkflowCardContract(workflow: CanvasAgentMed
             disabled: !actions.hasCandidateAction,
         }));
     const selectedCandidate = candidates.find((candidate) => candidate.checked);
+    const initialReferenceSummary = {
+        count: workflow.referenceNodeIds.length,
+        label: `初始参考图 ${workflow.referenceNodeIds.length} 张`,
+        items: workflow.referenceNodeIds.map((nodeId, index) => ({
+            nodeId,
+            label: `参考图 ${index + 1} · ${shortNodeId(nodeId)}`,
+        })),
+    };
 
     return {
         imageModel,
@@ -76,6 +84,7 @@ export function getCanvasAgentMediaWorkflowCardContract(workflow: CanvasAgentMed
         imageCount: workflow.imageCount,
         videoSeconds: workflow.videoSeconds,
         aspectRatio: workflow.aspectRatio,
+        initialReferenceSummary,
         selectedCandidateSummary: selectedCandidate ? `${selectedCandidate.label} · ${selectedCandidate.nodeId}` : "未选择候选图",
         videoResult: workflow.videoResult ? { ...workflow.videoResult, canOpen: Boolean(actions.hasResultAction) } : undefined,
         imageModelSelect: { value: imageModel, disabled: !actions.hasImageModelChange },
@@ -125,6 +134,18 @@ export function CanvasAgentMediaWorkflowCard({
             {showImageStage ? (
                 <div className="space-y-3 p-3">
                     <WorkflowStageTitle icon={<ImageIcon className="size-3.5" />} title="第一步：生成候选图" status={workflow.imageStatus} />
+                    {card.initialReferenceSummary.count ? (
+                        <div className="space-y-1.5 rounded-lg bg-black/[0.035] p-2 text-xs dark:bg-white/[0.06]">
+                            <p className="opacity-65">{card.initialReferenceSummary.label}</p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {card.initialReferenceSummary.items.map((reference) => (
+                                    <span key={reference.nodeId} title={reference.nodeId} className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/15">
+                                        {reference.label}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    ) : null}
                     <ModelSelect ariaLabel="选择图片模型" emptyLabel="暂无图片模型" models={imageModels} value={card.imageModelSelect.value} disabled={card.imageModelSelect.disabled} onChange={onImageModelChange} />
                     <label className="flex items-center justify-between gap-3 text-xs"><span className="opacity-65">图片数量</span><input aria-label="图片数量" type="number" min={1} max={15} value={card.imageCount} disabled={!onImageCountChange} onChange={(event) => onImageCountChange?.(Number(event.target.value))} className="h-8 w-20 rounded-md border border-black/10 bg-transparent px-2 dark:border-white/15" /></label>
                     <Button block type="primary" disabled={card.imageGenerateButton.disabled} icon={workflow.imageStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImageIcon className="size-3.5" />} onClick={onGenerateImages}>
@@ -173,6 +194,10 @@ export function CanvasAgentMediaWorkflowCard({
             ) : null}
         </section>
     );
+}
+
+function shortNodeId(nodeId: string) {
+    return nodeId.length > 16 ? `${nodeId.slice(0, 8)}…${nodeId.slice(-4)}` : nodeId;
 }
 
 function WorkflowValueSelect({ ariaLabel, value, values, suffix = "", disabled, onChange }: { ariaLabel: string; value: string; values: string[]; suffix?: string; disabled: boolean; onChange?: (value: string) => void }) {
