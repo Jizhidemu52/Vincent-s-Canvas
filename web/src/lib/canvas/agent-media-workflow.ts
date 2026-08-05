@@ -58,9 +58,9 @@ export function createAgentMediaWorkflowForPrompt(prompt: string, models: AgentM
 }
 
 export function resolveAgentMediaToolDispatch(input: AgentMediaToolDispatchInput): AgentMediaToolDispatch | null {
-    if (!isAgentMediaTool(input)) return null;
     const generationPrompts = generationPromptsFromOps(input.ops);
     const intent = classifyAgentMediaIntent([input.userPrompt, input.toolPrompt, ...generationPrompts].join("\n"));
+    if (!isAgentMediaTool(input) && !(intent === "video" && hasModeOmittedBatchGeneration(input))) return null;
     if (intent === "image_to_video") {
         return {
             kind: "workflow",
@@ -123,6 +123,10 @@ function isVisualGenerationMode(mode: unknown) {
 
 function generationPromptsFromOps(ops?: AgentMediaToolDispatchInput["ops"]): string[] {
     return ops?.flatMap((op) => (op.type === "run_generation" && typeof op.prompt === "string" ? [op.prompt] : [])) || [];
+}
+
+function hasModeOmittedBatchGeneration(input: AgentMediaToolDispatchInput) {
+    return input.toolName === "canvas_apply_ops" && Boolean(input.ops?.some((op) => op.type === "run_generation" && op.mode === undefined));
 }
 
 export function selectWorkflowCandidate(workflow: CanvasAgentMediaWorkflow, nodeId: string): CanvasAgentMediaWorkflow {

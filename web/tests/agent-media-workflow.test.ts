@@ -92,7 +92,39 @@ test("uses a target Config mode when canvas_run_generation omits mode, but force
             models: { imageModel: defaultConfig.imageModel, videoModel: defaultConfig.videoModel },
         }),
     ).toEqual({ kind: "generation", mode: "video" });
-    expect(onlineToolToOps("canvas_run_generation", { nodeId: "config-1" }, snapshot, defaultConfig, "video")).toEqual([{ type: "run_generation", nodeId: "config-1", mode: "video", prompt: "" }]);
+    expect(onlineToolToOps("canvas_run_generation", { nodeId: "config-1" }, snapshot, defaultConfig, "video").filter((op) => op.type === "run_generation")).toEqual([{ type: "run_generation", nodeId: "config-1", mode: "video", prompt: "" }]);
+});
+
+test("synchronizes an existing Config to the video model before direct-video canvas_run_generation", () => {
+    const snapshot: CanvasAgentSnapshot = {
+        ...emptyAgentSnapshot,
+        nodes: [
+            {
+                id: "config-1",
+                type: CanvasNodeType.Config,
+                title: "Image config",
+                position: { x: 0, y: 0 },
+                width: 320,
+                height: 240,
+                metadata: { generationMode: "image", model: defaultConfig.imageModel },
+            },
+        ],
+    };
+
+    const dispatch = resolveAgentMediaToolDispatch({
+        userPrompt: "make the model walk a runway video",
+        toolName: "canvas_run_generation",
+        toolPrompt: "",
+        targetGenerationMode: "image",
+        models: { imageModel: defaultConfig.imageModel, videoModel: defaultConfig.videoModel },
+    });
+    expect(dispatch).toEqual({ kind: "generation", mode: "video" });
+    if (dispatch?.kind !== "generation" || dispatch.mode !== "video") throw new Error("direct-video dispatch must be video");
+    const ops = onlineToolToOps("canvas_run_generation", { nodeId: "config-1" }, snapshot, defaultConfig, dispatch.mode);
+    const configNode = applyCanvasAgentOps(snapshot, ops.filter((op) => op.type !== "run_generation")).nodes.find((node) => node.id === "config-1");
+
+    expect(configNode?.metadata).toMatchObject({ generationMode: "video", model: defaultConfig.videoModel });
+    expect(ops.filter((op) => op.type === "run_generation")).toEqual([{ type: "run_generation", nodeId: "config-1", mode: "video", prompt: "" }]);
 });
 
 test("converts a same-batch image Config to the selected video model before direct-video generation", () => {
@@ -117,6 +149,37 @@ test("converts a same-batch image Config to the selected video model before dire
     );
 
     const configNode = applyCanvasAgentOps(emptyAgentSnapshot, ops.filter((op) => op.type !== "run_generation")).nodes.find((node) => node.id === "config-1");
+    expect(configNode?.metadata).toMatchObject({ generationMode: "video", model: defaultConfig.videoModel });
+    expect(ops.filter((op) => op.type === "run_generation")).toEqual([{ type: "run_generation", nodeId: "config-1", mode: "video", prompt: "runway model" }]);
+});
+
+test("routes a direct-video apply-ops generation with omitted mode and synchronizes its Config", () => {
+    const input = {
+        ops: [
+            {
+                type: "add_node",
+                id: "config-1",
+                nodeType: "config",
+                title: "Image config",
+                position: { x: 0, y: 0 },
+                metadata: { generationMode: "image", model: defaultConfig.imageModel },
+            },
+            { type: "run_generation", nodeId: "config-1", prompt: "runway model" },
+        ],
+    };
+    const dispatch = resolveAgentMediaToolDispatch({
+        userPrompt: "make the model walk a runway video",
+        toolName: "canvas_apply_ops",
+        toolPrompt: "",
+        ops: input.ops,
+        models: { imageModel: defaultConfig.imageModel, videoModel: defaultConfig.videoModel },
+    });
+
+    expect(dispatch).toEqual({ kind: "generation", mode: "video" });
+    if (dispatch?.kind !== "generation" || dispatch.mode !== "video") throw new Error("direct-video dispatch must be video");
+    const ops = onlineToolToOps("canvas_apply_ops", input, emptyAgentSnapshot, defaultConfig, dispatch.mode);
+    const configNode = applyCanvasAgentOps(emptyAgentSnapshot, ops.filter((op) => op.type !== "run_generation")).nodes.find((node) => node.id === "config-1");
+
     expect(configNode?.metadata).toMatchObject({ generationMode: "video", model: defaultConfig.videoModel });
     expect(ops.filter((op) => op.type === "run_generation")).toEqual([{ type: "run_generation", nodeId: "config-1", mode: "video", prompt: "runway model" }]);
 });

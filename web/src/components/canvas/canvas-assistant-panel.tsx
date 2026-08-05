@@ -1214,7 +1214,11 @@ export function onlineToolToOps(name: string, input: Record<string, unknown>, sn
     if (name === "canvas_set_viewport") return [{ type: "set_viewport", viewport: requireViewport(input.viewport) }];
     if (name === "canvas_run_generation") {
         const nodeId = requireString(input.nodeId, "nodeId");
-        return [runGenerationOp(nodeId, forcedMediaMode || generationModeFromTarget(snapshot, nodeId) || generationMode(input.mode), stringOptional(input.prompt))];
+        const mode = forcedMediaMode || generationModeFromTarget(snapshot, nodeId) || generationMode(input.mode);
+        const generation = runGenerationOp(nodeId, mode, stringOptional(input.prompt));
+        return forcedMediaMode === "video" && snapshot.nodes.some((node) => node.id === nodeId && node.type === CanvasNodeType.Config)
+            ? [{ type: "update_node", id: nodeId, metadata: generationConfigMetadata(config, forcedMediaMode) }, generation]
+            : [generation];
     }
     throw new Error(`不支持的工具：${name}`);
 }
@@ -1229,7 +1233,7 @@ function forceGenerationOpsMediaMode(ops: CanvasAgentOp[], snapshot: CanvasAgent
     ops.forEach((op) => {
         if (op.type === "add_node" && op.nodeType === CanvasNodeType.Config && op.id && generationNodeIds.has(op.id)) configNodeIds.add(op.id);
     });
-    const videoMetadata = { generationMode: forcedMediaMode, model: resolveGenerationModel(config, forcedMediaMode) } as CanvasNodeData["metadata"];
+    const videoMetadata = generationConfigMetadata(config, forcedMediaMode);
     return ops.reduce<CanvasAgentOp[]>((forcedOps, op) => {
         if (op.type === "add_node" && op.nodeType === CanvasNodeType.Config && op.id && configNodeIds.has(op.id)) {
             forcedOps.push({ ...op, metadata: { ...op.metadata, ...videoMetadata } });
@@ -1316,6 +1320,10 @@ function configNodeOp(id: string, input: Record<string, unknown>, x: number, y: 
 
 function runGenerationOp(nodeId: string, mode: "text" | "image" | "video" | "audio", prompt?: string): CanvasAgentOp {
     return { type: "run_generation", nodeId, mode, prompt };
+}
+
+function generationConfigMetadata(config: AiConfig, mode: "video"): CanvasNodeData["metadata"] {
+    return { generationMode: mode, model: resolveGenerationModel(config, mode) };
 }
 
 function isWritableToolCall(call: ResponseToolCall) {
