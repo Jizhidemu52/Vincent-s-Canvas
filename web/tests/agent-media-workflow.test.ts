@@ -36,6 +36,52 @@ test("routes an image tool for a runway prompt to a video generation dispatch", 
     ).toMatchObject({ kind: "generation", mode: "video" });
 });
 
+test("routes every auto-running Agent generation entry through the media dispatcher", () => {
+    const models = { imageModel: "gpt-image-2", videoModel: "happyhorse-1.0" };
+    const entries = [
+        { toolName: "canvas_create_config_node", toolPrompt: "fashion still", requestedMode: "image", autoRun: true },
+        { toolName: "canvas_run_generation", toolPrompt: "fashion still", requestedMode: "image" },
+        {
+            toolName: "canvas_apply_ops",
+            toolPrompt: "fashion still",
+            ops: [{ type: "run_generation", nodeId: "config-1", mode: "image", prompt: "fashion still" }],
+        },
+    ] as const;
+
+    for (const entry of entries) {
+        expect(resolveAgentMediaToolDispatch({ userPrompt: "make the model walk a runway", models, ...entry })).toEqual({ kind: "generation", mode: "video" });
+    }
+});
+
+test("turns explicit image-to-video requests from every auto-running Agent entry into a gated workflow", () => {
+    const models = { imageModel: "gpt-image-2", videoModel: "happyhorse-1.0" };
+    const entries = [
+        { toolName: "canvas_create_config_node", toolPrompt: "fashion still", requestedMode: "image", autoRun: true },
+        { toolName: "canvas_run_generation", toolPrompt: "fashion still", requestedMode: "image" },
+        {
+            toolName: "canvas_apply_ops",
+            toolPrompt: "fashion still",
+            ops: [{ type: "run_generation", nodeId: "config-1", mode: "image", prompt: "fashion still" }],
+        },
+    ] as const;
+
+    for (const entry of entries) {
+        expect(resolveAgentMediaToolDispatch({ userPrompt: "image_to_video fashion runway", models, ...entry })).toMatchObject({ kind: "workflow", workflow: { intent: "image_to_video", imageStatus: "idle", videoStatus: "idle" } });
+    }
+});
+
+test("uses the nested run-generation prompt when an apply-ops image-to-video workflow has no top-level prompt", () => {
+    expect(
+        resolveAgentMediaToolDispatch({
+            userPrompt: "image to video fashion runway",
+            toolName: "canvas_apply_ops",
+            toolPrompt: "",
+            ops: [{ type: "run_generation", nodeId: "config-1", mode: "image", prompt: "editorial fashion still" }],
+            models: { imageModel: "gpt-image-2", videoModel: "happyhorse-1.0" },
+        }),
+    ).toMatchObject({ kind: "workflow", workflow: { prompt: "editorial fashion still" } });
+});
+
 test("routes an explicit image-then-video request to a staged workflow without a video run", () => {
     expect(
         resolveAgentMediaToolDispatch({
@@ -119,11 +165,17 @@ test("keeps an explicit first-generate-image-then-video request in staged mode",
     expect(classifyAgentMediaIntent("先生成图片，再选一张生成走秀视频")).toBe("image_to_video");
 });
 
+test("classifies explicit image_to_video spellings before direct-video keywords", () => {
+    expect(classifyAgentMediaIntent("image_to_video fashion runway")).toBe("image_to_video");
+    expect(classifyAgentMediaIntent("image-to-video fashion runway")).toBe("image_to_video");
+    expect(classifyAgentMediaIntent("image to video fashion runway")).toBe("image_to_video");
+});
+
 test("requires one successful candidate before video is enabled", () => {
     const workflow = createAgentMediaWorkflow({ intent: "image_to_video", prompt: "走秀", imageModel: "gpt-image-2", videoModel: "happyhorse-1.0" });
 
     expect(canGenerateWorkflowVideo(workflow)).toBe(false);
-    expect(canGenerateWorkflowVideo(selectWorkflowCandidate({ ...workflow, candidates: [{ nodeId: "image-1", status: "success" }] }, "image-1"))).toBe(true);
+    expect(canGenerateWorkflowVideo(selectWorkflowCandidate({ ...workflow, imageStatus: "success", candidates: [{ nodeId: "image-1", status: "success" }] }, "image-1"))).toBe(true);
 });
 
 test("does not select failed candidates for image-to-video", () => {
@@ -140,6 +192,42 @@ test("does not select failed candidates for image-to-video", () => {
 
 test("keeps video disabled when there are no candidates", () => {
     expect(canGenerateWorkflowVideo(createAgentMediaWorkflow({ intent: "image_to_video", prompt: "走秀", imageModel: "gpt-image-2", videoModel: "happyhorse-1.0" }))).toBe(false);
+});
+
+test("keeps image-to-video submission disabled while a new image stage is running", () => {
+    const workflow = selectWorkflowCandidate(
+        createAgentMediaWorkflow({
+            intent: "image_to_video",
+            prompt: "lookbook",
+            imageModel: "gpt-image-2",
+            videoModel: "happyhorse-1.0",
+            imageStatus: "running",
+            candidates: [{ nodeId: "previous-image", status: "success" }],
+        }),
+        "previous-image",
+    );
+
+    expect(canGenerateWorkflowVideo(workflow)).toBe(false);
+});
+
+test("clears an old candidate selection when starting a new image stage", () => {
+    const workflow = selectWorkflowCandidate(
+        createAgentMediaWorkflow({
+            intent: "image_to_video",
+            prompt: "lookbook",
+            imageModel: "gpt-image-2",
+            videoModel: "happyhorse-1.0",
+            candidates: [{ nodeId: "previous-image", status: "success" }],
+        }),
+        "previous-image",
+    );
+
+    expect(completeAgentMediaWorkflowStage(workflow, "image", { status: "running" })).toMatchObject({
+        imageStatus: "running",
+        videoStatus: "idle",
+        candidates: [],
+        selectedCandidateNodeId: undefined,
+    });
 });
 
 test("keeps the card video action disabled with a selection prompt until a successful candidate is selected", () => {
@@ -307,7 +395,7 @@ test("card view model carries the JSX control props for selection, handlers, and
         imageModelSelect: { value: "image-model", disabled: false },
         videoModelSelect: { value: "video-model", disabled: false },
         imageGenerateButton: { disabled: false },
-        videoGenerateButton: { disabled: false },
+        videoGenerateButton: { disabled: true },
         candidates: [
             { nodeId: "image-1", checked: false, disabled: false },
             { nodeId: "image-2", checked: true, disabled: false },

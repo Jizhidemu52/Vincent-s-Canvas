@@ -193,7 +193,7 @@ type OnlineAgentLogContext = { model: string; running: boolean; confirmTools: bo
 type OnlineLoopContext = { step: number };
 type OnlineToolResult = { ok: true; message: string; data?: unknown; mediaWorkflow?: CanvasAgentMediaWorkflow } | { ok: false; message: string };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
-type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; assistantId: string; step: number };
+type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; assistantId: string; step: number; userPrompt: string };
 
 function mediaWorkflowFromResults(results: OnlineExecutedToolCall[]) {
     for (const item of results) {
@@ -424,13 +424,13 @@ export function CanvasAssistantPanel({
                 if (confirmTools && writableCalls.length) {
                     upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "准备执行工具，等待确认。" });
                     const toolMessageId = nanoid();
-                    pendingToolContextRef.current.set(toolMessageId, { messages, toolCalls: result.toolCalls, assistantId, step: loop.step });
+                    pendingToolContextRef.current.set(toolMessageId, { messages, toolCalls: result.toolCalls, assistantId, step: loop.step, userPrompt: userMessage.text });
                     const toolMessage: CanvasAssistantMessage = { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(result.toolCalls), detail: { status: "pending", step: loop.step, toolCalls: result.toolCalls } };
                     appendMessage(sessionId, toolMessage);
                     addOnlineLog("等待用户确认", result.toolCalls);
                     return;
                 }
-                await continueOnlineToolLoop(sessionId, assistantId, messages, result, loop.step);
+                await continueOnlineToolLoop(sessionId, assistantId, messages, result, loop.step, userMessage.text);
             } else {
                 if (!result.content.trim()) throw new Error("模型没有返回工具调用，画布操作未执行。");
                 upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "没有返回内容。" });
@@ -444,8 +444,8 @@ export function CanvasAssistantPanel({
         }
     };
 
-    const continueOnlineToolLoop = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], result: { content: string; toolCalls: ResponseToolCall[] }, step: number) => {
-        const toolResults = executeOnlineToolCalls(result.toolCalls);
+    const continueOnlineToolLoop = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], result: { content: string; toolCalls: ResponseToolCall[] }, step: number, userPrompt: string) => {
+        const toolResults = executeOnlineToolCalls(result.toolCalls, userPrompt);
         addOnlineLog("工具执行结果", toolResults);
         const mediaWorkflow = mediaWorkflowFromResults(toolResults);
         appendMessage(sessionId, {
@@ -455,10 +455,10 @@ export function CanvasAssistantPanel({
             text: toolResults.map((item) => toolResultText(item.result)).join("\n"),
             detail: { status: "completed", step, toolCalls: result.toolCalls, results: toolResults, ...(mediaWorkflow ? { mediaWorkflow } : {}) },
         });
-        await continueOnlineToolLoopAfterResults(sessionId, assistantId, messages, result.toolCalls, toolResults, step);
+        await continueOnlineToolLoopAfterResults(sessionId, assistantId, messages, result.toolCalls, toolResults, step, userPrompt);
     };
 
-    const continueOnlineToolLoopAfterResults = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], toolCalls: ResponseToolCall[], toolResults: OnlineExecutedToolCall[], step: number) => {
+    const continueOnlineToolLoopAfterResults = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], toolCalls: ResponseToolCall[], toolResults: OnlineExecutedToolCall[], step: number, userPrompt: string) => {
         const nextMessages: ResponseInputMessage[] = [...messages, ...toolCalls.map(toolCallToResponseInput), ...toolResults.map((item) => ({ role: "tool" as const, tool_call_id: item.toolCallId, content: JSON.stringify(item.result) }))];
         if (step >= ONLINE_AGENT_MAX_STEPS) {
             upsertMessage(sessionId, { id: assistantId, role: "assistant", text: toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。" });
@@ -484,12 +484,12 @@ export function CanvasAssistantPanel({
             if (confirmTools && writableCalls.length) {
                 upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || "准备执行工具，等待确认。" });
                 const toolMessageId = nanoid();
-                pendingToolContextRef.current.set(toolMessageId, { messages: nextMessages, toolCalls: next.toolCalls, assistantId, step: step + 1 });
+                pendingToolContextRef.current.set(toolMessageId, { messages: nextMessages, toolCalls: next.toolCalls, assistantId, step: step + 1, userPrompt });
                 appendMessage(sessionId, { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(next.toolCalls), detail: { status: "pending", step: step + 1, toolCalls: next.toolCalls } });
                 addOnlineLog("等待用户确认", next.toolCalls);
                 return;
             }
-            await continueOnlineToolLoop(sessionId, assistantId, nextMessages, next, step + 1);
+            await continueOnlineToolLoop(sessionId, assistantId, nextMessages, next, step + 1, userPrompt);
             return;
         }
         upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。" });
@@ -506,7 +506,7 @@ export function CanvasAssistantPanel({
         return { changed, ops, ranGeneration, noopReason, before: JSON.parse(before), after: JSON.parse(snapshotSignature(next)) };
     };
 
-    const executeOnlineTool = (name: string, args: Record<string, unknown>): OnlineToolResult => {
+    const executeOnlineTool = (name: string, args: Record<string, unknown>, userPrompt: string): OnlineToolResult => {
         const current = snapshotRef.current;
         try {
             if (name === "canvas_get_state") return { ok: true, message: describeCanvasSnapshot(current), data: compactSnapshot(current) };
@@ -519,10 +519,12 @@ export function CanvasAssistantPanel({
             const imageModels = selectableModelsByCapability(effectiveConfig, "image");
             const videoModels = selectableModelsByCapability(effectiveConfig, "video");
             const mediaDispatch = resolveAgentMediaToolDispatch({
-                userPrompt: latestAssistantUserPrompt(safeSessions.find((session) => session.id === localActiveSessionId)?.messages || []),
+                userPrompt,
                 toolName: name,
                 toolPrompt: mediaPrompt,
                 requestedMode: stringOptional(args.mode),
+                autoRun: args.autoRun === true,
+                ops: Array.isArray(args.ops) ? args.ops.map((op) => (op && typeof op === "object" ? op as { type?: unknown; mode?: unknown; prompt?: unknown } : {})) : undefined,
                 models: {
                     imageModel: imageModels.includes(effectiveConfig.imageModel) ? effectiveConfig.imageModel : imageModels[0] || defaultGenerationModel(effectiveConfig, "image"),
                     videoModel: videoModels.includes(effectiveConfig.videoModel) ? effectiveConfig.videoModel : videoModels[0] || defaultGenerationModel(effectiveConfig, "video"),
@@ -539,16 +541,16 @@ export function CanvasAssistantPanel({
         }
     };
 
-    const executeOnlineToolCall = (toolCall: ResponseToolCall): OnlineExecutedToolCall => {
+    const executeOnlineToolCall = (toolCall: ResponseToolCall, userPrompt: string): OnlineExecutedToolCall => {
         try {
-            const result = executeOnlineTool(toolCall.function.name, parseToolArguments(toolCall.function.arguments));
+            const result = executeOnlineTool(toolCall.function.name, parseToolArguments(toolCall.function.arguments), userPrompt);
             return { toolCallId: toolCall.id, name: toolCall.function.name, result };
         } catch (error) {
             return { toolCallId: toolCall.id, name: toolCall.function.name, result: { ok: false, message: error instanceof Error ? error.message : "工具参数错误" } };
         }
     };
 
-    const executeOnlineToolCalls = (toolCalls: ResponseToolCall[]) => {
+    const executeOnlineToolCalls = (toolCalls: ResponseToolCall[], userPrompt: string) => {
         const results: OnlineExecutedToolCall[] = [];
         let stopped = false;
         toolCalls.forEach((toolCall) => {
@@ -556,7 +558,7 @@ export function CanvasAssistantPanel({
                 results.push({ toolCallId: toolCall.id, name: toolCall.function.name, result: { ok: false, message: "前一个工具调用失败，未继续执行。" } });
                 return;
             }
-            const result = executeOnlineToolCall(toolCall);
+            const result = executeOnlineToolCall(toolCall, userPrompt);
             results.push(result);
             if (!result.result.ok) stopped = true;
         });
@@ -579,7 +581,7 @@ export function CanvasAssistantPanel({
         }
         try {
             setIsRunning(true);
-            const results = executeOnlineToolCalls(toolCalls);
+            const results = executeOnlineToolCalls(toolCalls, pendingContext?.userPrompt || latestAssistantUserPrompt(session.messages));
             addOnlineLog("工具执行结果", results);
             const mediaWorkflow = mediaWorkflowFromResults(results);
             upsertMessage(session.id, {
@@ -590,7 +592,7 @@ export function CanvasAssistantPanel({
                 detail: { ...detail, results, status: "completed", ...(mediaWorkflow ? { mediaWorkflow } : {}) },
             });
             pendingToolContextRef.current.delete(messageId);
-            await continueOnlineToolLoopAfterResults(session.id, assistantId, previousMessages, toolCalls, results, pendingContext?.step || Number(detail.step) || 1);
+            await continueOnlineToolLoopAfterResults(session.id, assistantId, previousMessages, toolCalls, results, pendingContext?.step || Number(detail.step) || 1, pendingContext?.userPrompt || latestAssistantUserPrompt(session.messages));
         } catch (error) {
             addOnlineLog("工具续跑失败", error instanceof Error ? error.message : error);
             appendMessage(session.id, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
@@ -1149,7 +1151,7 @@ function parseToolArguments(value: string) {
 }
 
 function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig, forcedMediaMode?: "video"): CanvasAgentOp[] {
-    if (name === "canvas_apply_ops") return requireOps(input.ops);
+    if (name === "canvas_apply_ops") return forceGenerationOpsMediaMode(requireOps(input.ops), forcedMediaMode);
     if (name === "canvas_create_node") {
         const nodeType = requireNodeType(input.nodeType);
         const x = numberOr(input.x, nextCanvasX(snapshot));
@@ -1175,8 +1177,9 @@ function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot:
     if (name === "canvas_create_image_prompt_flow") return generationFlowOps({ ...input, mode: forcedMediaMode || "image" }, snapshot, config);
     if (name === "canvas_create_config_node") {
         const configId = `config-${nanoid()}`;
-        const mode = generationMode(input.mode);
-        return [configNodeOp(configId, input, numberOr(input.x, nextCanvasX(snapshot)), numberOr(input.y, 0), config), ...(input.autoRun ? [runGenerationOp(configId, mode, stringOptional(input.prompt))] : [])];
+        const configInput = forcedMediaMode ? { ...input, mode: forcedMediaMode } : input;
+        const mode = generationMode(configInput.mode);
+        return [configNodeOp(configId, configInput, numberOr(configInput.x, nextCanvasX(snapshot)), numberOr(configInput.y, 0), config), ...(configInput.autoRun ? [runGenerationOp(configId, mode, stringOptional(configInput.prompt))] : [])];
     }
     if (name === "canvas_create_generation_flow") return generationFlowOps(forcedMediaMode ? { ...input, mode: forcedMediaMode } : input, snapshot, config);
     if (name === "canvas_generate_text") return generationFlowOps({ ...input, mode: "text", autoRun: true }, snapshot, config);
@@ -1207,8 +1210,13 @@ function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot:
         return requireRecordArray(input.connections, "connections").map((connection) => ({ type: "connect_nodes", fromNodeId: requireString(connection.fromNodeId, "fromNodeId"), toNodeId: requireString(connection.toNodeId, "toNodeId") }));
     if (name === "canvas_select_nodes") return [{ type: "select_nodes", ids: requireStringArray(input.ids, "ids") }];
     if (name === "canvas_set_viewport") return [{ type: "set_viewport", viewport: requireViewport(input.viewport) }];
-    if (name === "canvas_run_generation") return [runGenerationOp(requireString(input.nodeId, "nodeId"), generationMode(input.mode), stringOptional(input.prompt))];
+    if (name === "canvas_run_generation") return [runGenerationOp(requireString(input.nodeId, "nodeId"), forcedMediaMode || generationMode(input.mode), stringOptional(input.prompt))];
     throw new Error(`不支持的工具：${name}`);
+}
+
+function forceGenerationOpsMediaMode(ops: CanvasAgentOp[], forcedMediaMode?: "video") {
+    if (!forcedMediaMode) return ops;
+    return ops.map((op) => (op.type === "run_generation" ? { ...op, mode: forcedMediaMode } : op));
 }
 
 function generationFlowOps(input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig): CanvasAgentOp[] {

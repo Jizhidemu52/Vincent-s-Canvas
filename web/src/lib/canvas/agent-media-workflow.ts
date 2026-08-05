@@ -10,6 +10,8 @@ export type AgentMediaToolDispatchInput = {
     toolName: string;
     toolPrompt: string;
     requestedMode?: string;
+    autoRun?: boolean;
+    ops?: Array<{ type?: unknown; mode?: unknown; prompt?: unknown }>;
     models: AgentMediaWorkflowModels;
 };
 export type AgentMediaToolDispatch = { kind: "workflow"; workflow: CanvasAgentMediaWorkflow } | { kind: "generation"; mode: "image" | "video" };
@@ -30,6 +32,7 @@ export type CreateAgentMediaWorkflowInput = Omit<CanvasAgentMediaWorkflow, "id" 
 
 export function classifyAgentMediaIntent(prompt: string): AgentMediaIntent {
     const normalized = prompt.toLowerCase();
+    if (/\bimage[\s_-]*to[\s_-]*video\b/.test(normalized)) return "image_to_video";
     if (/(先|first)[\s\S]{0,40}(出图|生成图片|生成图像|image)[\s\S]{0,80}(再|然后|then)[\s\S]{0,40}(视频|走秀|动画|video|runway|motion|animation)/.test(normalized)) return "image_to_video";
     if (/(视频|走秀|运镜|镜头|动态|动画|短片|动作|video|runway|motion|camera|animation|clip|action)/.test(normalized)) return "video";
     return "image";
@@ -43,7 +46,7 @@ export function createAgentMediaWorkflow(input: CreateAgentMediaWorkflowInput): 
         imageModel: input.imageModel,
         videoModel: input.videoModel,
         candidates: input.candidates || [],
-        imageStatus: input.imageStatus || "idle",
+        imageStatus: input.imageStatus || (input.candidates?.some((candidate) => candidate.status === "success") ? "success" : "idle"),
         videoStatus: input.videoStatus || "idle",
         ...(input.error ? { error: input.error } : {}),
     };
@@ -54,12 +57,13 @@ export function createAgentMediaWorkflowForPrompt(prompt: string, models: AgentM
 }
 
 export function resolveAgentMediaToolDispatch(input: AgentMediaToolDispatchInput): AgentMediaToolDispatch | null {
-    if (!isAgentMediaTool(input.toolName, input.requestedMode)) return null;
-    const intent = classifyAgentMediaIntent(`${input.userPrompt}\n${input.toolPrompt}`);
+    if (!isAgentMediaTool(input)) return null;
+    const generationPrompts = generationPromptsFromOps(input.ops);
+    const intent = classifyAgentMediaIntent([input.userPrompt, input.toolPrompt, ...generationPrompts].join("\n"));
     if (intent === "image_to_video") {
         return {
             kind: "workflow",
-            workflow: createAgentMediaWorkflow({ intent, prompt: input.toolPrompt, ...input.models }),
+            workflow: createAgentMediaWorkflow({ intent, prompt: input.toolPrompt || generationPrompts[0] || input.userPrompt, ...input.models }),
         };
     }
     return {
@@ -80,6 +84,9 @@ export function videoReferenceNodeIds(input: Pick<CanvasAgentMediaWorkflow, "can
 
 export function completeAgentMediaWorkflowStage(workflow: CanvasAgentMediaWorkflow, stage: "image" | "video", result: CompleteAgentMediaWorkflowStageInput): CanvasAgentMediaWorkflow {
     const { error: _previousError, ...withoutPreviousError } = workflow;
+    if (stage === "image" && result.status === "running") {
+        return { ...withoutPreviousError, candidates: [], selectedCandidateNodeId: undefined, imageStatus: "running", videoStatus: "idle" };
+    }
     const candidates = result.candidates ? mergeWorkflowCandidates(workflow.candidates, result.candidates) : workflow.candidates;
     const next = {
         ...withoutPreviousError,
@@ -100,8 +107,21 @@ function mergeWorkflowCandidates(current: CanvasAgentMediaWorkflowCandidate[], i
     return Array.from(candidates.values());
 }
 
-function isAgentMediaTool(name: string, requestedMode?: string) {
-    return name === "canvas_generate_image" || name === "canvas_generate_video" || name === "canvas_create_image_prompt_flow" || (name === "canvas_create_generation_flow" && (requestedMode === "image" || requestedMode === "video"));
+function isAgentMediaTool(input: AgentMediaToolDispatchInput) {
+    const { toolName: name, requestedMode, autoRun, ops } = input;
+    if (name === "canvas_generate_image" || name === "canvas_generate_video" || name === "canvas_create_image_prompt_flow") return true;
+    if (name === "canvas_create_generation_flow") return requestedMode === "image" || requestedMode === "video";
+    if (name === "canvas_create_config_node") return autoRun === true && isVisualGenerationMode(requestedMode);
+    if (name === "canvas_run_generation") return isVisualGenerationMode(requestedMode);
+    return name === "canvas_apply_ops" && Boolean(ops?.some((op) => op.type === "run_generation" && isVisualGenerationMode(op.mode)));
+}
+
+function isVisualGenerationMode(mode: unknown) {
+    return mode === "image" || mode === "video";
+}
+
+function generationPromptsFromOps(ops?: AgentMediaToolDispatchInput["ops"]): string[] {
+    return ops?.flatMap((op) => (op.type === "run_generation" && typeof op.prompt === "string" ? [op.prompt] : [])) || [];
 }
 
 export function selectWorkflowCandidate(workflow: CanvasAgentMediaWorkflow, nodeId: string): CanvasAgentMediaWorkflow {
@@ -111,5 +131,5 @@ export function selectWorkflowCandidate(workflow: CanvasAgentMediaWorkflow, node
 
 export function canGenerateWorkflowVideo(workflow: CanvasAgentMediaWorkflow) {
     if (workflow.intent === "video") return true;
-    return workflow.intent === "image_to_video" && workflow.candidates.some((candidate) => candidate.nodeId === workflow.selectedCandidateNodeId && candidate.status === "success");
+    return workflow.intent === "image_to_video" && workflow.imageStatus === "success" && workflow.candidates.some((candidate) => candidate.nodeId === workflow.selectedCandidateNodeId && candidate.status === "success");
 }
