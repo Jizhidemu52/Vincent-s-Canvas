@@ -27,7 +27,7 @@ import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
 import { ActiveConnectionPath, ConnectionPath } from "@/components/canvas/canvas-connections";
 import { CanvasConfigComposer } from "@/components/canvas/canvas-config-composer";
 import { CanvasConfigNodePanel } from "@/components/canvas/canvas-config-node-panel";
-import { CANVAS_AGENT_PANEL_MOTION_MS, CanvasAssistantPanel } from "@/components/canvas/canvas-assistant-panel";
+import { CANVAS_AGENT_PANEL_MOTION_MS, CanvasAssistantPanel, type CanvasMediaWorkflowAction } from "@/components/canvas/canvas-assistant-panel";
 import { CanvasNodeContextMenu } from "@/components/canvas/canvas-context-menu";
 import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "@/components/canvas/canvas-node-crop-dialog";
@@ -52,6 +52,8 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
+import { buildWorkflowVideoStageDispatch, completeAgentMediaWorkflowStage, restoreAgentMediaWorkflow, selectWorkflowCandidate } from "@/lib/canvas/agent-media-workflow";
+import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workflow-stage";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "@/lib/canvas/canvas-resource-references";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { validateImageReferences } from "@/lib/image-reference-policy";
@@ -60,6 +62,7 @@ import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
 import {
     CanvasNodeType,
     type CanvasAssistantImage,
+    type CanvasAgentMediaWorkflow,
     type CanvasAssistantSession,
     type CanvasConnection,
     type CanvasImageGenerationType,
@@ -101,6 +104,19 @@ type CanvasGenerationRequest = {
     originNodeId: string;
     runningNodeId: string;
     controller: AbortController;
+};
+
+type CanvasGenerationOutput = {
+    nodeId: string;
+    status: "success" | "failed";
+    url?: string;
+    storageKey?: string;
+    error?: string;
+};
+
+type CanvasGenerationResult = {
+    mode: CanvasNodeGenerationMode;
+    outputs: CanvasGenerationOutput[];
 };
 
 type BatchEditFileItem = {
@@ -378,16 +394,13 @@ function WirelessCanvasPage() {
     const [isNodeDragging, setIsNodeDragging] = useState(false);
 
     const selectedMaskEditModel = maskEditModel || effectiveConfig.imageModel || effectiveConfig.model;
-    const maskEditEstimate = useMemo(
-        () => estimateUsage({ operationType: "inpaint", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }),
-        [estimateUsage, selectedMaskEditModel],
-    );
+    const maskEditEstimate = useMemo(() => estimateUsage({ operationType: "inpaint", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }), [estimateUsage, selectedMaskEditModel]);
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const viewportRef = useRef(viewport);
-    const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
+    const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void) => Promise<void>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const selectionBoxRef = useRef(selectionBox);
@@ -494,7 +507,7 @@ function WirelessCanvasPage() {
 
         const restore = async () => {
             const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes));
-            const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
+            const restoredSessions = await hydrateAssistantImages(project.chatSessions || [], restoredNodes);
             setNodes(restoredNodes);
             setConnections(project.connections);
             setChatSessions(restoredSessions);
@@ -2339,38 +2352,42 @@ function WirelessCanvasPage() {
         const token = searchParams.get("reuseToken");
         if (!projectLoaded || !token || loadedReuseTokenRef.current.has(token)) return;
         loadedReuseTokenRef.current.add(token);
-        void hydratePromptReuse(token).then(async (payload) => {
-            const parameters = payload.template.parameters;
-            const isBatch = payload.template.targetTool === "batch-edit" || searchParams.get("promptTool") === "batch-edit";
-            if (isBatch) {
-                setBatchEditPrompt(payload.template.prompt);
-                setBatchEditOpen(true);
-            } else {
-                setQuickGeneratePrompt(payload.template.prompt);
-                if (payload.pricing.selectedModel?.modelId) setQuickGenerateModel(payload.pricing.selectedModel.modelId);
-                if (typeof parameters.size === "string") setQuickGenerateSize(parameters.size);
-                const quantity = typeof parameters.quantity === "number" ? parameters.quantity : typeof parameters.count === "number" ? parameters.count : 1;
-                setQuickGenerateCount(Math.min(4, Math.max(1, quantity)));
-                const nextReferences = await Promise.all(payload.template.referenceAssetIds.map(async (assetId) => {
-                    const blob = await fetchServerAssetContent(assetId);
-                    const image = await uploadImage(blob);
-                    return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
-                }));
-                setQuickGenerateReferences(nextReferences);
-                setQuickGenerateOpen(true);
-            }
-            payload.warnings.forEach((warning) => message.warning(warning));
-            if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请选择管理员当前启用的模型");
-            const cost = payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准";
-            if (payload.mode === "fill_and_generate" && !isBatch) {
-                modal.confirm({ title: "确认在画布生成？", content: `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => quickGenerateRef.current() });
-            } else if (payload.mode === "fill_and_generate" && isBatch) {
-                message.info(`模板已填入，当前预计 ${cost}。请先选择文件夹，再确认批量生成。`);
-            } else message.success(`模板已填入，当前预计 ${cost}`);
-        }).catch((error) => {
-            loadedReuseTokenRef.current.delete(token);
-            message.error(error instanceof Error ? error.message : "模板复用失败");
-        });
+        void hydratePromptReuse(token)
+            .then(async (payload) => {
+                const parameters = payload.template.parameters;
+                const isBatch = payload.template.targetTool === "batch-edit" || searchParams.get("promptTool") === "batch-edit";
+                if (isBatch) {
+                    setBatchEditPrompt(payload.template.prompt);
+                    setBatchEditOpen(true);
+                } else {
+                    setQuickGeneratePrompt(payload.template.prompt);
+                    if (payload.pricing.selectedModel?.modelId) setQuickGenerateModel(payload.pricing.selectedModel.modelId);
+                    if (typeof parameters.size === "string") setQuickGenerateSize(parameters.size);
+                    const quantity = typeof parameters.quantity === "number" ? parameters.quantity : typeof parameters.count === "number" ? parameters.count : 1;
+                    setQuickGenerateCount(Math.min(4, Math.max(1, quantity)));
+                    const nextReferences = await Promise.all(
+                        payload.template.referenceAssetIds.map(async (assetId) => {
+                            const blob = await fetchServerAssetContent(assetId);
+                            const image = await uploadImage(blob);
+                            return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
+                        }),
+                    );
+                    setQuickGenerateReferences(nextReferences);
+                    setQuickGenerateOpen(true);
+                }
+                payload.warnings.forEach((warning) => message.warning(warning));
+                if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请选择管理员当前启用的模型");
+                const cost = payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准";
+                if (payload.mode === "fill_and_generate" && !isBatch) {
+                    modal.confirm({ title: "确认在画布生成？", content: `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => quickGenerateRef.current() });
+                } else if (payload.mode === "fill_and_generate" && isBatch) {
+                    message.info(`模板已填入，当前预计 ${cost}。请先选择文件夹，再确认批量生成。`);
+                } else message.success(`模板已填入，当前预计 ${cost}`);
+            })
+            .catch((error) => {
+                loadedReuseTokenRef.current.delete(token);
+                message.error(error instanceof Error ? error.message : "模板复用失败");
+            });
     }, [message, modal, projectLoaded, searchParams]);
 
     const applyBatchEditFiles = useCallback((files: FileList | File[] | null) => {
@@ -2444,9 +2461,7 @@ function WirelessCanvasPage() {
         setBatchEditRunning(true);
         setBatchEditServerId(null);
         setBatchEditAction(null);
-        setBatchEditItems((prev) =>
-            prev.map((item) => ({ ...item, status: "waiting", sourceUrl: undefined, resultUrl: undefined, failureReason: undefined })),
-        );
+        setBatchEditItems((prev) => prev.map((item) => ({ ...item, status: "waiting", sourceUrl: undefined, resultUrl: undefined, failureReason: undefined })));
 
         for (const [index, item] of items.entries()) {
             const sourceId = `${localBatchId}-source-${index + 1}`;
@@ -2489,17 +2504,11 @@ function WirelessCanvasPage() {
                 ]);
                 setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: sourceId, toNodeId: resultId }]);
                 prepared.push({ originalIndex: index, item, sourceId, resultId, uploadedSource });
-                setBatchEditItems((prev) =>
-                    prev.map((entry) => (entry.id === item.id ? { ...entry, status: "waiting", sourceUrl: uploadedSource.url } : entry)),
-                );
+                setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "waiting", sourceUrl: uploadedSource.url } : entry)));
             } catch (error) {
                 localFailures += 1;
                 const reason = error instanceof Error ? error.message : "本地图片读取失败";
-                setBatchEditItems((prev) =>
-                    prev.map((entry) =>
-                        entry.id === item.id ? { ...entry, status: "failed", sourceUrl: `file://${item.relativePath}`, failureReason: reason } : entry,
-                    ),
-                );
+                setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "failed", sourceUrl: `file://${item.relativePath}`, failureReason: reason } : entry)));
             }
         }
 
@@ -2540,14 +2549,8 @@ function WirelessCanvasPage() {
                 const entry = prepared[failure.index];
                 if (!entry) continue;
                 failedCount += 1;
-                setBatchEditItems((prev) =>
-                    prev.map((item) => (item.id === entry.item.id ? { ...item, status: "failed", failureReason: failure.reason } : item)),
-                );
-                setNodes((prev) =>
-                    prev.map((node) =>
-                        node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: failure.reason } } : node,
-                    ),
-                );
+                setBatchEditItems((prev) => prev.map((item) => (item.id === entry.item.id ? { ...item, status: "failed", failureReason: failure.reason } : item)));
+                setNodes((prev) => prev.map((node) => (node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: failure.reason } } : node)));
                 settledResultIds.add(entry.resultId);
             }
 
@@ -2559,16 +2562,8 @@ function WirelessCanvasPage() {
                     if (cancelled) cancelledCount += 1;
                     else failedCount += 1;
                     const reason = task.failureReason || (cancelled ? "任务已取消" : "批量改图失败");
-                    setBatchEditItems((prev) =>
-                        prev.map((item) =>
-                            item.id === entry.item.id ? { ...item, status: cancelled ? "cancelled" : "failed", failureReason: reason } : item,
-                        ),
-                    );
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node,
-                        ),
-                    );
+                    setBatchEditItems((prev) => prev.map((item) => (item.id === entry.item.id ? { ...item, status: cancelled ? "cancelled" : "failed", failureReason: reason } : item)));
+                    setNodes((prev) => prev.map((node) => (node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node)));
                     settledResultIds.add(entry.resultId);
                     continue;
                 }
@@ -2576,14 +2571,8 @@ function WirelessCanvasPage() {
                 if (!resultUrl) {
                     failedCount += 1;
                     const reason = "任务成功但没有返回结果图片";
-                    setBatchEditItems((prev) =>
-                        prev.map((item) => (item.id === entry.item.id ? { ...item, status: "failed", failureReason: reason } : item)),
-                    );
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node,
-                        ),
-                    );
+                    setBatchEditItems((prev) => prev.map((item) => (item.id === entry.item.id ? { ...item, status: "failed", failureReason: reason } : item)));
+                    setNodes((prev) => prev.map((node) => (node.id === entry.resultId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node)));
                     settledResultIds.add(entry.resultId);
                     continue;
                 }
@@ -2645,29 +2634,15 @@ function WirelessCanvasPage() {
                         recreatePath: `/image?tool=image-edit&prompt=${encodeURIComponent(prompt)}&model=${encodeURIComponent(model)}`,
                     },
                 });
-                setBatchEditItems((prev) =>
-                    prev.map((item) => (item.id === entry.item.id ? { ...item, status: "success", resultUrl: uploadedResult.url } : item)),
-                );
+                setBatchEditItems((prev) => prev.map((item) => (item.id === entry.item.id ? { ...item, status: "success", resultUrl: uploadedResult.url } : item)));
                 settledResultIds.add(entry.resultId);
             }
         } catch (error) {
             const reason = error instanceof Error ? error.message : "批量任务提交失败";
             const unresolved = prepared.filter((entry) => !settledResultIds.has(entry.resultId));
             failedCount += unresolved.length;
-            setBatchEditItems((prev) =>
-                prev.map((item) =>
-                    unresolved.some((entry) => entry.item.id === item.id)
-                        ? { ...item, status: "failed", failureReason: reason }
-                        : item,
-                ),
-            );
-            setNodes((prev) =>
-                prev.map((node) =>
-                    unresolved.some((entry) => entry.resultId === node.id)
-                        ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } }
-                        : node,
-                ),
-            );
+            setBatchEditItems((prev) => prev.map((item) => (unresolved.some((entry) => entry.item.id === item.id) ? { ...item, status: "failed", failureReason: reason } : item)));
+            setNodes((prev) => prev.map((node) => (unresolved.some((entry) => entry.resultId === node.id) ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node)));
         } finally {
             setSelectedNodeIds(new Set(selectedResults));
             setBatchEditRunning(false);
@@ -2740,11 +2715,18 @@ function WirelessCanvasPage() {
     }, []);
 
     const handleGenerateNode = useCallback(
-        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
+        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void) => {
+            let reported = false;
+            const reportResult = (outputs: CanvasGenerationOutput[]) => {
+                if (reported) return;
+                reported = true;
+                onResult?.({ mode, outputs });
+            };
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
+                reportResult([{ nodeId, status: "failed", error: "模型配置不可用" }]);
                 return;
             }
 
@@ -2759,6 +2741,7 @@ function WirelessCanvasPage() {
             if (runController.signal.aborted) {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
+                reportResult([{ nodeId, status: "failed", error: "生成已取消" }]);
                 return;
             }
             const markSourceStatus = sourceNode?.type !== CanvasNodeType.Image && !editingTextNode;
@@ -2766,6 +2749,7 @@ function WirelessCanvasPage() {
             if (!effectivePrompt && (mode === "text" || mode === "audio")) {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
+                reportResult([{ nodeId, status: "failed", error: "缺少生成提示词" }]);
                 return;
             }
             let pendingChildIds: string[] = [];
@@ -2788,6 +2772,7 @@ function WirelessCanvasPage() {
                         message.error(referenceValidation.message);
                         finishGenerationRequest(nodeId, runController);
                         setRunningNodeId(null);
+                        reportResult([{ nodeId, status: "failed", error: referenceValidation.message }]);
                         return;
                     }
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
@@ -2880,6 +2865,7 @@ function WirelessCanvasPage() {
                     if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
                     let hasSuccess = false;
                     let hasFailure = false;
+                    const imageOutputs: CanvasGenerationOutput[] = [];
                     await Promise.all(
                         targetIds.map(async (targetId) => {
                             try {
@@ -2936,12 +2922,14 @@ function WirelessCanvasPage() {
                                     },
                                 });
                                 hasSuccess = true;
+                                imageOutputs.push({ nodeId: targetId, status: "success", url: uploaded.url, storageKey: uploaded.storageKey });
                                 if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
                                 return true;
                             } catch (error) {
                                 if (isGenerationCanceled(error)) return false;
                                 const errorDetails = error instanceof Error ? error.message : "生成失败";
                                 hasFailure = true;
+                                imageOutputs.push({ nodeId: targetId, status: "failed", error: errorDetails });
                                 setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
                             } finally {
                                 finishGenerationRequest(targetId, controller);
@@ -2952,6 +2940,7 @@ function WirelessCanvasPage() {
                     if (count > 1) finishGenerationRequest(rootId, controller);
                     if (controller.signal.aborted) {
                         setNodes((prev) => prev.map((node) => (node.id === nodeId && isConfigNode && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node)));
+                        reportResult(imageOutputs.length ? imageOutputs : [{ nodeId, status: "failed", error: "生成已取消" }]);
                         return;
                     }
                     if (hasFailure) message.error(hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
@@ -2966,6 +2955,7 @@ function WirelessCanvasPage() {
                                     : node,
                         ),
                     );
+                    reportResult(imageOutputs);
                     return;
                 }
 
@@ -3030,6 +3020,7 @@ function WirelessCanvasPage() {
                                     : node,
                             ),
                         );
+                        reportResult([{ nodeId: videoId, status: "success", url: video.url, storageKey: video.storageKey }]);
                     } finally {
                         finishGenerationRequest(videoId, controller);
                     }
@@ -3127,12 +3118,16 @@ function WirelessCanvasPage() {
                     ),
                 );
             } catch (error) {
-                if (isGenerationCanceled(error)) return;
+                if (isGenerationCanceled(error)) {
+                    reportResult((pendingChildIds.length ? pendingChildIds : [nodeId]).map((outputNodeId) => ({ nodeId: outputNodeId, status: "failed", error: "生成已取消" })));
+                    return;
+                }
                 const errorDetails = error instanceof Error ? error.message : "生成失败";
                 message.error(errorDetails);
                 setNodes((prev) =>
                     prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } }) : node)),
                 );
+                reportResult((pendingChildIds.length ? pendingChildIds : [nodeId]).map((outputNodeId) => ({ nodeId: outputNodeId, status: "failed", error: errorDetails })));
             } finally {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
@@ -3143,6 +3138,120 @@ function WirelessCanvasPage() {
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
     }, [handleGenerateNode]);
+
+    const updateMediaWorkflow = useCallback((messageId: string, updater: (workflow: CanvasAgentMediaWorkflow) => CanvasAgentMediaWorkflow) => {
+        setChatSessions((sessions) =>
+            sessions.map((session) => ({
+                ...session,
+                messages: session.messages.map((item) => {
+                    const workflow = item.id === messageId ? item.detail?.mediaWorkflow : undefined;
+                    return workflow ? { ...item, detail: { ...item.detail, mediaWorkflow: updater(workflow) } } : item;
+                }),
+            })),
+        );
+    }, []);
+
+    const runWorkflowImageStage = useCallback(
+        async (messageId: string, workflow: CanvasAgentMediaWorkflow) => {
+            if (workflow.intent === "video") return;
+            updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "image", { status: "running" }));
+            const { configId, ops } = buildAgentMediaWorkflowStageOps(workflow, "image", nodesRef.current);
+            applyAgentOps(ops);
+            try {
+                let result: CanvasGenerationResult | undefined;
+                await handleGenerateNode(configId, "image", workflow.prompt, (nextResult) => {
+                    result = nextResult;
+                });
+                const candidates = workflowImageCandidatesFromResult(result);
+                const firstFailure = result?.outputs.find((output) => output.status === "failed");
+                updateMediaWorkflow(messageId, (current) =>
+                    completeAgentMediaWorkflowStage(current, "image", {
+                        status: candidates.some((candidate) => candidate.status === "success") ? "success" : "failed",
+                        candidates,
+                        error: firstFailure?.error || "图片生成失败，请重试。",
+                    }),
+                );
+            } catch (error) {
+                updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "image", { status: "failed", error }));
+            }
+        },
+        [applyAgentOps, handleGenerateNode, updateMediaWorkflow],
+    );
+
+    const runWorkflowVideoStage = useCallback(
+        async (messageId: string, workflow: CanvasAgentMediaWorkflow) => {
+            const dispatch = buildWorkflowVideoStageDispatch(workflow);
+            if (!dispatch) {
+                message.warning("请先选择一张成功候选图");
+                return;
+            }
+            updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "video", { status: "running" }));
+            const { configId, ops } = buildAgentMediaWorkflowStageOps(workflow, "video", nodesRef.current, dispatch.referenceNodeIds[0]);
+            applyAgentOps(ops);
+            try {
+                let result: CanvasGenerationResult | undefined;
+                await handleGenerateNode(configId, "video", workflow.prompt, (nextResult) => {
+                    result = nextResult;
+                });
+                const output = result?.outputs[0];
+                const status = output?.status === "success" && output.url ? "success" : "failed";
+                updateMediaWorkflow(messageId, (current) =>
+                    completeAgentMediaWorkflowStage(current, "video", {
+                        status,
+                        ...(status === "success" && output ? { videoResult: { nodeId: output.nodeId, url: output.url!, ...(output.storageKey ? { storageKey: output.storageKey } : {}) } } : {}),
+                        error: output?.error || "视频生成失败，请重试。",
+                    }),
+                );
+            } catch (error) {
+                updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "video", { status: "failed", error }));
+            }
+        },
+        [applyAgentOps, handleGenerateNode, message, updateMediaWorkflow],
+    );
+
+    const handleMediaWorkflowAction = useCallback(
+        (action: CanvasMediaWorkflowAction) => {
+            const workflow = chatSessions.flatMap((session) => session.messages).find((item) => item.id === action.messageId)?.detail?.mediaWorkflow;
+            if (!workflow) return;
+            if (action.type === "image_model_change") {
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, imageModel: action.model }));
+                return;
+            }
+            if (action.type === "video_model_change") {
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, videoModel: action.model }));
+                return;
+            }
+            if (action.type === "image_count_change") {
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, imageCount: Math.max(1, Math.min(15, Math.floor(action.count) || 1)) }));
+                return;
+            }
+            if (action.type === "video_seconds_change") {
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, videoSeconds: action.seconds }));
+                return;
+            }
+            if (action.type === "aspect_ratio_change") {
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, aspectRatio: action.ratio }));
+                return;
+            }
+            if (action.type === "select_candidate") {
+                updateMediaWorkflow(action.messageId, (current) => selectWorkflowCandidate(current, action.nodeId));
+                return;
+            }
+            if (action.type === "generate_images" || (action.type === "retry" && action.stage === "image")) {
+                void runWorkflowImageStage(action.messageId, workflow);
+                return;
+            }
+            if (action.type === "open_result") {
+                const node = workflow.videoResult ? nodesRef.current.find((item) => item.id === workflow.videoResult?.nodeId) : undefined;
+                if (!node) return;
+                setSelectedNodeIds(new Set([node.id]));
+                focusCanvasArea(node.position, node.width, node.height);
+                return;
+            }
+            if (action.type === "generate_video" || (action.type === "retry" && action.stage === "video")) void runWorkflowVideoStage(action.messageId, workflow);
+        },
+        [chatSessions, focusCanvasArea, runWorkflowImageStage, runWorkflowVideoStage, updateMediaWorkflow],
+    );
 
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData) => {
@@ -3425,7 +3534,12 @@ function WirelessCanvasPage() {
             <aside className="hidden w-[286px] shrink-0 border-r border-stone-200 bg-white/95 p-3 dark:border-stone-800 dark:bg-stone-950/95 lg:block">
                 <div className="mb-3 flex items-center justify-between px-1">
                     <div className="text-sm font-semibold">AI 生成</div>
-                    <button type="button" className="grid size-7 place-items-center rounded-md border border-stone-200 text-stone-500 transition hover:border-orange-400 hover:text-orange-600 dark:border-stone-800" onClick={() => setQuickGenerateOpen(true)} title="新建生成">
+                    <button
+                        type="button"
+                        className="grid size-7 place-items-center rounded-md border border-stone-200 text-stone-500 transition hover:border-orange-400 hover:text-orange-600 dark:border-stone-800"
+                        onClick={() => setQuickGenerateOpen(true)}
+                        title="新建生成"
+                    >
                         <Plus className="size-4" />
                     </button>
                 </div>
@@ -3914,6 +4028,7 @@ function WirelessCanvasPage() {
                     onPasteImage={pasteAssistantImage}
                     agentMode={agentMode}
                     onAgentModeChange={setAgentMode}
+                    onMediaWorkflowAction={handleMediaWorkflowAction}
                     autoConnectLocal={codexAutoConnect}
                     closing={assistantClosing}
                     onCollapse={closeAgent}
@@ -3943,8 +4058,25 @@ function CanvasInspectorPanel({
                 <div className="mt-0.5 truncate text-[10px] text-stone-400">{selectedNode ? `${selectedNode.type} · ${Math.round(selectedNode.width)} × ${Math.round(selectedNode.height)}` : "对象未选中时调整画布外观"}</div>
             </div>
             <div className="space-y-2 p-2.5 text-xs">
-                <div className="flex items-center justify-between gap-2"><span className="text-stone-500">背景</span><div className="flex rounded-md bg-stone-100 p-0.5 dark:bg-stone-900"><button type="button" className={`rounded px-2 py-1 ${backgroundMode === "lines" ? "bg-white text-orange-600 shadow-sm dark:bg-stone-800" : "text-stone-400"}`} onClick={() => onBackgroundModeChange("lines")}>线</button><button type="button" className={`rounded px-2 py-1 ${backgroundMode === "dots" ? "bg-white text-orange-600 shadow-sm dark:bg-stone-800" : "text-stone-400"}`} onClick={() => onBackgroundModeChange("dots")}>点</button></div></div>
-                <button type="button" className="flex w-full items-center justify-between rounded-md border border-stone-200 px-2.5 py-2 text-left transition hover:border-orange-300 dark:border-stone-800" onClick={() => onShowImageInfoChange(!showImageInfo)}><span>显示素材信息</span><span className={showImageInfo ? "text-orange-600" : "text-stone-400"}>{showImageInfo ? "已开启" : "已关闭"}</span></button>
+                <div className="flex items-center justify-between gap-2">
+                    <span className="text-stone-500">背景</span>
+                    <div className="flex rounded-md bg-stone-100 p-0.5 dark:bg-stone-900">
+                        <button type="button" className={`rounded px-2 py-1 ${backgroundMode === "lines" ? "bg-white text-orange-600 shadow-sm dark:bg-stone-800" : "text-stone-400"}`} onClick={() => onBackgroundModeChange("lines")}>
+                            线
+                        </button>
+                        <button type="button" className={`rounded px-2 py-1 ${backgroundMode === "dots" ? "bg-white text-orange-600 shadow-sm dark:bg-stone-800" : "text-stone-400"}`} onClick={() => onBackgroundModeChange("dots")}>
+                            点
+                        </button>
+                    </div>
+                </div>
+                <button
+                    type="button"
+                    className="flex w-full items-center justify-between rounded-md border border-stone-200 px-2.5 py-2 text-left transition hover:border-orange-300 dark:border-stone-800"
+                    onClick={() => onShowImageInfoChange(!showImageInfo)}
+                >
+                    <span>显示素材信息</span>
+                    <span className={showImageInfo ? "text-orange-600" : "text-stone-400"}>{showImageInfo ? "已开启" : "已关闭"}</span>
+                </button>
             </div>
         </aside>
     );
@@ -4384,6 +4516,15 @@ function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
     return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
 }
 
+function workflowImageCandidatesFromResult(result: CanvasGenerationResult | undefined): CanvasAgentMediaWorkflow["candidates"] {
+    return (result?.outputs || []).map((output) => ({
+        nodeId: output.nodeId,
+        status: output.status,
+        ...(output.url ? { url: output.url } : {}),
+        ...(output.storageKey ? { storageKey: output.storageKey } : {}),
+    }));
+}
+
 function videoMetadata(video: UploadedFile): CanvasNodeMetadata {
     return { content: video.url, storageKey: video.storageKey, status: "success", naturalWidth: video.width, naturalHeight: video.height, bytes: video.bytes, mimeType: video.mimeType || "video/mp4", durationMs: video.durationMs };
 }
@@ -4450,7 +4591,7 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     );
 }
 
-async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
+async function hydrateAssistantImages(sessions: CanvasAssistantSession[], nodes: CanvasNodeData[]) {
     const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T) => {
         if (item.storageKey) return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
         if (item.dataUrl?.startsWith("data:image/")) {
@@ -4463,10 +4604,33 @@ async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
         sessions.map(async (session) => ({
             ...session,
             messages: await Promise.all(
-                session.messages.map(async (message) => ({
-                    ...message,
-                    references: await Promise.all((message.references || []).map(hydrateItem)),
-                })),
+                session.messages.map(async (message) => {
+                    const workflow = message.detail?.mediaWorkflow ? restoreAgentMediaWorkflow(message.detail.mediaWorkflow, nodes) : undefined;
+                    const hydratedWorkflow = workflow
+                        ? {
+                              ...workflow,
+                              candidates: await Promise.all(
+                                  workflow.candidates.map(async (candidate) => ({
+                                      ...candidate,
+                                      ...(candidate.storageKey ? { url: await resolveImageUrl(candidate.storageKey, candidate.url) } : {}),
+                                  })),
+                              ),
+                              ...(workflow.videoResult
+                                  ? {
+                                        videoResult: {
+                                            ...workflow.videoResult,
+                                            ...(workflow.videoResult.storageKey ? { url: await resolveMediaUrl(workflow.videoResult.storageKey, workflow.videoResult.url) } : {}),
+                                        },
+                                    }
+                                  : {}),
+                          }
+                        : undefined;
+                    return {
+                        ...message,
+                        references: await Promise.all((message.references || []).map(hydrateItem)),
+                        ...(hydratedWorkflow ? { detail: { ...message.detail, mediaWorkflow: hydratedWorkflow } } : {}),
+                    };
+                }),
             ),
         })),
     );

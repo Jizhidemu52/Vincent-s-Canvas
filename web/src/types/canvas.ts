@@ -104,13 +104,53 @@ export type CanvasAssistantImage = {
     prompt: string;
 };
 
+export type CanvasAgentMediaIntent = "image" | "video" | "image_to_video";
+export type CanvasAgentMediaWorkflowCandidateStatus = "pending" | "success" | "failed";
+export type CanvasAgentMediaWorkflowStageStatus = "idle" | "running" | "success" | "failed";
+
+export type CanvasAgentMediaWorkflowCandidate = {
+    nodeId: string;
+    status: CanvasAgentMediaWorkflowCandidateStatus;
+    url?: string;
+    storageKey?: string;
+};
+
+export type CanvasAgentMediaWorkflowVideoResult = {
+    nodeId: string;
+    url: string;
+    storageKey?: string;
+};
+
+export type CanvasAgentMediaWorkflow = {
+    id: string;
+    intent: CanvasAgentMediaIntent;
+    prompt: string;
+    imageModel: string;
+    videoModel: string;
+    imageCount: number;
+    videoSeconds: string;
+    aspectRatio: string;
+    referenceNodeIds: string[];
+    candidates: CanvasAgentMediaWorkflowCandidate[];
+    selectedCandidateNodeId?: string;
+    imageStatus: CanvasAgentMediaWorkflowStageStatus;
+    videoStatus: CanvasAgentMediaWorkflowStageStatus;
+    videoResult?: CanvasAgentMediaWorkflowVideoResult;
+    error?: string;
+};
+
+export type CanvasAssistantMessageDetail = {
+    mediaWorkflow?: CanvasAgentMediaWorkflow;
+    [key: string]: unknown;
+};
+
 export type CanvasAssistantMessage = {
     id: string;
     role: "user" | "assistant" | "system" | "tool" | "error";
     title?: string;
     text: string;
     meta?: string;
-    detail?: unknown;
+    detail?: CanvasAssistantMessageDetail;
     references?: CanvasAssistantReference[];
 };
 
