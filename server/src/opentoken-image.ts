@@ -4,9 +4,12 @@ export type OpenTokenReferenceImage = {
   bytes: Uint8Array;
 };
 
+export type OpenTokenImageModel = "gpt-image-2" | "gemini-3.1-flash-image";
+
 export type OpenTokenImageInput = {
   baseUrl: string;
   apiKey: string;
+  modelId?: OpenTokenImageModel;
   prompt: string;
   size?: string;
   resolution?: "1k" | "2k" | "4k";
@@ -18,7 +21,7 @@ export type OpenTokenImageRequest = {
   method: "POST";
   headers: Record<string, string>;
   body?: {
-    model: "gpt-image-2";
+    model: OpenTokenImageModel;
     prompt: string;
     n: 1;
     size?: string;
@@ -30,10 +33,11 @@ export type OpenTokenImageRequest = {
 export function buildOpenTokenImageRequest(input: OpenTokenImageInput): OpenTokenImageRequest {
   const baseUrl = input.baseUrl.replace(/\/$/, "");
   const references = input.references || [];
+  const modelId = input.modelId || "gpt-image-2";
   const headers = { authorization: `Bearer ${input.apiKey}` };
   if (references.length) {
     const form = new FormData();
-    form.set("model", "gpt-image-2");
+    form.set("model", modelId);
     form.set("prompt", input.prompt);
     form.set("n", "1");
     if (input.size) form.set("size", input.size);
@@ -49,7 +53,7 @@ export function buildOpenTokenImageRequest(input: OpenTokenImageInput): OpenToke
     method: "POST",
     headers: { ...headers, "content-type": "application/json" },
     body: {
-      model: "gpt-image-2",
+      model: modelId,
       prompt: input.prompt,
       n: 1,
       ...(input.size ? { size: input.size } : {}),

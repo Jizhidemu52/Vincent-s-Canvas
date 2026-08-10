@@ -29,6 +29,17 @@ describe("OpenToken image protocol adapter", () => {
     });
   });
 
+  test("preserves the selected OpenToken image model in a generation request", () => {
+    const request = buildOpenTokenImageRequest({
+      baseUrl: "https://cn2.gw.opentoken.io/v1",
+      apiKey: "test-key",
+      modelId: "gemini-3.1-flash-image",
+      prompt: "A fashion sketch on a white background",
+    });
+
+    expect(request.body?.model).toBe("gemini-3.1-flash-image");
+  });
+
   test("uses the image edits endpoint when reference images are supplied", () => {
     const request = buildOpenTokenImageRequest({
       baseUrl: "https://cn2.gw.opentoken.io/v1",
