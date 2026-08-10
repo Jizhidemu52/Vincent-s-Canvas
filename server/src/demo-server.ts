@@ -1,5 +1,6 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
 import { apiMartImageModel, buildApiMartImageRequest, runApiMartImageTask } from "./apimart-image";
+import { resolveDemoExternalProviders } from "./demo-provider-configuration";
 import { runOpenTokenImage } from "./opentoken-image";
 import { buildGeminiRequestBody, readGeminiResponse } from "./routes/chat";
 
@@ -64,7 +65,9 @@ const gptImage2ProviderId = "30000000-0000-4000-8000-000000000002";
 const openTokenProviderId = "30000000-0000-4000-8000-000000000005";
 const openTokenBaseUrl = (process.env.OPENTOKEN_BASE_URL || "https://cn2.gw.opentoken.io/v1").replace(/\/$/, "");
 const openTokenApiKey = process.env.OPENTOKEN_API_KEY?.trim() || "";
-const gptImage2ModelId = "40000000-0000-4000-8000-000000000099";
+const externalProviders = resolveDemoExternalProviders({ openTokenApiKey, apiMartApiKey });
+const { hasOpenToken, hasApiMart, openTokenGptImage2ModelId, apiMartGptImage2ModelId } = externalProviders;
+const gptImage2ModelId = apiMartGptImage2ModelId;
 const happyHorseModelId = "40000000-0000-4000-8000-000000000100";
 const geminiProviderId = "30000000-0000-4000-8000-000000000003";
 const geminiModelId = "40000000-0000-4000-8000-000000000101";
@@ -106,7 +109,7 @@ const demoModels: Array<Record<string, unknown>> = toolDefinitions.map(
     enabled: true,
   }),
 );
-if (openTokenApiKey) {
+if (hasOpenToken) {
   demoProviders.push({
     id: openTokenProviderId,
     name: "OpenToken",
@@ -118,7 +121,7 @@ if (openTokenApiKey) {
     updatedAt: new Date().toISOString(),
   });
   demoModels.push({
-    id: gptImage2ModelId,
+    id: openTokenGptImage2ModelId,
     providerId: openTokenProviderId,
     providerName: "OpenToken",
     workflowConfigId: null,
@@ -132,7 +135,8 @@ if (openTokenApiKey) {
     concurrencyLimit: 2,
     enabled: true,
   });
-} else if (apiMartApiKey) {
+}
+if (hasApiMart) {
   demoProviders.push({
     id: gptImage2ProviderId,
     name: "APIMart 图片服务",
@@ -261,9 +265,9 @@ const demoToolConfigurations = toolDefinitions.map((tool, index) => ({
   modelConfigId:
     tool.toolKey === "video" && apiMartApiKey
       ? happyHorseModelId
-      : ["image", "image-edit", "angle-control"].includes(tool.toolKey) && openTokenApiKey
-        ? gptImage2ModelId
-        : tool.toolKey === "image" && apiMartApiKey
+      : ["image", "image-edit", "angle-control"].includes(tool.toolKey) && hasOpenToken
+        ? openTokenGptImage2ModelId
+        : tool.toolKey === "image" && hasApiMart
         ? gptImage2ModelId
         : demoModels[index]!.id as string,
   enabled: true,
@@ -723,8 +727,12 @@ Bun.serve({
           (item) =>
             item.id === input.modelConfigId &&
             typeof item.modelId === "string" &&
-            ((openTokenApiKey && item.id === gptImage2ModelId) ||
-              (apiMartApiKey && apiMartImageModel(item.modelId))) &&
+            ((hasOpenToken &&
+              item.id === openTokenGptImage2ModelId &&
+              item.providerId === openTokenProviderId) ||
+              (hasApiMart &&
+                item.providerId === gptImage2ProviderId &&
+                apiMartImageModel(item.modelId))) &&
             item.enabled,
         );
         if (!model)
