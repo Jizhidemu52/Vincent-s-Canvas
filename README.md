@@ -200,6 +200,19 @@ cd server
 bun run dev:demo
 ```
 
+#### Local OpenToken GPT-Image-2
+
+To use the local demo API with OpenToken, set these variables only in the server process that starts `dev:demo` (never in `web/` or a committed file):
+
+```powershell
+$env:OPENTOKEN_API_KEY = "<dedicated OpenToken key>"
+$env:OPENTOKEN_BASE_URL = "https://cn2.gw.opentoken.io/v1"
+cd server
+bun run dev:demo
+```
+
+When the key is present, the local demo exposes `gpt-image-2` for text-to-image and reference-image editing. Text-to-image calls `/images/generations`; requests with one or more reference images call `/images/edits` as multipart form data. This is a local demo integration only; production credentials remain configured through the encrypted provider settings.
+
 演示 API 只监听 `127.0.0.1:3100`，使用内存 Session，重启后会恢复默认数据。登录页检测到演示 API 后会自动显示以下可点击填入的账号：
 
 | 身份 | 登录入口 | 账号 | 密码 |

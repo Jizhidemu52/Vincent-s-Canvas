@@ -4,7 +4,7 @@
 
 **Goal:** Configure OpenToken as the secure OpenAI-compatible provider for the `gpt-image-2` image-generation and reference-image editing paths.
 
-**Architecture:** No application source changes are required because the server already persists encrypted provider credentials and routes OpenAI-compatible text-to-image requests to `/images/generations` and reference-image edits to `/images/edits`. Configuration is stored through the existing super-admin API/UI: one enabled provider, one enabled image model, and tool mappings that point to that model.
+**Architecture:** Production continues to use the encrypted provider configuration and generic OpenAI-compatible worker. The local demo adds a small OpenToken adapter: ordinary requests call `/images/generations`, and requests with reference assets call `/images/edits` as multipart form data. The API key is process-only and is never returned to the browser or written to a file.
 
 **Tech Stack:** React admin UI, Express API, PostgreSQL provider/model configuration, AES-256-GCM provider credential encryption, OpenAI-compatible OpenToken API.
 

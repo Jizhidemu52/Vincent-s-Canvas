@@ -1,5 +1,6 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
 import { apiMartImageModel, buildApiMartImageRequest, runApiMartImageTask } from "./apimart-image";
+import { runOpenTokenImage } from "./opentoken-image";
 import { buildGeminiRequestBody, readGeminiResponse } from "./routes/chat";
 
 const sessions = new Map<string, string>();
@@ -60,6 +61,9 @@ const apiMartBaseUrl = (
 ).replace(/\/$/, "");
 const apiMartApiKey = process.env.APIMART_API_KEY?.trim() || process.env.GPT_IMAGE_2_API_KEY?.trim() || "";
 const gptImage2ProviderId = "30000000-0000-4000-8000-000000000002";
+const openTokenProviderId = "30000000-0000-4000-8000-000000000005";
+const openTokenBaseUrl = (process.env.OPENTOKEN_BASE_URL || "https://cn2.gw.opentoken.io/v1").replace(/\/$/, "");
+const openTokenApiKey = process.env.OPENTOKEN_API_KEY?.trim() || "";
 const gptImage2ModelId = "40000000-0000-4000-8000-000000000099";
 const happyHorseModelId = "40000000-0000-4000-8000-000000000100";
 const geminiProviderId = "30000000-0000-4000-8000-000000000003";
@@ -102,7 +106,33 @@ const demoModels: Array<Record<string, unknown>> = toolDefinitions.map(
     enabled: true,
   }),
 );
-if (apiMartApiKey) {
+if (openTokenApiKey) {
+  demoProviders.push({
+    id: openTokenProviderId,
+    name: "OpenToken",
+    protocol: "openai",
+    baseUrl: openTokenBaseUrl,
+    enabled: true,
+    hasCredentials: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  demoModels.push({
+    id: gptImage2ModelId,
+    providerId: openTokenProviderId,
+    providerName: "OpenToken",
+    workflowConfigId: null,
+    workflowName: null,
+    replacementModelConfigId: null,
+    name: "GPT-Image-2",
+    modelId: "gpt-image-2",
+    capabilities: ["generate", "edit"],
+    creditCost: 4,
+    rmbCost: 0,
+    concurrencyLimit: 2,
+    enabled: true,
+  });
+} else if (apiMartApiKey) {
   demoProviders.push({
     id: gptImage2ProviderId,
     name: "APIMart 图片服务",
@@ -231,7 +261,9 @@ const demoToolConfigurations = toolDefinitions.map((tool, index) => ({
   modelConfigId:
     tool.toolKey === "video" && apiMartApiKey
       ? happyHorseModelId
-      : tool.toolKey === "image" && apiMartApiKey
+      : ["image", "image-edit", "angle-control"].includes(tool.toolKey) && openTokenApiKey
+        ? gptImage2ModelId
+        : tool.toolKey === "image" && apiMartApiKey
         ? gptImage2ModelId
         : demoModels[index]!.id as string,
   enabled: true,
@@ -664,11 +696,11 @@ Bun.serve({
           input.operationType || "",
         )
       ) {
-        if (!apiMartApiKey)
+        if (!openTokenApiKey && !apiMartApiKey)
           return json(
             {
               error: "PROVIDER_NOT_CONFIGURED",
-              message: "GPT-Image-2 service credential is not configured",
+              message: "Image generation service credential is not configured",
             },
             503,
           );
@@ -691,7 +723,8 @@ Bun.serve({
           (item) =>
             item.id === input.modelConfigId &&
             typeof item.modelId === "string" &&
-            apiMartImageModel(item.modelId) &&
+            ((openTokenApiKey && item.id === gptImage2ModelId) ||
+              (apiMartApiKey && apiMartImageModel(item.modelId))) &&
             item.enabled,
         );
         if (!model)
@@ -769,14 +802,23 @@ Bun.serve({
         };
         demoTasks.set(task.id, task);
         user.creditBalance -= credits;
-        void runApiMartImageTaskForDemo(
-          task,
-          user,
-          imageModelId,
-          input.prompt || "",
-          input.parameters || {},
-          sources,
-        );
+        if (model.providerId === openTokenProviderId)
+          void runOpenTokenImageTaskForDemo(
+            task,
+            user,
+            input.prompt || "",
+            input.parameters || {},
+            sources,
+          );
+        else
+          void runApiMartImageTaskForDemo(
+            task,
+            user,
+            imageModelId,
+            input.prompt || "",
+            input.parameters || {},
+            sources,
+          );
         return json({ task }, 201);
       }
       if (input.operationType !== "seamless_stitch")
@@ -1238,6 +1280,30 @@ async function runApiMartImageTaskForDemo(
     task.failureReason = isProviderNetworkError(error)
       ? "无法与图像服务建立安全连接。请检查服务器外网、TLS 证书策略或稍后重试；本次积分已自动退还。"
       : error instanceof Error ? error.message : "APIMart 图片任务失败";
+    user.creditBalance += task.credits;
+  }
+}
+
+async function runOpenTokenImageTaskForDemo(
+  task: DemoTask,
+  user: (typeof demoAccounts)[number]["user"],
+  prompt: string,
+  parameters: Record<string, unknown>,
+  sources: DemoAsset[],
+) {
+  try {
+    task.resultUrls = [await runOpenTokenImage({
+      baseUrl: openTokenBaseUrl,
+      apiKey: openTokenApiKey,
+      prompt,
+      size: normalizeGptImageSize(parameters.size),
+      resolution: normalizeGptImageResolution(parameters.resolution),
+      references: sources.map((source) => ({ filename: source.filename, mimeType: source.mimeType, bytes: source.bytes })),
+    })];
+    task.status = "success";
+  } catch (error) {
+    task.status = "failed";
+    task.failureReason = error instanceof Error ? error.message : "OpenToken image task failed";
     user.creditBalance += task.credits;
   }
 }
