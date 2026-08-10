@@ -427,8 +427,10 @@ async function callDemoGeminiWithNode(endpoint: string, body: unknown): Promise<
   return JSON.parse(stdout) as DemoGeminiPayload;
 }
 
+const demoPort = Number(process.env.DEMO_PORT || 3100);
+
 Bun.serve({
-  port: 3100,
+  port: demoPort,
   hostname: "127.0.0.1",
   async fetch(request) {
     const url = new URL(request.url);
@@ -1294,7 +1296,7 @@ Bun.serve({
   },
 });
 
-console.log("Local demo API listening on http://127.0.0.1:3100");
+console.log(`Local demo API listening on http://127.0.0.1:${demoPort}`);
 
 async function runApiMartImageTaskForDemo(
   task: DemoTask,
