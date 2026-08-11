@@ -1,6 +1,7 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
 import { apiMartImageModel, buildApiMartImageRequest, runApiMartImageTask } from "./apimart-image";
 import { resolveDemoExternalProviders } from "./demo-provider-configuration";
+import { toHappyHorseImageDataUrl } from "./happyhorse";
 import { runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
 import { buildGeminiRequestBody, readGeminiResponse } from "./routes/chat";
 
@@ -1479,7 +1480,7 @@ async function callHappyHorse(
 ) {
   const imageSources = sources.filter((source) => source.mimeType.startsWith("image/"));
   const videoSource = sources.find((source) => source.mimeType.startsWith("video/"));
-  const uploadedImageUrls = await Promise.all(imageSources.map(uploadHappyHorseImage));
+  const referenceImageUrls = imageSources.map(toHappyHorseImageDataUrl);
   const body: Record<string, unknown> = {
     model: "happyhorse-1.0",
     prompt,
@@ -1487,9 +1488,9 @@ async function callHappyHorse(
     watermark: parameters.watermark,
   };
   if (parameters.mode === "first-frame") {
-    body.first_frame_image = uploadedImageUrls[0];
+    body.first_frame_image = referenceImageUrls[0];
   } else if (parameters.mode === "reference") {
-    body.image_urls = uploadedImageUrls;
+    body.image_urls = referenceImageUrls;
   } else if (parameters.mode === "edit") {
     if (!videoSource) throw new Error("A source video is required for video editing");
     // The upstream service needs a URL it can fetch. Demo assets are private to
@@ -1584,30 +1585,6 @@ function validateHappyHorseRequest(
   if (images.some((source) => source.bytes.byteLength > 10 * 1024 * 1024)) return "Each image must be 10MB or smaller";
   if (videos.some((source) => source.bytes.byteLength > 100 * 1024 * 1024)) return "The source video must be 100MB or smaller";
   return "";
-}
-
-async function uploadHappyHorseImage(source: DemoAsset) {
-  const form = new FormData();
-  const bytes = new Uint8Array(source.bytes.byteLength);
-  bytes.set(source.bytes);
-  form.set(
-    "file",
-    new File([bytes.buffer], source.filename, { type: source.mimeType }),
-  );
-  const response = await fetch(`${apiMartBaseUrl}/uploads/images`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${apiMartApiKey}` },
-    body: form,
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!response.ok)
-    throw new Error(
-      `HappyHorse image upload failed: ${response.status}${await providerErrorDetail(response)}`,
-    );
-  const uploaded = (await response.json()) as { url?: unknown };
-  if (typeof uploaded.url !== "string" || !/^https?:\/\//.test(uploaded.url))
-    throw new Error("HappyHorse image upload did not return an HTTP URL");
-  return uploaded.url;
 }
 
 function extractHappyHorseVideoUrl(items: unknown[] | undefined) {
