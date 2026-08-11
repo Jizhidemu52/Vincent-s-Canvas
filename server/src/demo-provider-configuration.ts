@@ -7,6 +7,7 @@ export function resolveDemoExternalProviders(input: {
     hasApiMart: Boolean(input.apiMartApiKey?.trim()),
     openTokenGptImage2ModelId: "40000000-0000-4000-8000-000000000105",
     officialNanoBanana2ModelId: "40000000-0000-4000-8000-000000000106",
+    officialNanoBanana2Capabilities: ["generate", "edit"],
     apiMartGptImage2ModelId: "40000000-0000-4000-8000-000000000099",
   };
 }

@@ -66,7 +66,7 @@ const openTokenProviderId = "30000000-0000-4000-8000-000000000005";
 const openTokenBaseUrl = (process.env.OPENTOKEN_BASE_URL || "https://cn2.gw.opentoken.io/v1").replace(/\/$/, "");
 const openTokenApiKey = process.env.OPENTOKEN_API_KEY?.trim() || "";
 const externalProviders = resolveDemoExternalProviders({ openTokenApiKey, apiMartApiKey });
-const { hasOpenToken, hasApiMart, openTokenGptImage2ModelId, officialNanoBanana2ModelId, apiMartGptImage2ModelId } = externalProviders;
+const { hasOpenToken, hasApiMart, openTokenGptImage2ModelId, officialNanoBanana2ModelId, officialNanoBanana2Capabilities, apiMartGptImage2ModelId } = externalProviders;
 const gptImage2ModelId = apiMartGptImage2ModelId;
 const happyHorseModelId = "40000000-0000-4000-8000-000000000100";
 const geminiProviderId = "30000000-0000-4000-8000-000000000003";
@@ -144,7 +144,7 @@ if (hasOpenToken) {
     replacementModelConfigId: null,
     name: "官方nanobanna2",
     modelId: "gemini-3.1-flash-image",
-    capabilities: ["generate"],
+    capabilities: officialNanoBanana2Capabilities,
     creditCost: 4,
     rmbCost: 0,
     concurrencyLimit: 2,
@@ -781,14 +781,6 @@ Bun.serve({
           sources.push(source);
         }
         const imageModelId = String(model.modelId);
-        if (imageModelId === "gemini-3.1-flash-image" && sources.length)
-          return json(
-            {
-              error: "MODEL_CAPABILITY_MISMATCH",
-              message: "官方nanobanna2 当前仅接入文生图，暂不支持参考图编辑",
-            },
-            400,
-          );
         if ((imageModelId === "midjourney" || imageModelId === "midjourney-blend") && input.operationType !== "image_generation")
           return json({ error: "MODEL_CAPABILITY_MISMATCH", message: "Midjourney 当前只支持文生图，请选择 GPT-Image-2 或 Gemini 图片模型进行编辑" }, 400);
         if (sources.length > (imageModelId === "gpt-image-2" ? 16 : imageModelId === "midjourney" ? 0 : imageModelId === "midjourney-blend" ? 4 : 14))
