@@ -7,6 +7,7 @@ test("workbench keeps reference rails and floating viewport controls", async () 
 
     expect(project).toContain('data-testid="canvas-left-generator-rail"');
     expect(project).toContain('testId="canvas-right-asset-rail"');
+    expect(project).toContain('useState<CanvasBackgroundMode>("dots")');
     expect(toolbar).toContain('data-testid="canvas-top-tool-rail"');
     expect(zoom).toContain("bottom-5 right-5");
 });
