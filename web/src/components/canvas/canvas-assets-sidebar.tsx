@@ -12,7 +12,7 @@ export type CanvasSidebarAsset =
     | { kind: "image"; dataUrl: string; title: string; storageKey?: string }
     | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number };
 
-export function CanvasAssetsSidebar({ onInsert }: { onInsert: (asset: CanvasSidebarAsset) => void }) {
+export function CanvasAssetsSidebar({ onInsert, testId }: { onInsert: (asset: CanvasSidebarAsset) => void; testId?: string }) {
     const assets = useAssetStore((state) => state.assets);
     const user = useUserStore((state) => state.user);
     const [tab, setTab] = useState<AssetTab>("history");
@@ -29,8 +29,8 @@ export function CanvasAssetsSidebar({ onInsert }: { onInsert: (asset: CanvasSide
     }, [assets, keyword, tab, user]);
 
     return (
-        <aside className="hidden h-full min-h-0 w-[252px] shrink-0 flex-col border-l border-stone-200 bg-white/95 text-stone-900 dark:border-stone-800 dark:bg-stone-950/95 dark:text-stone-100 xl:flex">
-            <div className="border-b border-stone-200 px-3 pb-3 pt-3 dark:border-stone-800">
+        <aside data-testid={testId} className="hidden h-full min-h-0 w-[224px] shrink-0 flex-col border-l border-slate-200/80 bg-white/95 pt-10 text-slate-900 shadow-[-10px_0_30px_rgba(15,23,42,.025)] dark:border-stone-800 dark:bg-stone-950/95 dark:text-stone-100 xl:flex">
+            <div className="border-b border-slate-200/80 px-2.5 pb-2.5 pt-2 dark:border-stone-800">
                 <Segmented
                     block
                     size="small"
@@ -43,7 +43,7 @@ export function CanvasAssetsSidebar({ onInsert }: { onInsert: (asset: CanvasSide
                     ]}
                 />
                 <Input
-                    className="!mt-3 !rounded-lg"
+                    className="!mt-2 !rounded-md"
                     size="small"
                     value={keyword}
                     onChange={(event) => setKeyword(event.target.value)}
@@ -53,9 +53,9 @@ export function CanvasAssetsSidebar({ onInsert }: { onInsert: (asset: CanvasSide
                 />
             </div>
 
-            <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
+            <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-2.5">
                 {visibleAssets.length ? (
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-1.5">
                         {visibleAssets.map((asset) => (
                             <AssetTile key={asset.id} asset={asset} onInsert={onInsert} />
                         ))}
@@ -76,7 +76,7 @@ function AssetTile({ asset, onInsert }: { asset: Asset; onInsert: (asset: Canvas
     };
 
     return (
-        <button type="button" className="group overflow-hidden rounded-md border border-stone-200 bg-stone-50 text-left transition hover:border-orange-400 hover:shadow-sm dark:border-stone-800 dark:bg-stone-900" onClick={insert} title={`插入 ${asset.title}`}>
+        <button type="button" className="group overflow-hidden rounded-md border border-slate-200 bg-[#fafaf9] text-left transition hover:border-[#50d5be] hover:shadow-sm dark:border-stone-800 dark:bg-stone-900" onClick={insert} title={`插入 ${asset.title}`}>
             {imageUrl ? <img src={imageUrl} alt={asset.title} className="aspect-square w-full object-cover" /> : <div className="flex aspect-square items-center justify-center text-stone-400"><ImageIcon className="size-5" /></div>}
             <div className="truncate px-1.5 py-1 text-[10px] font-medium text-stone-600 dark:text-stone-300">{asset.title}</div>
         </button>
