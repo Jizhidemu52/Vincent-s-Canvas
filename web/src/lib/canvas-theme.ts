@@ -4,11 +4,11 @@ export type CanvasBackgroundMode = "dots" | "lines" | "blank";
 export const canvasThemes = {
     light: {
         canvas: {
-            background: "#f4f2ed",
-            dot: "rgba(68,64,60,.28)",
-            line: "rgba(68,64,60,.12)",
-            selectionStroke: "#1c1917",
-            selectionFill: "rgba(28,25,23,.06)",
+            background: "#fbfbfa",
+            dot: "rgba(71,85,105,.12)",
+            line: "rgba(71,85,105,.07)",
+            selectionStroke: "#50d5be",
+            selectionFill: "rgba(80,213,190,.08)",
         },
         node: {
             label: "#57534e",
@@ -28,6 +28,8 @@ export const canvasThemes = {
             itemHover: "#e7e5df",
             activeBg: "#e7e5df",
             activeText: "#292524",
+            primary: "#f36a2d",
+            highResolution: "#805ad5",
         },
     },
     dark: {
@@ -56,6 +58,8 @@ export const canvasThemes = {
             itemHover: "#292524",
             activeBg: "#3a3631",
             activeText: "#f5f5f4",
+            primary: "#f36a2d",
+            highResolution: "#b794f4",
         },
     },
 } as const;
