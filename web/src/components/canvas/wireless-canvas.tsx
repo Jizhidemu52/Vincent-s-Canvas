@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
+import { canvasViewportTransform, zoomViewportAtPoint } from "@/lib/canvas/canvas-viewport-interaction";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ViewportTransform } from "@/types/canvas";
 
@@ -10,6 +11,7 @@ type WirelessCanvasProps = {
     viewport: ViewportTransform;
     backgroundMode?: CanvasBackgroundMode;
     onViewportChange: (viewport: ViewportTransform) => void;
+    onViewportPreview?: (viewport: ViewportTransform) => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
     onCanvasDeselect?: () => void;
     onContextMenu?: (event: React.MouseEvent) => void;
@@ -17,7 +19,7 @@ type WirelessCanvasProps = {
     children: React.ReactNode;
 };
 
-export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, children }: WirelessCanvasProps) {
+export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onViewportPreview, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, children }: WirelessCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const panState = useRef({
         isPanning: false,
@@ -25,20 +27,25 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
         startY: 0,
         initialX: 0,
         initialY: 0,
+        initialK: 1,
         hasMoved: false,
     });
-    const scaleRef = useRef(viewport.k);
+    const contentRef = useRef<HTMLDivElement>(null);
+    const gridRef = useRef<HTMLDivElement>(null);
+    const liveViewportRef = useRef(viewport);
     const frameRef = useRef<number | null>(null);
-    const nextViewportRef = useRef<ViewportTransform | null>(null);
+    const pendingViewportRef = useRef<ViewportTransform | null>(null);
+    const wheelCommitTimerRef = useRef<number | null>(null);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
 
     useEffect(() => {
-        scaleRef.current = viewport.k;
-    }, [viewport.k]);
+        if (!panState.current.isPanning) liveViewportRef.current = viewport;
+    }, [viewport]);
 
     useEffect(
         () => () => {
             if (frameRef.current) cancelAnimationFrame(frameRef.current);
+            if (wheelCommitTimerRef.current) window.clearTimeout(wheelCommitTimerRef.current);
         },
         [],
     );
@@ -62,26 +69,66 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
         };
     }, []);
 
+    const applyLiveViewport = useCallback(
+        (next: ViewportTransform) => {
+            liveViewportRef.current = next;
+            const content = contentRef.current;
+            if (content) content.style.transform = canvasViewportTransform(next);
+            const grid = gridRef.current;
+            if (grid && backgroundMode !== "blank") {
+                const gridSize = (backgroundMode === "dots" ? 16 : 48) * next.k;
+                grid.style.backgroundSize = `${gridSize}px ${gridSize}px`;
+                grid.style.backgroundPosition = `${next.x % gridSize}px ${next.y % gridSize}px`;
+            }
+            onViewportPreview?.(next);
+        },
+        [backgroundMode, onViewportPreview],
+    );
+
+    const queueLiveViewport = useCallback(
+        (next: ViewportTransform) => {
+            pendingViewportRef.current = next;
+            if (frameRef.current) return;
+            frameRef.current = requestAnimationFrame(() => {
+                frameRef.current = null;
+                const pending = pendingViewportRef.current;
+                pendingViewportRef.current = null;
+                if (pending) applyLiveViewport(pending);
+            });
+        },
+        [applyLiveViewport],
+    );
+
+    const commitLiveViewport = useCallback(() => {
+        if (frameRef.current) {
+            cancelAnimationFrame(frameRef.current);
+            frameRef.current = null;
+        }
+        const next = pendingViewportRef.current || liveViewportRef.current;
+        pendingViewportRef.current = null;
+        applyLiveViewport(next);
+        onViewportChange(next);
+    }, [applyLiveViewport, onViewportChange]);
+
     const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
         if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
 
         const delta = -event.deltaY;
         const factor = Math.pow(1.1, delta / 100);
-        const newScale = clampCanvasZoom(viewport.k * factor);
+        const current = pendingViewportRef.current || liveViewportRef.current;
+        const newScale = clampCanvasZoom(current.k * factor);
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
 
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
-        const worldX = (mouseX - viewport.x) / viewport.k;
-        const worldY = (mouseY - viewport.y) / viewport.k;
-
-        onViewportChange({
-            x: mouseX - worldX * newScale,
-            y: mouseY - worldY * newScale,
-            k: newScale,
-        });
+        queueLiveViewport(zoomViewportAtPoint(current, { x: mouseX, y: mouseY }, newScale));
+        if (wheelCommitTimerRef.current) window.clearTimeout(wheelCommitTimerRef.current);
+        wheelCommitTimerRef.current = window.setTimeout(() => {
+            wheelCommitTimerRef.current = null;
+            commitLiveViewport();
+        }, 120);
     };
 
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -100,12 +147,14 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
         if (event.button === 1 || (event.button === 0 && !isSpacePressed && isBackgroundClick)) {
             event.preventDefault();
             event.currentTarget.setPointerCapture(event.pointerId);
+            const current = pendingViewportRef.current || liveViewportRef.current;
             panState.current = {
                 isPanning: true,
                 startX: event.clientX,
                 startY: event.clientY,
-                initialX: viewport.x,
-                initialY: viewport.y,
+                initialX: current.x,
+                initialY: current.y,
+                initialK: current.k,
                 hasMoved: false,
             };
             document.body.style.cursor = "grabbing";
@@ -127,15 +176,10 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
                 panState.current.hasMoved = true;
             }
 
-            nextViewportRef.current = {
+            queueLiveViewport({
                 x: panState.current.initialX + dx,
                 y: panState.current.initialY + dy,
-                k: scaleRef.current,
-            };
-            if (frameRef.current) return;
-            frameRef.current = requestAnimationFrame(() => {
-                frameRef.current = null;
-                if (nextViewportRef.current) onViewportChange(nextViewportRef.current);
+                k: panState.current.initialK,
             });
         };
 
@@ -144,6 +188,8 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
 
             if (!panState.current.hasMoved) {
                 onCanvasDeselect?.();
+            } else {
+                commitLiveViewport();
             }
             panState.current.isPanning = false;
             document.body.style.cursor = "default";
@@ -155,7 +201,7 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerUp);
         };
-    }, [onCanvasDeselect, onViewportChange]);
+    }, [commitLiveViewport, onCanvasDeselect, queueLiveViewport]);
 
     useEffect(() => {
         const container = containerRef.current;
@@ -177,11 +223,12 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
             onDragOver={(event) => event.preventDefault()}
             onDrop={onDrop}
         >
-            <CanvasGrid viewport={viewport} mode={backgroundMode} />
+            <CanvasGrid gridRef={gridRef} viewport={viewport} mode={backgroundMode} />
             <div
+                ref={contentRef}
                 className="absolute origin-top-left"
                 style={{
-                    transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})`,
+                    transform: canvasViewportTransform(viewport),
                 }}
             >
                 {children}
@@ -190,7 +237,7 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
     );
 }
 
-function CanvasGrid({ viewport, mode }: { viewport: ViewportTransform; mode: CanvasBackgroundMode }) {
+function CanvasGrid({ gridRef, viewport, mode }: { gridRef: React.RefObject<HTMLDivElement | null>; viewport: ViewportTransform; mode: CanvasBackgroundMode }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     if (mode === "blank") return null;
 
@@ -203,6 +250,7 @@ function CanvasGrid({ viewport, mode }: { viewport: ViewportTransform; mode: Can
 
     return (
         <div
+            ref={gridRef}
             className="pointer-events-none absolute inset-0 opacity-70"
             style={{
                 backgroundImage,

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ChevronRight, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { canvasNodeRenderStateEqual, type CanvasNodeRenderState } from "@/lib/canvas/canvas-render-stability";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -329,7 +330,38 @@ export const CanvasNode = React.memo(function CanvasNode({
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
         </div>
     );
-});
+}, canvasNodePropsEqual);
+
+function canvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProps) {
+    if (!canvasNodeRenderStateEqual(toRenderState(previous), toRenderState(next))) return false;
+    if (previous.onMouseDown !== next.onMouseDown || previous.onHoverStart !== next.onHoverStart || previous.onHoverEnd !== next.onHoverEnd || previous.onConnectStart !== next.onConnectStart || previous.onResize !== next.onResize || previous.onContentChange !== next.onContentChange || previous.onToggleBatch !== next.onToggleBatch || previous.onSetBatchPrimary !== next.onSetBatchPrimary || previous.onRetry !== next.onRetry || previous.onGenerateImage !== next.onGenerateImage || previous.onViewImage !== next.onViewImage || previous.onContextMenu !== next.onContextMenu) return false;
+    if (previous.showPanel || next.showPanel) return previous.renderPanel === next.renderPanel;
+    if (previous.data.type === CanvasNodeType.Config || next.data.type === CanvasNodeType.Config) return previous.renderNodeContent === next.renderNodeContent;
+    return true;
+}
+
+function toRenderState(props: CanvasNodeProps): CanvasNodeRenderState {
+    return {
+        data: props.data,
+        scale: props.scale,
+        isSelected: props.isSelected,
+        isRelated: props.isRelated,
+        isFocusRelated: props.isFocusRelated,
+        isConnectionTarget: props.isConnectionTarget,
+        isConnecting: props.isConnecting,
+        editRequestNonce: props.editRequestNonce ?? 0,
+        showPanel: props.showPanel,
+        showImageInfo: props.showImageInfo,
+        resourceLabel: props.resourceLabel,
+        mentionReferences: props.mentionReferences || [],
+        batchCount: props.batchCount ?? 0,
+        batchExpanded: props.batchExpanded ?? false,
+        batchClosing: props.batchClosing ?? false,
+        batchOpening: props.batchOpening ?? false,
+        batchRecovering: props.batchRecovering ?? false,
+        batchMotion: props.batchMotion,
+    };
+}
 
 function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
