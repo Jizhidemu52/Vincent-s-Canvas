@@ -60,6 +60,7 @@ import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-referenc
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createDragPreview, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
+import { connectionIntersectsCanvasBounds } from "@/lib/canvas/canvas-connection-visibility";
 import { boundsForViewport, createCanvasSpatialIndex, selectIndexedCanvasNodes } from "@/lib/canvas/canvas-spatial-index";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
@@ -810,15 +811,16 @@ function WirelessCanvasPage() {
 
     const canvasSpatialIndex = useMemo(() => createCanvasSpatialIndex(nodes), [nodes]);
 
-    const visibleNodes = useMemo(() => {
+    const visibleCanvasBounds = useMemo(() => {
         const padding = 280;
         const rect = containerRef.current?.getBoundingClientRect();
         const width = rect?.width || size.width;
         const height = rect?.height || size.height;
-        const bounds = boundsForViewport(viewport, width, height, padding);
 
-        return selectIndexedCanvasNodes(nodes, canvasSpatialIndex, bounds, (node) => !isHiddenBatchChild(node, nodes, collapsingBatchIds));
-    }, [canvasSpatialIndex, collapsingBatchIds, nodes, size.height, size.width, viewport]);
+        return boundsForViewport(viewport, width, height, padding);
+    }, [size.height, size.width, viewport]);
+
+    const visibleNodes = useMemo(() => selectIndexedCanvasNodes(nodes, canvasSpatialIndex, visibleCanvasBounds, (node) => !isHiddenBatchChild(node, nodes, collapsingBatchIds)), [canvasSpatialIndex, collapsingBatchIds, nodes, visibleCanvasBounds]);
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
     const renderNodeById = useMemo(() => {
@@ -831,6 +833,15 @@ function WirelessCanvasPage() {
         });
         return next;
     }, [dragPreviewById, nodeById]);
+    const visibleConnections = useMemo(
+        () =>
+            connections.filter((connection) => {
+                const from = renderNodeById.get(connection.fromNodeId);
+                const to = renderNodeById.get(connection.toNodeId);
+                return Boolean(from && to && !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes) && connectionIntersectsCanvasBounds(from, to, visibleCanvasBounds));
+            }),
+        [connections, nodes, renderNodeById, visibleCanvasBounds],
+    );
     const toolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
@@ -3685,13 +3696,7 @@ function WirelessCanvasPage() {
                     onDrop={handleDrop}
                 >
                     <svg className="absolute left-0 top-0 h-[10000px] w-[10000px] overflow-visible" style={{ pointerEvents: "none", transform: "translateZ(0)", zIndex: 0 }}>
-                        {connections
-                            .filter((connection) => {
-                                const from = renderNodeById.get(connection.fromNodeId);
-                                const to = renderNodeById.get(connection.toNodeId);
-                                return Boolean(from && to && !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes));
-                            })
-                            .map((connection) => {
+                        {visibleConnections.map((connection) => {
                                 const from = renderNodeById.get(connection.fromNodeId);
                                 const to = renderNodeById.get(connection.toNodeId);
                                 if (!from || !to) return null;
