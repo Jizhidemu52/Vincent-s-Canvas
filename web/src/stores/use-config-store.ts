@@ -33,6 +33,9 @@ export type AiConfig = {
     vquality: string;
     videoGenerateAudio: string;
     videoWatermark: string;
+    claudeStream: string;
+    claudeThinking: string;
+    claudeMaxTokens: string;
     systemPrompt: string;
     models: string[];
     imageModels: string[];
@@ -72,12 +75,12 @@ export const defaultConfig: AiConfig = {
             baseUrl: OPENAI_BASE_URL,
             apiKey: "",
             apiFormat: "openai",
-            models: ["gpt-image-2", "grok-imagine-video", DEFAULT_SERVER_TEXT_MODEL, "gpt-5.5", "gpt-4o-mini-tts"],
+            models: ["gpt-image-2", "happyhorse-1.1", DEFAULT_SERVER_TEXT_MODEL, "gpt-5.5", "gpt-4o-mini-tts"],
         },
     ],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video",
+    videoModel: "default::happyhorse-1.1",
     textModel: `default::${DEFAULT_SERVER_TEXT_MODEL}`,
     audioModel: "default::gpt-4o-mini-tts",
     audioVoice: "alloy",
@@ -85,13 +88,16 @@ export const defaultConfig: AiConfig = {
     audioSpeed: "1",
     audioInstructions: "",
     videoSeconds: "6",
-    vquality: "720",
+    vquality: "1080P",
     videoGenerateAudio: "true",
     videoWatermark: "false",
+    claudeStream: "true",
+    claudeThinking: "false",
+    claudeMaxTokens: "2048",
     systemPrompt: "",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", `default::${DEFAULT_SERVER_TEXT_MODEL}`, "default::gpt-5.5", "default::gpt-4o-mini-tts"],
+    models: ["default::gpt-image-2", "default::happyhorse-1.1", `default::${DEFAULT_SERVER_TEXT_MODEL}`, "default::gpt-5.5", "default::gpt-4o-mini-tts"],
     imageModels: ["default::gpt-image-2"],
-    videoModels: ["default::grok-imagine-video"],
+    videoModels: ["default::happyhorse-1.1"],
     textModels: [`default::${DEFAULT_SERVER_TEXT_MODEL}`, "default::gpt-5.5"],
     audioModels: ["default::gpt-4o-mini-tts"],
     quality: "auto",
@@ -123,7 +129,7 @@ type ConfigStore = {
 
 function isVideoModelName(model: string) {
     const value = modelOptionName(model).toLowerCase();
-    return value.includes("seedance") || value.includes("video") || value.includes("sora") || value.includes("veo") || value.includes("kling") || value.includes("wan") || value.includes("hailuo");
+    return value.includes("seedance") || value.includes("video") || value.includes("sora") || value.includes("veo") || value.includes("kling") || value.includes("wan") || value.includes("hailuo") || value.includes("happyhorse") || value.includes("minimax");
 }
 
 function isImageModelName(model: string) {
@@ -226,7 +232,7 @@ export const useConfigStore = create<ConfigStore>()(
                         channels,
                         models,
                         imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
-                        videoModel: normalizeModelOptionValue(config.videoModel || "grok-imagine-video", channels),
+                        videoModel: normalizeVideoModelOption(config.videoModel, channels),
                         textModel: shouldUpgradeDefaultTextModel(config.textModel)
                             ? encodeChannelModel("default", DEFAULT_SERVER_TEXT_MODEL)
                             : normalizeModelOptionValue(config.textModel || config.model, channels),
@@ -236,9 +242,12 @@ export const useConfigStore = create<ConfigStore>()(
                         audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
                         audioInstructions: config.audioInstructions || "",
                         videoSeconds: config.videoSeconds || "6",
-                        vquality: config.vquality || "720",
+                        vquality: config.vquality || "1080P",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
+                        claudeStream: config.claudeStream === "false" ? "false" : "true",
+                        claudeThinking: config.claudeThinking === "true" ? "true" : "false",
+                        claudeMaxTokens: config.claudeMaxTokens || "2048",
                         canvasImageCount: config.canvasImageCount || "3",
                         imageModels: Array.isArray(persistedConfig.imageModels) ? normalizeModelList(config.imageModels, channels) : filterModelsByCapability(models, "image"),
                         videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels, channels) : filterModelsByCapability(models, "video"),
@@ -363,7 +372,7 @@ function normalizeChannels(config: AiConfig) {
             ...channel,
             id: channel.id || (index === 0 ? "default" : `channel-${index + 1}`),
             name: channel.name || (index === 0 ? "默认渠道" : `渠道 ${index + 1}`),
-            models: uniqueRawModels(channel.models || []),
+            models: uniqueRawModels(channel.models || []).filter((model) => !["grok-imagine-video", "happyhorse-1.0"].includes(model.toLowerCase())),
         }),
     );
     if (!channels.length) {
@@ -379,6 +388,13 @@ function normalizeChannels(config: AiConfig) {
         );
     }
     return channels.map((channel) => ({ ...channel, models: uniqueRawModels(channel.models) }));
+}
+
+function normalizeVideoModelOption(value: string | undefined, channels: ModelChannel[]) {
+    const normalized = normalizeModelOptionValue(value || "happyhorse-1.1", channels);
+    return ["grok-imagine-video", "happyhorse-1.0"].includes(modelOptionName(normalized).toLowerCase())
+        ? normalizeModelOptionValue("happyhorse-1.1", channels)
+        : normalized;
 }
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {

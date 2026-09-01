@@ -1,9 +1,19 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
+import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
+import { resolveStandaloneStaticPath } from "./demo-standalone-web";
 import { apiMartImageModel, buildApiMartImageRequest, runApiMartImageTask } from "./apimart-image";
-import { resolveDemoExternalProviders } from "./demo-provider-configuration";
-import { toHappyHorseImageDataUrl } from "./happyhorse";
+import { listAvailableDemoModels, resolveDemoExternalProviders, videoModelConfigIds } from "./demo-provider-configuration";
+import { applyDemoProviderCredentials } from "./demo-provider-credentials";
+import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
+import { resolveDemoHost } from "./demo-network-config";
 import { runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
-import { buildGeminiRequestBody, readGeminiResponse } from "./routes/chat";
+import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, readClaudeResponse, readGeminiResponse } from "./routes/chat";
+import { createDemoPublicAssetUrl, normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
+import { decodeInlineImageResult } from "./demo-task-result-assets";
+import { syncDemoProject } from "./demo-projects";
+import { createDemoBatchTaskInputs } from "./demo-batch-tasks";
+import { buildVideoProviderRequest, getVideoModelCapability, isSupportedVideoModelId, supportedVideoModelIds, type ProviderVideoSource, type SupportedVideoModelId, type VideoProviderParameters, videoTaskStatusPath } from "./video-models";
+import { preflightVideoTask } from "./video-task-preflight";
 
 const sessions = new Map<string, string>();
 const modules = [
@@ -61,16 +71,17 @@ const toolDefinitions = [
 const apiMartBaseUrl = (
   process.env.APIMART_BASE_URL || process.env.GPT_IMAGE_2_BASE_URL || "https://api.apimart.ai/v1"
 ).replace(/\/$/, "");
-const apiMartApiKey = process.env.APIMART_API_KEY?.trim() || process.env.GPT_IMAGE_2_API_KEY?.trim() || "";
+const demoPublicAssetOrigin = normalizeDemoPublicAssetOrigin(process.env.DEMO_PUBLIC_ASSET_ORIGIN);
+let apiMartApiKey = process.env.APIMART_API_KEY?.trim() || process.env.GPT_IMAGE_2_API_KEY?.trim() || "";
 const gptImage2ProviderId = "30000000-0000-4000-8000-000000000002";
 const openTokenProviderId = "30000000-0000-4000-8000-000000000005";
 const openTokenBaseUrl = (process.env.OPENTOKEN_BASE_URL || "https://cn2.gw.opentoken.io/v1").replace(/\/$/, "");
-const openTokenApiKey = process.env.OPENTOKEN_API_KEY?.trim() || "";
+let openTokenApiKey = process.env.OPENTOKEN_API_KEY?.trim() || "";
 const externalProviders = resolveDemoExternalProviders({ openTokenApiKey, apiMartApiKey });
-const { hasOpenToken, hasApiMart, openTokenGptImage2ModelId, officialNanoBanana2ModelId, officialNanoBanana2Capabilities, apiMartGptImage2ModelId } = externalProviders;
+const { hasOpenToken, hasApiMart, openTokenGptImage2ModelId, openTokenGptImage2ApiModelId, openTokenGptImage2DisplayName, officialNanoBanana2ModelId, openTokenGeminiDisplayName, officialNanoBanana2Capabilities, apiMartGptImage2ModelId, apiMartGptImage2PublicModelId, claudeModelIds } = externalProviders;
 const gptImage2ModelId = apiMartGptImage2ModelId;
-const happyHorseModelId = "40000000-0000-4000-8000-000000000100";
 const geminiProviderId = "30000000-0000-4000-8000-000000000003";
+const claudeProviderId = "30000000-0000-4000-8000-000000000006";
 const geminiModelId = "40000000-0000-4000-8000-000000000101";
 const geminiFlashImageModelId = "40000000-0000-4000-8000-000000000102";
 const midjourneyModelId = "40000000-0000-4000-8000-000000000103";
@@ -107,17 +118,17 @@ const demoModels: Array<Record<string, unknown>> = toolDefinitions.map(
           ? 0.4
           : 0.2,
     concurrencyLimit: 5,
-    enabled: true,
+    enabled: tool.toolKey !== "video",
   }),
 );
-if (hasOpenToken) {
+{
   demoProviders.push({
     id: openTokenProviderId,
     name: "OpenToken",
     protocol: "openai",
     baseUrl: openTokenBaseUrl,
     enabled: true,
-    hasCredentials: true,
+    hasCredentials: Boolean(openTokenApiKey),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
@@ -128,8 +139,8 @@ if (hasOpenToken) {
     workflowConfigId: null,
     workflowName: null,
     replacementModelConfigId: null,
-    name: "GPT-Image-2",
-    modelId: "gpt-image-2",
+    name: openTokenGptImage2DisplayName,
+    modelId: openTokenGptImage2ApiModelId,
     capabilities: ["generate", "edit"],
     creditCost: 4,
     rmbCost: 0,
@@ -143,7 +154,7 @@ if (hasOpenToken) {
     workflowConfigId: null,
     workflowName: null,
     replacementModelConfigId: null,
-    name: "官方nanobanna2",
+    name: openTokenGeminiDisplayName,
     modelId: "gemini-3.1-flash-image",
     capabilities: officialNanoBanana2Capabilities,
     creditCost: 4,
@@ -151,15 +162,42 @@ if (hasOpenToken) {
     concurrencyLimit: 2,
     enabled: true,
   });
+  demoProviders.push({
+    id: claudeProviderId,
+    name: "Anthropic Claude",
+    protocol: "anthropic",
+    baseUrl: apiMartBaseUrl.replace(/\/v1$/, ""),
+    enabled: true,
+    hasCredentials: Boolean(apiMartApiKey),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  for (const [index, modelId] of claudeModelIds.entries()) {
+    demoModels.push({
+      id: `40000000-0000-4000-8000-00000000012${index + 1}`,
+      providerId: claudeProviderId,
+      providerName: "Anthropic Claude",
+      workflowConfigId: null,
+      workflowName: null,
+      replacementModelConfigId: null,
+      name: modelId,
+      modelId,
+      capabilities: ["chat", "vision", "tools"],
+      creditCost: 0,
+      rmbCost: 0,
+      concurrencyLimit: 2,
+      enabled: true,
+    });
+  }
 }
-if (hasApiMart) {
+{
   demoProviders.push({
     id: gptImage2ProviderId,
     name: "APIMart 图片服务",
     protocol: "apimart",
     baseUrl: apiMartBaseUrl,
     enabled: true,
-    hasCredentials: true,
+    hasCredentials: Boolean(apiMartApiKey),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
@@ -170,8 +208,8 @@ if (hasApiMart) {
     workflowConfigId: "demo-gpt-image-2",
     workflowName: "GPT-Image-2 async",
     replacementModelConfigId: null,
-    name: "GPT-Image-2",
-    modelId: "gpt-image-2",
+    name: "vcen gpt2",
+    modelId: apiMartGptImage2PublicModelId,
     capabilities: ["generate", "edit", "upscale"],
     creditCost: 4,
     rmbCost: 0,
@@ -223,28 +261,13 @@ if (hasApiMart) {
     concurrencyLimit: 2,
     enabled: true,
   });
-  demoModels.push({
-    id: happyHorseModelId,
-    providerId: gptImage2ProviderId,
-    providerName: "APIMart",
-    workflowConfigId: "happyhorse-1.0",
-    workflowName: "HappyHorse 1.0 async",
-    replacementModelConfigId: null,
-    name: "HappyHorse 1.0",
-    modelId: "happyhorse-1.0",
-    capabilities: ["video"],
-    creditCost: 0,
-    rmbCost: 0,
-    concurrencyLimit: 2,
-    enabled: true,
-  });
   demoProviders.push({
     id: geminiProviderId,
     name: "APIMart Gemini",
     protocol: "gemini",
     baseUrl: apiMartBaseUrl.replace(/\/v1$/, ""),
     enabled: true,
-    hasCredentials: true,
+    hasCredentials: Boolean(apiMartApiKey),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
@@ -258,6 +281,35 @@ if (hasApiMart) {
     name: "Gemini 3.1 Pro",
     modelId: "gemini-3.1-pro-preview",
     capabilities: ["chat"],
+    creditCost: 0,
+    rmbCost: 0,
+    concurrencyLimit: 2,
+    enabled: true,
+  });
+}
+if (!demoProviders.some((provider) => provider.id === gptImage2ProviderId)) {
+  demoProviders.push({
+    id: gptImage2ProviderId,
+    name: "APIMart",
+    protocol: "apimart",
+    baseUrl: apiMartBaseUrl,
+    enabled: true,
+    hasCredentials: Boolean(apiMartApiKey),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+}
+for (const modelId of supportedVideoModelIds) {
+  demoModels.push({
+    id: videoModelConfigIds[modelId],
+    providerId: gptImage2ProviderId,
+    providerName: "APIMart",
+    workflowConfigId: modelId,
+    workflowName: `${modelId} async`,
+    replacementModelConfigId: null,
+    name: modelId,
+    modelId,
+    capabilities: ["video"],
     creditCost: 0,
     rmbCost: 0,
     concurrencyLimit: 2,
@@ -280,7 +332,7 @@ const demoToolConfigurations = toolDefinitions.map((tool, index) => ({
   toolKey: tool.toolKey,
   modelConfigId:
     tool.toolKey === "video" && apiMartApiKey
-      ? happyHorseModelId
+      ? videoModelConfigIds["happyhorse-1.1"]
       : ["image", "image-edit", "angle-control"].includes(tool.toolKey) && hasOpenToken
         ? openTokenGptImage2ModelId
         : tool.toolKey === "image" && hasApiMart
@@ -303,6 +355,11 @@ type DemoTask = {
   ownerUserId: string;
   operationType: string;
   status: "processing" | "success" | "failed";
+  stage?: "preflight" | "submitted" | "polling" | "downloading" | "succeeded" | "failed";
+  errorCode?: string | null;
+  upstreamTaskId?: string | null;
+  providerModel?: SupportedVideoModelId;
+  updatedAt?: string;
   resultUrls: string[];
   failureReason: string | null;
   credits: number;
@@ -314,6 +371,10 @@ type DemoInternalAiConfig = {
   updatedAt: string | null;
 };
 const demoAssets = new Map<string, DemoAsset>();
+const standaloneDemoUser = resolveStandaloneDemoUser(process.env.LOCAL_STANDALONE === "true");
+const standaloneMode = Boolean(standaloneDemoUser);
+const standaloneWebDirectory = process.env.STANDALONE_WEB_DIR?.trim() || "";
+const demoPublicVideoAssetAccess = new Map<string, { assetId: string; expiresAt: number }>();
 const demoTasks = new Map<string, DemoTask>();
 const internalAiConfig: DemoInternalAiConfig = {
   seamlessUrl: "",
@@ -335,6 +396,7 @@ const empty = (status = 204, extra: Record<string, string> = {}) =>
   new Response(null, { status, headers: extra });
 
 function sessionUser(request: Request) {
+  if (standaloneDemoUser) return standaloneDemoUser;
   const token = request.headers
     .get("cookie")
     ?.match(/(?:^|; )wireless_canvas_demo_session=([^;]+)/)?.[1];
@@ -429,13 +491,125 @@ async function callDemoGeminiWithNode(endpoint: string, body: unknown): Promise<
 }
 
 const demoPort = Number(process.env.DEMO_PORT || 3100);
+const demoHost = resolveDemoHost();
+
+function createProviderVideoSources(model: SupportedVideoModelId, sources: DemoAsset[]) {
+  if (!demoPublicAssetOrigin)
+    return { sources: sources as ProviderVideoSource[], accessTokens: [] as string[] };
+  const accessTokens: string[] = [];
+  const providerSources = sources.map((source) => {
+    const accessToken = crypto.randomUUID();
+    accessTokens.push(accessToken);
+    demoPublicVideoAssetAccess.set(accessToken, {
+      assetId: source.id,
+      expiresAt: Date.now() + 25 * 60_000,
+    });
+    return {
+      ...source,
+      publicUrl: createDemoPublicAssetUrl(demoPublicAssetOrigin, source.id, accessToken),
+    };
+  });
+  return { sources: providerSources as ProviderVideoSource[], accessTokens };
+}
+
+async function callDemoClaude(modelId: string, input: { input: DemoResponseInput[]; tools: DemoResponseTool[]; toolChoice?: unknown; stream?: boolean; thinking?: boolean; maxTokens?: number }) {
+  const endpoint = `${apiMartBaseUrl.replace(/\/v1$/, "")}/v1/messages`;
+  const body = {
+    model: modelId,
+    ...buildClaudeMessagesRequest(input as never, {
+      maxTokens: Math.max(1, Math.min(16_384, Math.floor(input.maxTokens || 2048))),
+      stream: false,
+      thinking: input.thinking === true,
+    }),
+  };
+  const upstream = await fetch(endpoint, {
+    method: "POST",
+    headers: { "x-api-key": apiMartApiKey, "anthropic-version": ANTHROPIC_MESSAGES_VERSION, "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!upstream.ok) throw new Error(`Claude Provider ${upstream.status}: ${(await upstream.text()).slice(0, 500)}`);
+  return readClaudeResponse(await upstream.json() as never);
+}
+
+async function callDemoClaudeStream(modelId: string, input: { input: DemoResponseInput[]; tools: DemoResponseTool[]; toolChoice?: unknown; thinking?: boolean; maxTokens?: number }) {
+  const upstream = await fetch(`${apiMartBaseUrl.replace(/\/v1$/, "")}/v1/messages`, {
+    method: "POST",
+    headers: { "x-api-key": apiMartApiKey, "anthropic-version": ANTHROPIC_MESSAGES_VERSION, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: modelId,
+      ...buildClaudeMessagesRequest(input as never, {
+        maxTokens: Math.max(1, Math.min(16_384, Math.floor(input.maxTokens || 2048))),
+        stream: true,
+        thinking: input.thinking === true,
+      }),
+    }),
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!upstream.ok) throw new Error(`Claude Provider ${upstream.status}: ${(await upstream.text()).slice(0, 500)}`);
+  if (!upstream.body) throw new Error("Claude Provider did not return a streaming body");
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: {
+      "content-type": upstream.headers.get("content-type") || "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+    },
+  });
+}
+
+function revokeProviderVideoSources(accessTokens: string[]) {
+  for (const accessToken of accessTokens) demoPublicVideoAssetAccess.delete(accessToken);
+}
+
+function publicDemoAssetResponse(asset: DemoAsset) {
+  return new Response(Uint8Array.from(asset.bytes).buffer, {
+    headers: {
+      "content-type": asset.mimeType,
+      "cache-control": "private, max-age=60",
+    },
+  });
+}
+
+function storeDemoTaskResult(task: DemoTask, ownerUserId: string, resultUrl: string) {
+  const inlineImage = decodeInlineImageResult(resultUrl);
+  if (!inlineImage) return resultUrl;
+
+  const assetId = crypto.randomUUID();
+  const extension = inlineImage.mimeType.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "png";
+  demoAssets.set(assetId, {
+    id: assetId,
+    ownerUserId,
+    filename: `generation-${task.id}.${extension}`,
+    mimeType: inlineImage.mimeType,
+    bytes: inlineImage.bytes,
+    createdAt: now(),
+  });
+  return `/api/assets/${assetId}/content`;
+}
+
+function completeDemoImageTask(task: DemoTask, ownerUserId: string, resultUrl: string) {
+  task.resultUrls = [storeDemoTaskResult(task, ownerUserId, resultUrl)];
+  task.status = "success";
+  task.updatedAt = now();
+}
 
 Bun.serve({
   port: demoPort,
-  hostname: "127.0.0.1",
+  hostname: demoHost,
+  idleTimeout: DEMO_STREAM_IDLE_TIMEOUT_SECONDS,
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname;
+    if (standaloneWebDirectory && request.method === "GET" && !path.startsWith("/api/")) {
+      const requestedPath = resolveStandaloneStaticPath(standaloneWebDirectory, path);
+      if (requestedPath) {
+        const requestedFile = Bun.file(requestedPath);
+        if (await requestedFile.exists()) return new Response(requestedFile);
+      }
+      const indexFile = Bun.file(resolveStandaloneStaticPath(standaloneWebDirectory, "/")!);
+      if (await indexFile.exists()) return new Response(indexFile);
+    }
     if (path === "/api/health")
       return json({ status: "ok", mode: "local-demo" });
     if (path === "/api/demo/accounts")
@@ -478,6 +652,23 @@ Bun.serve({
       });
     if (path === "/api/auth/change-password" && request.method === "POST")
       return empty();
+    if (
+      /^\/api\/assets\/[^/]+\/content$/.test(path) &&
+      request.method === "GET" &&
+      url.searchParams.has("video_access")
+    ) {
+      const accessToken = url.searchParams.get("video_access") || "";
+      const grant = demoPublicVideoAssetAccess.get(accessToken);
+      const assetId = path.split("/")[3]!;
+      if (!grant || grant.assetId !== assetId || grant.expiresAt < Date.now()) {
+        demoPublicVideoAssetAccess.delete(accessToken);
+        return json({ error: "NOT_FOUND", message: "素材不存在或访问已过期" }, 404);
+      }
+      const asset = demoAssets.get(assetId);
+      if (!asset?.bytes.byteLength)
+        return json({ error: "NOT_FOUND", message: "素材不存在或访问已过期" }, 404);
+      return publicDemoAssetResponse(asset);
+    }
     const user = sessionUser(request);
     if (!user) return json({ error: "UNAUTHORIZED", message: "请先登录" }, 401);
 
@@ -489,16 +680,33 @@ Bun.serve({
           updatedAt: now(),
         })),
       });
+    if (path === "/api/projects/sync" && request.method === "POST") {
+      try {
+        return json(syncDemoProject(await request.json()));
+      } catch (error) {
+        return json(
+          {
+            error: "INVALID_PROJECT",
+            message: error instanceof Error ? error.message : "Invalid project identity",
+          },
+          400,
+        );
+      }
+    }
     if (path === "/api/models")
       return json({
-        models: demoModels
-          .filter((model) => model.enabled)
+        models: listAvailableDemoModels(demoModels, demoProviders)
+          .sort((left, right) => {
+            const leftConfigured = demoProviders.find((provider) => provider.id === left.providerId)?.hasCredentials === true ? 1 : 0;
+            const rightConfigured = demoProviders.find((provider) => provider.id === right.providerId)?.hasCredentials === true ? 1 : 0;
+            return rightConfigured - leftConfigured;
+          })
           .map(({ id, name, modelId, capabilities, creditCost, rmbCost }) => ({
             id,
             name,
             modelId,
             capabilities,
-            creditCost,
+            creditCost: billedDemoCredits(standaloneMode, Number(creditCost || 0)),
             rmbCost,
           })),
         prices: demoPrices
@@ -506,7 +714,7 @@ Bun.serve({
           .map(({ operationType, label, credits, rmbCost, version }) => ({
             operationType,
             label,
-            credits,
+            credits: billedDemoCredits(standaloneMode, Number(credits || 0)),
             rmbCost,
             version,
           })),
@@ -519,13 +727,19 @@ Bun.serve({
         tools?: DemoResponseTool[];
         toolChoice?: unknown;
         webSearch?: boolean;
+        claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
       };
-      if (input.modelId !== "gemini-3.1-pro-preview")
+      const selectedModel = String(input.modelId || "");
+      if (selectedModel !== "gemini-3.1-pro-preview" && !claudeModelIds.includes(selectedModel as (typeof claudeModelIds)[number]))
         return json({ error: "MODEL_DISABLED", message: "管理员尚未启用该对话模型" }, 400);
       if (!apiMartApiKey)
         return json({ error: "PROVIDER_NOT_CONFIGURED", message: "本地服务端尚未配置 APIMart 密钥" }, 503);
       try {
-        return json(await callDemoGemini({ input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, webSearch: input.webSearch }));
+        if (selectedModel !== "gemini-3.1-pro-preview" && input.claude?.stream)
+          return await callDemoClaudeStream(selectedModel, { input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, thinking: input.claude.thinking, maxTokens: input.claude.maxTokens });
+        return json(selectedModel === "gemini-3.1-pro-preview"
+          ? await callDemoGemini({ input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, webSearch: input.webSearch })
+          : await callDemoClaude(selectedModel, { input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, stream: input.claude?.stream, thinking: input.claude?.thinking, maxTokens: input.claude?.maxTokens }));
       } catch (error) {
         return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "Gemini request failed" }, 502);
       }
@@ -601,12 +815,91 @@ Bun.serve({
           { error: "NOT_FOUND", message: "素材不存在或无权访问" },
           404,
         );
-      return new Response(Uint8Array.from(asset.bytes).buffer, {
-        headers: {
-          "content-type": asset.mimeType,
-          "cache-control": "private, max-age=60",
-        },
+      return publicDemoAssetResponse(asset);
+    }
+    if (path === "/api/generation-capabilities" && request.method === "GET")
+      return json({
+        models: listAvailableDemoModels(demoModels, demoProviders)
+          .filter((model) => isSupportedVideoModelId(model.modelId))
+          .map((model) => {
+            const modelId = model.modelId as SupportedVideoModelId;
+            return {
+              id: model.id,
+              name: model.name,
+              modelId,
+              capability: getVideoModelCapability(modelId),
+            };
+          }),
       });
+    if (path === "/api/tasks/batch" && request.method === "POST") {
+      const input = (await request.json().catch(() => null)) as {
+        requestId?: string;
+        projectId?: string;
+        operationType?: string;
+        modelConfigId?: string;
+        prompt?: string;
+        parameters?: Record<string, unknown>;
+        priority?: string;
+        items?: Array<{ sourceUrls?: string[] }>;
+      } | null;
+      if (!input?.requestId || !input.projectId || !input.operationType || !input.modelConfigId || !Array.isArray(input.items) || !input.items.length)
+        return json({ error: "INVALID_BATCH", message: "Batch task details are incomplete" }, 400);
+      const batchId = crypto.randomUUID();
+      const cookie = request.headers.get("cookie") || "";
+      const tasks: Array<Record<string, unknown> & { itemIndex: number }> = [];
+      const failures: Array<{ index: number; reason: string }> = [];
+      const taskInputs = createDemoBatchTaskInputs({
+        requestId: input.requestId,
+        projectId: input.projectId,
+        operationType: input.operationType,
+        modelConfigId: input.modelConfigId,
+        prompt: input.prompt || "",
+        parameters: input.parameters,
+        priority: input.priority,
+        items: input.items.map((item) => ({ sourceUrls: item.sourceUrls || [] })),
+      });
+      for (const [itemIndex, taskInput] of taskInputs.entries()) {
+        const response = await fetch(`http://127.0.0.1:${demoPort}/api/tasks`, {
+          method: "POST",
+          headers: { "content-type": "application/json", cookie },
+          body: JSON.stringify(taskInput),
+        });
+        const body = (await response.json().catch(() => ({}))) as { task?: Record<string, unknown>; message?: string };
+        if (response.ok && body.task) tasks.push({ ...body.task, itemIndex });
+        else failures.push({ index: itemIndex, reason: body.message || `Task submission failed (${response.status})` });
+      }
+      return json({ batchId, tasks, failures }, 201);
+    }
+    if (path === "/api/tasks/preflight" && request.method === "POST") {
+      const input = (await request.clone().json().catch(() => ({}))) as {
+        requestId?: string;
+        operationType?: string;
+        modelConfigId?: string;
+        prompt?: string;
+        parameters?: Record<string, unknown>;
+        sourceUrls?: string[];
+      };
+      if (input.operationType !== "video_generation")
+        return json({ error: "UNSUPPORTED_OPERATION", message: "Only video preflight is supported" }, 400);
+      if (!apiMartApiKey)
+        return json({ error: "PROVIDER_NOT_CONFIGURED", message: "Video generation provider is not configured" }, 503);
+      const model = demoModels.find(
+        (item) => item.id === input.modelConfigId && isSupportedVideoModelId(item.modelId) && item.enabled,
+      );
+      if (!model)
+        return json({ error: "MODEL_DISABLED", message: "The selected video model is not enabled" }, 400);
+      const sources = resolveOwnedVideoSources(input.sourceUrls || [], user);
+      if (sources instanceof Response) return sources;
+      const modelId = model.modelId as SupportedVideoModelId;
+      const providerSources = createProviderVideoSources(modelId, sources);
+      try {
+        const preflight = preflightVideoTask({ model: modelId, prompt: input.prompt || "", parameters: input.parameters || {}, sources: providerSources.sources });
+        return json({ ok: true, requestId: input.requestId || crypto.randomUUID(), normalized: preflight.normalized });
+      } catch (error) {
+        return json({ error: "INVALID_VIDEO_INPUT", message: error instanceof Error ? error.message : "Invalid video parameters" }, 400);
+      } finally {
+        revokeProviderVideoSources(providerSources.accessTokens);
+      }
     }
     if (path === "/api/tasks" && request.method === "POST") {
       const input = (await request
@@ -647,49 +940,43 @@ Bun.serve({
         const model = demoModels.find(
           (item) =>
             item.id === input.modelConfigId &&
-            item.modelId === "happyhorse-1.0" &&
+            isSupportedVideoModelId(item.modelId) &&
             item.enabled,
         );
         if (!model)
           return json(
             {
               error: "MODEL_DISABLED",
-              message: "HappyHorse 1.0 is not enabled for video creation",
+              message: "The selected video model is not enabled",
             },
             400,
           );
-        const sources: DemoAsset[] = [];
-        for (const sourceUrl of input.sourceUrls || []) {
-          const assetId = sourceUrl.match(
-            /^\/api\/assets\/([0-9a-f-]+)\/content$/i,
-          )?.[1];
-          const source = assetId ? demoAssets.get(assetId) : undefined;
-          if (
-            !source ||
-            source.ownerUserId !== user.id ||
-            !source.bytes.byteLength
-          )
-            return json(
-              {
-                error: "INVALID_SOURCE",
-                message: "A selected video reference is unavailable",
-              },
-              400,
-            );
-          sources.push(source);
+        const sources = resolveOwnedVideoSources(input.sourceUrls || [], user);
+        if (sources instanceof Response) return sources;
+        const modelId = model.modelId as SupportedVideoModelId;
+        const parameters = (input.parameters || {}) as VideoProviderParameters;
+        const providerSources = createProviderVideoSources(modelId, sources);
+        try {
+          preflightVideoTask({ model: modelId, prompt: input.prompt || "", parameters, sources: providerSources.sources });
+        } catch (error) {
+          return json(
+            {
+              error: "INVALID_VIDEO_INPUT",
+              message: error instanceof Error ? error.message : "Invalid video parameters",
+            },
+            400,
+          );
+        } finally {
+          revokeProviderVideoSources(providerSources.accessTokens);
         }
-        const parameters = readHappyHorseParameters(input.parameters);
-        const validationError = validateHappyHorseRequest(parameters, sources);
-        if (validationError)
-          return json({ error: "INVALID_VIDEO_INPUT", message: validationError }, 400);
         const price = demoPrices.find(
           (item) =>
             item.operationType === "video_generation" &&
             item.status === "published",
         );
-        const credits =
-          Number(price?.credits || 0) + Number(model.creditCost || 0);
-        if (user.creditBalance < credits)
+        const credits = billedDemoCredits(standaloneMode,
+          Number(price?.credits || 0) + Number(model.creditCost || 0));
+        if (!standaloneMode && user.creditBalance < credits)
           return json(
             {
               error: "INSUFFICIENT_CREDITS",
@@ -705,12 +992,17 @@ Bun.serve({
           status: "processing",
           resultUrls: [],
           failureReason: null,
+          stage: "submitted",
+          errorCode: null,
+          upstreamTaskId: null,
+          providerModel: modelId,
+          updatedAt: now(),
           credits,
           createdAt: now(),
         };
         demoTasks.set(task.id, task);
-        user.creditBalance -= credits;
-        void runHappyHorseTask(task, user, input.prompt || "", parameters, sources);
+        if (!standaloneMode) user.creditBalance -= credits;
+        void runVideoTask(task, user, modelId, input.prompt || "", parameters, sources);
         return json({ task }, 201);
       }
       if (
@@ -745,10 +1037,10 @@ Bun.serve({
           (item) =>
             item.id === input.modelConfigId &&
             typeof item.modelId === "string" &&
-            ((hasOpenToken &&
+            ((Boolean(openTokenApiKey) &&
               item.providerId === openTokenProviderId &&
               (item.id === openTokenGptImage2ModelId || item.id === officialNanoBanana2ModelId)) ||
-              (hasApiMart &&
+              (Boolean(apiMartApiKey) &&
                 item.providerId === gptImage2ProviderId &&
                 apiMartImageModel(item.modelId))) &&
             item.enabled,
@@ -784,11 +1076,13 @@ Bun.serve({
         const imageModelId = String(model.modelId);
         if ((imageModelId === "midjourney" || imageModelId === "midjourney-blend") && input.operationType !== "image_generation")
           return json({ error: "MODEL_CAPABILITY_MISMATCH", message: "Midjourney 当前只支持文生图，请选择 GPT-Image-2 或 Gemini 图片模型进行编辑" }, 400);
-        if (sources.length > (imageModelId === "gpt-image-2" ? 16 : imageModelId === "midjourney" ? 0 : imageModelId === "midjourney-blend" ? 4 : 14))
+        const apiMartModel = model.providerId === openTokenProviderId ? null : apiMartImageModel(imageModelId);
+        const isGptImage2 = imageModelId === "gpt-image-2" || apiMartModel === "gpt-image-2";
+        if (sources.length > (isGptImage2 ? 16 : imageModelId === "midjourney" ? 0 : imageModelId === "midjourney-blend" ? 4 : 14))
           return json(
             {
               error: "TOO_MANY_REFERENCES",
-              message: imageModelId === "gpt-image-2" ? "GPT-Image-2 最多支持 16 张参考图" : imageModelId === "midjourney" ? "Midjourney 文生图不支持上传参考图" : "Gemini 3.1 Flash 最多支持 14 张参考图",
+              message: isGptImage2 ? "GPT-Image-2 最多支持 16 张参考图" : imageModelId === "midjourney" ? "Midjourney 文生图不支持上传参考图" : "Gemini 3.1 Flash 最多支持 14 张参考图",
             },
             400,
           );
@@ -805,9 +1099,9 @@ Bun.serve({
             item.operationType === input.operationType &&
             item.status === "published",
         );
-        const credits =
-          Number(price?.credits || 0) + Number(model.creditCost || 0);
-        if (user.creditBalance < credits)
+        const credits = billedDemoCredits(standaloneMode,
+          Number(price?.credits || 0) + Number(model.creditCost || 0));
+        if (!standaloneMode && user.creditBalance < credits)
           return json(
             {
               error: "INSUFFICIENT_CREDITS",
@@ -827,7 +1121,7 @@ Bun.serve({
           createdAt: now(),
         };
         demoTasks.set(task.id, task);
-        user.creditBalance -= credits;
+        if (!standaloneMode) user.creditBalance -= credits;
         if (model.providerId === openTokenProviderId)
           void runOpenTokenImageTaskForDemo(
             task,
@@ -906,9 +1200,9 @@ Bun.serve({
           item.operationType === "seamless_stitch" &&
           item.status === "published",
       );
-      const credits =
-        Number(price?.credits || 0) + Number(model.creditCost || 0);
-      if (user.creditBalance < credits)
+      const credits = billedDemoCredits(standaloneMode,
+        Number(price?.credits || 0) + Number(model.creditCost || 0));
+      if (!standaloneMode && user.creditBalance < credits)
         return json(
           {
             error: "INSUFFICIENT_CREDITS",
@@ -928,7 +1222,7 @@ Bun.serve({
         createdAt: now(),
       };
       demoTasks.set(task.id, task);
-      user.creditBalance -= credits;
+      if (!standaloneMode) user.creditBalance -= credits;
       void runInternalAiSeamlessTask(task, user, source, parameters);
       return json({ task }, 201);
     }
@@ -938,6 +1232,32 @@ Bun.serve({
           .filter((task) => task.ownerUserId === user.id)
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       });
+    const taskId = path.match(/^\/api\/tasks\/([0-9a-f-]+)$/i)?.[1];
+    if (taskId && request.method === "GET") {
+      const task = demoTasks.get(taskId);
+      return task && task.ownerUserId === user.id
+        ? json({ task })
+        : json({ error: "NOT_FOUND", message: "Task not found" }, 404);
+    }
+    const recoverTaskId = path.match(/^\/api\/tasks\/([0-9a-f-]+)\/recover$/i)?.[1];
+    if (recoverTaskId && request.method === "POST") {
+      const task = demoTasks.get(recoverTaskId);
+      if (!task || task.ownerUserId !== user.id)
+        return json({ error: "NOT_FOUND", message: "Task not found" }, 404);
+      if (task.status === "success")
+        return json({ task, recovered: false, message: "Task has already completed" });
+      if (!task.upstreamTaskId || !task.providerModel)
+        return json({ task, recovered: false, message: "No upstream task is available to query" });
+      if (task.status === "processing")
+        return json({ task, recovered: false, message: "Task is already being queried" });
+      task.status = "processing";
+      task.stage = "polling";
+      task.errorCode = null;
+      task.failureReason = null;
+      task.updatedAt = now();
+      void recoverVideoTask(task, task.providerModel, task.upstreamTaskId);
+      return json({ task, recovered: true, message: "Task status is being queried without a new generation submission" });
+    }
 
     if (!user.role.includes("admin")) {
       if (path === "/api/projects") return json({ projects: [] });
@@ -1105,6 +1425,14 @@ Bun.serve({
         input.credentials ? { hasCredentials: true } : {},
         { updatedAt: now() },
       );
+      const updatedCredentials = applyDemoProviderCredentials(
+        { apiMartApiKey, openTokenApiKey },
+        String(provider.id),
+        input.credentials as Record<string, unknown> | undefined,
+        { apiMartProviderId: gptImage2ProviderId, openTokenProviderId },
+      );
+      apiMartApiKey = updatedCredentials.apiMartApiKey;
+      openTokenApiKey = updatedCredentials.openTokenApiKey;
       delete provider.credentials;
       return json({ provider });
     }
@@ -1289,7 +1617,7 @@ Bun.serve({
   },
 });
 
-console.log(`Local demo API listening on http://127.0.0.1:${demoPort}`);
+console.log(`Local demo API listening on http://${demoHost}:${demoPort}`);
 
 async function runApiMartImageTaskForDemo(
   task: DemoTask,
@@ -1300,8 +1628,7 @@ async function runApiMartImageTaskForDemo(
   sources: DemoAsset[],
 ) {
   try {
-    task.resultUrls = [await callApiMartImage(modelId, prompt, parameters, sources)];
-    task.status = "success";
+    completeDemoImageTask(task, user.id, await callApiMartImage(modelId, prompt, parameters, sources));
   } catch (error) {
     task.status = "failed";
     task.failureReason = isProviderNetworkError(error)
@@ -1320,7 +1647,7 @@ async function runOpenTokenImageTaskForDemo(
   sources: DemoAsset[],
 ) {
   try {
-    task.resultUrls = [await runOpenTokenImage({
+    completeDemoImageTask(task, user.id, await runOpenTokenImage({
       baseUrl: openTokenBaseUrl,
       apiKey: openTokenApiKey,
       modelId,
@@ -1328,8 +1655,7 @@ async function runOpenTokenImageTaskForDemo(
       size: normalizeGptImageSize(parameters.size),
       resolution: normalizeGptImageResolution(parameters.resolution),
       references: sources.map((source) => ({ filename: source.filename, mimeType: source.mimeType, bytes: source.bytes })),
-    })];
-    task.status = "success";
+    }));
   } catch (error) {
     task.status = "failed";
     task.failureReason = error instanceof Error ? error.message : "OpenToken image task failed";
@@ -1446,61 +1772,96 @@ async function downloadApiMartImage(url: string) {
   return `data:${mimeType};base64,${Buffer.from(await response.arrayBuffer()).toString("base64")}`;
 }
 
-type HappyHorseParameters = {
-  mode: "text" | "first-frame" | "reference" | "edit";
-  duration: number;
-  size: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
-  resolution: "720P" | "1080P";
-  watermark: boolean;
-  audioSetting: "auto" | "origin";
-};
-
-async function runHappyHorseTask(
+async function runVideoTask(
   task: DemoTask,
   user: (typeof demoAccounts)[number]["user"],
+  model: SupportedVideoModelId,
   prompt: string,
-  parameters: HappyHorseParameters,
+  parameters: VideoProviderParameters,
   sources: DemoAsset[],
 ) {
   try {
-    task.resultUrls = [await callHappyHorse(prompt, parameters, sources)];
+    task.stage = "polling";
+    task.updatedAt = now();
+    const outputUrl = await callVideoProvider(model, prompt, parameters, sources, (upstreamTaskId) => {
+      task.upstreamTaskId = upstreamTaskId;
+      task.updatedAt = now();
+    });
+    task.stage = "downloading";
+    task.updatedAt = now();
+    task.resultUrls = [outputUrl];
     task.status = "success";
+    task.stage = "succeeded";
+    task.updatedAt = now();
   } catch (error) {
     task.status = "failed";
+    task.stage = "failed";
+    task.errorCode = classifyVideoTaskError(error);
     task.failureReason =
-      error instanceof Error ? error.message : "HappyHorse task failed";
+      error instanceof Error ? error.message : "Video task failed";
+    task.updatedAt = now();
     user.creditBalance += task.credits;
   }
 }
 
-async function callHappyHorse(
-  prompt: string,
-  parameters: HappyHorseParameters,
-  sources: DemoAsset[],
+async function recoverVideoTask(
+  task: DemoTask,
+  model: SupportedVideoModelId,
+  upstreamTaskId: string,
 ) {
-  const imageSources = sources.filter((source) => source.mimeType.startsWith("image/"));
-  const videoSource = sources.find((source) => source.mimeType.startsWith("video/"));
-  const referenceImageUrls = imageSources.map(toHappyHorseImageDataUrl);
-  const body: Record<string, unknown> = {
-    model: "happyhorse-1.0",
-    prompt,
-    resolution: parameters.resolution,
-    watermark: parameters.watermark,
-  };
-  if (parameters.mode === "first-frame") {
-    body.first_frame_image = referenceImageUrls[0];
-  } else if (parameters.mode === "reference") {
-    body.image_urls = referenceImageUrls;
-  } else if (parameters.mode === "edit") {
-    if (!videoSource) throw new Error("A source video is required for video editing");
-    // The upstream service needs a URL it can fetch. Demo assets are private to
-    // this local server, so an object-storage public URL is required in production.
-    throw new Error("Video editing requires a publicly reachable HTTPS source video URL. Configure company object storage before using this mode.");
+  try {
+    const outputUrl = await pollVideoProviderTask(model, upstreamTaskId);
+    task.stage = "downloading";
+    task.updatedAt = now();
+    task.resultUrls = [outputUrl];
+    task.status = "success";
+    task.stage = "succeeded";
+    task.updatedAt = now();
+  } catch (error) {
+    task.status = "failed";
+    task.stage = "failed";
+    task.errorCode = classifyVideoTaskError(error);
+    task.failureReason = error instanceof Error ? error.message : "Video task status query failed";
+    task.updatedAt = now();
   }
-  if (parameters.mode === "text" || parameters.mode === "reference") {
-    body.size = parameters.size;
-    body.duration = parameters.duration;
+}
+
+function resolveOwnedVideoSources(
+  sourceUrls: string[],
+  user: { id: string },
+): DemoAsset[] | Response {
+  const sources: DemoAsset[] = [];
+  for (const sourceUrl of sourceUrls) {
+    const assetId = sourceUrl.match(/^\/api\/assets\/([0-9a-f-]+)\/content$/i)?.[1];
+    const source = assetId ? demoAssets.get(assetId) : undefined;
+    if (!source || source.ownerUserId !== user.id || !source.bytes.byteLength)
+      return json(
+        { error: "INVALID_SOURCE", message: "A selected video reference is unavailable" },
+        400,
+      );
+    sources.push(source);
   }
+  return sources;
+}
+
+function classifyVideoTaskError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (/balance|credit|quota/i.test(message)) return "INSUFFICIENT_CREDITS";
+  if (/401|403|permission|unauthori[sz]ed/i.test(message)) return "PROVIDER_AUTHORIZATION";
+  if (/status check|timeout|network|fetch/i.test(message)) return "RECOVERABLE_PROVIDER_STATUS";
+  return "PROVIDER_FAILURE";
+}
+
+async function callVideoProvider(
+  model: SupportedVideoModelId,
+  prompt: string,
+  parameters: VideoProviderParameters,
+  sources: DemoAsset[],
+  onSubmitted?: (upstreamTaskId: string) => void,
+) {
+  const providerSources = createProviderVideoSources(model, sources);
+  try {
+  const { body } = buildVideoProviderRequest(model, prompt, parameters, providerSources.sources);
   const submitted = await fetch(`${apiMartBaseUrl}/videos/generations`, {
     method: "POST",
     headers: {
@@ -1512,18 +1873,26 @@ async function callHappyHorse(
   });
   if (!submitted.ok)
     throw new Error(
-      `HappyHorse submission failed: ${submitted.status}${await providerErrorDetail(submitted)}`,
+      `${model} submission failed: ${submitted.status}${await providerErrorDetail(submitted)}`,
     );
   const created = (await submitted.json()) as {
     data?: Array<{ task_id?: string }>;
   };
   const taskId = created.data?.[0]?.task_id;
-  if (!taskId) throw new Error("HappyHorse did not return a task ID");
+  if (!taskId) throw new Error(`${model} did not return a task ID`);
+  onSubmitted?.(taskId);
+  return pollVideoProviderTask(model, taskId);
+  } finally {
+    revokeProviderVideoSources(providerSources.accessTokens);
+  }
+}
+
+async function pollVideoProviderTask(model: SupportedVideoModelId, taskId: string) {
   const deadline = Date.now() + 20 * 60_000;
   while (Date.now() < deadline) {
     await Bun.sleep(2_000);
     const statusResponse = await fetch(
-      `${apiMartBaseUrl}/tasks/${encodeURIComponent(taskId)}?language=zh`,
+      `${apiMartBaseUrl}${videoTaskStatusPath(taskId)}`,
       {
         headers: { authorization: `Bearer ${apiMartApiKey}` },
         signal: AbortSignal.timeout(60_000),
@@ -1531,7 +1900,7 @@ async function callHappyHorse(
     );
     if (!statusResponse.ok)
       throw new Error(
-        `HappyHorse status check failed: ${statusResponse.status}`,
+        `${model} status check failed: ${statusResponse.status}`,
       );
     const status = (await statusResponse.json()) as {
       data?: {
@@ -1541,50 +1910,13 @@ async function callHappyHorse(
       };
     };
     if (["failed", "cancelled"].includes(status.data?.status || ""))
-      throw new Error(status.data?.error?.message || "HappyHorse generation failed");
+      throw new Error(status.data?.error?.message || `${model} generation failed`);
     if (status.data?.status !== "completed") continue;
     const outputUrl = extractHappyHorseVideoUrl(status.data?.result?.videos);
-    if (!outputUrl) throw new Error("HappyHorse completed without an output video");
+    if (!outputUrl) throw new Error(`${model} completed without an output video`);
     return outputUrl;
   }
-  throw new Error("HappyHorse generation timed out");
-}
-
-function readHappyHorseParameters(
-  value?: Record<string, unknown>,
-): HappyHorseParameters {
-  const mode = ["text", "first-frame", "reference", "edit"].includes(
-    String(value?.happyHorseMode),
-  )
-    ? (value!.happyHorseMode as HappyHorseParameters["mode"])
-    : "text";
-  const duration = Math.floor(Number(value?.seconds) || 5);
-  const size = String(value?.size || "16:9");
-  return {
-    mode,
-    duration: Math.max(3, Math.min(15, duration)),
-    size: (["16:9", "9:16", "1:1", "4:3", "3:4"].includes(size)
-      ? size
-      : "16:9") as HappyHorseParameters["size"],
-    resolution: String(value?.resolution).toUpperCase() === "720P" ? "720P" : "1080P",
-    watermark: value?.watermark === true,
-    audioSetting: value?.audioSetting === "origin" ? "origin" : "auto",
-  };
-}
-
-function validateHappyHorseRequest(
-  parameters: HappyHorseParameters,
-  sources: DemoAsset[],
-) {
-  const images = sources.filter((source) => source.mimeType.startsWith("image/"));
-  const videos = sources.filter((source) => source.mimeType.startsWith("video/"));
-  if (parameters.mode === "text" && sources.length) return "Text-to-video cannot include reference media";
-  if (parameters.mode === "first-frame" && (images.length !== 1 || videos.length)) return "First-frame mode requires exactly one image";
-  if (parameters.mode === "reference" && (images.length < 1 || images.length > 9 || videos.length)) return "Reference mode requires 1-9 images";
-  if (parameters.mode === "edit" && (videos.length !== 1 || images.length > 5)) return "Edit mode requires one source video and up to five reference images";
-  if (images.some((source) => source.bytes.byteLength > 10 * 1024 * 1024)) return "Each image must be 10MB or smaller";
-  if (videos.some((source) => source.bytes.byteLength > 100 * 1024 * 1024)) return "The source video must be 100MB or smaller";
-  return "";
+  throw new Error(`${model} generation timed out`);
 }
 
 function extractHappyHorseVideoUrl(items: unknown[] | undefined) {

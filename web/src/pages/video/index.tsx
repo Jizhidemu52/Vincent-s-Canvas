@@ -12,6 +12,7 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { standaloneEdition } from "@/lib/standalone-edition";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { happyHorseModes, isHappyHorseVideoConfig, normalizeHappyHorseDuration, normalizeHappyHorseRatio, normalizeHappyHorseResolution, type HappyHorseMode } from "@/lib/happyhorse-video";
@@ -115,7 +116,7 @@ export default function VideoPage() {
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const isHappyHorse = isHappyHorseVideoConfig({ ...effectiveConfig, model, videoModel: model });
     const estimatedUsage = estimate({ operationType: "video_generation", modelId: modelOptionName(model), quantity: 1 });
-    const quotaBlocked = Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
+    const quotaBlocked = !standaloneEdition && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const canGenerate = Boolean(prompt.trim() || (isHappyHorse && happyHorseMode === "first-frame")) && !quotaBlocked;
 
     const handleMissingModelConfig = () => {
@@ -134,7 +135,7 @@ export default function VideoPage() {
     }, [running, startedAt]);
 
     useEffect(() => {
-        const happyHorse = configuredModels.find((item) => item.modelId === "happyhorse-1.0");
+        const happyHorse = configuredModels.find((item) => item.modelId === "happyhorse-1.1");
         const currentEnabled = configuredModels.some((item) => item.modelId === model);
         if (happyHorse && !currentEnabled) updateConfig("videoModel", happyHorse.modelId);
     }, [configuredModels, model, updateConfig]);
@@ -177,9 +178,9 @@ export default function VideoPage() {
             setReferences(nextReferences);
             payload.warnings.forEach((warning) => message.warning(warning));
             if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请先选择管理员当前启用的视频模型");
-            const cost = payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准";
+            const cost = standaloneEdition ? "本机版直接生成" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
             if (payload.mode === "fill_and_generate") {
-                modal.confirm({ title: "确认使用当前配置生成视频？", content: `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
+                modal.confirm({ title: "确认使用当前配置生成视频？", content: standaloneEdition ? "确认后将直接提交视频生成任务。" : `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
             } else message.success(`模板已填入，当前预计 ${cost}`);
         }).catch((error) => {
             loadedReuseTokenRef.current.delete(token);
@@ -691,8 +692,8 @@ export default function VideoPage() {
 
                         <div className="mt-auto pt-6">
                             <div className="mb-3 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs dark:border-stone-800 dark:bg-stone-900">
-                                <span>预计消耗 {estimatedUsage.configured ? estimatedUsage.credits : "待配置"} 积分</span>
-                                <span>{user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录"}</span>
+                                <span>{standaloneEdition ? "本机版直接生成" : `预计消耗 ${estimatedUsage.configured ? estimatedUsage.credits : "待配置"} 积分`}</span>
+                                <span>{standaloneEdition ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
                             </div>
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 开始生成

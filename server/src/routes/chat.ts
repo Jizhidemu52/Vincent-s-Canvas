@@ -23,6 +23,11 @@ const schema = z.object({
     tools: z.array(z.unknown()).max(100).default([]),
     toolChoice: z.unknown().optional(),
     webSearch: z.boolean().optional(),
+    claude: z.object({
+        stream: z.boolean().optional(),
+        thinking: z.boolean().optional(),
+        maxTokens: z.number().int().min(1).max(16384).optional(),
+    }).optional(),
 });
 
 export function createChatRouter(db: Database, config: AppConfig) {
@@ -36,6 +41,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 tools: ResponseTool[];
                 toolChoice?: unknown;
                 webSearch?: boolean;
+                claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
             };
             await assertModuleEnabled(db, "gpt-chat");
 
@@ -82,11 +88,103 @@ export function createChatRouter(db: Database, config: AppConfig) {
 export async function requestChatCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean },
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
 ): Promise<{ content: string; toolCalls: ToolCall[] }> {
     if (model.protocol === "gemini") return requestGeminiCompletion(model, credentials, input);
+    if (model.protocol === "anthropic") return requestClaudeCompletion(model, credentials, input);
     if (model.protocol === "openai" || model.protocol === "custom") return requestOpenAiCompletion(model, credentials, input);
     throw new ChatProtocolError("PROTOCOL_NOT_SUPPORTED", "当前对话入口暂不支持该 Provider 协议");
+}
+
+async function requestClaudeCompletion(
+    model: ChatModel,
+    credentials: Record<string, string>,
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
+) {
+    const upstream = await fetch(`${model.base_url.replace(/\/$/, "")}/v1/messages`, {
+        method: "POST",
+        headers: {
+            "x-api-key": credentials.apiKey || "",
+            "anthropic-version": ANTHROPIC_MESSAGES_VERSION,
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking }) }),
+        signal: AbortSignal.timeout(180000),
+    });
+    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream);
+    return readClaudeResponse(await upstream.json() as ClaudeResponse);
+}
+
+export function buildClaudeMessagesRequest(
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown },
+    options: { maxTokens: number; stream?: boolean; thinking?: boolean },
+) {
+    const system = input.input
+        .flatMap((item) => {
+            if (!("role" in item) || item.role !== "system") return [];
+            if (typeof item.content !== "string") throw new ChatProtocolError("CLAUDE_SYSTEM_FORMAT_NOT_SUPPORTED", "Claude system prompt only supports text content");
+            return [item.content];
+        })
+        .filter(Boolean)
+        .join("\n\n");
+    const calls = new Map<string, string>();
+    const messages: Array<Record<string, unknown>> = [];
+    for (const item of input.input) {
+        if ("role" in item) {
+            if (item.role !== "system") messages.push({ role: item.role, content: toClaudeContent(item.content) });
+            continue;
+        }
+        if (item.type === "function_call") {
+            calls.set(item.call_id, item.name);
+            messages.push({ role: "assistant", content: [{ type: "tool_use", id: item.call_id, name: item.name, input: parseJsonObject(item.arguments) }] });
+            continue;
+        }
+        const name = calls.get(item.call_id);
+        if (name) messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: item.call_id, content: item.output }] });
+    }
+    const tools = input.tools.map((tool) => ({
+        name: tool.name,
+        ...(tool.description ? { description: tool.description } : {}),
+        input_schema: tool.parameters,
+    }));
+    return {
+        ...(system ? { system } : {}),
+        messages,
+        max_tokens: Math.max(1, Math.floor(options.maxTokens || 2048)),
+        ...(tools.length ? { tools, tool_choice: toClaudeToolChoice(input.toolChoice) } : {}),
+        ...(options.stream ? { stream: true } : {}),
+        ...(options.thinking ? { thinking: { type: "enabled", budget_tokens: 1024 } } : {}),
+    };
+}
+
+export function readClaudeResponse(body: ClaudeResponse): { content: string; toolCalls: ToolCall[] } {
+    return {
+        content: (body.content || []).filter((block) => block.type === "text").map((block) => block.text || "").join(""),
+        toolCalls: (body.content || []).flatMap((block) => block.type === "tool_use" && block.name ? [{
+            id: block.id || crypto.randomUUID(),
+            type: "function" as const,
+            function: { name: block.name, arguments: JSON.stringify(block.input || {}) },
+        }] : []),
+    };
+}
+
+function toClaudeContent(content: string | ResponseContent[]) {
+    if (typeof content === "string") return content;
+    return content.map((part) => {
+        if (part.type === "input_text") return { type: "text", text: part.text };
+        const dataUrl = /^data:([^;,]+);base64,([a-z0-9+/=]+)$/i.exec(part.image_url);
+        if (!dataUrl) throw new ChatProtocolError("CLAUDE_IMAGE_FORMAT_NOT_SUPPORTED", "Claude 原生对话仅支持 data URL 图片；请先上传为可用的内联图片。");
+        return { type: "image", source: { type: "base64", media_type: dataUrl[1], data: dataUrl[2] } };
+    });
+}
+
+function toClaudeToolChoice(value: unknown) {
+    if (value === "required") return { type: "any" };
+    if (value && typeof value === "object" && "type" in value && (value as { type?: unknown }).type === "function") {
+        const name = (value as { name?: unknown }).name;
+        return typeof name === "string" ? { type: "tool", name } : { type: "auto" };
+    }
+    return { type: "auto" };
 }
 
 async function requestOpenAiCompletion(
@@ -260,3 +358,15 @@ type GeminiCandidate = {
     content?: { parts?: Array<{ text?: string; thoughtSignature?: string; functionCall?: { name?: string; args?: Record<string, unknown> } }> };
     groundingMetadata?: { groundingChunks?: Array<{ web?: { uri?: string; title?: string } }> };
 };
+
+type ClaudeResponse = {
+    content?: Array<{
+        type?: string;
+        text?: string;
+        thinking?: string;
+        id?: string;
+        name?: string;
+        input?: Record<string, unknown>;
+    }>;
+};
+export const ANTHROPIC_MESSAGES_VERSION = "2023-06-01";

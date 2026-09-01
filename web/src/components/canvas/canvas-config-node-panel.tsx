@@ -6,6 +6,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { standaloneEdition } from "@/lib/standalone-edition";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
@@ -126,10 +127,10 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                         </>
                     ) : (
                         <>
-                            <span className="inline-flex items-center gap-1">
+                            {!standaloneEdition ? <span className="inline-flex items-center gap-1">
                                 <CreditSymbol />
                                 {credits.toLocaleString()}
-                            </span>
+                            </span> : null}
                             <Play className="size-4" />
                             <span>开始生成</span>
                         </>

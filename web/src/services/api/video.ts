@@ -3,7 +3,7 @@ import { getQueuedTask, requestQueuedMedia, submitQueuedMediaTask } from "@/serv
 import { getMediaBlob, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
-import { isHappyHorseVideoConfig, normalizeHappyHorseDuration, normalizeHappyHorseRatio, normalizeHappyHorseResolution, type HappyHorseMode } from "@/lib/happyhorse-video";
+import type { HappyHorseMode } from "@/lib/happyhorse-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -40,7 +40,7 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
     throw new Error("视频接口没有返回可播放的视频");
 }
 
-async function queuedVideoInput(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions, happyHorseMode?: HappyHorseMode) {
+async function queuedVideoInput(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions, _happyHorseMode?: HappyHorseMode) {
     const sourceFiles: File[] = [];
     const sourceUrls: string[] = [];
     for (const image of references) sourceFiles.push(dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) }));
@@ -58,49 +58,15 @@ async function queuedVideoInput(config: AiConfig, prompt: string, references: Re
         modelId: modelOptionName(config.model || config.videoModel),
         prompt,
         operationType: "video_generation",
-        parameters: isHappyHorseVideoConfig(config)
-            ? {
-                happyHorseMode: happyHorseMode || inferHappyHorseMode(references, videoReferences),
-                seconds: Number(normalizeHappyHorseDuration(config.videoSeconds)),
-                size: normalizeHappyHorseRatio(config.size),
-                resolution: normalizeHappyHorseResolution(config.vquality),
-                audioSetting: config.videoGenerateAudio === "true" ? "origin" : "auto",
-                watermark: config.videoWatermark === "true",
-            }
-            : {
-                seconds: clampNumber(config.videoSeconds, 6, 1, 20),
-                size: normalizeVideoSize(config.size),
-                resolution: normalizeVideoResolution(config.vquality),
-                preset: "normal",
-                generateAudio: config.videoGenerateAudio === "true",
-                watermark: config.videoWatermark === "true",
-            },
+        parameters: {
+            seconds: Number.isFinite(Number(config.videoSeconds)) ? Number(config.videoSeconds) : 5,
+            size: config.size || "auto",
+            resolution: config.vquality || "auto",
+            generateAudio: config.videoGenerateAudio === "true",
+            watermark: config.videoWatermark === "true",
+        },
         sourceFiles,
         sourceUrls,
         signal: options?.signal,
     };
-}
-
-function inferHappyHorseMode(references: ReferenceImage[], videos: ReferenceVideo[]): HappyHorseMode {
-    if (videos.length) return "edit";
-    if (references.length === 1) return "first-frame";
-    if (references.length > 1) return "reference";
-    return "text";
-}
-
-function normalizeVideoSize(value: string) {
-    if (!value || value === "auto") return "";
-    if (/^\d+x\d+$/.test(value)) return value;
-    return ["9:16", "2:3", "3:4"].includes(value) ? "720x1280" : "1280x720";
-}
-
-function normalizeVideoResolution(value: string) {
-    if (value === "low") return "480p";
-    if (value === "auto" || value === "high" || value === "medium") return "720p";
-    return `${value.replace(/p$/i, "") || "720"}p`;
-}
-
-function clampNumber(value: string, fallback: number, min: number, max: number) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
 }

@@ -4,6 +4,7 @@ import { createBrowserRouter, Outlet } from "react-router-dom";
 import UserLayout from "@/layouts/user-layout";
 import { AuthGate } from "@/components/auth/auth-gate";
 import { ModuleGate } from "@/components/auth/module-gate";
+import { standaloneEdition } from "@/lib/standalone-edition";
 import type { ModuleKey } from "@/services/api/modules";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
@@ -66,16 +67,20 @@ export const router = createBrowserRouter([
         ),
         children: [
             { path: "/", element: protectedRoute(HomePage) },
-            { path: "/login", element: routeElement(LoginPage) },
-            { path: "/change-password", element: protectedRoute(ChangePasswordPage) },
+            ...(!standaloneEdition ? [
+                { path: "/login", element: routeElement(LoginPage) },
+                { path: "/change-password", element: protectedRoute(ChangePasswordPage) },
+            ] : []),
             { path: "/image", element: moduleRoute(ImagePage, imageModule) },
             { path: "/video", element: moduleRoute(VideoPage, "video") },
             { path: "/assets", element: moduleRoute(AssetsPage, "assets") },
             { path: "/team", element: moduleRoute(TeamPage, "team") },
             { path: "/prompts", element: moduleRoute(PromptsPage, "prompts") },
             { path: "/my-prompts", element: moduleRoute(MyPromptsPage, "prompts") },
-            { path: "/admin", element: protectedRoute(AdminPage, true) },
-            { path: "/admin/login", element: routeElement(AdminLoginPage) },
+            ...(!standaloneEdition ? [
+                { path: "/admin", element: protectedRoute(AdminPage, true) },
+                { path: "/admin/login", element: routeElement(AdminLoginPage) },
+            ] : []),
             { path: "/canvas", element: moduleRoute(CanvasPage, canvasModule) },
             { path: "/chat", element: moduleRoute(ChatPage, "gpt-chat") },
             { path: "/canvas/:id", element: moduleRoute(CanvasProjectPage, "canvas") },

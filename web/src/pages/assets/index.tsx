@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 
 import { useCopyText } from "@/hooks/use-copy-text";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
+import { createClientId } from "@/lib/client-id";
 import { uploadImage } from "@/services/image-storage";
 import { cn } from "@/lib/utils";
 import { canUserAccessAsset, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
@@ -204,7 +205,7 @@ export default function AssetsPage() {
             return;
         }
         try {
-            const receiptKey = `asset.downloaded:${asset.id}:${crypto.randomUUID()}`;
+            const receiptKey = `asset.downloaded:${asset.id}:${createClientId()}`;
             const blob = await fetchServerAssetContent(asset.id);
             saveAs(blob, filename);
             await recordServerAssetDownload(asset.id, filename, receiptKey);

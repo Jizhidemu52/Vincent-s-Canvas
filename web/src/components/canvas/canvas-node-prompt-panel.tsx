@@ -7,6 +7,8 @@ import { defaultConfig, modelOptionName, useConfigStore, useEffectiveConfig, typ
 import { CreditSymbol } from "@/constant/credits";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { standaloneEdition } from "@/lib/standalone-edition";
+import { createClientId } from "@/lib/client-id";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
@@ -18,6 +20,7 @@ import { ReferenceImageTray } from "@/components/reference-images/reference-imag
 import { AssetPickerModal, type InsertAssetPayload } from "./asset-picker-modal";
 import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
 import { resolveCanvasImageReferences, toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
+import { canvasNodePromptDraft } from "@/lib/canvas/canvas-node-prompt-draft";
 import { uploadImage } from "@/services/image-storage";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -47,7 +50,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
-    const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
+    const [prompt, setPrompt] = useState(canvasNodePromptDraft(node));
     const [canvasPickerOpen, setCanvasPickerOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -57,12 +60,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const credits = usage.configured ? usage.credits : 0;
 
     useEffect(() => {
-        setPrompt(isEditingExistingContent ? "" : node.metadata?.prompt || "");
-    }, [isEditingExistingContent, node.id]);
+        setPrompt(canvasNodePromptDraft(node));
+    }, [node.id, node.metadata?.draftPrompt, node.metadata?.prompt]);
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
-        if (!isEditingExistingContent) onPromptChange(node.id, value);
+        onPromptChange(node.id, value);
     };
 
     const submit = () => {
@@ -70,6 +73,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         if (!text || isRunning || !referenceValidation.valid) return;
         onGenerate(node.id, mode, text);
         setPrompt("");
+        onPromptChange(node.id, "");
     };
 
     const saveReferences = (next: typeof imageReferences) => {
@@ -92,7 +96,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const addAssets = (payloads: InsertAssetPayload[]) => {
         void Promise.all(payloads.filter((payload): payload is Extract<InsertAssetPayload, { kind: "image" }> => payload.kind === "image").map(async (payload) => {
             const stored = await uploadImage(payload.dataUrl);
-            return createImageReferenceItem({ id: crypto.randomUUID(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "asset");
+            return createImageReferenceItem({ id: createClientId(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "asset");
         })).then((items) => saveReferences(dedupeImageReferences([...imageReferences, ...items])));
         setAssetPickerOpen(false);
     };
@@ -101,14 +105,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         if (!files) return;
         void Promise.all(Array.from(files).filter((file) => file.type.startsWith("image/")).map(async (file) => {
             const stored = await uploadImage(file);
-            return createImageReferenceItem({ id: crypto.randomUUID(), name: file.name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "upload");
+            return createImageReferenceItem({ id: createClientId(), name: file.name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "upload");
         })).then((items) => saveReferences(dedupeImageReferences([...imageReferences, ...items])));
         if (uploadInputRef.current) uploadInputRef.current.value = "";
     };
 
     return (
         <div
-            className="rounded-2xl border p-3 shadow-2xl backdrop-blur"
+            className="rounded-xl border p-3 shadow-[0_16px_38px_rgba(15,23,42,.10)] backdrop-blur"
             style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
@@ -119,7 +123,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 references={mentionReferences}
                 onChange={updatePrompt}
                 onSubmit={submit}
-                className="thin-scrollbar h-24 w-full resize-none rounded-xl border px-3 py-2 text-sm leading-5 outline-none"
+                className="thin-scrollbar h-24 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-5 outline-none"
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
@@ -159,6 +163,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     type="primary"
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
                     danger={isRunning}
+                    style={isRunning ? undefined : { background: theme.toolbar.primary, borderColor: theme.toolbar.primary }}
                     disabled={!isRunning && (!prompt.trim() || !referenceValidation.valid)}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={isRunning ? "停止生成" : "生成"}
@@ -172,10 +177,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             </>
                         ) : (
                             <>
-                                <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
+                                {!standaloneEdition ? <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
                                     <CreditSymbol />
                                     {credits.toLocaleString()}
-                                </span>
+                                </span> : null}
                                 <ArrowUp className="size-4" />
                             </>
                         )}

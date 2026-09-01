@@ -119,15 +119,15 @@ export const deletePromptTemplate = (id: string) => request<void>(`/api/prompt-t
 export const setPromptFavorite = (id: string, favorite: boolean) => request<{ favorite: boolean }>(`/api/prompt-templates/${id}/favorite`, { method: "PUT", body: JSON.stringify({ favorite }) });
 export const savePromptFromTask = (taskId: string) => request<{ template: PromptTemplate }>(`/api/prompt-templates/from-task/${taskId}`, { method: "POST" });
 export const savePromptFromAsset = (assetId: string) => request<{ template: PromptTemplate }>(`/api/prompt-templates/from-asset/${assetId}`, { method: "POST" });
-export const submitPromptToTeam = (id: string, requestId = crypto.randomUUID()) => request<{ submission: PromptSubmission & { duplicate: boolean } }>(`/api/prompt-templates/${id}/submit`, { method: "POST", body: JSON.stringify({ requestId: `prompt-submit:${requestId}` }) });
+export const submitPromptToTeam = (id: string, requestId = createClientId()) => request<{ submission: PromptSubmission & { duplicate: boolean } }>(`/api/prompt-templates/${id}/submit`, { method: "POST", body: JSON.stringify({ requestId: `prompt-submit:${requestId}` }) });
 export const listPromptSubmissions = () => request<{ submissions: PromptSubmission[] }>("/api/prompt-templates/review/submissions");
 export const reviewPromptSubmission = (id: string, decision: "approve" | "reject", note = "") => request<{ submission: PromptSubmission }>(`/api/prompt-templates/review/submissions/${id}`, { method: "POST", body: JSON.stringify({ decision, note }) });
-export const promotePromptPublic = (id: string, requestId = crypto.randomUUID()) => request<{ publication: { templateId: string; versionId: string; duplicate: boolean } }>(`/api/prompt-templates/${id}/promote-public`, { method: "POST", body: JSON.stringify({ requestId: `prompt-public:${requestId}` }) });
+export const promotePromptPublic = (id: string, requestId = createClientId()) => request<{ publication: { templateId: string; versionId: string; duplicate: boolean } }>(`/api/prompt-templates/${id}/promote-public`, { method: "POST", body: JSON.stringify({ requestId: `prompt-public:${requestId}` }) });
 export const createPublicPrompt = (input: PromptSnapshotInput) => request<{ template: PromptTemplate }>("/api/admin/prompt-templates/public", { method: "POST", body: JSON.stringify(input) });
 export const updatePublicPrompt = (id: string, input: PromptSnapshotInput) => request<{ template: PromptTemplate }>(`/api/admin/prompt-templates/public/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const archiveSharedPrompt = (id: string) => request<{ status: string }>(`/api/admin/prompt-templates/${id}/archive`, { method: "POST" });
 
-export const resolvePromptReuse = (id: string, mode: "fill" | "fill_and_generate", requestId = crypto.randomUUID()) =>
+export const resolvePromptReuse = (id: string, mode: "fill" | "fill_and_generate", requestId = createClientId()) =>
     request<{ reuseToken: string; expiresInSeconds: number; mode: "fill" | "fill_and_generate"; pricing: PromptPricingResolution }>(`/api/prompt-templates/${id}/resolve`, { method: "POST", body: JSON.stringify({ mode, requestId: `prompt-reuse:${requestId}` }) });
 export const hydratePromptReuse = (token: string) => request<PromptReusePayload>(`/api/prompt-templates/reuse/${encodeURIComponent(token)}`);
 
@@ -180,3 +180,4 @@ export function formatPromptDate(value: string) {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
+import { createClientId } from "@/lib/client-id";

@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import {
+    buildClaudeMessagesRequest,
     buildGeminiGenerateUrl,
     ChatProtocolError,
     buildGeminiRequestBody,
     readGeminiResponse,
     requestChatCompletion,
+    readClaudeResponse,
     toGeminiContents,
 } from "../src/routes/chat";
 
@@ -101,5 +103,56 @@ describe("Gemini native chat protocol", () => {
         expect(result.content).toContain("建议采用针织撞色条纹。");
         expect(result.content).toContain("联网参考：");
         expect(result.content).toContain("H&M knitwear trends: https://example.com/knitwear");
+    });
+});
+
+describe("Claude Messages native protocol", () => {
+    test("builds a native request with system, base64 image, tool and thinking", () => {
+        const body = buildClaudeMessagesRequest({
+            input: [
+                { role: "system", content: "Keep the brand tone." },
+                { role: "user", content: [{ type: "input_text", text: "Review this" }, { type: "input_image", image_url: "data:image/png;base64,aGVsbG8=" }] },
+            ],
+            tools: [{ type: "function", name: "canvas_get_state", description: "Read canvas", parameters: { type: "object", properties: {} } }],
+        }, { maxTokens: 1024, thinking: true, stream: true });
+
+        expect(body).toMatchObject({
+            system: "Keep the brand tone.",
+            max_tokens: 1024,
+            stream: true,
+            thinking: { type: "enabled" },
+            messages: [{ role: "user", content: [{ type: "text", text: "Review this" }, { type: "image", source: { type: "base64", media_type: "image/png", data: "aGVsbG8=" } }] }],
+            tools: [{ name: "canvas_get_state", input_schema: { type: "object", properties: {} } }],
+        });
+    });
+
+    test("reads text and tool-use blocks without assuming the first block is text", () => {
+        expect(readClaudeResponse({
+            content: [
+                { type: "thinking", thinking: "reasoning" },
+                { type: "text", text: "Use the warm red option." },
+                { type: "tool_use", id: "tool-1", name: "canvas_get_state", input: { scope: "selected" } },
+            ],
+        })).toEqual({
+            content: "Use the warm red option.",
+            toolCalls: [{ id: "tool-1", type: "function", function: { name: "canvas_get_state", arguments: '{"scope":"selected"}' } }],
+        });
+    });
+
+    test("sends an Anthropic-native endpoint and headers", async () => {
+        globalThis.fetch = (async (input, init) => {
+            expect(String(input)).toBe("https://api.apimart.ai/v1/messages");
+            const headers = new Headers(init?.headers);
+            expect(headers.get("x-api-key")).toBe("test-key");
+            expect(headers.get("anthropic-version")).toBe("2023-06-01");
+            expect(JSON.parse(String(init?.body))).toMatchObject({ model: "claude-sonnet-5", max_tokens: 2048, messages: [{ role: "user", content: "ping" }] });
+            return Response.json({ content: [{ type: "text", text: "pong" }] });
+        }) as typeof fetch;
+
+        await expect(requestChatCompletion(
+            { model_id: "claude-sonnet-5", base_url: "https://api.apimart.ai", protocol: "anthropic", encrypted_credentials: "unused" },
+            { apiKey: "test-key" },
+            { input: [{ role: "user", content: "ping" }], tools: [] },
+        )).resolves.toEqual({ content: "pong", toolCalls: [] });
     });
 });

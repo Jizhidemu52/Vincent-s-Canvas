@@ -4,6 +4,7 @@ import { Cpu } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
+import { standaloneEdition } from "@/lib/standalone-edition";
 import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelPickerProps = {
@@ -22,7 +23,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const [open, setOpen] = useState(false);
     const canManageConfig = useCanManageConfig();
     const [serverModels,setServerModels]=useState<Array<{modelId:string;name:string;creditCost:number;capabilities:string[]}>>([]);
-    useEffect(()=>{if(!capability)return;const required=capability==="image"?["generate","edit"]:[capability==="text"?"chat":capability];fetch("/api/models",{credentials:"include"}).then((response)=>response.ok?response.json():Promise.reject()).then((result:{models:Array<{modelId:string;name:string;creditCost:number;capabilities:string[]}>})=>setServerModels(result.models.filter((model)=>required.some((item)=>model.capabilities.includes(item))))).catch(()=>setServerModels([]));},[capability]);
+    useEffect(()=>{if(!capability)return;const required=capability==="image"?["generate","edit"]:[capability==="text"?"chat":capability];fetch("/api/models",{credentials:"include"}).then((response)=>response.ok?response.json():Promise.reject()).then((result:{models:Array<{modelId:string;name:string;creditCost:number;capabilities:string[]}>})=>setServerModels(result.models.filter((model)=>!model.modelId.startsWith("demo-")&&required.some((item)=>model.capabilities.includes(item))))).catch(()=>setServerModels([]));},[capability]);
     const options = useMemo(() => capability ? serverModels.map((model)=>model.modelId) : Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, serverModels, value]);
     const current = value || "";
 
@@ -96,7 +97,7 @@ function ModelLabel({ config, model, serverModel }: { config: AiConfig; model: s
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
-            <span className="truncate">{serverModel?`${serverModel.name} · 模型 ${serverModel.creditCost} 积分`:modelOptionLabel(config, model)}</span>
+            <span className="truncate">{serverModel ? (standaloneEdition ? serverModel.name : `${serverModel.name} · 模型 ${serverModel.creditCost} 积分`) : modelOptionLabel(config, model)}</span>
         </span>
     );
 }

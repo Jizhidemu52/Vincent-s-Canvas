@@ -13,7 +13,7 @@ export const happyHorseRatios = ["16:9", "9:16", "1:1", "4:3", "3:4"] as const;
 
 export function isHappyHorseVideoConfig(config: AiConfig | Pick<AiConfig, "model" | "videoModel" | "baseUrl">) {
     const requestConfig = "channels" in config ? resolveModelRequestConfig(config, config.model || config.videoModel) : config;
-    return modelOptionName(requestConfig.model || requestConfig.videoModel).toLowerCase() === "happyhorse-1.0";
+    return modelOptionName(requestConfig.model || requestConfig.videoModel).toLowerCase() === "happyhorse-1.1";
 }
 
 export function normalizeHappyHorseRatio(value: string) {

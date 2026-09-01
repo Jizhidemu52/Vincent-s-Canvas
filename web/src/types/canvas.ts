@@ -36,6 +36,7 @@ export type CanvasNodeMetadata = {
     content?: string;
     composerContent?: string;
     prompt?: string;
+    draftPrompt?: string;
     status?: CanvasNodeStatus;
     errorDetails?: string;
     fontSize?: number;
@@ -144,6 +145,13 @@ export type CanvasAssistantMessageDetail = {
     [key: string]: unknown;
 };
 
+export type CanvasAssistantAttachment = {
+    id: string;
+    name: string;
+    url: string;
+    mediaType: "image" | "video";
+};
+
 export type CanvasAssistantMessage = {
     id: string;
     role: "user" | "assistant" | "system" | "tool" | "error";
@@ -152,6 +160,7 @@ export type CanvasAssistantMessage = {
     meta?: string;
     detail?: CanvasAssistantMessageDetail;
     references?: CanvasAssistantReference[];
+    attachments?: CanvasAssistantAttachment[];
 };
 
 export type CanvasAssistantSession = {

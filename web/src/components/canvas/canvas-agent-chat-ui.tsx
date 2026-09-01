@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Tooltip } from "antd";
-import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, UserRound, Wrench, X, XCircle } from "lucide-react";
+import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, UserRound, WandSparkles, Wrench, X, XCircle } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { LocalUser } from "@/stores/use-user-store";
 
-export type CanvasAgentChatAttachment = { id: string; name: string; url: string };
+export type CanvasAgentChatAttachment = { id: string; name: string; url: string; mediaType?: "image" | "video" };
 export type CanvasAgentMode = "online" | "local";
 export type CanvasAgentChatMessage = {
     id: string;
@@ -19,7 +19,7 @@ export type CanvasAgentChatMessage = {
 
 const WORKING_TEXT = "working...";
 
-export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
+export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool, onUseImageForVideo }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void }) {
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
     const color = item.role === "error" ? "#dc2626" : item.role === "tool" ? "#2563eb" : theme.node.text;
@@ -47,7 +47,7 @@ export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveToo
             {!isUser ? <AgentAvatar theme={theme} /> : null}
             <div className={`min-w-0 max-w-[82%] text-sm leading-6 ${isUser ? "text-right" : "text-left"}`} style={{ color }}>
                 <div className="whitespace-pre-wrap break-words text-left">{item.text}</div>
-                {item.attachments?.length ? <AgentMessageAttachments attachments={item.attachments} /> : null}
+                {item.attachments?.length ? <AgentMessageAttachments attachments={item.attachments} onUseImageForVideo={onUseImageForVideo} /> : null}
                 {item.meta ? <div className="mt-1 text-[11px] opacity-45">{item.meta}</div> : null}
             </div>
             {isUser ? <AgentUserAvatar user={user} theme={theme} /> : null}
@@ -155,6 +155,7 @@ export function AgentChatComposer({
     onAddFiles,
     onRemoveAttachment,
     left,
+    generationControls,
 }: {
     prompt: string;
     attachments?: CanvasAgentChatAttachment[];
@@ -167,6 +168,7 @@ export function AgentChatComposer({
     onAddFiles?: (files: FileList | File[] | null) => void | Promise<void>;
     onRemoveAttachment?: (id: string) => void;
     left?: ReactNode;
+    generationControls?: ReactNode;
 }) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canSubmit = !disabled && !sending && Boolean(prompt.trim() || attachments.length);
@@ -187,6 +189,7 @@ export function AgentChatComposer({
                         ))}
                     </div>
                 ) : null}
+                {generationControls ? <div className="mb-2">{generationControls}</div> : null}
                 <textarea
                     value={prompt}
                     onChange={(event) => onPromptChange(event.target.value)}
@@ -283,11 +286,19 @@ function AgentUserAvatar({ user, theme }: { user: LocalUser | null; theme: (type
     );
 }
 
-function AgentMessageAttachments({ attachments }: { attachments: CanvasAgentChatAttachment[] }) {
+function AgentMessageAttachments({ attachments, onUseImageForVideo }: { attachments: CanvasAgentChatAttachment[]; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void }) {
     return (
-        <div className="mt-2 grid grid-cols-3 gap-1.5">
+        <div className="mt-2 grid grid-cols-2 gap-2">
             {attachments.map((item) => (
-                <img key={item.id} src={item.url} alt={item.name} className="aspect-square w-full rounded-lg object-cover" />
+                <div key={item.id} className="group overflow-hidden rounded-xl border" style={{ borderColor: "rgba(120,120,120,.2)" }}>
+                    {item.mediaType === "video" ? <video src={item.url} controls className="aspect-video w-full bg-black object-cover" /> : <img src={item.url} alt={item.name} className="aspect-square w-full object-cover" />}
+                    {item.mediaType !== "video" && onUseImageForVideo ? (
+                        <button type="button" className="flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs font-medium transition hover:bg-black/5" onClick={() => onUseImageForVideo(item)}>
+                            <WandSparkles className="size-3.5" />
+                            选此图生成视频
+                        </button>
+                    ) : null}
+                </div>
             ))}
         </div>
     );

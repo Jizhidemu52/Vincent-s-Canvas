@@ -16,6 +16,7 @@ import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
+import { standaloneEdition } from "@/lib/standalone-edition";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -56,6 +57,7 @@ import { buildWorkflowVideoStageDispatch, completeAgentMediaWorkflowStage, resto
 import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workflow-stage";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "@/lib/canvas/canvas-resource-references";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
+import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
@@ -347,7 +349,7 @@ function WirelessCanvasPage() {
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
-    const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
+    const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("dots");
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
@@ -1673,7 +1675,7 @@ function WirelessCanvasPage() {
     }, []);
 
     const handleNodePromptChange = useCallback((nodeId: string, prompt: string) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt } } : node)));
+        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...canvasNodePromptDraftPatch(prompt) } } : node)));
     }, []);
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
@@ -1875,7 +1877,7 @@ function WirelessCanvasPage() {
                 message.error("当前设计师账号不可用");
                 return;
             }
-            if (user.creditBalance < usage.credits) {
+            if (!standaloneEdition && user.creditBalance < usage.credits) {
                 message.error(`额度不足：本次局部编辑需要 ${usage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
                 return;
             }
@@ -2212,7 +2214,7 @@ function WirelessCanvasPage() {
             message.error("当前设计师账号不可用");
             return;
         }
-        if (usage.configured && user.creditBalance < usage.credits) {
+        if (!standaloneEdition && usage.configured && user.creditBalance < usage.credits) {
             message.error(`额度不足：预计需要 ${usage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
             return;
         }
@@ -2377,7 +2379,7 @@ function WirelessCanvasPage() {
                 }
                 payload.warnings.forEach((warning) => message.warning(warning));
                 if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请选择管理员当前启用的模型");
-                const cost = payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准";
+                const cost = standaloneEdition ? "本机版直接生成" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
                 if (payload.mode === "fill_and_generate" && !isBatch) {
                     modal.confirm({ title: "确认在画布生成？", content: `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => quickGenerateRef.current() });
                 } else if (payload.mode === "fill_and_generate" && isBatch) {
@@ -2435,7 +2437,7 @@ function WirelessCanvasPage() {
             message.error("当前设计师账号不可用");
             return;
         }
-        if (usage.configured && user.creditBalance < usage.credits) {
+        if (!standaloneEdition && usage.configured && user.creditBalance < usage.credits) {
             message.error(`额度不足：预计需要 ${usage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
             return;
         }
@@ -3531,7 +3533,7 @@ function WirelessCanvasPage() {
 
     return (
         <main className="flex h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.background, color: theme.node.text }}>
-            <aside className="hidden w-[286px] shrink-0 border-r border-stone-200 bg-white/95 p-3 dark:border-stone-800 dark:bg-stone-950/95 lg:block">
+            <aside data-testid="canvas-left-generator-rail" className="hidden w-[232px] shrink-0 border-r border-slate-200/80 bg-white/95 p-3 pt-14 text-slate-900 shadow-[10px_0_30px_rgba(15,23,42,.025)] lg:block dark:border-stone-800 dark:bg-stone-950/95 dark:text-stone-100">
                 <div className="mb-3 flex items-center justify-between px-1">
                     <div className="text-sm font-semibold">AI 生成</div>
                     <button
@@ -4012,7 +4014,7 @@ function WirelessCanvasPage() {
                 <input ref={batchFilesInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBatchFolderInputChange} />
                 {codexCompactAgent && !assistantMounted ? <CanvasLocalAgentPanel headless snapshot={agentSnapshot} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} autoConnect={codexAutoConnect} /> : null}
             </section>
-            <CanvasAssetsSidebar onInsert={insertSidebarAsset} />
+            <CanvasAssetsSidebar onInsert={insertSidebarAsset} testId="canvas-right-asset-rail" />
             {assistantMounted ? (
                 <CanvasAssistantPanel
                     nodes={nodes}
@@ -4135,14 +4137,14 @@ function CanvasQuickGeneratePanel({
         <div
             data-testid="canvas-quick-generate-panel"
             data-canvas-no-zoom
-            className={`pointer-events-auto ${embedded ? "relative h-full w-full overflow-y-auto rounded-xl border-stone-200 bg-transparent p-0 shadow-none" : "absolute left-4 right-4 top-[76px] z-[70] w-auto rounded-[20px] border border-orange-200 bg-white/95 p-3.5 text-stone-950 shadow-[0_24px_70px_rgba(124,45,18,.20)] backdrop-blur-xl sm:right-auto sm:w-[420px]"}`}
+            className={`pointer-events-auto ${embedded ? "relative h-full w-full overflow-y-auto rounded-lg border-slate-200 bg-transparent p-0 shadow-none" : "absolute left-4 right-4 top-[76px] z-[70] w-auto rounded-xl border border-slate-200 bg-white/95 p-3 text-slate-900 shadow-[0_16px_38px_rgba(15,23,42,.10)] backdrop-blur-xl sm:right-auto sm:w-[420px]"}`}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
             <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2.5">
-                    <span className="grid size-9 shrink-0 place-items-center rounded-full bg-stone-950 text-orange-300 shadow-sm">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-slate-900 text-white shadow-sm">
                         <Sparkles className="size-4" />
                     </span>
                     <div className="min-w-0">
@@ -4154,7 +4156,7 @@ function CanvasQuickGeneratePanel({
             </div>
 
             <Input.TextArea
-                className="!mt-3 !resize-none !rounded-xl !border-orange-200 !bg-orange-50/50 !px-3 !py-2.5 !text-sm focus:!border-orange-400"
+                className="!mt-3 !resize-none !rounded-lg !border-slate-200 !bg-[#f7f7f6] !px-3 !py-2.5 !text-sm focus:!border-[#50d5be]"
                 value={prompt}
                 disabled={running}
                 autoSize={{ minRows: 3, maxRows: 6 }}
@@ -4168,15 +4170,15 @@ function CanvasQuickGeneratePanel({
                 <ModelPicker config={config} value={model} capability="image" fullWidth onChange={onModelChange} onMissingConfig={onMissingConfig} className="!h-9 !rounded-xl !border-orange-200 !bg-white" />
             </div>
 
-            <div className="mt-3 grid grid-cols-[minmax(0,1fr)_132px] gap-3">
+            <div className="mt-3 space-y-3">
                 <div className="min-w-0">
                     <div className="mb-1.5 text-[11px] font-semibold text-stone-500">画幅</div>
-                    <div className="grid grid-cols-5 gap-1 rounded-xl bg-stone-100 p-1">
+                    <div className="grid grid-cols-5 gap-1 rounded-lg bg-slate-100 p-1">
                         {QUICK_IMAGE_SIZES.map((value) => (
                             <button
                                 key={value}
                                 type="button"
-                                className={`h-8 min-w-0 rounded-lg text-[11px] font-semibold transition ${size === value ? "bg-white text-orange-600 shadow-sm" : "text-stone-500 hover:text-stone-900"}`}
+                                className={`h-8 min-w-0 rounded-md text-[11px] font-semibold transition ${size === value ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-900"}`}
                                 disabled={running}
                                 onClick={() => onSizeChange(value)}
                             >
@@ -4187,12 +4189,12 @@ function CanvasQuickGeneratePanel({
                 </div>
                 <div>
                     <div className="mb-1.5 text-[11px] font-semibold text-stone-500">数量</div>
-                    <div className="grid grid-cols-4 gap-1 rounded-xl bg-stone-100 p-1">
+                    <div className="grid grid-cols-4 gap-1 rounded-lg bg-slate-100 p-1">
                         {QUICK_IMAGE_COUNTS.map((value) => (
                             <button
                                 key={value}
                                 type="button"
-                                className={`h-8 rounded-lg text-xs font-semibold transition ${count === value ? "bg-white text-orange-600 shadow-sm" : "text-stone-500 hover:text-stone-900"}`}
+                                className={`h-8 rounded-md text-xs font-semibold transition ${count === value ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-900"}`}
                                 disabled={running}
                                 onClick={() => onCountChange(value)}
                             >
@@ -4203,11 +4205,11 @@ function CanvasQuickGeneratePanel({
                 </div>
             </div>
 
-            <div className="mt-3 border-t border-orange-100 pt-3">
+            <div className="mt-3 border-t border-slate-100 pt-3">
                 <div className="mb-2 flex items-center justify-between gap-3">
                     <span className="text-[11px] font-semibold text-stone-500">参考图 {references.length ? `${references.length}/6` : ""}</span>
                     {references.length ? (
-                        <button type="button" className="text-[11px] font-medium text-stone-400 transition hover:text-orange-600" disabled={running} onClick={onClearReferences}>
+                        <button type="button" className="text-[11px] font-medium text-slate-400 transition hover:text-slate-900" disabled={running} onClick={onClearReferences}>
                             清空
                         </button>
                     ) : null}
@@ -4215,7 +4217,7 @@ function CanvasQuickGeneratePanel({
                 <div className="flex min-h-14 items-center gap-2 overflow-x-auto pb-1">
                     <button
                         type="button"
-                        className="grid size-14 shrink-0 place-items-center rounded-xl border border-dashed border-orange-300 bg-orange-50 text-orange-600 transition hover:border-orange-500 hover:bg-orange-100 disabled:opacity-50"
+                        className="grid size-14 shrink-0 place-items-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600 transition hover:border-[#50d5be] hover:bg-[#edfffa] disabled:opacity-50"
                         aria-label="添加参考图"
                         title="添加参考图"
                         disabled={running || references.length >= 6}
@@ -4242,17 +4244,14 @@ function CanvasQuickGeneratePanel({
                 </div>
             </div>
 
-            <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-orange-50 px-3 py-2 text-xs text-orange-950">
-                <span className="font-semibold">
-                    预计 {estimateCredits} 积分 · ¥{estimateRmb.toFixed(2)}
-                </span>
-                <span className="truncate text-orange-800/70">剩余 {remainingCredits ?? "-"} 积分</span>
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                {standaloneEdition ? <span className="font-semibold">本机版直接生成</span> : <><span className="font-semibold">预计 {estimateCredits} 积分 · ¥{estimateRmb.toFixed(2)}</span><span className="truncate text-slate-500">剩余 {remainingCredits ?? "-"} 积分</span></>}
             </div>
 
             <Button
                 type="primary"
                 block
-                className="!mt-3 !h-11 !rounded-full !border-stone-950 !bg-stone-950 !font-semibold !text-white shadow-[0_10px_28px_rgba(28,25,23,.22)] hover:!border-orange-600 hover:!bg-orange-600"
+                className="!mt-3 !h-10 !rounded-lg !border-[#f36a2d] !bg-[#f36a2d] !font-semibold !text-white shadow-[0_8px_20px_rgba(243,106,45,.20)] hover:!border-[#db5720] hover:!bg-[#db5720]"
                 icon={<Sparkles className="size-4" />}
                 loading={running}
                 disabled={!model}
@@ -4380,7 +4379,7 @@ function CanvasTopBar({
                     {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} /> : null}
                     <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} />
                     <span className="h-6 w-px" style={{ background: theme.toolbar.border }} />
-                    <Button type="text" className="!h-8 !rounded-lg !px-2.5 !text-xs !font-medium" icon={<Download className="size-3.5" />} onClick={onExport}>
+                    <Button type="text" className="!h-8 !rounded-md !px-2.5 !text-xs !font-medium !text-white" style={{ background: theme.toolbar.primary, borderColor: theme.toolbar.primary }} icon={<Download className="size-3.5" />} onClick={onExport}>
                         导出
                     </Button>
                     <Button type="text" className="!h-8 !rounded-lg !px-2.5 !text-xs !font-medium" icon={<Share2 className="size-3.5" />} onClick={onShare}>

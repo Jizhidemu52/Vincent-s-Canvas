@@ -5,6 +5,7 @@ import { apiMartImageModel, buildApiMartImageRequest } from "../src/apimart-imag
 describe("APIMart image protocol adapter", () => {
   test("recognizes the configured image model aliases", () => {
     expect(apiMartImageModel("gpt-image-2-ext")).toBe("gpt-image-2");
+    expect(apiMartImageModel("vcen-gpt2")).toBe("gpt-image-2");
     expect(apiMartImageModel("nano-banana-2")).toBe("gemini-3.1-flash-image-preview");
     expect(apiMartImageModel("midjourney-v7")).toBe("midjourney");
   });

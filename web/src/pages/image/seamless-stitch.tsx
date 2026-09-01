@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { useSearchParams } from "react-router-dom";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
+import { standaloneEdition } from "@/lib/standalone-edition";
 import { resolveToolModel } from "@/services/api/business-config";
 import { DEFAULT_SEAMLESS_STITCH_PARAMETERS, requestSeamlessStitch, type SeamlessStitchParameters } from "@/services/api/internal-ai";
 import { listQueuedTasks, type QueuedTask } from "@/services/api/generation-tasks";
@@ -49,7 +50,7 @@ export function SeamlessStitchPage() {
     const [history, setHistory] = useState<QueuedTask[]>([]);
     const seamlessModel = resolveToolModel({ models, tools, prices: [] }, "seamless-stitch");
     const estimatedUsage = estimate({ operationType: "seamless_stitch", toolKey: "seamless-stitch", quantity: 1 });
-    const quotaBlocked = Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
+    const quotaBlocked = !standaloneEdition && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
 
     const refreshHistory = async () => {
         try {
@@ -183,7 +184,7 @@ export function SeamlessStitchPage() {
                 },
             });
             setResult({ status: "success", image: uploaded, durationMs: performance.now() - startedAt });
-            message.success(`无缝拼接完成，预计消耗 ${estimatedUsage.credits} 积分`);
+            message.success(standaloneEdition ? "无缝拼接完成" : `无缝拼接完成，预计消耗 ${estimatedUsage.credits} 积分`);
         } catch (error) {
             const reason = error instanceof Error ? error.message : "无缝拼接失败";
             setResult({ status: "failed", error: reason });
@@ -212,8 +213,8 @@ export function SeamlessStitchPage() {
             const cost = payload.pricing.estimate?.totalCredits ?? estimatedUsage.credits;
             if (payload.mode === "fill_and_generate") {
                 if (!firstAssetId) message.info("模板参数已填入，请先选择一张图片后再生成。");
-                else modal.confirm({ title: "确认开始无缝拼接？", content: `当前实际消耗 ${cost} 积分。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => runStitchRef.current() });
-            } else message.success(`模板已填入，当前消耗 ${cost} 积分/次`);
+                else modal.confirm({ title: "确认开始无缝拼接？", content: standaloneEdition ? "确认后将直接提交生成任务。" : `当前实际消耗 ${cost} 积分。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => runStitchRef.current() });
+            } else message.success(standaloneEdition ? "模板已填入" : `模板已填入，当前消耗 ${cost} 积分/次`);
         }).catch((error) => {
             loadedReuseTokenRef.current.delete(token);
             message.error(error instanceof Error ? error.message : "模板复用失败");
@@ -233,7 +234,7 @@ export function SeamlessStitchPage() {
                             <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">把单张花纹或纹理处理成可连续平铺的无缝素材。</p>
                         </div>
                         <Tag color="orange" className="m-0 shrink-0">
-                            {estimatedUsage.credits} 积分/次
+                            {standaloneEdition ? "本机版" : `${estimatedUsage.credits} 积分/次`}
                         </Tag>
                     </div>
 
@@ -297,8 +298,8 @@ export function SeamlessStitchPage() {
                     <div className="mt-auto pt-6">
                         <div className="mb-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs dark:border-stone-800 dark:bg-stone-950">
                             <div className="flex items-center justify-between gap-3">
-                                <span>本次消耗 {estimatedUsage.credits} 积分</span>
-                                <span>{user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录"}</span>
+                                <span>{standaloneEdition ? "本机版直接生成" : `本次消耗 ${estimatedUsage.credits} 积分`}</span>
+                                <span>{standaloneEdition ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
                             </div>
                             {quotaBlocked ? <div className="mt-1 text-red-500">额度不足，无法提交任务。</div> : null}
                         </div>

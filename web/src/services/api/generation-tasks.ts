@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { dataUrlToFile } from "@/lib/image-utils";
+import { createClientId } from "@/lib/client-id";
 import { uploadServerAsset } from "@/services/api/server-assets";
 import { imageToDataUrl } from "@/services/image-storage";
 import { modelOptionName } from "@/stores/use-config-store";
@@ -9,7 +10,10 @@ import type { ReferenceImage } from "@/types/image";
 
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
-export type QueuedTask = { id: string; requestId: string; operationType?: string; status: string; resultUrls: string[]; failureReason: string | null; createdAt?: string };
+export type ImageGenerationModel = PublicModel;
+export type QueuedTask = { id: string; requestId: string; operationType?: string; status: string; stage?: string; errorCode?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string };
+export type GenerationVideoCapability = { seconds: readonly [number, number]; resolutions: readonly string[]; sizes: readonly string[]; minImages: number; maxImages: number; firstFrameRequired: boolean; supportsAudio: boolean };
+export type GenerationCapabilityModel = { id: string; name: string; modelId: string; capability: GenerationVideoCapability };
 export type QueuedMediaInput = { modelId: string; prompt: string; operationType: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; signal?: AbortSignal };
 export type QueuedBatchItem = QueuedTask & { itemIndex: number };
 export type QueuedBatchFailure = { index: number; reason: string };
@@ -28,6 +32,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
 
+export function createImageTaskRequests(input: {
+    requestId: string;
+    projectId: string;
+    operationType: ImageOperationType;
+    modelConfigId: string;
+    prompt: string;
+    parameters?: Record<string, unknown>;
+    sourceUrls: string[];
+    count: number;
+}) {
+    return Array.from({ length: input.count }, (_, index) => ({
+        requestId: `${input.requestId}:${index}`,
+        projectId: input.projectId,
+        operationType: input.operationType,
+        modelConfigId: input.modelConfigId,
+        prompt: input.prompt,
+        parameters: { ...input.parameters, count: 1 },
+        sourceUrls: input.sourceUrls,
+        priority: "normal" as const,
+    }));
+}
+
 export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; references?: ReferenceImage[]; signal?: AbortSignal }) {
     const model = await resolvePublicModel(input.modelId);
     const sourceUrls: string[] = [];
@@ -38,41 +64,27 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
         sourceUrls.push(`/api/assets/${assetId}/content`);
     }
 
-    const rootRequestId = crypto.randomUUID();
+    const rootRequestId = createClientId();
     const projectId = currentProjectId("image-workbench");
-    let ids: string[];
-    if (input.count === 1) {
-        const result = await request<{ task: { id: string } }>("/api/tasks", {
+    const taskRequests = createImageTaskRequests({
+        requestId: rootRequestId,
+        projectId,
+        operationType: input.operationType,
+        modelConfigId: model.id,
+        prompt: input.prompt,
+        parameters: { ...input.parameters, ...(input.tool ? { tool: input.tool } : {}) },
+        sourceUrls,
+        count: input.count,
+    });
+    const submitted = await Promise.allSettled(
+        taskRequests.map((task) => request<{ task: { id: string } }>("/api/tasks", {
             method: "POST",
-            body: JSON.stringify({
-                requestId: rootRequestId,
-                projectId,
-                operationType: input.operationType,
-                modelConfigId: model.id,
-                prompt: input.prompt,
-                parameters: { ...input.parameters, count: input.count, ...(input.tool ? { tool: input.tool } : {}) },
-                sourceUrls,
-                priority: "normal",
-            }),
-        });
-        ids = [result.task.id];
-    } else {
-        const result = await request<{ tasks: Array<{ id: string }>; failures: Array<{ reason: string }> }>("/api/tasks/batch", {
-            method: "POST",
-            body: JSON.stringify({
-                requestId: rootRequestId,
-                projectId,
-                operationType: input.operationType,
-                modelConfigId: model.id,
-                prompt: input.prompt,
-                parameters: { ...input.parameters, count: 1, ...(input.tool ? { tool: input.tool } : {}) },
-                priority: "normal",
-                items: Array.from({ length: input.count }, () => ({ sourceUrls })),
-            }),
-        });
-        if (result.failures.length && !result.tasks.length) throw new Error(result.failures[0]!.reason);
-        ids = result.tasks.map((task) => task.id);
-    }
+            body: JSON.stringify(task),
+        })),
+    );
+    const rejected = submitted.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (rejected) throw rejected.reason instanceof Error ? rejected.reason : new Error("任务提交失败");
+    const ids = submitted.map((result) => (result as PromiseFulfilledResult<{ task: { id: string } }>).value.task.id);
 
     void refreshSessionBalance();
     try {
@@ -109,7 +121,7 @@ export async function requestQueuedImageBatch(input: { modelId: string; prompt: 
     }>("/api/tasks/batch", {
         method: "POST",
         body: JSON.stringify({
-            requestId: crypto.randomUUID(),
+            requestId: createClientId(),
             projectId: currentProjectId("canvas-batch-edit"),
             operationType: "batch_image",
             modelConfigId: model.id,
@@ -154,6 +166,28 @@ export function restoreBatchItemIndices(uploadedItems: Array<{ itemIndex: number
     };
 }
 
+export function createQueuedMediaTaskPayloads(input: {
+    requestId: string;
+    projectId: string;
+    operationType: string;
+    modelConfigId: string;
+    prompt: string;
+    parameters?: Record<string, unknown>;
+    sourceUrls: string[];
+}) {
+    const payload = {
+        requestId: input.requestId,
+        projectId: input.projectId,
+        operationType: input.operationType,
+        modelConfigId: input.modelConfigId,
+        prompt: input.prompt,
+        parameters: input.parameters || {},
+        sourceUrls: input.sourceUrls,
+        priority: "normal" as const,
+    };
+    return [payload, { ...payload, parameters: { ...payload.parameters }, sourceUrls: [...payload.sourceUrls] }];
+}
+
 export async function submitQueuedMediaTask(input: QueuedMediaInput) {
     const model = await resolvePublicModel(input.modelId);
     const sourceUrls = [...(input.sourceUrls || [])];
@@ -161,18 +195,26 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
         const id = await uploadServerAsset(file, { title: file.name, source: "task-reference" });
         sourceUrls.push(`/api/assets/${id}/content`);
     }
+    const [preflightPayload, submitPayload] = createQueuedMediaTaskPayloads({
+        requestId: createClientId(),
+        projectId: currentProjectId(input.operationType === "audio_generation" ? "audio-workbench" : "video-workbench"),
+        operationType: input.operationType,
+        modelConfigId: model.id,
+        prompt: input.prompt,
+        parameters: input.parameters || {},
+        sourceUrls,
+    });
+    if (input.operationType === "video_generation") {
+        const preflight = await request<{ ok: boolean; normalized: Record<string, unknown> }>("/api/tasks/preflight", {
+            method: "POST",
+            body: JSON.stringify(preflightPayload),
+        });
+        if (!preflight.ok) throw new Error("Video preflight failed");
+        submitPayload.parameters = { ...submitPayload.parameters, ...preflight.normalized };
+    }
     const result = await request<{ task: QueuedTask }>("/api/tasks", {
         method: "POST",
-        body: JSON.stringify({
-            requestId: crypto.randomUUID(),
-            projectId: currentProjectId(input.operationType === "audio_generation" ? "audio-workbench" : "video-workbench"),
-            operationType: input.operationType,
-            modelConfigId: model.id,
-            prompt: input.prompt,
-            parameters: input.parameters || {},
-            sourceUrls,
-            priority: "normal",
-        }),
+        body: JSON.stringify(submitPayload),
     });
     void refreshSessionBalance();
     return result.task;
@@ -181,6 +223,23 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
 export async function getQueuedTask(id: string) {
     const result = await request<{ tasks: QueuedTask[] }>("/api/tasks");
     return result.tasks.find((task) => task.id === id) || null;
+}
+
+export async function recoverQueuedTask(id: string) {
+    const result = await request<{ task: QueuedTask }>(`/api/tasks/${id}/recover`, { method: "POST" });
+    return result.task;
+}
+
+export function getGenerationCapabilities() {
+    return request<{ models: GenerationCapabilityModel[] }>("/api/generation-capabilities");
+}
+
+export function selectImageGenerationModels(models: ImageGenerationModel[]) {
+    return models.filter((model) => !model.modelId.startsWith("demo-") && model.capabilities.some((capability) => capability === "generate" || capability === "edit"));
+}
+
+export function getImageGenerationModels() {
+    return request<{ models: ImageGenerationModel[] }>("/api/models").then(({ models }) => selectImageGenerationModels(models));
 }
 
 export async function listQueuedTasks() {

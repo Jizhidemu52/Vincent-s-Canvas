@@ -11,6 +11,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { standaloneEdition } from "@/lib/standalone-edition";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { toolModeOperation, type AdminToolMode } from "@/lib/admin-domain";
 import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
@@ -82,7 +83,7 @@ function imageModelProfile(model: string): ImageModelProfile {
     if (normalized.includes("midjourney-blend")) return { kind: "midjourney-blend", maxCount: 1, tip: "Midjourney Blend merges 2 to 4 reference images. The prompt is not sent to the model." };
     if (normalized.includes("midjourney")) return { kind: "midjourney", maxCount: 1, tip: "Midjourney only supports text-to-image here. Reference images are not sent." };
     if (normalized.includes("gemini-3.1-flash") || normalized.includes("nano-banana-2")) return { kind: "gemini", maxCount: 10, tip: "Gemini 3.1 Flash supports multiple images, up to 10 outputs per submission, with up to 14 reference images." };
-    if (normalized.includes("gpt-image-2")) return { kind: "gpt", maxCount: 10, tip: "GPT-Image-2 supports 1K / 2K / 4K, 15 aspect ratios or custom pixel sizes, up to 10 outputs and 16 references." };
+    if (normalized.includes("gpt-image-2") || normalized.includes("vcen-gpt2")) return { kind: "gpt", maxCount: 10, tip: "GPT-Image-2 supports 1K / 2K / 4K, 15 aspect ratios or custom pixel sizes, up to 10 outputs and 16 references." };
     return { kind: "standard", maxCount: 10, tip: "The available options follow the administrator-selected model configuration." };
 }
 
@@ -179,7 +180,7 @@ function ImageGenerationPage() {
     const selectedModelProfile = imageModelProfile(adminModelId);
     const referenceValidation = validateImageReferences(adminModelId, references);
     const estimatedUsage = estimate({ operationType, modelId: adminModelId, quantity: generationCount });
-    const quotaBlocked = Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
+    const quotaBlocked = !standaloneEdition && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const missingReference = toolModeConfig.requiresReference && references.length === 0;
     const unsupportedMidjourneyReferences = selectedModelProfile.kind === "midjourney" && references.length > 0;
     const invalidBlendReferences = selectedModelProfile.kind === "midjourney-blend" && (references.length < 2 || references.length > 4);
@@ -261,9 +262,9 @@ function ImageGenerationPage() {
             restoreReferences(nextReferences, "template");
             payload.warnings.forEach((warning) => message.warning(warning));
             if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请先选择管理员当前启用的模型");
-            const cost = payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准";
+            const cost = standaloneEdition ? "本机版直接生成" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
             if (payload.mode === "fill_and_generate") {
-                modal.confirm({ title: "确认使用当前配置生成？", content: `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
+                modal.confirm({ title: "确认使用当前配置生成？", content: standaloneEdition ? "确认后将直接提交生成任务。" : `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
             } else message.success(`模板已填入，当前预计 ${cost}`);
         }).catch((error) => { loadedReuseTokenRef.current.delete(token); message.error(error instanceof Error ? error.message : "模板复用失败"); });
     }, [message, modal, searchParams, updateConfig]);
@@ -590,8 +591,8 @@ function ImageGenerationPage() {
                         <div className="mt-auto pt-6">
                             <div className="mb-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
                                 <div className="flex items-center justify-between gap-3">
-                                    <span>预计消耗 {estimatedUsage.credits} 积分</span>
-                                    <span>{user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录"}</span>
+                                    <span>{standaloneEdition ? "本机版直接生成" : `预计消耗 ${estimatedUsage.credits} 积分`}</span>
+                                    <span>{standaloneEdition ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
                                 </div>
                                 {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{toolModeConfig.title}需要先添加至少一张参考图。</div> : null}
                                 {!referenceValidation.valid ? <div className="mt-1 text-red-500">{referenceValidation.message}</div> : null}

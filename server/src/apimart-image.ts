@@ -21,7 +21,7 @@ const GEMINI_MODELS = new Set([
   "nano-banana-2",
 ]);
 
-const GPT_MODELS = new Set(["gpt-image-2", "gpt-image-2-ext"]);
+const GPT_MODELS = new Set(["gpt-image-2", "gpt-image-2-ext", "vcen-gpt2"]);
 
 const IMAGE_STATUSES = new Set(["pending", "submitted", "processing", "queued", "running"]);
 const IMAGE_FAILURE_STATUSES = new Set(["failed", "cancelled", "canceled"]);

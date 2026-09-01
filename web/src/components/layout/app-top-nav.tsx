@@ -7,6 +7,7 @@ import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { navigationModuleKey, navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
+import { standaloneEdition } from "@/lib/standalone-edition";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -52,7 +53,12 @@ function SidebarTool({ tool, active, badge }: { tool: (typeof navigationTools)[n
 
 function ToolGroup({ group, activeToolSlug, adminVisible, teamVisible, getToolBadge }: { group: NavigationGroup; activeToolSlug?: NavigationToolSlug; adminVisible: boolean; teamVisible: boolean; getToolBadge: (slug: NavigationToolSlug) => string | undefined }) {
     const flags = useModuleStore((state) => state.flags);
-    const tools = navigationTools.filter((tool) => tool.group === group && (tool.slug === "admin" || flags[navigationModuleKey(tool.slug) as ModuleKey]) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
+    const tools = navigationTools.filter((tool) => {
+        if (tool.group !== group) return false;
+        if (standaloneEdition && tool.group === "admin") return false;
+        return (tool.slug === "admin" || flags[navigationModuleKey(tool.slug) as ModuleKey])
+            && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible));
+    });
     if (!tools.length) return null;
 
     return (
@@ -96,7 +102,7 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
                 <Globe2 className="size-4 text-stone-400" />
                 中文
             </button>
-            <button
+            {!standaloneEdition ? <button
                 type="button"
                 className={buttonClass}
                 onClick={async () => {
@@ -110,15 +116,15 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
             >
                 {user ? <LogOut className="size-4 text-stone-400" /> : <LogIn className="size-4 text-stone-400" />}
                 {user ? "退出登录" : "登录入口"}
-            </button>
+            </button> : null}
             <div className="mt-4 flex items-center gap-2 rounded-xl bg-white px-2.5 py-2 shadow-sm">
                 <div className="flex size-7 items-center justify-center rounded-full bg-orange-500 text-xs font-bold text-white">{displayName.slice(0, 1).toUpperCase()}</div>
                 <div className="min-w-0 flex-1">
                     <p className="truncate text-[11px] font-semibold text-stone-700">{displayName}</p>
-                    <p className="flex items-center gap-1 text-[11px] font-semibold text-orange-600">
+                    {!standaloneEdition ? <p className="flex items-center gap-1 text-[11px] font-semibold text-orange-600">
                         <CircleDollarSign className="size-3" />
                         {isAdminRole(user?.role) ? roleLabel : credits}
-                    </p>
+                    </p> : <p className="text-[11px] font-semibold text-orange-600">Standalone</p>}
                 </div>
             </div>
         </div>
@@ -155,6 +161,7 @@ export function AppTopNav() {
     const teamVisible = useUserStore((state) => Boolean(state.user?.groupId));
 
     const getToolBadge = (slug: NavigationToolSlug) => {
+        if (standaloneEdition) return undefined;
         const billing = navigationToolBilling[slug];
         if (billing) {
             if (businessConfigStatus === "idle" || businessConfigStatus === "loading") return "同步中";

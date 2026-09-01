@@ -65,7 +65,7 @@ export const recordServerAssetEvent = (id: string, eventType: AssetEventType, me
     request<{ eventId: string; projection: AssetProjection }>(`/api/assets/${id}/events`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ eventType, idempotencyKey: `${eventType}:${id}:${crypto.randomUUID()}`, metadata, projectId }),
+        body: JSON.stringify({ eventType, idempotencyKey: `${eventType}:${id}:${createClientId()}`, metadata, projectId }),
     });
 
 export const recordServerAssetDownload = (id: string, filename: string, idempotencyKey: string) =>
@@ -85,3 +85,4 @@ export const unshareServerAssetWithDepartment = (id: string, departmentId: strin
     request<void>(`/api/assets/${id}/share`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "department", targetId: departmentId }) });
 
 export const deleteServerAsset = (id: string) => request<void>(`/api/assets/${id}`, { method: "DELETE" });
+import { createClientId } from "@/lib/client-id";

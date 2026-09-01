@@ -1,0 +1,1 @@
+export const DEMO_STREAM_IDLE_TIMEOUT_SECONDS = 180;

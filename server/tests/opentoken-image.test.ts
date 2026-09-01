@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   buildOpenTokenImageRequest,
+  openTokenErrorMessage,
   parseOpenTokenImageResponse,
 } from "../src/opentoken-image";
 
@@ -23,8 +24,8 @@ describe("OpenToken image protocol adapter", () => {
         model: "gpt-image-2",
         prompt: "A blue ceramic button on a white background",
         n: 1,
-        size: "1:1",
-        resolution: "1k",
+        size: "1024x1024",
+        quality: "low",
       },
     });
   });
@@ -54,8 +55,8 @@ describe("OpenToken image protocol adapter", () => {
     expect(request.headers.authorization).toBe("Bearer test-key");
     expect(request.form?.get("model")).toBe("gpt-image-2");
     expect(request.form?.get("prompt")).toBe("Replace the background with light gray");
-    expect(request.form?.get("size")).toBe("1:1");
-    expect(request.form?.get("resolution")).toBe("1k");
+    expect(request.form?.get("size")).toBe("1024x1024");
+    expect(request.form?.get("quality")).toBe("low");
     expect(request.form?.getAll("image")).toHaveLength(1);
   });
 
@@ -64,7 +65,21 @@ describe("OpenToken image protocol adapter", () => {
     expect(parseOpenTokenImageResponse({ data: [{ b64_json: "aGVsbG8=" }] })).toEqual({ base64: "aGVsbG8=" });
   });
 
+  test("maps canvas ratios to OpenToken's exact supported size values", () => {
+    expect(buildOpenTokenImageRequest({ baseUrl: "https://cn2.gw.opentoken.io/v1", apiKey: "test-key", prompt: "landscape", size: "16:9" }).body?.size).toBe("1536x1024");
+    expect(buildOpenTokenImageRequest({ baseUrl: "https://cn2.gw.opentoken.io/v1", apiKey: "test-key", prompt: "portrait", size: "9:16" }).body?.size).toBe("1024x1536");
+    expect(buildOpenTokenImageRequest({ baseUrl: "https://cn2.gw.opentoken.io/v1", apiKey: "test-key", prompt: "adaptive", size: "auto" }).body?.size).toBe("auto");
+  });
+
   test("rejects a successful response without an image", () => {
     expect(() => parseOpenTokenImageResponse({ data: [] })).toThrow("OpenToken did not return an image");
+  });
+
+  test("keeps a provider quota message visible to the designer", () => {
+    expect(
+      openTokenErrorMessage({
+        error: { message: "Key 今日额度已用尽，请等待次日重置" },
+      }),
+    ).toBe("Key 今日额度已用尽，请等待次日重置");
   });
 });

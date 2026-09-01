@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 
+import { createClientId } from "@/lib/client-id";
+
 import {
   contributeGroupCredits,
   decideTeamGroupCreditRequest,
@@ -66,13 +68,13 @@ export default function TeamPage() {
 
   const applyCredits = async (values: { amount: number; reason: string }) => {
     try {
-      await submitGroupCreditRequest({ requestId: `group-claim-${crypto.randomUUID()}`, ...values });
+      await submitGroupCreditRequest({ requestId: `group-claim-${createClientId()}`, ...values });
       message.success("额度申请已提交，等待组长审批"); setRequestOpen(false); requestForm.resetFields(); await refresh();
     } catch (error) { message.error(error instanceof Error ? error.message : "申请失败"); }
   };
   const contribute = async (values: { amount: number }) => {
     try {
-      await contributeGroupCredits({ requestId: `group-contribution-${crypto.randomUUID()}`, ...values });
+      await contributeGroupCredits({ requestId: `group-contribution-${createClientId()}`, ...values });
       message.success("积分已归还到本组共享池，本月个人额度同步减少"); setContributionOpen(false);
       contributionForm.resetFields(); await Promise.all([hydrateSession(), refresh()]);
     } catch (error) { message.error(error instanceof Error ? error.message : "归还失败"); }
