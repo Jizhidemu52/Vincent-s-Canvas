@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { boundsForViewport, createCanvasSpatialIndex, queryCanvasSpatialIndex } from "@/lib/canvas/canvas-spatial-index";
+import { boundsForViewport, createCanvasSpatialIndex, queryCanvasSpatialIndex, selectIndexedCanvasNodes } from "@/lib/canvas/canvas-spatial-index";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const node = (id: string, x: number, y: number, width = 100, height = 100): CanvasNodeData => ({
@@ -27,5 +27,12 @@ describe("canvas spatial index", () => {
 
     test("converts a translated viewport and padding into world bounds", () => {
         expect(boundsForViewport({ x: 200, y: 100, k: 2 }, 400, 200, 50)).toEqual({ minX: -150, minY: -100, maxX: 150, maxY: 100 });
+    });
+
+    test("keeps stacking order while applying a node visibility predicate", () => {
+        const nodes = [node("far", 4000, 0), node("visible", 80, 40), node("hidden", 160, 40)];
+        const index = createCanvasSpatialIndex(nodes, 1024);
+
+        expect(selectIndexedCanvasNodes(nodes, index, { minX: 0, minY: 0, maxX: 400, maxY: 400 }, (candidate) => candidate.id !== "hidden").map((candidate) => candidate.id)).toEqual(["visible"]);
     });
 });

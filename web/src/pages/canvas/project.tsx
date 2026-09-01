@@ -60,6 +60,7 @@ import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-referenc
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createDragPreview, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
+import { boundsForViewport, createCanvasSpatialIndex, selectIndexedCanvasNodes } from "@/lib/canvas/canvas-spatial-index";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
@@ -807,18 +808,17 @@ function WirelessCanvasPage() {
         [screenToCanvas],
     );
 
+    const canvasSpatialIndex = useMemo(() => createCanvasSpatialIndex(nodes), [nodes]);
+
     const visibleNodes = useMemo(() => {
         const padding = 280;
         const rect = containerRef.current?.getBoundingClientRect();
         const width = rect?.width || size.width;
         const height = rect?.height || size.height;
-        const viewLeft = -viewport.x / viewport.k - padding;
-        const viewTop = -viewport.y / viewport.k - padding;
-        const viewRight = viewLeft + width / viewport.k + padding * 2;
-        const viewBottom = viewTop + height / viewport.k + padding * 2;
+        const bounds = boundsForViewport(viewport, width, height, padding);
 
-        return nodes.filter((node) => !isHiddenBatchChild(node, nodes, collapsingBatchIds) && node.position.x + node.width > viewLeft && node.position.x < viewRight && node.position.y + node.height > viewTop && node.position.y < viewBottom);
-    }, [collapsingBatchIds, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
+        return selectIndexedCanvasNodes(nodes, canvasSpatialIndex, bounds, (node) => !isHiddenBatchChild(node, nodes, collapsingBatchIds));
+    }, [canvasSpatialIndex, collapsingBatchIds, nodes, size.height, size.width, viewport]);
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
     const renderNodeById = useMemo(() => {

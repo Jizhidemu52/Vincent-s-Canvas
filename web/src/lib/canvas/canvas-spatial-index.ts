@@ -65,6 +65,11 @@ export function queryCanvasSpatialIndex(index: CanvasSpatialIndex, bounds: Canva
     return [...ids].filter((id) => intersects(index.boundsByNodeId.get(id), bounds));
 }
 
+export function selectIndexedCanvasNodes(nodes: CanvasNodeData[], index: CanvasSpatialIndex, bounds: CanvasBounds, shouldInclude: (node: CanvasNodeData) => boolean = () => true): CanvasNodeData[] {
+    const visibleIds = new Set(queryCanvasSpatialIndex(index, bounds));
+    return nodes.filter((node) => visibleIds.has(node.id) && shouldInclude(node));
+}
+
 function forEachCell(bounds: CanvasBounds, cellSize: number, callback: (key: string) => void) {
     const minCellX = Math.floor(bounds.minX / cellSize);
     const maxCellX = Math.floor((bounds.maxX - Number.EPSILON) / cellSize);
