@@ -58,6 +58,7 @@ import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workfl
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "@/lib/canvas/canvas-resource-references";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
+import { createDragPreview, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
@@ -314,6 +315,7 @@ function WirelessCanvasPage() {
         startY: 0,
         initialSelectedNodes: [],
     });
+    const dragPreviewRef = useRef<CanvasDragPreview>(new Map());
 
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
@@ -394,6 +396,7 @@ function WirelessCanvasPage() {
     const [collapsingBatchIds, setCollapsingBatchIds] = useState<Set<string>>(new Set());
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
+    const [dragPreviewById, setDragPreviewById] = useState<CanvasDragPreview>(() => new Map());
 
     const selectedMaskEditModel = maskEditModel || effectiveConfig.imageModel || effectiveConfig.model;
     const maskEditEstimate = useMemo(() => estimateUsage({ operationType: "inpaint", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }), [estimateUsage, selectedMaskEditModel]);
@@ -791,6 +794,16 @@ function WirelessCanvasPage() {
     }, [collapsingBatchIds, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+    const renderNodeById = useMemo(() => {
+        if (!dragPreviewById.size) return nodeById;
+
+        const next = new Map(nodeById);
+        dragPreviewById.forEach((position, id) => {
+            const node = nodeById.get(id);
+            if (node) next.set(id, { ...node, position });
+        });
+        return next;
+    }, [dragPreviewById, nodeById]);
     const toolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
@@ -1277,14 +1290,17 @@ function WirelessCanvasPage() {
         nodeDraggingRef.current = false;
         setIsNodeDragging(false);
         if (dragRef.current.hasMoved && clientX != null && clientY != null) {
+            const preview = createDragPreview(initialPositions, dx, dy);
             setNodes((prev) =>
                 prev.map((node) => {
-                    const initial = initialPositions.find((item) => item.id === node.id);
-                    if (!initial) return node;
-                    return { ...node, position: { x: initial.x + dx, y: initial.y + dy } };
+                    const position = preview.get(node.id);
+                    return position ? { ...node, position } : node;
                 }),
             );
         }
+
+        dragPreviewRef.current = new Map();
+        setDragPreviewById(dragPreviewRef.current);
 
         dragRef.current.isDraggingNode = false;
         dragRef.current.hasMoved = false;
@@ -1313,12 +1329,9 @@ function WirelessCanvasPage() {
 
                 if (rafRef.current) cancelAnimationFrame(rafRef.current);
                 rafRef.current = requestAnimationFrame(() => {
-                    setNodes((prev) =>
-                        prev.map((node) => {
-                            const initial = initialPositions.find((item) => item.id === node.id);
-                            return initial ? { ...node, position: { x: initial.x + dx, y: initial.y + dy } } : node;
-                        }),
-                    );
+                    const preview = createDragPreview(initialPositions, dx, dy);
+                    dragPreviewRef.current = preview;
+                    setDragPreviewById(preview);
                     rafRef.current = null;
                 });
                 return;
@@ -3644,13 +3657,13 @@ function WirelessCanvasPage() {
                     <svg className="absolute left-0 top-0 h-[10000px] w-[10000px] overflow-visible" style={{ pointerEvents: "none", transform: "translateZ(0)", zIndex: 0 }}>
                         {connections
                             .filter((connection) => {
-                                const from = nodeById.get(connection.fromNodeId);
-                                const to = nodeById.get(connection.toNodeId);
+                                const from = renderNodeById.get(connection.fromNodeId);
+                                const to = renderNodeById.get(connection.toNodeId);
                                 return Boolean(from && to && !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes));
                             })
                             .map((connection) => {
-                                const from = nodeById.get(connection.fromNodeId);
-                                const to = nodeById.get(connection.toNodeId);
+                                const from = renderNodeById.get(connection.fromNodeId);
+                                const to = renderNodeById.get(connection.toNodeId);
                                 if (!from || !to) return null;
 
                                 return (
@@ -3673,13 +3686,14 @@ function WirelessCanvasPage() {
                                     />
                                 );
                             })}
-                        {connectingParams ? <ActiveConnectionPath node={nodeById.get(connectingParams.nodeId)} handle={connectingParams} mouseWorld={mouseWorld} target={connectionTargetNodeId ? nodeById.get(connectionTargetNodeId) : undefined} /> : null}
+                        {connectingParams ? <ActiveConnectionPath node={renderNodeById.get(connectingParams.nodeId)} handle={connectingParams} mouseWorld={mouseWorld} target={connectionTargetNodeId ? renderNodeById.get(connectionTargetNodeId) : undefined} /> : null}
                     </svg>
 
                     {visibleNodes.map((node) => (
                         <CanvasNode
                             key={node.id}
                             data={node}
+                            previewPosition={dragPreviewById.get(node.id)}
                             scale={viewport.k}
                             isSelected={selectedNodeIds.has(node.id)}
                             isRelated={relatedHighlight.nodeIds.has(node.id)}

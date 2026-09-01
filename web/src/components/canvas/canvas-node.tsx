@@ -14,6 +14,7 @@ type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
 type CanvasNodeProps = {
     data: CanvasNodeData;
+    previewPosition?: Position;
     scale: number;
     isSelected: boolean;
     isRelated: boolean;
@@ -69,6 +70,7 @@ type NodeContentRendererProps = {
 
 export const CanvasNode = React.memo(function CanvasNode({
     data,
+    previewPosition,
     scale,
     isSelected,
     isRelated,
@@ -110,6 +112,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
+    const position = previewPosition ?? data.position;
     const imageBorderColor = isActive ? theme.canvas.selectionStroke : isRelated && !isBatchChild ? theme.node.muted : "transparent";
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const resizeRef = useRef({
@@ -239,7 +242,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             data-node-id={data.id}
             className={`node-element absolute flex select-none flex-col transition-shadow duration-200 ${isSelected ? "z-50" : "z-10"}`}
             style={{
-                transform: `translate(${data.position.x}px, ${data.position.y}px)`,
+                transform: `translate(${position.x}px, ${position.y}px)`,
                 width: data.width,
                 height: data.height,
                 transition: "box-shadow 200ms ease",
@@ -334,6 +337,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 
 function canvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProps) {
     if (!canvasNodeRenderStateEqual(toRenderState(previous), toRenderState(next))) return false;
+    if (previous.previewPosition?.x !== next.previewPosition?.x || previous.previewPosition?.y !== next.previewPosition?.y) return false;
     if (previous.onMouseDown !== next.onMouseDown || previous.onHoverStart !== next.onHoverStart || previous.onHoverEnd !== next.onHoverEnd || previous.onConnectStart !== next.onConnectStart || previous.onResize !== next.onResize || previous.onContentChange !== next.onContentChange || previous.onToggleBatch !== next.onToggleBatch || previous.onSetBatchPrimary !== next.onSetBatchPrimary || previous.onRetry !== next.onRetry || previous.onGenerateImage !== next.onGenerateImage || previous.onViewImage !== next.onViewImage || previous.onContextMenu !== next.onContextMenu) return false;
     if (previous.showPanel || next.showPanel) return previous.renderPanel === next.renderPanel;
     if (previous.data.type === CanvasNodeType.Config || next.data.type === CanvasNodeType.Config) return previous.renderNodeContent === next.renderNodeContent;
