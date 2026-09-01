@@ -1,8 +1,10 @@
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import type { CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import type { CanvasNodeData } from "@/types/canvas";
 
 export type CanvasNodeRenderState = {
     data: CanvasNodeData;
+    renderQuality: CanvasRenderQuality;
     scale: number;
     isSelected: boolean;
     isRelated: boolean;
@@ -25,6 +27,7 @@ export type CanvasNodeRenderState = {
 export function canvasNodeRenderStateEqual(previous: CanvasNodeRenderState, next: CanvasNodeRenderState) {
     return (
         previous.data === next.data &&
+        previous.renderQuality === next.renderQuality &&
         previous.scale === next.scale &&
         previous.isSelected === next.isSelected &&
         previous.isRelated === next.isRelated &&

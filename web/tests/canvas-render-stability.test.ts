@@ -16,6 +16,7 @@ const node: CanvasNodeData = {
 function state(overrides: Partial<CanvasNodeRenderState> = {}): CanvasNodeRenderState {
     return {
         data: node,
+        renderQuality: "full",
         scale: 1,
         isSelected: false,
         isRelated: false,
@@ -45,6 +46,7 @@ describe("canvas node render stability", () => {
     test("refreshes a node when its interactive state or data changes", () => {
         expect(canvasNodeRenderStateEqual(state(), state({ isSelected: true }))).toBe(false);
         expect(canvasNodeRenderStateEqual(state(), state({ scale: 0.8 }))).toBe(false);
+        expect(canvasNodeRenderStateEqual(state(), state({ renderQuality: "moving" } as Partial<CanvasNodeRenderState>))).toBe(false);
         expect(canvasNodeRenderStateEqual(state(), state({ data: { ...node, position: { x: 180, y: 80 } } }))).toBe(false);
     });
 });

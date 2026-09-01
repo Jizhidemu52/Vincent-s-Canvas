@@ -59,6 +59,7 @@ import { buildCanvasResourceReferences, buildNodeMentionReferences } from "@/lib
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createDragPreview, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
+import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
@@ -301,6 +302,7 @@ function WirelessCanvasPage() {
     const didInitialCenterRef = useRef(false);
     const rafRef = useRef<number | null>(null);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const renderQualityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const nodeDraggingRef = useRef(false);
     const dragRef = useRef<{
         isDraggingNode: boolean;
@@ -397,6 +399,7 @@ function WirelessCanvasPage() {
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
     const [dragPreviewById, setDragPreviewById] = useState<CanvasDragPreview>(() => new Map());
+    const [renderQuality, setRenderQuality] = useState<CanvasRenderQuality>("full");
 
     const selectedMaskEditModel = maskEditModel || effectiveConfig.imageModel || effectiveConfig.model;
     const maskEditEstimate = useMemo(() => estimateUsage({ operationType: "inpaint", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }), [estimateUsage, selectedMaskEditModel]);
@@ -664,6 +667,30 @@ function WirelessCanvasPage() {
         setViewport(next);
         setContextMenu(null);
     }, []);
+
+    const handleCanvasInteractionChange = useCallback((isInteracting: boolean) => {
+        if (renderQualityTimerRef.current) {
+            clearTimeout(renderQualityTimerRef.current);
+            renderQualityTimerRef.current = null;
+        }
+
+        if (isInteracting) {
+            setRenderQuality(nextCanvasRenderQuality(true));
+            return;
+        }
+
+        renderQualityTimerRef.current = setTimeout(() => {
+            renderQualityTimerRef.current = null;
+            if (!nodeDraggingRef.current) setRenderQuality(nextCanvasRenderQuality(false));
+        }, 150);
+    }, []);
+
+    useEffect(
+        () => () => {
+            if (renderQualityTimerRef.current) clearTimeout(renderQualityTimerRef.current);
+        },
+        [],
+    );
 
     const getCanvasCenter = useCallback(() => {
         const rect = containerRef.current?.getBoundingClientRect();
@@ -1270,7 +1297,8 @@ function WirelessCanvasPage() {
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
         setIsNodeDragging(true);
-    }, []);
+        handleCanvasInteractionChange(true);
+    }, [handleCanvasInteractionChange]);
 
     const finishNodeDrag = useCallback((clientX?: number, clientY?: number) => {
         if (rafRef.current) {
@@ -1289,6 +1317,7 @@ function WirelessCanvasPage() {
         historyPausedRef.current = false;
         nodeDraggingRef.current = false;
         setIsNodeDragging(false);
+        handleCanvasInteractionChange(false);
         if (dragRef.current.hasMoved && clientX != null && clientY != null) {
             const preview = createDragPreview(initialPositions, dx, dy);
             setNodes((prev) =>
@@ -1313,7 +1342,7 @@ function WirelessCanvasPage() {
                 setDialogNodeId(clickedNodeId);
             }
         }
-    }, []);
+    }, [handleCanvasInteractionChange]);
 
     const handleGlobalMouseMove = useCallback(
         (event: MouseEvent) => {
@@ -3649,6 +3678,7 @@ function WirelessCanvasPage() {
                     backgroundMode={backgroundMode}
                     onViewportPreview={previewViewport}
                     onViewportChange={commitViewport}
+                    onInteractionChange={handleCanvasInteractionChange}
                     onCanvasMouseDown={handleCanvasMouseDown}
                     onCanvasDeselect={deselectCanvas}
                     onContextMenu={preventCanvasContextMenu}
@@ -3693,6 +3723,7 @@ function WirelessCanvasPage() {
                         <CanvasNode
                             key={node.id}
                             data={node}
+                            renderQuality={renderQuality}
                             previewPosition={dragPreviewById.get(node.id)}
                             scale={viewport.k}
                             isSelected={selectedNodeIds.has(node.id)}

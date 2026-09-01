@@ -12,6 +12,7 @@ type WirelessCanvasProps = {
     backgroundMode?: CanvasBackgroundMode;
     onViewportChange: (viewport: ViewportTransform) => void;
     onViewportPreview?: (viewport: ViewportTransform) => void;
+    onInteractionChange?: (isInteracting: boolean) => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
     onCanvasDeselect?: () => void;
     onContextMenu?: (event: React.MouseEvent) => void;
@@ -19,7 +20,7 @@ type WirelessCanvasProps = {
     children: React.ReactNode;
 };
 
-export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onViewportPreview, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, children }: WirelessCanvasProps) {
+export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onViewportPreview, onInteractionChange, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, children }: WirelessCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const panState = useRef({
         isPanning: false,
@@ -123,11 +124,13 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
 
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
+        onInteractionChange?.(true);
         queueLiveViewport(zoomViewportAtPoint(current, { x: mouseX, y: mouseY }, newScale));
         if (wheelCommitTimerRef.current) window.clearTimeout(wheelCommitTimerRef.current);
         wheelCommitTimerRef.current = window.setTimeout(() => {
             wheelCommitTimerRef.current = null;
             commitLiveViewport();
+            onInteractionChange?.(false);
         }, 120);
     };
 
@@ -157,6 +160,7 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
                 initialK: current.k,
                 hasMoved: false,
             };
+            onInteractionChange?.(true);
             document.body.style.cursor = "grabbing";
             return;
         }
@@ -192,6 +196,7 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
                 commitLiveViewport();
             }
             panState.current.isPanning = false;
+            onInteractionChange?.(false);
             document.body.style.cursor = "default";
         };
 
@@ -201,7 +206,7 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerUp);
         };
-    }, [commitLiveViewport, onCanvasDeselect, queueLiveViewport]);
+    }, [commitLiveViewport, onCanvasDeselect, onInteractionChange, queueLiveViewport]);
 
     useEffect(() => {
         const container = containerRef.current;
