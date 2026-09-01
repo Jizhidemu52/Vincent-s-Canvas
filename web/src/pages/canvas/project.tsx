@@ -37,6 +37,7 @@ import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "@/components
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
 import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "@/components/canvas/canvas-node-hover-toolbar";
+import { CanvasPerformancePanel } from "@/components/canvas/canvas-performance-panel";
 import { WirelessCanvas } from "@/components/canvas/wireless-canvas";
 import { Minimap } from "@/components/canvas/canvas-mini-map";
 import { CanvasNode } from "@/components/canvas/canvas-node";
@@ -60,6 +61,7 @@ import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-referenc
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createDragPreview, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
+import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
 import { connectionIntersectsCanvasBounds } from "@/lib/canvas/canvas-connection-visibility";
 import { boundsForViewport, createCanvasSpatialIndex, selectIndexedCanvasNodes } from "@/lib/canvas/canvas-spatial-index";
 import { validateImageReferences } from "@/lib/image-reference-policy";
@@ -285,6 +287,7 @@ function WirelessCanvasPage() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const projectId = params.id || "";
+    const performanceModeEnabled = import.meta.env.DEV && searchParams.get("perf") === "1";
     const localAgentConnected = useCanvasAgentStore((state) => state.connected);
     const localAgentActivity = useCanvasAgentStore((state) => state.activity);
     const localAgentEnabled = useCanvasAgentStore((state) => state.enabled);
@@ -305,6 +308,11 @@ function WirelessCanvasPage() {
     const rafRef = useRef<number | null>(null);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const renderQualityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const performanceTrackerRef = useRef(createCanvasPerformanceTracker());
+    const performanceFrameRef = useRef<number | null>(null);
+    const performanceLastFrameAtRef = useRef(0);
+    const performanceActiveRef = useRef(false);
+    const performanceCountsRef = useRef<CanvasVisibilityCounts>({ totalNodes: 0, visibleNodes: 0, totalConnections: 0, visibleConnections: 0 });
     const nodeDraggingRef = useRef(false);
     const dragRef = useRef<{
         isDraggingNode: boolean;
@@ -402,6 +410,7 @@ function WirelessCanvasPage() {
     const [isNodeDragging, setIsNodeDragging] = useState(false);
     const [dragPreviewById, setDragPreviewById] = useState<CanvasDragPreview>(() => new Map());
     const [renderQuality, setRenderQuality] = useState<CanvasRenderQuality>("full");
+    const [performanceMetrics, setPerformanceMetrics] = useState<CanvasInteractionMetrics | null>(null);
 
     const selectedMaskEditModel = maskEditModel || effectiveConfig.imageModel || effectiveConfig.model;
     const maskEditEstimate = useMemo(() => estimateUsage({ operationType: "inpaint", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }), [estimateUsage, selectedMaskEditModel]);
@@ -678,18 +687,36 @@ function WirelessCanvasPage() {
 
         if (isInteracting) {
             setRenderQuality(nextCanvasRenderQuality(true));
+            if (performanceModeEnabled && !performanceActiveRef.current) {
+                performanceActiveRef.current = true;
+                performanceLastFrameAtRef.current = performance.now();
+                performanceTrackerRef.current.start("canvas", performanceLastFrameAtRef.current);
+                const sample = (now: number) => {
+                    performanceTrackerRef.current.frame(now - performanceLastFrameAtRef.current);
+                    performanceLastFrameAtRef.current = now;
+                    performanceFrameRef.current = requestAnimationFrame(sample);
+                };
+                performanceFrameRef.current = requestAnimationFrame(sample);
+            }
             return;
         }
 
         renderQualityTimerRef.current = setTimeout(() => {
             renderQualityTimerRef.current = null;
             if (!nodeDraggingRef.current) setRenderQuality(nextCanvasRenderQuality(false));
+            if (performanceModeEnabled && performanceActiveRef.current) {
+                performanceActiveRef.current = false;
+                if (performanceFrameRef.current) cancelAnimationFrame(performanceFrameRef.current);
+                performanceFrameRef.current = null;
+                setPerformanceMetrics(performanceTrackerRef.current.finish(performance.now(), performanceCountsRef.current));
+            }
         }, 150);
-    }, []);
+    }, [performanceModeEnabled]);
 
     useEffect(
         () => () => {
             if (renderQualityTimerRef.current) clearTimeout(renderQualityTimerRef.current);
+            if (performanceFrameRef.current) cancelAnimationFrame(performanceFrameRef.current);
         },
         [],
     );
@@ -842,6 +869,9 @@ function WirelessCanvasPage() {
             }),
         [connections, nodes, renderNodeById, visibleCanvasBounds],
     );
+    useEffect(() => {
+        performanceCountsRef.current = { totalNodes: nodes.length, visibleNodes: visibleNodes.length, totalConnections: connections.length, visibleConnections: visibleConnections.length };
+    }, [connections.length, nodes.length, visibleConnections.length, visibleNodes.length]);
     const toolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
@@ -3817,6 +3847,7 @@ function WirelessCanvasPage() {
                     ) : null}
                     {pendingConnectionCreate ? <ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /> : null}
                 </WirelessCanvas>
+                {performanceModeEnabled ? <CanvasPerformancePanel metrics={performanceMetrics} /> : null}
 
                 <CanvasNodeHoverToolbar
                     node={isNodeDragging || nodeImageSettingsOpen ? null : toolbarNode}
