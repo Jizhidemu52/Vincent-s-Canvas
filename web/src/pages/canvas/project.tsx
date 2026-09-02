@@ -65,6 +65,7 @@ import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/
 import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
 import { connectionIntersectsCanvasBounds } from "@/lib/canvas/canvas-connection-visibility";
 import { boundsForViewport, createCanvasSpatialIndex, selectIndexedCanvasNodes } from "@/lib/canvas/canvas-spatial-index";
+import { canvasViewportOverscan } from "@/lib/canvas/canvas-viewport-overscan";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
@@ -845,10 +846,10 @@ function WirelessCanvasPage() {
     const canvasSpatialIndex = useMemo(() => createCanvasSpatialIndex(nodes), [nodes]);
 
     const visibleCanvasBounds = useMemo(() => {
-        const padding = 280;
         const rect = containerRef.current?.getBoundingClientRect();
         const width = rect?.width || size.width;
         const height = rect?.height || size.height;
+        const padding = canvasViewportOverscan(viewport, width, height);
 
         return boundsForViewport(viewport, width, height, padding);
     }, [size.height, size.width, viewport]);
