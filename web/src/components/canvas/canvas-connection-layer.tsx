@@ -1,7 +1,7 @@
 import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "react";
 
 import { createConnectionGeometryCache } from "@/lib/canvas/canvas-connection-geometry";
-import { drawCanvasConnections } from "@/lib/canvas/canvas-connection-layer";
+import { createCanvasConnectionDrawBatches, drawCanvasConnectionBatches } from "@/lib/canvas/canvas-connection-layer";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -36,6 +36,7 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
             }),
         [activeConnectionIds, connections, nodeById],
     );
+    const batches = useMemo(() => createCanvasConnectionDrawBatches(items), [items]);
 
     const draw = useCallback(
         (nextViewport: ViewportTransform) => {
@@ -61,7 +62,7 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
                 context.clearRect(0, 0, rect.width, rect.height);
                 context.translate(nextViewport.x, nextViewport.y);
                 context.scale(nextViewport.k, nextViewport.k);
-                if (drawCanvasConnections(context, items, { stroke: theme.node.muted, activeStroke: theme.node.activeStroke })) return;
+                if (drawCanvasConnectionBatches(context, batches, { stroke: theme.node.muted, activeStroke: theme.node.activeStroke })) return;
             } catch {
                 // Fall through to the SVG renderer below.
             }
@@ -70,7 +71,7 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
                 onDrawFailure();
             }
         },
-        [items, onDrawFailure, theme.node.activeStroke, theme.node.muted],
+        [batches, onDrawFailure, theme.node.activeStroke, theme.node.muted],
     );
 
     useImperativeHandle(ref, () => ({ draw }), [draw]);

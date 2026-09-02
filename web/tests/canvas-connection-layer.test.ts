@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { drawCanvasConnections } from "@/lib/canvas/canvas-connection-layer";
+import { createCanvasConnectionDrawBatches, drawCanvasConnections } from "@/lib/canvas/canvas-connection-layer";
 import type { CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
 
 const geometry: CanvasConnectionGeometry = {
@@ -78,4 +78,14 @@ test("batches regular connections into one canvas stroke", () => {
 
     expect(drawCanvasConnections(context, [{ geometry, active: false }, { geometry, active: false }, { geometry, active: true }], { stroke: "#94a3b8", activeStroke: "#2dd4bf" })).toBe(true);
     expect(calls).toEqual(["begin", "move", "curve", "move", "curve", "stroke", "begin", "move", "curve", "stroke"]);
+});
+
+test("precomputes normal and active batches before a viewport redraw", () => {
+    const regular = { geometry, active: false };
+    const active = { geometry, active: true };
+
+    const batches = createCanvasConnectionDrawBatches([regular, active, regular]);
+
+    expect(batches.regular).toEqual([regular, regular]);
+    expect(batches.active).toEqual([active]);
 });

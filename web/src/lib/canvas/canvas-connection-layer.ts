@@ -10,10 +10,24 @@ export type CanvasConnectionPalette = {
     activeStroke: string;
 };
 
-export function drawCanvasConnections(context: CanvasRenderingContext2D, items: CanvasConnectionDrawItem[], palette: CanvasConnectionPalette): boolean {
+export type CanvasConnectionDrawBatches = {
+    regular: CanvasConnectionDrawItem[];
+    active: CanvasConnectionDrawItem[];
+};
+
+export function createCanvasConnectionDrawBatches(items: CanvasConnectionDrawItem[]): CanvasConnectionDrawBatches {
+    return items.reduce<CanvasConnectionDrawBatches>(
+        (batches, item) => {
+            batches[item.active ? "active" : "regular"].push(item);
+            return batches;
+        },
+        { regular: [], active: [] },
+    );
+}
+
+export function drawCanvasConnectionBatches(context: CanvasRenderingContext2D, batches: CanvasConnectionDrawBatches, palette: CanvasConnectionPalette): boolean {
     try {
-        const drawBatch = (active: boolean) => {
-            const batch = items.filter((item) => item.active === active);
+        const drawBatch = (batch: CanvasConnectionDrawItem[], active: boolean) => {
             if (!batch.length) return;
             context.beginPath();
             batch.forEach(({ geometry }) => {
@@ -29,8 +43,8 @@ export function drawCanvasConnections(context: CanvasRenderingContext2D, items: 
             context.stroke();
         };
 
-        drawBatch(false);
-        drawBatch(true);
+        drawBatch(batches.regular, false);
+        drawBatch(batches.active, true);
         context.globalAlpha = 1;
         context.shadowBlur = 0;
         context.shadowColor = "transparent";
@@ -38,4 +52,8 @@ export function drawCanvasConnections(context: CanvasRenderingContext2D, items: 
     } catch {
         return false;
     }
+}
+
+export function drawCanvasConnections(context: CanvasRenderingContext2D, items: CanvasConnectionDrawItem[], palette: CanvasConnectionPalette): boolean {
+    return drawCanvasConnectionBatches(context, createCanvasConnectionDrawBatches(items), palette);
 }
