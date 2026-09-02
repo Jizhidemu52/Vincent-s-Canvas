@@ -61,3 +61,21 @@ test("signals a draw failure so the SVG fallback can be enabled", () => {
 
     expect(drawCanvasConnections(context, [{ geometry, active: false }], { stroke: "#94a3b8", activeStroke: "#2dd4bf" })).toBe(false);
 });
+
+test("batches regular connections into one canvas stroke", () => {
+    const calls: string[] = [];
+    const context = {
+        beginPath: () => calls.push("begin"),
+        moveTo: () => calls.push("move"),
+        bezierCurveTo: () => calls.push("curve"),
+        stroke: () => calls.push("stroke"),
+        strokeStyle: "",
+        lineWidth: 0,
+        globalAlpha: 1,
+        shadowBlur: 0,
+        shadowColor: "",
+    } as unknown as CanvasRenderingContext2D;
+
+    expect(drawCanvasConnections(context, [{ geometry, active: false }, { geometry, active: false }, { geometry, active: true }], { stroke: "#94a3b8", activeStroke: "#2dd4bf" })).toBe(true);
+    expect(calls).toEqual(["begin", "move", "curve", "move", "curve", "stroke", "begin", "move", "curve", "stroke"]);
+});
