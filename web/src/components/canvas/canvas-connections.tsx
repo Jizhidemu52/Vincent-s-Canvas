@@ -12,6 +12,7 @@ export const ConnectionPath = React.memo(function ConnectionPath({
     from,
     to,
     active,
+    renderVisual = true,
     onSelect,
     onContextMenu,
 }: {
@@ -19,6 +20,7 @@ export const ConnectionPath = React.memo(function ConnectionPath({
     from: CanvasNodeData;
     to: CanvasNodeData;
     active: boolean;
+    renderVisual?: boolean;
     onSelect: () => void;
     onContextMenu?: (event: ReactMouseEvent<SVGPathElement>) => void;
 }) {
@@ -45,14 +47,16 @@ export const ConnectionPath = React.memo(function ConnectionPath({
                     onContextMenu?.(event);
                 }}
             />
-            <path
-                d={pathD}
-                stroke={active ? theme.node.activeStroke : theme.node.muted}
-                strokeWidth={active ? 3 : 2}
-                strokeOpacity={active ? 1 : 0.82}
-                fill="none"
-                style={{ filter: active ? `drop-shadow(0 0 8px ${theme.node.activeStroke}66)` : undefined, pointerEvents: "none" }}
-            />
+            {renderVisual ? (
+                <path
+                    d={pathD}
+                    stroke={active ? theme.node.activeStroke : theme.node.muted}
+                    strokeWidth={active ? 3 : 2}
+                    strokeOpacity={active ? 1 : 0.82}
+                    fill="none"
+                    style={{ filter: active ? `drop-shadow(0 0 8px ${theme.node.activeStroke}66)` : undefined, pointerEvents: "none" }}
+                />
+            ) : null}
         </g>
     );
 }, (previous, next) => canvasConnectionRenderStateEqual(previous, next));

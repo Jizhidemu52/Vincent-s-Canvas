@@ -16,4 +16,13 @@ describe("canvas connection render stability", () => {
         expect(canvasConnectionRenderStateEqual({ connection, from: source, to: target, active: false }, { connection, from: { ...source, position: { x: 20, y: 0 } }, to: target, active: false })).toBe(false);
         expect(canvasConnectionRenderStateEqual({ connection, from: source, to: target, active: false }, { connection, from: source, to: target, active: true })).toBe(false);
     });
+
+    test("refreshes a connection when the canvas layer falls back to SVG visuals", () => {
+        expect(
+            canvasConnectionRenderStateEqual(
+                { connection, from: source, to: target, active: false, renderVisual: false },
+                { connection, from: source, to: target, active: false, renderVisual: true },
+            ),
+        ).toBe(false);
+    });
 });

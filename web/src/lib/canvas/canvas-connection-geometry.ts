@@ -1,7 +1,16 @@
 import type { CanvasBounds } from "@/lib/canvas/canvas-spatial-index";
 import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
 
-export type CanvasConnectionGeometry = { d: string; bounds: CanvasBounds };
+export type CanvasConnectionGeometry = {
+    d: string;
+    points: {
+        start: { x: number; y: number };
+        controlOne: { x: number; y: number };
+        controlTwo: { x: number; y: number };
+        end: { x: number; y: number };
+    };
+    bounds: CanvasBounds;
+};
 
 export function createConnectionGeometry(from: CanvasNodeData, to: CanvasNodeData): CanvasConnectionGeometry {
     const startX = from.position.x + from.width;
@@ -14,6 +23,12 @@ export function createConnectionGeometry(from: CanvasNodeData, to: CanvasNodeDat
 
     return {
         d: `M ${startX} ${startY} C ${controlOneX} ${startY}, ${controlTwoX} ${endY}, ${endX} ${endY}`,
+        points: {
+            start: { x: startX, y: startY },
+            controlOne: { x: controlOneX, y: startY },
+            controlTwo: { x: controlTwoX, y: endY },
+            end: { x: endX, y: endY },
+        },
         bounds: {
             minX: Math.min(startX, controlOneX, controlTwoX, endX),
             minY: Math.min(startY, endY),

@@ -38,6 +38,7 @@ import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "@/compon
 import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "@/components/canvas/canvas-node-hover-toolbar";
 import { CanvasPerformancePanel } from "@/components/canvas/canvas-performance-panel";
+import { CanvasConnectionLayer, type CanvasConnectionLayerHandle } from "@/components/canvas/canvas-connection-layer";
 import { WirelessCanvas } from "@/components/canvas/wireless-canvas";
 import { Minimap } from "@/components/canvas/canvas-mini-map";
 import { CanvasNode } from "@/components/canvas/canvas-node";
@@ -313,6 +314,7 @@ function WirelessCanvasPage() {
     const performanceLastFrameAtRef = useRef(0);
     const performanceActiveRef = useRef(false);
     const performanceCountsRef = useRef<CanvasVisibilityCounts>({ totalNodes: 0, visibleNodes: 0, totalConnections: 0, visibleConnections: 0 });
+    const canvasConnectionLayerRef = useRef<CanvasConnectionLayerHandle>(null);
     const nodeDraggingRef = useRef(false);
     const dragRef = useRef<{
         isDraggingNode: boolean;
@@ -354,6 +356,7 @@ function WirelessCanvasPage() {
     const [size, setSize] = useState({ width: 1200, height: 720 });
     const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
     const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+    const [canvasConnectionFallback, setCanvasConnectionFallback] = useState(false);
     const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
     const [connectingParams, setConnectingParams] = useState<ConnectionHandle | null>(null);
     const [connectionTargetNodeId, setConnectionTargetNodeId] = useState<string | null>(null);
@@ -671,7 +674,10 @@ function WirelessCanvasPage() {
 
     const previewViewport = useCallback((next: ViewportTransform) => {
         viewportRef.current = next;
+        canvasConnectionLayerRef.current?.draw(next);
     }, []);
+
+    const enableCanvasConnectionFallback = useCallback(() => setCanvasConnectionFallback(true), []);
 
     const commitViewport = useCallback((next: ViewportTransform) => {
         viewportRef.current = next;
@@ -919,6 +925,10 @@ function WirelessCanvasPage() {
 
         return { nodeIds, connectionIds };
     }, [activeNodeId, connections]);
+    const activeCanvasConnectionIds = useMemo(() => {
+        if (!selectedConnectionId) return relatedHighlight.connectionIds;
+        return new Set([...relatedHighlight.connectionIds, selectedConnectionId]);
+    }, [relatedHighlight.connectionIds, selectedConnectionId]);
 
     const configInputsById = useMemo(() => {
         const map = new Map<string, NodeGenerationInput[]>();
@@ -3724,6 +3734,18 @@ function WirelessCanvasPage() {
                     onCanvasDeselect={deselectCanvas}
                     onContextMenu={preventCanvasContextMenu}
                     onDrop={handleDrop}
+                    underlay={
+                        canvasConnectionFallback ? null : (
+                            <CanvasConnectionLayer
+                                ref={canvasConnectionLayerRef}
+                                connections={visibleConnections}
+                                nodeById={renderNodeById}
+                                viewport={viewport}
+                                activeConnectionIds={activeCanvasConnectionIds}
+                                onDrawFailure={enableCanvasConnectionFallback}
+                            />
+                        )
+                    }
                 >
                     <svg className="absolute left-0 top-0 h-[10000px] w-[10000px] overflow-visible" style={{ pointerEvents: "none", transform: "translateZ(0)", zIndex: 0 }}>
                         {visibleConnections.map((connection) => {
@@ -3738,6 +3760,7 @@ function WirelessCanvasPage() {
                                         from={from}
                                         to={to}
                                         active={selectedConnectionId === connection.id || relatedHighlight.connectionIds.has(connection.id)}
+                                        renderVisual={canvasConnectionFallback}
                                         onSelect={() => {
                                             setSelectedConnectionId(connection.id);
                                             setSelectedNodeIds(new Set());

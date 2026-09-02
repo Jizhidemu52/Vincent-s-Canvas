@@ -5,8 +5,9 @@ export type CanvasConnectionRenderState = {
     from: CanvasNodeData;
     to: CanvasNodeData;
     active: boolean;
+    renderVisual?: boolean;
 };
 
 export function canvasConnectionRenderStateEqual(previous: CanvasConnectionRenderState, next: CanvasConnectionRenderState) {
-    return previous.connection === next.connection && previous.from === next.from && previous.to === next.to && previous.active === next.active;
+    return previous.connection === next.connection && previous.from === next.from && previous.to === next.to && previous.active === next.active && previous.renderVisual === next.renderVisual;
 }

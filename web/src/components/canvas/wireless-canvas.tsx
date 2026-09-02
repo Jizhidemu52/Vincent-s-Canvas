@@ -17,10 +17,11 @@ type WirelessCanvasProps = {
     onCanvasDeselect?: () => void;
     onContextMenu?: (event: React.MouseEvent) => void;
     onDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
+    underlay?: React.ReactNode;
     children: React.ReactNode;
 };
 
-export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onViewportPreview, onInteractionChange, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, children }: WirelessCanvasProps) {
+export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onViewportPreview, onInteractionChange, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, underlay, children }: WirelessCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const panState = useRef({
         isPanning: false,
@@ -229,9 +230,10 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
             onDrop={onDrop}
         >
             <CanvasGrid gridRef={gridRef} viewport={viewport} mode={backgroundMode} />
+            {underlay}
             <div
                 ref={contentRef}
-                className="absolute origin-top-left"
+                className="absolute z-[1] origin-top-left"
                 style={{
                     transform: canvasViewportTransform(viewport),
                 }}
