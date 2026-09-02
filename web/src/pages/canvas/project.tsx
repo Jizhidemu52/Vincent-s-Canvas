@@ -60,7 +60,9 @@ import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workfl
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "@/lib/canvas/canvas-resource-references";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
+import { createConnectionAdjacency } from "@/lib/canvas/canvas-connection-geometry";
 import { createDragPreview, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
+import { refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
 import { connectionIntersectsCanvasBounds } from "@/lib/canvas/canvas-connection-visibility";
@@ -857,6 +859,8 @@ function WirelessCanvasPage() {
     const visibleNodes = useMemo(() => selectIndexedCanvasNodes(nodes, canvasSpatialIndex, visibleCanvasBounds, (node) => !isHiddenBatchChild(node, nodes, collapsingBatchIds)), [canvasSpatialIndex, collapsingBatchIds, nodes, visibleCanvasBounds]);
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+    const connectionById = useMemo(() => new Map(connections.map((connection) => [connection.id, connection])), [connections]);
+    const connectionAdjacency = useMemo(() => createConnectionAdjacency(connections), [connections]);
     const renderNodeById = useMemo(() => {
         if (!dragPreviewById.size) return nodeById;
 
@@ -867,15 +871,31 @@ function WirelessCanvasPage() {
         });
         return next;
     }, [dragPreviewById, nodeById]);
-    const visibleConnections = useMemo(
+    const baseVisibleConnections = useMemo(
         () =>
             connections.filter((connection) => {
-                const from = renderNodeById.get(connection.fromNodeId);
-                const to = renderNodeById.get(connection.toNodeId);
+                const from = nodeById.get(connection.fromNodeId);
+                const to = nodeById.get(connection.toNodeId);
                 return Boolean(from && to && !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes) && connectionIntersectsCanvasBounds(from, to, visibleCanvasBounds));
             }),
-        [connections, nodes, renderNodeById, visibleCanvasBounds],
+        [connections, nodeById, nodes, visibleCanvasBounds],
     );
+    const draggedConnectionIds = useMemo(() => {
+        const ids = new Set<string>();
+        dragPreviewById.forEach((_position, nodeId) => connectionAdjacency.get(nodeId)?.forEach((connectionId) => ids.add(connectionId)));
+        return ids;
+    }, [connectionAdjacency, dragPreviewById]);
+    const visibleConnections = useMemo(() => {
+        if (!draggedConnectionIds.size) return baseVisibleConnections;
+        return refreshVisibleConnectionsForDrag({
+            baseVisibleConnections,
+            affectedConnectionIds: draggedConnectionIds,
+            connectionById,
+            nodeById: renderNodeById,
+            bounds: visibleCanvasBounds,
+            shouldInclude: (_connection, from, to) => !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes),
+        });
+    }, [baseVisibleConnections, connectionById, draggedConnectionIds, nodes, renderNodeById, visibleCanvasBounds]);
     useEffect(() => {
         performanceCountsRef.current = { totalNodes: nodes.length, visibleNodes: visibleNodes.length, totalConnections: connections.length, visibleConnections: visibleConnections.length };
     }, [connections.length, nodes.length, visibleConnections.length, visibleNodes.length]);
