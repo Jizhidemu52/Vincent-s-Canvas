@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { createDragPreview, resolvePreviewPosition } from "@/lib/canvas/canvas-drag-preview";
+import { createDragPreview, createPreviewNodeResolver, resolvePreviewPosition } from "@/lib/canvas/canvas-drag-preview";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const source: CanvasNodeData = {
@@ -30,5 +30,17 @@ describe("canvas drag preview", () => {
 
     test("falls back to the persisted position when the node is not being dragged", () => {
         expect(resolvePreviewPosition(source, new Map())).toEqual(source.position);
+    });
+
+    test("only creates preview node objects for nodes currently being dragged", () => {
+        const stable: CanvasNodeData = { ...source, id: "stable", position: { x: 200, y: 20 } };
+        const resolveNode = createPreviewNodeResolver(
+            new Map([[source.id, source], [stable.id, stable]]),
+            new Map([[source.id, { x: 42, y: 64 }]]),
+        );
+
+        expect(resolveNode(source.id)).toEqual({ ...source, position: { x: 42, y: 64 } });
+        expect(resolveNode(source.id)).not.toBe(source);
+        expect(resolveNode(stable.id)).toBe(stable);
     });
 });

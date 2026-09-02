@@ -6,16 +6,16 @@ type RefreshVisibleConnectionsForDragOptions = {
     baseVisibleConnections: CanvasConnection[];
     affectedConnectionIds: ReadonlySet<string>;
     connectionById: ReadonlyMap<string, CanvasConnection>;
-    nodeById: ReadonlyMap<string, CanvasNodeData>;
+    resolveNode: (nodeId: string) => CanvasNodeData | undefined;
     bounds: CanvasBounds;
     shouldInclude?: (connection: CanvasConnection, from: CanvasNodeData, to: CanvasNodeData) => boolean;
 };
 
-export function refreshVisibleConnectionsForDrag({ baseVisibleConnections, affectedConnectionIds, connectionById, nodeById, bounds, shouldInclude = () => true }: RefreshVisibleConnectionsForDragOptions): CanvasConnection[] {
+export function refreshVisibleConnectionsForDrag({ baseVisibleConnections, affectedConnectionIds, connectionById, resolveNode, bounds, shouldInclude = () => true }: RefreshVisibleConnectionsForDragOptions): CanvasConnection[] {
     const baseVisibleIds = new Set(baseVisibleConnections.map((connection) => connection.id));
     const isVisible = (connection: CanvasConnection) => {
-        const from = nodeById.get(connection.fromNodeId);
-        const to = nodeById.get(connection.toNodeId);
+        const from = resolveNode(connection.fromNodeId);
+        const to = resolveNode(connection.toNodeId);
         return Boolean(from && to && shouldInclude(connection, from, to) && connectionIntersectsCanvasBounds(from, to, bounds));
     };
     const retained = baseVisibleConnections.filter((connection) => !affectedConnectionIds.has(connection.id) || isVisible(connection));

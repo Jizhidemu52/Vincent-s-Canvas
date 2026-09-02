@@ -12,14 +12,14 @@ export type CanvasConnectionLayerHandle = {
 
 type CanvasConnectionLayerProps = {
     connections: CanvasConnection[];
-    nodeById: Map<string, CanvasNodeData>;
+    resolveNode: (nodeId: string) => CanvasNodeData | undefined;
     viewport: ViewportTransform;
     activeConnectionIds: Set<string>;
     onDrawFailure: () => void;
 };
 
 export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, CanvasConnectionLayerProps>(function CanvasConnectionLayer(
-    { connections, nodeById, viewport, activeConnectionIds, onDrawFailure },
+    { connections, resolveNode, viewport, activeConnectionIds, onDrawFailure },
     ref,
 ) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -29,12 +29,12 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     const items = useMemo(
         () =>
             connections.flatMap((connection) => {
-                const from = nodeById.get(connection.fromNodeId);
-                const to = nodeById.get(connection.toNodeId);
+                const from = resolveNode(connection.fromNodeId);
+                const to = resolveNode(connection.toNodeId);
                 if (!from || !to) return [];
                 return [{ geometry: geometryCacheRef.current.get(connection, from, to), active: activeConnectionIds.has(connection.id) }];
             }),
-        [activeConnectionIds, connections, nodeById],
+        [activeConnectionIds, connections, resolveNode],
     );
     const batches = useMemo(() => createCanvasConnectionDrawBatches(items), [items]);
 

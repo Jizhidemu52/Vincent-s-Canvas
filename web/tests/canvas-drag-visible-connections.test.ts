@@ -29,7 +29,7 @@ test("refreshes only dragged-node connections while retaining unrelated visible 
             baseVisibleConnections: [stable, exits],
             affectedConnectionIds: new Set([exits.id, enters.id]),
             connectionById,
-            nodeById,
+            resolveNode: (nodeId) => nodeById.get(nodeId),
             bounds,
         }),
     ).toEqual([stable, enters]);
