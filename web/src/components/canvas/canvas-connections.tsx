@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useRef } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasConnectionRenderStateEqual } from "@/lib/canvas/canvas-connection-render-stability";
+import { createConnectionGeometryCache } from "@/lib/canvas/canvas-connection-geometry";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ConnectionHandle, Position } from "@/types/canvas";
 
@@ -22,13 +23,8 @@ export const ConnectionPath = React.memo(function ConnectionPath({
     onContextMenu?: (event: ReactMouseEvent<SVGPathElement>) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const startX = from.position.x + from.width;
-    const startY = from.position.y + from.height / 2;
-    const endX = to.position.x;
-    const endY = to.position.y + to.height / 2;
-    const dx = Math.abs(endX - startX);
-    const curvature = Math.max(dx * 0.5, 50);
-    const pathD = `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`;
+    const geometryCacheRef = useRef(createConnectionGeometryCache());
+    const pathD = geometryCacheRef.current.get(connection, from, to).d;
 
     return (
         <g>
