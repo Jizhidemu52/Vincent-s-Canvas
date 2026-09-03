@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Empty, Input, Segmented } from "antd";
 import { Clock3, Heart, Image as ImageIcon, Search, Sparkles } from "lucide-react";
 
 import { canUserAccessAsset, useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { canvasAssetsSidebarPropsEqual, type CanvasAssetsSidebarRenderState } from "@/lib/canvas/canvas-assets-sidebar-render-stability";
 
 type AssetTab = "history" | "favorites" | "community";
 
@@ -12,7 +13,7 @@ export type CanvasSidebarAsset =
     | { kind: "image"; dataUrl: string; title: string; storageKey?: string }
     | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number };
 
-export function CanvasAssetsSidebar({ onInsert, testId }: { onInsert: (asset: CanvasSidebarAsset) => void; testId?: string }) {
+export const CanvasAssetsSidebar = memo(function CanvasAssetsSidebar({ onInsert, testId }: CanvasAssetsSidebarRenderState) {
     const assets = useAssetStore((state) => state.assets);
     const user = useUserStore((state) => state.user);
     const [tab, setTab] = useState<AssetTab>("history");
@@ -66,7 +67,7 @@ export function CanvasAssetsSidebar({ onInsert, testId }: { onInsert: (asset: Ca
             </div>
         </aside>
     );
-}
+}, canvasAssetsSidebarPropsEqual);
 
 function AssetTile({ asset, onInsert }: { asset: Asset; onInsert: (asset: CanvasSidebarAsset) => void }) {
     const imageUrl = asset.kind === "image" ? asset.coverUrl || asset.data.dataUrl : asset.kind === "video" ? asset.coverUrl : "";

@@ -3718,9 +3718,9 @@ function WirelessCanvasPage() {
         }
     }, [message]);
 
-    const insertSidebarAsset = (asset: CanvasSidebarAsset) => {
+    const insertSidebarAsset = useCallback((asset: CanvasSidebarAsset) => {
         handleAssetInsert(asset);
-    };
+    }, [handleAssetInsert]);
 
     const renderCanvasNodePanel = useCallback(
         (panelNode: CanvasNodeData) =>
