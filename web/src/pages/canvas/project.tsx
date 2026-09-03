@@ -51,7 +51,7 @@ import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { CanvasLocalAgentPanel } from "@/components/canvas/canvas-local-agent-panel";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
-import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
@@ -62,6 +62,7 @@ import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-referenc
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createConnectionAdjacency } from "@/lib/canvas/canvas-connection-geometry";
 import { findCanvasConnectionDropTarget, type CanvasConnectionDropTarget } from "@/lib/canvas/canvas-connection-drop-target";
+import { createCanvasProjectSaveQueue, type CanvasProjectSaveQueue } from "@/lib/canvas/canvas-project-save-queue";
 import { buildCanvasRelatedHighlight } from "@/lib/canvas/canvas-related-highlight";
 import { createDragPreview, createPreviewNodeResolver, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
 import { refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
@@ -107,6 +108,11 @@ type CanvasHistoryEntry = Pick<CanvasClipboard, "nodes" | "connections"> & {
     activeChatId: string | null;
     backgroundMode: CanvasBackgroundMode;
     showImageInfo: boolean;
+};
+
+type CanvasProjectSaveSnapshot = {
+    projectId: string;
+    patch: Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo">;
 };
 
 type CanvasGenerationRequest = {
@@ -301,6 +307,9 @@ function WirelessCanvasPage() {
     const historyRef = useRef<{ past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }>({ past: [], future: [] });
     const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
     const historyCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const projectSaveQueueRef = useRef<CanvasProjectSaveQueue<CanvasProjectSaveSnapshot> | null>(null);
+    const projectSaveHandlerRef = useRef<(snapshot: CanvasProjectSaveSnapshot) => void>(() => undefined);
+    const savedProjectIdRef = useRef(projectId);
     const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const applyingHistoryRef = useRef(false);
     const historyPausedRef = useRef(false);
@@ -348,6 +357,10 @@ function WirelessCanvasPage() {
     const renameProject = useCanvasStore((state) => state.renameProject);
     const deleteProjects = useCanvasStore((state) => state.deleteProjects);
     const currentProject = useCanvasStore((state) => state.projects.find((project) => project.id === projectId));
+    projectSaveHandlerRef.current = ({ projectId: id, patch }) => updateProject(id, patch);
+    if (!projectSaveQueueRef.current) {
+        projectSaveQueueRef.current = createCanvasProjectSaveQueue(180, (snapshot) => projectSaveHandlerRef.current(snapshot));
+    }
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [nodes, setNodes] = useState<CanvasNodeData[]>([]);
     const [connections, setConnections] = useState<CanvasConnection[]>([]);
@@ -608,9 +621,31 @@ function WirelessCanvasPage() {
     );
 
     useEffect(() => {
+        if (savedProjectIdRef.current === projectId) return;
+        projectSaveQueueRef.current?.flush();
+        savedProjectIdRef.current = projectId;
+    }, [projectId]);
+
+    useEffect(() => {
         if (!projectLoaded || historyPausedRef.current) return;
-        updateProject(projectId, { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo });
-    }, [activeChatId, backgroundMode, chatSessions, connections, nodes, projectId, projectLoaded, showImageInfo, updateProject]);
+        projectSaveQueueRef.current?.schedule({
+            projectId,
+            patch: { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo },
+        });
+    }, [activeChatId, backgroundMode, chatSessions, connections, nodes, projectId, projectLoaded, showImageInfo]);
+
+    useEffect(
+        () => () => {
+            projectSaveQueueRef.current?.flush();
+        },
+        [],
+    );
+
+    useEffect(() => {
+        const flushProjectSave = () => projectSaveQueueRef.current?.flush();
+        window.addEventListener("pagehide", flushProjectSave);
+        return () => window.removeEventListener("pagehide", flushProjectSave);
+    }, []);
 
     useEffect(() => {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
