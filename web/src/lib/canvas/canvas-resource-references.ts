@@ -26,6 +26,36 @@ export function buildNodeMentionReferences(node: CanvasNodeData, nodes: CanvasNo
     return labelResourceNodes(getMentionResourceNodes(node.id, nodes, connections), true);
 }
 
+export function buildNodeMentionReferencesByNodeId(nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const resourceInputsByTargetId = new Map<string, CanvasNodeData[]>();
+    const firstConfigTargetBySourceId = new Map<string, string>();
+
+    connections.forEach((connection) => {
+        const source = nodeById.get(connection.fromNodeId);
+        const target = nodeById.get(connection.toNodeId);
+        if (!source || !target) return;
+        if (isResourceNode(source)) {
+            const inputs = resourceInputsByTargetId.get(target.id) || [];
+            inputs.push(source);
+            resourceInputsByTargetId.set(target.id, inputs);
+        }
+        if (target.type === CanvasNodeType.Config && !firstConfigTargetBySourceId.has(source.id)) {
+            firstConfigTargetBySourceId.set(source.id, target.id);
+        }
+    });
+
+    const referencesByNodeId = new Map<string, CanvasResourceReference[]>();
+    nodes.forEach((node) => {
+        const configTargetId = firstConfigTargetBySourceId.get(node.id);
+        const configInputs = configTargetId ? (resourceInputsByTargetId.get(configTargetId) || []).filter((input) => input.id !== node.id) : [];
+        const ownInputs = resourceInputsByTargetId.get(node.id) || [];
+        const resources = configInputs.length ? configInputs : ownInputs.length ? ownInputs : isResourceNode(node) ? [node] : [];
+        referencesByNodeId.set(node.id, labelResourceNodes(resources, true));
+    });
+    return referencesByNodeId;
+}
+
 export function getMentionResourceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
     const configInputs = getConnectedConfigResourceNodes(nodeId, nodes, connections);
     if (configInputs.length) return configInputs;

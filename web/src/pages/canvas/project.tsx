@@ -57,7 +57,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { buildWorkflowVideoStageDispatch, completeAgentMediaWorkflowStage, restoreAgentMediaWorkflow, selectWorkflowCandidate } from "@/lib/canvas/agent-media-workflow";
 import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workflow-stage";
-import { buildCanvasResourceReferences, buildNodeMentionReferences } from "@/lib/canvas/canvas-resource-references";
+import { buildCanvasResourceReferences, buildNodeMentionReferencesByNodeId } from "@/lib/canvas/canvas-resource-references";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createConnectionAdjacency } from "@/lib/canvas/canvas-connection-geometry";
@@ -1006,11 +1006,7 @@ function WirelessCanvasPage() {
     const resourceContextNodeId = dialogNodeId || activeNodeId;
     const canvasResourceReferences = useMemo(() => buildCanvasResourceReferences(nodes, connections, resourceContextNodeId), [connections, nodes, resourceContextNodeId]);
     const resourceReferenceByNodeId = useMemo(() => new Map(canvasResourceReferences.map((reference) => [reference.nodeId, reference])), [canvasResourceReferences]);
-    const mentionReferencesByNodeId = useMemo(() => {
-        const map = new Map<string, ReturnType<typeof buildNodeMentionReferences>>();
-        nodes.forEach((node) => map.set(node.id, buildNodeMentionReferences(node, nodes, connections)));
-        return map;
-    }, [connections, nodes]);
+    const mentionReferencesByNodeId = useMemo(() => buildNodeMentionReferencesByNodeId(nodes, connections), [connections, nodes]);
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(
         () => ({ projectId, title: currentProject?.title || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
         [connections, currentProject?.title, nodes, projectId, selectedNodeIds, viewport],
