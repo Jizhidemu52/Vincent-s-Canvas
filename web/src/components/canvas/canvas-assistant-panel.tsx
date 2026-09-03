@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import copyToClipboard from "copy-to-clipboard";
 import { Bot, Copy, Cpu, History, ImageIcon, PanelRightClose, Plus, Settings2, Trash2, Video, X } from "lucide-react";
 import { Button, Modal, Segmented, Switch, Tooltip } from "antd";
@@ -29,6 +29,7 @@ import { classifyAgentMediaIntent, resolveAgentMediaToolDispatch } from "@/lib/c
 import { agentQuickstartPreset, buildAgentGeneratedMediaOps, buildAgentGenerationBrief, buildAgentGenerationPlan, buildAgentReferenceImageContent, buildAgentVideoPrompt, createAgentVideoConfirmation, normalizeAgentVideoSettings, resolveAgentGeneratedMediaPosition, selectAgentVideoReferences, type AgentGenerationSettings, type AgentVideoConfirmation } from "@/lib/agent-direct-generation";
 import { getGenerationCapabilities, getImageGenerationModels, type GenerationCapabilityModel, type ImageGenerationModel } from "@/services/api/generation-tasks";
 import type { ReferenceImage } from "@/types/image";
+import { canvasAssistantPanelPropsEqual, type CanvasAssistantPanelRenderState, type CanvasMediaWorkflowAction } from "@/lib/canvas/canvas-assistant-panel-render-stability";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -213,39 +214,9 @@ function latestAssistantUserPrompt(messages: CanvasAssistantMessage[]) {
     return "";
 }
 
-export type CanvasMediaWorkflowAction =
-    | { type: "image_model_change"; messageId: string; model: string }
-    | { type: "image_count_change"; messageId: string; count: number }
-    | { type: "generate_images"; messageId: string }
-    | { type: "select_candidate"; messageId: string; nodeId: string }
-    | { type: "video_model_change"; messageId: string; model: string }
-    | { type: "video_seconds_change"; messageId: string; seconds: string }
-    | { type: "aspect_ratio_change"; messageId: string; ratio: string }
-    | { type: "generate_video"; messageId: string }
-    | { type: "retry"; messageId: string; stage: "image" | "video" }
-    | { type: "open_result"; messageId: string };
+export type { CanvasMediaWorkflowAction } from "@/lib/canvas/canvas-assistant-panel-render-stability";
 
-type CanvasAssistantPanelProps = {
-    nodes: CanvasNodeData[];
-    selectedNodeIds: Set<string>;
-    snapshot: CanvasAgentSnapshot;
-    sessions: CanvasAssistantSession[];
-    activeSessionId: string | null;
-    onSelectNodeIds: (ids: Set<string>) => void;
-    onSessionsChange: (sessions: CanvasAssistantSession[], activeSessionId: string | null) => void;
-    onApplyOps: (ops?: CanvasAgentOp[]) => CanvasAgentSnapshot;
-    canUndoOps: boolean;
-    onUndoOps: () => CanvasAgentSnapshot | null;
-    onPasteImage: (file: File) => void;
-    agentMode: CanvasAgentMode;
-    onAgentModeChange: (mode: CanvasAgentMode) => void;
-    onMediaWorkflowAction?: (action: CanvasMediaWorkflowAction) => void;
-    autoConnectLocal?: boolean;
-    closing: boolean;
-    onCollapse: () => void;
-};
-
-export function CanvasAssistantPanel({
+export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     nodes,
     selectedNodeIds,
     snapshot,
@@ -263,7 +234,7 @@ export function CanvasAssistantPanel({
     autoConnectLocal,
     closing,
     onCollapse,
-}: CanvasAssistantPanelProps) {
+}: CanvasAssistantPanelRenderState) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useUserStore((state) => state.user);
     const effectiveConfig = useEffectiveConfig();
@@ -1037,7 +1008,7 @@ export function CanvasAssistantPanel({
             </motion.aside>
         </motion.div>
     );
-}
+}, canvasAssistantPanelPropsEqual);
 
 function AgentTextModelPicker({ config, value, onChange }: { config: AiConfig; value: string; onChange: (model: string) => void }) {
     const options = useMemo(() => Array.from(new Set([value, ...selectableModelsByCapability(config, "text")].filter(Boolean))), [config, value]);
