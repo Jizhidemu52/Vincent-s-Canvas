@@ -1,8 +1,23 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 
+import { createMinimapNodeRects, type MinimapNodeRect } from "@/lib/canvas/canvas-minimap-layout";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "@/types/canvas";
+import type { CanvasNodeData, ViewportTransform } from "@/types/canvas";
+
+const MinimapNodeLayer = memo(function MinimapNodeLayer({ rects }: { rects: MinimapNodeRect[] }) {
+    return (
+        <>
+            {rects.map((rect) => (
+                <div
+                    key={rect.id}
+                    className="absolute rounded-[1px]"
+                    style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height, backgroundColor: rect.color, opacity: 0.8 }}
+                />
+            ))}
+        </>
+    );
+});
 
 export function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { nodes: CanvasNodeData[]; viewport: ViewportTransform; viewportSize: { width: number; height: number }; onViewportChange: (viewport: ViewportTransform) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -81,6 +96,7 @@ export function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { n
             h: Math.max(p2.y - p1.y, 4),
         };
     }, [toMinimap, viewport.k, viewport.x, viewport.y, viewportSize.height, viewportSize.width]);
+    const nodeRects = useMemo(() => createMinimapNodeRects(nodes, scale, offset, theme.node.muted), [nodes, offset, scale, theme.node.muted]);
 
     const updateViewportFromEvent = (event: React.PointerEvent) => {
         const rect = containerRef.current?.getBoundingClientRect();
@@ -111,24 +127,7 @@ export function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { n
                 onPointerUp={() => setIsDragging(false)}
                 onPointerLeave={() => setIsDragging(false)}
             >
-                {nodes.map((node) => {
-                    const pos = toMinimap(node.position.x, node.position.y);
-                    const color = node.type === CanvasNodeType.Image ? "#10b981" : node.type === CanvasNodeType.Video ? "#f97316" : node.type === CanvasNodeType.Audio ? "#a855f7" : node.type === CanvasNodeType.Config ? "#60a5fa" : theme.node.muted;
-                    return (
-                        <div
-                            key={node.id}
-                            className="absolute rounded-[1px]"
-                            style={{
-                                left: pos.x,
-                                top: pos.y,
-                                width: Math.max(node.width * scale, 2),
-                                height: Math.max(node.height * scale, 2),
-                                backgroundColor: color,
-                                opacity: 0.8,
-                            }}
-                        />
-                    );
-                })}
+                <MinimapNodeLayer rects={nodeRects} />
                 <div className="pointer-events-none absolute border" style={{ left: viewportRect.x, top: viewportRect.y, width: viewportRect.w, height: viewportRect.h, borderColor: theme.canvas.selectionStroke, background: `${theme.canvas.selectionStroke}18` }} />
             </div>
         </div>
