@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Bot, Download, Home, ImageIcon, Images, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Share2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
@@ -71,6 +71,7 @@ import { createResizePreview, type CanvasResizePreview } from "@/lib/canvas/canv
 import { refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
+import { canvasQuickGeneratePanelPropsEqual, type CanvasQuickGeneratePanelRenderState } from "@/lib/canvas/canvas-quick-generate-render-stability";
 import { createCanvasConnectionSpatialIndex, selectCanvasSpatialIndexConnections } from "@/lib/canvas/canvas-connection-spatial-index";
 import { selectCanvasNodeIdsInBounds } from "@/lib/canvas/canvas-selection";
 import { boundsForViewport, createCanvasSpatialIndex, selectCanvasSpatialIndexNodes } from "@/lib/canvas/canvas-spatial-index";
@@ -3777,6 +3778,11 @@ function WirelessCanvasPage() {
     const deleteSelectedNodesFromToolbar = useCallback(() => deleteNodes(new Set(selectedNodeIdsRef.current)), [deleteNodes]);
     const openClearCanvasFromToolbar = useCallback(() => setClearConfirmOpen(true), []);
     const openAssetsFromToolbar = useCallback(() => setAssetPickerOpen(true), []);
+    const closeQuickGeneratePanel = useCallback(() => setQuickGenerateOpen(false), []);
+    const pickQuickGenerateReferences = useCallback(() => quickReferenceInputRef.current?.click(), []);
+    const removeQuickGenerateReference = useCallback((id: string) => setQuickGenerateReferences((current) => current.filter((reference) => reference.id !== id)), []);
+    const clearQuickGenerateReferences = useCallback(() => setQuickGenerateReferences([]), []);
+    const generateQuickFromPanel = useCallback(() => void runQuickCanvasGeneration(), [runQuickCanvasGeneration]);
 
     if (!projectLoaded) return <CanvasRefreshShell />;
 
@@ -3788,7 +3794,7 @@ function WirelessCanvasPage() {
                     <button
                         type="button"
                         className="grid size-7 place-items-center rounded-md border border-stone-200 text-stone-500 transition hover:border-orange-400 hover:text-orange-600 dark:border-stone-800"
-                        onClick={() => setQuickGenerateOpen(true)}
+                        onClick={openQuickGenerateFromToolbar}
                         title="新建生成"
                     >
                         <Plus className="size-4" />
@@ -3807,16 +3813,16 @@ function WirelessCanvasPage() {
                     estimateRmb={quickGenerateEstimate.rmbCost}
                     remainingCredits={user?.creditBalance}
                     config={effectiveConfig}
-                    onClose={() => setQuickGenerateOpen(false)}
+                    onClose={closeQuickGeneratePanel}
                     onPromptChange={setQuickGeneratePrompt}
                     onModelChange={setQuickGenerateModel}
                     onSizeChange={setQuickGenerateSize}
                     onCountChange={setQuickGenerateCount}
-                    onPickReferences={() => quickReferenceInputRef.current?.click()}
-                    onRemoveReference={(id) => setQuickGenerateReferences((current) => current.filter((reference) => reference.id !== id))}
-                    onClearReferences={() => setQuickGenerateReferences([])}
+                    onPickReferences={pickQuickGenerateReferences}
+                    onRemoveReference={removeQuickGenerateReference}
+                    onClearReferences={clearQuickGenerateReferences}
                     onMissingConfig={handleMissingModelConfig}
-                    onGenerate={() => void runQuickCanvasGeneration()}
+                    onGenerate={generateQuickFromPanel}
                 />
             </aside>
             <section className="relative min-w-0 flex-1 overflow-hidden">
@@ -4030,16 +4036,16 @@ function WirelessCanvasPage() {
                     estimateRmb={quickGenerateEstimate.rmbCost}
                     remainingCredits={user?.creditBalance}
                     config={effectiveConfig}
-                    onClose={() => setQuickGenerateOpen(false)}
+                    onClose={closeQuickGeneratePanel}
                     onPromptChange={setQuickGeneratePrompt}
                     onModelChange={setQuickGenerateModel}
                     onSizeChange={setQuickGenerateSize}
                     onCountChange={setQuickGenerateCount}
-                    onPickReferences={() => quickReferenceInputRef.current?.click()}
-                    onRemoveReference={(id) => setQuickGenerateReferences((current) => current.filter((reference) => reference.id !== id))}
-                    onClearReferences={() => setQuickGenerateReferences([])}
+                    onPickReferences={pickQuickGenerateReferences}
+                    onRemoveReference={removeQuickGenerateReference}
+                    onClearReferences={clearQuickGenerateReferences}
                     onMissingConfig={handleMissingModelConfig}
-                    onGenerate={() => void runQuickCanvasGeneration()}
+                    onGenerate={generateQuickFromPanel}
                 />
 
                 {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportChange={setViewport} /> : null}
@@ -4295,7 +4301,13 @@ function CanvasInspectorPanel({
     );
 }
 
-function CanvasQuickGeneratePanel({
+type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "embedded" | "config" | "references"> & {
+    embedded?: boolean;
+    config: AiConfig;
+    references: ReferenceImage[];
+};
+
+const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     embedded = false,
     open,
     prompt,
@@ -4318,30 +4330,7 @@ function CanvasQuickGeneratePanel({
     onClearReferences,
     onMissingConfig,
     onGenerate,
-}: {
-    embedded?: boolean;
-    open: boolean;
-    prompt: string;
-    model: string;
-    size: string;
-    count: number;
-    references: ReferenceImage[];
-    running: boolean;
-    estimateCredits: number;
-    estimateRmb: number;
-    remainingCredits?: number;
-    config: AiConfig;
-    onClose: () => void;
-    onPromptChange: (value: string) => void;
-    onModelChange: (value: string) => void;
-    onSizeChange: (value: string) => void;
-    onCountChange: (value: number) => void;
-    onPickReferences: () => void;
-    onRemoveReference: (id: string) => void;
-    onClearReferences: () => void;
-    onMissingConfig: () => void;
-    onGenerate: () => void;
-}) {
+}: CanvasQuickGeneratePanelProps) {
     if (!open) return null;
 
     return (
@@ -4472,7 +4461,7 @@ function CanvasQuickGeneratePanel({
             </Button>
         </div>
     );
-}
+}, (previous, next) => canvasQuickGeneratePanelPropsEqual({ ...previous, embedded: Boolean(previous.embedded) }, { ...next, embedded: Boolean(next.embedded) }));
 
 function CanvasTopBar({
     title,
