@@ -2,6 +2,7 @@ import type { CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-ge
 import type { CanvasConnection } from "@/types/canvas";
 
 export type CanvasConnectionDrawItem = {
+    id?: string;
     geometry: CanvasConnectionGeometry;
     active: boolean;
 };
@@ -27,6 +28,22 @@ export function createCanvasConnectionDrawBatches(items: CanvasConnectionDrawIte
 }
 
 /**
+ * During a node drag the static canvas keeps unrelated links painted while a
+ * lightweight overlay redraws only links attached to the moving node.
+ */
+export function filterCanvasConnectionDrawBatches(
+    batches: CanvasConnectionDrawBatches,
+    connectionIds: ReadonlySet<string>,
+    include: boolean,
+): CanvasConnectionDrawBatches {
+    const filter = (item: CanvasConnectionDrawItem) => (connectionIds.has(item.id || "") ? include : !include);
+    return {
+        regular: batches.regular.filter(filter),
+        active: batches.active.filter(filter),
+    };
+}
+
+/**
  * Keeps stable draw batches during a drag. A viewport may contain hundreds of
  * links while only the links attached to the moved node need fresh geometry.
  */
@@ -45,7 +62,7 @@ export function createCanvasConnectionDrawCache(resolveGeometry: (connection: Ca
         connections.forEach((connection) => {
             const geometry = resolveGeometry(connection);
             if (!geometry) return;
-            const item = { geometry, active: nextActiveIds.has(connection.id) };
+            const item = { id: connection.id, geometry, active: nextActiveIds.has(connection.id) };
             items.push(item);
             itemById.set(connection.id, item);
         });

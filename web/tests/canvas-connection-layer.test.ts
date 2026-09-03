@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createCanvasConnectionDrawBatches, createCanvasConnectionDrawCache, drawCanvasConnections } from "@/lib/canvas/canvas-connection-layer";
+import { createCanvasConnectionDrawBatches, createCanvasConnectionDrawCache, drawCanvasConnections, filterCanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
 import type { CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
 
 const geometry: CanvasConnectionGeometry = {
@@ -88,6 +88,16 @@ test("precomputes normal and active batches before a viewport redraw", () => {
 
     expect(batches.regular).toEqual([regular, regular]);
     expect(batches.active).toEqual([active]);
+});
+
+test("separates moved-node links from the static connection layer", () => {
+    const still = { id: "still", geometry, active: false };
+    const moving = { id: "moving", geometry, active: false };
+    const activeMoving = { id: "active-moving", geometry, active: true };
+    const batches = createCanvasConnectionDrawBatches([still, moving, activeMoving]);
+
+    expect(filterCanvasConnectionDrawBatches(batches, new Set(["moving", "active-moving"]), false)).toEqual({ regular: [still], active: [] });
+    expect(filterCanvasConnectionDrawBatches(batches, new Set(["moving", "active-moving"]), true)).toEqual({ regular: [moving], active: [activeMoving] });
 });
 
 test("refreshes only affected connection geometry while a drag is active", () => {

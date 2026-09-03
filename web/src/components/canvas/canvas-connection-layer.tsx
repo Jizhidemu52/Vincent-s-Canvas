@@ -1,7 +1,7 @@
 import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef } from "react";
 
 import { createConnectionGeometryCache, type CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
-import { createCanvasConnectionDrawCache, drawCanvasConnectionBatches, type CanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
+import { createCanvasConnectionDrawCache, drawCanvasConnectionBatches, filterCanvasConnectionDrawBatches, type CanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -26,11 +26,19 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     ref,
 ) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const staticCanvasRef = useRef<HTMLCanvasElement>(null);
+    const dynamicCanvasRef = useRef<HTMLCanvasElement>(null);
     const geometryCacheRef = useRef(createConnectionGeometryCache());
     const resolveGeometryRef = useRef<(connection: CanvasConnection) => CanvasConnectionGeometry | undefined>(() => undefined);
     const drawCacheRef = useRef(createCanvasConnectionDrawCache((connection) => resolveGeometryRef.current(connection)));
     const batchesRef = useRef<CanvasConnectionDrawBatches>({ regular: [], active: [] });
+    const dynamicConnectionIdsRef = useRef<ReadonlySet<string>>(new Set());
+    const splitBatchesRef = useRef<{ source: CanvasConnectionDrawBatches | null; ids: ReadonlySet<string>; static: CanvasConnectionDrawBatches; dynamic: CanvasConnectionDrawBatches }>({
+        source: null,
+        ids: new Set(),
+        static: { regular: [], active: [] },
+        dynamic: { regular: [], active: [] },
+    });
     const wasDraggingNodesRef = useRef(false);
     const failedRef = useRef(false);
     resolveGeometryRef.current = (connection) => {
@@ -41,15 +49,13 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     const refreshAllGeometry = !isDraggingNodes && wasDraggingNodesRef.current;
     batchesRef.current = drawCacheRef.current.sync(connections, activeConnectionIds, affectedConnectionIds, refreshAllGeometry);
 
-    const draw = useCallback(
-        (nextViewport: ViewportTransform) => {
-            if (failedRef.current) return;
-            const canvas = canvasRef.current;
+    const drawBatches = useCallback(
+        (canvas: HTMLCanvasElement | null, nextViewport: ViewportTransform, batches: CanvasConnectionDrawBatches) => {
             const host = canvas?.parentElement;
-            if (!canvas || !host) return;
+            if (!canvas || !host) return false;
 
             const rect = host.getBoundingClientRect();
-            if (rect.width <= 0 || rect.height <= 0) return;
+            if (rect.width <= 0 || rect.height <= 0) return true;
             const pixelRatio = window.devicePixelRatio || 1;
             const width = Math.round(rect.width * pixelRatio);
             const height = Math.round(rect.height * pixelRatio);
@@ -65,24 +71,66 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
                 context.clearRect(0, 0, rect.width, rect.height);
                 context.translate(nextViewport.x, nextViewport.y);
                 context.scale(nextViewport.k, nextViewport.k);
-                if (drawCanvasConnectionBatches(context, batchesRef.current, { stroke: theme.node.muted, activeStroke: theme.node.activeStroke })) return;
+                return drawCanvasConnectionBatches(context, batches, { stroke: theme.node.muted, activeStroke: theme.node.activeStroke });
             } catch {
-                // Fall through to the SVG renderer below.
-            }
-            {
-                failedRef.current = true;
-                onDrawFailure();
+                return false;
             }
         },
-        [onDrawFailure, theme.node.activeStroke, theme.node.muted],
+        [theme.node.activeStroke, theme.node.muted],
+    );
+
+    const splitBatches = useCallback((connectionIds: ReadonlySet<string>) => {
+        const current = splitBatchesRef.current;
+        if (current.source === batchesRef.current && sameConnectionIds(current.ids, connectionIds)) return { batches: current, changed: false };
+
+        const next = {
+            source: batchesRef.current,
+            ids: new Set(connectionIds),
+            static: filterCanvasConnectionDrawBatches(batchesRef.current, connectionIds, false),
+            dynamic: filterCanvasConnectionDrawBatches(batchesRef.current, connectionIds, true),
+        };
+        splitBatchesRef.current = next;
+        return { batches: next, changed: true };
+    }, []);
+
+    const failDrawing = useCallback(() => {
+        if (failedRef.current) return;
+        failedRef.current = true;
+        onDrawFailure();
+    }, [onDrawFailure]);
+
+    const draw = useCallback(
+        (nextViewport: ViewportTransform) => {
+            if (failedRef.current) return;
+            const dynamicIds = dynamicConnectionIdsRef.current;
+            if (isDraggingNodes && dynamicIds.size) {
+                const { batches } = splitBatches(dynamicIds);
+                if (drawBatches(staticCanvasRef.current, nextViewport, batches.static) && drawBatches(dynamicCanvasRef.current, nextViewport, batches.dynamic)) return;
+            } else {
+                dynamicConnectionIdsRef.current = new Set();
+                splitBatchesRef.current.source = null;
+                if (drawBatches(staticCanvasRef.current, nextViewport, batchesRef.current) && drawBatches(dynamicCanvasRef.current, nextViewport, { regular: [], active: [] })) return;
+            }
+            failDrawing();
+        },
+        [drawBatches, failDrawing, isDraggingNodes, splitBatches],
     );
 
     const refresh = useCallback(
         (nextViewport: ViewportTransform, nextAffectedConnectionIds: ReadonlySet<string>) => {
+            if (failedRef.current) return;
             batchesRef.current = drawCacheRef.current.sync(connections, activeConnectionIds, nextAffectedConnectionIds, false);
-            draw(nextViewport);
+            dynamicConnectionIdsRef.current = new Set(nextAffectedConnectionIds);
+            if (!nextAffectedConnectionIds.size) {
+                draw(nextViewport);
+                return;
+            }
+
+            const { batches, changed } = splitBatches(nextAffectedConnectionIds);
+            if ((!changed || drawBatches(staticCanvasRef.current, nextViewport, batches.static)) && drawBatches(dynamicCanvasRef.current, nextViewport, batches.dynamic)) return;
+            failDrawing();
         },
-        [activeConnectionIds, connections, draw],
+        [activeConnectionIds, connections, draw, drawBatches, failDrawing, splitBatches],
     );
 
     useImperativeHandle(ref, () => ({ draw, refresh }), [draw, refresh]);
@@ -96,7 +144,7 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     }, [isDraggingNodes]);
 
     useLayoutEffect(() => {
-        const canvas = canvasRef.current;
+        const canvas = staticCanvasRef.current;
         const host = canvas?.parentElement;
         if (!host) return;
         const observer = new ResizeObserver(() => draw(viewport));
@@ -104,5 +152,14 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
         return () => observer.disconnect();
     }, [draw, viewport]);
 
-    return <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" />;
+    return (
+        <>
+            <canvas ref={staticCanvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" />
+            <canvas ref={dynamicCanvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" />
+        </>
+    );
 });
+
+function sameConnectionIds(previous: ReadonlySet<string>, next: ReadonlySet<string>) {
+    return previous.size === next.size && Array.from(previous).every((id) => next.has(id));
+}
