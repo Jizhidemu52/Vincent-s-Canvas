@@ -3766,6 +3766,18 @@ function WirelessCanvasPage() {
         [configInputsById, confirmStopGeneration, handleConfigNodeChange, handleGenerateNode, runningNodeId],
     );
 
+    const addImageNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Image), [createNode]);
+    const addVideoNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Video), [createNode]);
+    const addAudioNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Audio), [createNode]);
+    const addTextNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Text), [createNode]);
+    const addConfigNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Config), [createNode]);
+    const openQuickGenerateFromToolbar = useCallback(() => setQuickGenerateOpen(true), []);
+    const openBatchEditFromToolbar = useCallback(() => setBatchEditOpen(true), []);
+    const uploadFromToolbar = useCallback(() => handleUploadRequest(), [handleUploadRequest]);
+    const deleteSelectedNodesFromToolbar = useCallback(() => deleteNodes(new Set(selectedNodeIdsRef.current)), [deleteNodes]);
+    const openClearCanvasFromToolbar = useCallback(() => setClearConfirmOpen(true), []);
+    const openAssetsFromToolbar = useCallback(() => setAssetPickerOpen(true), []);
+
     if (!projectLoaded) return <CanvasRefreshShell />;
 
     return (
@@ -3980,24 +3992,22 @@ function WirelessCanvasPage() {
                     canRedo={historyState.canRedo}
                     backgroundMode={backgroundMode}
                     showImageInfo={showImageInfo}
-                    onAddImage={() => createNode(CanvasNodeType.Image)}
-                    onAddVideo={() => createNode(CanvasNodeType.Video)}
-                    onAddAudio={() => createNode(CanvasNodeType.Audio)}
-                    onAddText={() => createNode(CanvasNodeType.Text)}
-                    onAddConfig={() => createNode(CanvasNodeType.Config)}
-                    onOpenQuickGenerate={() => setQuickGenerateOpen(true)}
-                    onOpenBatchEdit={() => setBatchEditOpen(true)}
+                    onAddImage={addImageNodeFromToolbar}
+                    onAddVideo={addVideoNodeFromToolbar}
+                    onAddAudio={addAudioNodeFromToolbar}
+                    onAddText={addTextNodeFromToolbar}
+                    onAddConfig={addConfigNodeFromToolbar}
+                    onOpenQuickGenerate={openQuickGenerateFromToolbar}
+                    onOpenBatchEdit={openBatchEditFromToolbar}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
-                    onUpload={() => handleUploadRequest()}
-                    onDelete={() => deleteNodes(new Set(selectedNodeIds))}
-                    onClear={() => setClearConfirmOpen(true)}
+                    onUpload={uploadFromToolbar}
+                    onDelete={deleteSelectedNodesFromToolbar}
+                    onClear={openClearCanvasFromToolbar}
                     onDeselect={deselectCanvas}
                     onBackgroundModeChange={setBackgroundMode}
                     onShowImageInfoChange={setShowImageInfo}
-                    onOpenMyAssets={() => {
-                        setAssetPickerOpen(true);
-                    }}
+                    onOpenMyAssets={openAssetsFromToolbar}
                 />
 
                 <CanvasInspectorPanel

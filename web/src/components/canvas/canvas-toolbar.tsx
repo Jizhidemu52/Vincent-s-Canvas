@@ -1,13 +1,14 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { Button, Segmented, Switch } from "antd";
 import { CircleDot, Eraser, FolderOpen, Grid2x2, Hand, Image as ImageIcon, Info, Moon, Music2, Palette, Redo2, Settings2, Sparkles, Square, Sun, Trash2, Type, Undo2, Upload, Video, WandSparkles } from "lucide-react";
 
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme, type CanvasTheme } from "@/lib/canvas-theme";
+import { canvasToolbarPropsEqual, type CanvasToolbarRenderState } from "@/lib/canvas/canvas-toolbar-render-stability";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 
-export function CanvasToolbar({
+export const CanvasToolbar = memo(function CanvasToolbar({
     selectedCount,
     canUndo,
     canRedo,
@@ -29,29 +30,7 @@ export function CanvasToolbar({
     onBackgroundModeChange,
     onShowImageInfoChange,
     onOpenMyAssets,
-}: {
-    selectedCount: number;
-    canUndo: boolean;
-    canRedo: boolean;
-    backgroundMode: CanvasBackgroundMode;
-    showImageInfo: boolean;
-    onAddImage: () => void;
-    onAddVideo: () => void;
-    onAddAudio: () => void;
-    onAddText: () => void;
-    onAddConfig: () => void;
-    onOpenQuickGenerate: () => void;
-    onOpenBatchEdit: () => void;
-    onUndo: () => void;
-    onRedo: () => void;
-    onUpload: () => void;
-    onDelete: () => void;
-    onClear: () => void;
-    onDeselect: () => void;
-    onBackgroundModeChange: (mode: CanvasBackgroundMode) => void;
-    onShowImageInfoChange: (show: boolean) => void;
-    onOpenMyAssets: () => void;
-}) {
+}: CanvasToolbarRenderState) {
     const wrapRef = useRef<HTMLDivElement>(null);
     const colorTheme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
@@ -199,7 +178,7 @@ export function CanvasToolbar({
             ) : null}
         </div>
     );
-}
+}, canvasToolbarPropsEqual);
 
 function ToolbarButton({
     id,
