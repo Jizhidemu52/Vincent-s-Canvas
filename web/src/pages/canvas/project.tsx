@@ -60,6 +60,7 @@ import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workfl
 import { buildCanvasResourceReferences, buildNodeMentionReferencesByNodeId, mergeCanvasResourceReferences } from "@/lib/canvas/canvas-resource-references";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
+import { createCanvasBatchRootIndex, isCanvasBatchChildHidden, isCanvasBatchConnectionEndpointHidden } from "@/lib/canvas/canvas-batch-visibility";
 import { createConnectionAdjacency } from "@/lib/canvas/canvas-connection-geometry";
 import { findCanvasConnectionDropTarget, type CanvasConnectionDropTarget } from "@/lib/canvas/canvas-connection-drop-target";
 import { createCanvasProjectSaveQueue, type CanvasProjectSaveQueue } from "@/lib/canvas/canvas-project-save-queue";
@@ -842,6 +843,7 @@ function WirelessCanvasPage() {
     }, [setConnecting]);
 
     const canvasSpatialIndex = useMemo(() => createCanvasSpatialIndex(nodes), [nodes]);
+    const batchRootsById = useMemo(() => createCanvasBatchRootIndex(nodes), [nodes]);
 
     const getConnectionDropTarget = useCallback(
         (clientX: number, clientY: number, current: ConnectionHandle): CanvasConnectionDropTarget => {
@@ -852,10 +854,10 @@ function WirelessCanvasPage() {
                 current,
                 scale: viewportRef.current.k,
                 canConnect: (node) => Boolean(normalizeConnection(current.nodeId, node.id, nodesRef.current, current.handleType)),
-                isHiddenNode: (node) => isHiddenBatchChild(node, nodesRef.current),
+                isHiddenNode: (node) => isCanvasBatchChildHidden(node, batchRootsById),
             });
         },
-        [canvasSpatialIndex, screenToCanvas],
+        [batchRootsById, canvasSpatialIndex, screenToCanvas],
     );
 
     const visibleCanvasBounds = useMemo(() => {
@@ -867,7 +869,7 @@ function WirelessCanvasPage() {
         return boundsForViewport(viewport, width, height, padding);
     }, [size.height, size.width, viewport]);
 
-    const visibleNodes = useMemo(() => selectCanvasSpatialIndexNodes(canvasSpatialIndex, visibleCanvasBounds, (node) => !isHiddenBatchChild(node, nodes, collapsingBatchIds)), [canvasSpatialIndex, collapsingBatchIds, nodes, visibleCanvasBounds]);
+    const visibleNodes = useMemo(() => selectCanvasSpatialIndexNodes(canvasSpatialIndex, visibleCanvasBounds, (node) => !isCanvasBatchChildHidden(node, batchRootsById, collapsingBatchIds)), [batchRootsById, canvasSpatialIndex, collapsingBatchIds, visibleCanvasBounds]);
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
     const connectionById = useMemo(() => new Map(connections.map((connection) => [connection.id, connection])), [connections]);
@@ -879,9 +881,9 @@ function WirelessCanvasPage() {
             selectCanvasSpatialIndexConnections(connectionSpatialIndex, visibleCanvasBounds, (connection) => {
                 const from = nodeById.get(connection.fromNodeId);
                 const to = nodeById.get(connection.toNodeId);
-                return Boolean(from && to && !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes));
+                return Boolean(from && to && !isCanvasBatchConnectionEndpointHidden(from, batchRootsById) && !isCanvasBatchConnectionEndpointHidden(to, batchRootsById));
             }),
-        [connectionSpatialIndex, nodeById, nodes, visibleCanvasBounds],
+        [batchRootsById, connectionSpatialIndex, nodeById, visibleCanvasBounds],
     );
     const baseVisibleConnectionIds = useMemo(() => new Set(baseVisibleConnections.map((connection) => connection.id)), [baseVisibleConnections]);
     const draggedConnectionIds = useMemo(() => {
@@ -898,9 +900,9 @@ function WirelessCanvasPage() {
             connectionById,
             resolveNode: resolveRenderNode,
             bounds: visibleCanvasBounds,
-            shouldInclude: (_connection, from, to) => !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes),
+            shouldInclude: (_connection, from, to) => !isCanvasBatchConnectionEndpointHidden(from, batchRootsById) && !isCanvasBatchConnectionEndpointHidden(to, batchRootsById),
         });
-    }, [baseVisibleConnectionIds, baseVisibleConnections, connectionById, draggedConnectionIds, nodes, resolveRenderNode, visibleCanvasBounds]);
+    }, [baseVisibleConnectionIds, baseVisibleConnections, batchRootsById, connectionById, draggedConnectionIds, resolveRenderNode, visibleCanvasBounds]);
     const applySelectionPointer = useCallback(
         (clientX: number, clientY: number) => {
             const currentSelection = selectionBoxRef.current;
@@ -917,14 +919,14 @@ function WirelessCanvasPage() {
                 canvasSpatialIndex,
                 bounds,
                 new Set(currentSelection.additive ? currentSelection.initialSelectedNodeIds : []),
-                (node) => !isHiddenBatchChild(node, nodesRef.current),
+                (node) => !isCanvasBatchChildHidden(node, batchRootsById, collapsingBatchIds),
             );
             const nextSelectionBox = { ...currentSelection, currentWorldX: world.x, currentWorldY: world.y };
             selectionBoxRef.current = nextSelectionBox;
             setSelectionBox(nextSelectionBox);
             setSelectedNodeIds(nextSelected);
         },
-        [canvasSpatialIndex, screenToCanvas],
+        [batchRootsById, canvasSpatialIndex, collapsingBatchIds, screenToCanvas],
     );
     const flushSelectionPointer = useCallback(() => {
         if (selectionFrameRef.current !== null) {
@@ -4897,21 +4899,6 @@ function sourceNodeReferenceImages(node: CanvasNodeData | null) {
 
 function isAudioFile(file: File) {
     return file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name);
-}
-
-function isHiddenBatchChild(node: CanvasNodeData, nodes: CanvasNodeData[], collapsingBatchIds?: Set<string>) {
-    const rootId = node.metadata?.batchRootId;
-    if (!rootId) return false;
-    const root = nodes.find((item) => item.id === rootId);
-    if (root && collapsingBatchIds?.has(rootId)) return false;
-    return Boolean(root && !root.metadata?.imageBatchExpanded);
-}
-
-function isHiddenBatchConnectionEndpoint(node: CanvasNodeData, nodes: CanvasNodeData[]) {
-    const rootId = node.metadata?.batchRootId;
-    if (!rootId) return false;
-    const root = nodes.find((item) => item.id === rootId);
-    return Boolean(root && !root.metadata?.imageBatchExpanded);
 }
 
 function buildAngleLabel(params: CanvasImageAngleParams) {
