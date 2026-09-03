@@ -6,6 +6,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import type { CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { canvasNodeRenderStateEqual, type CanvasNodeRenderState } from "@/lib/canvas/canvas-render-stability";
 import { canvasMediaPlaybackProps } from "@/lib/canvas/canvas-media-render-quality";
+import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -56,6 +57,7 @@ type NodeContentRendererProps = {
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     renderQuality: CanvasRenderQuality;
     isEditingContent: boolean;
+    textDraft: string;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
     isBatchRoot: boolean;
     batchCount: number;
@@ -111,6 +113,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [hovered, setHovered] = useState(false);
     const [isEditingContent, setIsEditingContent] = useState(false);
+    const [textDraft, setTextDraft] = useState(data.metadata?.content || "");
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
@@ -121,6 +124,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     const position = previewPosition ?? data.position;
     const imageBorderColor = isActive ? theme.canvas.selectionStroke : isRelated && !isBatchChild ? theme.node.muted : "transparent";
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const textDraftRef = useRef<ReturnType<typeof createCanvasTextDraft> | null>(null);
+    if (!textDraftRef.current) textDraftRef.current = createCanvasTextDraft(data.metadata?.content || "", (content) => onContentChange(data.id, content));
     const resizeRef = useRef({
         isResizing: false,
         corner: "bottom-right" as ResizeCorner,
@@ -133,6 +138,32 @@ export const CanvasNode = React.memo(function CanvasNode({
         keepRatio: false,
         ratio: 1,
     });
+
+    const beginTextEditing = useCallback(() => {
+        const content = data.metadata?.content || "";
+        textDraftRef.current?.reset(content);
+        setTextDraft(content);
+        setIsEditingContent(true);
+    }, [data.metadata?.content]);
+
+    const updateTextDraft = useCallback((content: string) => {
+        textDraftRef.current?.change(content);
+        setTextDraft(content);
+    }, []);
+
+    const finishTextEditing = useCallback(() => {
+        textDraftRef.current?.flush();
+        setIsEditingContent(false);
+    }, []);
+
+    useEffect(() => {
+        if (isEditingContent) return;
+        const content = data.metadata?.content || "";
+        textDraftRef.current?.reset(content);
+        setTextDraft(content);
+    }, [data.metadata?.content, isEditingContent]);
+
+    useEffect(() => () => textDraftRef.current?.flush(), []);
 
     useEffect(() => {
         const textarea = textareaRef.current;
@@ -152,8 +183,8 @@ export const CanvasNode = React.memo(function CanvasNode({
 
     useEffect(() => {
         if (!editRequestNonce || data.type !== CanvasNodeType.Text) return;
-        setIsEditingContent(true);
-    }, [data.type, editRequestNonce]);
+        beginTextEditing();
+    }, [beginTextEditing, data.type, editRequestNonce]);
 
     useEffect(() => {
         if (!isEditingContent) return;
@@ -163,12 +194,12 @@ export const CanvasNode = React.memo(function CanvasNode({
             if (!(target instanceof Node)) return;
             if (isEditingContent && textareaRef.current?.contains(target)) return;
 
-            setIsEditingContent(false);
+            finishTextEditing();
         };
 
         window.addEventListener("pointerdown", handleOutsidePointerDown, true);
         return () => window.removeEventListener("pointerdown", handleOutsidePointerDown, true);
-    }, [isEditingContent]);
+    }, [finishTextEditing, isEditingContent]);
 
     const handleResizeMove = useCallback(
         (event: MouseEvent) => {
@@ -288,7 +319,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     }
                     if (data.type !== CanvasNodeType.Text) return;
                     event.stopPropagation();
-                    setIsEditingContent(true);
+                    beginTextEditing();
                 }}
             >
                 <div
@@ -309,6 +340,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         theme={theme}
                         renderQuality={renderQuality}
                         isEditingContent={isEditingContent}
+                        textDraft={textDraft}
                         textareaRef={textareaRef}
                         isBatchRoot={isBatchRoot}
                         batchCount={batchCount}
@@ -317,8 +349,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                         batchRecovering={batchRecovering}
                         renderNodeContent={renderNodeContent}
                         mentionReferences={mentionReferences}
-                        onContentChange={onContentChange}
-                        onStopEditing={() => setIsEditingContent(false)}
+                        onContentChange={updateTextDraft}
+                        onStopEditing={finishTextEditing}
                         onRetry={onRetry}
                         onGenerateImage={onGenerateImage}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
@@ -434,7 +466,7 @@ function UnknownNodeContent({ theme }: Pick<NodeContentRendererProps, "theme">) 
     );
 }
 
-function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onGenerateImage }: NodeContentRendererProps) {
+function TextContent({ node, theme, isEditingContent, textDraft, textareaRef, mentionReferences, onContentChange, onStopEditing, onGenerateImage }: NodeContentRendererProps) {
     const fontSize = node.metadata?.fontSize || 14;
     const textStyle = { fontSize: `${fontSize}px`, lineHeight: `${Math.round(fontSize * 1.65)}px`, color: theme.node.text, boxSizing: "border-box" } as React.CSSProperties;
 
@@ -461,7 +493,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     ref={textareaRef}
                     className="thin-scrollbar block h-full w-full resize-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent pl-4 pr-14 pt-0 pb-4 m-0 font-mono outline-none select-text appearance-none"
                     style={textStyle}
-                    value={node.metadata?.content || ""}
+                    value={textDraft}
                     references={mentionReferences}
                     highlightLabels={false}
                     onChange={(value) => onContentChange(node.id, value)}
