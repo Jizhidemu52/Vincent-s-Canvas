@@ -29,3 +29,27 @@ export function createPreviewNodeResolver(nodeById: ReadonlyMap<string, CanvasNo
 
     return (id: string) => previewNodes.get(id) ?? nodeById.get(id);
 }
+
+/**
+ * Keeps connection geometry in sync with rAF drag updates without requiring a
+ * React render for every pointer frame. It only rebuilds preview node copies
+ * after one of the preview maps has actually changed.
+ */
+export function createLivePreviewNodeResolver(
+    nodeById: ReadonlyMap<string, CanvasNodeData>,
+    dragPreviewRef: { current: CanvasDragPreview },
+    resizePreviewRef: { current: CanvasResizePreview },
+) {
+    let previousDragPreview: CanvasDragPreview | undefined;
+    let previousResizePreview: CanvasResizePreview | undefined;
+    let resolve = createPreviewNodeResolver(nodeById, dragPreviewRef.current, resizePreviewRef.current);
+
+    return (id: string) => {
+        if (previousDragPreview !== dragPreviewRef.current || previousResizePreview !== resizePreviewRef.current) {
+            previousDragPreview = dragPreviewRef.current;
+            previousResizePreview = resizePreviewRef.current;
+            resolve = createPreviewNodeResolver(nodeById, previousDragPreview, previousResizePreview);
+        }
+        return resolve(id);
+    };
+}

@@ -1,13 +1,14 @@
-import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "react";
+import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef } from "react";
 
 import { createConnectionGeometryCache, type CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
-import { createCanvasConnectionDrawCache, drawCanvasConnectionBatches } from "@/lib/canvas/canvas-connection-layer";
+import { createCanvasConnectionDrawCache, drawCanvasConnectionBatches, type CanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
 
 export type CanvasConnectionLayerHandle = {
     draw: (viewport: ViewportTransform) => void;
+    refresh: (viewport: ViewportTransform, affectedConnectionIds: ReadonlySet<string>) => void;
 };
 
 type CanvasConnectionLayerProps = {
@@ -29,6 +30,7 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     const geometryCacheRef = useRef(createConnectionGeometryCache());
     const resolveGeometryRef = useRef<(connection: CanvasConnection) => CanvasConnectionGeometry | undefined>(() => undefined);
     const drawCacheRef = useRef(createCanvasConnectionDrawCache((connection) => resolveGeometryRef.current(connection)));
+    const batchesRef = useRef<CanvasConnectionDrawBatches>({ regular: [], active: [] });
     const wasDraggingNodesRef = useRef(false);
     const failedRef = useRef(false);
     resolveGeometryRef.current = (connection) => {
@@ -37,10 +39,7 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
         return from && to ? geometryCacheRef.current.get(connection, from, to) : undefined;
     };
     const refreshAllGeometry = !isDraggingNodes && wasDraggingNodesRef.current;
-    const batches = useMemo(
-        () => drawCacheRef.current.sync(connections, activeConnectionIds, affectedConnectionIds, refreshAllGeometry),
-        [activeConnectionIds, affectedConnectionIds, connections, refreshAllGeometry, resolveNode],
-    );
+    batchesRef.current = drawCacheRef.current.sync(connections, activeConnectionIds, affectedConnectionIds, refreshAllGeometry);
 
     const draw = useCallback(
         (nextViewport: ViewportTransform) => {
@@ -66,7 +65,7 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
                 context.clearRect(0, 0, rect.width, rect.height);
                 context.translate(nextViewport.x, nextViewport.y);
                 context.scale(nextViewport.k, nextViewport.k);
-                if (drawCanvasConnectionBatches(context, batches, { stroke: theme.node.muted, activeStroke: theme.node.activeStroke })) return;
+                if (drawCanvasConnectionBatches(context, batchesRef.current, { stroke: theme.node.muted, activeStroke: theme.node.activeStroke })) return;
             } catch {
                 // Fall through to the SVG renderer below.
             }
@@ -75,10 +74,18 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
                 onDrawFailure();
             }
         },
-        [batches, onDrawFailure, theme.node.activeStroke, theme.node.muted],
+        [onDrawFailure, theme.node.activeStroke, theme.node.muted],
     );
 
-    useImperativeHandle(ref, () => ({ draw }), [draw]);
+    const refresh = useCallback(
+        (nextViewport: ViewportTransform, nextAffectedConnectionIds: ReadonlySet<string>) => {
+            batchesRef.current = drawCacheRef.current.sync(connections, activeConnectionIds, nextAffectedConnectionIds, false);
+            draw(nextViewport);
+        },
+        [activeConnectionIds, connections, draw],
+    );
+
+    useImperativeHandle(ref, () => ({ draw, refresh }), [draw, refresh]);
 
     useLayoutEffect(() => {
         draw(viewport);

@@ -12,6 +12,16 @@ type RefreshVisibleConnectionsForDragOptions = {
     shouldInclude?: (connection: CanvasConnection, from: CanvasNodeData, to: CanvasNodeData) => boolean;
 };
 
+/**
+ * Finds the small set of links whose geometry or viewport visibility can
+ * change while a node is being dragged or resized.
+ */
+export function collectAffectedConnectionIds(nodeIds: ReadonlySet<string>, connectionAdjacency: ReadonlyMap<string, ReadonlySet<string>>): Set<string> {
+    const ids = new Set<string>();
+    nodeIds.forEach((nodeId) => connectionAdjacency.get(nodeId)?.forEach((connectionId) => ids.add(connectionId)));
+    return ids;
+}
+
 export function refreshVisibleConnectionsForDrag({ baseVisibleConnections, baseVisibleConnectionIds, affectedConnectionIds, connectionById, resolveNode, bounds, shouldInclude = () => true }: RefreshVisibleConnectionsForDragOptions): CanvasConnection[] {
     const isVisible = (connection: CanvasConnection) => {
         const from = resolveNode(connection.fromNodeId);

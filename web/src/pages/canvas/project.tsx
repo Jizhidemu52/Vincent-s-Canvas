@@ -66,9 +66,9 @@ import { createConnectionAdjacency } from "@/lib/canvas/canvas-connection-geomet
 import { findCanvasConnectionDropTarget, type CanvasConnectionDropTarget } from "@/lib/canvas/canvas-connection-drop-target";
 import { createCanvasProjectSaveQueue, type CanvasProjectSaveQueue } from "@/lib/canvas/canvas-project-save-queue";
 import { buildCanvasRelatedHighlight } from "@/lib/canvas/canvas-related-highlight";
-import { createDragPreview, createPreviewNodeResolver, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
+import { createDragPreview, createLivePreviewNodeResolver, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
 import { createResizePreview, type CanvasResizePreview } from "@/lib/canvas/canvas-resize-preview";
-import { refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
+import { collectAffectedConnectionIds, refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
 import { canvasQuickGeneratePanelPropsEqual, type CanvasQuickGeneratePanelRenderState } from "@/lib/canvas/canvas-quick-generate-render-stability";
@@ -346,6 +346,7 @@ function WirelessCanvasPage() {
         initialSelectedNodes: [],
     });
     const dragPreviewRef = useRef<CanvasDragPreview>(new Map());
+    const draggedConnectionIdsRef = useRef<ReadonlySet<string>>(new Set());
     const resizePreviewRef = useRef<CanvasResizePreview>(new Map());
     const resizePreviewRafRef = useRef<number | null>(null);
 
@@ -434,6 +435,7 @@ function WirelessCanvasPage() {
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
     const [dragPreviewById, setDragPreviewById] = useState<CanvasDragPreview>(() => new Map());
+    const [draggedConnectionIds, setDraggedConnectionIds] = useState<ReadonlySet<string>>(() => new Set());
     const [resizePreviewById, setResizePreviewById] = useState<CanvasResizePreview>(() => new Map());
     const [renderQuality, setRenderQuality] = useState<CanvasRenderQuality>("full");
     const [performanceMetrics, setPerformanceMetrics] = useState<CanvasInteractionMetrics | null>(null);
@@ -883,7 +885,7 @@ function WirelessCanvasPage() {
     const connectionById = useMemo(() => new Map(connections.map((connection) => [connection.id, connection])), [connections]);
     const connectionSpatialIndex = useMemo(() => createCanvasConnectionSpatialIndex(connections, nodeById), [connections, nodeById]);
     const connectionAdjacency = useMemo(() => createConnectionAdjacency(connections), [connections]);
-    const resolveRenderNode = useMemo(() => createPreviewNodeResolver(nodeById, dragPreviewById, resizePreviewById), [dragPreviewById, nodeById, resizePreviewById]);
+    const resolveRenderNode = useMemo(() => createLivePreviewNodeResolver(nodeById, dragPreviewRef, resizePreviewRef), [nodeById]);
     const baseVisibleConnections = useMemo(
         () =>
             selectCanvasSpatialIndexConnections(connectionSpatialIndex, visibleCanvasBounds, (connection) => {
@@ -894,24 +896,27 @@ function WirelessCanvasPage() {
         [batchRootsById, connectionSpatialIndex, nodeById, visibleCanvasBounds],
     );
     const baseVisibleConnectionIds = useMemo(() => new Set(baseVisibleConnections.map((connection) => connection.id)), [baseVisibleConnections]);
-    const draggedConnectionIds = useMemo(() => {
-        const ids = new Set<string>();
-        dragPreviewById.forEach((_position, nodeId) => connectionAdjacency.get(nodeId)?.forEach((connectionId) => ids.add(connectionId)));
-        resizePreviewById.forEach((_bounds, nodeId) => connectionAdjacency.get(nodeId)?.forEach((connectionId) => ids.add(connectionId)));
+    const resizeConnectionIds = useMemo(
+        () => collectAffectedConnectionIds(new Set(resizePreviewById.keys()), connectionAdjacency),
+        [connectionAdjacency, resizePreviewById],
+    );
+    const affectedConnectionIds = useMemo(() => {
+        const ids = new Set(draggedConnectionIds);
+        resizeConnectionIds.forEach((id) => ids.add(id));
         return ids;
-    }, [connectionAdjacency, dragPreviewById, resizePreviewById]);
+    }, [draggedConnectionIds, resizeConnectionIds]);
     const visibleConnections = useMemo(() => {
-        if (!draggedConnectionIds.size) return baseVisibleConnections;
+        if (!affectedConnectionIds.size) return baseVisibleConnections;
         return refreshVisibleConnectionsForDrag({
             baseVisibleConnections,
             baseVisibleConnectionIds,
-            affectedConnectionIds: draggedConnectionIds,
+            affectedConnectionIds,
             connectionById,
             resolveNode: resolveRenderNode,
             bounds: visibleCanvasBounds,
             shouldInclude: (_connection, from, to) => !isCanvasBatchConnectionEndpointHidden(from, batchRootsById) && !isCanvasBatchConnectionEndpointHidden(to, batchRootsById),
         });
-    }, [baseVisibleConnectionIds, baseVisibleConnections, batchRootsById, connectionById, draggedConnectionIds, resolveRenderNode, visibleCanvasBounds]);
+    }, [affectedConnectionIds, baseVisibleConnectionIds, baseVisibleConnections, batchRootsById, connectionById, resolveRenderNode, visibleCanvasBounds]);
     const applySelectionPointer = useCallback(
         (clientX: number, clientY: number) => {
             const currentSelection = selectionBoxRef.current;
@@ -1361,6 +1366,15 @@ function WirelessCanvasPage() {
         [cancelPendingConnectionCreate, screenToCanvas],
     );
 
+    const applyLiveDragPreview = useCallback((preview: CanvasDragPreview) => {
+        dragPreviewRef.current = preview;
+        preview.forEach((position, nodeId) => {
+            const nodeElement = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(nodeId)}"]`);
+            if (nodeElement) nodeElement.style.transform = `translate(${position.x}px, ${position.y}px)`;
+        });
+        canvasConnectionLayerRef.current?.refresh(viewportRef.current, draggedConnectionIdsRef.current);
+    }, []);
+
     const handleNodeMouseDown = useCallback((event: ReactMouseEvent, nodeId: string) => {
         event.stopPropagation();
         setContextMenu(null);
@@ -1388,6 +1402,9 @@ function WirelessCanvasPage() {
         currentNodes.forEach((node) => {
             if (nextSelected.has(node.id)) node.metadata?.batchChildIds?.forEach((childId) => dragIds.add(childId));
         });
+        const nextDraggedConnectionIds = collectAffectedConnectionIds(dragIds, connectionAdjacency);
+        draggedConnectionIdsRef.current = nextDraggedConnectionIds;
+        setDraggedConnectionIds(nextDraggedConnectionIds);
         dragRef.current = {
             isDraggingNode: true,
             hasMoved: false,
@@ -1399,7 +1416,7 @@ function WirelessCanvasPage() {
         nodeDraggingRef.current = true;
         setIsNodeDragging(true);
         handleCanvasInteractionChange(true);
-    }, [handleCanvasInteractionChange]);
+    }, [connectionAdjacency, handleCanvasInteractionChange]);
 
     const finishNodeDrag = useCallback((clientX?: number, clientY?: number) => {
         if (rafRef.current) {
@@ -1427,10 +1444,16 @@ function WirelessCanvasPage() {
                     return position ? { ...node, position } : node;
                 }),
             );
+        } else if (dragRef.current.hasMoved) {
+            // A cancelled pointer sequence has no final coordinates. Restore
+            // the imperatively moved node elements to their persisted state.
+            applyLiveDragPreview(createDragPreview(initialPositions, 0, 0));
         }
 
         dragPreviewRef.current = new Map();
         setDragPreviewById(dragPreviewRef.current);
+        draggedConnectionIdsRef.current = new Set();
+        setDraggedConnectionIds(draggedConnectionIdsRef.current);
 
         dragRef.current.isDraggingNode = false;
         dragRef.current.hasMoved = false;
@@ -1443,7 +1466,7 @@ function WirelessCanvasPage() {
                 setDialogNodeId(clickedNodeId);
             }
         }
-    }, [handleCanvasInteractionChange]);
+    }, [applyLiveDragPreview, handleCanvasInteractionChange]);
 
     const handleGlobalMouseMove = useCallback(
         (event: MouseEvent) => {
@@ -1460,8 +1483,8 @@ function WirelessCanvasPage() {
                 if (rafRef.current) cancelAnimationFrame(rafRef.current);
                 rafRef.current = requestAnimationFrame(() => {
                     const preview = createDragPreview(initialPositions, dx, dy);
-                    dragPreviewRef.current = preview;
-                    setDragPreviewById(preview);
+                    applyLiveDragPreview(preview);
+                    if (canvasConnectionFallback) setDragPreviewById(preview);
                     rafRef.current = null;
                 });
                 return;
@@ -1474,7 +1497,7 @@ function WirelessCanvasPage() {
                 setMouseWorld(screenToCanvas(event.clientX, event.clientY));
             }
         },
-        [finishNodeDrag, getConnectionDropTarget, screenToCanvas],
+        [applyLiveDragPreview, canvasConnectionFallback, finishNodeDrag, getConnectionDropTarget, screenToCanvas],
     );
 
     const handleGlobalPointerMove = useCallback(
@@ -3880,8 +3903,8 @@ function WirelessCanvasPage() {
                                 resolveNode={resolveRenderNode}
                                 viewport={viewport}
                                 activeConnectionIds={activeCanvasConnectionIds}
-                                affectedConnectionIds={draggedConnectionIds}
-                                isDraggingNodes={dragPreviewById.size > 0 || resizePreviewById.size > 0}
+                                affectedConnectionIds={affectedConnectionIds}
+                                isDraggingNodes={isNodeDragging || resizePreviewById.size > 0}
                                 onDrawFailure={enableCanvasConnectionFallback}
                             />
                         )

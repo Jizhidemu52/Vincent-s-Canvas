@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { createDragPreview, createPreviewNodeResolver, resolvePreviewPosition } from "@/lib/canvas/canvas-drag-preview";
+import { createDragPreview, createLivePreviewNodeResolver, createPreviewNodeResolver, resolvePreviewPosition } from "@/lib/canvas/canvas-drag-preview";
 import { createResizePreview } from "@/lib/canvas/canvas-resize-preview";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
@@ -58,5 +58,15 @@ describe("canvas drag preview", () => {
             width: 360,
             height: 220,
         });
+    });
+
+    test("reads the newest drag preview without recreating the connection resolver", () => {
+        const dragPreviewRef = { current: new Map<string, { x: number; y: number }>() };
+        const resizePreviewRef = { current: new Map() };
+        const resolveNode = createLivePreviewNodeResolver(new Map([[source.id, source]]), dragPreviewRef, resizePreviewRef);
+
+        dragPreviewRef.current = new Map([[source.id, { x: 240, y: 360 }]]);
+
+        expect(resolveNode(source.id)).toEqual({ ...source, position: { x: 240, y: 360 } });
     });
 });

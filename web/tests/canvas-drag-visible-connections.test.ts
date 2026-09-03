@@ -1,10 +1,22 @@
 import { expect, test } from "bun:test";
 
-import { refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
+import { collectAffectedConnectionIds, refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
 const node = (id: string, x: number): CanvasNodeData => ({ id, type: CanvasNodeType.Text, title: id, position: { x, y: 100 }, width: 100, height: 80 });
 const bounds = { minX: 0, minY: 0, maxX: 800, maxY: 500 };
+
+test("collects every connection adjacent to previewed nodes", () => {
+    const result = collectAffectedConnectionIds(
+        new Set(["resized", "dragged"]),
+        new Map([
+            ["resized", new Set(["resized-link", "shared-link"])],
+            ["dragged", new Set(["dragged-link", "shared-link"])],
+        ]),
+    );
+
+    expect(result).toEqual(new Set(["resized-link", "shared-link", "dragged-link"]));
+});
 
 test("refreshes only dragged-node connections while retaining unrelated visible links", () => {
     const stable: CanvasConnection = { id: "stable", fromNodeId: "a", toNodeId: "b" };
