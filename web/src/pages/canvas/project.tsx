@@ -39,6 +39,7 @@ import { buildConfigGenerationInputsByNodeId, buildNodeGenerationContext, buildN
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "@/components/canvas/canvas-node-hover-toolbar";
 import { CanvasPerformancePanel } from "@/components/canvas/canvas-performance-panel";
 import { CanvasConnectionLayer, type CanvasConnectionLayerHandle } from "@/components/canvas/canvas-connection-layer";
+import { CanvasSelectionOverlay, type CanvasSelectionOverlayHandle } from "@/components/canvas/canvas-selection-overlay";
 import { WirelessCanvas } from "@/components/canvas/wireless-canvas";
 import { Minimap } from "@/components/canvas/canvas-mini-map";
 import { CanvasNode } from "@/components/canvas/canvas-node";
@@ -322,7 +323,10 @@ function WirelessCanvasPage() {
     const didInitialCenterRef = useRef(false);
     const rafRef = useRef<number | null>(null);
     const selectionFrameRef = useRef<number | null>(null);
+    const selectionPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const selectionPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
+    const pendingSelectionIdsRef = useRef<Set<string> | null>(null);
+    const selectionOverlayRef = useRef<CanvasSelectionOverlayHandle>(null);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const renderQualityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const performanceTrackerRef = useRef(createCanvasPerformanceTracker());
@@ -387,7 +391,7 @@ function WirelessCanvasPage() {
     const [connectionTargetNodeId, setConnectionTargetNodeId] = useState<string | null>(null);
     const [pendingConnectionCreate, setPendingConnectionCreate] = useState<PendingConnectionCreate | null>(null);
     const [mouseWorld, setMouseWorld] = useState<Position>({ x: 0, y: 0 });
-    const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+    const [isSelecting, setIsSelecting] = useState(false);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
@@ -454,7 +458,7 @@ function WirelessCanvasPage() {
     const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void) => Promise<void>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
-    const selectionBoxRef = useRef(selectionBox);
+    const selectionBoxRef = useRef<SelectionBox | null>(null);
     const agentCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
@@ -688,10 +692,6 @@ function WirelessCanvasPage() {
         pendingConnectionCreateRef.current = pendingConnectionCreate;
     }, [nodes, connections, selectedNodeIds, viewport, connectingParams, connectionTargetNodeId, pendingConnectionCreate]);
 
-    useLayoutEffect(() => {
-        selectionBoxRef.current = selectionBox;
-    }, [selectionBox]);
-
     useEffect(() => {
         const el = containerRef.current;
         if (!el) return;
@@ -917,6 +917,33 @@ function WirelessCanvasPage() {
             shouldInclude: (_connection, from, to) => !isCanvasBatchConnectionEndpointHidden(from, batchRootsById) && !isCanvasBatchConnectionEndpointHidden(to, batchRootsById),
         });
     }, [affectedConnectionIds, baseVisibleConnectionIds, baseVisibleConnections, batchRootsById, connectionById, resolveRenderNode, visibleCanvasBounds]);
+    const commitSelectedNodeIds = useCallback((nextSelected: Set<string>) => {
+        if (sameCanvasIdSet(selectedNodeIdsRef.current, nextSelected)) return;
+        selectedNodeIdsRef.current = nextSelected;
+        setSelectedNodeIds(nextSelected);
+    }, []);
+
+    const scheduleSelectionPreviewCommit = useCallback((nextSelected: Set<string>) => {
+        pendingSelectionIdsRef.current = nextSelected;
+        if (selectionPreviewTimerRef.current) return;
+        selectionPreviewTimerRef.current = setTimeout(() => {
+            selectionPreviewTimerRef.current = null;
+            const pending = pendingSelectionIdsRef.current;
+            pendingSelectionIdsRef.current = null;
+            if (pending) commitSelectedNodeIds(pending);
+        }, 80);
+    }, [commitSelectedNodeIds]);
+
+    const flushSelectionPreviewCommit = useCallback(() => {
+        if (selectionPreviewTimerRef.current) {
+            clearTimeout(selectionPreviewTimerRef.current);
+            selectionPreviewTimerRef.current = null;
+        }
+        const pending = pendingSelectionIdsRef.current;
+        pendingSelectionIdsRef.current = null;
+        if (pending) commitSelectedNodeIds(pending);
+    }, [commitSelectedNodeIds]);
+
     const applySelectionPointer = useCallback(
         (clientX: number, clientY: number) => {
             const currentSelection = selectionBoxRef.current;
@@ -937,10 +964,10 @@ function WirelessCanvasPage() {
             );
             const nextSelectionBox = { ...currentSelection, currentWorldX: world.x, currentWorldY: world.y };
             selectionBoxRef.current = nextSelectionBox;
-            setSelectionBox(nextSelectionBox);
-            setSelectedNodeIds(nextSelected);
+            selectionOverlayRef.current?.show(nextSelectionBox);
+            scheduleSelectionPreviewCommit(nextSelected);
         },
-        [batchRootsById, canvasSpatialIndex, collapsingBatchIds, screenToCanvas],
+        [batchRootsById, canvasSpatialIndex, collapsingBatchIds, scheduleSelectionPreviewCommit, screenToCanvas],
     );
     const flushSelectionPointer = useCallback(() => {
         if (selectionFrameRef.current !== null) {
@@ -950,7 +977,23 @@ function WirelessCanvasPage() {
         const pointer = selectionPointerRef.current;
         selectionPointerRef.current = null;
         if (pointer) applySelectionPointer(pointer.clientX, pointer.clientY);
-    }, [applySelectionPointer]);
+        flushSelectionPreviewCommit();
+    }, [applySelectionPointer, flushSelectionPreviewCommit]);
+    const cancelSelectionPreview = useCallback(() => {
+        if (selectionFrameRef.current !== null) {
+            cancelAnimationFrame(selectionFrameRef.current);
+            selectionFrameRef.current = null;
+        }
+        selectionPointerRef.current = null;
+        if (selectionPreviewTimerRef.current) {
+            clearTimeout(selectionPreviewTimerRef.current);
+            selectionPreviewTimerRef.current = null;
+        }
+        pendingSelectionIdsRef.current = null;
+        selectionBoxRef.current = null;
+        selectionOverlayRef.current?.hide();
+        setIsSelecting(false);
+    }, []);
     const scheduleSelectionPointer = useCallback(
         (clientX: number, clientY: number) => {
             selectionPointerRef.current = { clientX, clientY };
@@ -1128,15 +1171,15 @@ function WirelessCanvasPage() {
 
     const deselectCanvas = useCallback(() => {
         cancelPendingConnectionCreate();
-        setSelectedNodeIds(new Set());
+        commitSelectedNodeIds(new Set());
         setSelectedConnectionId(null);
         setContextMenu(null);
-        setSelectionBox(null);
+        cancelSelectionPreview();
         setHoveredNodeId(null);
         setToolbarNodeId(null);
         setDialogNodeId(null);
         setEditingNodeId(null);
-    }, [cancelPendingConnectionCreate]);
+    }, [cancelPendingConnectionCreate, cancelSelectionPreview, commitSelectedNodeIds]);
 
     const clearCanvas = useCallback(() => {
         setNodes([]);
@@ -1340,8 +1383,8 @@ function WirelessCanvasPage() {
             if (event.button !== 0) return;
 
             if (!event.ctrlKey && !event.metaKey) {
-                setSelectionBox(null);
-                setSelectedNodeIds(new Set());
+                cancelSelectionPreview();
+                commitSelectedNodeIds(new Set());
                 setSelectedConnectionId(null);
                 return;
             }
@@ -1356,14 +1399,15 @@ function WirelessCanvasPage() {
                 initialSelectedNodeIds: event.shiftKey ? Array.from(selectedNodeIdsRef.current) : [],
             };
             selectionBoxRef.current = nextSelectionBox;
-            setSelectionBox(nextSelectionBox);
+            selectionOverlayRef.current?.show(nextSelectionBox);
+            setIsSelecting(true);
             if (!event.shiftKey) {
-                setSelectedNodeIds(new Set());
+                commitSelectedNodeIds(new Set());
             }
 
             setSelectedConnectionId(null);
         },
-        [cancelPendingConnectionCreate, screenToCanvas],
+        [cancelPendingConnectionCreate, cancelSelectionPreview, commitSelectedNodeIds, screenToCanvas],
     );
 
     const applyLiveDragPreview = useCallback((preview: CanvasDragPreview) => {
@@ -1508,7 +1552,8 @@ function WirelessCanvasPage() {
             if (event.buttons === 0) {
                 flushSelectionPointer();
                 selectionBoxRef.current = null;
-                setSelectionBox(null);
+                selectionOverlayRef.current?.hide();
+                setIsSelecting(false);
                 return;
             }
 
@@ -1523,7 +1568,8 @@ function WirelessCanvasPage() {
 
             flushSelectionPointer();
             selectionBoxRef.current = null;
-            setSelectionBox(null);
+            selectionOverlayRef.current?.hide();
+            setIsSelecting(false);
 
             if (pendingConnectionCreateRef.current) return;
 
@@ -1549,13 +1595,15 @@ function WirelessCanvasPage() {
             finishNodeDrag(event.clientX, event.clientY);
             flushSelectionPointer();
             selectionBoxRef.current = null;
-            setSelectionBox(null);
+            selectionOverlayRef.current?.hide();
+            setIsSelecting(false);
         };
         const cancelNodeDrag = () => {
             finishNodeDrag();
             flushSelectionPointer();
             selectionBoxRef.current = null;
-            setSelectionBox(null);
+            selectionOverlayRef.current?.hide();
+            setIsSelecting(false);
         };
         window.addEventListener("mousemove", handleGlobalMouseMove);
         window.addEventListener("mouseup", handleGlobalMouseUp);
@@ -1571,6 +1619,7 @@ function WirelessCanvasPage() {
             window.removeEventListener("blur", cancelNodeDrag);
             window.removeEventListener("pointermove", handleGlobalPointerMove);
             if (selectionFrameRef.current !== null) cancelAnimationFrame(selectionFrameRef.current);
+            if (selectionPreviewTimerRef.current) clearTimeout(selectionPreviewTimerRef.current);
         };
     }, [finishNodeDrag, flushSelectionPointer, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
 
@@ -1697,10 +1746,10 @@ function WirelessCanvasPage() {
 
             if (isModifierShortcut && !event.altKey && key === "a") {
                 event.preventDefault();
-                setSelectedNodeIds(new Set(nodesRef.current.map((node) => node.id)));
+                commitSelectedNodeIds(new Set(nodesRef.current.map((node) => node.id)));
                 setSelectedConnectionId(null);
                 setContextMenu(null);
-                setSelectionBox(null);
+                cancelSelectionPreview();
                 return;
             }
 
@@ -1730,10 +1779,10 @@ function WirelessCanvasPage() {
             }
 
             if (event.key === "Escape") {
-                setSelectedNodeIds(new Set());
+                commitSelectedNodeIds(new Set());
                 setSelectedConnectionId(null);
                 setContextMenu(null);
-                setSelectionBox(null);
+                cancelSelectionPreview();
                 setConnecting(null);
                 setHoveredNodeId(null);
                 setToolbarNodeId(null);
@@ -1748,7 +1797,7 @@ function WirelessCanvasPage() {
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [copySelectedNodes, deleteConnection, deleteNodes, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas]);
+    }, [cancelSelectionPreview, commitSelectedNodeIds, copySelectedNodes, deleteConnection, deleteNodes, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas]);
 
     const handleConnectStart = useCallback(
         (event: ReactMouseEvent, nodeId: string, handleType: "source" | "target") => {
@@ -3978,7 +4027,7 @@ function WirelessCanvasPage() {
                             isConnectionTarget={connectionTargetNodeId === node.id}
                             isConnecting={Boolean(connectingParams)}
                             editRequestNonce={editingNodeId === node.id ? editRequestNonce : 0}
-                            showPanel={dialogNodeId === node.id && !selectionBox}
+                            showPanel={dialogNodeId === node.id && !isSelecting}
                             batchCount={batchChildCountById.get(node.id) || 0}
                             batchExpanded={Boolean(node.metadata?.imageBatchExpanded)}
                             batchClosing={Boolean(node.metadata?.batchRootId && collapsingBatchIds.has(node.metadata.batchRootId))}
@@ -4006,19 +4055,7 @@ function WirelessCanvasPage() {
                         />
                     ))}
 
-                    {selectionBox ? (
-                        <div
-                            className="pointer-events-none absolute z-[100] border"
-                            style={{
-                                left: Math.min(selectionBox.startWorldX, selectionBox.currentWorldX),
-                                top: Math.min(selectionBox.startWorldY, selectionBox.currentWorldY),
-                                width: Math.abs(selectionBox.currentWorldX - selectionBox.startWorldX),
-                                height: Math.abs(selectionBox.currentWorldY - selectionBox.startWorldY),
-                                borderColor: theme.canvas.selectionStroke,
-                                background: theme.canvas.selectionFill,
-                            }}
-                        />
-                    ) : null}
+                    <CanvasSelectionOverlay ref={selectionOverlayRef} borderColor={theme.canvas.selectionStroke} background={theme.canvas.selectionFill} />
                     {pendingConnectionCreate ? <ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /> : null}
                 </WirelessCanvas>
                 {performanceModeEnabled ? <CanvasPerformancePanel metrics={performanceMetrics} /> : null}
