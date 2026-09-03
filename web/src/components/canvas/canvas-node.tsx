@@ -7,6 +7,7 @@ import type { CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { canvasNodeRenderStateEqual, type CanvasNodeRenderState } from "@/lib/canvas/canvas-render-stability";
 import { canvasMediaPlaybackProps } from "@/lib/canvas/canvas-media-render-quality";
 import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
+import type { CanvasResizeBounds } from "@/lib/canvas/canvas-resize-preview";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -19,6 +20,7 @@ type CanvasNodeProps = {
     data: CanvasNodeData;
     renderQuality: CanvasRenderQuality;
     previewPosition?: Position;
+    previewBounds?: CanvasResizeBounds;
     scale: number;
     isSelected: boolean;
     isRelated: boolean;
@@ -43,6 +45,7 @@ type CanvasNodeProps = {
     onHoverEnd: (nodeId: string) => void;
     onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target") => void;
     onResize: (nodeId: string, width: number, height: number, position?: Position) => void;
+    onResizeEnd: (nodeId: string, width: number, height: number, position: Position) => void;
     onContentChange: (nodeId: string, content: string) => void;
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
@@ -78,6 +81,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     data,
     renderQuality,
     previewPosition,
+    previewBounds,
     scale,
     isSelected,
     isRelated,
@@ -102,6 +106,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onHoverEnd,
     onConnectStart,
     onResize,
+    onResizeEnd,
     onContentChange,
     onToggleBatch,
     onSetBatchPrimary,
@@ -121,7 +126,9 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const isMoving = renderQuality === "moving";
-    const position = previewPosition ?? data.position;
+    const position = previewPosition ?? previewBounds?.position ?? data.position;
+    const width = previewBounds?.width ?? data.width;
+    const height = previewBounds?.height ?? data.height;
     const imageBorderColor = isActive ? theme.canvas.selectionStroke : isRelated && !isBatchChild ? theme.node.muted : "transparent";
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const textDraftRef = useRef<ReturnType<typeof createCanvasTextDraft> | null>(null);
@@ -137,6 +144,9 @@ export const CanvasNode = React.memo(function CanvasNode({
         startHeight: 0,
         keepRatio: false,
         ratio: 1,
+        currentWidth: 0,
+        currentHeight: 0,
+        currentPosition: { x: 0, y: 0 },
     });
 
     const beginTextEditing = useCallback(() => {
@@ -234,19 +244,27 @@ export const CanvasNode = React.memo(function CanvasNode({
                 }
             }
 
-            onResize(data.id, width, height, {
+            const position = {
                 x: fromLeft ? startRight - width : resizeRef.current.startLeft,
                 y: fromTop ? startBottom - height : resizeRef.current.startTop,
-            });
+            };
+            resizeRef.current.currentWidth = width;
+            resizeRef.current.currentHeight = height;
+            resizeRef.current.currentPosition = position;
+            onResize(data.id, width, height, position);
         },
         [data.id, onResize, scale],
     );
 
     const handleResizeUp = useCallback(() => {
+        const resize = resizeRef.current;
+        if (resize.isResizing && (resize.currentWidth !== resize.startWidth || resize.currentHeight !== resize.startHeight || resize.currentPosition.x !== resize.startLeft || resize.currentPosition.y !== resize.startTop)) {
+            onResizeEnd(data.id, resize.currentWidth, resize.currentHeight, resize.currentPosition);
+        }
         resizeRef.current.isResizing = false;
         window.removeEventListener("mousemove", handleResizeMove);
         window.removeEventListener("mouseup", handleResizeUp);
-    }, [handleResizeMove]);
+    }, [data.id, handleResizeMove, onResizeEnd]);
 
     const handleResizeMouseDown = (event: React.MouseEvent, corner: ResizeCorner) => {
         event.stopPropagation();
@@ -262,6 +280,9 @@ export const CanvasNode = React.memo(function CanvasNode({
             startHeight: data.height,
             keepRatio: (data.type === CanvasNodeType.Image && !data.metadata?.freeResize) || data.type === CanvasNodeType.Video,
             ratio: (data.metadata?.naturalWidth || data.width) / (data.metadata?.naturalHeight || data.height || 1),
+            currentWidth: data.width,
+            currentHeight: data.height,
+            currentPosition: data.position,
         };
         window.addEventListener("mousemove", handleResizeMove);
         window.addEventListener("mouseup", handleResizeUp);
@@ -280,8 +301,8 @@ export const CanvasNode = React.memo(function CanvasNode({
             className={`node-element absolute flex select-none flex-col ${isMoving ? "[&_.backdrop-blur-md]:!backdrop-blur-none" : "transition-shadow duration-200"} ${isSelected ? "z-50" : "z-10"}`}
             style={{
                 transform: `translate(${position.x}px, ${position.y}px)`,
-                width: data.width,
-                height: data.height,
+                width,
+                height,
                 transition: isMoving ? "none" : "box-shadow 200ms ease",
                 contain: "layout style",
             }}
@@ -380,7 +401,8 @@ export const CanvasNode = React.memo(function CanvasNode({
 function canvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProps) {
     if (!canvasNodeRenderStateEqual(toRenderState(previous), toRenderState(next))) return false;
     if (previous.previewPosition?.x !== next.previewPosition?.x || previous.previewPosition?.y !== next.previewPosition?.y) return false;
-    if (previous.onMouseDown !== next.onMouseDown || previous.onHoverStart !== next.onHoverStart || previous.onHoverEnd !== next.onHoverEnd || previous.onConnectStart !== next.onConnectStart || previous.onResize !== next.onResize || previous.onContentChange !== next.onContentChange || previous.onToggleBatch !== next.onToggleBatch || previous.onSetBatchPrimary !== next.onSetBatchPrimary || previous.onRetry !== next.onRetry || previous.onGenerateImage !== next.onGenerateImage || previous.onViewImage !== next.onViewImage || previous.onContextMenu !== next.onContextMenu) return false;
+    if (previous.previewBounds?.position.x !== next.previewBounds?.position.x || previous.previewBounds?.position.y !== next.previewBounds?.position.y || previous.previewBounds?.width !== next.previewBounds?.width || previous.previewBounds?.height !== next.previewBounds?.height) return false;
+    if (previous.onMouseDown !== next.onMouseDown || previous.onHoverStart !== next.onHoverStart || previous.onHoverEnd !== next.onHoverEnd || previous.onConnectStart !== next.onConnectStart || previous.onResize !== next.onResize || previous.onResizeEnd !== next.onResizeEnd || previous.onContentChange !== next.onContentChange || previous.onToggleBatch !== next.onToggleBatch || previous.onSetBatchPrimary !== next.onSetBatchPrimary || previous.onRetry !== next.onRetry || previous.onGenerateImage !== next.onGenerateImage || previous.onViewImage !== next.onViewImage || previous.onContextMenu !== next.onContextMenu) return false;
     if (previous.showPanel || next.showPanel) return previous.renderPanel === next.renderPanel;
     if (previous.data.type === CanvasNodeType.Config || next.data.type === CanvasNodeType.Config) return previous.renderNodeContent === next.renderNodeContent;
     return true;

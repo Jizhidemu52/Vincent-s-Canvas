@@ -67,6 +67,7 @@ import { findCanvasConnectionDropTarget, type CanvasConnectionDropTarget } from 
 import { createCanvasProjectSaveQueue, type CanvasProjectSaveQueue } from "@/lib/canvas/canvas-project-save-queue";
 import { buildCanvasRelatedHighlight } from "@/lib/canvas/canvas-related-highlight";
 import { createDragPreview, createPreviewNodeResolver, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
+import { createResizePreview, type CanvasResizePreview } from "@/lib/canvas/canvas-resize-preview";
 import { refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
@@ -342,6 +343,8 @@ function WirelessCanvasPage() {
         initialSelectedNodes: [],
     });
     const dragPreviewRef = useRef<CanvasDragPreview>(new Map());
+    const resizePreviewRef = useRef<CanvasResizePreview>(new Map());
+    const resizePreviewRafRef = useRef<number | null>(null);
 
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
@@ -428,6 +431,7 @@ function WirelessCanvasPage() {
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
     const [dragPreviewById, setDragPreviewById] = useState<CanvasDragPreview>(() => new Map());
+    const [resizePreviewById, setResizePreviewById] = useState<CanvasResizePreview>(() => new Map());
     const [renderQuality, setRenderQuality] = useState<CanvasRenderQuality>("full");
     const [performanceMetrics, setPerformanceMetrics] = useState<CanvasInteractionMetrics | null>(null);
 
@@ -876,7 +880,7 @@ function WirelessCanvasPage() {
     const connectionById = useMemo(() => new Map(connections.map((connection) => [connection.id, connection])), [connections]);
     const connectionSpatialIndex = useMemo(() => createCanvasConnectionSpatialIndex(connections, nodeById), [connections, nodeById]);
     const connectionAdjacency = useMemo(() => createConnectionAdjacency(connections), [connections]);
-    const resolveRenderNode = useMemo(() => createPreviewNodeResolver(nodeById, dragPreviewById), [dragPreviewById, nodeById]);
+    const resolveRenderNode = useMemo(() => createPreviewNodeResolver(nodeById, dragPreviewById, resizePreviewById), [dragPreviewById, nodeById, resizePreviewById]);
     const baseVisibleConnections = useMemo(
         () =>
             selectCanvasSpatialIndexConnections(connectionSpatialIndex, visibleCanvasBounds, (connection) => {
@@ -890,8 +894,9 @@ function WirelessCanvasPage() {
     const draggedConnectionIds = useMemo(() => {
         const ids = new Set<string>();
         dragPreviewById.forEach((_position, nodeId) => connectionAdjacency.get(nodeId)?.forEach((connectionId) => ids.add(connectionId)));
+        resizePreviewById.forEach((_bounds, nodeId) => connectionAdjacency.get(nodeId)?.forEach((connectionId) => ids.add(connectionId)));
         return ids;
-    }, [connectionAdjacency, dragPreviewById]);
+    }, [connectionAdjacency, dragPreviewById, resizePreviewById]);
     const visibleConnections = useMemo(() => {
         if (!draggedConnectionIds.size) return baseVisibleConnections;
         return refreshVisibleConnectionsForDrag({
@@ -1732,7 +1737,27 @@ function WirelessCanvasPage() {
     );
 
     const handleNodeResize = useCallback((nodeId: string, width: number, height: number, position?: Position) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, width, height, position: position || node.position } : node)));
+        const preview = createResizePreview(nodeId, { position: position || nodesRef.current.find((node) => node.id === nodeId)?.position || { x: 0, y: 0 }, width, height });
+        if (resizePreviewRafRef.current) cancelAnimationFrame(resizePreviewRafRef.current);
+        resizePreviewRafRef.current = requestAnimationFrame(() => {
+            resizePreviewRafRef.current = null;
+            resizePreviewRef.current = preview;
+            setResizePreviewById(preview);
+        });
+    }, []);
+
+    const finishNodeResize = useCallback((nodeId: string, width: number, height: number, position: Position) => {
+        if (resizePreviewRafRef.current) {
+            cancelAnimationFrame(resizePreviewRafRef.current);
+            resizePreviewRafRef.current = null;
+        }
+        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, width, height, position } : node)));
+        resizePreviewRef.current = new Map();
+        setResizePreviewById(resizePreviewRef.current);
+    }, []);
+
+    useEffect(() => () => {
+        if (resizePreviewRafRef.current) cancelAnimationFrame(resizePreviewRafRef.current);
     }, []);
 
     const toggleNodeFreeResize = useCallback((nodeId: string) => {
@@ -3827,7 +3852,7 @@ function WirelessCanvasPage() {
                                 viewport={viewport}
                                 activeConnectionIds={activeCanvasConnectionIds}
                                 affectedConnectionIds={draggedConnectionIds}
-                                isDraggingNodes={dragPreviewById.size > 0}
+                                isDraggingNodes={dragPreviewById.size > 0 || resizePreviewById.size > 0}
                                 onDrawFailure={enableCanvasConnectionFallback}
                             />
                         )
@@ -3869,6 +3894,7 @@ function WirelessCanvasPage() {
                             data={node}
                             renderQuality={renderQuality}
                             previewPosition={dragPreviewById.get(node.id)}
+                            previewBounds={resizePreviewById.get(node.id)}
                             scale={viewport.k}
                             isSelected={selectedNodeIds.has(node.id)}
                             isRelated={relatedHighlight.nodeIds.has(node.id)}
@@ -3893,6 +3919,7 @@ function WirelessCanvasPage() {
                             onHoverEnd={handleNodeHoverEnd}
                             onConnectStart={handleConnectStart}
                             onResize={handleNodeResize}
+                            onResizeEnd={finishNodeResize}
                             onContentChange={handleNodeContentChange}
                             onToggleBatch={toggleBatchExpanded}
                             onSetBatchPrimary={setBatchPrimary}

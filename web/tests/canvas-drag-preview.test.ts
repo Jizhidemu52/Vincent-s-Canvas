@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { createDragPreview, createPreviewNodeResolver, resolvePreviewPosition } from "@/lib/canvas/canvas-drag-preview";
+import { createResizePreview } from "@/lib/canvas/canvas-resize-preview";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const source: CanvasNodeData = {
@@ -42,5 +43,20 @@ describe("canvas drag preview", () => {
         expect(resolveNode(source.id)).toEqual({ ...source, position: { x: 42, y: 64 } });
         expect(resolveNode(source.id)).not.toBe(source);
         expect(resolveNode(stable.id)).toBe(stable);
+    });
+
+    test("combines resize bounds with drag positions for connection rendering", () => {
+        const resolveNode = createPreviewNodeResolver(
+            new Map([[source.id, source]]),
+            new Map([[source.id, { x: 42, y: 64 }]]),
+            createResizePreview(source.id, { position: { x: 20, y: 30 }, width: 360, height: 220 }),
+        );
+
+        expect(resolveNode(source.id)).toEqual({
+            ...source,
+            position: { x: 42, y: 64 },
+            width: 360,
+            height: 220,
+        });
     });
 });

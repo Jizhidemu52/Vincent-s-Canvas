@@ -1,4 +1,5 @@
 import type { CanvasNodeData, Position } from "@/types/canvas";
+import type { CanvasResizePreview } from "@/lib/canvas/canvas-resize-preview";
 
 export type CanvasDragPreview = ReadonlyMap<string, Position>;
 
@@ -15,10 +16,14 @@ export function resolvePreviewPosition(node: CanvasNodeData, preview: CanvasDrag
  * actively dragged nodes receive short-lived position copies, so large canvas
  * drags do not clone every node merely to render a handful of moving nodes.
  */
-export function createPreviewNodeResolver(nodeById: ReadonlyMap<string, CanvasNodeData>, preview: CanvasDragPreview) {
+export function createPreviewNodeResolver(nodeById: ReadonlyMap<string, CanvasNodeData>, preview: CanvasDragPreview, resizePreview: CanvasResizePreview = new Map()) {
     const previewNodes = new Map<string, CanvasNodeData>();
-    preview.forEach((position, id) => {
+    resizePreview.forEach((bounds, id) => {
         const node = nodeById.get(id);
+        if (node) previewNodes.set(id, { ...node, ...bounds });
+    });
+    preview.forEach((position, id) => {
+        const node = previewNodes.get(id) ?? nodeById.get(id);
         if (node) previewNodes.set(id, { ...node, position });
     });
 
