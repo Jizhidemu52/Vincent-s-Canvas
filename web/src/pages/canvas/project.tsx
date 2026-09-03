@@ -61,6 +61,7 @@ import { buildCanvasResourceReferences, buildNodeMentionReferencesByNodeId, merg
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createConnectionAdjacency } from "@/lib/canvas/canvas-connection-geometry";
+import { findCanvasConnectionDropTarget, type CanvasConnectionDropTarget } from "@/lib/canvas/canvas-connection-drop-target";
 import { buildCanvasRelatedHighlight } from "@/lib/canvas/canvas-related-highlight";
 import { createDragPreview, createPreviewNodeResolver, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
 import { refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
@@ -99,11 +100,6 @@ type CanvasClipboard = {
 type PendingConnectionCreate = {
     connection: ConnectionHandle;
     position: Position;
-};
-
-type ConnectionDropTarget = {
-    nodeId: string | null;
-    isNearNode: boolean;
 };
 
 type CanvasHistoryEntry = Pick<CanvasClipboard, "nodes" | "connections"> & {
@@ -147,8 +143,6 @@ const QUICK_IMAGE_SIZES = ["1:1", "4:3", "3:4", "16:9", "9:16"];
 const QUICK_IMAGE_COUNTS = [1, 2, 3, 4];
 const VIDEO_NODE_MAX_WIDTH = 420;
 const VIDEO_NODE_MAX_HEIGHT = 420;
-const CONNECTION_HANDLE_HIT_RADIUS = 40;
-const CONNECTION_NODE_HIT_PADDING = 32;
 const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
@@ -812,44 +806,22 @@ function WirelessCanvasPage() {
         setConnecting(null);
     }, [setConnecting]);
 
-    const getConnectionDropTarget = useCallback(
-        (clientX: number, clientY: number, current: ConnectionHandle): ConnectionDropTarget => {
-            const world = screenToCanvas(clientX, clientY);
-            const scale = Math.max(viewportRef.current.k, 0.05);
-            const padding = CONNECTION_NODE_HIT_PADDING / scale;
-            const handleRadius = CONNECTION_HANDLE_HIT_RADIUS / scale;
-            let isNearNode = false;
-            let bestNodeId: string | null = null;
-            let bestPriority = Number.POSITIVE_INFINITY;
-
-            [...nodesRef.current]
-                .filter((node) => !isHiddenBatchChild(node, nodesRef.current))
-                .reverse()
-                .forEach((node) => {
-                    const anchor = getConnectionTargetAnchor(node, current);
-                    const dx = world.x - anchor.x;
-                    const dy = world.y - anchor.y;
-                    const hitsHandle = dx * dx + dy * dy <= handleRadius * handleRadius;
-                    const hitsInside = world.x >= node.position.x && world.x <= node.position.x + node.width && world.y >= node.position.y && world.y <= node.position.y + node.height;
-                    const hitsExpanded = world.x >= node.position.x - padding && world.x <= node.position.x + node.width + padding && world.y >= node.position.y - padding && world.y <= node.position.y + node.height + padding;
-
-                    if (!hitsHandle && !hitsInside && !hitsExpanded) return;
-                    isNearNode = true;
-                    if (node.id === current.nodeId || !normalizeConnection(current.nodeId, node.id, nodesRef.current, current.handleType)) return;
-
-                    const priority = hitsInside ? 0 : hitsHandle ? 1 : 2;
-                    if (priority < bestPriority) {
-                        bestNodeId = node.id;
-                        bestPriority = priority;
-                    }
-                });
-
-            return { nodeId: bestNodeId, isNearNode };
-        },
-        [screenToCanvas],
-    );
-
     const canvasSpatialIndex = useMemo(() => createCanvasSpatialIndex(nodes), [nodes]);
+
+    const getConnectionDropTarget = useCallback(
+        (clientX: number, clientY: number, current: ConnectionHandle): CanvasConnectionDropTarget => {
+            const world = screenToCanvas(clientX, clientY);
+            return findCanvasConnectionDropTarget({
+                index: canvasSpatialIndex,
+                world,
+                current,
+                scale: viewportRef.current.k,
+                canConnect: (node) => Boolean(normalizeConnection(current.nodeId, node.id, nodesRef.current, current.handleType)),
+                isHiddenNode: (node) => isHiddenBatchChild(node, nodesRef.current),
+            });
+        },
+        [canvasSpatialIndex, screenToCanvas],
+    );
 
     const visibleCanvasBounds = useMemo(() => {
         const rect = containerRef.current?.getBoundingClientRect();
@@ -4812,13 +4784,6 @@ function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeDat
     const spec = node.type === CanvasNodeType.Video ? NODE_DEFAULT_SIZE[CanvasNodeType.Video] : NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const size = typeof safePatch.size === "string" && !node.metadata?.content ? nodeSizeFromRatio(safePatch.size, spec.width, spec.height) : null;
     return size && (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) ? { ...next, ...size, position: { x: node.position.x + node.width / 2 - size.width / 2, y: node.position.y + node.height / 2 - size.height / 2 } } : next;
-}
-
-function getConnectionTargetAnchor(node: CanvasNodeData, current: ConnectionHandle) {
-    return {
-        x: current.handleType === "source" ? node.position.x : node.position.x + node.width,
-        y: node.position.y + node.height / 2,
-    };
 }
 
 function normalizeConnection(firstNodeId: string, secondNodeId: string, nodes: CanvasNodeData[], firstHandleType: "source" | "target") {
