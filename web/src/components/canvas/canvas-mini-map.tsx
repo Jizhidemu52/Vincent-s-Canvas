@@ -1,6 +1,7 @@
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createMinimapNodeRects, type MinimapNodeRect } from "@/lib/canvas/canvas-minimap-layout";
+import { createRafLatestScheduler } from "@/lib/canvas/canvas-raf-scheduler";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -22,9 +23,21 @@ const MinimapNodeLayer = memo(function MinimapNodeLayer({ rects }: { rects: Mini
 export function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { nodes: CanvasNodeData[]; viewport: ViewportTransform; viewportSize: { width: number; height: number }; onViewportChange: (viewport: ViewportTransform) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const containerRef = useRef<HTMLDivElement>(null);
+    const onViewportChangeRef = useRef(onViewportChange);
+    const viewportSchedulerRef = useRef<ReturnType<typeof createRafLatestScheduler<ViewportTransform>> | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const width = 240;
     const height = 160;
+
+    useEffect(() => {
+        onViewportChangeRef.current = onViewportChange;
+    }, [onViewportChange]);
+
+    if (!viewportSchedulerRef.current) {
+        viewportSchedulerRef.current = createRafLatestScheduler(requestAnimationFrame, cancelAnimationFrame, (nextViewport) => onViewportChangeRef.current(nextViewport));
+    }
+
+    useEffect(() => () => viewportSchedulerRef.current?.cancel(), []);
 
     const { worldBounds, scale, offset } = useMemo(() => {
         if (!nodes.length) {
@@ -103,7 +116,7 @@ export function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { n
         if (!rect) return;
 
         const world = toWorld(event.clientX - rect.left, event.clientY - rect.top);
-        onViewportChange({
+        viewportSchedulerRef.current?.schedule({
             x: viewportSize.width / 2 - world.x * viewport.k,
             y: viewportSize.height / 2 - world.y * viewport.k,
             k: viewport.k,
@@ -124,8 +137,14 @@ export function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { n
                 onPointerMove={(event) => {
                     if (isDragging) updateViewportFromEvent(event);
                 }}
-                onPointerUp={() => setIsDragging(false)}
-                onPointerLeave={() => setIsDragging(false)}
+                onPointerUp={() => {
+                    viewportSchedulerRef.current?.flush();
+                    setIsDragging(false);
+                }}
+                onPointerLeave={() => {
+                    viewportSchedulerRef.current?.flush();
+                    setIsDragging(false);
+                }}
             >
                 <MinimapNodeLayer rects={nodeRects} />
                 <div className="pointer-events-none absolute border" style={{ left: viewportRect.x, top: viewportRect.y, width: viewportRect.w, height: viewportRect.h, borderColor: theme.canvas.selectionStroke, background: `${theme.canvas.selectionStroke}18` }} />
