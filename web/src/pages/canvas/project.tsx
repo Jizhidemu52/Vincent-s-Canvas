@@ -61,6 +61,7 @@ import { buildCanvasResourceReferences, buildNodeMentionReferencesByNodeId } fro
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createConnectionAdjacency } from "@/lib/canvas/canvas-connection-geometry";
+import { buildCanvasRelatedHighlight } from "@/lib/canvas/canvas-related-highlight";
 import { createDragPreview, createPreviewNodeResolver, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
 import { refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
@@ -974,22 +975,7 @@ function WirelessCanvasPage() {
         });
         return map;
     }, [nodeById, nodes]);
-    const relatedHighlight = useMemo(() => {
-        const nodeIds = new Set<string>();
-        const connectionIds = new Set<string>();
-
-        if (!activeNodeId) return { nodeIds, connectionIds };
-
-        nodeIds.add(activeNodeId);
-        connections.forEach((connection) => {
-            if (connection.fromNodeId !== activeNodeId && connection.toNodeId !== activeNodeId) return;
-            connectionIds.add(connection.id);
-            nodeIds.add(connection.fromNodeId);
-            nodeIds.add(connection.toNodeId);
-        });
-
-        return { nodeIds, connectionIds };
-    }, [activeNodeId, connections]);
+    const relatedHighlight = useMemo(() => buildCanvasRelatedHighlight(activeNodeId, connectionAdjacency, connectionById), [activeNodeId, connectionAdjacency, connectionById]);
     const activeCanvasConnectionIds = useMemo(() => {
         if (!selectedConnectionId) return relatedHighlight.connectionIds;
         return new Set([...relatedHighlight.connectionIds, selectedConnectionId]);
