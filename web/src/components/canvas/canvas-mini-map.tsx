@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createMinimapNodeRects, type MinimapNodeRect } from "@/lib/canvas/canvas-minimap-layout";
 import { createRafLatestScheduler } from "@/lib/canvas/canvas-raf-scheduler";
+import { minimapPropsEqual } from "@/lib/canvas/canvas-floating-surface-render-stability";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -20,7 +21,7 @@ const MinimapNodeLayer = memo(function MinimapNodeLayer({ rects }: { rects: Mini
     );
 });
 
-export function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { nodes: CanvasNodeData[]; viewport: ViewportTransform; viewportSize: { width: number; height: number }; onViewportChange: (viewport: ViewportTransform) => void }) {
+export const Minimap = memo(function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { nodes: CanvasNodeData[]; viewport: ViewportTransform; viewportSize: { width: number; height: number }; onViewportChange: (viewport: ViewportTransform) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const containerRef = useRef<HTMLDivElement>(null);
     const onViewportChangeRef = useRef(onViewportChange);
@@ -151,4 +152,4 @@ export function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { n
             </div>
         </div>
     );
-}
+}, minimapPropsEqual);

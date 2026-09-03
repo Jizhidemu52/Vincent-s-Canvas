@@ -72,6 +72,7 @@ import { refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visib
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
 import { canvasQuickGeneratePanelPropsEqual, type CanvasQuickGeneratePanelRenderState } from "@/lib/canvas/canvas-quick-generate-render-stability";
+import { canvasInspectorPanelPropsEqual } from "@/lib/canvas/canvas-floating-surface-render-stability";
 import { createCanvasConnectionSpatialIndex, selectCanvasSpatialIndexConnections } from "@/lib/canvas/canvas-connection-spatial-index";
 import { selectCanvasNodeIdsInBounds } from "@/lib/canvas/canvas-selection";
 import { boundsForViewport, createCanvasSpatialIndex, selectCanvasSpatialIndexNodes } from "@/lib/canvas/canvas-spatial-index";
@@ -4257,7 +4258,7 @@ function WirelessCanvasPage() {
     );
 }
 
-function CanvasInspectorPanel({
+const CanvasInspectorPanel = memo(function CanvasInspectorPanel({
     selectedNode,
     backgroundMode,
     showImageInfo,
@@ -4299,7 +4300,7 @@ function CanvasInspectorPanel({
             </div>
         </aside>
     );
-}
+}, canvasInspectorPanelPropsEqual);
 
 type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "embedded" | "config" | "references"> & {
     embedded?: boolean;
