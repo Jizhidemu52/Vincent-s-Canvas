@@ -10,6 +10,8 @@ export type CanvasBounds = {
 export type CanvasSpatialIndex = {
     cellSize: number;
     boundsByNodeId: Map<string, CanvasBounds>;
+    nodesById: Map<string, CanvasNodeData>;
+    nodeOrderById: Map<string, number>;
     cells: Map<string, Set<string>>;
 };
 
@@ -40,11 +42,15 @@ export function boundsForViewport(viewport: ViewportTransform, width: number, he
 export function createCanvasSpatialIndex(nodes: CanvasNodeData[], cellSize = DEFAULT_CELL_SIZE): CanvasSpatialIndex {
     const safeCellSize = Math.max(1, cellSize);
     const boundsByNodeId = new Map<string, CanvasBounds>();
+    const nodesById = new Map<string, CanvasNodeData>();
+    const nodeOrderById = new Map<string, number>();
     const cells = new Map<string, Set<string>>();
 
-    nodes.forEach((node) => {
+    nodes.forEach((node, order) => {
         const bounds = boundsForCanvasNode(node);
         boundsByNodeId.set(node.id, bounds);
+        nodesById.set(node.id, node);
+        nodeOrderById.set(node.id, order);
         forEachCell(bounds, safeCellSize, (key) => {
             const ids = cells.get(key) ?? new Set<string>();
             ids.add(node.id);
@@ -52,7 +58,7 @@ export function createCanvasSpatialIndex(nodes: CanvasNodeData[], cellSize = DEF
         });
     });
 
-    return { cellSize: safeCellSize, boundsByNodeId, cells };
+    return { cellSize: safeCellSize, boundsByNodeId, nodesById, nodeOrderById, cells };
 }
 
 export function queryCanvasSpatialIndex(index: CanvasSpatialIndex, bounds: CanvasBounds): string[] {
@@ -65,9 +71,15 @@ export function queryCanvasSpatialIndex(index: CanvasSpatialIndex, bounds: Canva
     return [...ids].filter((id) => intersects(index.boundsByNodeId.get(id), bounds));
 }
 
-export function selectIndexedCanvasNodes(nodes: CanvasNodeData[], index: CanvasSpatialIndex, bounds: CanvasBounds, shouldInclude: (node: CanvasNodeData) => boolean = () => true): CanvasNodeData[] {
-    const visibleIds = new Set(queryCanvasSpatialIndex(index, bounds));
-    return nodes.filter((node) => visibleIds.has(node.id) && shouldInclude(node));
+export function selectIndexedCanvasNodes(_nodes: CanvasNodeData[], index: CanvasSpatialIndex, bounds: CanvasBounds, shouldInclude: (node: CanvasNodeData) => boolean = () => true): CanvasNodeData[] {
+    return selectCanvasSpatialIndexNodes(index, bounds, shouldInclude);
+}
+
+export function selectCanvasSpatialIndexNodes(index: CanvasSpatialIndex, bounds: CanvasBounds, shouldInclude: (node: CanvasNodeData) => boolean = () => true): CanvasNodeData[] {
+    return queryCanvasSpatialIndex(index, bounds)
+        .map((id) => index.nodesById.get(id))
+        .filter((node): node is CanvasNodeData => Boolean(node && shouldInclude(node)))
+        .sort((first, second) => (index.nodeOrderById.get(first.id) || 0) - (index.nodeOrderById.get(second.id) || 0));
 }
 
 function forEachCell(bounds: CanvasBounds, cellSize: number, callback: (key: string) => void) {

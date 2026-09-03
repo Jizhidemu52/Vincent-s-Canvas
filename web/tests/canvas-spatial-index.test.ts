@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { boundsForViewport, createCanvasSpatialIndex, queryCanvasSpatialIndex, selectIndexedCanvasNodes } from "@/lib/canvas/canvas-spatial-index";
+import { boundsForViewport, createCanvasSpatialIndex, queryCanvasSpatialIndex, selectCanvasSpatialIndexNodes, selectIndexedCanvasNodes } from "@/lib/canvas/canvas-spatial-index";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const node = (id: string, x: number, y: number, width = 100, height = 100): CanvasNodeData => ({
@@ -34,5 +34,12 @@ describe("canvas spatial index", () => {
         const index = createCanvasSpatialIndex(nodes, 1024);
 
         expect(selectIndexedCanvasNodes(nodes, index, { minX: 0, minY: 0, maxX: 400, maxY: 400 }, (candidate) => candidate.id !== "hidden").map((candidate) => candidate.id)).toEqual(["visible"]);
+    });
+
+    test("returns visible candidates in document order directly from the index", () => {
+        const nodes = [node("later", 2100, 0), node("earlier", 0, 0), node("outside", 5000, 0)];
+        const index = createCanvasSpatialIndex(nodes, 1024);
+
+        expect(selectCanvasSpatialIndexNodes(index, { minX: -50, minY: -50, maxX: 2400, maxY: 200 }).map((candidate) => candidate.id)).toEqual(["later", "earlier"]);
     });
 });

@@ -66,7 +66,8 @@ import { refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visib
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
 import { connectionIntersectsCanvasBounds } from "@/lib/canvas/canvas-connection-visibility";
-import { boundsForViewport, createCanvasSpatialIndex, selectIndexedCanvasNodes } from "@/lib/canvas/canvas-spatial-index";
+import { selectCanvasNodeIdsInBounds } from "@/lib/canvas/canvas-selection";
+import { boundsForViewport, createCanvasSpatialIndex, selectCanvasSpatialIndexNodes } from "@/lib/canvas/canvas-spatial-index";
 import { canvasViewportOverscan } from "@/lib/canvas/canvas-viewport-overscan";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
@@ -310,6 +311,8 @@ function WirelessCanvasPage() {
     const historyPausedRef = useRef(false);
     const didInitialCenterRef = useRef(false);
     const rafRef = useRef<number | null>(null);
+    const selectionFrameRef = useRef<number | null>(null);
+    const selectionPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const renderQualityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const performanceTrackerRef = useRef(createCanvasPerformanceTracker());
@@ -856,7 +859,7 @@ function WirelessCanvasPage() {
         return boundsForViewport(viewport, width, height, padding);
     }, [size.height, size.width, viewport]);
 
-    const visibleNodes = useMemo(() => selectIndexedCanvasNodes(nodes, canvasSpatialIndex, visibleCanvasBounds, (node) => !isHiddenBatchChild(node, nodes, collapsingBatchIds)), [canvasSpatialIndex, collapsingBatchIds, nodes, visibleCanvasBounds]);
+    const visibleNodes = useMemo(() => selectCanvasSpatialIndexNodes(canvasSpatialIndex, visibleCanvasBounds, (node) => !isHiddenBatchChild(node, nodes, collapsingBatchIds)), [canvasSpatialIndex, collapsingBatchIds, nodes, visibleCanvasBounds]);
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
     const connectionById = useMemo(() => new Map(connections.map((connection) => [connection.id, connection])), [connections]);
@@ -889,6 +892,53 @@ function WirelessCanvasPage() {
             shouldInclude: (_connection, from, to) => !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes),
         });
     }, [baseVisibleConnectionIds, baseVisibleConnections, connectionById, draggedConnectionIds, nodes, resolveRenderNode, visibleCanvasBounds]);
+    const applySelectionPointer = useCallback(
+        (clientX: number, clientY: number) => {
+            const currentSelection = selectionBoxRef.current;
+            if (!currentSelection) return;
+
+            const world = screenToCanvas(clientX, clientY);
+            const bounds = {
+                minX: Math.min(currentSelection.startWorldX, world.x),
+                minY: Math.min(currentSelection.startWorldY, world.y),
+                maxX: Math.max(currentSelection.startWorldX, world.x),
+                maxY: Math.max(currentSelection.startWorldY, world.y),
+            };
+            const nextSelected = selectCanvasNodeIdsInBounds(
+                canvasSpatialIndex,
+                bounds,
+                new Set(currentSelection.additive ? currentSelection.initialSelectedNodeIds : []),
+                (node) => !isHiddenBatchChild(node, nodesRef.current),
+            );
+            const nextSelectionBox = { ...currentSelection, currentWorldX: world.x, currentWorldY: world.y };
+            selectionBoxRef.current = nextSelectionBox;
+            setSelectionBox(nextSelectionBox);
+            setSelectedNodeIds(nextSelected);
+        },
+        [canvasSpatialIndex, screenToCanvas],
+    );
+    const flushSelectionPointer = useCallback(() => {
+        if (selectionFrameRef.current !== null) {
+            cancelAnimationFrame(selectionFrameRef.current);
+            selectionFrameRef.current = null;
+        }
+        const pointer = selectionPointerRef.current;
+        selectionPointerRef.current = null;
+        if (pointer) applySelectionPointer(pointer.clientX, pointer.clientY);
+    }, [applySelectionPointer]);
+    const scheduleSelectionPointer = useCallback(
+        (clientX: number, clientY: number) => {
+            selectionPointerRef.current = { clientX, clientY };
+            if (selectionFrameRef.current !== null) return;
+            selectionFrameRef.current = requestAnimationFrame(() => {
+                selectionFrameRef.current = null;
+                const pointer = selectionPointerRef.current;
+                selectionPointerRef.current = null;
+                if (pointer) applySelectionPointer(pointer.clientX, pointer.clientY);
+            });
+        },
+        [applySelectionPointer],
+    );
     useEffect(() => {
         performanceCountsRef.current = { totalNodes: nodes.length, visibleNodes: visibleNodes.length, totalConnections: connections.length, visibleConnections: visibleConnections.length };
     }, [connections.length, nodes.length, visibleConnections.length, visibleNodes.length]);
@@ -1447,38 +1497,22 @@ function WirelessCanvasPage() {
             if (!currentSelection) return;
 
             if (event.buttons === 0) {
+                flushSelectionPointer();
                 selectionBoxRef.current = null;
                 setSelectionBox(null);
                 return;
             }
 
-            const world = screenToCanvas(event.clientX, event.clientY);
-            const rectX = Math.min(currentSelection.startWorldX, world.x);
-            const rectY = Math.min(currentSelection.startWorldY, world.y);
-            const rectW = Math.abs(world.x - currentSelection.startWorldX);
-            const rectH = Math.abs(world.y - currentSelection.startWorldY);
-            const nextSelected = new Set<string>(currentSelection.additive ? currentSelection.initialSelectedNodeIds : []);
-
-            nodesRef.current
-                .filter((node) => !isHiddenBatchChild(node, nodesRef.current))
-                .forEach((node) => {
-                    const intersects = rectX < node.position.x + node.width && rectX + rectW > node.position.x && rectY < node.position.y + node.height && rectY + rectH > node.position.y;
-
-                    if (intersects) nextSelected.add(node.id);
-                });
-
-            const nextSelectionBox = { ...currentSelection, currentWorldX: world.x, currentWorldY: world.y };
-            selectionBoxRef.current = nextSelectionBox;
-            setSelectionBox(nextSelectionBox);
-            setSelectedNodeIds(nextSelected);
+            scheduleSelectionPointer(event.clientX, event.clientY);
         },
-        [screenToCanvas],
+        [flushSelectionPointer, scheduleSelectionPointer],
     );
 
     const handleGlobalMouseUp = useCallback(
         (event: MouseEvent) => {
             finishNodeDrag(event.clientX, event.clientY);
 
+            flushSelectionPointer();
             selectionBoxRef.current = null;
             setSelectionBox(null);
 
@@ -1498,12 +1532,22 @@ function WirelessCanvasPage() {
                 }
             }
         },
-        [connectNodes, finishNodeDrag, getConnectionDropTarget, screenToCanvas, setConnecting],
+        [connectNodes, finishNodeDrag, flushSelectionPointer, getConnectionDropTarget, screenToCanvas, setConnecting],
     );
 
     useEffect(() => {
-        const handlePointerUp = (event: PointerEvent) => finishNodeDrag(event.clientX, event.clientY);
-        const cancelNodeDrag = () => finishNodeDrag();
+        const handlePointerUp = (event: PointerEvent) => {
+            finishNodeDrag(event.clientX, event.clientY);
+            flushSelectionPointer();
+            selectionBoxRef.current = null;
+            setSelectionBox(null);
+        };
+        const cancelNodeDrag = () => {
+            finishNodeDrag();
+            flushSelectionPointer();
+            selectionBoxRef.current = null;
+            setSelectionBox(null);
+        };
         window.addEventListener("mousemove", handleGlobalMouseMove);
         window.addEventListener("mouseup", handleGlobalMouseUp);
         window.addEventListener("pointerup", handlePointerUp);
@@ -1517,8 +1561,9 @@ function WirelessCanvasPage() {
             window.removeEventListener("pointercancel", cancelNodeDrag);
             window.removeEventListener("blur", cancelNodeDrag);
             window.removeEventListener("pointermove", handleGlobalPointerMove);
+            if (selectionFrameRef.current !== null) cancelAnimationFrame(selectionFrameRef.current);
         };
-    }, [finishNodeDrag, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
+    }, [finishNodeDrag, flushSelectionPointer, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
 
     const createImageFileNode = useCallback(async (file: File, position: Position) => {
         const image = await uploadImage(file);
