@@ -3694,6 +3694,53 @@ function WirelessCanvasPage() {
         handleAssetInsert(asset);
     };
 
+    const renderCanvasNodePanel = useCallback(
+        (panelNode: CanvasNodeData) =>
+            panelNode.type === CanvasNodeType.Config ? (
+                <CanvasConfigComposer
+                    value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
+                    inputs={configInputsById.get(panelNode.id) || []}
+                    onChange={(composerContent) => handleConfigNodeChange(panelNode.id, { composerContent })}
+                    onClose={() => setDialogNodeId(null)}
+                />
+            ) : (
+                <CanvasNodePromptPanel
+                    node={panelNode}
+                    isRunning={runningNodeId === panelNode.id}
+                    mentionReferences={mentionReferencesByNodeId.get(panelNode.id) || []}
+                    onPromptChange={handleNodePromptChange}
+                    onConfigChange={handleConfigNodeChange}
+                    onGenerate={handleGenerateNode}
+                    onStop={confirmStopGeneration}
+                    canvasNodes={nodes}
+                    canvasConnections={connections}
+                    onImageSettingsOpenChange={(open) => {
+                        setNodeImageSettingsOpen(open);
+                        if (open) setToolbarNodeId(null);
+                    }}
+                />
+            ),
+        [configInputsById, confirmStopGeneration, connections, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferencesByNodeId, nodes, runningNodeId],
+    );
+
+    const renderConfigNodeContent = useCallback(
+        (contentNode: CanvasNodeData) => (
+            <CanvasConfigNodePanel
+                node={contentNode}
+                isRunning={runningNodeId === contentNode.id}
+                inputSummary={getInputSummary(configInputsById.get(contentNode.id) || [])}
+                onConfigChange={handleConfigNodeChange}
+                onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
+                onStop={confirmStopGeneration}
+                onGenerate={(nodeId) => {
+                    const target = nodesRef.current.find((item) => item.id === nodeId);
+                    void handleGenerateNode(nodeId, target?.metadata?.generationMode || "image", target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
+                }}
+            />
+        ),
+        [configInputsById, confirmStopGeneration, handleConfigNodeChange, handleGenerateNode, runningNodeId],
+    );
+
     if (!projectLoaded) return <CanvasRefreshShell />;
 
     return (
@@ -3839,46 +3886,8 @@ function WirelessCanvasPage() {
                             showImageInfo={showImageInfo}
                             resourceLabel={resourceReferenceByNodeId.get(node.id)}
                             mentionReferences={mentionReferencesByNodeId.get(node.id) || []}
-                            renderPanel={(panelNode) =>
-                                panelNode.type === CanvasNodeType.Config ? (
-                                    <CanvasConfigComposer
-                                        value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
-                                        inputs={configInputsById.get(panelNode.id) || []}
-                                        onChange={(composerContent) => handleConfigNodeChange(panelNode.id, { composerContent })}
-                                        onClose={() => setDialogNodeId(null)}
-                                    />
-                                ) : (
-                                    <CanvasNodePromptPanel
-                                        node={panelNode}
-                                        isRunning={runningNodeId === panelNode.id}
-                                        mentionReferences={mentionReferencesByNodeId.get(panelNode.id) || []}
-                                        onPromptChange={handleNodePromptChange}
-                                        onConfigChange={handleConfigNodeChange}
-                                        onGenerate={handleGenerateNode}
-                                        onStop={confirmStopGeneration}
-                                        canvasNodes={nodes}
-                                        canvasConnections={connections}
-                                        onImageSettingsOpenChange={(open) => {
-                                            setNodeImageSettingsOpen(open);
-                                            if (open) setToolbarNodeId(null);
-                                        }}
-                                    />
-                                )
-                            }
-                            renderNodeContent={(contentNode) => (
-                                <CanvasConfigNodePanel
-                                    node={contentNode}
-                                    isRunning={runningNodeId === contentNode.id}
-                                    inputSummary={getInputSummary(configInputsById.get(contentNode.id) || [])}
-                                    onConfigChange={handleConfigNodeChange}
-                                    onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
-                                    onStop={confirmStopGeneration}
-                                    onGenerate={(nodeId) => {
-                                        const target = nodesRef.current.find((item) => item.id === nodeId);
-                                        void handleGenerateNode(nodeId, target?.metadata?.generationMode || "image", target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
-                                    }}
-                                />
-                            )}
+                            renderPanel={renderCanvasNodePanel}
+                            renderNodeContent={renderConfigNodeContent}
                             onMouseDown={handleNodeMouseDown}
                             onHoverStart={handleNodeHoverStart}
                             onHoverEnd={handleNodeHoverEnd}
