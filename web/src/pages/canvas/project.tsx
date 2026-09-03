@@ -68,7 +68,7 @@ import { createCanvasProjectSaveQueue, type CanvasProjectSaveQueue } from "@/lib
 import { buildCanvasRelatedHighlight } from "@/lib/canvas/canvas-related-highlight";
 import { createDragPreview, createLivePreviewNodeResolver, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
 import { createResizePreview, type CanvasResizePreview } from "@/lib/canvas/canvas-resize-preview";
-import { collectAffectedConnectionIds, refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
+import { collectAffectedConnectionIds, refreshVisibleConnectionsForDrag, sameCanvasIdSet } from "@/lib/canvas/canvas-drag-visible-connections";
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
 import { canvasQuickGeneratePanelPropsEqual, type CanvasQuickGeneratePanelRenderState } from "@/lib/canvas/canvas-quick-generate-render-stability";
@@ -348,6 +348,8 @@ function WirelessCanvasPage() {
     const dragPreviewRef = useRef<CanvasDragPreview>(new Map());
     const draggedConnectionIdsRef = useRef<ReadonlySet<string>>(new Set());
     const resizePreviewRef = useRef<CanvasResizePreview>(new Map());
+    const resizeConnectionIdsRef = useRef<ReadonlySet<string>>(new Set());
+    const nodeResizingRef = useRef(false);
     const resizePreviewRafRef = useRef<number | null>(null);
 
     const config = useConfigStore((state) => state.config);
@@ -437,6 +439,8 @@ function WirelessCanvasPage() {
     const [dragPreviewById, setDragPreviewById] = useState<CanvasDragPreview>(() => new Map());
     const [draggedConnectionIds, setDraggedConnectionIds] = useState<ReadonlySet<string>>(() => new Set());
     const [resizePreviewById, setResizePreviewById] = useState<CanvasResizePreview>(() => new Map());
+    const [resizeConnectionIds, setResizeConnectionIds] = useState<ReadonlySet<string>>(() => new Set());
+    const [isNodeResizing, setIsNodeResizing] = useState(false);
     const [renderQuality, setRenderQuality] = useState<CanvasRenderQuality>("full");
     const [performanceMetrics, setPerformanceMetrics] = useState<CanvasInteractionMetrics | null>(null);
 
@@ -896,10 +900,6 @@ function WirelessCanvasPage() {
         [batchRootsById, connectionSpatialIndex, nodeById, visibleCanvasBounds],
     );
     const baseVisibleConnectionIds = useMemo(() => new Set(baseVisibleConnections.map((connection) => connection.id)), [baseVisibleConnections]);
-    const resizeConnectionIds = useMemo(
-        () => collectAffectedConnectionIds(new Set(resizePreviewById.keys()), connectionAdjacency),
-        [connectionAdjacency, resizePreviewById],
-    );
     const affectedConnectionIds = useMemo(() => {
         const ids = new Set(draggedConnectionIds);
         resizeConnectionIds.forEach((id) => ids.add(id));
@@ -1762,15 +1762,35 @@ function WirelessCanvasPage() {
         [screenToCanvas, setConnecting],
     );
 
+    const applyLiveResizePreview = useCallback(
+        (preview: CanvasResizePreview) => {
+            resizePreviewRef.current = preview;
+            const nextResizeConnectionIds = collectAffectedConnectionIds(new Set(preview.keys()), connectionAdjacency);
+            if (!sameCanvasIdSet(resizeConnectionIdsRef.current, nextResizeConnectionIds)) {
+                resizeConnectionIdsRef.current = nextResizeConnectionIds;
+                setResizeConnectionIds(nextResizeConnectionIds);
+            }
+            if (!nodeResizingRef.current) {
+                nodeResizingRef.current = true;
+                setIsNodeResizing(true);
+            }
+
+            const allAffectedConnectionIds = new Set(draggedConnectionIdsRef.current);
+            nextResizeConnectionIds.forEach((id) => allAffectedConnectionIds.add(id));
+            canvasConnectionLayerRef.current?.refresh(viewportRef.current, allAffectedConnectionIds);
+            if (canvasConnectionFallback) setResizePreviewById(preview);
+        },
+        [canvasConnectionFallback, connectionAdjacency],
+    );
+
     const handleNodeResize = useCallback((nodeId: string, width: number, height: number, position?: Position) => {
         const preview = createResizePreview(nodeId, { position: position || nodesRef.current.find((node) => node.id === nodeId)?.position || { x: 0, y: 0 }, width, height });
         if (resizePreviewRafRef.current) cancelAnimationFrame(resizePreviewRafRef.current);
         resizePreviewRafRef.current = requestAnimationFrame(() => {
             resizePreviewRafRef.current = null;
-            resizePreviewRef.current = preview;
-            setResizePreviewById(preview);
+            applyLiveResizePreview(preview);
         });
-    }, []);
+    }, [applyLiveResizePreview]);
 
     const finishNodeResize = useCallback((nodeId: string, width: number, height: number, position: Position) => {
         if (resizePreviewRafRef.current) {
@@ -1780,6 +1800,10 @@ function WirelessCanvasPage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, width, height, position } : node)));
         resizePreviewRef.current = new Map();
         setResizePreviewById(resizePreviewRef.current);
+        resizeConnectionIdsRef.current = new Set();
+        setResizeConnectionIds(resizeConnectionIdsRef.current);
+        nodeResizingRef.current = false;
+        setIsNodeResizing(false);
     }, []);
 
     useEffect(() => () => {
@@ -3904,7 +3928,7 @@ function WirelessCanvasPage() {
                                 viewport={viewport}
                                 activeConnectionIds={activeCanvasConnectionIds}
                                 affectedConnectionIds={affectedConnectionIds}
-                                isDraggingNodes={isNodeDragging || resizePreviewById.size > 0}
+                                isDraggingNodes={isNodeDragging || isNodeResizing}
                                 onDrawFailure={enableCanvasConnectionFallback}
                             />
                         )

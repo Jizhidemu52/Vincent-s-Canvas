@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { collectAffectedConnectionIds, refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
+import { collectAffectedConnectionIds, refreshVisibleConnectionsForDrag, sameCanvasIdSet } from "@/lib/canvas/canvas-drag-visible-connections";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
 const node = (id: string, x: number): CanvasNodeData => ({ id, type: CanvasNodeType.Text, title: id, position: { x, y: 100 }, width: 100, height: 80 });
@@ -16,6 +16,12 @@ test("collects every connection adjacent to previewed nodes", () => {
     );
 
     expect(result).toEqual(new Set(["resized-link", "shared-link", "dragged-link"]));
+});
+
+test("recognizes unchanged preview link sets so a resize does not schedule duplicate page updates", () => {
+    expect(sameCanvasIdSet(new Set(["left", "right"]), new Set(["right", "left"]))).toBe(true);
+    expect(sameCanvasIdSet(new Set(["left"]), new Set(["right"]))).toBe(false);
+    expect(sameCanvasIdSet(new Set(["left"]), new Set(["left", "right"]))).toBe(false);
 });
 
 test("refreshes only dragged-node connections while retaining unrelated visible links", () => {

@@ -22,6 +22,10 @@ export function collectAffectedConnectionIds(nodeIds: ReadonlySet<string>, conne
     return ids;
 }
 
+export function sameCanvasIdSet(previous: ReadonlySet<string>, next: ReadonlySet<string>) {
+    return previous.size === next.size && Array.from(previous).every((id) => next.has(id));
+}
+
 export function refreshVisibleConnectionsForDrag({ baseVisibleConnections, baseVisibleConnectionIds, affectedConnectionIds, connectionById, resolveNode, bounds, shouldInclude = () => true }: RefreshVisibleConnectionsForDragOptions): CanvasConnection[] {
     const isVisible = (connection: CanvasConnection) => {
         const from = resolveNode(connection.fromNodeId);
