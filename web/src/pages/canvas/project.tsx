@@ -73,6 +73,7 @@ import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/
 import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
 import { canvasQuickGeneratePanelPropsEqual, type CanvasQuickGeneratePanelRenderState } from "@/lib/canvas/canvas-quick-generate-render-stability";
 import { canvasInspectorPanelPropsEqual } from "@/lib/canvas/canvas-floating-surface-render-stability";
+import { canvasTopBarPropsEqual, type CanvasTopBarRenderState } from "@/lib/canvas/canvas-top-bar-render-stability";
 import { createCanvasConnectionSpatialIndex, selectCanvasSpatialIndexConnections } from "@/lib/canvas/canvas-connection-spatial-index";
 import { selectCanvasNodeIdsInBounds } from "@/lib/canvas/canvas-selection";
 import { boundsForViewport, createCanvasSpatialIndex, selectCanvasSpatialIndexNodes } from "@/lib/canvas/canvas-spatial-index";
@@ -3682,7 +3683,7 @@ function WirelessCanvasPage() {
     );
 
     const assistantOpen = assistantMounted && !assistantCollapsed;
-    const openAgent = (mode: CanvasAgentMode = agentMode) => {
+    const openAgent = useCallback((mode: CanvasAgentMode = agentMode) => {
         if (agentCloseTimerRef.current) {
             clearTimeout(agentCloseTimerRef.current);
             agentCloseTimerRef.current = null;
@@ -3691,8 +3692,8 @@ function WirelessCanvasPage() {
         setAssistantMounted(true);
         setAssistantClosing(false);
         setAssistantCollapsed(false);
-    };
-    const closeAgent = () => {
+    }, [agentMode]);
+    const closeAgent = useCallback(() => {
         if (!assistantMounted || assistantClosing) return;
         setAssistantCollapsed(true);
         setAssistantClosing(true);
@@ -3701,21 +3702,21 @@ function WirelessCanvasPage() {
             setAssistantMounted(false);
             setAssistantClosing(false);
         }, CANVAS_AGENT_PANEL_MOTION_MS);
-    };
+    }, [assistantClosing, assistantMounted]);
 
-    const exportCurrentCanvas = () => {
+    const exportCurrentCanvas = useCallback(() => {
         if (!currentProject) return;
         void exportCanvasProjects([currentProject], currentProject.title || "无线画布");
-    };
+    }, [currentProject]);
 
-    const shareCurrentCanvas = async () => {
+    const shareCurrentCanvas = useCallback(async () => {
         try {
             await navigator.clipboard.writeText(window.location.href);
             message.success("画布链接已复制");
         } catch {
             message.warning("无法复制链接，请从地址栏复制");
         }
-    };
+    }, [message]);
 
     const insertSidebarAsset = (asset: CanvasSidebarAsset) => {
         handleAssetInsert(asset);
@@ -3784,6 +3785,15 @@ function WirelessCanvasPage() {
     const removeQuickGenerateReference = useCallback((id: string) => setQuickGenerateReferences((current) => current.filter((reference) => reference.id !== id)), []);
     const clearQuickGenerateReferences = useCallback(() => setQuickGenerateReferences([]), []);
     const generateQuickFromPanel = useCallback(() => void runQuickCanvasGeneration(), [runQuickCanvasGeneration]);
+    const cancelTitleEditing = useCallback(() => setTitleEditing(false), []);
+    const goHomeFromTopBar = useCallback(() => navigate("/"), [navigate]);
+    const goProjectsFromTopBar = useCallback(() => navigate("/canvas"), [navigate]);
+    const shareFromTopBar = useCallback(() => void shareCurrentCanvas(), [shareCurrentCanvas]);
+    const compactAgentStatus = useMemo(
+        () => (codexCompactAgent ? { connected: localAgentConnected, enabled: localAgentEnabled, activity: localAgentActivity } : undefined),
+        [codexCompactAgent, localAgentConnected, localAgentEnabled, localAgentActivity],
+    );
+    const toggleAgentFromTopBar = useCallback(() => (assistantOpen ? closeAgent() : openAgent()), [assistantOpen, closeAgent, openAgent]);
 
     if (!projectLoaded) return <CanvasRefreshShell />;
 
@@ -3834,21 +3844,21 @@ function WirelessCanvasPage() {
                     onTitleDraftChange={setTitleDraft}
                     onStartTitleEditing={startTitleEditing}
                     onFinishTitleEditing={finishTitleEditing}
-                    onCancelTitleEditing={() => setTitleEditing(false)}
+                    onCancelTitleEditing={cancelTitleEditing}
                     canUndo={historyState.canUndo}
                     canRedo={historyState.canRedo}
-                    onHome={() => navigate("/")}
-                    onProjects={() => navigate("/canvas")}
+                    onHome={goHomeFromTopBar}
+                    onProjects={goProjectsFromTopBar}
                     onCreateProject={createAndOpenProject}
                     onDeleteProject={deleteCurrentProject}
-                    onImportImage={() => handleUploadRequest()}
+                    onImportImage={uploadFromToolbar}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
                     onExport={exportCurrentCanvas}
-                    onShare={() => void shareCurrentCanvas()}
+                    onShare={shareFromTopBar}
                     agentOpen={assistantOpen}
-                    compactAgentStatus={codexCompactAgent ? { connected: localAgentConnected, enabled: localAgentEnabled, activity: localAgentActivity } : undefined}
-                    onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
+                    compactAgentStatus={compactAgentStatus}
+                    onToggleAgent={toggleAgentFromTopBar}
                 />
 
                 <WirelessCanvas
@@ -4464,7 +4474,7 @@ const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     );
 }, (previous, next) => canvasQuickGeneratePanelPropsEqual({ ...previous, embedded: Boolean(previous.embedded) }, { ...next, embedded: Boolean(next.embedded) }));
 
-function CanvasTopBar({
+const CanvasTopBar = memo(function CanvasTopBar({
     title,
     titleDraft,
     isTitleEditing,
@@ -4486,29 +4496,7 @@ function CanvasTopBar({
     agentOpen,
     compactAgentStatus,
     onToggleAgent,
-}: {
-    title: string;
-    titleDraft: string;
-    isTitleEditing: boolean;
-    onTitleDraftChange: (value: string) => void;
-    onStartTitleEditing: () => void;
-    onFinishTitleEditing: () => void;
-    onCancelTitleEditing: () => void;
-    canUndo: boolean;
-    canRedo: boolean;
-    onHome: () => void;
-    onProjects: () => void;
-    onCreateProject: () => void;
-    onDeleteProject: () => void;
-    onImportImage: () => void;
-    onUndo: () => void;
-    onRedo: () => void;
-    onExport: () => void;
-    onShare: () => void;
-    agentOpen: boolean;
-    compactAgentStatus?: { connected: boolean; enabled: boolean; activity: string };
-    onToggleAgent: () => void;
-}) {
+}: CanvasTopBarRenderState) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
     const titleRef = useRef<HTMLDivElement>(null);
@@ -4616,7 +4604,7 @@ function CanvasTopBar({
             </Modal>
         </>
     );
-}
+}, canvasTopBarPropsEqual);
 
 function MenuLabel({ text, shortcut }: { text: string; shortcut: string }) {
     return (
