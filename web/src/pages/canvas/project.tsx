@@ -60,6 +60,7 @@ import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workfl
 import { buildCanvasResourceReferences, buildNodeMentionReferencesByNodeId, mergeCanvasResourceReferences } from "@/lib/canvas/canvas-resource-references";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
+import { createCanvasBatchMotionById } from "@/lib/canvas/canvas-batch-motion";
 import { createCanvasBatchRootIndex, isCanvasBatchChildHidden, isCanvasBatchConnectionEndpointHidden } from "@/lib/canvas/canvas-batch-visibility";
 import { createConnectionAdjacency } from "@/lib/canvas/canvas-connection-geometry";
 import { findCanvasConnectionDropTarget, type CanvasConnectionDropTarget } from "@/lib/canvas/canvas-connection-drop-target";
@@ -971,19 +972,7 @@ function WirelessCanvasPage() {
         });
         return map;
     }, [nodes]);
-    const batchMotionById = useMemo(() => {
-        const map = new Map<string, { x: number; y: number; index: number }>();
-        nodes.forEach((node) => {
-            const rootId = node.metadata?.batchRootId;
-            if (!rootId) return;
-            const root = nodeById.get(rootId);
-            const index = root?.metadata?.batchChildIds?.indexOf(node.id) ?? 0;
-            const stackX = root ? root.position.x + 34 + index * 14 : node.position.x;
-            const stackY = root ? root.position.y + 14 + index * 8 : node.position.y;
-            map.set(node.id, { x: stackX - node.position.x, y: stackY - node.position.y, index: Math.max(index, 0) });
-        });
-        return map;
-    }, [nodeById, nodes]);
+    const batchMotionById = useMemo(() => createCanvasBatchMotionById(nodes, nodeById), [nodeById, nodes]);
     const relatedHighlight = useMemo(() => buildCanvasRelatedHighlight(activeNodeId, connectionAdjacency, connectionById), [activeNodeId, connectionAdjacency, connectionById]);
     const activeCanvasConnectionIds = useMemo(() => {
         if (!selectedConnectionId) return relatedHighlight.connectionIds;
