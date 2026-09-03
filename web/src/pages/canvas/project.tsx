@@ -67,6 +67,7 @@ import { createConnectionAdjacency } from "@/lib/canvas/canvas-connection-geomet
 import { findCanvasConnectionDropTarget, type CanvasConnectionDropTarget } from "@/lib/canvas/canvas-connection-drop-target";
 import { createCanvasProjectSaveQueue, type CanvasProjectSaveQueue } from "@/lib/canvas/canvas-project-save-queue";
 import { buildCanvasRelatedHighlight } from "@/lib/canvas/canvas-related-highlight";
+import { beginCanvasHover, commitCanvasHover, endCanvasHover, type CanvasHoverState } from "@/lib/canvas/canvas-hover-stability";
 import { createDragPreview, createLivePreviewNodeResolver, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
 import { createResizePreview, type CanvasResizePreview } from "@/lib/canvas/canvas-resize-preview";
 import { collectAffectedConnectionIds, refreshVisibleConnectionsForDrag, sameCanvasIdSet } from "@/lib/canvas/canvas-drag-visible-connections";
@@ -328,6 +329,8 @@ function WirelessCanvasPage() {
     const pendingSelectionIdsRef = useRef<Set<string> | null>(null);
     const selectionOverlayRef = useRef<CanvasSelectionOverlayHandle>(null);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const canvasHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const canvasHoverStateRef = useRef<CanvasHoverState>({ activeId: null, pendingId: null });
     const renderQualityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const performanceTrackerRef = useRef(createCanvasPerformanceTracker());
     const performanceFrameRef = useRef<number | null>(null);
@@ -811,6 +814,53 @@ function WirelessCanvasPage() {
             toolbarHideTimerRef.current = null;
         }, 120);
     }, []);
+
+    const commitSettledCanvasHover = useCallback(() => {
+        canvasHoverTimerRef.current = null;
+        const next = commitCanvasHover(canvasHoverStateRef.current);
+        canvasHoverStateRef.current = next;
+        setHoveredNodeId((current) => (current === next.activeId ? current : next.activeId));
+        if (next.activeId) keepNodeToolbar(next.activeId);
+    }, [keepNodeToolbar]);
+
+    const scheduleSettledCanvasHover = useCallback(
+        (nodeId: string) => {
+            const next = beginCanvasHover(canvasHoverStateRef.current, nodeId);
+            canvasHoverStateRef.current = next;
+            if (canvasHoverTimerRef.current) clearTimeout(canvasHoverTimerRef.current);
+            if (next.activeId === nodeId) {
+                keepNodeToolbar(nodeId);
+                return;
+            }
+            canvasHoverTimerRef.current = setTimeout(commitSettledCanvasHover, 72);
+        },
+        [commitSettledCanvasHover, keepNodeToolbar],
+    );
+
+    const clearSettledCanvasHover = useCallback(
+        (nodeId: string) => {
+            const previous = canvasHoverStateRef.current;
+            const next = endCanvasHover(previous, nodeId);
+            canvasHoverStateRef.current = next;
+            if (previous.pendingId === nodeId && canvasHoverTimerRef.current) {
+                clearTimeout(canvasHoverTimerRef.current);
+                canvasHoverTimerRef.current = null;
+            }
+            if (previous.activeId !== next.activeId) {
+                setHoveredNodeId((current) => (current === next.activeId ? current : next.activeId));
+            }
+            if (!next.activeId) hideNodeToolbar();
+        },
+        [hideNodeToolbar],
+    );
+
+    useEffect(
+        () => () => {
+            if (toolbarHideTimerRef.current) clearTimeout(toolbarHideTimerRef.current);
+            if (canvasHoverTimerRef.current) clearTimeout(canvasHoverTimerRef.current);
+        },
+        [],
+    );
 
     const connectNodes = useCallback(
         (current: ConnectionHandle, targetNodeId: string) => {
@@ -3686,18 +3736,16 @@ function WirelessCanvasPage() {
     const handleNodeHoverStart = useCallback(
         (nodeId: string) => {
             if (nodeDraggingRef.current) return;
-            setHoveredNodeId(nodeId);
-            keepNodeToolbar(nodeId);
+            scheduleSettledCanvasHover(nodeId);
         },
-        [keepNodeToolbar],
+        [scheduleSettledCanvasHover],
     );
 
     const handleNodeHoverEnd = useCallback(
         (nodeId: string) => {
-            setHoveredNodeId((current) => (current === nodeId ? null : current));
-            hideNodeToolbar();
+            clearSettledCanvasHover(nodeId);
         },
-        [hideNodeToolbar],
+        [clearSettledCanvasHover],
     );
 
     const handleNodeViewImage = useCallback((node: CanvasNodeData) => setPreviewNodeId(node.id), []);
