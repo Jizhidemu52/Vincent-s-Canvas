@@ -27,10 +27,50 @@ test("refreshes only dragged-node connections while retaining unrelated visible 
     expect(
         refreshVisibleConnectionsForDrag({
             baseVisibleConnections: [stable, exits],
+            baseVisibleConnectionIds: new Set([stable.id, exits.id]),
             affectedConnectionIds: new Set([exits.id, enters.id]),
             connectionById,
             resolveNode: (nodeId) => nodeById.get(nodeId),
             bounds,
         }),
     ).toEqual([stable, enters]);
+});
+
+test("reuses the base list when dragged connections remain in the same visibility state", () => {
+    const stable: CanvasConnection = { id: "stable", fromNodeId: "a", toNodeId: "b" };
+    const baseVisibleConnections = [stable];
+    const nodeById = new Map([
+        ["a", node("a", 0)],
+        ["b", node("b", 400)],
+    ]);
+
+    expect(
+        refreshVisibleConnectionsForDrag({
+            baseVisibleConnections,
+            baseVisibleConnectionIds: new Set([stable.id]),
+            affectedConnectionIds: new Set([stable.id]),
+            connectionById: new Map([[stable.id, stable]]),
+            resolveNode: (nodeId) => nodeById.get(nodeId),
+            bounds,
+        }),
+    ).toBe(baseVisibleConnections);
+});
+
+test("removes a deleted affected connection from the prior visible list", () => {
+    const deleted: CanvasConnection = { id: "deleted", fromNodeId: "a", toNodeId: "b" };
+    const nodeById = new Map([
+        ["a", node("a", 0)],
+        ["b", node("b", 400)],
+    ]);
+
+    expect(
+        refreshVisibleConnectionsForDrag({
+            baseVisibleConnections: [deleted],
+            baseVisibleConnectionIds: new Set([deleted.id]),
+            affectedConnectionIds: new Set([deleted.id]),
+            connectionById: new Map(),
+            resolveNode: (nodeId) => nodeById.get(nodeId),
+            bounds,
+        }),
+    ).toEqual([]);
 });

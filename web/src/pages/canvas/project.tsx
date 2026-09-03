@@ -871,6 +871,7 @@ function WirelessCanvasPage() {
             }),
         [connections, nodeById, nodes, visibleCanvasBounds],
     );
+    const baseVisibleConnectionIds = useMemo(() => new Set(baseVisibleConnections.map((connection) => connection.id)), [baseVisibleConnections]);
     const draggedConnectionIds = useMemo(() => {
         const ids = new Set<string>();
         dragPreviewById.forEach((_position, nodeId) => connectionAdjacency.get(nodeId)?.forEach((connectionId) => ids.add(connectionId)));
@@ -880,13 +881,14 @@ function WirelessCanvasPage() {
         if (!draggedConnectionIds.size) return baseVisibleConnections;
         return refreshVisibleConnectionsForDrag({
             baseVisibleConnections,
+            baseVisibleConnectionIds,
             affectedConnectionIds: draggedConnectionIds,
             connectionById,
             resolveNode: resolveRenderNode,
             bounds: visibleCanvasBounds,
             shouldInclude: (_connection, from, to) => !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes),
         });
-    }, [baseVisibleConnections, connectionById, draggedConnectionIds, nodes, resolveRenderNode, visibleCanvasBounds]);
+    }, [baseVisibleConnectionIds, baseVisibleConnections, connectionById, draggedConnectionIds, nodes, resolveRenderNode, visibleCanvasBounds]);
     useEffect(() => {
         performanceCountsRef.current = { totalNodes: nodes.length, visibleNodes: visibleNodes.length, totalConnections: connections.length, visibleConnections: visibleConnections.length };
     }, [connections.length, nodes.length, visibleConnections.length, visibleNodes.length]);
