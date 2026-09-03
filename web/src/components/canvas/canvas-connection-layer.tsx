@@ -2,6 +2,7 @@ import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, u
 
 import { createConnectionGeometryCache, type CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
 import { createCanvasConnectionDrawCache, drawCanvasConnectionBatches, filterCanvasConnectionDrawBatches, type CanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
+import { canvasConnectionCanvasSize, type CanvasConnectionCanvasSize } from "@/lib/canvas/canvas-connection-canvas-size";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -28,6 +29,8 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const staticCanvasRef = useRef<HTMLCanvasElement>(null);
     const dynamicCanvasRef = useRef<HTMLCanvasElement>(null);
+    const canvasSizeRef = useRef<CanvasConnectionCanvasSize | null>(null);
+    const latestViewportRef = useRef(viewport);
     const geometryCacheRef = useRef(createConnectionGeometryCache());
     const resolveGeometryRef = useRef<(connection: CanvasConnection) => CanvasConnectionGeometry | undefined>(() => undefined);
     const drawCacheRef = useRef(createCanvasConnectionDrawCache((connection) => resolveGeometryRef.current(connection)));
@@ -41,6 +44,7 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     });
     const wasDraggingNodesRef = useRef(false);
     const failedRef = useRef(false);
+    latestViewportRef.current = viewport;
     resolveGeometryRef.current = (connection) => {
         const from = resolveNode(connection.fromNodeId);
         const to = resolveNode(connection.toNodeId);
@@ -49,26 +53,36 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     const refreshAllGeometry = !isDraggingNodes && wasDraggingNodesRef.current;
     batchesRef.current = drawCacheRef.current.sync(connections, activeConnectionIds, affectedConnectionIds, refreshAllGeometry);
 
+    const syncCanvasSize = useCallback((cssWidth: number, cssHeight: number) => {
+        const next = canvasConnectionCanvasSize(cssWidth, cssHeight, window.devicePixelRatio || 1);
+        const previous = canvasSizeRef.current;
+        if ((previous === null && next === null) || (previous !== null && next !== null && previous.cssWidth === next.cssWidth && previous.cssHeight === next.cssHeight && previous.pixelRatio === next.pixelRatio)) return;
+        canvasSizeRef.current = next;
+    }, []);
+
     const drawBatches = useCallback(
         (canvas: HTMLCanvasElement | null, nextViewport: ViewportTransform, batches: CanvasConnectionDrawBatches) => {
-            const host = canvas?.parentElement;
-            if (!canvas || !host) return false;
+            if (!canvas) return false;
+            let size = canvasSizeRef.current;
+            if (!size) {
+                const host = canvas.parentElement;
+                if (!host) return false;
+                const rect = host.getBoundingClientRect();
+                syncCanvasSize(rect.width, rect.height);
+                size = canvasSizeRef.current;
+                if (!size) return true;
+            }
 
-            const rect = host.getBoundingClientRect();
-            if (rect.width <= 0 || rect.height <= 0) return true;
-            const pixelRatio = window.devicePixelRatio || 1;
-            const width = Math.round(rect.width * pixelRatio);
-            const height = Math.round(rect.height * pixelRatio);
-            if (canvas.width !== width || canvas.height !== height) {
-                canvas.width = width;
-                canvas.height = height;
+            if (canvas.width !== size.width || canvas.height !== size.height) {
+                canvas.width = size.width;
+                canvas.height = size.height;
             }
 
             try {
                 const context = canvas.getContext("2d");
                 if (!context) throw new Error("Canvas 2D context is unavailable");
-                context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-                context.clearRect(0, 0, rect.width, rect.height);
+                context.setTransform(size.pixelRatio, 0, 0, size.pixelRatio, 0, 0);
+                context.clearRect(0, 0, size.cssWidth, size.cssHeight);
                 context.translate(nextViewport.x, nextViewport.y);
                 context.scale(nextViewport.k, nextViewport.k);
                 return drawCanvasConnectionBatches(context, batches, { stroke: theme.node.muted, activeStroke: theme.node.activeStroke });
@@ -76,7 +90,7 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
                 return false;
             }
         },
-        [theme.node.activeStroke, theme.node.muted],
+        [syncCanvasSize, theme.node.activeStroke, theme.node.muted],
     );
 
     const splitBatches = useCallback((connectionIds: ReadonlySet<string>) => {
@@ -136,10 +150,6 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     useImperativeHandle(ref, () => ({ draw, refresh }), [draw, refresh]);
 
     useLayoutEffect(() => {
-        draw(viewport);
-    }, [draw, viewport]);
-
-    useLayoutEffect(() => {
         wasDraggingNodesRef.current = isDraggingNodes;
     }, [isDraggingNodes]);
 
@@ -147,9 +157,20 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
         const canvas = staticCanvasRef.current;
         const host = canvas?.parentElement;
         if (!host) return;
-        const observer = new ResizeObserver(() => draw(viewport));
+        const initialRect = host.getBoundingClientRect();
+        syncCanvasSize(initialRect.width, initialRect.height);
+        const observer = new ResizeObserver((entries) => {
+            const rect = entries[0]?.contentRect;
+            if (!rect) return;
+            syncCanvasSize(rect.width, rect.height);
+            draw(latestViewportRef.current);
+        });
         observer.observe(host);
         return () => observer.disconnect();
+    }, [draw, syncCanvasSize]);
+
+    useLayoutEffect(() => {
+        draw(viewport);
     }, [draw, viewport]);
 
     return (
