@@ -35,7 +35,7 @@ import { CanvasNodeCropDialog, type CanvasImageCropRect } from "@/components/can
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "@/components/canvas/canvas-node-mask-edit-dialog";
 import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "@/components/canvas/canvas-node-split-dialog";
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
-import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
+import { buildConfigGenerationInputsByNodeId, buildNodeGenerationContext, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "@/components/canvas/canvas-node-hover-toolbar";
 import { CanvasPerformancePanel } from "@/components/canvas/canvas-performance-panel";
 import { CanvasConnectionLayer, type CanvasConnectionLayerHandle } from "@/components/canvas/canvas-connection-layer";
@@ -981,14 +981,7 @@ function WirelessCanvasPage() {
         return new Set([...relatedHighlight.connectionIds, selectedConnectionId]);
     }, [relatedHighlight.connectionIds, selectedConnectionId]);
 
-    const configInputsById = useMemo(() => {
-        const map = new Map<string, NodeGenerationInput[]>();
-        nodes.forEach((node) => {
-            if (node.type !== CanvasNodeType.Config) return;
-            map.set(node.id, buildNodeGenerationInputs(node.id, nodes, connections));
-        });
-        return map;
-    }, [connections, nodes]);
+    const configInputsById = useMemo(() => buildConfigGenerationInputsByNodeId(nodes, connections), [connections, nodes]);
     const resourceContextNodeId = dialogNodeId || activeNodeId;
     const canvasResourceReferences = useMemo(() => buildCanvasResourceReferences(nodes, connections, resourceContextNodeId), [connections, nodes, resourceContextNodeId]);
     const resourceReferenceByNodeId = useMemo(() => new Map(canvasResourceReferences.map((reference) => [reference.nodeId, reference])), [canvasResourceReferences]);

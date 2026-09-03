@@ -114,17 +114,28 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
 }
 
 export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): NodeGenerationInput[] {
-    return getGenerationResourceNodes(nodeId, nodes, connections).flatMap((node): NodeGenerationInput[] => {
-        const image = readReferenceImage(node);
-        if (image) return [{ nodeId: node.id, type: "image" as const, title: node.title, image }];
-        const video = readReferenceVideo(node);
-        if (video) return [{ nodeId: node.id, type: "video" as const, title: node.title, video }];
-        const audio = readReferenceAudio(node);
-        if (audio) return [{ nodeId: node.id, type: "audio" as const, title: node.title, audio }];
-        const text = readNodeTextInput(node);
-        if (text) return [{ nodeId: node.id, type: "text" as const, title: node.title, text }];
-        return [];
+    return getGenerationResourceNodes(nodeId, nodes, connections).flatMap((node) => {
+        const input = generationInputForNode(node);
+        return input ? [input] : [];
     });
+}
+
+export function buildConfigGenerationInputsByNodeId(nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const inputsByConfigId = new Map<string, NodeGenerationInput[]>();
+    nodes.forEach((node) => {
+        if (node.type === CanvasNodeType.Config) inputsByConfigId.set(node.id, []);
+    });
+
+    connections.forEach((connection) => {
+        if (!inputsByConfigId.has(connection.toNodeId)) return;
+        const source = nodeById.get(connection.fromNodeId);
+        if (!source) return;
+        const input = generationInputForNode(source);
+        if (input) inputsByConfigId.get(connection.toNodeId)?.push(input);
+    });
+
+    return inputsByConfigId;
 }
 
 export function buildNodeResponseMessages(context: NodeGenerationContext): AiTextMessage[] {
@@ -148,6 +159,17 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
 function readNodeTextInput(node: CanvasNodeData) {
     if (node.type === CanvasNodeType.Text) return node.metadata?.content || node.metadata?.prompt || "";
     return node.metadata?.prompt || "";
+}
+
+function generationInputForNode(node: CanvasNodeData): NodeGenerationInput | null {
+    const image = readReferenceImage(node);
+    if (image) return { nodeId: node.id, type: "image", title: node.title, image };
+    const video = readReferenceVideo(node);
+    if (video) return { nodeId: node.id, type: "video", title: node.title, video };
+    const audio = readReferenceAudio(node);
+    if (audio) return { nodeId: node.id, type: "audio", title: node.title, audio };
+    const text = readNodeTextInput(node);
+    return text ? { nodeId: node.id, type: "text", title: node.title, text } : null;
 }
 
 function generationLabel(type: NodeGenerationInput["type"], index: number) {
