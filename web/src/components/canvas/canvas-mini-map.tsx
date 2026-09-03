@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createMinimapNodeRects, type MinimapNodeRect } from "@/lib/canvas/canvas-minimap-layout";
+import { minimapViewportAtWorldPoint } from "@/lib/canvas/canvas-minimap-preview";
 import { createRafLatestScheduler } from "@/lib/canvas/canvas-raf-scheduler";
 import { minimapPropsEqual } from "@/lib/canvas/canvas-floating-surface-render-stability";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -21,21 +22,46 @@ const MinimapNodeLayer = memo(function MinimapNodeLayer({ rects }: { rects: Mini
     );
 });
 
-export const Minimap = memo(function Minimap({ nodes, viewport, viewportSize, onViewportChange }: { nodes: CanvasNodeData[]; viewport: ViewportTransform; viewportSize: { width: number; height: number }; onViewportChange: (viewport: ViewportTransform) => void }) {
+export const Minimap = memo(function Minimap({
+    nodes,
+    viewport,
+    viewportSize,
+    onViewportPreview,
+    onViewportChange,
+}: {
+    nodes: CanvasNodeData[];
+    viewport: ViewportTransform;
+    viewportSize: { width: number; height: number };
+    onViewportPreview: (viewport: ViewportTransform) => void;
+    onViewportChange: (viewport: ViewportTransform) => void;
+}) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const containerRef = useRef<HTMLDivElement>(null);
+    const onViewportPreviewRef = useRef(onViewportPreview);
     const onViewportChangeRef = useRef(onViewportChange);
     const viewportSchedulerRef = useRef<ReturnType<typeof createRafLatestScheduler<ViewportTransform>> | null>(null);
-    const [isDragging, setIsDragging] = useState(false);
+    const liveViewportRef = useRef(viewport);
+    const isDraggingRef = useRef(false);
+    const [previewViewport, setPreviewViewport] = useState(viewport);
     const width = 240;
     const height = 160;
 
     useEffect(() => {
+        onViewportPreviewRef.current = onViewportPreview;
         onViewportChangeRef.current = onViewportChange;
-    }, [onViewportChange]);
+    }, [onViewportChange, onViewportPreview]);
+
+    useEffect(() => {
+        liveViewportRef.current = viewport;
+        setPreviewViewport(viewport);
+    }, [viewport]);
 
     if (!viewportSchedulerRef.current) {
-        viewportSchedulerRef.current = createRafLatestScheduler(requestAnimationFrame, cancelAnimationFrame, (nextViewport) => onViewportChangeRef.current(nextViewport));
+        viewportSchedulerRef.current = createRafLatestScheduler(requestAnimationFrame, cancelAnimationFrame, (nextViewport) => {
+            liveViewportRef.current = nextViewport;
+            setPreviewViewport(nextViewport);
+            onViewportPreviewRef.current(nextViewport);
+        });
     }
 
     useEffect(() => () => viewportSchedulerRef.current?.cancel(), []);
@@ -96,10 +122,10 @@ export const Minimap = memo(function Minimap({ nodes, viewport, viewportSize, on
     );
 
     const viewportRect = useMemo(() => {
-        const vx = -viewport.x / viewport.k;
-        const vy = -viewport.y / viewport.k;
-        const vw = viewportSize.width / viewport.k;
-        const vh = viewportSize.height / viewport.k;
+        const vx = -previewViewport.x / previewViewport.k;
+        const vy = -previewViewport.y / previewViewport.k;
+        const vw = viewportSize.width / previewViewport.k;
+        const vh = viewportSize.height / previewViewport.k;
         const p1 = toMinimap(vx, vy);
         const p2 = toMinimap(vx + vw, vy + vh);
 
@@ -109,7 +135,7 @@ export const Minimap = memo(function Minimap({ nodes, viewport, viewportSize, on
             w: Math.max(p2.x - p1.x, 4),
             h: Math.max(p2.y - p1.y, 4),
         };
-    }, [toMinimap, viewport.k, viewport.x, viewport.y, viewportSize.height, viewportSize.width]);
+    }, [previewViewport.k, previewViewport.x, previewViewport.y, toMinimap, viewportSize.height, viewportSize.width]);
     const nodeRects = useMemo(() => createMinimapNodeRects(nodes, scale, offset, theme.node.muted), [nodes, offset, scale, theme.node.muted]);
 
     const updateViewportFromEvent = (event: React.PointerEvent) => {
@@ -117,11 +143,14 @@ export const Minimap = memo(function Minimap({ nodes, viewport, viewportSize, on
         if (!rect) return;
 
         const world = toWorld(event.clientX - rect.left, event.clientY - rect.top);
-        viewportSchedulerRef.current?.schedule({
-            x: viewportSize.width / 2 - world.x * viewport.k,
-            y: viewportSize.height / 2 - world.y * viewport.k,
-            k: viewport.k,
-        });
+        viewportSchedulerRef.current?.schedule(minimapViewportAtWorldPoint(world, viewportSize, liveViewportRef.current.k));
+    };
+
+    const commitPreviewViewport = () => {
+        if (!isDraggingRef.current) return;
+        viewportSchedulerRef.current?.flush();
+        isDraggingRef.current = false;
+        onViewportChangeRef.current(liveViewportRef.current);
     };
 
     return (
@@ -132,20 +161,14 @@ export const Minimap = memo(function Minimap({ nodes, viewport, viewportSize, on
                 onPointerDown={(event) => {
                     event.preventDefault();
                     event.currentTarget.setPointerCapture(event.pointerId);
-                    setIsDragging(true);
+                    isDraggingRef.current = true;
                     updateViewportFromEvent(event);
                 }}
                 onPointerMove={(event) => {
-                    if (isDragging) updateViewportFromEvent(event);
+                    if (isDraggingRef.current) updateViewportFromEvent(event);
                 }}
-                onPointerUp={() => {
-                    viewportSchedulerRef.current?.flush();
-                    setIsDragging(false);
-                }}
-                onPointerLeave={() => {
-                    viewportSchedulerRef.current?.flush();
-                    setIsDragging(false);
-                }}
+                onPointerUp={commitPreviewViewport}
+                onPointerLeave={commitPreviewViewport}
             >
                 <MinimapNodeLayer rects={nodeRects} />
                 <div className="pointer-events-none absolute border" style={{ left: viewportRect.x, top: viewportRect.y, width: viewportRect.w, height: viewportRect.h, borderColor: theme.canvas.selectionStroke, background: `${theme.canvas.selectionStroke}18` }} />

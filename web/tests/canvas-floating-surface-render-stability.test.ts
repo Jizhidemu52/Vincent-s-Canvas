@@ -7,9 +7,10 @@ const node = { id: "node-1" };
 const nodes = [node];
 const viewport = { x: 20, y: 30, k: 1 };
 const viewportSize = { width: 1440, height: 900 };
+type MinimapPreviewRenderState = MinimapRenderState & { onViewportPreview: (viewport: { x: number; y: number; k: number }) => void };
 
-function minimapState(overrides: Partial<MinimapRenderState> = {}): MinimapRenderState {
-    return { nodes, viewport, viewportSize, onViewportChange: noop, ...overrides };
+function minimapState(overrides: Partial<MinimapPreviewRenderState> = {}): MinimapPreviewRenderState {
+    return { nodes, viewport, viewportSize, onViewportPreview: noop, onViewportChange: noop, ...overrides };
 }
 
 function inspectorState(overrides: Partial<CanvasInspectorPanelRenderState> = {}): CanvasInspectorPanelRenderState {
@@ -23,6 +24,10 @@ describe("canvas floating surface render stability", () => {
 
     test("refreshes the minimap when its viewport changes", () => {
         expect(minimapPropsEqual(minimapState(), minimapState({ viewport: { x: 21, y: 30, k: 1 } }))).toBe(false);
+    });
+
+    test("refreshes the minimap when its live preview callback changes", () => {
+        expect(minimapPropsEqual(minimapState(), minimapState({ onViewportPreview: () => undefined }))).toBe(false);
     });
 
     test("keeps the inspector stable while a separate node is previewed", () => {

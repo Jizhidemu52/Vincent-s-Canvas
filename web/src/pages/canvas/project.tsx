@@ -40,7 +40,7 @@ import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "@/components/canvas
 import { CanvasPerformancePanel } from "@/components/canvas/canvas-performance-panel";
 import { CanvasConnectionLayer, type CanvasConnectionLayerHandle } from "@/components/canvas/canvas-connection-layer";
 import { CanvasSelectionOverlay, type CanvasSelectionOverlayHandle } from "@/components/canvas/canvas-selection-overlay";
-import { WirelessCanvas } from "@/components/canvas/wireless-canvas";
+import { WirelessCanvas, type WirelessCanvasHandle } from "@/components/canvas/wireless-canvas";
 import { Minimap } from "@/components/canvas/canvas-mini-map";
 import { CanvasNode } from "@/components/canvas/canvas-node";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
@@ -341,6 +341,7 @@ function WirelessCanvasPage() {
     const performanceActiveRef = useRef(false);
     const performanceCountsRef = useRef<CanvasVisibilityCounts>({ totalNodes: 0, visibleNodes: 0, totalConnections: 0, visibleConnections: 0 });
     const canvasConnectionLayerRef = useRef<CanvasConnectionLayerHandle>(null);
+    const wirelessCanvasRef = useRef<WirelessCanvasHandle>(null);
     const nodeDraggingRef = useRef(false);
     const dragRef = useRef<{
         isDraggingNode: boolean;
@@ -731,6 +732,10 @@ function WirelessCanvasPage() {
     const previewViewport = useCallback((next: ViewportTransform) => {
         viewportRef.current = next;
         canvasConnectionLayerRef.current?.draw(next);
+    }, []);
+
+    const previewMinimapViewport = useCallback((next: ViewportTransform) => {
+        wirelessCanvasRef.current?.previewViewport(next);
     }, []);
 
     const enableCanvasConnectionFallback = useCallback(() => setCanvasConnectionFallback(true), []);
@@ -4058,6 +4063,7 @@ function WirelessCanvasPage() {
                 />
 
                 <WirelessCanvas
+                    ref={wirelessCanvasRef}
                     containerRef={containerRef}
                     viewport={viewport}
                     backgroundMode={backgroundMode}
@@ -4243,7 +4249,7 @@ function WirelessCanvasPage() {
                     onGenerate={generateQuickFromPanel}
                 />
 
-                {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportChange={setViewport} /> : null}
+                {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportPreview={previewMinimapViewport} onViewportChange={commitViewport} /> : null}
 
                 <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)} />
 

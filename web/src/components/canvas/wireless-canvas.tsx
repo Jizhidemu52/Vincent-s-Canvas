@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
@@ -21,7 +21,14 @@ type WirelessCanvasProps = {
     children: React.ReactNode;
 };
 
-export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onViewportPreview, onInteractionChange, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, underlay, children }: WirelessCanvasProps) {
+export type WirelessCanvasHandle = {
+    previewViewport: (viewport: ViewportTransform) => void;
+};
+
+export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasProps>(function WirelessCanvas(
+    { containerRef, viewport, backgroundMode = "lines", onViewportChange, onViewportPreview, onInteractionChange, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, underlay, children },
+    ref,
+) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const panState = useRef({
         isPanning: false,
@@ -111,6 +118,20 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
         applyLiveViewport(next);
         onViewportChange(next);
     }, [applyLiveViewport, onViewportChange]);
+
+    const previewViewport = useCallback(
+        (next: ViewportTransform) => {
+            if (frameRef.current) {
+                cancelAnimationFrame(frameRef.current);
+                frameRef.current = null;
+            }
+            pendingViewportRef.current = null;
+            applyLiveViewport(next);
+        },
+        [applyLiveViewport],
+    );
+
+    useImperativeHandle(ref, () => ({ previewViewport }), [previewViewport]);
 
     const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
@@ -242,7 +263,7 @@ export function WirelessCanvas({ containerRef, viewport, backgroundMode = "lines
             </div>
         </div>
     );
-}
+});
 
 function CanvasGrid({ gridRef, viewport, mode }: { gridRef: React.RefObject<HTMLDivElement | null>; viewport: ViewportTransform; mode: CanvasBackgroundMode }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
