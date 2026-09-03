@@ -25,7 +25,7 @@ import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { App, Button, Dropdown, Input, Modal, Progress } from "antd";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
-import { ActiveConnectionPath, ConnectionPath } from "@/components/canvas/canvas-connections";
+import { ActiveConnectionPath, type ActiveConnectionPathHandle, ConnectionPath } from "@/components/canvas/canvas-connections";
 import { CanvasConfigComposer } from "@/components/canvas/canvas-config-composer";
 import { CanvasConfigNodePanel } from "@/components/canvas/canvas-config-node-panel";
 import { CANVAS_AGENT_PANEL_MOTION_MS, CanvasAssistantPanel, type CanvasMediaWorkflowAction } from "@/components/canvas/canvas-assistant-panel";
@@ -328,6 +328,9 @@ function WirelessCanvasPage() {
     const selectionPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
     const pendingSelectionIdsRef = useRef<Set<string> | null>(null);
     const selectionOverlayRef = useRef<CanvasSelectionOverlayHandle>(null);
+    const connectionPreviewFrameRef = useRef<number | null>(null);
+    const connectionPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
+    const activeConnectionPathRef = useRef<ActiveConnectionPathHandle>(null);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const canvasHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const canvasHoverStateRef = useRef<CanvasHoverState>({ activeId: null, pendingId: null });
@@ -393,7 +396,6 @@ function WirelessCanvasPage() {
     const [connectingParams, setConnectingParams] = useState<ConnectionHandle | null>(null);
     const [connectionTargetNodeId, setConnectionTargetNodeId] = useState<string | null>(null);
     const [pendingConnectionCreate, setPendingConnectionCreate] = useState<PendingConnectionCreate | null>(null);
-    const [mouseWorld, setMouseWorld] = useState<Position>({ x: 0, y: 0 });
     const [isSelecting, setIsSelecting] = useState(false);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
@@ -790,6 +792,7 @@ function WirelessCanvasPage() {
         connectingParamsRef.current = next;
         setConnectingParams(next);
         if (!next) {
+            activeConnectionPathRef.current?.clear();
             connectionTargetNodeIdRef.current = null;
             setConnectionTargetNodeId(null);
         }
@@ -967,6 +970,54 @@ function WirelessCanvasPage() {
             shouldInclude: (_connection, from, to) => !isCanvasBatchConnectionEndpointHidden(from, batchRootsById) && !isCanvasBatchConnectionEndpointHidden(to, batchRootsById),
         });
     }, [affectedConnectionIds, baseVisibleConnectionIds, baseVisibleConnections, batchRootsById, connectionById, resolveRenderNode, visibleCanvasBounds]);
+
+    const applyConnectionPointer = useCallback(
+        (clientX: number, clientY: number) => {
+            const current = connectingParamsRef.current;
+            if (!current || pendingConnectionCreateRef.current) return;
+
+            const dropTarget = getConnectionDropTarget(clientX, clientY, current);
+            if (connectionTargetNodeIdRef.current !== dropTarget.nodeId) {
+                connectionTargetNodeIdRef.current = dropTarget.nodeId;
+                setConnectionTargetNodeId(dropTarget.nodeId);
+            }
+            const mouseWorld = screenToCanvas(clientX, clientY);
+            activeConnectionPathRef.current?.draw(resolveRenderNode(current.nodeId), current, mouseWorld, dropTarget.nodeId ? resolveRenderNode(dropTarget.nodeId) : undefined);
+        },
+        [getConnectionDropTarget, resolveRenderNode, screenToCanvas],
+    );
+
+    const scheduleConnectionPointer = useCallback(
+        (clientX: number, clientY: number) => {
+            connectionPointerRef.current = { clientX, clientY };
+            if (connectionPreviewFrameRef.current) return;
+            connectionPreviewFrameRef.current = requestAnimationFrame(() => {
+                connectionPreviewFrameRef.current = null;
+                const pointer = connectionPointerRef.current;
+                connectionPointerRef.current = null;
+                if (pointer) applyConnectionPointer(pointer.clientX, pointer.clientY);
+            });
+        },
+        [applyConnectionPointer],
+    );
+
+    const flushConnectionPointer = useCallback(() => {
+        if (connectionPreviewFrameRef.current) {
+            cancelAnimationFrame(connectionPreviewFrameRef.current);
+            connectionPreviewFrameRef.current = null;
+        }
+        const pointer = connectionPointerRef.current;
+        connectionPointerRef.current = null;
+        if (pointer) applyConnectionPointer(pointer.clientX, pointer.clientY);
+    }, [applyConnectionPointer]);
+
+    useEffect(
+        () => () => {
+            if (connectionPreviewFrameRef.current) cancelAnimationFrame(connectionPreviewFrameRef.current);
+        },
+        [],
+    );
+
     const commitSelectedNodeIds = useCallback((nextSelected: Set<string>) => {
         if (sameCanvasIdSet(selectedNodeIdsRef.current, nextSelected)) return;
         selectedNodeIdsRef.current = nextSelected;
@@ -1585,13 +1636,10 @@ function WirelessCanvasPage() {
             }
 
             if (connectingParamsRef.current && !pendingConnectionCreateRef.current) {
-                const dropTarget = getConnectionDropTarget(event.clientX, event.clientY, connectingParamsRef.current);
-                connectionTargetNodeIdRef.current = dropTarget.nodeId;
-                setConnectionTargetNodeId(dropTarget.nodeId);
-                setMouseWorld(screenToCanvas(event.clientX, event.clientY));
+                scheduleConnectionPointer(event.clientX, event.clientY);
             }
         },
-        [applyLiveDragPreview, canvasConnectionFallback, finishNodeDrag, getConnectionDropTarget, screenToCanvas],
+        [applyLiveDragPreview, canvasConnectionFallback, finishNodeDrag, scheduleConnectionPointer],
     );
 
     const handleGlobalPointerMove = useCallback(
@@ -1615,6 +1663,7 @@ function WirelessCanvasPage() {
     const handleGlobalMouseUp = useCallback(
         (event: MouseEvent) => {
             finishNodeDrag(event.clientX, event.clientY);
+            flushConnectionPointer();
 
             flushSelectionPointer();
             selectionBoxRef.current = null;
@@ -1632,12 +1681,13 @@ function WirelessCanvasPage() {
                 } else if (dropTarget.isNearNode) {
                     setConnecting(null);
                 } else {
-                    setMouseWorld(screenToCanvas(event.clientX, event.clientY));
-                    setPendingConnectionCreate({ connection: currentConnection, position: screenToCanvas(event.clientX, event.clientY) });
+                    const position = screenToCanvas(event.clientX, event.clientY);
+                    activeConnectionPathRef.current?.clear();
+                    setPendingConnectionCreate({ connection: currentConnection, position });
                 }
             }
         },
-        [connectNodes, finishNodeDrag, flushSelectionPointer, getConnectionDropTarget, screenToCanvas, setConnecting],
+        [connectNodes, finishNodeDrag, flushConnectionPointer, flushSelectionPointer, getConnectionDropTarget, screenToCanvas, setConnecting],
     );
 
     useEffect(() => {
@@ -1852,13 +1902,15 @@ function WirelessCanvasPage() {
     const handleConnectStart = useCallback(
         (event: ReactMouseEvent, nodeId: string, handleType: "source" | "target") => {
             event.stopPropagation();
-            setMouseWorld(screenToCanvas(event.clientX, event.clientY));
-            setConnecting({ nodeId, handleType });
+            const connection = { nodeId, handleType } as ConnectionHandle;
+            const mouseWorld = screenToCanvas(event.clientX, event.clientY);
+            setConnecting(connection);
             connectionTargetNodeIdRef.current = null;
             setConnectionTargetNodeId(null);
             setSelectedConnectionId(null);
+            activeConnectionPathRef.current?.draw(resolveRenderNode(nodeId), connection, mouseWorld);
         },
-        [screenToCanvas, setConnecting],
+        [resolveRenderNode, screenToCanvas, setConnecting],
     );
 
     const applyLiveResizePreview = useCallback(
@@ -4058,7 +4110,7 @@ function WirelessCanvasPage() {
                                     />
                                 );
                             })}
-                        {connectingParams ? <ActiveConnectionPath node={resolveRenderNode(connectingParams.nodeId)} handle={connectingParams} mouseWorld={mouseWorld} target={connectionTargetNodeId ? resolveRenderNode(connectionTargetNodeId) : undefined} /> : null}
+                        <ActiveConnectionPath ref={activeConnectionPathRef} />
                     </svg>
 
                     {visibleNodes.map((node) => (

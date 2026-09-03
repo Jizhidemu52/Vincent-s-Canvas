@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { forwardRef, useImperativeHandle, useRef } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -61,10 +61,7 @@ export const ConnectionPath = React.memo(function ConnectionPath({
     );
 }, (previous, next) => canvasConnectionRenderStateEqual(previous, next));
 
-export function ActiveConnectionPath({ node, handle, mouseWorld, target }: { node?: CanvasNodeData; handle: ConnectionHandle; mouseWorld: Position; target?: CanvasNodeData }) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    if (!node) return null;
-
+export function canvasActiveConnectionPathD(node: CanvasNodeData, handle: ConnectionHandle, mouseWorld: Position, target?: CanvasNodeData) {
     const startX = handle.handleType === "source" ? node.position.x + node.width : mouseWorld.x;
     const startY = handle.handleType === "source" ? node.position.y + node.height / 2 : mouseWorld.y;
     const endX = handle.handleType === "source" ? mouseWorld.x : node.position.x;
@@ -74,7 +71,33 @@ export function ActiveConnectionPath({ node, handle, mouseWorld, target }: { nod
     const snappedEndX = handle.handleType === "source" && target ? target.position.x : endX;
     const snappedEndY = handle.handleType === "source" && target ? target.position.y + target.height / 2 : endY;
     const distance = Math.abs(snappedEndX - snappedStartX);
-    const pathD = `M ${snappedStartX} ${snappedStartY} C ${snappedStartX + distance * 0.5} ${snappedStartY}, ${snappedEndX - distance * 0.5} ${snappedEndY}, ${snappedEndX} ${snappedEndY}`;
-
-    return <path d={pathD} stroke={theme.node.activeStroke} strokeWidth="2" fill="none" strokeDasharray="5,5" />;
+    return `M ${snappedStartX} ${snappedStartY} C ${snappedStartX + distance * 0.5} ${snappedStartY}, ${snappedEndX - distance * 0.5} ${snappedEndY}, ${snappedEndX} ${snappedEndY}`;
 }
+
+export type ActiveConnectionPathHandle = {
+    draw: (node: CanvasNodeData | undefined, handle: ConnectionHandle, mouseWorld: Position, target?: CanvasNodeData) => void;
+    clear: () => void;
+};
+
+export const ActiveConnectionPath = forwardRef<ActiveConnectionPathHandle>(function ActiveConnectionPath(_props, ref) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const pathRef = useRef<SVGPathElement>(null);
+
+    useImperativeHandle(
+        ref,
+        () => ({
+            draw: (node, handle, mouseWorld, target) => {
+                const path = pathRef.current;
+                if (!path || !node) return;
+                path.setAttribute("d", canvasActiveConnectionPathD(node, handle, mouseWorld, target));
+                path.style.display = "";
+            },
+            clear: () => {
+                if (pathRef.current) pathRef.current.style.display = "none";
+            },
+        }),
+        [],
+    );
+
+    return <path ref={pathRef} stroke={theme.node.activeStroke} strokeWidth="2" fill="none" strokeDasharray="5,5" style={{ display: "none", pointerEvents: "none" }} />;
+});
