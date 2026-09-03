@@ -1,4 +1,5 @@
 import type { CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
+import type { CanvasConnection } from "@/types/canvas";
 
 export type CanvasConnectionDrawItem = {
     geometry: CanvasConnectionGeometry;
@@ -23,6 +24,67 @@ export function createCanvasConnectionDrawBatches(items: CanvasConnectionDrawIte
         },
         { regular: [], active: [] },
     );
+}
+
+/**
+ * Keeps stable draw batches during a drag. A viewport may contain hundreds of
+ * links while only the links attached to the moved node need fresh geometry.
+ */
+export function createCanvasConnectionDrawCache(resolveGeometry: (connection: CanvasConnection) => CanvasConnectionGeometry | undefined) {
+    let previousConnections: CanvasConnection[] | undefined;
+    let items: CanvasConnectionDrawItem[] = [];
+    let itemById = new Map<string, CanvasConnectionDrawItem>();
+    let connectionById = new Map<string, CanvasConnection>();
+    let batches: CanvasConnectionDrawBatches = { regular: [], active: [] };
+    let activeIds = new Set<string>();
+
+    const rebuild = (connections: CanvasConnection[], nextActiveIds: ReadonlySet<string>) => {
+        items = [];
+        itemById = new Map<string, CanvasConnectionDrawItem>();
+        connectionById = new Map(connections.map((connection) => [connection.id, connection]));
+        connections.forEach((connection) => {
+            const geometry = resolveGeometry(connection);
+            if (!geometry) return;
+            const item = { geometry, active: nextActiveIds.has(connection.id) };
+            items.push(item);
+            itemById.set(connection.id, item);
+        });
+        activeIds = new Set(nextActiveIds);
+        batches = createCanvasConnectionDrawBatches(items);
+    };
+
+    return {
+        sync(connections: CanvasConnection[], nextActiveIds: ReadonlySet<string>, affectedConnectionIds: ReadonlySet<string>, refreshAll: boolean): CanvasConnectionDrawBatches {
+            if (previousConnections !== connections) {
+                previousConnections = connections;
+                rebuild(connections, nextActiveIds);
+                return batches;
+            }
+
+            const activeChanged = !sameConnectionIds(activeIds, nextActiveIds);
+            const idsToRefresh = refreshAll ? connections.map((connection) => connection.id) : affectedConnectionIds;
+            for (const id of idsToRefresh) {
+                const connection = connectionById.get(id);
+                const item = itemById.get(id);
+                if (!connection || !item) continue;
+                const geometry = resolveGeometry(connection);
+                if (geometry) item.geometry = geometry;
+            }
+
+            if (activeChanged) {
+                itemById.forEach((item, id) => {
+                    item.active = nextActiveIds.has(id);
+                });
+                activeIds = new Set(nextActiveIds);
+                batches = createCanvasConnectionDrawBatches(items);
+            }
+            return batches;
+        },
+    };
+}
+
+function sameConnectionIds(previous: ReadonlySet<string>, next: ReadonlySet<string>) {
+    return previous.size === next.size && Array.from(previous).every((id) => next.has(id));
 }
 
 export function drawCanvasConnectionBatches(context: CanvasRenderingContext2D, batches: CanvasConnectionDrawBatches, palette: CanvasConnectionPalette): boolean {

@@ -3756,6 +3756,8 @@ function WirelessCanvasPage() {
                                 resolveNode={resolveRenderNode}
                                 viewport={viewport}
                                 activeConnectionIds={activeCanvasConnectionIds}
+                                affectedConnectionIds={draggedConnectionIds}
+                                isDraggingNodes={dragPreviewById.size > 0}
                                 onDrawFailure={enableCanvasConnectionFallback}
                             />
                         )

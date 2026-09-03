@@ -1,7 +1,7 @@
 import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "react";
 
-import { createConnectionGeometryCache } from "@/lib/canvas/canvas-connection-geometry";
-import { createCanvasConnectionDrawBatches, drawCanvasConnectionBatches } from "@/lib/canvas/canvas-connection-layer";
+import { createConnectionGeometryCache, type CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
+import { createCanvasConnectionDrawCache, drawCanvasConnectionBatches } from "@/lib/canvas/canvas-connection-layer";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -15,28 +15,32 @@ type CanvasConnectionLayerProps = {
     resolveNode: (nodeId: string) => CanvasNodeData | undefined;
     viewport: ViewportTransform;
     activeConnectionIds: Set<string>;
+    affectedConnectionIds: ReadonlySet<string>;
+    isDraggingNodes: boolean;
     onDrawFailure: () => void;
 };
 
 export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, CanvasConnectionLayerProps>(function CanvasConnectionLayer(
-    { connections, resolveNode, viewport, activeConnectionIds, onDrawFailure },
+    { connections, resolveNode, viewport, activeConnectionIds, affectedConnectionIds, isDraggingNodes, onDrawFailure },
     ref,
 ) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const geometryCacheRef = useRef(createConnectionGeometryCache());
+    const resolveGeometryRef = useRef<(connection: CanvasConnection) => CanvasConnectionGeometry | undefined>(() => undefined);
+    const drawCacheRef = useRef(createCanvasConnectionDrawCache((connection) => resolveGeometryRef.current(connection)));
+    const wasDraggingNodesRef = useRef(false);
     const failedRef = useRef(false);
-    const items = useMemo(
-        () =>
-            connections.flatMap((connection) => {
-                const from = resolveNode(connection.fromNodeId);
-                const to = resolveNode(connection.toNodeId);
-                if (!from || !to) return [];
-                return [{ geometry: geometryCacheRef.current.get(connection, from, to), active: activeConnectionIds.has(connection.id) }];
-            }),
-        [activeConnectionIds, connections, resolveNode],
+    resolveGeometryRef.current = (connection) => {
+        const from = resolveNode(connection.fromNodeId);
+        const to = resolveNode(connection.toNodeId);
+        return from && to ? geometryCacheRef.current.get(connection, from, to) : undefined;
+    };
+    const refreshAllGeometry = !isDraggingNodes && wasDraggingNodesRef.current;
+    const batches = useMemo(
+        () => drawCacheRef.current.sync(connections, activeConnectionIds, affectedConnectionIds, refreshAllGeometry),
+        [activeConnectionIds, affectedConnectionIds, connections, refreshAllGeometry, resolveNode],
     );
-    const batches = useMemo(() => createCanvasConnectionDrawBatches(items), [items]);
 
     const draw = useCallback(
         (nextViewport: ViewportTransform) => {
@@ -79,6 +83,10 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     useLayoutEffect(() => {
         draw(viewport);
     }, [draw, viewport]);
+
+    useLayoutEffect(() => {
+        wasDraggingNodesRef.current = isDraggingNodes;
+    }, [isDraggingNodes]);
 
     useLayoutEffect(() => {
         const canvas = canvasRef.current;

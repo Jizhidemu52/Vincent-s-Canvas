@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createCanvasConnectionDrawBatches, drawCanvasConnections } from "@/lib/canvas/canvas-connection-layer";
+import { createCanvasConnectionDrawBatches, createCanvasConnectionDrawCache, drawCanvasConnections } from "@/lib/canvas/canvas-connection-layer";
 import type { CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
 
 const geometry: CanvasConnectionGeometry = {
@@ -88,4 +88,38 @@ test("precomputes normal and active batches before a viewport redraw", () => {
 
     expect(batches.regular).toEqual([regular, regular]);
     expect(batches.active).toEqual([active]);
+});
+
+test("refreshes only affected connection geometry while a drag is active", () => {
+    const connections = [
+        { id: "a", fromNodeId: "one", toNodeId: "two" },
+        { id: "b", fromNodeId: "three", toNodeId: "four" },
+    ];
+    const resolved: string[] = [];
+    const cache = createCanvasConnectionDrawCache((connection) => {
+        resolved.push(connection.id);
+        return { ...geometry, d: `${geometry.d} ${connection.id}` };
+    });
+
+    const initial = cache.sync(connections, new Set(), new Set(), true);
+    resolved.length = 0;
+    const updated = cache.sync(connections, new Set(), new Set(["a"]), false);
+
+    expect(resolved).toEqual(["a"]);
+    expect(updated).toBe(initial);
+    expect(updated.regular.map((item) => item.geometry.d)).toEqual([`${geometry.d} a`, `${geometry.d} b`]);
+});
+
+test("keeps the correct connection active when an unresolved connection is skipped", () => {
+    const connections = [
+        { id: "missing", fromNodeId: "one", toNodeId: "two" },
+        { id: "visible", fromNodeId: "three", toNodeId: "four" },
+    ];
+    const cache = createCanvasConnectionDrawCache((connection) => (connection.id === "missing" ? undefined : geometry));
+
+    cache.sync(connections, new Set(), new Set(), true);
+    const updated = cache.sync(connections, new Set(["visible"]), new Set(), false);
+
+    expect(updated.regular).toEqual([]);
+    expect(updated.active.map((item) => item.geometry)).toEqual([geometry]);
 });
