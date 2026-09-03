@@ -65,7 +65,7 @@ import { createDragPreview, createPreviewNodeResolver, type CanvasDragPreview } 
 import { refreshVisibleConnectionsForDrag } from "@/lib/canvas/canvas-drag-visible-connections";
 import { nextCanvasRenderQuality, type CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { createCanvasPerformanceTracker, type CanvasInteractionMetrics, type CanvasVisibilityCounts } from "@/lib/canvas/canvas-performance-metrics";
-import { connectionIntersectsCanvasBounds } from "@/lib/canvas/canvas-connection-visibility";
+import { createCanvasConnectionSpatialIndex, selectCanvasSpatialIndexConnections } from "@/lib/canvas/canvas-connection-spatial-index";
 import { selectCanvasNodeIdsInBounds } from "@/lib/canvas/canvas-selection";
 import { boundsForViewport, createCanvasSpatialIndex, selectCanvasSpatialIndexNodes } from "@/lib/canvas/canvas-spatial-index";
 import { canvasViewportOverscan } from "@/lib/canvas/canvas-viewport-overscan";
@@ -863,16 +863,17 @@ function WirelessCanvasPage() {
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
     const connectionById = useMemo(() => new Map(connections.map((connection) => [connection.id, connection])), [connections]);
+    const connectionSpatialIndex = useMemo(() => createCanvasConnectionSpatialIndex(connections, nodeById), [connections, nodeById]);
     const connectionAdjacency = useMemo(() => createConnectionAdjacency(connections), [connections]);
     const resolveRenderNode = useMemo(() => createPreviewNodeResolver(nodeById, dragPreviewById), [dragPreviewById, nodeById]);
     const baseVisibleConnections = useMemo(
         () =>
-            connections.filter((connection) => {
+            selectCanvasSpatialIndexConnections(connectionSpatialIndex, visibleCanvasBounds, (connection) => {
                 const from = nodeById.get(connection.fromNodeId);
                 const to = nodeById.get(connection.toNodeId);
-                return Boolean(from && to && !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes) && connectionIntersectsCanvasBounds(from, to, visibleCanvasBounds));
+                return Boolean(from && to && !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes));
             }),
-        [connections, nodeById, nodes, visibleCanvasBounds],
+        [connectionSpatialIndex, nodeById, nodes, visibleCanvasBounds],
     );
     const baseVisibleConnectionIds = useMemo(() => new Set(baseVisibleConnections.map((connection) => connection.id)), [baseVisibleConnections]);
     const draggedConnectionIds = useMemo(() => {
