@@ -1,5 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { drawMinimapNodeRects } from "@/lib/canvas/canvas-minimap-drawing";
 import { createMinimapNodeRects, type MinimapNodeRect } from "@/lib/canvas/canvas-minimap-layout";
 import { minimapViewportAtWorldPoint } from "@/lib/canvas/canvas-minimap-preview";
 import { createRafLatestScheduler } from "@/lib/canvas/canvas-raf-scheduler";
@@ -9,17 +10,29 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeData, ViewportTransform } from "@/types/canvas";
 
 const MinimapNodeLayer = memo(function MinimapNodeLayer({ rects }: { rects: MinimapNodeRect[] }) {
-    return (
-        <>
-            {rects.map((rect) => (
-                <div
-                    key={rect.id}
-                    className="absolute rounded-[1px]"
-                    style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height, backgroundColor: rect.color, opacity: 0.8 }}
-                />
-            ))}
-        </>
-    );
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+
+    useLayoutEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        if (!width || !height) return;
+        const pixelRatio = window.devicePixelRatio || 1;
+        const pixelWidth = Math.round(width * pixelRatio);
+        const pixelHeight = Math.round(height * pixelRatio);
+        if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+            canvas.width = pixelWidth;
+            canvas.height = pixelHeight;
+        }
+        const context = canvas.getContext("2d");
+        if (!context) return;
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        context.clearRect(0, 0, width, height);
+        drawMinimapNodeRects(context, rects);
+    }, [rects]);
+
+    return <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" />;
 });
 
 export const Minimap = memo(function Minimap({
