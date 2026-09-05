@@ -9,7 +9,7 @@
         <script>
             try {
                 var s = JSON.parse(localStorage.getItem("wireless-canvas:theme_store") || "{}");
-                var t = s.state && s.state.theme === "light" ? "light" : "dark";
+                var t = s.state && s.state.theme === "dark" ? "dark" : "light";
                 document.documentElement.classList.toggle("dark", t === "dark");
                 document.documentElement.style.colorScheme = t;
             } catch (e) {}

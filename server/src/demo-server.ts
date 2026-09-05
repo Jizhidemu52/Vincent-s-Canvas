@@ -1,4 +1,7 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
+import { imageParameterProfile } from "./image-parameter-profile";
+import { openAiImageParameters } from "./openai-image-parameters";
+import { deploymentFeatures } from "./deployment-features";
 import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
 import { resolveStandaloneStaticPath } from "./demo-standalone-web";
 import { apiMartImageModel, buildApiMartImageRequest, runApiMartImageTask } from "./apimart-image";
@@ -14,6 +17,7 @@ import { syncDemoProject } from "./demo-projects";
 import { createDemoBatchTaskInputs } from "./demo-batch-tasks";
 import { buildVideoProviderRequest, getVideoModelCapability, isSupportedVideoModelId, supportedVideoModelIds, type ProviderVideoSource, type SupportedVideoModelId, type VideoProviderParameters, videoTaskStatusPath } from "./video-models";
 import { preflightVideoTask } from "./video-task-preflight";
+import { uploadApiMartImage, validateApiMartVideoImage } from "./apimart-upload";
 
 const sessions = new Map<string, string>();
 const modules = [
@@ -348,13 +352,22 @@ type DemoAsset = {
   bytes: Uint8Array;
   createdAt: string;
   clientReferenceId?: string;
+  projectId?: string;
+  taskId?: string;
+  metadata?: Record<string, unknown>;
 };
 type DemoTask = {
+  prompt?: string;
+  parameters?: Record<string, unknown>;
+  sourceUrls?: string[];
+  projectId?: string;
+  modelConfigId?: string;
   id: string;
   requestId: string;
   ownerUserId: string;
   operationType: string;
-  status: "processing" | "success" | "failed";
+  status: "processing" | "success" | "failed" | "paused";
+  submissionStartedAt?: string;
   stage?: "preflight" | "submitted" | "polling" | "downloading" | "succeeded" | "failed";
   errorCode?: string | null;
   upstreamTaskId?: string | null;
@@ -371,7 +384,12 @@ type DemoInternalAiConfig = {
   updatedAt: string | null;
 };
 const demoAssets = new Map<string, DemoAsset>();
-const standaloneDemoUser = resolveStandaloneDemoUser(process.env.LOCAL_STANDALONE === "true");
+const features = deploymentFeatures({
+  AUTH_ENABLED: process.env.LOCAL_STANDALONE === "true" || process.env.AUTH_ENABLED === "false" ? "false" : "true",
+  CREDITS_ENABLED: process.env.CREDITS_ENABLED === "false" ? "false" : "true",
+  ROLE_PORTALS_ENABLED: process.env.LOCAL_STANDALONE === "true" || process.env.ROLE_PORTALS_ENABLED === "false" ? "false" : "true",
+});
+const standaloneDemoUser = resolveStandaloneDemoUser(!features.authenticationEnabled);
 const standaloneMode = Boolean(standaloneDemoUser);
 const standaloneWebDirectory = process.env.STANDALONE_WEB_DIR?.trim() || "";
 const demoPublicVideoAssetAccess = new Map<string, { assetId: string; expiresAt: number }>();
@@ -396,14 +414,13 @@ const empty = (status = 204, extra: Record<string, string> = {}) =>
   new Response(null, { status, headers: extra });
 
 function sessionUser(request: Request) {
-  if (standaloneDemoUser) return standaloneDemoUser;
   const token = request.headers
     .get("cookie")
     ?.match(/(?:^|; )wireless_canvas_demo_session=([^;]+)/)?.[1];
   const accountId = token ? sessions.get(token) : null;
   return accountId
     ? demoAccounts.find((account) => account.id === accountId)?.user || null
-    : null;
+    : standaloneDemoUser;
 }
 
 function publicAccounts() {
@@ -494,8 +511,10 @@ const demoPort = Number(process.env.DEMO_PORT || 3100);
 const demoHost = resolveDemoHost();
 
 function createProviderVideoSources(model: SupportedVideoModelId, sources: DemoAsset[]) {
+  // Preflight only: validate local bytes and reserve a logical asset URI, never submit this URI upstream.
+  sources.forEach(validateApiMartVideoImage);
   if (!demoPublicAssetOrigin)
-    return { sources: sources as ProviderVideoSource[], accessTokens: [] as string[] };
+    return { sources: sources.map((source) => ({ ...source, publicUrl: `asset://pending-upload/${source.id}` })) as ProviderVideoSource[], accessTokens: [] as string[] };
   const accessTokens: string[] = [];
   const providerSources = sources.map((source) => {
     const accessToken = crypto.randomUUID();
@@ -517,6 +536,7 @@ async function callDemoClaude(modelId: string, input: { input: DemoResponseInput
   const body = {
     model: modelId,
     ...buildClaudeMessagesRequest(input as never, {
+      modelId,
       maxTokens: Math.max(1, Math.min(16_384, Math.floor(input.maxTokens || 2048))),
       stream: false,
       thinking: input.thinking === true,
@@ -539,6 +559,7 @@ async function callDemoClaudeStream(modelId: string, input: { input: DemoRespons
     body: JSON.stringify({
       model: modelId,
       ...buildClaudeMessagesRequest(input as never, {
+        modelId,
         maxTokens: Math.max(1, Math.min(16_384, Math.floor(input.maxTokens || 2048))),
         stream: true,
         thinking: input.thinking === true,
@@ -581,6 +602,8 @@ function storeDemoTaskResult(task: DemoTask, ownerUserId: string, resultUrl: str
     id: assetId,
     ownerUserId,
     filename: `generation-${task.id}.${extension}`,
+    taskId: task.id,
+    projectId: task.projectId,
     mimeType: inlineImage.mimeType,
     bytes: inlineImage.bytes,
     createdAt: now(),
@@ -612,6 +635,8 @@ Bun.serve({
     }
     if (path === "/api/health")
       return json({ status: "ok", mode: "local-demo" });
+    if (path === "/api/deployment")
+      return json(features, 200, { "cache-control": "no-store" });
     if (path === "/api/demo/accounts")
       return json({ accounts: publicAccounts() });
     if (path === "/api/auth/login" && request.method === "POST") {
@@ -624,7 +649,7 @@ Bun.serve({
         input.identifier || "",
         input.password || "",
         input.portal || "designer",
-      );
+      ) || (!features.rolePortalsEnabled ? authenticateDemoAccount(input.identifier || "", input.password || "", "admin") : null);
       if (!account)
         return json(
           {
@@ -701,12 +726,13 @@ Bun.serve({
             const rightConfigured = demoProviders.find((provider) => provider.id === right.providerId)?.hasCredentials === true ? 1 : 0;
             return rightConfigured - leftConfigured;
           })
-          .map(({ id, name, modelId, capabilities, creditCost, rmbCost }) => ({
+          .map(({ id, name, modelId, capabilities, creditCost, rmbCost, providerId }) => ({
             id,
             name,
             modelId,
             capabilities,
-            creditCost: billedDemoCredits(standaloneMode, Number(creditCost || 0)),
+            imageParameterProfile: imageParameterProfile(demoProviders.find(provider => provider.id === providerId)?.protocol, modelId),
+            creditCost: billedDemoCredits(!features.creditsEnabled, Number(creditCost || 0)),
             rmbCost,
           })),
         prices: demoPrices
@@ -714,11 +740,11 @@ Bun.serve({
           .map(({ operationType, label, credits, rmbCost, version }) => ({
             operationType,
             label,
-            credits: billedDemoCredits(standaloneMode, Number(credits || 0)),
+            credits: billedDemoCredits(!features.creditsEnabled, Number(credits || 0)),
             rmbCost,
             version,
           })),
-        tools: demoToolConfigurations.filter((tool) => tool.enabled),
+        tools: demoToolConfigurations.filter((tool) => tool.enabled && listAvailableDemoModels(demoModels, demoProviders).some((model) => model.id === tool.modelConfigId)),
       });
     if (path === "/api/chat/responses" && request.method === "POST") {
       const input = (await request.json()) as {
@@ -753,19 +779,21 @@ Bun.serve({
         mimeType?: string;
         byteSize?: number;
         clientReferenceId?: string;
+        projectId?: string;
+        metadata?: Record<string, unknown>;
       };
-      if (!input.mimeType?.startsWith("image/"))
+      if (!input.mimeType || !/^(image|video|audio|text)\//.test(input.mimeType))
         return json(
-          { error: "INVALID_ASSET", message: "无缝拼接测试只支持图片文件" },
+          { error: "INVALID_ASSET", message: "仅支持图片、视频、音频或文本素材" },
           400,
         );
       if (
         !Number.isFinite(input.byteSize) ||
         Number(input.byteSize) <= 0 ||
-        Number(input.byteSize) > 15 * 1024 * 1024
+        Number(input.byteSize) > 100 * 1024 * 1024
       )
         return json(
-          { error: "INVALID_ASSET_SIZE", message: "图片大小必须在 15MB 以内" },
+          { error: "INVALID_ASSET_SIZE", message: "素材大小必须在 100MB 以内" },
           400,
         );
       const existing = input.clientReferenceId
@@ -782,6 +810,8 @@ Bun.serve({
         bytes: new Uint8Array(),
         createdAt: now(),
         clientReferenceId: input.clientReferenceId,
+        projectId: input.projectId,
+        metadata: input.metadata,
       });
       return json(
         { assetId, uploadUrl: `/api/assets/${assetId}/content-upload` },
@@ -797,12 +827,13 @@ Bun.serve({
       if (!asset || asset.ownerUserId !== user.id)
         return json({ error: "NOT_FOUND", message: "上传素材不存在" }, 404);
       const bytes = new Uint8Array(await request.arrayBuffer());
-      if (!bytes.byteLength || bytes.byteLength > 15 * 1024 * 1024)
+      if (!bytes.byteLength || bytes.byteLength > 100 * 1024 * 1024)
         return json(
-          { error: "INVALID_ASSET_SIZE", message: "图片大小必须在 15MB 以内" },
+          { error: "INVALID_ASSET_SIZE", message: "素材大小必须在 100MB 以内" },
           400,
         );
       asset.bytes = bytes;
+      if (asset.mimeType.startsWith("text/")) asset.metadata = { ...asset.metadata, content: new TextDecoder().decode(bytes) };
       return empty();
     }
     if (
@@ -891,14 +922,16 @@ Bun.serve({
       const sources = resolveOwnedVideoSources(input.sourceUrls || [], user);
       if (sources instanceof Response) return sources;
       const modelId = model.modelId as SupportedVideoModelId;
-      const providerSources = createProviderVideoSources(modelId, sources);
+      let accessTokens: string[] = [];
       try {
+        const providerSources = createProviderVideoSources(modelId, sources);
+        accessTokens = providerSources.accessTokens;
         const preflight = preflightVideoTask({ model: modelId, prompt: input.prompt || "", parameters: input.parameters || {}, sources: providerSources.sources });
         return json({ ok: true, requestId: input.requestId || crypto.randomUUID(), normalized: preflight.normalized });
       } catch (error) {
         return json({ error: "INVALID_VIDEO_INPUT", message: error instanceof Error ? error.message : "Invalid video parameters" }, 400);
       } finally {
-        revokeProviderVideoSources(providerSources.accessTokens);
+        revokeProviderVideoSources(accessTokens);
       }
     }
     if (path === "/api/tasks" && request.method === "POST") {
@@ -907,6 +940,7 @@ Bun.serve({
         .json()
         .catch(() => ({}))) as {
         requestId?: string;
+        projectId?: string;
         operationType?: string;
         modelConfigId?: string;
         prompt?: string;
@@ -955,8 +989,10 @@ Bun.serve({
         if (sources instanceof Response) return sources;
         const modelId = model.modelId as SupportedVideoModelId;
         const parameters = (input.parameters || {}) as VideoProviderParameters;
-        const providerSources = createProviderVideoSources(modelId, sources);
+        let accessTokens: string[] = [];
         try {
+          const providerSources = createProviderVideoSources(modelId, sources);
+          accessTokens = providerSources.accessTokens;
           preflightVideoTask({ model: modelId, prompt: input.prompt || "", parameters, sources: providerSources.sources });
         } catch (error) {
           return json(
@@ -967,16 +1003,16 @@ Bun.serve({
             400,
           );
         } finally {
-          revokeProviderVideoSources(providerSources.accessTokens);
+          revokeProviderVideoSources(accessTokens);
         }
         const price = demoPrices.find(
           (item) =>
             item.operationType === "video_generation" &&
             item.status === "published",
         );
-        const credits = billedDemoCredits(standaloneMode,
+        const credits = billedDemoCredits(!features.creditsEnabled,
           Number(price?.credits || 0) + Number(model.creditCost || 0));
-        if (!standaloneMode && user.creditBalance < credits)
+        if (features.creditsEnabled && user.creditBalance < credits)
           return json(
             {
               error: "INSUFFICIENT_CREDITS",
@@ -1000,8 +1036,9 @@ Bun.serve({
           credits,
           createdAt: now(),
         };
+        Object.assign(task, { prompt: input.prompt || "", parameters: input.parameters || {}, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
         demoTasks.set(task.id, task);
-        if (!standaloneMode) user.creditBalance -= credits;
+        if (features.creditsEnabled) user.creditBalance -= credits;
         void runVideoTask(task, user, modelId, input.prompt || "", parameters, sources);
         return json({ task }, 201);
       }
@@ -1099,9 +1136,9 @@ Bun.serve({
             item.operationType === input.operationType &&
             item.status === "published",
         );
-        const credits = billedDemoCredits(standaloneMode,
+        const credits = billedDemoCredits(!features.creditsEnabled,
           Number(price?.credits || 0) + Number(model.creditCost || 0));
-        if (!standaloneMode && user.creditBalance < credits)
+        if (features.creditsEnabled && user.creditBalance < credits)
           return json(
             {
               error: "INSUFFICIENT_CREDITS",
@@ -1120,8 +1157,9 @@ Bun.serve({
           credits,
           createdAt: now(),
         };
+        Object.assign(task, { prompt: input.prompt || "", parameters: input.parameters || {}, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
         demoTasks.set(task.id, task);
-        if (!standaloneMode) user.creditBalance -= credits;
+        if (features.creditsEnabled) user.creditBalance -= credits;
         if (model.providerId === openTokenProviderId)
           void runOpenTokenImageTaskForDemo(
             task,
@@ -1146,7 +1184,7 @@ Bun.serve({
         return json(
           {
             error: "DEMO_OPERATION_UNAVAILABLE",
-            message: "本地演示任务目前仅开放无缝拼接",
+            message: "当前服务未配置此任务类型的可用模型，请先在后台配置；图像与视频可使用已启用的模型。",
           },
           400,
         );
@@ -1200,9 +1238,9 @@ Bun.serve({
           item.operationType === "seamless_stitch" &&
           item.status === "published",
       );
-      const credits = billedDemoCredits(standaloneMode,
+      const credits = billedDemoCredits(!features.creditsEnabled,
         Number(price?.credits || 0) + Number(model.creditCost || 0));
-      if (!standaloneMode && user.creditBalance < credits)
+      if (features.creditsEnabled && user.creditBalance < credits)
         return json(
           {
             error: "INSUFFICIENT_CREDITS",
@@ -1222,7 +1260,7 @@ Bun.serve({
         createdAt: now(),
       };
       demoTasks.set(task.id, task);
-      if (!standaloneMode) user.creditBalance -= credits;
+      if (features.creditsEnabled) user.creditBalance -= credits;
       void runInternalAiSeamlessTask(task, user, source, parameters);
       return json({ task }, 201);
     }
@@ -1259,10 +1297,26 @@ Bun.serve({
       return json({ task, recovered: true, message: "Task status is being queried without a new generation submission" });
     }
 
+    if (path === "/api/assets" && request.method === "GET") {
+      return json({ assets: [...demoAssets.values()].filter((asset) => asset.ownerUserId === user.id && asset.bytes.byteLength).map((asset) => {
+        const task = asset.taskId ? demoTasks.get(asset.taskId) : undefined;
+        return { id: asset.id, ownerUserId: asset.ownerUserId, ownerName: user.displayName, departmentId: user.departmentId || null,
+          departmentName: user.departmentName || null, projectId: asset.projectId || null, projectName: null, taskId: asset.taskId || null,
+          filename: asset.filename, mimeType: asset.mimeType, byteSize: asset.bytes.byteLength, kind: asset.mimeType.startsWith("image/") ? "image" : asset.mimeType.startsWith("video/") ? "video" : asset.mimeType.startsWith("text/") ? "text" : "other",
+          source: task ? "generation" : "upload", operationType: task?.operationType || null, prompt: task?.prompt || null,
+          modelName: demoModels.find((model) => model.id === task?.modelConfigId)?.name || null, status: "ready", visibilityScope: "private",
+          metadata: asset.metadata || {}, createdAt: asset.createdAt, resultStatus: "unused", usabilityScore: 0, downloadCount: 0, firstDownloadedAt: null, eventCount: 0 };
+      }).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) });
+    }
+    if (path === "/api/history" && request.method === "GET") {
+      return json({ history: [...demoTasks.values()].filter((task) => task.ownerUserId === user.id).map((task) => ({
+        ...task, taskId: task.id, userId: user.id, userName: user.displayName, departmentId: user.departmentId || null,
+        departmentName: user.departmentName || null, modelName: demoModels.find((model) => model.id === task.modelConfigId)?.name || "",
+        prompt: task.prompt || "", parameters: task.parameters || {}, sourceUrls: task.sourceUrls || [], credits: task.status === "success" ? task.credits : 0, rmbCost: 0,
+      })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) });
+    }
     if (!user.role.includes("admin")) {
       if (path === "/api/projects") return json({ projects: [] });
-      if (path === "/api/assets") return json({ assets: [] });
-      if (path === "/api/history") return json({ history: [] });
       if (path === "/api/team" && user.groupRole === "leader")
         return json({
           group: {
@@ -1652,8 +1706,7 @@ async function runOpenTokenImageTaskForDemo(
       apiKey: openTokenApiKey,
       modelId,
       prompt,
-      size: normalizeGptImageSize(parameters.size),
-      resolution: normalizeGptImageResolution(parameters.resolution),
+      ...openAiImageParameters(parameters, modelId),
       references: sources.map((source) => ({ filename: source.filename, mimeType: source.mimeType, bytes: source.bytes })),
     }));
   } catch (error) {
@@ -1786,21 +1839,22 @@ async function runVideoTask(
     const outputUrl = await callVideoProvider(model, prompt, parameters, sources, (upstreamTaskId) => {
       task.upstreamTaskId = upstreamTaskId;
       task.updatedAt = now();
-    });
+    }, () => { task.submissionStartedAt = now(); });
     task.stage = "downloading";
     task.updatedAt = now();
-    task.resultUrls = [outputUrl];
+    task.resultUrls = [await storeDemoVideoResult(task, outputUrl)];
     task.status = "success";
     task.stage = "succeeded";
     task.updatedAt = now();
   } catch (error) {
-    task.status = "failed";
+    const paused = Boolean(task.submissionStartedAt) && !(error instanceof DemoVideoTerminalError);
+    task.status = paused ? "paused" : "failed";
     task.stage = "failed";
     task.errorCode = classifyVideoTaskError(error);
     task.failureReason =
       error instanceof Error ? error.message : "Video task failed";
     task.updatedAt = now();
-    user.creditBalance += task.credits;
+    if (!paused) user.creditBalance += task.credits;
   }
 }
 
@@ -1813,12 +1867,16 @@ async function recoverVideoTask(
     const outputUrl = await pollVideoProviderTask(model, upstreamTaskId);
     task.stage = "downloading";
     task.updatedAt = now();
-    task.resultUrls = [outputUrl];
+    task.resultUrls = [await storeDemoVideoResult(task, outputUrl)];
     task.status = "success";
     task.stage = "succeeded";
     task.updatedAt = now();
   } catch (error) {
-    task.status = "failed";
+    task.status = error instanceof DemoVideoTerminalError ? "failed" : "paused";
+    if (task.status === "failed") {
+      const owner = demoAccounts.find((account) => account.user.id === task.ownerUserId)?.user;
+      if (owner) owner.creditBalance += task.credits;
+    }
     task.stage = "failed";
     task.errorCode = classifyVideoTaskError(error);
     task.failureReason = error instanceof Error ? error.message : "Video task status query failed";
@@ -1858,10 +1916,13 @@ async function callVideoProvider(
   parameters: VideoProviderParameters,
   sources: DemoAsset[],
   onSubmitted?: (upstreamTaskId: string) => void,
+  onSubmissionStarting?: () => void,
 ) {
-  const providerSources = createProviderVideoSources(model, sources);
-  try {
-  const { body } = buildVideoProviderRequest(model, prompt, parameters, providerSources.sources);
+  sources.forEach(validateApiMartVideoImage);
+  const uploadedSources: ProviderVideoSource[] = [];
+  for (const source of sources) uploadedSources.push({ ...source, publicUrl: await uploadApiMartImage({ baseUrl: apiMartBaseUrl, apiKey: apiMartApiKey, bytes: source.bytes, mimeType: source.mimeType, filename: source.filename }) });
+  const { body } = buildVideoProviderRequest(model, prompt, parameters, uploadedSources);
+  onSubmissionStarting?.();
   const submitted = await fetch(`${apiMartBaseUrl}/videos/generations`, {
     method: "POST",
     headers: {
@@ -1872,7 +1933,7 @@ async function callVideoProvider(
     signal: AbortSignal.timeout(180_000),
   });
   if (!submitted.ok)
-    throw new Error(
+    throw new (submitted.status < 500 ? DemoVideoTerminalError : Error)(
       `${model} submission failed: ${submitted.status}${await providerErrorDetail(submitted)}`,
     );
   const created = (await submitted.json()) as {
@@ -1882,9 +1943,18 @@ async function callVideoProvider(
   if (!taskId) throw new Error(`${model} did not return a task ID`);
   onSubmitted?.(taskId);
   return pollVideoProviderTask(model, taskId);
-  } finally {
-    revokeProviderVideoSources(providerSources.accessTokens);
-  }
+}
+
+class DemoVideoTerminalError extends Error {}
+
+async function storeDemoVideoResult(task: DemoTask, url: string) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(180_000) });
+  if (!response.ok) throw new Error(`视频下载失败（${response.status}），可恢复查询原任务`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.byteLength) throw new Error("视频结果为空，可恢复查询原任务");
+  const id = crypto.randomUUID();
+  demoAssets.set(id, { id, ownerUserId: task.ownerUserId, filename: `video-${task.id}.mp4`, mimeType: "video/mp4", bytes, createdAt: now(), projectId: task.projectId, taskId: task.id });
+  return `/api/assets/${id}/content`;
 }
 
 async function pollVideoProviderTask(model: SupportedVideoModelId, taskId: string) {
@@ -1910,7 +1980,7 @@ async function pollVideoProviderTask(model: SupportedVideoModelId, taskId: strin
       };
     };
     if (["failed", "cancelled"].includes(status.data?.status || ""))
-      throw new Error(status.data?.error?.message || `${model} generation failed`);
+      throw new DemoVideoTerminalError(status.data?.error?.message || `${model} generation failed`);
     if (status.data?.status !== "completed") continue;
     const outputUrl = extractHappyHorseVideoUrl(status.data?.result?.videos);
     if (!outputUrl) throw new Error(`${model} completed without an output video`);

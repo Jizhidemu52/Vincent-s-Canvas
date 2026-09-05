@@ -14,3 +14,18 @@ test("reports frame timing statistics without storing canvas content", () => {
     expect(metrics.longFrameCount).toBe(1);
     expect(JSON.stringify(metrics)).not.toContain("prompt");
 });
+
+test("keeps browser throttling gaps separate from actual long frames", () => {
+    const tracker = createCanvasPerformanceTracker();
+    tracker.start("pan", 0);
+    tracker.frame(18);
+    tracker.frame(1001);
+    tracker.frame(120);
+
+    const metrics = tracker.finish(1200, { totalNodes: 5000, visibleNodes: 30, totalConnections: 10000, visibleConnections: 56 });
+
+    expect(metrics.p95FrameMs).toBe(120);
+    expect(metrics.longFrameCount).toBe(1);
+    expect(metrics.stalledFrameGapCount).toBe(1);
+    expect(metrics.averageFps).toBeGreaterThan(0);
+});

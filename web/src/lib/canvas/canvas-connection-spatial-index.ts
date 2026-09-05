@@ -43,6 +43,22 @@ export function createCanvasConnectionSpatialIndex(connections: CanvasConnection
     return { cellSize: safeCellSize, boundsByConnectionId, connectionsById, connectionOrderById, cells, globalConnectionIds };
 }
 
+/**
+ * Node-content changes keep connection paths in the same cells. Retain their
+ * spatial grid and only refresh connection records until an endpoint moves or
+ * the connection topology changes.
+ */
+export function refreshCanvasConnectionSpatialIndex(previous: CanvasConnectionSpatialIndex, connections: CanvasConnection[], nodeById: ReadonlyMap<string, CanvasNodeData>): CanvasConnectionSpatialIndex {
+    if (!hasSameCanvasConnectionGeometry(previous, connections, nodeById)) {
+        return createCanvasConnectionSpatialIndex(connections, nodeById, previous.cellSize);
+    }
+
+    return {
+        ...previous,
+        connectionsById: new Map(connections.map((connection) => [connection.id, connection])),
+    };
+}
+
 export function selectCanvasSpatialIndexConnections(index: CanvasConnectionSpatialIndex, bounds: CanvasBounds, shouldInclude: (connection: CanvasConnection) => boolean = () => true): CanvasConnection[] {
     const ids = new Set(index.globalConnectionIds);
     forEachCell(bounds, index.cellSize, (key) => index.cells.get(key)?.forEach((id) => ids.add(id)));
@@ -75,4 +91,23 @@ function forEachCell(bounds: CanvasBounds, cellSize: number, callback: (key: str
 
 function intersects(first: CanvasBounds | undefined, second: CanvasBounds) {
     return Boolean(first && first.maxX > second.minX && first.minX < second.maxX && first.maxY > second.minY && first.minY < second.maxY);
+}
+
+function hasSameCanvasConnectionGeometry(index: CanvasConnectionSpatialIndex, connections: CanvasConnection[], nodeById: ReadonlyMap<string, CanvasNodeData>) {
+    if (index.connectionOrderById.size > connections.length) return false;
+
+    return connections.every((connection, order) => {
+        const from = nodeById.get(connection.fromNodeId);
+        const to = nodeById.get(connection.toNodeId);
+        const previousConnection = index.connectionsById.get(connection.id);
+        const previousBounds = index.boundsByConnectionId.get(connection.id);
+        const hasEndpoints = Boolean(from && to);
+
+        if (!hasEndpoints) return !previousConnection && !previousBounds;
+        if (!previousConnection || !previousBounds || index.connectionOrderById.get(connection.id) !== order) return false;
+        if (previousConnection.fromNodeId !== connection.fromNodeId || previousConnection.toNodeId !== connection.toNodeId) return false;
+
+        const bounds = boundsForCanvasConnection(from!, to!);
+        return bounds.minX === previousBounds.minX && bounds.minY === previousBounds.minY && bounds.maxX === previousBounds.maxX && bounds.maxY === previousBounds.maxY;
+    });
 }

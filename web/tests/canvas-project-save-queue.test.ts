@@ -7,11 +7,13 @@ type TimerCallback = () => void;
 function createTimerScheduler() {
     let nextId = 0;
     const callbacks = new Map<number, TimerCallback>();
+    const delays: number[] = [];
     return {
         scheduler: {
-            set(callback: TimerCallback) {
+            set(callback: TimerCallback, delayMs: number) {
                 const id = nextId++;
                 callbacks.set(id, callback);
+                delays.push(delayMs);
                 return id;
             },
             clear(id: unknown) {
@@ -25,6 +27,9 @@ function createTimerScheduler() {
         },
         count() {
             return callbacks.size;
+        },
+        requestedDelays() {
+            return delays;
         },
     };
 }
@@ -52,4 +57,13 @@ test("flushes a pending canvas project snapshot before the page closes", () => {
 
     expect(saved).toEqual(["draft"]);
     expect(timers.count()).toBe(0);
+});
+
+test("lets batch generation request a longer coalescing delay", () => {
+    const timers = createTimerScheduler();
+    const queue = createCanvasProjectSaveQueue(180, () => undefined, timers.scheduler);
+
+    queue.schedule("batch-result", 900);
+
+    expect(timers.requestedDelays()).toEqual([900]);
 });

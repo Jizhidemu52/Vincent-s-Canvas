@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Tooltip } from "antd";
 import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, UserRound, WandSparkles, Wrench, X, XCircle } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import type { LocalUser } from "@/stores/use-user-store";
 
-export type CanvasAgentChatAttachment = { id: string; name: string; url: string; mediaType?: "image" | "video" };
+export type CanvasAgentChatAttachment = { id: string; name: string; url: string; storageKey?: string; mediaType?: "image" | "video" };
 export type CanvasAgentMode = "online" | "local";
 export type CanvasAgentChatMessage = {
     id: string;
@@ -19,7 +20,7 @@ export type CanvasAgentChatMessage = {
 
 const WORKING_TEXT = "working...";
 
-export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool, onUseImageForVideo }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void }) {
+export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool, onUseImageForVideo }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void }) {
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
     const color = item.role === "error" ? "#dc2626" : item.role === "tool" ? "#2563eb" : theme.node.text;
@@ -34,7 +35,7 @@ export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveToo
         );
     }
     if (item.role === "tool") {
-        if (objectField(item.detail, "status") === "pending") return <AgentPendingToolCard summary={item.text} detail={item.detail} theme={theme} onReject={() => onRejectTool?.(item.id)} onApprove={() => onApproveTool?.(item.id)} />;
+        if (["pending", "running"].includes(String(objectField(item.detail, "status")))) return <AgentPendingToolCard summary={item.text} detail={item.detail} theme={theme} onReject={() => onRejectTool?.(item.id)} onApprove={() => onApproveTool?.(item.id)} />;
         return (
             <div className="flex items-start gap-3">
                 <AgentAvatar theme={theme} />
@@ -53,9 +54,10 @@ export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveToo
             {isUser ? <AgentUserAvatar user={user} theme={theme} /> : null}
         </div>
     );
-}
+});
 
 export function AgentPendingToolCard({ summary, detail, theme, onReject, onApprove }: { summary: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onReject?: () => void; onApprove?: () => void }) {
+    const running = objectField(detail, "status") === "running";
     return (
         <div className="flex items-start gap-3">
             <AgentAvatar theme={theme} />
@@ -64,13 +66,13 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
                     <summary className="cursor-pointer list-none">
                         <div className="flex items-start gap-3">
                             <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border" style={{ borderColor: "rgba(217,119,6,.24)", color: "#d97706", background: "rgba(217,119,6,.04)" }}>
-                                <CircleAlert className="size-4" />
+                                {running ? <LoaderCircle className="size-4 animate-spin" /> : <CircleAlert className="size-4" />}
                             </span>
                             <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2 text-sm font-semibold leading-5">
-                                    <span>确认工具调用</span>
+                                    <span>{running ? "工具执行中" : "确认工具调用"}</span>
                                     <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium" style={{ borderColor: "rgba(217,119,6,.22)", color: "#d97706", background: "rgba(217,119,6,.04)" }}>
-                                        等待确认
+                                        {running ? "执行中" : "等待确认"}
                                     </span>
                                     {detail ? <span className="ml-auto text-xs font-normal" style={{ color: theme.node.muted }}>详情</span> : null}
                                 </div>
@@ -84,11 +86,11 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
                 </details>
                 {onReject || onApprove ? (
                     <div className="mt-4 grid grid-cols-2 gap-2">
-                        <Button danger className="!h-9" icon={<XCircle className="size-4" />} onClick={() => onReject?.()}>
+                        <Button danger disabled={running} className="!h-9" icon={<XCircle className="size-4" />} onClick={() => onReject?.()}>
                             拒绝执行
                         </Button>
-                        <Button className="!h-9" icon={<CheckCircle2 className="size-4" />} style={{ borderColor: "rgba(22,163,74,.42)", color: "#16a34a", background: "transparent" }} onClick={() => onApprove?.()}>
-                            批准执行
+                        <Button disabled={running} loading={running} className="!h-9" icon={<CheckCircle2 className="size-4" />} style={{ borderColor: "rgba(22,163,74,.42)", color: "#16a34a", background: "transparent" }} onClick={() => onApprove?.()}>
+                            {running ? "正在执行" : "批准执行"}
                         </Button>
                     </div>
                 ) : null}
@@ -174,7 +176,7 @@ export function AgentChatComposer({
     const canSubmit = !disabled && !sending && Boolean(prompt.trim() || attachments.length);
     return (
         <div className="px-2 pb-2 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
-            <div className="rounded-[24px] border px-3 pb-3 pt-3 shadow-lg" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
+            <div className="rounded-xl border px-2.5 pb-2 pt-2 shadow-sm" style={{ background: theme.node.panel, borderColor: theme.node.stroke }}>
                 {attachments.length ? (
                     <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
                         {attachments.map((item) => (
@@ -189,7 +191,6 @@ export function AgentChatComposer({
                         ))}
                     </div>
                 ) : null}
-                {generationControls ? <div className="mb-2">{generationControls}</div> : null}
                 <textarea
                     value={prompt}
                     onChange={(event) => onPromptChange(event.target.value)}
@@ -209,8 +210,12 @@ export function AgentChatComposer({
                     style={{ color: theme.node.text }}
                     placeholder={placeholder}
                 />
-                <div className="mt-2 flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-1">
+                <div className="mt-2 flex items-center justify-between gap-1 border-t pt-2" style={{ borderColor: theme.node.stroke }}>
+                    <div className="flex min-w-0 flex-1 items-center gap-1">
+                        {generationControls}
+                        {left}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
                         {onAddFiles ? (
                             <>
                                 <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={(event) => {
@@ -218,13 +223,12 @@ export function AgentChatComposer({
                                     event.target.value = "";
                                 }} />
                                 <Tooltip title="上传图片">
-                                    <Button type="text" shape="circle" className="!h-9 !w-9 !min-w-9" disabled={sending} style={{ color: theme.node.muted }} icon={<ImagePlus className="size-4" />} onClick={() => fileInputRef.current?.click()} />
+                                    <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8 !p-0" aria-label="添加参考图" disabled={sending} style={{ color: theme.node.muted }} icon={<ImagePlus className="size-5" />} onClick={() => fileInputRef.current?.click()} />
                                 </Tooltip>
                             </>
                         ) : null}
-                        {left}
+                    <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8 !p-0" style={{ background: canSubmit ? theme.node.text : theme.node.fill, color: canSubmit ? theme.node.panel : theme.node.faint }} disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={() => void onSubmit()} aria-label="发送" />
                     </div>
-                    <Button type="primary" shape="circle" className="!h-10 !w-10 !min-w-10" disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={() => void onSubmit()} aria-label="发送" />
                 </div>
             </div>
         </div>
@@ -264,9 +268,50 @@ export function AgentPanelTabs<T extends string>({ value, items, theme, right, o
 function AgentDetailBlock({ detail, theme }: { detail: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     return (
         <pre className="thin-scrollbar mt-3 max-h-64 overflow-auto rounded-lg border p-3 text-[11px] leading-4" style={{ borderColor: theme.node.stroke, background: theme.toolbar.panel, color: theme.node.muted }}>
-            {JSON.stringify(detail, null, 2)}
+            {JSON.stringify(toolDetailPreview(detail), null, 2)}
         </pre>
     );
+}
+
+// Continuation signatures remain in the original tool call, never in its visual preview.
+function toolDetailPreview(detail: unknown): unknown {
+    const calls = objectField(detail, "toolCalls");
+    if (!Array.isArray(calls)) return stripToolSignatures(detail);
+    const settings = objectField(detail, "generationSettings");
+    const references = objectField(detail, "referenceImages");
+    return calls.map((call) => {
+        const fn = objectField(call, "function");
+        const name = objectField(fn, "name");
+        let args = objectField(fn, "arguments");
+        if (typeof args === "string") {
+            try { args = JSON.parse(args); } catch { return { tool: name, parameters: "无法解析工具参数" }; }
+        }
+        const parameters = stripToolSignatures(args) as Record<string, unknown> | undefined;
+        if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return { tool: name, parameters };
+        const { model, prompt, referenceNodeIds, ...rest } = parameters;
+        const mode = name === "canvas_generate_image" ? "image" : name === "canvas_generate_video" ? "video" : parameters.mode;
+        const defaults = mode === "image"
+            ? { size: objectField(settings, "size"), quality: objectField(settings, "quality"), count: objectField(settings, "imageCount") }
+            : mode === "video"
+              ? { size: objectField(settings, "size"), seconds: objectField(settings, "videoSeconds"), vquality: objectField(settings, "videoQuality"), generateAudio: objectField(settings, "videoGenerateAudio") }
+              : {};
+        const selectedReferences = Array.isArray(referenceNodeIds) && referenceNodeIds.length
+            ? referenceNodeIds.map((id) => Array.isArray(references) ? references.find((reference) => objectField(reference, "id") === id) || { id } : { id })
+            : mode === "image" || mode === "video" ? references : referenceNodeIds;
+        return {
+            tool: name,
+            model: model || (mode === "image" ? objectField(settings, "imageModel") : mode === "video" ? objectField(settings, "videoModel") : undefined),
+            prompt,
+            references: selectedReferences,
+            parameters: { ...defaults, ...rest },
+        };
+    });
+}
+
+function stripToolSignatures(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(stripToolSignatures);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value).filter(([key]) => key !== "thoughtSignature" && key !== "thought_signature").map(([key, item]) => [key, stripToolSignatures(item)]));
 }
 
 function AgentAvatar({ theme }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
@@ -291,7 +336,14 @@ function AgentMessageAttachments({ attachments, onUseImageForVideo }: { attachme
         <div className="mt-2 grid grid-cols-2 gap-2">
             {attachments.map((item) => (
                 <div key={item.id} className="group overflow-hidden rounded-xl border" style={{ borderColor: "rgba(120,120,120,.2)" }}>
-                    {item.mediaType === "video" ? <video src={item.url} controls className="aspect-video w-full bg-black object-cover" /> : <img src={item.url} alt={item.name} className="aspect-square w-full object-cover" />}
+                    <CanvasPersistedMediaPreview
+                        kind={item.mediaType === "video" ? "video" : "image"}
+                        url={item.url}
+                        storageKey={item.storageKey}
+                        alt={item.name}
+                        controls={item.mediaType === "video"}
+                        className={item.mediaType === "video" ? "aspect-video w-full bg-black object-cover" : "aspect-square w-full object-cover"}
+                    />
                     {item.mediaType !== "video" && onUseImageForVideo ? (
                         <button type="button" className="flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs font-medium transition hover:bg-black/5" onClick={() => onUseImageForVideo(item)}>
                             <WandSparkles className="size-3.5" />

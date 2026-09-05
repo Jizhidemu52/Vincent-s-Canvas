@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createCanvasBatchMotionById } from "@/lib/canvas/canvas-batch-motion";
+import { createCanvasBatchIndexes, createCanvasBatchMotionById, createCanvasBatchRenderIndex } from "@/lib/canvas/canvas-batch-motion";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const node = (id: string, x: number, y: number, metadata?: CanvasNodeData["metadata"]): CanvasNodeData => ({
@@ -28,4 +28,26 @@ test("keeps an orphan batch child at its own position", () => {
     const child = node("child", 50, 60, { batchRootId: "missing" });
 
     expect(createCanvasBatchMotionById([child], new Map([[child.id, child]])).get("child")).toEqual({ x: 0, y: 0, index: 0 });
+});
+
+test("builds root visibility and child motion indexes in the same traversal", () => {
+    const root = node("root", 100, 100, { isBatchRoot: true, batchChildIds: ["child"] });
+    const child = node("child", 50, 60, { batchRootId: "root" });
+    const indexes = createCanvasBatchIndexes([root, child], new Map([[root.id, root], [child.id, child]]));
+
+    expect(indexes.rootsById.get("root")).toBe(root);
+    expect(indexes.childCountByRootId.get("root")).toBe(1);
+    expect(indexes.motionById.get("child")).toEqual({ x: 84, y: 54, index: 0 });
+});
+
+test("calculates and reuses child stack motion only when a rendered child needs it", () => {
+    const root = node("root", 100, 100, { isBatchRoot: true, batchChildIds: ["child"] });
+    const child = node("child", 50, 60, { batchRootId: "root" });
+    const index = createCanvasBatchRenderIndex([root, child]);
+
+    expect(index.childCountByRootId.get("root")).toBe(1);
+    expect(index.getMotion(root)).toBeUndefined();
+    const first = index.getMotion(child);
+    expect(first).toEqual({ x: 84, y: 54, index: 0 });
+    expect(index.getMotion(child)).toBe(first);
 });

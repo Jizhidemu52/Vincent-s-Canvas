@@ -5,10 +5,12 @@ import "./styles/globals.css";
 import { RouterProvider } from "react-router-dom";
 
 import { AppProviders } from "@/components/layout/app-providers";
-import { router } from "@/router";
+import { loadDeploymentFeatures } from "@/lib/deployment-features";
 
 document.body.style.fontFamily = '"SF Pro Display","SF Pro Text","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif';
 
+void loadDeploymentFeatures().then(async () => {
+const { router } = await import("@/router");
 createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
         <AppProviders>
@@ -16,3 +18,4 @@ createRoot(document.getElementById("root")!).render(
         </AppProviders>
     </React.StrictMode>,
 );
+});

@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { BillingError, reserveCredits, settleReservation } from "./billing";
 import type { Cache, Database } from "./db";
+import { withTransaction } from "./db-transaction";
 
 export type TaskPriority = "normal" | "priority" | "urgent";
 export type QueueTaskAction = "pause" | "resume" | "cancel";
 export type TaskInput = {
+  creditsEnabled?: boolean;
   requestId: string;
   userId: string;
   departmentId: string | null;
@@ -32,8 +34,36 @@ const priorityBand: Record<TaskPriority, number> = {
   priority: 1,
   normal: 2,
 };
+export const TASK_LEASE_SECONDS = 180;
+
 export function queueScore(priority: TaskPriority, timestamp = Date.now()) {
   return priorityBand[priority] * 1_000_000_000_000_000 + timestamp;
+}
+
+/**
+ * Redis is an acceleration layer, not the task source of truth. Rebuild its
+ * waiting members from Postgres after a worker restart, and return only
+ * expired processing leases to waiting. This covers crashes both before and
+ * after the Redis pop without stealing work from a live worker.
+ */
+export async function restoreWaitingTasksToQueue(db: Database, cache: Cache) {
+  await db.query(
+    `UPDATE tasks
+        SET status='waiting',lease_expires_at=NULL,updated_at=now()
+      WHERE status='processing' AND (lease_expires_at IS NULL OR lease_expires_at <= now())`,
+  );
+  const pending = await db.query<{ id: string; priority: TaskPriority; queued_at: string }>(
+    "SELECT id,priority,queued_at FROM tasks WHERE status='waiting' ORDER BY queued_at,id",
+  );
+  for (let offset = 0; offset < pending.rows.length; offset += 64) {
+    await Promise.all(pending.rows.slice(offset, offset + 64).map((task) =>
+      cache.zAdd("tasks:queue", {
+        score: queueScore(task.priority, new Date(task.queued_at).getTime()),
+        value: task.id,
+      }),
+    ));
+  }
+  return pending.rows.length;
 }
 
 export async function enqueueTask(
@@ -42,72 +72,77 @@ export async function enqueueTask(
   input: TaskInput,
 ) {
   const taskId = randomUUID();
-  const inserted = await db.query<{ id: string }>(
-    `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,credits,rmb_cost)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,0)
-         ON CONFLICT(request_id) DO NOTHING RETURNING id`,
-    [
-      taskId,
-      input.requestId,
-      input.batchId ?? null,
-      input.userId,
-      input.departmentId,
-      input.projectId,
-      input.operationType,
-      input.modelConfigId ?? null,
-      input.prompt,
-      input.parameters ?? {},
-      JSON.stringify(input.sourceUrls),
-      input.priority,
-    ],
-  );
-  if (!inserted.rows[0]) {
-    const existing = await db.query<{
-      id: string;
-      requestId: string;
-      status: string;
-      credits: number;
-      rmbCost: number;
-    }>(
-      `SELECT id,request_id AS "requestId",status,credits,rmb_cost::float8 AS "rmbCost" FROM tasks WHERE request_id=$1 AND user_id=$2`,
-      [input.requestId, input.userId],
+  const task = await withTransaction(db, async (client) => {
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,credits,rmb_cost)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,0)
+           ON CONFLICT(request_id) DO NOTHING RETURNING id`,
+      [
+        taskId,
+        input.requestId,
+        input.batchId ?? null,
+        input.userId,
+        input.departmentId,
+        input.projectId,
+        input.operationType,
+        input.modelConfigId ?? null,
+        input.prompt,
+        input.parameters ?? {},
+        JSON.stringify(input.sourceUrls),
+        input.priority,
+      ],
     );
-    if (!existing.rows[0])
-      throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他账号占用");
-    return existing.rows[0];
-  }
-  try {
+    if (!inserted.rows[0]) {
+      const existing = await client.query<{
+        id: string;
+        requestId: string;
+        status: string;
+        credits: number;
+        rmbCost: number;
+        priority: TaskPriority;
+      }>(
+        `SELECT id,request_id AS "requestId",status,priority,credits,rmb_cost::float8 AS "rmbCost" FROM tasks WHERE request_id=$1 AND user_id=$2`,
+        [input.requestId, input.userId],
+      );
+      if (!existing.rows[0])
+        throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他账号占用");
+      return {
+        task: existing.rows[0],
+        shouldQueue: existing.rows[0].status === "waiting",
+        queuePriority: existing.rows[0].priority,
+      };
+    }
     const reservation = await reserveCredits(db, {
       requestId: input.requestId,
       userId: input.userId,
       operationType: input.operationType,
       modelConfigId: input.modelConfigId,
       quantity: 1,
-    });
-    await db.query(
+      creditsEnabled: input.creditsEnabled,
+    }, client);
+    await client.query(
       "UPDATE tasks SET credits=$1,rmb_cost=$2,updated_at=now() WHERE id=$3",
       [reservation.credits, reservation.rmbCost, taskId],
     );
-    await cache.zAdd("tasks:queue", {
-      score: queueScore(input.priority),
-      value: taskId,
-    });
     return {
-      id: taskId,
-      requestId: input.requestId,
-      status: "waiting",
-      credits: reservation.credits,
-      rmbCost: reservation.rmbCost,
+      task: {
+        id: taskId,
+        requestId: input.requestId,
+        status: "waiting",
+        credits: reservation.credits,
+        rmbCost: reservation.rmbCost,
+      },
+      shouldQueue: true,
+      queuePriority: input.priority,
     };
-  } catch (error) {
-    await db
-      .query("DELETE FROM tasks WHERE id=$1", [taskId])
-      .catch(() => undefined);
-    await settleReservation(db, input.requestId, "release", input.userId).catch(
-      () => undefined,
-    );
-    throw error;
+  });
+  if (task.shouldQueue) {
+    await cache.zAdd("tasks:queue", {
+      score: queueScore(task.queuePriority),
+      value: task.task.id,
+    });
   }
+  return task.task;
 }
 
 export async function recalculateBatch(db: Database, batchId: string) {

@@ -7,6 +7,7 @@ import {
     buildGeminiRequestBody,
     readGeminiResponse,
     requestChatCompletion,
+    requestClaudeStream,
     readClaudeResponse,
     toGeminiContents,
 } from "../src/routes/chat";
@@ -85,6 +86,14 @@ describe("Gemini native chat protocol", () => {
         expect(result).toEqual({ content: "pong", toolCalls: [] });
     });
 
+    test("preserves strict and nested JSON Schema in the Gemini JSON-schema field", () => {
+        const parameters = { type: "object", properties: { input: { type: "object", properties: { prompt: { type: "string" } }, additionalProperties: false } }, additionalProperties: false };
+        const body = buildGeminiRequestBody({ input: [], tools: [{ type: "function", name: "canvas_generate_video", parameters }] });
+        const declaration = (body.tools?.[0] as { functionDeclarations: Array<Record<string, unknown>> }).functionDeclarations[0];
+        expect(declaration.parametersJsonSchema).toEqual(parameters);
+        expect(declaration).not.toHaveProperty("parameters");
+    });
+
     test("keeps grounded web sources with the final assistant answer", () => {
         const result = readGeminiResponse({
             candidates: [
@@ -114,13 +123,13 @@ describe("Claude Messages native protocol", () => {
                 { role: "user", content: [{ type: "input_text", text: "Review this" }, { type: "input_image", image_url: "data:image/png;base64,aGVsbG8=" }] },
             ],
             tools: [{ type: "function", name: "canvas_get_state", description: "Read canvas", parameters: { type: "object", properties: {} } }],
-        }, { maxTokens: 1024, thinking: true, stream: true });
+        }, { modelId: "claude-sonnet-5", maxTokens: 1024, thinking: true, stream: true });
 
         expect(body).toMatchObject({
             system: "Keep the brand tone.",
             max_tokens: 1024,
             stream: true,
-            thinking: { type: "enabled" },
+            thinking: { type: "adaptive", display: "omitted" },
             messages: [{ role: "user", content: [{ type: "text", text: "Review this" }, { type: "image", source: { type: "base64", media_type: "image/png", data: "aGVsbG8=" } }] }],
             tools: [{ name: "canvas_get_state", input_schema: { type: "object", properties: {} } }],
         });
@@ -133,10 +142,58 @@ describe("Claude Messages native protocol", () => {
                 { type: "text", text: "Use the warm red option." },
                 { type: "tool_use", id: "tool-1", name: "canvas_get_state", input: { scope: "selected" } },
             ],
-        })).toEqual({
+        })).toMatchObject({
             content: "Use the warm red option.",
             toolCalls: [{ id: "tool-1", type: "function", function: { name: "canvas_get_state", arguments: '{"scope":"selected"}' } }],
         });
+    });
+
+    test("uses Claude 5 adaptive thinking without a legacy budget and never disables Fable", () => {
+        for (const modelId of ["claude-opus-5", "claude-sonnet-5", "claude-fable-5"]) {
+            for (const thinking of [true, false, undefined]) {
+                const body = buildClaudeMessagesRequest({ input: [{ role: "user", content: "hi" }], tools: [] }, { modelId, maxTokens: 1024, thinking });
+                expect(body.thinking).toEqual(thinking === false && modelId !== "claude-fable-5" ? { type: "disabled" } : { type: "adaptive", display: "omitted" });
+                expect(body.max_tokens).toBe(1024);
+                expect(JSON.stringify(body)).not.toContain("budget_tokens");
+            }
+        }
+    });
+
+    test("retains complete native assistant blocks and tool-result ordering", () => {
+        const blocks = [
+            { type: "thinking", thinking: "", signature: "opaque-test-signature" },
+            { type: "text", text: "读取两个节点。" },
+            { type: "tool_use", id: "one", name: "read_node", input: { id: 1 } },
+            { type: "redacted_thinking", data: "opaque-test-redaction" },
+            { type: "tool_use", id: "two", name: "read_node", input: { id: 2 } },
+        ];
+        const body = buildClaudeMessagesRequest({ input: [
+            { role: "user", content: "review" },
+            { type: "claude_assistant", content: blocks },
+            { type: "function_call_output", call_id: "one", output: "first result" },
+            { type: "function_call_output", call_id: "two", output: "second result" },
+        ], tools: [] }, { modelId: "claude-fable-5", maxTokens: 2048, thinking: false });
+        expect(body.messages).toEqual([
+            { role: "user", content: "review" },
+            { role: "assistant", content: blocks },
+            { role: "user", content: [{ type: "tool_result", tool_use_id: "one", content: "first result" }] },
+            { role: "user", content: [{ type: "tool_result", tool_use_id: "two", content: "second result" }] },
+        ]);
+        expect(readClaudeResponse({ content: blocks }).claudeAssistantContent).toEqual(blocks);
+    });
+
+    test("the production Claude streaming path submits stream=true with the same verified parameters", async () => {
+        const events = 'event: message_stop\ndata: {"type":"message_stop"}\n\n';
+        globalThis.fetch = (async (_input, init) => {
+            expect(JSON.parse(String(init?.body))).toMatchObject({ model: "claude-fable-5", stream: true, max_tokens: 2048, thinking: { type: "adaptive", display: "omitted" } });
+            return new Response(events, { headers: { "content-type": "text/event-stream" } });
+        }) as typeof fetch;
+        const response = await requestClaudeStream(
+            { model_id: "claude-fable-5", base_url: "https://api.apimart.ai", protocol: "anthropic", encrypted_credentials: "unused" },
+            { apiKey: "test-key" },
+            { input: [{ role: "user", content: "hello" }], tools: [], claude: { thinking: false, maxTokens: 2048 } },
+        );
+        expect(await response.text()).toBe(events);
     });
 
     test("sends an Anthropic-native endpoint and headers", async () => {

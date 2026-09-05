@@ -11,10 +11,27 @@ import type { ReferenceImage } from "@/types/image";
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
 export type ImageGenerationModel = PublicModel;
-export type QueuedTask = { id: string; requestId: string; operationType?: string; status: string; stage?: string; errorCode?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string };
+export type QueuedTask = { id: string; requestId: string; operationType?: string; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string };
+export class QueuedTaskPausedError extends Error {
+    readonly taskId: string;
+    readonly canRecover: boolean;
+    constructor(readonly task: QueuedTask, message?: string) {
+        const canRecover = task.operationType === "video_generation" && Boolean(task.upstreamTaskId);
+        super(`${message || task.failureReason || "任务查询已暂停"}（任务 ${task.id}）。${canRecover ? "可恢复查询原任务，不会重新生成。" : "提交状态待核查，请勿重复生成。"}`);
+        this.name = "QueuedTaskPausedError";
+        this.taskId = task.id;
+        this.canRecover = canRecover;
+    }
+}
+export class QueuedTaskFailedError extends Error {
+    constructor(readonly task: QueuedTask) {
+        super(task.failureReason || "生成任务已失败或取消");
+        this.name = "QueuedTaskFailedError";
+    }
+}
 export type GenerationVideoCapability = { seconds: readonly [number, number]; resolutions: readonly string[]; sizes: readonly string[]; minImages: number; maxImages: number; firstFrameRequired: boolean; supportsAudio: boolean };
 export type GenerationCapabilityModel = { id: string; name: string; modelId: string; capability: GenerationVideoCapability };
-export type QueuedMediaInput = { modelId: string; prompt: string; operationType: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; signal?: AbortSignal };
+export type QueuedMediaInput = { modelId: string; prompt: string; operationType: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; signal?: AbortSignal; onSubmitted?: (task: QueuedTask) => void };
 export type QueuedBatchItem = QueuedTask & { itemIndex: number };
 export type QueuedBatchFailure = { index: number; reason: string };
 export type QueuedBatchAction = "pause" | "resume" | "cancel";
@@ -221,12 +238,19 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
 }
 
 export async function getQueuedTask(id: string) {
-    const result = await request<{ tasks: QueuedTask[] }>("/api/tasks");
-    return result.tasks.find((task) => task.id === id) || null;
+    const response = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { credentials: "include" });
+    if (response.status === 404) return null;
+    if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { message?: string };
+        throw new Error(body.message || `任务查询失败（${response.status}）`);
+    }
+    const result = await response.json() as { task: QueuedTask };
+    return result.task;
 }
 
 export async function recoverQueuedTask(id: string) {
-    const result = await request<{ task: QueuedTask }>(`/api/tasks/${id}/recover`, { method: "POST" });
+    const result = await request<{ task: QueuedTask; recovered?: boolean; message?: string }>(`/api/tasks/${id}/recover`, { method: "POST" });
+    if (result.task.status === "paused") throw new QueuedTaskPausedError(result.task, result.message);
     return result.task;
 }
 
@@ -249,13 +273,25 @@ export async function listQueuedTasks() {
 
 export async function requestQueuedMedia(input: QueuedMediaInput) {
     const submitted = await submitQueuedMediaTask(input);
+    input.onSubmitted?.(submitted);
+    return waitForQueuedMedia(submitted, input.signal);
+}
+
+export async function recoverQueuedMedia(id: string, signal?: AbortSignal) {
+    if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
+    const original = await recoverQueuedTask(id);
+    return waitForQueuedMedia(original, signal);
+}
+
+async function waitForQueuedMedia(submitted: QueuedTask, signal?: AbortSignal) {
     const ids = [submitted.id];
     try {
-        const [completed] = await waitForTasks(ids, input.signal);
-        if (!completed || completed.status !== "success") throw new Error(completed?.failureReason || "任务失败");
+        const [completed] = await waitForTasks(ids, signal, undefined, true);
+        if (!completed) throw new Error("任务不存在");
+        if (completed.status !== "success") throw new QueuedTaskFailedError(completed);
         return completed.resultUrls;
     } catch (error) {
-        if (input.signal?.aborted) await cancelTasks(ids);
+        if (signal?.aborted) await cancelTasks(ids);
         throw error;
     } finally {
         await refreshSessionBalance();
@@ -270,13 +306,20 @@ async function resolvePublicModel(modelId: string) {
     return model;
 }
 
-async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks: QueuedTask[]) => void) {
+async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks: QueuedTask[]) => void, haltOnPaused = false) {
     const wanted = new Set(ids);
     for (;;) {
         if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
-        const result = await request<{ tasks: QueuedTask[] }>("/api/tasks");
-        const tasks = result.tasks.filter((task) => wanted.has(task.id));
+        const tasks = haltOnPaused
+            ? await Promise.all(ids.map(async (id) => {
+                const task = await getQueuedTask(id);
+                if (!task) throw new Error(`原任务 ${id} 不存在或无权访问`);
+                return task;
+            }))
+            : (await request<{ tasks: QueuedTask[] }>("/api/tasks")).tasks.filter((task) => wanted.has(task.id));
         onPoll?.(tasks);
+        const paused = haltOnPaused ? tasks.find((task) => task.status === "paused") : undefined;
+        if (paused) throw new QueuedTaskPausedError(paused);
         if (tasks.length === ids.length && tasks.every((task) => ["success", "failed", "cancelled"].includes(task.status))) return tasks;
         await delay(1_000, signal);
     }

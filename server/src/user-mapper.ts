@@ -5,6 +5,7 @@ export type UserRow = {
     role: SessionUser["role"]; status: SessionUser["status"]; department_id: string | null;
     department_name: string | null; must_change_password: boolean; mfa_enabled: boolean;
     group_id: string | null; group_name: string | null; group_role: SessionUser["groupRole"];
+    is_guest?: boolean;
     credit_balance: number; credit_limit: number; monthly_credit_limit: number;
     temporary_credit_adjustment: number; credit_period_start: string; credit_reset_at: string;
 };
@@ -23,7 +24,7 @@ export function mapUser(row: UserRow): SessionUser {
     };
 }
 
-export const userSelect = `u.id, u.username, u.display_name, u.email, u.employee_no, u.role, u.status,
+export const userSelect = `u.id, u.username, u.display_name, u.email, u.employee_no, u.role, u.status, u.is_guest,
     u.department_id, d.name AS department_name, u.must_change_password, u.mfa_enabled,
     (SELECT gm.group_id FROM group_memberships gm JOIN designer_groups g ON g.id=gm.group_id
       WHERE gm.user_id=u.id AND gm.ended_at IS NULL AND g.status='active' LIMIT 1) AS group_id,

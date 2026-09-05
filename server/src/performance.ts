@@ -1,5 +1,5 @@
 import type { Database } from "./db";
-import { projectAssetEvents, type AssetEventRecord, type AssetEventType } from "./asset-events";
+import { activeAssetEvents, projectAssetEvents, type AssetEventRecord, type AssetEventType } from "./asset-events";
 import { designDirections, type DesignDirection } from "./design-direction";
 import type { SessionUser } from "./types";
 
@@ -114,27 +114,37 @@ type PerformanceComparisons = { previousMonth: DesignerSummary | null; sameGroup
 
 export function aggregatePerformance(tasks: TaskRow[], assets: AssetRow[], events: AssetEventRecord[], batches: BatchRow[], filters: PerformanceFilters, options: PerformanceOptions) {
   const eventMap = new Map<string, AssetEventRecord[]>();
-  for (const event of events) eventMap.set(event.assetId, [...(eventMap.get(event.assetId) ?? []), event]);
-  const projections = new Map(assets.map((asset) => [asset.id, projectAssetEvents(eventMap.get(asset.id) ?? [])]));
+  for (const event of events) {
+    const assetEvents = eventMap.get(event.assetId);
+    if (assetEvents) assetEvents.push(event);
+    else eventMap.set(event.assetId, [event]);
+  }
+  const activeEventMap = new Map<string, AssetEventRecord[]>();
+  for (const [assetId, assetEvents] of eventMap) activeEventMap.set(assetId, activeAssetEvents(assetEvents));
+  const projections = new Map(assets.map((asset) => [asset.id, projectAssetEvents(activeEventMap.get(asset.id) ?? [])]));
+  const tasksByDay = groupBy(tasks, (task) => shanghaiDate(task.queuedAt));
+  const assetsByDay = groupBy(assets, (asset) => shanghaiDate(asset.createdAt));
+  const tasksByUser = groupBy(tasks, (task) => task.userId);
+  const assetsByUser = groupBy(assets, (asset) => asset.userId);
   const terminal = tasks.filter((task) => ["success", "failed", "cancelled"].includes(task.status));
   const successes = tasks.filter((task) => task.status === "success");
   const failed = tasks.filter((task) => task.status === "failed");
   const cancelled = tasks.filter((task) => task.status === "cancelled");
   const totalCredits = successes.reduce((sum, task) => sum + task.credits, 0);
   const totalRmbCost = successes.reduce((sum, task) => sum + task.rmbCost, 0);
-  const activeDays = new Set(assets.map((asset) => shanghaiDate(asset.createdAt))).size;
+  const activeDays = assetsByDay.size;
   const naturalDays = Math.max(1, Math.ceil((new Date(filters.to).getTime() - new Date(filters.from).getTime()) / 86_400_000));
   const durations = terminal.flatMap((task) => task.startedAt && task.completedAt ? [new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime()] : []);
-  const adoptedAssets = assets.filter((asset) => hasEffective(eventMap.get(asset.id), "asset.adopted"));
+  const adoptedAssets = assets.filter((asset) => hasEffective(activeEventMap.get(asset.id), "asset.adopted"));
   const deliveredWithDeadline = assets.flatMap((asset) => {
     const deadline = asset.taskDeadlineAt ?? asset.projectDeadlineAt;
-    const delivered = firstEffectiveTime(eventMap.get(asset.id), "asset.delivered");
+    const delivered = firstEffectiveTime(activeEventMap.get(asset.id), "asset.delivered");
     return deadline && delivered ? [{ deadline, delivered }] : [];
   });
   const reworked = adoptedAssets.filter((asset) => {
-    const adoptedAt = firstEffectiveTime(eventMap.get(asset.id), "asset.adopted");
+    const adoptedAt = firstEffectiveTime(activeEventMap.get(asset.id), "asset.adopted");
     const adoptedTimestamp = adoptedAt ? new Date(adoptedAt).getTime() : null;
-    return (eventMap.get(asset.id) ?? []).some((event) => event.firstEffective
+    return (activeEventMap.get(asset.id) ?? []).some((event) => event.firstEffective
       && ["asset.edited", "asset.reused"].includes(event.eventType)
       && adoptedTimestamp !== null && new Date(event.occurredAt).getTime() > adoptedTimestamp);
   });
@@ -143,24 +153,25 @@ export function aggregatePerformance(tasks: TaskRow[], assets: AssetRow[], event
     ["downloaded", "asset.downloaded"], ["adopted", "asset.adopted"], ["delivered", "asset.delivered"],
   ];
   const funnel = funnelTypes.map(([stage, type]) => {
-    const count = type ? assets.filter((asset) => hasEffective(eventMap.get(asset.id), type)).length : assets.length;
+    const count = type ? assets.filter((asset) => hasEffective(activeEventMap.get(asset.id), type)).length : assets.length;
     return { stage, count, rate: percentage(count, assets.length) };
   });
+  const directionCounts = countBy(assets, (asset) => asset.primaryDirection ?? "unclassified");
   const directions = designDirections.map((direction) => ({
     direction,
-    count: assets.filter((asset) => asset.primaryDirection === direction).length,
-    rate: percentage(assets.filter((asset) => asset.primaryDirection === direction).length, assets.length),
+    count: directionCounts[direction] ?? 0,
+    rate: percentage(directionCounts[direction] ?? 0, assets.length),
   })).filter((item) => item.count > 0);
   const trendDays = dateKeys(filters.from, filters.to);
   const trend = trendDays.map((date) => {
-    const dayAssets = assets.filter((asset) => shanghaiDate(asset.createdAt) === date);
-    const dayTasks = tasks.filter((task) => shanghaiDate(task.queuedAt) === date);
+    const dayAssets = assetsByDay.get(date) ?? [];
+    const dayTasks = tasksByDay.get(date) ?? [];
     return { date, outputs: dayAssets.length, success: dayTasks.filter((task) => task.status === "success").length,
       failed: dayTasks.filter((task) => task.status === "failed").length,
       credits: dayTasks.filter((task) => task.status === "success").reduce((sum, task) => sum + task.credits, 0) };
   });
-  const userIds = [...new Set([...tasks.map((task) => task.userId), ...assets.map((asset) => asset.userId)])];
-  const designers = userIds.map((userId) => designerSummary(userId, tasks, assets, eventMap, projections));
+  const userIds = [...new Set([...tasksByUser.keys(), ...assetsByUser.keys()])];
+  const designers = userIds.map((userId) => designerSummary(userId, tasksByUser.get(userId) ?? [], assetsByUser.get(userId) ?? [], activeEventMap, projections));
   const failureReasons = Object.entries(countBy(failed, (task) => task.failureReason || "未知原因"))
     .map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count).slice(0, 10);
   const batchTotal = batches.reduce((sum, batch) => sum + batch.totalItems, 0);
@@ -187,9 +198,7 @@ export function aggregatePerformance(tasks: TaskRow[], assets: AssetRow[], event
   };
 }
 
-function designerSummary(userId: string, tasks: TaskRow[], assets: AssetRow[], eventMap: Map<string, AssetEventRecord[]>, projections: Map<string, ReturnType<typeof projectAssetEvents>>) {
-  const userTasks = tasks.filter((task) => task.userId === userId);
-  const userAssets = assets.filter((asset) => asset.userId === userId);
+function designerSummary(userId: string, userTasks: TaskRow[], userAssets: AssetRow[], eventMap: Map<string, AssetEventRecord[]>, projections: Map<string, ReturnType<typeof projectAssetEvents>>) {
   const successful = userTasks.filter((task) => task.status === "success");
   const terminal = userTasks.filter((task) => ["success", "failed", "cancelled"].includes(task.status));
   const adopted = userAssets.filter((asset) => hasEffective(eventMap.get(asset.id), "asset.adopted")).length;
@@ -253,6 +262,16 @@ function round(value: number) { return Math.round(value * 100) / 100; }
 function shanghaiDate(value: string) { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value)); }
 function dateKeys(from: string, to: string) { const result: string[] = []; for (let cursor = new Date(from); cursor < new Date(to) && result.length < 367; cursor = new Date(cursor.getTime() + 86_400_000)) result.push(shanghaiDate(cursor.toISOString())); return [...new Set(result)]; }
 function countBy<T>(items: T[], key: (item: T) => string) { return items.reduce<Record<string, number>>((result, item) => { const value = key(item); result[value] = (result[value] ?? 0) + 1; return result; }, {}); }
+function groupBy<T>(items: T[], key: (item: T) => string) {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const value = key(item);
+    const group = groups.get(value);
+    if (group) group.push(item);
+    else groups.set(value, [item]);
+  }
+  return groups;
+}
 function topKey<T>(items: T[], key: (item: T) => string) { return Object.entries(countBy(items, key)).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null; }
 export function previousCalendarMonth(to: string) {
   const anchor = shanghaiDate(new Date(new Date(to).getTime() - 1).toISOString());

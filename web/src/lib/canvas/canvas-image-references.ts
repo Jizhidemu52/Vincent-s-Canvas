@@ -8,7 +8,7 @@ export function resolveCanvasImageReferences(node: CanvasNodeData, nodes: Canvas
     const excluded = new Set(node.metadata?.excludedConnectedImageReferenceKeys || []);
     const connected = getGenerationResourceNodes(node.id, nodes, connections)
         .filter((candidate) => candidate.type === CanvasNodeType.Image && Boolean(candidate.metadata?.content))
-        .map((candidate) => createImageReferenceItem({ id: candidate.id, name: `${candidate.title || candidate.id}.png`, type: candidate.metadata?.mimeType || "image/png", dataUrl: candidate.metadata!.content!, storageKey: candidate.metadata?.storageKey }, "connection"))
+        .map((candidate) => createImageReferenceItem({ id: candidate.id, name: candidate.metadata?.originalFileName || candidate.title || candidate.id, originalFileName: candidate.metadata?.originalFileName, type: candidate.metadata?.mimeType || "image/png", dataUrl: candidate.metadata!.content!, storageKey: candidate.metadata?.storageKey }, "connection"))
         .map((reference) => ({ ...reference, referenceKey: `node:${reference.id}` }))
         .filter((reference) => !excluded.has(reference.referenceKey));
     return applyCanvasReferenceOrder(dedupeImageReferences([...manual, ...connected]), node.metadata?.imageReferenceOrder || []);

@@ -5,7 +5,8 @@
     "type": "module",
     "scripts": {
         "dev": "vite --host 0.0.0.0 --port 3000",
-        "build": "tsc --noEmit && vite build",
+        "build": "bun run clean:dist && tsc --noEmit && vite build && bun scripts/bundle-budget.mjs",
+        "clean:dist": "bun scripts/clean-dist.mjs",
         "test": "bun test",
         "start": "vite preview --host 0.0.0.0 --port 3000",
         "format": "prettier --write .",

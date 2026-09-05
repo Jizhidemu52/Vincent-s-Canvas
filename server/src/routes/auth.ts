@@ -13,6 +13,7 @@ import { mapUser, userSelect, type UserRow } from "../user-mapper";
 import { rateLimit } from "../http-security";
 import { createWeComAuthorizationUrl, exchangeWeComCode, WeComError } from "../wecom";
 import { refreshMonthlyCreditPeriod } from "../billing";
+import { deploymentFeatures } from "../deployment-features";
 
 const loginSchema = z.object({
     identifier: z.string().trim().min(1).max(200),
@@ -23,6 +24,7 @@ const passwordSchema = z.object({ currentPassword: z.string().min(1), newPasswor
 
 export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) {
     const router = Router();
+    const features = deploymentFeatures(config);
     const requireSession = sessionMiddleware(db, cache, config);
 
     router.post("/login", rateLimit(cache, {
@@ -41,7 +43,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             );
             const row = result.rows[0];
             const valid = row?.password_hash ? await verifyPassword(row.password_hash, input.password) : false;
-            if (!row || !valid || row.status !== "active" || (row.locked_until && row.locked_until > new Date()) || !canUsePortal(row.role, input.portal)) {
+            if (!row || !valid || row.status !== "active" || row.is_guest || (row.locked_until && row.locked_until > new Date()) || (features.rolePortalsEnabled && !canUsePortal(row.role, input.portal))) {
                 if (row) {
                     await db.query(`UPDATE users SET failed_login_count=failed_login_count+1,
                         locked_until=CASE WHEN failed_login_count+1>=5 THEN now()+interval '15 minutes' ELSE locked_until END WHERE id=$1`, [row.id]);
@@ -67,7 +69,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             }
             await cache.set(`session:${hashToken(session.token)}`, session.id, { EX: config.SESSION_TTL_SECONDS });
             setSessionCookie(response, config, session.token);
-            await refreshMonthlyCreditPeriod(db, row.id);
+            if (features.creditsEnabled) await refreshMonthlyCreditPeriod(db, row.id);
             const refreshed = await db.query<UserRow>(
                 `SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`, [row.id],
             );
@@ -79,7 +81,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
 
     router.get("/session", requireSession, (request, response) => response.json({ user: (request as unknown as AuthenticatedRequest).auth }));
 
-    router.post("/logout", requireSession, async (request, response, next) => {
+    router.post("/logout", sessionMiddleware(db, cache, config, { allowGuest: false }), async (request, response, next) => {
         try {
             const authenticated = request as unknown as AuthenticatedRequest;
             const token = request.cookies[config.SESSION_COOKIE_NAME];
@@ -91,7 +93,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
         } catch (error) { next(error); }
     });
 
-    router.post("/change-password", requireSession, async (request, response, next) => {
+    router.post("/change-password", sessionMiddleware(db, cache, config, { allowGuest: false }), async (request, response, next) => {
         try {
             const input = passwordSchema.parse(request.body);
             const passwordError = validatePassword(input.newPassword);
@@ -136,7 +138,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
                  WHERE e.subject=$1 OR u.employee_no=$1 ORDER BY (e.subject=$1) DESC LIMIT 1`, [userId],
             );
             const row = result.rows[0];
-            if (!row || row.status !== "active" || !canUsePortal(row.role, portal as "designer" | "admin")) {
+            if (!row || row.status !== "active" || row.is_guest || (features.rolePortalsEnabled && !canUsePortal(row.role, portal as "designer" | "admin"))) {
                 response.status(403).send("该企业微信成员尚未开通对应平台权限"); return;
             }
             const session = createSessionToken();
@@ -164,7 +166,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             setSessionCookie(response, config, session.token);
             const user = mapUser(row);
             await writeAudit(db, { actor: user, action: "auth.wecom_login", targetType: "session", targetId: session.id, result: "success", ip: request.ip });
-            const destination = user.mustChangePassword ? "/change-password" : user.role === "designer" ? "/" : "/admin";
+            const destination = user.mustChangePassword ? "/change-password" : !features.rolePortalsEnabled || user.role === "designer" ? "/" : "/admin";
             response.redirect(302, destination);
         } catch (error) {
             if (error instanceof WeComError) {

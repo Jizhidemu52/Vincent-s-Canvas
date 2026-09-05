@@ -12,11 +12,14 @@ export default defineConfig(({ mode }) => {
     return {
         plugins: [react()],
         build: {
+            // A deploy is a complete immutable asset set. Keeping old hashed files
+            // here made local packages grow by hundreds of megabytes after rebuilds.
+            emptyOutDir: true,
             chunkSizeWarningLimit: 1500,
         },
         server: {
             proxy: {
-                "/api": { target: env.VITE_API_PROXY_TARGET || "http://localhost:3100", changeOrigin: true },
+                "/api": { target: env.VITE_API_PROXY_TARGET || "http://127.0.0.1:3100", changeOrigin: true },
             },
         },
         resolve: {

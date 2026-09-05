@@ -15,7 +15,9 @@ export type VideoModelCapability = {
   minImages: number;
   maxImages: number;
   firstFrameRequired: boolean;
+  /** Whether the channel exposes a generate_audio toggle; not whether output has native sound. */
   supportsAudio: boolean;
+  supportsWatermark: boolean;
 };
 
 export type ProviderVideoSource = {
@@ -31,6 +33,7 @@ export type VideoProviderParameters = {
   resolution?: unknown;
   watermark?: unknown;
   generateAudio?: unknown;
+  happyHorseMode?: unknown;
 };
 
 export type ProviderVideoRequest = {
@@ -51,19 +54,21 @@ export const videoModelCapabilities: Record<SupportedVideoModelId, VideoModelCap
     resolutions: ["768P", "2K"],
     sizes: miniMaxRatios,
     minImages: 0,
-    maxImages: 1,
+    maxImages: 9,
     firstFrameRequired: false,
     supportsAudio: false,
+    supportsWatermark: true,
   },
   "doubao-seedance-2.5": {
     model: "doubao-seedance-2.5",
     seconds: [4, 30],
-    resolutions: ["480p", "720p"],
+    resolutions: ["480p", "720p", "1080p"],
     sizes: seedanceRatios,
     minImages: 0,
     maxImages: 30,
     firstFrameRequired: false,
     supportsAudio: true,
+    supportsWatermark: true,
   },
   "wan2.7": {
     model: "wan2.7",
@@ -74,6 +79,7 @@ export const videoModelCapabilities: Record<SupportedVideoModelId, VideoModelCap
     maxImages: 2,
     firstFrameRequired: false,
     supportsAudio: false,
+    supportsWatermark: true,
   },
   "happyhorse-1.1": {
     model: "happyhorse-1.1",
@@ -84,6 +90,7 @@ export const videoModelCapabilities: Record<SupportedVideoModelId, VideoModelCap
     maxImages: 9,
     firstFrameRequired: false,
     supportsAudio: false,
+    supportsWatermark: true,
   },
 };
 
@@ -108,11 +115,14 @@ export function buildVideoProviderRequest(
   const images = sources.filter((source) => source.mimeType.startsWith("image/"));
   if (images.length !== sources.length) throw new Error("Only image references are supported for this video request");
   if (images.some((source) => source.bytes.byteLength > 10 * 1024 * 1024)) throw new Error("Each image must be 10MB or smaller");
+  if (["MiniMax-H3", "happyhorse-1.1"].includes(model) && images.some((image) => image.mimeType === "image/gif")) throw new Error(`${model} does not accept GIF reference images; use JPEG, PNG or WebP`);
 
   if (model === "MiniMax-H3") {
+    if (images.length > 9) throw new Error("MiniMax-H3 accepts up to 9 image references");
+    if (prompt.length > 7000) throw new Error("MiniMax-H3 prompt must be 7000 characters or fewer");
     const duration = clampDuration(parameters.seconds, 5, 4, 15);
     const resolution = normalizeResolution(parameters.resolution, ["2K", "768P"], "2K");
-    const size = normalizeChoice(parameters.size, miniMaxRatios, "16:9");
+    const size = images.length === 1 ? "adaptive" : normalizeChoice(parameters.size, miniMaxRatios, "16:9");
     return {
       duration,
       resolution,
@@ -122,8 +132,9 @@ export function buildVideoProviderRequest(
         prompt,
         duration,
         resolution,
-        aspect_ratio: size,
-        ...(images[0] ? { first_frame_image: toRemoteImageUrl(model, images[0]) } : {}),
+        ...(images.length !== 1 ? { aspect_ratio: size } : {}),
+        watermark: parameters.watermark === true,
+        ...(images.length === 1 ? { first_frame_image: toRemoteImageUrl(model, images[0]) } : images.length > 1 ? { image_urls: images.map((image) => toRemoteImageUrl(model, image)) } : {}),
       },
     };
   }
@@ -131,14 +142,14 @@ export function buildVideoProviderRequest(
   if (model === "doubao-seedance-2.5") {
     if (images.length > 30) throw new Error("doubao-seedance-2.5 accepts up to 30 image references");
     const duration = Number(parameters.seconds) === -1 ? -1 : clampDuration(parameters.seconds, 5, 4, 30);
-    const resolution = normalizeResolution(parameters.resolution, ["480p", "720p"], "720p");
+    const resolution = normalizeResolution(parameters.resolution, ["480p", "720p", "1080p"], "720p");
     const size = normalizeChoice(parameters.size === "auto" ? "adaptive" : parameters.size, seedanceRatios, "adaptive");
     return {
       duration,
       resolution,
       size,
       body: {
-        model,
+        model: "seedance-2.5",
         prompt,
         duration,
         resolution,
@@ -152,9 +163,10 @@ export function buildVideoProviderRequest(
 
   if (model === "wan2.7") {
     if (images.length > 2) throw new Error("wan2.7 accepts one first frame or a first and last frame");
+    if (prompt.length > 5000) throw new Error("wan2.7 prompt must be 5000 characters or fewer");
     const duration = clampDuration(parameters.seconds, 5, 2, 15);
     const resolution = normalizeResolution(parameters.resolution, ["720P", "1080P"], "1080P");
-    const size = normalizeChoice(parameters.size, standardRatios, "16:9");
+    const size = images.length ? "adaptive" : normalizeChoice(parameters.size, standardRatios, "16:9");
     return {
       duration,
       resolution,
@@ -164,7 +176,7 @@ export function buildVideoProviderRequest(
         prompt,
         duration,
         resolution,
-        size,
+        ...(!images.length ? { size } : {}),
         prompt_extend: true,
         watermark: parameters.watermark === true,
         ...(images.length ? { image_urls: images.map((image) => toRemoteImageUrl(model, image)) } : {}),
@@ -173,9 +185,16 @@ export function buildVideoProviderRequest(
   }
 
   if (images.length > 9) throw new Error("happyhorse-1.1 accepts up to 9 image references");
+  if (prompt.length > 2500) throw new Error("happyhorse-1.1 prompt must be 2500 characters or fewer");
+  const mode = parameters.happyHorseMode;
+  if (mode !== undefined && !["text", "first-frame", "reference"].includes(String(mode))) throw new Error("happyhorse-1.1 supports text, first-frame or reference mode only");
+  if (mode === "text" && images.length) throw new Error("happyhorse-1.1 text mode does not accept images");
+  if (mode === "first-frame" && images.length !== 1) throw new Error("happyhorse-1.1 first-frame mode requires exactly one image");
+  if (mode === "reference" && !images.length) throw new Error("happyhorse-1.1 reference mode requires 1 to 9 images");
+  const firstFrame = images.length === 1 && mode !== "reference";
   const duration = clampDuration(parameters.seconds, 5, 3, 15);
   const resolution = normalizeResolution(parameters.resolution, ["720P", "1080P"], "1080P");
-  const size = normalizeChoice(parameters.size, standardRatios, "16:9");
+  const size = firstFrame ? "adaptive" : normalizeChoice(parameters.size, standardRatios, "16:9");
   return {
     duration,
     resolution,
@@ -185,11 +204,11 @@ export function buildVideoProviderRequest(
       prompt,
       duration,
       resolution,
-      size,
+      ...(!firstFrame ? { size } : {}),
       watermark: parameters.watermark === true,
-      ...(images.length === 1
+      ...(firstFrame
         ? { first_frame_image: toRemoteImageUrl(model, images[0]) }
-        : images.length > 1
+        : images.length > 0
           ? { image_urls: images.map((image) => toRemoteImageUrl(model, image)) }
           : {}),
     },

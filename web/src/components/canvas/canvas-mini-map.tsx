@@ -1,13 +1,14 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { drawMinimapNodeRects } from "@/lib/canvas/canvas-minimap-drawing";
-import { createMinimapNodeRects, type MinimapNodeRect } from "@/lib/canvas/canvas-minimap-layout";
+import { getFastCanvas2DContext } from "@/lib/canvas/canvas-2d-context";
+import { createMinimapLayout, createMinimapNodeRects, refreshMinimapLayout, type MinimapLayout, type MinimapNodeGeometry, type MinimapNodeRect } from "@/lib/canvas/canvas-minimap-layout";
 import { minimapViewportAtWorldPoint } from "@/lib/canvas/canvas-minimap-preview";
 import { createRafLatestScheduler } from "@/lib/canvas/canvas-raf-scheduler";
 import { minimapPropsEqual } from "@/lib/canvas/canvas-floating-surface-render-stability";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
-import type { CanvasNodeData, ViewportTransform } from "@/types/canvas";
+import type { ViewportTransform } from "@/types/canvas";
 
 const MinimapNodeLayer = memo(function MinimapNodeLayer({ rects }: { rects: MinimapNodeRect[] }) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -25,7 +26,7 @@ const MinimapNodeLayer = memo(function MinimapNodeLayer({ rects }: { rects: Mini
             canvas.width = pixelWidth;
             canvas.height = pixelHeight;
         }
-        const context = canvas.getContext("2d");
+        const context = getFastCanvas2DContext(canvas);
         if (!context) return;
         context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
         context.clearRect(0, 0, width, height);
@@ -42,7 +43,7 @@ export const Minimap = memo(function Minimap({
     onViewportPreview,
     onViewportChange,
 }: {
-    nodes: CanvasNodeData[];
+    nodes: readonly MinimapNodeGeometry[];
     viewport: ViewportTransform;
     viewportSize: { width: number; height: number };
     onViewportPreview: (viewport: ViewportTransform) => void;
@@ -50,9 +51,11 @@ export const Minimap = memo(function Minimap({
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const containerRef = useRef<HTMLDivElement>(null);
+    const containerRectRef = useRef<DOMRect | null>(null);
     const onViewportPreviewRef = useRef(onViewportPreview);
     const onViewportChangeRef = useRef(onViewportChange);
     const viewportSchedulerRef = useRef<ReturnType<typeof createRafLatestScheduler<ViewportTransform>> | null>(null);
+    const layoutRef = useRef<MinimapLayout | null>(null);
     const liveViewportRef = useRef(viewport);
     const isDraggingRef = useRef(false);
     const [previewViewport, setPreviewViewport] = useState(viewport);
@@ -79,40 +82,28 @@ export const Minimap = memo(function Minimap({
 
     useEffect(() => () => viewportSchedulerRef.current?.cancel(), []);
 
-    const { worldBounds, scale, offset } = useMemo(() => {
-        if (!nodes.length) {
-            return { worldBounds: { x: -500, y: -500, w: 1000, h: 1000 }, scale: 0.16, offset: { x: 40, y: 0 } };
-        }
+    const syncContainerRect = useCallback(() => {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) containerRectRef.current = rect;
+        return rect;
+    }, []);
 
-        let minX = Infinity;
-        let minY = Infinity;
-        let maxX = -Infinity;
-        let maxY = -Infinity;
+    useLayoutEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
 
-        nodes.forEach((node) => {
-            minX = Math.min(minX, node.position.x);
-            minY = Math.min(minY, node.position.y);
-            maxX = Math.max(maxX, node.position.x + node.width);
-            maxY = Math.max(maxY, node.position.y + node.height);
-        });
+        syncContainerRect();
+        const observer = new ResizeObserver(() => syncContainerRect());
+        observer.observe(container);
+        return () => observer.disconnect();
+    }, [syncContainerRect]);
 
-        minX -= 500;
-        minY -= 500;
-        maxX += 500;
-        maxY += 500;
-
-        const boundsWidth = maxX - minX;
-        const boundsHeight = maxY - minY;
-        const nextScale = Math.min(width / boundsWidth, height / boundsHeight);
-        const mapContentW = boundsWidth * nextScale;
-        const mapContentH = boundsHeight * nextScale;
-
-        return {
-            worldBounds: { x: minX, y: minY, w: boundsWidth, h: boundsHeight },
-            scale: nextScale,
-            offset: { x: (width - mapContentW) / 2, y: (height - mapContentH) / 2 },
-        };
+    const layout = useMemo(() => {
+        const nextLayout = layoutRef.current ? refreshMinimapLayout(layoutRef.current, nodes, width, height) : createMinimapLayout(nodes, width, height);
+        layoutRef.current = nextLayout;
+        return nextLayout;
     }, [nodes]);
+    const { worldBounds, scale, offset } = layout;
 
     const toMinimap = useCallback(
         (worldX: number, worldY: number) => {
@@ -149,10 +140,10 @@ export const Minimap = memo(function Minimap({
             h: Math.max(p2.y - p1.y, 4),
         };
     }, [previewViewport.k, previewViewport.x, previewViewport.y, toMinimap, viewportSize.height, viewportSize.width]);
-    const nodeRects = useMemo(() => createMinimapNodeRects(nodes, scale, offset, theme.node.muted), [nodes, offset, scale, theme.node.muted]);
+    const nodeRects = useMemo(() => createMinimapNodeRects(layout.nodes, scale, offset, theme.node.muted), [layout, offset, scale, theme.node.muted]);
 
     const updateViewportFromEvent = (event: React.PointerEvent) => {
-        const rect = containerRef.current?.getBoundingClientRect();
+        const rect = containerRectRef.current || syncContainerRect();
         if (!rect) return;
 
         const world = toWorld(event.clientX - rect.left, event.clientY - rect.top);
@@ -167,7 +158,7 @@ export const Minimap = memo(function Minimap({
     };
 
     return (
-        <div className="absolute bottom-16 left-5 z-50 overflow-hidden rounded-lg border shadow-[0_12px_30px_rgba(15,23,42,.10)] backdrop-blur-sm" style={{ width, height, background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
+        <div className="absolute bottom-16 right-3 z-50 overflow-hidden rounded-lg border shadow-[0_12px_30px_rgba(15,23,42,.10)] backdrop-blur-sm" style={{ width, height, background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
             <div
                 ref={containerRef}
                 className="relative h-full w-full cursor-crosshair"
@@ -175,6 +166,7 @@ export const Minimap = memo(function Minimap({
                     event.preventDefault();
                     event.currentTarget.setPointerCapture(event.pointerId);
                     isDraggingRef.current = true;
+                    syncContainerRect();
                     updateViewportFromEvent(event);
                 }}
                 onPointerMove={(event) => {

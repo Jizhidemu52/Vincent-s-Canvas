@@ -1,11 +1,15 @@
-import React, { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef } from "react";
+import React, { forwardRef, memo, useCallback, useImperativeHandle, useLayoutEffect, useRef } from "react";
 
 import { createConnectionGeometryCache, type CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
-import { createCanvasConnectionDrawCache, drawCanvasConnectionBatches, filterCanvasConnectionDrawBatches, type CanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
+import { getFastCanvas2DContext } from "@/lib/canvas/canvas-2d-context";
+import { canvasConnectionViewportBounds, createCanvasConnectionDrawCache, drawCanvasConnectionBatches, filterCanvasConnectionDrawBatches, type CanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
 import { canvasConnectionCanvasSize, type CanvasConnectionCanvasSize } from "@/lib/canvas/canvas-connection-canvas-size";
+import { shouldDrawCanvasConnectionLayer, shouldRedrawCanvasConnectionLayer, type CanvasConnectionLayerPaintState } from "@/lib/canvas/canvas-dynamic-connection-layer";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
+
+const EMPTY_CONNECTION_DRAW_BATCHES: CanvasConnectionDrawBatches = { regular: [], active: [] };
 
 export type CanvasConnectionLayerHandle = {
     draw: (viewport: ViewportTransform) => void;
@@ -22,20 +26,24 @@ type CanvasConnectionLayerProps = {
     onDrawFailure: () => void;
 };
 
-export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, CanvasConnectionLayerProps>(function CanvasConnectionLayer(
+export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle, CanvasConnectionLayerProps>(function CanvasConnectionLayer(
     { connections, resolveNode, viewport, activeConnectionIds, affectedConnectionIds, isDraggingNodes, onDrawFailure },
     ref,
 ) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const staticCanvasRef = useRef<HTMLCanvasElement>(null);
     const dynamicCanvasRef = useRef<HTMLCanvasElement>(null);
-    const canvasSizeRef = useRef<CanvasConnectionCanvasSize | null>(null);
+    const staticCanvasSizeRef = useRef<CanvasConnectionCanvasSize | null>(null);
+    const dynamicCanvasSizeRef = useRef<CanvasConnectionCanvasSize | null>(null);
     const latestViewportRef = useRef(viewport);
     const geometryCacheRef = useRef(createConnectionGeometryCache());
     const resolveGeometryRef = useRef<(connection: CanvasConnection) => CanvasConnectionGeometry | undefined>(() => undefined);
     const drawCacheRef = useRef(createCanvasConnectionDrawCache((connection) => resolveGeometryRef.current(connection)));
     const batchesRef = useRef<CanvasConnectionDrawBatches>({ regular: [], active: [] });
     const dynamicConnectionIdsRef = useRef<ReadonlySet<string>>(new Set());
+    const staticCanvasHasContentRef = useRef(false);
+    const dynamicCanvasHasContentRef = useRef(false);
+    const staticPaintStateRef = useRef<CanvasConnectionLayerPaintState | null>(null);
     const splitBatchesRef = useRef<{ source: CanvasConnectionDrawBatches | null; ids: ReadonlySet<string>; static: CanvasConnectionDrawBatches; dynamic: CanvasConnectionDrawBatches }>({
         source: null,
         ids: new Set(),
@@ -44,6 +52,7 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     });
     const wasDraggingNodesRef = useRef(false);
     const failedRef = useRef(false);
+    const staticPaintKey = `${theme.node.muted}:${theme.node.activeStroke}`;
     latestViewportRef.current = viewport;
     resolveGeometryRef.current = (connection) => {
         const from = resolveNode(connection.fromNodeId);
@@ -54,22 +63,26 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
     batchesRef.current = drawCacheRef.current.sync(connections, activeConnectionIds, affectedConnectionIds, refreshAllGeometry);
 
     const syncCanvasSize = useCallback((cssWidth: number, cssHeight: number) => {
-        const next = canvasConnectionCanvasSize(cssWidth, cssHeight, window.devicePixelRatio || 1);
-        const previous = canvasSizeRef.current;
-        if ((previous === null && next === null) || (previous !== null && next !== null && previous.cssWidth === next.cssWidth && previous.cssHeight === next.cssHeight && previous.pixelRatio === next.pixelRatio)) return;
-        canvasSizeRef.current = next;
+        const pixelRatio = window.devicePixelRatio || 1;
+        const nextStatic = canvasConnectionCanvasSize(cssWidth, cssHeight, pixelRatio);
+        const nextDynamic = canvasConnectionCanvasSize(cssWidth, cssHeight, pixelRatio, 1);
+        if (!sameCanvasSize(staticCanvasSizeRef.current, nextStatic)) {
+            staticCanvasSizeRef.current = nextStatic;
+            staticPaintStateRef.current = null;
+        }
+        if (!sameCanvasSize(dynamicCanvasSizeRef.current, nextDynamic)) dynamicCanvasSizeRef.current = nextDynamic;
     }, []);
 
     const drawBatches = useCallback(
-        (canvas: HTMLCanvasElement | null, nextViewport: ViewportTransform, batches: CanvasConnectionDrawBatches) => {
+        (canvas: HTMLCanvasElement | null, nextViewport: ViewportTransform, batches: CanvasConnectionDrawBatches, sizeRef: React.MutableRefObject<CanvasConnectionCanvasSize | null>) => {
             if (!canvas) return false;
-            let size = canvasSizeRef.current;
+            let size = sizeRef.current;
             if (!size) {
                 const host = canvas.parentElement;
                 if (!host) return false;
                 const rect = host.getBoundingClientRect();
                 syncCanvasSize(rect.width, rect.height);
-                size = canvasSizeRef.current;
+                size = sizeRef.current;
                 if (!size) return true;
             }
 
@@ -79,13 +92,18 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
             }
 
             try {
-                const context = canvas.getContext("2d");
+                const context = getFastCanvas2DContext(canvas);
                 if (!context) throw new Error("Canvas 2D context is unavailable");
                 context.setTransform(size.pixelRatio, 0, 0, size.pixelRatio, 0, 0);
                 context.clearRect(0, 0, size.cssWidth, size.cssHeight);
                 context.translate(nextViewport.x, nextViewport.y);
                 context.scale(nextViewport.k, nextViewport.k);
-                return drawCanvasConnectionBatches(context, batches, { stroke: theme.node.muted, activeStroke: theme.node.activeStroke });
+                return drawCanvasConnectionBatches(
+                    context,
+                    batches,
+                    { stroke: theme.node.muted, activeStroke: theme.node.activeStroke },
+                    canvasConnectionViewportBounds(nextViewport, { width: size.cssWidth, height: size.cssHeight }),
+                );
             } catch {
                 return false;
             }
@@ -119,15 +137,38 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
             const dynamicIds = dynamicConnectionIdsRef.current;
             if (isDraggingNodes && dynamicIds.size) {
                 const { batches } = splitBatches(dynamicIds);
-                if (drawBatches(staticCanvasRef.current, nextViewport, batches.static) && drawBatches(dynamicCanvasRef.current, nextViewport, batches.dynamic)) return;
+                const hasStaticContent = hasCanvasConnectionDrawContent(batches.static);
+                const hasDynamicContent = hasCanvasConnectionDrawContent(batches.dynamic);
+                const needsStaticDraw = shouldRedrawCanvasConnectionLayer(staticPaintStateRef.current, { hasContent: hasStaticContent, batches: batches.static, paintKey: staticPaintKey, viewport: nextViewport });
+                const needsDynamicDraw = shouldDrawCanvasConnectionLayer(dynamicCanvasHasContentRef.current, hasDynamicContent);
+                if (
+                    (!needsStaticDraw || drawBatches(staticCanvasRef.current, nextViewport, batches.static, staticCanvasSizeRef)) &&
+                    (!needsDynamicDraw || drawBatches(dynamicCanvasRef.current, nextViewport, batches.dynamic, dynamicCanvasSizeRef))
+                ) {
+                    staticCanvasHasContentRef.current = hasStaticContent;
+                    dynamicCanvasHasContentRef.current = hasDynamicContent;
+                    if (needsStaticDraw) staticPaintStateRef.current = { hasContent: hasStaticContent, batches: batches.static, paintKey: staticPaintKey, viewport: nextViewport };
+                    return;
+                }
             } else {
                 dynamicConnectionIdsRef.current = new Set();
                 splitBatchesRef.current.source = null;
-                if (drawBatches(staticCanvasRef.current, nextViewport, batchesRef.current) && drawBatches(dynamicCanvasRef.current, nextViewport, { regular: [], active: [] })) return;
+                const hasStaticContent = hasCanvasConnectionDrawContent(batchesRef.current);
+                const needsStaticDraw = shouldRedrawCanvasConnectionLayer(staticPaintStateRef.current, { hasContent: hasStaticContent, batches: batchesRef.current, paintKey: staticPaintKey, viewport: nextViewport });
+                const needsDynamicDraw = shouldDrawCanvasConnectionLayer(dynamicCanvasHasContentRef.current, false);
+                if (
+                    (!needsStaticDraw || drawBatches(staticCanvasRef.current, nextViewport, batchesRef.current, staticCanvasSizeRef)) &&
+                    (!needsDynamicDraw || drawBatches(dynamicCanvasRef.current, nextViewport, EMPTY_CONNECTION_DRAW_BATCHES, dynamicCanvasSizeRef))
+                ) {
+                    staticCanvasHasContentRef.current = hasStaticContent;
+                    dynamicCanvasHasContentRef.current = false;
+                    if (needsStaticDraw) staticPaintStateRef.current = { hasContent: hasStaticContent, batches: batchesRef.current, paintKey: staticPaintKey, viewport: nextViewport };
+                    return;
+                }
             }
             failDrawing();
         },
-        [drawBatches, failDrawing, isDraggingNodes, splitBatches],
+        [drawBatches, failDrawing, isDraggingNodes, splitBatches, staticPaintKey],
     );
 
     const refresh = useCallback(
@@ -141,10 +182,22 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
             }
 
             const { batches, changed } = splitBatches(nextAffectedConnectionIds);
-            if ((!changed || drawBatches(staticCanvasRef.current, nextViewport, batches.static)) && drawBatches(dynamicCanvasRef.current, nextViewport, batches.dynamic)) return;
+            const hasStaticContent = hasCanvasConnectionDrawContent(batches.static);
+            const hasDynamicContent = hasCanvasConnectionDrawContent(batches.dynamic);
+            const needsStaticDraw = changed && shouldRedrawCanvasConnectionLayer(staticPaintStateRef.current, { hasContent: hasStaticContent, batches: batches.static, paintKey: staticPaintKey, viewport: nextViewport });
+            const needsDynamicDraw = shouldDrawCanvasConnectionLayer(dynamicCanvasHasContentRef.current, hasDynamicContent);
+            if (
+                (!needsStaticDraw || drawBatches(staticCanvasRef.current, nextViewport, batches.static, staticCanvasSizeRef)) &&
+                (!needsDynamicDraw || drawBatches(dynamicCanvasRef.current, nextViewport, batches.dynamic, dynamicCanvasSizeRef))
+            ) {
+                if (changed) staticCanvasHasContentRef.current = hasStaticContent;
+                dynamicCanvasHasContentRef.current = hasDynamicContent;
+                if (needsStaticDraw) staticPaintStateRef.current = { hasContent: hasStaticContent, batches: batches.static, paintKey: staticPaintKey, viewport: nextViewport };
+                return;
+            }
             failDrawing();
         },
-        [activeConnectionIds, connections, draw, drawBatches, failDrawing, splitBatches],
+        [activeConnectionIds, connections, draw, drawBatches, failDrawing, splitBatches, staticPaintKey],
     );
 
     useImperativeHandle(ref, () => ({ draw, refresh }), [draw, refresh]);
@@ -179,8 +232,16 @@ export const CanvasConnectionLayer = forwardRef<CanvasConnectionLayerHandle, Can
             <canvas ref={dynamicCanvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" />
         </>
     );
-});
+}));
 
 function sameConnectionIds(previous: ReadonlySet<string>, next: ReadonlySet<string>) {
     return previous.size === next.size && Array.from(previous).every((id) => next.has(id));
+}
+
+function hasCanvasConnectionDrawContent(batches: CanvasConnectionDrawBatches) {
+    return batches.regular.length > 0 || batches.active.length > 0;
+}
+
+function sameCanvasSize(previous: CanvasConnectionCanvasSize | null, next: CanvasConnectionCanvasSize | null) {
+    return (previous === null && next === null) || Boolean(previous && next && previous.cssWidth === next.cssWidth && previous.cssHeight === next.cssHeight && previous.pixelRatio === next.pixelRatio);
 }

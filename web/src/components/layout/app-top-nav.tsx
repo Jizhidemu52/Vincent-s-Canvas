@@ -8,6 +8,7 @@ import { navigationModuleKey, navigationToolBilling, navigationTools, type Navig
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
 import { standaloneEdition } from "@/lib/standalone-edition";
+import { deploymentFeatures } from "@/lib/deployment-features";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -42,9 +43,9 @@ function SidebarTool({ tool, active, badge }: { tool: (typeof navigationTools)[n
         <Link
             to={tool.path}
             aria-current={active ? "page" : undefined}
-            className={cn("group flex h-10 items-center gap-3 rounded-lg px-2.5 text-[13px] font-semibold transition", active ? "!bg-black !text-white shadow-sm" : "!text-stone-500 hover:bg-white hover:!text-stone-950")}
+            className="wb-nav-link group flex h-10 items-center gap-3 rounded-lg px-3"
         >
-            <Icon className={cn("size-4 shrink-0", active ? "!text-white" : "text-stone-400 group-hover:text-orange-600")} />
+            <Icon className="size-4 shrink-0" />
             <span className="min-w-0 truncate">{tool.label}</span>
             {badge ? <span className={cn("ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold", active ? "bg-white/18 text-white" : "bg-orange-50 text-orange-600")}>{badge}</span> : null}
         </Link>
@@ -55,7 +56,7 @@ function ToolGroup({ group, activeToolSlug, adminVisible, teamVisible, getToolBa
     const flags = useModuleStore((state) => state.flags);
     const tools = navigationTools.filter((tool) => {
         if (tool.group !== group) return false;
-        if (standaloneEdition && tool.group === "admin") return false;
+        if (!deploymentFeatures.rolePortalsEnabled && tool.group === "admin") return false;
         return (tool.slug === "admin" || flags[navigationModuleKey(tool.slug) as ModuleKey])
             && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible));
     });
@@ -82,14 +83,14 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
     const setTheme = useThemeStore((state) => state.setTheme);
     const user = useUserStore((state) => state.user);
     const clearSession = useUserStore((state) => state.clearSession);
-    const buttonClass = "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-[12px] font-semibold !text-stone-500 transition hover:bg-white hover:!text-stone-950";
-    const displayName = user?.displayName || "未登录";
+    const buttonClass = "wb-nav-link flex h-10 w-full items-center gap-2 rounded-lg px-3";
+    const displayName = user?.displayName || (deploymentFeatures.authenticationEnabled ? "未登录" : "我的工作台");
     const roleLabel = user?.role === "super_admin" ? "超级管理员" : user?.role === "department_admin" ? "部门管理员" : user?.role === "designer" ? "设计师" : "登录";
     const credits = user ? `${user.creditBalance}积分 · 月额${user.monthlyCreditLimit}` : "请登录";
 
     return (
         <div className="space-y-1 border-t border-stone-200 pt-3">
-            {adminVisible ? (
+            {adminVisible && deploymentFeatures.rolePortalsEnabled ? (
                 <button type="button" className={buttonClass} onClick={() => navigate("/admin?tab=api")}>
                     <Link2 className="size-4 text-stone-400" />
                     API 设置
@@ -98,11 +99,11 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
             <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={buttonClass} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}>
                 <span>{theme === "dark" ? "黑夜模式" : "白天模式"}</span>
             </AnimatedThemeToggler>
-            <button type="button" className={buttonClass}>
+            <div className={`${buttonClass} cursor-default`}>
                 <Globe2 className="size-4 text-stone-400" />
                 中文
-            </button>
-            {!standaloneEdition ? <button
+            </div>
+            {deploymentFeatures.authenticationEnabled ? <button
                 type="button"
                 className={buttonClass}
                 onClick={async () => {
@@ -117,14 +118,14 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
                 {user ? <LogOut className="size-4 text-stone-400" /> : <LogIn className="size-4 text-stone-400" />}
                 {user ? "退出登录" : "登录入口"}
             </button> : null}
-            <div className="mt-4 flex items-center gap-2 rounded-xl bg-white px-2.5 py-2 shadow-sm">
+            <div className="wb-account mt-4 flex items-center gap-2 rounded-xl px-3 py-3">
                 <div className="flex size-7 items-center justify-center rounded-full bg-orange-500 text-xs font-bold text-white">{displayName.slice(0, 1).toUpperCase()}</div>
                 <div className="min-w-0 flex-1">
                     <p className="truncate text-[11px] font-semibold text-stone-700">{displayName}</p>
-                    {!standaloneEdition ? <p className="flex items-center gap-1 text-[11px] font-semibold text-orange-600">
+                    {deploymentFeatures.creditsEnabled ? <p className="flex items-center gap-1 text-[11px] font-semibold text-orange-600">
                         <CircleDollarSign className="size-3" />
-                        {isAdminRole(user?.role) ? roleLabel : credits}
-                    </p> : <p className="text-[11px] font-semibold text-orange-600">Standalone</p>}
+                        {deploymentFeatures.rolePortalsEnabled && isAdminRole(user?.role) ? roleLabel : credits}
+                    </p> : <p className="text-[11px] text-stone-500">{deploymentFeatures.authenticationEnabled ? "不计积分" : "免登录创作"}</p>}
                 </div>
             </div>
         </div>
@@ -161,7 +162,7 @@ export function AppTopNav() {
     const teamVisible = useUserStore((state) => Boolean(state.user?.groupId));
 
     const getToolBadge = (slug: NavigationToolSlug) => {
-        if (standaloneEdition) return undefined;
+        if (!deploymentFeatures.creditsEnabled) return undefined;
         const billing = navigationToolBilling[slug];
         if (billing) {
             if (businessConfigStatus === "idle" || businessConfigStatus === "loading") return "同步中";
@@ -183,7 +184,7 @@ export function AppTopNav() {
         <>
             {!hideShell ? (
                 <>
-                    <aside className="hidden h-dvh w-[200px] shrink-0 flex-col border-r border-stone-200 bg-[#f3f3f1] px-4 py-3 text-stone-950 md:flex">
+                    <aside className="wb-sidebar hidden h-dvh w-[216px] shrink-0 flex-col px-4 py-5 md:flex">
                         <div className="flex items-center gap-2">
                             <BrandMark />
                             <button type="button" onClick={createAndEnter} className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md !bg-black px-3 text-[12px] font-bold !text-white shadow-sm transition hover:!bg-stone-800">
@@ -194,10 +195,11 @@ export function AppTopNav() {
                         <nav className="hide-scrollbar mt-6 min-h-0 flex-1 space-y-5 overflow-y-auto pb-6">
                             <Link
                                 to="/"
-                                className={cn("flex h-10 items-center gap-3 rounded-lg px-2.5 text-[13px] font-semibold transition", pathname === "/" ? "bg-white !text-stone-950 shadow-sm" : "!text-stone-500 hover:bg-white hover:!text-stone-950")}
+                                aria-current={pathname === "/" ? "page" : undefined}
+                                className="wb-nav-link flex h-10 items-center gap-3 rounded-lg px-3"
                             >
                                 <Menu className="size-4 text-stone-400" />
-                                项目
+                                工作台
                             </Link>
                             <ToolGroup group="local" activeToolSlug={activeToolSlug} adminVisible={adminVisible} teamVisible={teamVisible} getToolBadge={getToolBadge} />
                             <ToolGroup group="online" activeToolSlug={activeToolSlug} adminVisible={adminVisible} teamVisible={teamVisible} getToolBadge={getToolBadge} />
@@ -206,8 +208,8 @@ export function AppTopNav() {
                         <SidebarFooter adminVisible={configVisible} />
                     </aside>
 
-                    <header className="fixed inset-x-0 top-0 z-20 flex h-14 items-center justify-between border-b border-stone-200 bg-[#f3f3f1]/95 px-4 backdrop-blur-xl md:hidden">
-                        <Link to="/" className="flex items-center gap-2 text-sm font-semibold text-stone-950">
+                    <header className="wb-sidebar fixed inset-x-0 top-0 z-20 flex h-14 items-center justify-between border-b px-4 md:hidden">
+                        <Link to="/" className="flex items-center gap-2 text-sm font-semibold text-foreground">
                             <span
                                 className="size-6 bg-current"
                                 style={{

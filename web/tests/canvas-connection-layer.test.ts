@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createCanvasConnectionDrawBatches, createCanvasConnectionDrawCache, drawCanvasConnections, filterCanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
+import { canvasConnectionViewportBounds, createCanvasConnectionDrawBatches, createCanvasConnectionDrawCache, drawCanvasConnectionBatches, drawCanvasConnections, filterCanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
 import type { CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
 
 const geometry: CanvasConnectionGeometry = {
@@ -80,6 +80,36 @@ test("batches regular connections into one canvas stroke", () => {
     expect(calls).toEqual(["begin", "move", "curve", "move", "curve", "stroke", "begin", "move", "curve", "stroke"]);
 });
 
+test("skips offscreen connection paths while preserving curves that cross the viewport", () => {
+    const calls: string[] = [];
+    const context = {
+        beginPath: () => calls.push("begin"),
+        moveTo: (x: number) => calls.push(`move:${x}`),
+        bezierCurveTo: () => calls.push("curve"),
+        stroke: () => calls.push("stroke"),
+        strokeStyle: "",
+        lineWidth: 0,
+        globalAlpha: 1,
+        shadowBlur: 0,
+        shadowColor: "",
+    } as unknown as CanvasRenderingContext2D;
+    const offscreen = { ...geometry, bounds: { minX: 800, minY: 20, maxX: 900, maxY: 80 } };
+    const crossing = { ...geometry, bounds: { minX: -20, minY: 20, maxX: 20, maxY: 80 } };
+
+    expect(
+        drawCanvasConnectionBatches(
+            context,
+            createCanvasConnectionDrawBatches([
+                { geometry: offscreen, active: false },
+                { geometry: crossing, active: false },
+            ]),
+            { stroke: "#94a3b8", activeStroke: "#2dd4bf" },
+            canvasConnectionViewportBounds({ x: 0, y: 0, k: 1 }, { width: 400, height: 300 }),
+        ),
+    ).toBe(true);
+    expect(calls).toEqual(["begin", "move:10", "curve", "stroke"]);
+});
+
 test("precomputes normal and active batches before a viewport redraw", () => {
     const regular = { geometry, active: false };
     const active = { geometry, active: true };
@@ -118,6 +148,25 @@ test("refreshes only affected connection geometry while a drag is active", () =>
     expect(resolved).toEqual(["a"]);
     expect(updated).toBe(initial);
     expect(updated.regular.map((item) => item.geometry.d)).toEqual([`${geometry.d} a`, `${geometry.d} b`]);
+});
+
+test("keeps cached geometry when a connection is appended", () => {
+    const connections = [
+        { id: "a", fromNodeId: "one", toNodeId: "two" },
+        { id: "b", fromNodeId: "three", toNodeId: "four" },
+    ];
+    const resolved: string[] = [];
+    const cache = createCanvasConnectionDrawCache((connection) => {
+        resolved.push(connection.id);
+        return { ...geometry, d: `${geometry.d} ${connection.id}` };
+    });
+
+    cache.sync(connections, new Set(), new Set(), true);
+    resolved.length = 0;
+    const updated = cache.sync([...connections, { id: "c", fromNodeId: "five", toNodeId: "six" }], new Set(), new Set(), false);
+
+    expect(resolved).toEqual(["c"]);
+    expect(updated.regular.map((item) => item.id)).toEqual(["a", "b", "c"]);
 });
 
 test("keeps the correct connection active when an unresolved connection is skipped", () => {

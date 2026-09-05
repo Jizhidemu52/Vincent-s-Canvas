@@ -43,8 +43,11 @@ import { GroupCreditError } from "./group-credits";
 import { createPerformanceRouter } from "./routes/performance";
 import { createAdminPromptTemplatesRouter, createPromptTemplatesRouter } from "./routes/prompt-templates";
 import { PromptTemplateError } from "./prompt-templates";
+import { deploymentFeatures } from "./deployment-features";
+import { createGenerationCapabilitiesRouter } from "./routes/generation-capabilities";
 
 const config = loadConfig();
+const features = deploymentFeatures(config);
 const db = createDatabase(config.DATABASE_URL);
 const cache = await createCache(config.REDIS_URL);
 const storage = new ObjectStorage(config);
@@ -57,6 +60,9 @@ app.use("/api/chat", express.json({ limit: "12mb" }));
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 app.use(requireSameOrigin);
+app.get("/api/deployment", (_request, response) => {
+  response.set("Cache-Control", "no-store").json(features);
+});
 
 app.get("/api/health", async (_request, response, next) => {
   try {
@@ -68,11 +74,12 @@ app.get("/api/health", async (_request, response, next) => {
 });
 app.use("/api/auth", createAuthRouter(db, cache, config));
 const requireSession = sessionMiddleware(db, cache, config);
+const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
 app.use(
   "/api/billing",
   requireSession,
   requireAccountReady,
-  createBillingRouter(db),
+  createBillingRouter(db, features.creditsEnabled),
 );
 app.use(
   "/api/models",
@@ -80,6 +87,7 @@ app.use(
   requireAccountReady,
   createPublicModelRouter(db),
 );
+app.use("/api/generation-capabilities", requireSession, requireAccountReady, createGenerationCapabilitiesRouter(db));
 app.use(
   "/api/modules",
   requireSession,
@@ -88,13 +96,13 @@ app.use(
 );
 app.use(
   "/api/admin/modules",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createAdminModuleFlagsRouter(db),
 );
 app.use(
   "/api/admin/model-configuration",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createModelConfigurationRouter(db, config),
 );
@@ -102,11 +110,11 @@ app.use(
   "/api/tasks",
   requireSession,
   requireAccountReady,
-  createTasksRouter(db, cache),
+  createTasksRouter(db, cache, features.creditsEnabled),
 );
 app.use(
   "/api/admin/tasks",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createAdminTasksRouter(db, cache),
 );
@@ -118,7 +126,7 @@ app.use(
 );
 app.use(
   "/api/admin/history",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createAdminHistoryRouter(db),
 );
@@ -130,7 +138,7 @@ app.use(
 );
 app.use(
   "/api/admin/assets",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createAdminAssetsRouter(db),
 );
@@ -142,13 +150,13 @@ app.use(
 );
 app.use(
   "/api/admin/projects",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createAdminProjectsRouter(db),
 );
 app.use(
   "/api/admin/workflows",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createWorkflowsRouter(db),
 );
@@ -160,19 +168,19 @@ app.use(
 );
 app.use(
   "/api/admin/accounts",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createAccountsRouter(db),
 );
 app.use(
   "/api/admin/departments",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createDepartmentsRouter(db),
 );
 app.use(
   "/api/admin/groups",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createGroupsRouter(db),
 );
@@ -196,7 +204,7 @@ app.use(
 );
 app.use(
   "/api/admin/group-credits",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createAdminGroupCreditsRouter(db),
 );
@@ -214,25 +222,25 @@ app.use(
 );
 app.use(
   "/api/admin/prompt-templates",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createAdminPromptTemplatesRouter(db),
 );
 app.use(
   "/api/admin/audit-logs",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createAuditRouter(db),
 );
 app.use(
   "/api/admin/integrations",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createIntegrationsRouter(config),
 );
 app.use(
   "/api/admin/internal-ai",
-  requireSession,
+  requireAdminSession,
   requireAccountReady,
   createInternalAiConfigurationRouter(db, config),
 );

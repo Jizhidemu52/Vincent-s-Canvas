@@ -1,0 +1,38 @@
+---
+title: 数据库结构与迁移
+description: 正式数据存储边界及任务恢复和访客身份字段
+---
+
+# 数据库结构与迁移
+
+正式 API 和 Worker 使用 `server/src/migrations/` 中的 PostgreSQL 迁移，完整表结构以这些 SQL 为准。`server/src/demo-server.ts` 使用演示内存状态，不执行正式数据隔离或持久化验收。
+
+| 存储 | 负责内容 |
+| --- | --- |
+| PostgreSQL | 用户、部门、项目、任务、额度账本、历史、审计、Provider 配置与素材元数据 |
+| Redis | 会话、任务队列、限流和并发控制 |
+| S3 / MinIO | 上传文件及生成结果的文件内容 |
+| 浏览器 IndexedDB | 本地画布布局、节点、会话及相关媒体缓存，不是跨设备云同步 |
+
+## 任务执行与恢复字段
+
+`018_task_execution_lease.sql` 为 `tasks` 新增 `lease_expires_at timestamptz`，并建立仅覆盖 `processing` 任务的租约索引。Worker 领取任务时写入租约；完成、失败或回队时清除。启动恢复只将租约缺失或已过期的执行中任务回队，避免立即抢占仍有效的执行。
+
+`020_video_upstream_identity.sql` 为 `tasks` 新增以下可空字段：
+
+| 字段 | 类型 | 用途 |
+| --- | --- | --- |
+| `upstream_task_id` | `text` | 保存视频服务商返回的原任务 ID，恢复时查询原任务 |
+| `upstream_submission_started_at` | `timestamptz` | 标记已开始提交；无返回 ID 时保留提交不确定状态，防止自动重复生成 |
+
+恢复查询不等于重新生成。已开始提交的视频发生不确定网络错误时保留原任务和预留额度，暂停后核实上游状态；只有明确失败或完成才能按对应流程结算。
+
+## 访客身份约束
+
+`019_optional_access.sql` 为 `users` 新增 `is_guest boolean NOT NULL DEFAULT false`。数据库约束 `guest_is_unprivileged` 要求访客只能是 `designer`，不得有密码散列或首次改密要求。
+
+正式免登录模式仍为浏览器分配独立访客身份和会话，访客不是管理员，不能通过密码登录或企业微信绑定绕过限制。关闭免登录后，普通认证流程不接受访客会话。演示服务的固定身份不能用于验证这种隔离。
+
+## 更新和备份
+
+升级时由现有迁移入口按顺序应用 SQL，不在生产数据库中试删表解决启动错误。数据库备份还需搭配对象存储文件与 Provider 加密密钥；仅复制数据库不能恢复所有成果文件。部署步骤见仓库 `docs/manual/production-deployment.md`。

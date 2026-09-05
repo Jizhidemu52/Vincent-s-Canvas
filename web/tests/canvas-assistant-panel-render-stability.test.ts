@@ -5,18 +5,19 @@ import type { CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import type { CanvasAssistantSession, CanvasNodeData } from "@/types/canvas";
 
 const noop = () => undefined;
-const nodes: CanvasNodeData[] = [];
 const selectedNodeIds = new Set<string>();
 const snapshot = {} as CanvasAgentSnapshot;
+const snapshotRef = { current: snapshot };
+const selectedNodes: CanvasNodeData[] = [];
 const sessions: CanvasAssistantSession[] = [];
 const returnSnapshot = () => snapshot;
 const returnNoSnapshot = () => null;
 
 function state(overrides: Partial<CanvasAssistantPanelRenderState> = {}): CanvasAssistantPanelRenderState {
     return {
-        nodes,
         selectedNodeIds,
-        snapshot,
+        selectedNodes,
+        snapshotRef,
         sessions,
         activeSessionId: null,
         onSelectNodeIds: noop,
@@ -40,8 +41,17 @@ describe("canvas assistant panel render stability", () => {
         expect(canvasAssistantPanelPropsEqual(state(), state())).toBe(true);
     });
 
-    test("refreshes the Agent panel when the canvas snapshot changes", () => {
-        expect(canvasAssistantPanelPropsEqual(state(), state({ snapshot: { revision: 2 } as CanvasAgentSnapshot }))).toBe(false);
+    test("keeps the Agent panel stable while unselected canvas results update", () => {
+        snapshotRef.current = { revision: 2 } as CanvasAgentSnapshot;
+        expect(canvasAssistantPanelPropsEqual(state(), state())).toBe(true);
+    });
+
+    test("refreshes the Agent panel when the snapshot reference is replaced", () => {
+        expect(canvasAssistantPanelPropsEqual(state(), state({ snapshotRef: { current: { revision: 2 } as CanvasAgentSnapshot } }))).toBe(false);
+    });
+
+    test("refreshes the Agent panel when a selected reference changes", () => {
+        expect(canvasAssistantPanelPropsEqual(state(), state({ selectedNodes: [{ id: "selected" } as CanvasNodeData] }))).toBe(false);
     });
 
     test("refreshes the Agent panel when the conversation changes", () => {

@@ -18,7 +18,7 @@ describe("APIMart image protocol adapter", () => {
       sourceDataUrls: ["data:image/png;base64,AA=="],
     });
     expect(request.path).toBe("/images/generations");
-    expect(request.payload).toMatchObject({ model: "gpt-image-2", n: 10, size: "16:9", resolution: "4k" });
+    expect(request.payload).toMatchObject({ model: "gpt-image-2", n: 1, size: "16:9", resolution: "4k" });
   });
 
   test("builds Gemini Flash with one output and its own options", () => {
@@ -29,7 +29,7 @@ describe("APIMart image protocol adapter", () => {
     });
     expect(request.payload).toMatchObject({
       model: "gemini-3.1-flash-image-preview",
-      n: 5,
+      n: 1,
       size: "1:1",
       resolution: "2K",
       google_search: true,
@@ -37,7 +37,7 @@ describe("APIMart image protocol adapter", () => {
     });
   });
 
-  test("builds the Midjourney route and appends aspect ratio", () => {
+  test("builds Midjourney structured aspect without inventing a version or rewriting the prompt", () => {
     const request = buildApiMartImageRequest({
       modelId: "midjourney",
       prompt: "editorial fashion illustration",
@@ -45,9 +45,8 @@ describe("APIMart image protocol adapter", () => {
     });
     expect(request.path).toBe("/midjourney/generations");
     expect(request.payload).toEqual({
-      prompt: "editorial fashion illustration --ar 16:9",
+      prompt: "editorial fashion illustration",
       size: "16:9",
-      version: "6.1",
       speed: "relax",
     });
   });
@@ -63,12 +62,22 @@ describe("APIMart image protocol adapter", () => {
     expect(request.payload).toMatchObject({ size: "3:2", speed: "turbo" });
   });
 
-  test("rejects Midjourney reference images before submitting", () => {
-    expect(() => buildApiMartImageRequest({
+  test("supports the documented Midjourney image-guided route", () => {
+    expect(buildApiMartImageRequest({
       modelId: "midjourney",
       prompt: "fashion campaign",
       parameters: {},
       sourceDataUrls: ["data:image/png;base64,AA=="],
-    })).toThrow("Midjourney");
+    }).payload.image_urls).toEqual(["data:image/png;base64,AA=="]);
+  });
+  test("checks model-specific ratios and reference limits against request tables", () => {
+    expect(() => buildApiMartImageRequest({ modelId: "vcen-gpt2", prompt: "test", parameters: { size: "1:8" } })).toThrow("不支持尺寸");
+    expect(() => buildApiMartImageRequest({ modelId: "gemini-3.1-flash-image-preview", prompt: "test", parameters: { size: "3:1" } })).toThrow("不支持尺寸");
+    expect(() => buildApiMartImageRequest({ modelId: "vcen-gpt2", prompt: "test", parameters: {}, sourceDataUrls: Array(16).fill("https://example.com/a.png") })).toThrow("15 张");
+    expect(buildApiMartImageRequest({ modelId: "vcen-gpt2", prompt: "test", parameters: { size: "1881x836" } }).payload.size).toBe("1881x836");
+  });
+  test("retains Gemini official channel and suppresses incompatible fallback", () => {
+    expect(buildApiMartImageRequest({ modelId: "gemini-3.1-flash-image-preview-official", prompt: "test", parameters: { officialFallback: true } }).payload).toMatchObject({ model: "gemini-3.1-flash-image-preview-official", n: 1 });
+    expect(buildApiMartImageRequest({ modelId: "nano-banana-2", prompt: "test", parameters: { officialFallback: true } }).payload).not.toHaveProperty("official_fallback");
   });
 });

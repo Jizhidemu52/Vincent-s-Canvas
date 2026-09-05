@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { App, Button, Empty, Input, Select, Spin, Switch } from "antd";
-import { Plus, Search } from "lucide-react";
+import { BookOpen, Plus, Search } from "lucide-react";
+import { deploymentFeatures } from "@/lib/deployment-features";
+import { createPromptListLoader } from "@/lib/prompt-list-loader";
 
 import { PromptTemplateCard } from "@/components/prompts/prompt-template-card";
 import { PromptTemplateEditor } from "@/components/prompts/prompt-template-editor";
@@ -18,22 +20,25 @@ export default function MyPromptsPage() {
     const groupId = useUserStore((state) => state.user?.groupId);
     const [items, setItems] = useState<PromptTemplate[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState("");
     const [query, setQuery] = useState("");
     const [sort, setSort] = useState<"updated" | "recent" | "used">("updated");
     const [favorite, setFavorite] = useState(false);
     const [editing, setEditing] = useState<PromptTemplate | null>(null);
     const [editorOpen, setEditorOpen] = useState(false);
+    const [loader] = useState(createPromptListLoader);
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const result = await listPromptTemplates({ scope: "personal", query, sort, favorite: favorite ? true : undefined, pageSize: 100 });
-            setItems(result.templates);
-        } catch (error) { message.error(error instanceof Error ? error.message : "加载个人提示词失败"); }
-        finally { setLoading(false); }
-    }, [favorite, message, query, sort]);
+    const load = useCallback(() => loader.load(
+        () => listPromptTemplates({ scope: "personal", query, sort, favorite: favorite ? true : undefined, pageSize: 100 }),
+        (result) => setItems(result.templates),
+        (error) => setLoadError(error instanceof Error ? error.message : "加载个人提示词失败"),
+        (value) => { setLoading(value); if (value) setLoadError(""); },
+    ), [favorite, loader, message, query, sort]);
 
-    useEffect(() => { const timer = window.setTimeout(() => void load(), 250); return () => window.clearTimeout(timer); }, [load]);
+    useEffect(() => {
+        const timer = window.setTimeout(() => void load(), 250);
+        return () => { window.clearTimeout(timer); loader.invalidate(); };
+    }, [load, loader]);
 
     const save = async (input: PromptSnapshotInput) => {
         if (editing) await updatePromptTemplate(editing.id, input); else await createPromptTemplate(input);
@@ -49,20 +54,21 @@ export default function MyPromptsPage() {
     };
 
     return (
-        <main className="h-full overflow-y-auto bg-[#f6f6f4] px-5 py-8 text-stone-950 dark:bg-stone-950 dark:text-white">
+        <main className="wb-page h-full overflow-y-auto px-4 py-6 md:px-8 md:py-8">
             <div className="mx-auto max-w-7xl">
-                <header className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-6 dark:border-stone-800">
-                    <div><p className="text-xs font-semibold text-orange-600">个人经验</p><h1 className="mt-2 text-3xl font-semibold">我的提示词</h1><p className="mt-2 text-sm text-stone-500">仅你本人可管理。复用默认只填入，确认当前积分后才会生成。</p></div>
-                    <Button type="primary" icon={<Plus className="size-4" />} onClick={() => { setEditing(null); setEditorOpen(true); }}>新建模板</Button>
+                <header className="wb-header">
+                    <div><p className="wb-eyebrow">个人经验库</p><h1 className="wb-title">我的提示词</h1><p className="wb-description">把好用的创作方法存成模板。点击「仅填入」先检查内容，{deploymentFeatures.creditsEnabled ? "确认积分后" : "确认参数后"}再生成。</p></div>
+                    <Button size="large" type="primary" icon={<Plus className="size-4" />} onClick={() => { setEditing(null); setEditorOpen(true); }}>新建模板</Button>
                 </header>
-                <section className="my-6 flex flex-wrap items-center gap-3">
+                <section className="wb-toolbar mb-6">
                     <Input className="max-w-md" allowClear prefix={<Search className="size-4 text-stone-400" />} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、提示词或分类" />
                     <Select value={sort} onChange={setSort} options={[{ value: "updated", label: "最近更新" }, { value: "recent", label: "最近使用" }, { value: "used", label: "使用最多" }]} />
                     <label className="flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300"><Switch size="small" checked={favorite} onChange={setFavorite} />只看收藏</label>
-                    <span className="ml-auto text-xs text-stone-500">共 {items.length} 个模板</span>
+                    <span aria-live="polite" className="ml-auto text-xs text-stone-500">{loading && items.length ? "正在更新 · " : ""}共 {items.length} 个模板</span>
                 </section>
-                {loading ? <div className="flex min-h-80 items-center justify-center"><Spin /></div> : items.length ? (
-                    <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{items.map((item) => (
+                {loadError ? <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{loadError}</span><Button onClick={() => void load()}>重新加载</Button></div> : null}
+                {loading && !items.length ? <div className="flex min-h-80 items-center justify-center"><Spin /></div> : items.length ? (
+                    <section aria-busy={loading} className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{items.map((item) => (
                         <PromptTemplateCard key={item.id} item={item} editable canSubmit={Boolean(groupId)} onReuse={(mode) => void reuse(item, mode)}
                             onEdit={() => { setEditing(item); setEditorOpen(true); }}
                             onCopy={async () => { await copyPromptTemplate(item.id); message.success("已复制为新模板"); await load(); }}
@@ -71,7 +77,7 @@ export default function MyPromptsPage() {
                             onDelete={() => modal.confirm({ title: "删除这个个人模板？", content: "已发布的团队版本不会受影响。", okText: "删除", okButtonProps: { danger: true }, onOk: async () => { await deletePromptTemplate(item.id); message.success("模板已删除"); await load(); } })}
                         />
                     ))}</section>
-                ) : <Empty className="py-24" description="还没有个人模板" />}
+                ) : !loadError ? <div className="wb-surface wb-empty"><BookOpen className="size-9" /><strong>{query || favorite ? "没有匹配的模板" : "留住一次满意的创作"}</strong><p>{query || favorite ? "换个关键词，或关闭收藏筛选看看。" : "新建模板记录提示词，也可以从生成结果中一键保存。模板仅你本人可管理。"}</p>{query || favorite ? <Button onClick={() => { setQuery(""); setFavorite(false); }}>清除筛选</Button> : <Button type="primary" onClick={() => { setEditing(null); setEditorOpen(true); }}>创建第一个模板</Button>}</div> : null}
             </div>
             <PromptTemplateEditor open={editorOpen} initial={editing} title={editing ? "编辑个人模板" : "新建个人模板"} onCancel={() => { setEditorOpen(false); setEditing(null); }} onSubmit={save} />
         </main>

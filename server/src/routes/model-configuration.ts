@@ -175,12 +175,14 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     return router;
 }
 
+import { imageParameterProfile } from "../image-parameter-profile";
+
 export function createPublicModelRouter(db: Database) {
     const router = Router();
     router.get("/", async (_request, response, next) => {
         try {
             const [models, prices, tools] = await Promise.all([
-                db.query(`SELECT m.id,m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost" FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=true AND p.enabled=true ORDER BY m.name`),
+                db.query(`SELECT m.id,m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.protocol FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=true AND p.enabled=true ORDER BY m.name`),
                 db.query(`SELECT operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version FROM pricing_rule_versions WHERE status='published' ORDER BY operation_type`),
                 db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId"
                     FROM tool_api_configurations t JOIN model_configs m ON m.id=t.model_config_id
@@ -188,7 +190,7 @@ export function createPublicModelRouter(db: Database) {
                     WHERE t.enabled=true AND m.enabled=true AND p.enabled=true
                     AND (m.workflow_config_id IS NULL OR w.enabled=true)`),
             ]);
-            response.json({ models: models.rows, prices: prices.rows, tools: tools.rows });
+            response.json({ models: models.rows.map(({ protocol, ...model }) => ({ ...model, imageParameterProfile: imageParameterProfile(protocol, model.modelId) })), prices: prices.rows, tools: tools.rows });
         } catch (error) { next(error); }
     });
     return router;

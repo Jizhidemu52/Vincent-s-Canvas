@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { canManageResultState, projectAssetEvents, type AssetEventRecord } from "../src/asset-events";
+import { activeAssetEvents, canManageResultState, projectAssetEvents, type AssetEventRecord } from "../src/asset-events";
 import type { SessionUser } from "../src/types";
 
 const event = (
@@ -70,6 +70,16 @@ describe("asset event projections", () => {
     expect(projection.resultStatus).toBe("unused");
     expect(projection.usabilityScore).toBe(0);
     expect(projection.eventCount).toBe(1);
+  });
+
+  test("provides the same reversal-aware event stream to downstream analytics", () => {
+    const active = activeAssetEvents([
+      event("1", "asset.generated", false),
+      event("2", "asset.adopted"),
+      event("3", "asset.event_reversed", false, "2"),
+    ]);
+
+    expect(active.map((item) => item.id)).toEqual(["1"]);
   });
 
   test("limits result-state management to company or matching department administrators", () => {

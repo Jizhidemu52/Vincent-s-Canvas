@@ -19,3 +19,8 @@ export function endCanvasHover(state: CanvasHoverState, nodeId: string): CanvasH
     if (state.activeId === nodeId) return { activeId: null, pendingId: null };
     return state;
 }
+
+/** Canvas movement invalidates hover affordances until the pointer settles again. */
+export function resetCanvasHover(_state: CanvasHoverState): CanvasHoverState {
+    return { activeId: null, pendingId: null };
+}

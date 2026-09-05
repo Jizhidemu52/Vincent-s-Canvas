@@ -1,4 +1,6 @@
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
+import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { validateImageReferences } from "@/lib/image-reference-policy";
 import { requestQueuedImageBatch, requestQueuedImages, type QueuedBatchItem } from "@/services/api/generation-tasks";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
@@ -15,25 +17,28 @@ export type ResponseToolCall = {
     thoughtSignature?: string;
 };
 
-export type ResponseInputMessage = AiTextMessage | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { role: "tool"; tool_call_id: string; content: string };
+export type ClaudeAssistantContent = Array<Record<string, unknown>>;
+export type ResponseInputMessage = AiTextMessage | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { role: "tool"; tool_call_id: string; content: string };
 
 export type ResponseFunctionTool = {
     type: "function";
     function: { name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 };
 
-export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string };
+export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
 type RequestOptions = { signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; webSearch?: boolean };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
-type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
+type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 
 const CLAUDE_EMPTY_RESPONSE_RETRY_TOKENS = 8192;
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions, references?: ReferenceImage[]) {
-    const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const count = Number(normalizeImageModelSettings(config, imageModelProfile(config.model || config.imageModel)).count);
+    const validation = validateImageReferences(modelOptionName(config.model || config.imageModel), references || []);
+    if (!validation.valid) throw new Error(validation.message);
     return requestQueuedImages({
         modelId: modelOptionName(config.model || config.imageModel),
         prompt: withSystemPrompt(config, prompt),
@@ -47,7 +52,18 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
-    const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const profile = imageModelProfile(config.model || config.imageModel);
+    if (profile.kind === "midjourney-blend") {
+        if (mask) throw new Error("Midjourney Blend 不支持蒙版编辑");
+        return requestGeneration(config, "", { ...options, operationType: "image_generation" }, references);
+    }
+    if (profile.kind === "midjourney") {
+        if (mask) throw new Error("当前 Midjourney Imagine 入口不支持蒙版，请使用图像编辑模型");
+        return requestGeneration(config, prompt, { ...options, operationType: "image_generation" }, references);
+    }
+    const validation = validateImageReferences(modelOptionName(config.model || config.imageModel), references);
+    if (!validation.valid) throw new Error(validation.message);
+    const count = Number(normalizeImageModelSettings(config, profile).count);
     return requestQueuedImages({
         modelId: modelOptionName(config.model || config.imageModel),
         prompt: withSystemPrompt(config, buildImageReferencePromptText(prompt, references)),
@@ -61,28 +77,12 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 }
 
 export function imageTaskParameters(config: AiConfig) {
-    const value = String(config.size || "1:1").toLowerCase();
-    const configuredResolution = String(config.quality || "").toLowerCase();
-    const resolution = configuredResolution === "0.5k" || configuredResolution === "1k" || configuredResolution === "2k" || configuredResolution === "4k"
-        ? configuredResolution
-        : value.includes("4k") || /(^|x)3840x2160$|^2160x3840$/.test(value) ? "4k" : value.includes("2k") || /^2048x/.test(value) || /x2048$/.test(value) ? "2k" : "1k";
-    const size =
-        value === "auto"
-            ? "auto"
-            : value.includes("16:9") || /^1824x1024$|^2048x1152$|^3840x2160$/.test(value)
-            ? "16:9"
-            : value.includes("9:16") || /^1024x1824$|^1152x2048$|^2160x3840$/.test(value)
-              ? "9:16"
-              : value.includes("3:2") || /^1536x1024$/.test(value)
-                ? "3:2"
-                : value.includes("2:3") || /^1024x1536$/.test(value)
-                  ? "2:3"
-                  : value.includes("4:3") || /^1360x1024$/.test(value)
-                    ? "4:3"
-                    : value.includes("3:4") || /^1024x1360$/.test(value)
-                      ? "3:4"
-                      : "1:1";
-    return { size, resolution };
+    const profile = imageModelProfile(config.model || config.imageModel);
+    if (!profile.verified) return {};
+    const { size, quality } = normalizeImageModelSettings(config, profile);
+    if (profile.kind === "standard") return { size, quality };
+    if (profile.kind === "midjourney" || profile.kind === "midjourney-blend") return { size, midjourneySpeed: quality };
+    return { size, resolution: quality };
 }
 
 export async function requestBatchEdit(config: AiConfig, prompt: string, files: Array<{ file: File; title: string }>, options?: { signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
@@ -151,11 +151,18 @@ function normalizeClaudeMaxTokens(value: string | undefined) {
     return Number.isFinite(parsed) ? Math.max(256, Math.min(16_384, parsed)) : 2048;
 }
 
+export function toolResponseToInput(result: Pick<ToolResponseResult, "toolCalls" | "claudeAssistantContent">): ResponseInputMessage[] {
+    if (result.claudeAssistantContent) return [{ type: "claude_assistant", content: result.claudeAssistantContent }];
+    return result.toolCalls.map((call) => ({ type: "function_call", call_id: call.id, name: call.function.name, arguments: call.function.arguments, ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {}) }));
+}
+
+type ClaudeSseState = { buffer: string; content: string; stopReason?: string; blocks: Map<number, { block: Record<string, unknown>; inputJson: string }> };
+
 export async function readClaudeSseResponse(response: Response, onDelta?: (text: string) => void): Promise<ToolResponseResult> {
     if (!response.body) throw new Error("Claude 流式响应为空");
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    const state = { buffer: "", content: "", stopReason: undefined as string | undefined, blocks: new Map<number, { id?: string; name?: string; input: string }>() };
+    const state: ClaudeSseState = { buffer: "", content: "", blocks: new Map() };
     while (true) {
         const { done, value } = await reader.read();
         state.buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
@@ -169,26 +176,30 @@ export async function readClaudeSseResponse(response: Response, onDelta?: (text:
         if (done) break;
     }
     if (state.buffer.trim()) consumeClaudeSseEvent(state.buffer, state, onDelta);
+    const blocks: ClaudeAssistantContent = Array.from(state.blocks.entries()).sort(([left], [right]) => left - right).map(([, item]) => ({ ...item.block, ...(item.inputJson ? { input: JSON.parse(item.inputJson) as unknown } : {}) }));
+    const toolCalls: ResponseToolCall[] = blocks.flatMap((block) => block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string" ? [{
+        id: block.id,
+        type: "function" as const,
+        function: { name: block.name, arguments: JSON.stringify(block.input || {}) },
+    }] : []);
     return {
         content: state.content,
-        toolCalls: Array.from(state.blocks.values()).filter((block) => block.id && block.name).map((block) => ({
-            id: block.id!,
-            type: "function" as const,
-            function: { name: block.name!, arguments: block.input || "{}" },
-        })),
+        toolCalls,
+        ...(toolCalls.length ? { claudeAssistantContent: blocks } : {}),
         ...(state.stopReason ? { stopReason: state.stopReason } : {}),
     };
 }
 
-function consumeClaudeSseEvent(event: string, state: { content: string; stopReason?: string; blocks: Map<number, { id?: string; name?: string; input: string }> }, onDelta?: (text: string) => void) {
+function consumeClaudeSseEvent(event: string, state: ClaudeSseState, onDelta?: (text: string) => void) {
     const raw = event.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
     if (!raw || raw === "[DONE]") return;
-    let payload: { type?: string; index?: number; content_block?: { type?: string; id?: string; name?: string; text?: string }; delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string | null } };
+    let payload: { type?: string; index?: number; content_block?: Record<string, unknown>; delta?: { type?: string; text?: string; thinking?: string; signature?: string; partial_json?: string; stop_reason?: string | null }; error?: { message?: string } };
     try { payload = JSON.parse(raw); } catch { return; }
     const index = payload.index ?? 0;
+    if (payload.type === "error") throw new Error(payload.error?.message || "Claude 流式响应失败");
     if (payload.type === "content_block_start") {
-        state.blocks.set(index, { id: payload.content_block?.id, name: payload.content_block?.name, input: "" });
-        if (payload.content_block?.type === "text" && payload.content_block.text) {
+        state.blocks.set(index, { block: { ...payload.content_block }, inputJson: "" });
+        if (payload.content_block?.type === "text" && typeof payload.content_block.text === "string") {
             state.content += payload.content_block.text;
             onDelta?.(state.content);
         }
@@ -199,14 +210,15 @@ function consumeClaudeSseEvent(event: string, state: { content: string; stopReas
         return;
     }
     if (payload.type !== "content_block_delta") return;
+    const item = state.blocks.get(index);
     if (payload.delta?.text && (payload.delta.type === "text_delta" || !payload.delta.type)) {
         state.content += payload.delta.text;
+        if (item) item.block.text = String(item.block.text || "") + payload.delta.text;
         onDelta?.(state.content);
     }
-    if (payload.delta?.type === "input_json_delta") {
-        const block = state.blocks.get(index);
-        if (block) block.input += payload.delta.partial_json || "";
-    }
+    if (item && payload.delta?.type === "input_json_delta") item.inputJson += payload.delta.partial_json || "";
+    if (item && payload.delta?.type === "thinking_delta") item.block.thinking = String(item.block.thinking || "") + (payload.delta.thinking || "");
+    if (item && payload.delta?.type === "signature_delta") item.block.signature = String(item.block.signature || "") + (payload.delta.signature || "");
 }
 
 function withSystemPrompt(config: AiConfig, prompt: string) {
@@ -221,6 +233,7 @@ function withSystemMessage<T extends ResponseInputMessage>(config: AiConfig, mes
 
 function toResponseInput(messages: ResponseInputMessage[]): ResponseInputItem[] {
     return messages.flatMap((message): ResponseInputItem[] => {
+        if ("type" in message && message.type === "claude_assistant") return [{ type: "claude_assistant", content: message.content }];
         if ("type" in message) return [{ type: "function_call", call_id: message.call_id, name: message.name, arguments: message.arguments, ...(message.thoughtSignature ? { thoughtSignature: message.thoughtSignature } : {}) }];
         if (message.role === "tool") return [{ type: "function_call_output", call_id: message.tool_call_id, output: message.content }];
         return [{ role: message.role, content: toResponseContent(message.content || "") }];

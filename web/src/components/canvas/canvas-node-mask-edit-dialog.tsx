@@ -5,6 +5,7 @@ import { Brush, Eraser, RotateCcw, WandSparkles, X } from "lucide-react";
 import { readImageMeta } from "@/lib/image-utils";
 import { ModelPicker } from "@/components/model-picker";
 import type { AiConfig } from "@/stores/use-config-store";
+import { deploymentFeatures } from "@/lib/deployment-features";
 
 export type CanvasImageMaskEditPayload = {
     prompt: string;
@@ -170,7 +171,7 @@ export function CanvasNodeMaskEditDialog({
                     <div className="space-y-2">
                         <div className="flex items-center justify-between gap-3 text-sm">
                             <span className="font-medium opacity-75">编辑模型</span>
-                            {typeof estimatedCredits === "number" ? <span className="shrink-0 text-xs font-medium text-orange-600">预计 {estimatedCredits} 积分</span> : null}
+                            {deploymentFeatures.creditsEnabled && typeof estimatedCredits === "number" ? <span className="shrink-0 text-xs font-medium text-orange-600">预计 {estimatedCredits} 积分</span> : null}
                         </div>
                         <ModelPicker config={config} value={model} onChange={onModelChange} capability="image" fullWidth placeholder="选择局部编辑模型" />
                     </div>

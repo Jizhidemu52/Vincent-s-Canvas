@@ -6,34 +6,50 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import type { CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
 import { canvasNodeRenderStateEqual, type CanvasNodeRenderState } from "@/lib/canvas/canvas-render-stability";
 import { canvasMediaPlaybackProps } from "@/lib/canvas/canvas-media-render-quality";
+import { canvasImageRenderProps } from "@/lib/canvas/canvas-image-render-quality";
+import { needsCanvasNodeMediaPreviewResolution, resolveCanvasNodeMediaPreview } from "@/lib/canvas/canvas-node-media-preview";
+import { canvasNodeRenderingStyle } from "@/lib/canvas/canvas-node-rendering";
+import { canvasNodeResizePointerDelta } from "@/lib/canvas/canvas-node-resize";
+import { shouldRenderCanvasNodeControls } from "@/lib/canvas/canvas-node-controls-visibility";
+import { canvasNodeEffectiveHover } from "@/lib/canvas/canvas-node-hover-state";
+import { shouldUseCanvasNodeMovingPlaceholder } from "@/lib/canvas/canvas-node-moving-content";
+import { shouldShowCanvasTextStream } from "@/lib/canvas/canvas-text-stream-visibility";
 import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
 import type { CanvasResizeBounds } from "@/lib/canvas/canvas-resize-preview";
 import { formatBytes } from "@/lib/image-utils";
-import { useThemeStore } from "@/stores/use-theme-store";
+import { resolveImageUrl } from "@/services/image-storage";
+import { resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeData, type Position } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
+export type CanvasConfigInputSummary = { textCount: number; imageCount: number; videoCount: number; audioCount: number };
+const emptyConfigInputSummary: CanvasConfigInputSummary = { textCount: 0, imageCount: 0, videoCount: 0, audioCount: 0 };
+
 type CanvasNodeProps = {
     data: CanvasNodeData;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    themeKey: string;
     renderQuality: CanvasRenderQuality;
     previewPosition?: Position;
     previewBounds?: CanvasResizeBounds;
-    scale: number;
+    getCanvasScale: () => number;
     isSelected: boolean;
     isRelated: boolean;
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
     isConnecting: boolean;
+    isRunning: boolean;
     editRequestNonce?: number;
     showPanel: boolean;
     showImageInfo: boolean;
+    configInputSummary?: CanvasConfigInputSummary;
     resourceLabel?: CanvasResourceReference;
     mentionReferences?: CanvasResourceReference[];
     renderPanel?: (node: CanvasNodeData) => ReactNode;
-    renderNodeContent?: (node: CanvasNodeData) => ReactNode;
+    renderNodeContent?: (node: CanvasNodeData, options: { inputSummary: CanvasConfigInputSummary; isRunning: boolean }) => ReactNode;
     batchCount?: number;
     batchExpanded?: boolean;
     batchClosing?: boolean;
@@ -67,8 +83,10 @@ type NodeContentRendererProps = {
     batchExpanded: boolean;
     batchOpening: boolean;
     batchRecovering: boolean;
-    renderNodeContent?: (node: CanvasNodeData) => ReactNode;
-    onContentChange: (nodeId: string, content: string) => void;
+    configInputSummary: CanvasConfigInputSummary;
+    isRunning: boolean;
+    renderNodeContent?: (node: CanvasNodeData, options: { inputSummary: CanvasConfigInputSummary; isRunning: boolean }) => ReactNode;
+    onContentChange: (content: string) => void;
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
@@ -79,18 +97,22 @@ type NodeContentRendererProps = {
 
 export const CanvasNode = React.memo(function CanvasNode({
     data,
+    theme,
+    themeKey,
     renderQuality,
     previewPosition,
     previewBounds,
-    scale,
+    getCanvasScale,
     isSelected,
     isRelated,
     isFocusRelated,
     isConnectionTarget,
     isConnecting,
+    isRunning,
     editRequestNonce = 0,
     showPanel,
     showImageInfo,
+    configInputSummary = emptyConfigInputSummary,
     resourceLabel,
     mentionReferences = [],
     renderPanel,
@@ -115,7 +137,6 @@ export const CanvasNode = React.memo(function CanvasNode({
     onViewImage,
     onContextMenu,
 }: CanvasNodeProps) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [hovered, setHovered] = useState(false);
     const [isEditingContent, setIsEditingContent] = useState(false);
     const [textDraft, setTextDraft] = useState(data.metadata?.content || "");
@@ -127,6 +148,11 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const isMoving = renderQuality === "moving";
+    const effectiveHovered = canvasNodeEffectiveHover(hovered, renderQuality);
+    const useOverview = renderQuality === "overview" && !isActive && !showPanel && !effectiveHovered;
+    const useMovingPlaceholder = shouldUseCanvasNodeMovingPlaceholder({ type: data.type, renderQuality, active: isActive, hovered: effectiveHovered, showPanel });
+    const showNodeControls = shouldRenderCanvasNodeControls({ renderQuality, hovered: effectiveHovered, selected: isSelected, connecting: isConnecting });
+    const contentRenderQuality: CanvasRenderQuality = useOverview ? "overview" : renderQuality === "overview" ? "full" : renderQuality;
     const effectiveResizePreview = previewBounds ?? localResizePreview;
     const position = previewPosition ?? effectiveResizePreview?.position ?? data.position;
     const width = effectiveResizePreview?.width ?? data.width;
@@ -174,7 +200,9 @@ export const CanvasNode = React.memo(function CanvasNode({
         if (isEditingContent) return;
         const content = data.metadata?.content || "";
         textDraftRef.current?.reset(content);
-        setTextDraft(content);
+        // The displayed, non-editing node reads data.metadata.content directly.
+        // Avoid a second component render for every streamed token; entering
+        // edit mode always synchronizes textDraft from the latest content.
     }, [data.metadata?.content, isEditingContent]);
 
     useEffect(() => () => textDraftRef.current?.flush(), []);
@@ -219,8 +247,13 @@ export const CanvasNode = React.memo(function CanvasNode({
         (event: MouseEvent) => {
             if (!resizeRef.current.isResizing) return;
 
-            const dx = (event.clientX - resizeRef.current.startX) / scale;
-            const dy = (event.clientY - resizeRef.current.startY) / scale;
+            const { x: dx, y: dy } = canvasNodeResizePointerDelta({
+                startX: resizeRef.current.startX,
+                startY: resizeRef.current.startY,
+                clientX: event.clientX,
+                clientY: event.clientY,
+                scale: getCanvasScale(),
+            });
             const minWidth = 220;
             const minHeight = 160;
             const startRight = resizeRef.current.startLeft + resizeRef.current.startWidth;
@@ -266,7 +299,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             }
             onResize(data.id, width, height, position);
         },
-        [data.id, onResize, scale],
+        [data.id, getCanvasScale, onResize],
     );
 
     const handleResizeUp = useCallback(() => {
@@ -318,21 +351,22 @@ export const CanvasNode = React.memo(function CanvasNode({
     return (
         <div
             data-node-id={data.id}
-            className={`node-element absolute flex select-none flex-col ${isMoving ? "[&_.backdrop-blur-md]:!backdrop-blur-none" : "transition-shadow duration-200"} ${isSelected ? "z-50" : "z-10"}`}
+            className={`node-element absolute flex select-none flex-col ${isMoving ? "[&_.backdrop-blur]:!backdrop-blur-none [&_.backdrop-blur-sm]:!backdrop-blur-none [&_.backdrop-blur-md]:!backdrop-blur-none" : "transition-shadow duration-200"} ${isSelected ? "z-50" : "z-10"}`}
             style={{
                 transform: `translate(${position.x}px, ${position.y}px)`,
                 width,
                 height,
                 transition: isMoving ? "none" : "box-shadow 200ms ease",
-                contain: "layout style",
+                ...canvasNodeRenderingStyle,
             }}
             onMouseEnter={() => {
+                if (isMoving) return;
                 setHovered(true);
                 onHoverStart(data.id);
             }}
             onMouseLeave={() => {
                 setHovered(false);
-                onHoverEnd(data.id);
+                if (!isMoving) onHoverEnd(data.id);
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
@@ -376,42 +410,50 @@ export const CanvasNode = React.memo(function CanvasNode({
                         } as React.CSSProperties
                     }
                 >
-                    <NodeContent
-                        node={data}
-                        theme={theme}
-                        renderQuality={renderQuality}
-                        isEditingContent={isEditingContent}
-                        textDraft={textDraft}
-                        textareaRef={textareaRef}
-                        isBatchRoot={isBatchRoot}
-                        batchCount={batchCount}
-                        batchExpanded={batchExpanded}
-                        batchOpening={batchOpening}
-                        batchRecovering={batchRecovering}
-                        renderNodeContent={renderNodeContent}
-                        mentionReferences={mentionReferences}
-                        onContentChange={updateTextDraft}
-                        onStopEditing={finishTextEditing}
-                        onRetry={onRetry}
-                        onGenerateImage={onGenerateImage}
-                        onToggleBatch={() => onToggleBatch?.(data.id)}
-                        onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
-                    />
+                    {useOverview ? (
+                        <CanvasNodeOverview node={data} theme={theme} />
+                    ) : useMovingPlaceholder ? (
+                        <CanvasNodeOverview node={data} theme={theme} />
+                    ) : (
+                        <NodeContent
+                            node={data}
+                            theme={theme}
+                            renderQuality={contentRenderQuality}
+                            isEditingContent={isEditingContent}
+                            textDraft={textDraft}
+                            textareaRef={textareaRef}
+                            isBatchRoot={isBatchRoot}
+                            batchCount={batchCount}
+                            batchExpanded={batchExpanded}
+                            batchOpening={batchOpening}
+                            batchRecovering={batchRecovering}
+                            configInputSummary={configInputSummary}
+                            isRunning={isRunning}
+                            renderNodeContent={renderNodeContent}
+                            mentionReferences={mentionReferences}
+                            onContentChange={updateTextDraft}
+                            onStopEditing={finishTextEditing}
+                            onRetry={onRetry}
+                            onGenerateImage={onGenerateImage}
+                            onToggleBatch={() => onToggleBatch?.(data.id)}
+                            onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
+                        />
+                    )}
                 </div>
 
-                {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
-                {resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
+                {!useOverview && showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
+                {!useOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} theme={theme} /> : null}
 
-                {!hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
+                {!useOverview && !hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
 
-                <ResizeHandle corner="top-left" onMouseDown={handleResizeMouseDown} />
+                {showNodeControls ? <><ResizeHandle corner="top-left" onMouseDown={handleResizeMouseDown} />
                 <ResizeHandle corner="top-right" onMouseDown={handleResizeMouseDown} />
                 <ResizeHandle corner="bottom-left" onMouseDown={handleResizeMouseDown} />
-                <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} />
+                <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} /></> : null}
             </div>
 
-            <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
-            <ConnectionHandleDot side="right" visible={data.type !== CanvasNodeType.Config && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} />
+            {showNodeControls ? <><ConnectionHandleDot side="left" theme={theme} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
+            <ConnectionHandleDot side="right" theme={theme} visible={data.type !== CanvasNodeType.Config && (effectiveHovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /></> : null}
 
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
         </div>
@@ -422,7 +464,7 @@ function canvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProps) 
     if (!canvasNodeRenderStateEqual(toRenderState(previous), toRenderState(next))) return false;
     if (previous.previewPosition?.x !== next.previewPosition?.x || previous.previewPosition?.y !== next.previewPosition?.y) return false;
     if (previous.previewBounds?.position.x !== next.previewBounds?.position.x || previous.previewBounds?.position.y !== next.previewBounds?.position.y || previous.previewBounds?.width !== next.previewBounds?.width || previous.previewBounds?.height !== next.previewBounds?.height) return false;
-    if (previous.onMouseDown !== next.onMouseDown || previous.onHoverStart !== next.onHoverStart || previous.onHoverEnd !== next.onHoverEnd || previous.onConnectStart !== next.onConnectStart || previous.onResize !== next.onResize || previous.onResizeEnd !== next.onResizeEnd || previous.onContentChange !== next.onContentChange || previous.onToggleBatch !== next.onToggleBatch || previous.onSetBatchPrimary !== next.onSetBatchPrimary || previous.onRetry !== next.onRetry || previous.onGenerateImage !== next.onGenerateImage || previous.onViewImage !== next.onViewImage || previous.onContextMenu !== next.onContextMenu) return false;
+    if (previous.getCanvasScale !== next.getCanvasScale || previous.onMouseDown !== next.onMouseDown || previous.onHoverStart !== next.onHoverStart || previous.onHoverEnd !== next.onHoverEnd || previous.onConnectStart !== next.onConnectStart || previous.onResize !== next.onResize || previous.onResizeEnd !== next.onResizeEnd || previous.onContentChange !== next.onContentChange || previous.onToggleBatch !== next.onToggleBatch || previous.onSetBatchPrimary !== next.onSetBatchPrimary || previous.onRetry !== next.onRetry || previous.onGenerateImage !== next.onGenerateImage || previous.onViewImage !== next.onViewImage || previous.onContextMenu !== next.onContextMenu) return false;
     if (previous.showPanel || next.showPanel) return previous.renderPanel === next.renderPanel;
     if (previous.data.type === CanvasNodeType.Config || next.data.type === CanvasNodeType.Config) return previous.renderNodeContent === next.renderNodeContent;
     return true;
@@ -431,16 +473,18 @@ function canvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProps) 
 function toRenderState(props: CanvasNodeProps): CanvasNodeRenderState {
     return {
         data: props.data,
+        themeKey: props.themeKey,
         renderQuality: props.renderQuality,
-        scale: props.scale,
         isSelected: props.isSelected,
         isRelated: props.isRelated,
         isFocusRelated: props.isFocusRelated,
         isConnectionTarget: props.isConnectionTarget,
         isConnecting: props.isConnecting,
+        isRunning: props.isRunning,
         editRequestNonce: props.editRequestNonce ?? 0,
         showPanel: props.showPanel,
         showImageInfo: props.showImageInfo,
+        configInputSummaryKey: configInputSummaryKey(props.configInputSummary),
         resourceLabel: props.resourceLabel,
         mentionReferences: props.mentionReferences || [],
         batchCount: props.batchCount ?? 0,
@@ -453,9 +497,9 @@ function toRenderState(props: CanvasNodeProps): CanvasNodeRenderState {
 }
 
 function NodeContent(props: NodeContentRendererProps) {
-    if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
+    if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node, { inputSummary: props.configInputSummary, isRunning: props.isRunning });
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
-    if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
+    if (props.node.metadata?.status === "loading" && !shouldShowCanvasTextStream(props.node)) return <LoadingContent theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type];
@@ -480,11 +524,13 @@ function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
 }
 
 function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
+    const videoRecovery = node.type === CanvasNodeType.Video && Boolean(node.metadata?.videoTaskId);
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
             <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
             <button
                 type="button"
+                disabled={videoRecovery && node.metadata?.videoTaskCanRecover === false}
                 className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02]"
                 style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                 onClick={(event) => {
@@ -494,7 +540,7 @@ function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 <RefreshCw className="size-3.5" />
-                重试
+                {videoRecovery ? node.metadata?.videoTaskCanRecover === false ? "提交状态待核查" : "恢复查询" : "重试"}
             </button>
         </div>
     );
@@ -538,7 +584,7 @@ function TextContent({ node, theme, isEditingContent, textDraft, textareaRef, me
                     value={textDraft}
                     references={mentionReferences}
                     highlightLabels={false}
-                    onChange={(value) => onContentChange(node.id, value)}
+                    onChange={onContentChange}
                     onBlur={onStopEditing}
                     onKeyDown={(event) => {
                         if (event.key === "Escape") onStopEditing();
@@ -560,8 +606,7 @@ function TextContent({ node, theme, isEditingContent, textDraft, textareaRef, me
     );
 }
 
-function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference }) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+function ResourceLabelBadge({ reference, theme }: { reference: CanvasResourceReference; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     return (
         <span className={`pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "text-white shadow-sm" : "bg-black/35 text-white/75"}`} style={reference.active ? { background: theme.canvas.selectionStroke } : undefined}>
             {reference.label}
@@ -570,7 +615,8 @@ function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference 
 }
 
 function ImageNodeContent(props: NodeContentRendererProps) {
-    if (!props.node.metadata?.content && props.isBatchRoot) {
+    const hasImageSource = Boolean(props.node.metadata?.content || props.node.metadata?.storageKey);
+    if (!hasImageSource && props.isBatchRoot) {
         const content =
             props.node.metadata?.status === "loading" ? (
                 <LoadingContent theme={props.theme} />
@@ -580,16 +626,17 @@ function ImageNodeContent(props: NodeContentRendererProps) {
                 <EmptyImageContent {...props} isBatchRoot={false} />
             );
         return (
-            <BatchFrame batchCount={props.batchCount} batchExpanded={props.batchExpanded} batchOpening={props.batchOpening} batchRecovering={props.batchRecovering} onToggleBatch={props.onToggleBatch}>
+            <BatchFrame theme={props.theme} batchCount={props.batchCount} batchExpanded={props.batchExpanded} batchOpening={props.batchOpening} batchRecovering={props.batchRecovering} onToggleBatch={props.onToggleBatch}>
                 {content}
             </BatchFrame>
         );
     }
-    if (!props.node.metadata?.content) return <EmptyImageContent {...props} />;
+    if (!hasImageSource) return <EmptyImageContent {...props} />;
 
     return (
         <ImageContent
             node={props.node}
+            theme={props.theme}
             isBatchRoot={props.isBatchRoot}
             batchCount={props.batchCount}
             batchExpanded={props.batchExpanded}
@@ -612,7 +659,7 @@ function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batc
     );
     if (isBatchRoot)
         return (
-            <BatchFrame batchCount={batchCount} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
+            <BatchFrame theme={theme} batchCount={batchCount} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
                 {content}
             </BatchFrame>
         );
@@ -620,18 +667,34 @@ function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batc
 }
 
 function VideoNodeContent({ node, theme, renderQuality }: NodeContentRendererProps) {
-    if (!node.metadata?.content)
+    const previewUrl = useCanvasNodeMediaPreview(node);
+    if (!previewUrl)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
                 <Video className="size-7 opacity-35" />
                 <span className="text-sm">空视频节点</span>
             </div>
         );
-    return <video src={node.metadata.content} {...canvasMediaPlaybackProps(renderQuality)} className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
+    return <video src={previewUrl} {...canvasMediaPlaybackProps(renderQuality)} className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
+}
+
+function CanvasNodeOverview({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
+    const icon = node.type === CanvasNodeType.Image ? <ImageIcon className="size-4" /> : node.type === CanvasNodeType.Video ? <Video className="size-4" /> : node.type === CanvasNodeType.Audio ? <Music2 className="size-4" /> : node.type === CanvasNodeType.Text ? <span className="text-xs font-bold">T</span> : <span className="text-xs font-bold">AI</span>;
+    return (
+        <div data-testid="canvas-node-overview" className="flex h-full w-full items-center gap-2 overflow-hidden rounded-[inherit] px-3" style={{ background: theme.node.fill, color: theme.node.text }}>
+            <span className="grid size-7 shrink-0 place-items-center rounded-lg" style={{ background: theme.toolbar.activeBg, color: theme.node.muted }}>{icon}</span>
+            <span className="truncate text-xs font-medium">{node.title || node.type}</span>
+        </div>
+    );
+}
+
+function configInputSummaryKey(summary?: CanvasConfigInputSummary) {
+    return summary ? `${summary.textCount}:${summary.imageCount}:${summary.videoCount}:${summary.audioCount}` : "0:0:0:0";
 }
 
 function AudioNodeContent({ node, theme, renderQuality }: NodeContentRendererProps) {
-    if (!node.metadata?.content)
+    const previewUrl = useCanvasNodeMediaPreview(node);
+    if (!previewUrl)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: theme.node.placeholder }}>
                 <Music2 className="size-7 opacity-35" />
@@ -644,13 +707,14 @@ function AudioNodeContent({ node, theme, renderQuality }: NodeContentRendererPro
                 <Music2 className="size-4 shrink-0" />
                 <span className="truncate">{node.title || "音频"}</span>
             </div>
-            <audio src={node.metadata.content} {...canvasMediaPlaybackProps(renderQuality)} className="w-full" data-canvas-no-zoom />
+            <audio src={previewUrl} {...canvasMediaPlaybackProps(renderQuality)} className="w-full" data-canvas-no-zoom />
         </div>
     );
 }
 
 function ImageContent({
     node,
+    theme,
     isBatchRoot,
     batchCount,
     batchExpanded,
@@ -660,6 +724,7 @@ function ImageContent({
     onSetBatchPrimary,
 }: {
     node: CanvasNodeData;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     isBatchRoot: boolean;
     batchCount: number;
     batchExpanded: boolean;
@@ -668,20 +733,24 @@ function ImageContent({
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
 }) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isBatchChild = Boolean(node.metadata?.batchRootId);
+    const previewUrl = useCanvasNodeMediaPreview(node);
 
     return (
-        <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
+        <BatchFrame theme={theme} batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
             <div className="h-full w-full overflow-hidden rounded-3xl">
-                <img
-                    src={node.metadata!.content!}
-                    alt={node.title}
-                    draggable={false}
-                    decoding="async"
-                    onDragStart={(event) => event.preventDefault()}
-                    className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
-                />
+                {previewUrl ? (
+                    <img
+                        src={previewUrl}
+                        alt={node.title}
+                        draggable={false}
+                        {...canvasImageRenderProps()}
+                        onDragStart={(event) => event.preventDefault()}
+                        className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
+                    />
+                ) : (
+                    <div className="h-full w-full animate-pulse" style={{ background: theme.toolbar.activeBg }} aria-label="正在恢复图片预览" />
+                )}
             </div>
             {isBatchRoot ? (
                 <button
@@ -720,6 +789,35 @@ function ImageContent({
     );
 }
 
+function useCanvasNodeMediaPreview(node: CanvasNodeData) {
+    const content = node.metadata?.content || "";
+    const storageKey = node.metadata?.storageKey;
+    const source = { type: node.type, content, storageKey };
+    const needsResolution = needsCanvasNodeMediaPreviewResolution(source);
+    const [previewUrl, setPreviewUrl] = useState(() => (needsResolution ? "" : content));
+
+    useEffect(() => {
+        let active = true;
+        if (!needsResolution) {
+            setPreviewUrl(content);
+            return;
+        }
+        setPreviewUrl("");
+        void resolveCanvasNodeMediaPreview(source, { resolveImage: resolveImageUrl, resolveMedia: resolveMediaUrl })
+            .then((url) => {
+                if (active) setPreviewUrl(url);
+            })
+            .catch(() => {
+                if (active) setPreviewUrl("");
+            });
+        return () => {
+            active = false;
+        };
+    }, [content, needsResolution, node.type, storageKey]);
+
+    return previewUrl;
+}
+
 function ImageInfoBar({ node }: { node: CanvasNodeData }) {
     const width = Math.round(node.metadata?.naturalWidth || node.width);
     const height = Math.round(node.metadata?.naturalHeight || node.height);
@@ -734,8 +832,7 @@ function ImageInfoBar({ node }: { node: CanvasNodeData }) {
     );
 }
 
-function BatchFrame({ batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, children }: { batchCount: number; batchExpanded: boolean; batchOpening: boolean; batchRecovering: boolean; onToggleBatch?: () => void; children: ReactNode }) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+function BatchFrame({ theme, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, children }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; batchCount: number; batchExpanded: boolean; batchOpening: boolean; batchRecovering: boolean; onToggleBatch?: () => void; children: ReactNode }) {
     const isBatchRoot = batchCount > 1;
     return (
         <div
@@ -783,8 +880,7 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
     return <div className={`absolute z-50 size-7 ${positionClass}`} onMouseDown={(event) => onMouseDown(event, corner)} />;
 }
 
-function ConnectionHandleDot({ side, visible, onMouseDown }: { side: "left" | "right"; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+function ConnectionHandleDot({ side, theme, visible, onMouseDown }: { side: "left" | "right"; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
 
     return (
         <div

@@ -11,7 +11,7 @@ type ThemeStore = {
 export const useThemeStore = create<ThemeStore>()(
     persist(
         (set) => ({
-            theme: "dark",
+            theme: "light",
             setTheme: (theme) => set({ theme }),
         }),
         { name: "wireless-canvas:theme_store" },

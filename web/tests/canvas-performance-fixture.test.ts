@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { connectionIntersectsCanvasBounds } from "@/lib/canvas/canvas-connection-visibility";
 import { createCanvasConnectionSpatialIndex, selectCanvasSpatialIndexConnections } from "@/lib/canvas/canvas-connection-spatial-index";
+import { createCanvasPerformanceScenario } from "@/lib/canvas/canvas-performance-scenario";
 import { createCanvasSpatialIndex, selectIndexedCanvasNodes } from "@/lib/canvas/canvas-spatial-index";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
@@ -33,5 +34,20 @@ describe("canvas performance fixture", () => {
         expect(visibleNodes.length).toBeLessThan(nodes.length / 4);
         expect(visibleConnections.length).toBeLessThan(connections.length / 4);
         expect(visibleConnections.map((connection) => connection.id)).toEqual(expectedVisibleConnections.map((connection) => connection.id));
+    });
+
+    test("keeps the 5000-node stress fixture scoped to the local viewport", () => {
+        const scenario = createCanvasPerformanceScenario(5000);
+        const bounds = { minX: -280, minY: -280, maxX: 1480, maxY: 1000 };
+        const nodeIndex = createCanvasSpatialIndex(scenario.nodes);
+        const visibleNodes = selectIndexedCanvasNodes(scenario.nodes, nodeIndex, bounds, () => true);
+        const nodeById = new Map(scenario.nodes.map((node) => [node.id, node]));
+        const connectionIndex = createCanvasConnectionSpatialIndex(scenario.connections, nodeById);
+        const visibleConnections = selectCanvasSpatialIndexConnections(connectionIndex, bounds);
+
+        expect(visibleNodes.length).toBeLessThan(40);
+        expect(visibleConnections.length).toBeLessThan(100);
+        expect(visibleNodes.every((node) => node.position.x < bounds.maxX && node.position.y < bounds.maxY)).toBe(true);
+        expect(visibleConnections.every((connection) => connectionIntersectsCanvasBounds(nodeById.get(connection.fromNodeId)!, nodeById.get(connection.toNodeId)!, bounds))).toBe(true);
     });
 });

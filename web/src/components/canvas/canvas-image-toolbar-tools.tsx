@@ -38,7 +38,7 @@ export type ImageQuickToolsConfig = {
 
 export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v6";
 
-const defaultBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download", "edit"];
+const allBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download", "edit"];
 
 export const imageToolDefinitions: ImageToolDefinition[] = [
     {
@@ -47,7 +47,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         panelLabel: "复制提示词",
         label: "复制提示词",
         title: "复制生成该图片的提示词",
-        icon: () => <Copy className="size-4" />,
+        icon: () => <Copy className="size-[18px]" />,
         run: (node, handlers) => handlers.onCopyPrompt(node),
     },
     {
@@ -56,7 +56,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         panelLabel: "反推提示词",
         label: "反推提示词",
         title: "创建反推提示词的文本和配置节点",
-        icon: () => <FileText className="size-4" />,
+        icon: () => <FileText className="size-[18px]" />,
         run: (node, handlers) => handlers.onReversePrompt(node),
     },
     {
@@ -65,7 +65,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         panelLabel: "替换图片",
         label: "替换图片",
         title: "替换图片",
-        icon: () => <Upload className="size-4" />,
+        icon: () => <Upload className="size-[18px]" />,
         run: (node, handlers) => handlers.onUpload(node),
     },
     {
@@ -74,17 +74,17 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         panelLabel: "锁比例",
         label: (node) => (node.metadata?.freeResize ? "自由比例" : "锁比例"),
         title: (node) => (node.metadata?.freeResize ? "切换为等比缩放" : "切换为自由比例"),
-        icon: (node) => (node.metadata?.freeResize ? <LockOpen className="size-4" /> : <Lock className="size-4" />),
+        icon: (node) => (node.metadata?.freeResize ? <LockOpen className="size-[18px]" /> : <Lock className="size-[18px]" />),
         active: (node) => Boolean(node.metadata?.freeResize),
         run: (node, handlers) => handlers.onToggleFreeResize(node),
     },
     {
         id: "maskEdit",
         defaultVisible: true,
-        panelLabel: "局部编辑",
-        label: "局部编辑",
-        title: "添加蒙版遮罩后局部修改",
-        icon: () => <Brush className="size-4" />,
+        panelLabel: "局部重绘",
+        label: "局部重绘",
+        title: "局部重绘",
+        icon: () => <Brush className="size-[18px]" />,
         run: (node, handlers) => handlers.onMaskEdit(node),
     },
     {
@@ -93,7 +93,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         panelLabel: "裁剪",
         label: "裁剪",
         title: "裁剪并生成新节点",
-        icon: () => <Scissors className="size-4" />,
+        icon: () => <Scissors className="size-[18px]" />,
         run: (node, handlers) => handlers.onCrop(node),
     },
     {
@@ -102,7 +102,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         panelLabel: "切图",
         label: "切图",
         title: "按行列切分图片",
-        icon: () => <Grid2x2 className="size-4" />,
+        icon: () => <Grid2x2 className="size-[18px]" />,
         run: (node, handlers) => handlers.onSplit(node),
     },
     {
@@ -111,7 +111,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         panelLabel: "放大",
         label: "放大",
         title: "放大图片分辨率",
-        icon: () => <ZoomIn className="size-4" />,
+        icon: () => <ZoomIn className="size-[18px]" />,
         run: (node, handlers) => handlers.onUpscale(node),
     },
     {
@@ -120,7 +120,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         panelLabel: "超分",
         label: "超分",
         title: "AI 超分",
-        icon: () => <Sparkles className="size-4" />,
+        icon: () => <Sparkles className="size-[18px]" />,
         run: (node, handlers) => handlers.onSuperResolve(node),
     },
     {
@@ -129,7 +129,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         panelLabel: "多角度",
         label: "多角度",
         title: "生成角度",
-        icon: () => <Camera className="size-4" />,
+        icon: () => <Camera className="size-[18px]" />,
         run: (node, handlers) => handlers.onAngle(node),
     },
     {
@@ -138,12 +138,18 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         panelLabel: "查看大图",
         label: "查看大图",
         title: "查看图片详情",
-        icon: () => <Maximize2 className="size-4" />,
+        icon: () => <Maximize2 className="size-[18px]" />,
         run: (node, handlers) => handlers.onViewImage(node),
     },
 ];
 
-export const defaultImageQuickToolIds: ImageQuickToolId[] = [...defaultBaseToolIds, ...imageToolDefinitions.filter((tool) => tool.defaultVisible).map((tool) => tool.id)];
+export const defaultImageQuickToolIds: ImageQuickToolId[] = ["edit", "maskEdit", "crop", "download"];
+
+/** Keep old preferences intact while preventing a legacy full-width toolbar. */
+export function compactImageQuickToolIds(ids: ImageQuickToolId[]) {
+    const visible = ids.filter((id) => id !== "info" && id !== "delete");
+    return visible.length > 4 ? defaultImageQuickToolIds : visible;
+}
 
 export function buildImageToolbarTools(node: CanvasNodeData, handlers: ImageToolHandlers) {
     return imageToolDefinitions.map((tool) => ({
@@ -157,9 +163,9 @@ export function buildImageToolbarTools(node: CanvasNodeData, handlers: ImageTool
 }
 
 export function normalizeImageQuickToolIds(value: unknown[]) {
-    const allIds: ImageQuickToolId[] = [...defaultBaseToolIds, ...imageToolDefinitions.map((tool) => tool.id)];
+    const allIds: ImageQuickToolId[] = [...allBaseToolIds, ...imageToolDefinitions.map((tool) => tool.id)];
     const ids = new Set(allIds);
-    return allIds.filter((id) => value.includes(id) && ids.has(id));
+    return Array.from(new Set(value.filter((id): id is ImageQuickToolId => typeof id === "string" && ids.has(id as ImageQuickToolId))));
 }
 
 export function readImageQuickToolsConfig(value: unknown): ImageQuickToolsConfig {

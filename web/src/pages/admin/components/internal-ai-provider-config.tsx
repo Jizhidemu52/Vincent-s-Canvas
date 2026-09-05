@@ -89,7 +89,7 @@ export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
     };
 
     return (
-        <section className="rounded-md border border-orange-200 bg-white p-4 dark:border-orange-900 dark:bg-stone-900">
+        <section className="wb-surface p-5">
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <Typography.Title level={3} className="!mb-1 !text-base">
@@ -121,10 +121,10 @@ export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
                             { type: "url", message: "请输入有效的 HTTP 或 HTTPS 地址" },
                         ]}
                     >
-                        <Input prefix={<Server className="size-4 text-stone-400" />} placeholder={DEFAULT_SEAMLESS_URL} />
+                        <Input prefix={<Server className="size-4 text-[var(--muted-foreground)]" />} placeholder={DEFAULT_SEAMLESS_URL} />
                     </Form.Item>
                     <Form.Item name="appKey" label="App Key">
-                        <Input.Password prefix={<KeyRound className="size-4 text-stone-400" />} placeholder={status?.hasAppKey ? "留空则保留当前密钥" : "粘贴内部 AI App Key"} autoComplete="new-password" />
+                        <Input.Password prefix={<KeyRound className="size-4 text-[var(--muted-foreground)]" />} placeholder={status?.hasAppKey ? "留空则保留当前密钥" : "粘贴内部 AI App Key"} autoComplete="new-password" />
                     </Form.Item>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -140,7 +140,7 @@ export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
                         <Button icon={<PlugZap className="size-4" />} onClick={testConnection} disabled={!isAdmin || loading} loading={testing}>
                             真实测试出图
                         </Button>
-                        <Button type="primary" htmlType="submit" icon={<Save className="size-4" />} loading={saving}>
+                        <Button className="!h-10" type="primary" htmlType="submit" icon={<Save className="size-4" />} loading={saving}>
                             保存到服务端
                         </Button>
                     </Space>

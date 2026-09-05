@@ -1,24 +1,26 @@
 import type { ReactNode } from "react";
-import { Download, Edit3, FileUp, LogOut, ShieldCheck, SlidersHorizontal, UserPlus, UsersRound, WalletCards } from "lucide-react";
-import { useEffect, useState } from "react";
-import { App, Button, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag, Typography, Upload } from "antd";
+import { Download, Edit3, FileUp, LogOut, RefreshCw, ShieldCheck, SlidersHorizontal, UserPlus, UsersRound, WalletCards } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Alert, App, Button, Form, Input, InputNumber, Select, Skeleton, Space, Table, Tabs, Tag, Typography, Upload } from "antd";
 import { saveAs } from "file-saver";
 import Papa from "papaparse";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
-import { ApiConfigurationHub } from "@/pages/admin/components/api-configuration-hub";
-import { ModelPricingPanel } from "@/pages/admin/components/model-pricing-panel";
-import { HistoryManagementPanel, TaskManagementPanel } from "@/pages/admin/components/task-history-panels";
-import { AdminAssetsPanel } from "@/pages/admin/components/admin-assets-panel";
-import { IntegrationStatusPanel } from "@/pages/admin/components/integration-status-panel";
-import { GroupManagementPanel } from "@/pages/admin/components/group-management-panel";
-import { ModuleSwitchPanel } from "@/pages/admin/components/module-switch-panel";
-import { PerformanceDashboard } from "@/pages/performance/dashboard";
-import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, listAccounts, listAuditLogs, listDepartments, resetAccountPassword, updateAccount, type AccountInput, type AuditLog, type Department } from "@/services/api/admin-accounts";
-import { listAdminHistory } from "@/services/api/task-history";
+import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, resetAccountPassword, updateAccount, type AccountInput, type AuditLog, type Department } from "@/services/api/admin-accounts";
+import { loadAdminOverview, resolveAdminTab } from "./admin-overview";
 import type { ApiUser, ApiUserRole } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import { useModuleStore } from "@/stores/use-module-store";
+
+const ApiConfigurationHub = lazy(() => import("./components/api-configuration-hub").then((module) => ({ default: module.ApiConfigurationHub })));
+const ModelPricingPanel = lazy(() => import("./components/model-pricing-panel").then((module) => ({ default: module.ModelPricingPanel })));
+const HistoryManagementPanel = lazy(() => import("./components/task-history-panels").then((module) => ({ default: module.HistoryManagementPanel })));
+const TaskManagementPanel = lazy(() => import("./components/task-history-panels").then((module) => ({ default: module.TaskManagementPanel })));
+const AdminAssetsPanel = lazy(() => import("./components/admin-assets-panel").then((module) => ({ default: module.AdminAssetsPanel })));
+const IntegrationStatusPanel = lazy(() => import("./components/integration-status-panel").then((module) => ({ default: module.IntegrationStatusPanel })));
+const GroupManagementPanel = lazy(() => import("./components/group-management-panel").then((module) => ({ default: module.GroupManagementPanel })));
+const ModuleSwitchPanel = lazy(() => import("./components/module-switch-panel").then((module) => ({ default: module.ModuleSwitchPanel })));
+const PerformanceDashboard = lazy(() => import("@/pages/performance/dashboard").then((module) => ({ default: module.PerformanceDashboard })));
 
 type CreditFormValues = {
     designerId: string;
@@ -57,7 +59,12 @@ export default function AdminPage() {
     const [departmentName, setDepartmentName] = useState("");
     const [departmentCode, setDepartmentCode] = useState("");
     const [accountsLoading, setAccountsLoading] = useState(true);
-    const [totalCost, setTotalCost] = useState(0);
+    const [accountsReady, setAccountsReady] = useState(false);
+    const [totalCost, setTotalCost] = useState<number>();
+    const [loadError, setLoadError] = useState("");
+    const [pendingAction, setPendingAction] = useState("");
+    const pendingActionRef = useRef("");
+    const accountsRequest = useRef(0);
     const [searchParams, setSearchParams] = useSearchParams();
     const signedInUser = useUserStore((store) => store.user);
     const hydrateSession = useUserStore((store) => store.hydrateSession);
@@ -66,25 +73,36 @@ export default function AdminPage() {
     const currentOperator = signedInUser;
     const isAdmin = signedInUser?.role === "super_admin";
     const canManageAccounts = isAdminRole(signedInUser?.role);
-    const requestedAdminTabValue = searchParams.get("tab") || "accounts";
-    const requestedAdminTab = ["providers", "workflows", "models"].includes(requestedAdminTabValue) ? "api" : requestedAdminTabValue;
     const departmentAdminTabs = new Set(["accounts", "groups", "performance"]);
-    const requestedTabAvailable = requestedAdminTab !== "performance" || performanceEnabled;
-    const activeAdminTab = requestedTabAvailable && (isAdmin || departmentAdminTabs.has(requestedAdminTab)) ? requestedAdminTab : "accounts";
+    const activeAdminTab = resolveAdminTab(searchParams.get("tab"), isAdmin, performanceEnabled);
 
     const refreshAccounts = async () => {
+        const request = ++accountsRequest.current;
         setAccountsLoading(true);
         try {
-            const [accountResult, departmentResult, auditResult, historyResult] = await Promise.all([listAccounts(), listDepartments(), listAuditLogs(), listAdminHistory()]);
-            setAccounts(accountResult.users);
-            setDepartments(departmentResult.departments);
-            setAuditLogs(auditResult.auditLogs);
-            setTotalCost(historyResult.totalRmbCost);
-        } catch (error) { message.error(error instanceof Error ? error.message : "账号数据加载失败"); }
-        finally { setAccountsLoading(false); }
+            const result = await loadAdminOverview();
+            if (request !== accountsRequest.current) return;
+            if (result.accounts) { setAccounts(result.accounts); setAccountsReady(true); }
+            if (result.departments) setDepartments(result.departments);
+            if (result.auditLogs) setAuditLogs(result.auditLogs);
+            if (result.totalCost !== undefined) setTotalCost(result.totalCost);
+            setLoadError(result.errors.join("；"));
+        } catch (error) { if (request === accountsRequest.current) setLoadError(error instanceof Error ? error.message : "账号数据加载失败"); }
+        finally { if (request === accountsRequest.current) setAccountsLoading(false); }
     };
 
-    useEffect(() => { if (canManageAccounts) void refreshAccounts(); }, [canManageAccounts]);
+    useEffect(() => {
+        setAccounts([]); setDepartments([]); setAuditLogs([]); setTotalCost(undefined); setAccountsReady(false);
+        if (canManageAccounts) void refreshAccounts();
+        return () => { accountsRequest.current++; };
+    }, [canManageAccounts, signedInUser?.id, signedInUser?.role, signedInUser?.departmentId]);
+
+    const runAction = async (key: string, action: () => Promise<void>) => {
+        if (pendingActionRef.current) return;
+        pendingActionRef.current = key; setPendingAction(key);
+        try { await action(); }
+        finally { pendingActionRef.current = ""; setPendingAction(""); }
+    };
 
     const designerOptions = accounts.map((designer) => ({
         label: `${designer.displayName}（${designer.role === "designer" ? "设计师" : "管理员"}）`,
@@ -119,7 +137,7 @@ export default function AdminPage() {
         { key: "integrations", label: "系统集成" },
     ].filter((tab) => isAdmin || departmentAdminTabs.has(tab.key));
 
-    const submitCreditChange = async (values: CreditFormValues) => {
+    const submitCreditChange = (values: CreditFormValues) => runAction("credit", async () => {
         try {
             const result = await adjustAccountCredits(values.designerId, values.amount, values.reason || "管理员调整");
             if (result.user.id === signedInUser?.id) await hydrateSession();
@@ -127,14 +145,14 @@ export default function AdminPage() {
             await refreshAccounts();
         }
         catch (error) { message.error(error instanceof Error ? error.message : "额度调整失败"); }
-    };
+    });
 
-    const submitLimitChange = async (values: LimitFormValues) => {
+    const submitLimitChange = (values: LimitFormValues) => runAction("limit", async () => {
         try { await updateAccount(values.designerId, { monthlyCreditLimit: values.monthlyCreditLimit }); message.success("每月固定额度已更新，下月重置时生效"); await refreshAccounts(); }
         catch (error) { message.error(error instanceof Error ? error.message : "每月固定额度更新失败"); }
-    };
+    });
 
-    const submitAccount = async (values: AccountFormValues) => {
+    const submitAccount = (values: AccountFormValues) => runAction("account", async () => {
         try {
             if (editingAccountId) {
                 const currentAccount = accounts.find((account) => account.id === editingAccountId);
@@ -153,9 +171,10 @@ export default function AdminPage() {
             accountForm.setFieldsValue({ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 });
             await refreshAccounts();
         } catch (error) { message.error(error instanceof Error ? error.message : "账号保存失败"); }
-    };
+    });
 
     const editAccount = (designer: ApiUser) => {
+        if (pendingActionRef.current) return;
         setEditingAccountId(designer.id);
         accountForm.setFieldsValue({
             loginName: designer.username,
@@ -177,6 +196,7 @@ export default function AdminPage() {
     };
 
     const importAccountCsv = async (file: File) => {
+        await runAction("import", async () => {
         try {
             const parsed = Papa.parse<Record<string, string>>(await file.text(), { header: true, skipEmptyLines: true });
             const firstError = parsed.errors[0];
@@ -196,51 +216,60 @@ export default function AdminPage() {
             else message.success(`成功导入 ${result.created} 个账号`);
             await refreshAccounts();
         } catch (error) { message.error(error instanceof Error ? error.message : "CSV 导入失败"); }
+        });
         return false;
     };
 
     const submitDepartment = async () => {
         if (!departmentName.trim() || !departmentCode.trim()) { message.warning("请输入部门名称和编码"); return; }
+        await runAction("department", async () => {
         try {
             await createDepartment(departmentName, departmentCode);
             setDepartmentName(""); setDepartmentCode("");
             message.success("部门已创建");
             await refreshAccounts();
         } catch (error) { message.error(error instanceof Error ? error.message : "部门创建失败"); }
+        });
     };
 
     if (!signedInUser || !canManageAccounts) return <Navigate to="/admin/login" replace />;
 
     return (
-        <div className="h-full overflow-y-auto bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-            <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-6 py-5">
-                <section className="flex flex-col gap-4 border-b border-stone-200 pb-4 dark:border-stone-800 lg:flex-row lg:items-end lg:justify-between">
+        <div className="wb-page h-full overflow-y-auto">
+            <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+                <section className="wb-header !mb-0">
                     <div>
-                        <div className="text-xs font-medium text-stone-500 dark:text-stone-400">后台管理</div>
-                        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">账号额度、模型价格与历史审计</h1>
+                        <div className="wb-eyebrow">管理工作台</div>
+                        <h1 className="wb-title">管理中心</h1>
+                        <p className="wb-description">统一管理成员、生成服务与使用记录。只显示当前账号可管理的范围。</p>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <div className="rounded-md border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900">
+                        <div className="text-sm text-[var(--muted-foreground)]">
                             当前管理员：<span className="font-medium">{currentOperator?.displayName}</span>
                         </div>
+                        <Button className="!h-10" icon={<RefreshCw className="size-4" />} loading={accountsLoading} onClick={() => void refreshAccounts()}>刷新概览</Button>
                         <Button
+                            className="!h-10"
+                            loading={pendingAction === "logout"}
+                            disabled={Boolean(pendingAction) && pendingAction !== "logout"}
                             icon={<LogOut className="size-4" />}
-                            onClick={async () => {
+                            onClick={() => void runAction("logout", async () => {
                                 await clearSession();
                                 navigate("/admin/login", { replace: true });
-                            }}
+                            }).catch((error) => message.error(error instanceof Error ? error.message : "退出失败，请重试"))}
                         >
                             退出
                         </Button>
                     </div>
                 </section>
 
-                <section className="grid gap-3 md:grid-cols-4">
-                    <Metric icon={<UsersRound className="size-4" />} label="可管理账号" value={String(accounts.length)} />
-                    <Metric icon={<WalletCards className="size-4" />} label="剩余额度" value={totalRemaining.toLocaleString()} />
-                    <Metric icon={<SlidersHorizontal className="size-4" />} label="已用额度" value={totalUsed.toLocaleString()} />
-                    <Metric icon={<ShieldCheck className="size-4" />} label="人民币成本" value={`￥${totalCost.toFixed(2)}`} />
+                <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="管理概览" aria-busy={accountsLoading}>
+                    <Metric icon={<UsersRound className="size-4" />} label="可管理账号" value={accountsReady ? String(accounts.length) : "—"} />
+                    <Metric icon={<WalletCards className="size-4" />} label="剩余额度" value={accountsReady ? totalRemaining.toLocaleString() : "—"} />
+                    <Metric icon={<SlidersHorizontal className="size-4" />} label="已用额度" value={accountsReady ? totalUsed.toLocaleString() : "—"} />
+                    <Metric icon={<ShieldCheck className="size-4" />} label="人民币成本" value={totalCost === undefined ? "—" : `￥${totalCost.toFixed(2)}`} />
                 </section>
+                {loadError ? <Alert type="warning" showIcon title="部分概览暂未更新" description={loadError} action={<Button loading={accountsLoading} onClick={() => void refreshAccounts()}>重试</Button>} /> : null}
 
                 {!isAdmin ? (
                     <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
@@ -248,23 +277,21 @@ export default function AdminPage() {
                     </div>
                 ) : null}
 
-                <div className="flex flex-wrap gap-2">
+                <nav aria-label="管理板块" className="flex gap-1 overflow-x-auto border-b border-[var(--border)] pb-3">
                     {adminTabOptions.map((tab) => (
                         <Link
                             key={tab.key}
                             to={tab.key === "accounts" ? "/admin" : `/admin?tab=${tab.key}`}
-                            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${
-                                activeAdminTab === tab.key
-                                    ? "border-orange-500 bg-orange-600 text-white shadow-sm"
-                                    : "border-stone-200 bg-white text-stone-700 hover:border-orange-300 hover:text-orange-700 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-200 dark:hover:border-orange-700 dark:hover:text-orange-300"
-                            }`}
+                            aria-current={activeAdminTab === tab.key ? "page" : undefined}
+                            className="wb-nav-link shrink-0 rounded-xl px-4 py-2.5"
                         >
                             {tab.label}
                         </Link>
                     ))}
-                </div>
+                </nav>
 
                 <div>
+                    <Suspense fallback={<div className="wb-surface p-6" role="status" aria-label="正在加载管理板块"><Skeleton active paragraph={{ rows: 5 }} /></div>}>
                     <Tabs
                         className="admin-tabs"
                         activeKey={activeAdminTab}
@@ -276,13 +303,16 @@ export default function AdminPage() {
                                 key: "accounts",
                                 label: "账号额度",
                                 children: (
-                                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                                    <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
                                         <Table
+                                            className="wb-surface min-w-0 overflow-hidden"
                                             rowKey="id"
                                             size="small"
                                             loading={accountsLoading}
                                             pagination={{ pageSize: 20, showSizeChanger: false }}
                                             dataSource={accounts}
+                                            scroll={{ x: 1080 }}
+                                            locale={{ emptyText: loadError && !accountsReady ? "账号尚未加载，请在上方重试" : "暂无可管理账号" }}
                                             columns={[
                                                 { title: "姓名", dataIndex: "displayName" },
                                                 { title: "登录账号", dataIndex: "username" },
@@ -296,7 +326,7 @@ export default function AdminPage() {
                                                 {
                                                     title: "操作",
                                                     render: (_, record: ApiUser) => (
-                                                        <Button size="small" icon={<Edit3 className="size-3.5" />} onClick={() => editAccount(record)}>
+                                                        <Button size="small" disabled={Boolean(pendingAction)} icon={<Edit3 className="size-3.5" />} onClick={() => editAccount(record)}>
                                                             编辑
                                                         </Button>
                                                     ),
@@ -310,17 +340,17 @@ export default function AdminPage() {
                                                         <Input value={departmentName} onChange={(event) => setDepartmentName(event.target.value)} placeholder="部门名称" />
                                                         <Input value={departmentCode} onChange={(event) => setDepartmentCode(event.target.value)} placeholder="唯一编码" />
                                                     </div>
-                                                    <Button className="mt-2" block onClick={submitDepartment}>新建部门</Button>
+                                                    <Button className="mt-3 !h-10" loading={pendingAction === "department"} disabled={Boolean(pendingAction) && pendingAction !== "department"} block onClick={submitDepartment}>新建部门</Button>
                                                 </Panel>
                                             ) : null}
                                             <Panel title={editingAccountId ? "编辑账号权限" : "开通设计师账号"}>
                                                 <div className="mb-4 flex flex-wrap gap-2">
-                                                    <Upload accept=".csv,text/csv" maxCount={1} showUploadList={false} beforeUpload={(file) => importAccountCsv(file as File)}>
-                                                        <Button icon={<FileUp className="size-4" />}>批量导入 CSV</Button>
+                                                    <Upload accept=".csv,text/csv" disabled={Boolean(pendingAction)} maxCount={1} showUploadList={false} beforeUpload={(file) => importAccountCsv(file as File)}>
+                                                        <Button loading={pendingAction === "import"} disabled={Boolean(pendingAction) && pendingAction !== "import"} icon={<FileUp className="size-4" />}>批量导入 CSV</Button>
                                                     </Upload>
                                                     <Button icon={<Download className="size-4" />} onClick={downloadAccountTemplate}>下载模板</Button>
                                                 </div>
-                                                 <Form form={accountForm} layout="vertical" disabled={!canManageAccounts} initialValues={{ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 }} onFinish={submitAccount}>
+                                                 <Form form={accountForm} layout="vertical" disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 }} onFinish={submitAccount}>
                                                     <Form.Item name="loginName" label="登录账号" rules={[{ required: true, message: "请输入登录账号" }]}>
                                                         <Input placeholder="例如：张三 / zhangsan / 邮箱 / 工号" disabled={Boolean(editingAccountId)} />
                                                     </Form.Item>
@@ -362,7 +392,7 @@ export default function AdminPage() {
                                                         </Form.Item>
                                                     </div>
                                                     <Space className="w-full" orientation="vertical">
-                                                        <Button type="primary" htmlType="submit" icon={<UserPlus className="size-4" />} block>
+                                                        <Button className="!h-10" loading={pendingAction === "account"} type="primary" htmlType="submit" icon={<UserPlus className="size-4" />} block>
                                                             {editingAccountId ? "保存账号权限" : "开通账号"}
                                                         </Button>
                                                         {editingAccountId ? (
@@ -382,7 +412,7 @@ export default function AdminPage() {
                                                 <Typography.Paragraph className="!mb-0 !mt-3 text-xs !text-stone-500">登录账号支持中文或英文，邮箱和工号也可登录。新账号首次登录必须修改密码；停用和重置密码会使既有会话失效。</Typography.Paragraph>
                                             </Panel>
                                              <Panel title="调整本月临时额度">
-                                                <Form form={creditForm} layout="vertical" disabled={!canManageAccounts} initialValues={{ designerId: activeDesigner?.id, amount: 100, reason: "项目补充额度" }} onFinish={submitCreditChange}>
+                                                <Form form={creditForm} layout="vertical" disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ designerId: activeDesigner?.id, amount: 100, reason: "项目补充额度" }} onFinish={submitCreditChange}>
                                                     <Form.Item name="designerId" label="设计师" rules={[{ required: true }]}>
                                                         <Select options={designerOptions.filter((item) => accounts.find((designer) => designer.id === item.value)?.role === "designer")} />
                                                     </Form.Item>
@@ -392,20 +422,20 @@ export default function AdminPage() {
                                                     <Form.Item name="reason" label="原因">
                                                         <Input placeholder="例如：项目补充额度" />
                                                     </Form.Item>
-                                                    <Button type="primary" htmlType="submit" block>
+                                                    <Button className="!h-10" loading={pendingAction === "credit"} type="primary" htmlType="submit" block>
                                                         保存调整
                                                     </Button>
                                                 </Form>
                                             </Panel>
                                              <Panel title="设置每月固定额度">
-                                                 <Form form={limitForm} layout="vertical" disabled={!canManageAccounts} initialValues={{ designerId: activeDesigner?.id, monthlyCreditLimit: activeDesigner?.monthlyCreditLimit || 500 }} onFinish={submitLimitChange}>
+                                                 <Form form={limitForm} layout="vertical" disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ designerId: activeDesigner?.id, monthlyCreditLimit: activeDesigner?.monthlyCreditLimit || 500 }} onFinish={submitLimitChange}>
                                                     <Form.Item name="designerId" label="设计师" rules={[{ required: true }]}>
                                                         <Select options={designerOptions.filter((item) => accounts.find((designer) => designer.id === item.value)?.role === "designer")} />
                                                     </Form.Item>
                                                      <Form.Item name="monthlyCreditLimit" label="每月 1 日重置后的积分" rules={[{ required: true }]}>
                                                         <InputNumber className="w-full" min={0} max={1000000} />
                                                     </Form.Item>
-                                                    <Button htmlType="submit" block>
+                                                    <Button className="!h-10" loading={pendingAction === "limit"} htmlType="submit" block>
                                                          保存每月固定额度
                                                     </Button>
                                                 </Form>
@@ -452,13 +482,16 @@ export default function AdminPage() {
                             {
                                 key: "batch",
                                 label: "批量任务",
-                                children: <TaskManagementPanel />,
+                                children: <TaskManagementPanel active={activeAdminTab === "batch"} />,
                             },
                             {
                                 key: "audit",
                                 label: "审计日志",
                                 children: (
                                     <Table
+                                        className="wb-surface overflow-hidden"
+                                        loading={accountsLoading}
+                                        scroll={{ x: 1000 }}
                                         rowKey="id"
                                         size="small"
                                         dataSource={auditLogs}
@@ -481,9 +514,10 @@ export default function AdminPage() {
                             },
                         ]}
                     />
+                    </Suspense>
                 </div>
 
-                <div className="rounded-md border border-stone-200 bg-white px-4 py-3 text-xs leading-5 text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">
+                <div className="text-xs leading-6 text-[var(--muted-foreground)]">
                     账号、会话、模型密钥、价格版本、额度账本、任务队列、公司对象存储、生成历史和管理审计均由服务端统一管理。
                 </div>
             </main>
@@ -493,19 +527,19 @@ export default function AdminPage() {
 
 function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
     return (
-        <div className="rounded-md border border-stone-200 bg-white px-4 py-3 dark:border-stone-800 dark:bg-stone-900">
-            <div className="flex items-center gap-2 text-xs font-medium text-stone-500 dark:text-stone-400">
+        <div className="wb-surface px-5 py-4">
+            <div className="flex items-center gap-2 text-xs font-medium text-[var(--muted-foreground)]">
                 {icon}
                 {label}
             </div>
-            <div className="mt-2 text-2xl font-semibold text-stone-950 dark:text-stone-100">{value}</div>
+            <div className="mt-3 text-[28px] font-semibold tracking-tight tabular-nums">{value}</div>
         </div>
     );
 }
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
     return (
-        <section className="rounded-md border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+        <section className="wb-surface p-5">
             <Typography.Title level={3} className="!mb-4 !text-base">
                 {title}
             </Typography.Title>

@@ -1,6 +1,10 @@
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
+import type { ReactNode } from "react";
 
 export type CanvasToolbarRenderState = {
+    interactionMode?: "select" | "hand";
+    onInteractionModeChange?: (mode: "select" | "hand") => void;
+    children?: ReactNode;
     selectedCount: number;
     canUndo: boolean;
     canRedo: boolean;
@@ -31,6 +35,9 @@ export type CanvasToolbarRenderState = {
  */
 export function canvasToolbarPropsEqual(previous: CanvasToolbarRenderState, next: CanvasToolbarRenderState) {
     return (
+        previous.interactionMode === next.interactionMode &&
+        previous.onInteractionModeChange === next.onInteractionModeChange &&
+        previous.children === next.children &&
         previous.selectedCount === next.selectedCount &&
         previous.canUndo === next.canUndo &&
         previous.canRedo === next.canRedo &&

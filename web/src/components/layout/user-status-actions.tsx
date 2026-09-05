@@ -6,6 +6,7 @@ import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { deploymentFeatures } from "@/lib/deployment-features";
 
 type UserStatusActionsProps = {
     showConfig?: boolean;
@@ -24,7 +25,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
 
     return (
         <div className="inline-flex shrink-0 items-center gap-1">
-            {showConfig && canManageConfig ? (
+            {showConfig && canManageConfig && deploymentFeatures.rolePortalsEnabled ? (
                 <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label="配置" title="配置">
                     <Settings2 className="size-4" />
                 </button>

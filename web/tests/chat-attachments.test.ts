@@ -1,7 +1,14 @@
 import { expect, test } from "bun:test";
 import * as XLSX from "xlsx";
 
-import { MAX_CHAT_ATTACHMENT_TEXT_LENGTH, MAX_WORKBOOK_MODEL_TEXT_LENGTH, formatPdfText, formatWorkbookText, isSupportedChatAttachment, parseChatAttachment, truncateChatAttachmentText, truncateWorkbookText } from "../src/lib/chat-attachments";
+import { MAX_CHAT_ATTACHMENT_TEXT_LENGTH, MAX_WORKBOOK_MODEL_TEXT_LENGTH, chatAttachmentParserKind, formatPdfText, formatWorkbookText, isSupportedChatAttachment, parseChatAttachment, truncateChatAttachmentText, truncateWorkbookText } from "../src/lib/chat-attachments";
+
+test("loads heavyweight office parsers only for the matching attachment type", () => {
+    expect(chatAttachmentParserKind({ name: "notes.txt", type: "text/plain" })).toBeNull();
+    expect(chatAttachmentParserKind({ name: "lookbook.PDF", type: "application/pdf" })).toBe("pdf");
+    expect(chatAttachmentParserKind({ name: "inventory.xlsx", type: "" })).toBe("workbook");
+    expect(chatAttachmentParserKind({ name: "brief.docx", type: "" })).toBe("docx");
+});
 
 test("accepts office documents, PDFs, text and source-code attachments", () => {
     expect(isSupportedChatAttachment({ name: "销售表.xlsx", type: "" })).toBe(true);

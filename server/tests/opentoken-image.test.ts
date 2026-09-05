@@ -39,6 +39,8 @@ describe("OpenToken image protocol adapter", () => {
     });
 
     expect(request.body?.model).toBe("gemini-3.1-flash-image");
+    expect(request.body).not.toHaveProperty("size");
+    expect(request.body).not.toHaveProperty("quality");
   });
 
   test("uses the image edits endpoint when reference images are supplied", () => {

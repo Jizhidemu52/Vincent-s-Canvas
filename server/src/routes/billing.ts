@@ -6,7 +6,7 @@ import type { AuthenticatedRequest } from "../types";
 
 const reserveSchema = z.object({ requestId: z.string().min(8).max(200), operationType: z.string().min(1).max(80), modelConfigId: z.string().uuid().nullish(), quantity: z.number().int().min(1).max(100) });
 
-export function createBillingRouter(db: Database) {
+export function createBillingRouter(db: Database, creditsEnabled = true) {
     const router = Router();
     router.get("/ledger", async (request, response, next) => {
         try {
@@ -20,7 +20,7 @@ export function createBillingRouter(db: Database) {
         try {
             const input = reserveSchema.parse(request.body);
             const actor = (request as unknown as AuthenticatedRequest).auth;
-            response.status(201).json(await reserveCredits(db, { ...input, userId: actor.id }));
+            response.status(201).json(await reserveCredits(db, { ...input, userId: actor.id, creditsEnabled }));
         } catch (error) {
             if (error instanceof BillingError) { response.status(400).json({ error: error.code, message: error.message }); return; }
             next(error);

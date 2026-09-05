@@ -3,6 +3,7 @@ import { ImageIcon, LoaderCircle, RefreshCw, Video } from "lucide-react";
 import { Button } from "antd";
 
 import { canGenerateWorkflowVideo } from "@/lib/canvas/agent-media-workflow";
+import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import type { CanvasAgentMediaWorkflow } from "@/types/canvas";
 
@@ -162,7 +163,7 @@ export function CanvasAgentMediaWorkflowCard({
                                         className={`group relative aspect-square cursor-pointer overflow-hidden rounded-lg border text-left transition focus-within:ring-2 focus-within:ring-primary/25 ${candidate.checked ? "border-primary ring-2 ring-primary/25" : "border-black/10 hover:border-primary/50 dark:border-white/15"} ${candidate.disabled ? "cursor-not-allowed opacity-60" : ""}`}
                                     >
                                         <input id={candidate.id} className="sr-only" type="radio" name={candidate.name} checked={candidate.checked} disabled={candidate.disabled} onChange={() => onSelectCandidate?.(candidate.nodeId)} />
-                                        {candidate.url ? <img src={candidate.url} alt="" className="size-full object-cover" /> : <span aria-hidden className="grid size-full place-items-center bg-black/5 px-2 text-center text-xs opacity-65 dark:bg-white/10">{candidate.label}</span>}
+                                        {candidate.url ? <CanvasPersistedMediaPreview kind="image" url={candidate.url} storageKey={candidate.storageKey} alt="" className="size-full object-cover" /> : <span aria-hidden className="grid size-full place-items-center bg-black/5 px-2 text-center text-xs opacity-65 dark:bg-white/10">{candidate.label}</span>}
                                         <span className="sr-only">{candidate.label}</span>
                                         <span className={`absolute right-1 top-1 size-3 rounded-full border-2 border-white ${candidate.checked ? "bg-primary" : "bg-black/25 dark:bg-white/25"}`} />
                                     </label>

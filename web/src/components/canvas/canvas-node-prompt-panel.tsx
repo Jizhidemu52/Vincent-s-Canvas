@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ArrowUp, LoaderCircle, Square } from "lucide-react";
 import { Button } from "antd";
 
@@ -7,7 +7,7 @@ import { defaultConfig, modelOptionName, useConfigStore, useEffectiveConfig, typ
 import { CreditSymbol } from "@/constant/credits";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { standaloneEdition } from "@/lib/standalone-edition";
+import { deploymentFeatures } from "@/lib/deployment-features";
 import { createClientId } from "@/lib/client-id";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -17,15 +17,19 @@ import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textare
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasImageReferenceDialog } from "./canvas-image-reference-dialog";
 import { ReferenceImageTray } from "@/components/reference-images/reference-image-tray";
-import { AssetPickerModal, type InsertAssetPayload } from "./asset-picker-modal";
+import type { InsertAssetPayload } from "./asset-picker-modal";
+import { loadAssetPickerModal } from "@/lib/canvas/canvas-node-tool-loaders";
 import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
 import { resolveCanvasImageReferences, toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraft } from "@/lib/canvas/canvas-node-prompt-draft";
+import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
 import { uploadImage } from "@/services/image-storage";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
+
+const AssetPickerModal = lazy(loadAssetPickerModal);
 
 type CanvasNodePromptPanelProps = {
     node: CanvasNodeData;
@@ -51,6 +55,15 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(canvasNodePromptDraft(node));
+    const promptCommitRef = useRef({ nodeId: node.id, onPromptChange });
+    promptCommitRef.current = { nodeId: node.id, onPromptChange };
+    const promptDraftRef = useRef<ReturnType<typeof createCanvasTextDraft> | null>(null);
+    if (!promptDraftRef.current) {
+        promptDraftRef.current = createCanvasTextDraft(canvasNodePromptDraft(node), (value) => {
+            const current = promptCommitRef.current;
+            current.onPromptChange(current.nodeId, value);
+        });
+    }
     const [canvasPickerOpen, setCanvasPickerOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -60,19 +73,25 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const credits = usage.configured ? usage.credits : 0;
 
     useEffect(() => {
-        setPrompt(canvasNodePromptDraft(node));
+        const next = canvasNodePromptDraft(node);
+        setPrompt((current) => (current === next ? current : next));
+        promptDraftRef.current?.reset(next);
     }, [node.id, node.metadata?.draftPrompt, node.metadata?.prompt]);
+
+    useEffect(() => () => promptDraftRef.current?.flush(), []);
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
-        onPromptChange(node.id, value);
+        promptDraftRef.current?.change(value);
     };
 
     const submit = () => {
         const text = prompt.trim();
         if (!text || isRunning || !referenceValidation.valid) return;
+        promptDraftRef.current?.flush();
         onGenerate(node.id, mode, text);
         setPrompt("");
+        promptDraftRef.current?.reset("");
         onPromptChange(node.id, "");
     };
 
@@ -177,7 +196,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             </>
                         ) : (
                             <>
-                                {!standaloneEdition ? <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
+                                {deploymentFeatures.creditsEnabled ? <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
                                     <CreditSymbol />
                                     {credits.toLocaleString()}
                                 </span> : null}
@@ -188,7 +207,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 </Button>
             </div>
             <CanvasImageReferenceDialog open={canvasPickerOpen} nodes={canvasNodes.filter((candidate) => candidate.id !== node.id)} selectedReferenceKeys={imageReferences.map((reference) => reference.referenceKey)} onConfirm={addCanvasNodes} onClose={() => setCanvasPickerOpen(false)} />
-            <AssetPickerModal open={assetPickerOpen} selectionMode="multiple-images" onInsertMany={addAssets} onClose={() => setAssetPickerOpen(false)} />
+            {assetPickerOpen ? (
+                <Suspense fallback={null}>
+                    <AssetPickerModal open selectionMode="multiple-images" onInsertMany={addAssets} onClose={() => setAssetPickerOpen(false)} />
+                </Suspense>
+            ) : null}
             <input ref={uploadInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => addUploads(event.target.files)} />
         </div>
     );

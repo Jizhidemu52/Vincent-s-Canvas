@@ -39,17 +39,17 @@ export function boundsForViewport(viewport: ViewportTransform, width: number, he
     };
 }
 
-export function createCanvasSpatialIndex(nodes: CanvasNodeData[], cellSize = DEFAULT_CELL_SIZE): CanvasSpatialIndex {
+export function createCanvasSpatialIndex(nodes: CanvasNodeData[], cellSize = DEFAULT_CELL_SIZE, suppliedNodesById?: Map<string, CanvasNodeData>): CanvasSpatialIndex {
     const safeCellSize = Math.max(1, cellSize);
     const boundsByNodeId = new Map<string, CanvasBounds>();
-    const nodesById = new Map<string, CanvasNodeData>();
+    const nodesById = suppliedNodesById || new Map<string, CanvasNodeData>();
     const nodeOrderById = new Map<string, number>();
     const cells = new Map<string, Set<string>>();
 
     nodes.forEach((node, order) => {
         const bounds = boundsForCanvasNode(node);
         boundsByNodeId.set(node.id, bounds);
-        nodesById.set(node.id, node);
+        if (!suppliedNodesById) nodesById.set(node.id, node);
         nodeOrderById.set(node.id, order);
         forEachCell(bounds, safeCellSize, (key) => {
             const ids = cells.get(key) ?? new Set<string>();
@@ -59,6 +59,36 @@ export function createCanvasSpatialIndex(nodes: CanvasNodeData[], cellSize = DEF
     });
 
     return { cellSize: safeCellSize, boundsByNodeId, nodesById, nodeOrderById, cells };
+}
+
+/**
+ * Content edits do not change which cells contain a node. Reuse the expensive
+ * grid in that common case, while replacing the data map so callers still
+ * receive the newest titles, metadata and media URLs.
+ */
+export function refreshCanvasSpatialIndex(previous: CanvasSpatialIndex, nodes: CanvasNodeData[], suppliedNodesById?: Map<string, CanvasNodeData>): CanvasSpatialIndex {
+    if (suppliedNodesById && previous.nodesById === suppliedNodesById) return previous;
+    if (!hasSameCanvasNodeGeometry(previous, nodes)) return createCanvasSpatialIndex(nodes, previous.cellSize, suppliedNodesById);
+
+    return {
+        ...previous,
+        nodesById: suppliedNodesById || new Map(nodes.map((node) => [node.id, node])),
+    };
+}
+
+/**
+ * Consumers that only draw geometry (the far-zoom overview) do not need fresh
+ * titles, status or media metadata. Returning the existing index prevents a
+ * content-only state update from invalidating their draw callback.
+ */
+export function refreshCanvasSpatialGeometryIndex(previous: CanvasSpatialIndex, nodes: CanvasNodeData[], suppliedNodesById?: Map<string, CanvasNodeData>): CanvasSpatialIndex {
+    // A stable live map is already renewed by the project whenever geometry,
+    // ordering or batch membership changes. In overview mode this avoids an
+    // otherwise redundant full-node geometry scan for every streamed token.
+    if (suppliedNodesById && previous.nodesById === suppliedNodesById) return previous;
+    if (!hasSameCanvasNodeGeometry(previous, nodes)) return createCanvasSpatialIndex(nodes, previous.cellSize, suppliedNodesById);
+
+    return suppliedNodesById ? { ...previous, nodesById: suppliedNodesById } : previous;
 }
 
 export function queryCanvasSpatialIndex(index: CanvasSpatialIndex, bounds: CanvasBounds): string[] {
@@ -97,4 +127,20 @@ function forEachCell(bounds: CanvasBounds, cellSize: number, callback: (key: str
 
 function intersects(first: CanvasBounds | undefined, second: CanvasBounds) {
     return Boolean(first && first.maxX > second.minX && first.minX < second.maxX && first.maxY > second.minY && first.minY < second.maxY);
+}
+
+function hasSameCanvasNodeGeometry(index: CanvasSpatialIndex, nodes: CanvasNodeData[]) {
+    return (
+        index.nodeOrderById.size === nodes.length &&
+        nodes.every((node, order) => {
+            const previous = index.nodesById.get(node.id);
+            return (
+                index.nodeOrderById.get(node.id) === order &&
+                previous?.position.x === node.position.x &&
+                previous?.position.y === node.position.y &&
+                previous?.width === node.width &&
+                previous?.height === node.height
+            );
+        })
+    );
 }

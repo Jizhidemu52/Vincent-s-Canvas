@@ -1,7 +1,3 @@
-import mammoth from "mammoth";
-import * as XLSX from "xlsx";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
-
 export const MAX_CHAT_ATTACHMENT_TEXT_LENGTH = 80_000;
 // Workbooks are structured but can be extremely verbose. Keeping their model context smaller
 // avoids provider-side extended thinking consuming the whole response budget before answering.
@@ -29,6 +25,8 @@ type ParseChatAttachmentOptions = {
     imageToDataUrl?: (file: File) => Promise<string>;
 };
 
+export type ChatAttachmentParserKind = "pdf" | "workbook" | "docx";
+
 export function chatAttachmentExtension(name: string) {
     const match = /\.([a-z0-9]+)$/i.exec(name.trim());
     return match?.[1]?.toLowerCase() || "";
@@ -37,6 +35,15 @@ export function chatAttachmentExtension(name: string) {
 export function isSupportedChatAttachment(file: Pick<File, "name" | "type">) {
     const extension = chatAttachmentExtension(file.name);
     return IMAGE_EXTENSIONS.has(extension) || TEXT_EXTENSIONS.has(extension) || OFFICE_EXTENSIONS.has(extension) || file.type.startsWith("image/") || file.type.startsWith("text/");
+}
+
+/** Heavy office parsers are loaded only after the user selects a matching file. */
+export function chatAttachmentParserKind(file: Pick<File, "name" | "type">): ChatAttachmentParserKind | null {
+    const extension = chatAttachmentExtension(file.name);
+    if (extension === "pdf" || file.type === "application/pdf") return "pdf";
+    if (extension === "xlsx" || extension === "xls") return "workbook";
+    if (extension === "docx") return "docx";
+    return null;
 }
 
 export function truncateChatAttachmentText(value: string) {
@@ -120,6 +127,7 @@ async function readFileAsDataUrl(file: File) {
 }
 
 async function extractPdfText(file: File) {
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const task = getDocument({ data: new Uint8Array(await file.arrayBuffer()), useWorkerFetch: false });
     const pdf = await task.promise;
     try {
@@ -136,6 +144,7 @@ async function extractPdfText(file: File) {
 }
 
 async function extractWorkbookText(file: File) {
+    const XLSX = await import("xlsx");
     const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
     return truncateWorkbookText(workbook.SheetNames.map((name) => ({
         name,
@@ -144,6 +153,7 @@ async function extractWorkbookText(file: File) {
 }
 
 async function extractDocxText(file: File) {
+    const mammoth = (await import("mammoth")).default;
     const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
     return result.value.trim();
 }
@@ -164,11 +174,12 @@ export async function parseChatAttachment(file: File, options: ParseChatAttachme
         };
     }
 
+    const parserKind = chatAttachmentParserKind(file);
     let extractedText: string;
     try {
-        if (extension === "pdf" || file.type === "application/pdf") extractedText = await extractPdfText(file);
-        else if (extension === "xlsx" || extension === "xls") extractedText = await extractWorkbookText(file);
-        else if (extension === "docx") extractedText = await extractDocxText(file);
+        if (parserKind === "pdf") extractedText = await extractPdfText(file);
+        else if (parserKind === "workbook") extractedText = await extractWorkbookText(file);
+        else if (parserKind === "docx") extractedText = await extractDocxText(file);
         else extractedText = await file.text();
     } catch (error) {
         const detail = error instanceof Error ? error.message : "\u672a\u77e5\u89e3\u6790\u9519\u8bef";
@@ -177,7 +188,7 @@ export async function parseChatAttachment(file: File, options: ParseChatAttachme
 
     if (!extractedText.trim()) throw new Error(`${file.name} \u6ca1\u6709\u53ef\u4f9b\u5bf9\u8bdd\u6a21\u578b\u9605\u8bfb\u7684\u6587\u672c\u5185\u5bb9`);
     const truncated = truncateChatAttachmentText(extractedText);
-    const wasWorkbookTruncated = (extension === "xlsx" || extension === "xls") && extractedText.includes(WORKBOOK_TRUNCATION_MARKER);
+    const wasWorkbookTruncated = parserKind === "workbook" && extractedText.includes(WORKBOOK_TRUNCATION_MARKER);
     return {
         kind: "text",
         name: file.name,

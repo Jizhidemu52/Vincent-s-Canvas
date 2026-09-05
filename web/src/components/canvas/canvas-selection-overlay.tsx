@@ -21,7 +21,7 @@ export function canvasSelectionOverlayRect(selection: CanvasSelectionOverlayStat
     };
 }
 
-export const CanvasSelectionOverlay = forwardRef<CanvasSelectionOverlayHandle, { borderColor: string; background: string }>(function CanvasSelectionOverlay({ borderColor, background }, ref) {
+export const CanvasSelectionOverlay = React.memo(forwardRef<CanvasSelectionOverlayHandle, { borderColor: string; background: string }>(function CanvasSelectionOverlay({ borderColor, background }, ref) {
     const elementRef = useRef<HTMLDivElement>(null);
     const show = useCallback((selection: CanvasSelectionOverlayState) => {
         const element = elementRef.current;
@@ -40,4 +40,4 @@ export const CanvasSelectionOverlay = forwardRef<CanvasSelectionOverlayHandle, {
     useImperativeHandle(ref, () => ({ show, hide }), [hide, show]);
 
     return <div ref={elementRef} className="pointer-events-none absolute z-[100] border" style={{ display: "none", borderColor, background }} />;
-});
+}));

@@ -4,8 +4,12 @@ import { Navigate, useLocation } from "react-router-dom";
 
 import type { ModuleKey } from "@/services/api/modules";
 import { useModuleStore } from "@/stores/use-module-store";
+import { standaloneEdition } from "@/lib/standalone-edition";
+import { shouldBypassStandaloneModuleGate } from "@/lib/standalone-access";
 
 export function ModuleGate({ children, moduleKey }: { children: ReactNode; moduleKey: ModuleKey | ((search: string) => ModuleKey) }) {
+    if (shouldBypassStandaloneModuleGate(standaloneEdition)) return <>{children}</>;
+
     const location = useLocation();
     const status = useModuleStore((state) => state.status);
     const refresh = useModuleStore((state) => state.refresh);

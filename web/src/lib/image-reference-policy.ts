@@ -1,4 +1,5 @@
 import type { ImageReferenceItem, ImageReferenceOrigin, ReferenceImage } from "@/types/image";
+import { imageModelProfile } from "./image-model-settings";
 
 export type ImageReferenceValidation = {
     valid: boolean;
@@ -10,9 +11,11 @@ export type ImageReferenceValidation = {
 
 export function referencePolicyForModel(modelId: string): Omit<ImageReferenceValidation, "valid" | "message"> & { label: string } {
     const normalized = modelId.trim().toLowerCase();
-    if (normalized.includes("midjourney-blend")) return { label: "Midjourney Blend", minimum: 2, maximum: 4, supportsReferences: true };
-    if (normalized === "midjourney" || normalized === "midjourney-v7") return { label: "Midjourney", minimum: 0, maximum: 0, supportsReferences: false };
-    if (normalized.includes("gemini-3.1-flash") || normalized.includes("nano-banana-2")) return { label: "Gemini 3.1 Flash", minimum: 0, maximum: 14, supportsReferences: true };
+    const profile = imageModelProfile(modelId);
+    if (profile.kind === "midjourney-blend") return { label: "Midjourney Blend", minimum: 2, maximum: 4, supportsReferences: true };
+    if (profile.kind === "midjourney") return { label: "当前工作台的 Midjourney 参考图", minimum: 0, maximum: 16, supportsReferences: true };
+    if (profile.kind === "gpt") return { label: "APIMart GPT-Image-2", minimum: 0, maximum: 15, supportsReferences: true };
+    if (profile.kind === "gemini") return { label: "Gemini 3.1 Flash", minimum: 0, maximum: 14, supportsReferences: true };
     if (normalized.includes("gpt-image-2")) return { label: "GPT-Image-2", minimum: 0, maximum: 16, supportsReferences: true };
     return { label: "当前模型", minimum: 0, maximum: 16, supportsReferences: true };
 }

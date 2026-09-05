@@ -1,0 +1,6 @@
+.image-workbench .image-workbench-layout { max-width: 1880px; width: 100%; margin: 0 auto; }
+.image-workbench textarea { padding: 14px; line-height: 1.8; resize: vertical; }
+.image-workbench .ant-btn-lg { min-height: 44px; font-size: 14px; }
+.image-workbench .thin-scrollbar { scrollbar-gutter: stable; }
+.image-workbench .ant-tag { border: 0; }
+@media (max-width: 767px) { .image-workbench .image-workbench-layout { padding: 12px; gap: 12px; } .image-workbench .wb-surface { padding: 18px; } }

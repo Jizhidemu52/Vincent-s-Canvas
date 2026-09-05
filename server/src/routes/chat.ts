@@ -11,10 +11,12 @@ import type { AuthenticatedRequest } from "../types";
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInput =
     | { role: "system" | "user" | "assistant"; content: string | ResponseContent[] }
+    | { type: "claude_assistant"; content: Array<Record<string, unknown>> }
     | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string }
     | { type: "function_call_output"; call_id: string; output: string };
 type ResponseTool = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string }; thoughtSignature?: string };
+type ChatCompletionResult = { content: string; toolCalls: ToolCall[]; stopReason?: string; claudeAssistantContent?: Array<Record<string, unknown>> };
 type ChatModel = { model_id: string; base_url: string; protocol: string; encrypted_credentials: string | null };
 
 const schema = z.object({
@@ -65,6 +67,26 @@ export function createChatRouter(db: Database, config: AppConfig) {
             }
 
             const credentials = JSON.parse(decryptSecret(model.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as Record<string, string>;
+            if (model.protocol === "anthropic" && input.claude?.stream) {
+                const upstream = await requestClaudeStream(model, credentials, input);
+                response.setHeader("content-type", "text/event-stream; charset=utf-8");
+                response.setHeader("cache-control", "no-cache");
+                for await (const chunk of upstream.body!) {
+                    if (response.destroyed) break;
+                    response.write(chunk);
+                }
+                if (!response.destroyed) await writeAudit(db, {
+                    actor,
+                    action: "chat.completed",
+                    targetType: "model",
+                    targetId: input.modelId,
+                    result: "success",
+                    detail: { protocol: model.protocol, streaming: true },
+                    ip: request.ip,
+                });
+                response.end();
+                return;
+            }
             const resultPayload = await requestChatCompletion(model, credentials, input);
 
             await writeAudit(db, {
@@ -78,6 +100,10 @@ export function createChatRouter(db: Database, config: AppConfig) {
             });
             response.json(resultPayload);
         } catch (error) {
+            if (response.headersSent) {
+                if (!response.destroyed) response.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "对话流已中断，请重试。" } })}\n\n`);
+                return;
+            }
             next(error);
         }
     });
@@ -89,7 +115,7 @@ export async function requestChatCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
-): Promise<{ content: string; toolCalls: ToolCall[] }> {
+): Promise<ChatCompletionResult> {
     if (model.protocol === "gemini") return requestGeminiCompletion(model, credentials, input);
     if (model.protocol === "anthropic") return requestClaudeCompletion(model, credentials, input);
     if (model.protocol === "openai" || model.protocol === "custom") return requestOpenAiCompletion(model, credentials, input);
@@ -108,16 +134,32 @@ async function requestClaudeCompletion(
             "anthropic-version": ANTHROPIC_MESSAGES_VERSION,
             "content-type": "application/json",
         },
-        body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking }) }),
+        body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking }) }),
         signal: AbortSignal.timeout(180000),
     });
     if (!upstream.ok) throw await upstreamError("Claude Provider", upstream);
     return readClaudeResponse(await upstream.json() as ClaudeResponse);
 }
 
+export async function requestClaudeStream(
+    model: ChatModel,
+    credentials: Record<string, string>,
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; claude?: { thinking?: boolean; maxTokens?: number } },
+) {
+    const upstream = await fetch(`${model.base_url.replace(/\/$/, "")}/v1/messages`, {
+        method: "POST",
+        headers: { "x-api-key": credentials.apiKey || "", "anthropic-version": ANTHROPIC_MESSAGES_VERSION, "content-type": "application/json" },
+        body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking, stream: true }) }),
+        signal: AbortSignal.timeout(180000),
+    });
+    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream);
+    if (!upstream.body) throw new ChatProtocolError("CLAUDE_STREAM_EMPTY", "Claude 流式响应为空");
+    return upstream;
+}
+
 export function buildClaudeMessagesRequest(
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown },
-    options: { maxTokens: number; stream?: boolean; thinking?: boolean },
+    options: { modelId?: string; maxTokens: number; stream?: boolean; thinking?: boolean },
 ) {
     const system = input.input
         .flatMap((item) => {
@@ -132,6 +174,15 @@ export function buildClaudeMessagesRequest(
     for (const item of input.input) {
         if ("role" in item) {
             if (item.role !== "system") messages.push({ role: item.role, content: toClaudeContent(item.content) });
+            continue;
+        }
+        if (item.type === "claude_assistant") {
+            // Tool continuations must echo the complete assistant turn, preserving
+            // thinking/signature blocks and their order without reconstructing them.
+            for (const block of item.content) {
+                if (block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") calls.set(block.id, block.name);
+            }
+            messages.push({ role: "assistant", content: item.content });
             continue;
         }
         if (item.type === "function_call") {
@@ -153,11 +204,24 @@ export function buildClaudeMessagesRequest(
         max_tokens: Math.max(1, Math.floor(options.maxTokens || 2048)),
         ...(tools.length ? { tools, tool_choice: toClaudeToolChoice(input.toolChoice) } : {}),
         ...(options.stream ? { stream: true } : {}),
-        ...(options.thinking ? { thinking: { type: "enabled", budget_tokens: 1024 } } : {}),
+        ...claudeThinkingParameters(options),
     };
 }
 
-export function readClaudeResponse(body: ClaudeResponse): { content: string; toolCalls: ToolCall[] } {
+function claudeThinkingParameters(options: { modelId?: string; maxTokens: number; thinking?: boolean }) {
+    // ApiMart delegates parameter semantics to Anthropic. Claude 5 rejects the
+    // legacy enabled/budget_tokens setting; Fable 5 also rejects disabled.
+    if (/^claude-(opus|sonnet|fable)-5$/i.test(options.modelId || "")) {
+        const alwaysOn = options.modelId?.toLowerCase() === "claude-fable-5";
+        return { thinking: alwaysOn || options.thinking !== false ? { type: "adaptive", display: "omitted" } : { type: "disabled" } };
+    }
+    if (!options.thinking) return {};
+    if (options.maxTokens <= 1024) throw new ChatProtocolError("CLAUDE_THINKING_BUDGET_INVALID", "手动思考预算为 1024 时，总输出预算必须大于 1024");
+    return { thinking: { type: "enabled", budget_tokens: 1024 } };
+}
+
+export function readClaudeResponse(body: ClaudeResponse): ChatCompletionResult {
+    const hasTools = (body.content || []).some((block) => block.type === "tool_use");
     return {
         content: (body.content || []).filter((block) => block.type === "text").map((block) => block.text || "").join(""),
         toolCalls: (body.content || []).flatMap((block) => block.type === "tool_use" && block.name ? [{
@@ -165,6 +229,8 @@ export function readClaudeResponse(body: ClaudeResponse): { content: string; too
             type: "function" as const,
             function: { name: block.name, arguments: JSON.stringify(block.input || {}) },
         }] : []),
+        ...(hasTools ? { claudeAssistantContent: body.content } : {}),
+        ...(body.stop_reason ? { stopReason: body.stop_reason } : {}),
     };
 }
 
@@ -273,7 +339,8 @@ export function buildGeminiRequestBody(input: { input: ResponseInput[]; tools: R
     const declarations = input.tools.map((tool) => ({
         name: tool.name,
         ...(tool.description ? { description: tool.description } : {}),
-        parameters: tool.parameters,
+        // OpenAI tools use JSON Schema (including additionalProperties), not Gemini's OpenAPI subset.
+        parametersJsonSchema: tool.parameters,
     }));
     const tools = [
         ...(declarations.length ? [{ functionDeclarations: declarations }] : []),
@@ -360,7 +427,9 @@ type GeminiCandidate = {
 };
 
 type ClaudeResponse = {
+    stop_reason?: string;
     content?: Array<{
+        [key: string]: unknown;
         type?: string;
         text?: string;
         thinking?: string;

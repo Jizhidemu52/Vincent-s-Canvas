@@ -1,5 +1,9 @@
 import { CanvasNodeType, type CanvasAssistantAttachment } from "@/types/canvas";
 import type { CanvasAgentOp, CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
+import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { referencePolicyForModel } from "@/lib/image-reference-policy";
+import { getVideoModelParameterSpec } from "@/lib/video-model-parameters";
 
 export type AgentGenerationMode = "image" | "video";
 export type AgentImageAfterAction = "images_only" | "select_then_video" | "auto_first_image_video";
@@ -13,6 +17,7 @@ export type AgentGenerationSettings = {
     imageCount: string;
     videoSeconds: string;
     videoQuality: string;
+    videoGenerateAudio?: string;
     afterImage: AgentImageAfterAction;
 };
 
@@ -20,6 +25,7 @@ export type AgentVideoCapability = {
     seconds: readonly [number, number];
     resolutions: readonly string[];
     sizes: readonly string[];
+    supportsAudio?: boolean;
 };
 
 export type AgentVideoConfirmation = {
@@ -29,6 +35,11 @@ export type AgentVideoConfirmation = {
 };
 
 type ReferenceLike = { id: string };
+
+export function normalizeAgentImageSettings(settings: AgentGenerationSettings, profile = imageModelProfile(settings.imageModel)): AgentGenerationSettings {
+    const normalized = normalizeImageModelSettings({ size: settings.size, quality: settings.quality, count: settings.imageCount }, profile);
+    return { ...settings, size: normalized.size, quality: normalized.quality, imageCount: normalized.count };
+}
 
 export function createAgentVideoConfirmation(
     image: CanvasAssistantAttachment,
@@ -48,11 +59,12 @@ export function normalizeAgentVideoSettings(
 ): AgentGenerationSettings {
     const sizes = capability.sizes.map((size) => size === "adaptive" ? "auto" : size);
     const requestedSeconds = Number(settings.videoSeconds);
-    const seconds = Number.isFinite(requestedSeconds)
+    const seconds = requestedSeconds === -1 && getVideoModelParameterSpec(settings.videoModel)?.supportsAutoDuration ? -1 : Number.isFinite(requestedSeconds)
         ? Math.min(capability.seconds[1], Math.max(capability.seconds[0], Math.floor(requestedSeconds)))
         : capability.seconds[0];
     return {
         ...settings,
+        videoGenerateAudio: capability.supportsAudio ? settings.videoGenerateAudio || "false" : "false",
         videoSeconds: String(seconds),
         videoQuality: capability.resolutions.includes(settings.videoQuality)
             ? settings.videoQuality
@@ -73,8 +85,12 @@ export function buildAgentGeneratedMediaOps(
         nodeType: attachment.mediaType === "video" ? CanvasNodeType.Video : CanvasNodeType.Image,
         title: attachment.name,
         position: { x: context.x + index * 380, y: context.y },
+        ...(Number.isFinite(attachment.width) && Number.isFinite(attachment.height) && attachment.width! > 0 && attachment.height! > 0
+            ? fitNodeSize(attachment.width!, attachment.height!, 340, 340)
+            : {}),
         metadata: {
             content: attachment.url,
+            ...(attachment.storageKey ? { storageKey: attachment.storageKey } : {}),
             prompt: context.prompt,
             model: context.model,
             status: "success",
@@ -105,7 +121,9 @@ export async function buildAgentReferenceImageContent<T>(
 }
 
 export function selectAgentVideoReferences<T extends ReferenceLike>(model: string, references: T[]) {
-    return model === "MiniMax-H3" ? references.slice(0, 1) : references;
+    const spec = getVideoModelParameterSpec(model);
+    if (spec && references.length > spec.maxImages) throw new Error(`当前视频模型最多支持 ${spec.maxImages} 张参考图，请调整选择后重试。`);
+    return references;
 }
 
 export type AgentImageGenerationPlan = {
@@ -115,6 +133,7 @@ export type AgentImageGenerationPlan = {
     quality: string;
     count: number;
     afterImage: AgentImageAfterAction;
+    requiresPrompt: boolean;
 };
 
 export type AgentVideoGenerationPlan = {
@@ -127,17 +146,24 @@ export type AgentVideoGenerationPlan = {
 };
 
 export function buildAgentGenerationPlan(settings: AgentGenerationSettings, prompt: string, references: ReferenceLike[]): AgentImageGenerationPlan | AgentVideoGenerationPlan {
-    if (!prompt.trim()) throw new Error("请输入生成需求");
     if (settings.mode === "image") {
+        const profile = imageModelProfile(settings.imageModel);
+        if (profile.requiresPrompt && !prompt.trim()) throw new Error("请输入生成需求");
+        const policy = referencePolicyForModel(settings.imageModel);
+        if (!policy.supportsReferences && references.length) throw new Error("当前模型不支持参考图，请移除参考图或切换模型。");
+        if (references.length < policy.minimum || references.length > policy.maximum) throw new Error(`${policy.label} 需要 ${policy.minimum} 至 ${policy.maximum} 张参考图。`);
+        const normalized = normalizeAgentImageSettings(settings, profile);
         return {
             kind: "image",
             model: settings.imageModel,
-            size: settings.size,
-            quality: settings.quality,
-            count: clampImageCount(settings.imageCount),
+            size: normalized.size,
+            quality: normalized.quality,
+            count: Number(normalized.imageCount),
             afterImage: settings.afterImage,
+            requiresPrompt: profile.requiresPrompt,
         };
     }
+    if (!prompt.trim()) throw new Error("请输入生成需求");
     return {
         kind: "video",
         model: settings.videoModel,
@@ -150,8 +176,9 @@ export function buildAgentGenerationPlan(settings: AgentGenerationSettings, prom
 
 export function buildAgentVideoPrompt(prompt: string, hasReference: boolean) {
     const request = prompt.trim();
-    if (!hasReference) return request;
-    return `以所选参考图为唯一主体与视觉依据，保持人物、服装、材质、花型、颜色和构图一致。${request}。镜头运动自然稳定，动作连贯真实，避免改变参考图中的服装设计、Logo、纹理和主体身份。`;
+    // The Agent has already optimized this prompt with the user's actual image and constraints.
+    // Do not append a garment-specific preset or contradict an explicit change request.
+    return request || (hasReference ? "以参考图为视觉依据生成自然连贯的视频。" : "");
 }
 
 export function agentQuickstartPreset(kind: "video" | "lookbook" | "illustration" | "poster") {
@@ -162,15 +189,11 @@ export function agentQuickstartPreset(kind: "video" | "lookbook" | "illustration
 }
 
 export function buildAgentGenerationBrief(settings: AgentGenerationSettings, prompt: string, hasReference: boolean) {
+    const imageSettings = normalizeAgentImageSettings(settings);
     const preset = settings.mode === "image"
-        ? `图片模型：${settings.imageModel}；数量：${clampImageCount(settings.imageCount)}；质量：${settings.quality}；尺寸：${settings.size}`
+        ? `图片模型：${settings.imageModel}；数量：${imageSettings.imageCount}；${imageModelProfile(settings.imageModel).qualityLabel}：${imageSettings.quality}；尺寸：${imageSettings.size}`
         : `视频模型：${settings.videoModel}；时长：${settings.videoSeconds} 秒；清晰度：${settings.videoQuality}；画幅：${settings.size}`;
     return `任务类型：${settings.mode === "image" ? "图片生成" : "视频生成"}\n${preset}\n已有参考图：${hasReference ? "是" : "否"}\n用户需求：${prompt.trim()}`;
-}
-
-function clampImageCount(value: string) {
-    const count = Number.parseInt(value, 10);
-    return Number.isFinite(count) ? Math.min(4, Math.max(1, count)) : 1;
 }
 
 function mediaMimeType(attachment: CanvasAssistantAttachment) {

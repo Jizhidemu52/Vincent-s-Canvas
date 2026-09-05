@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { App, Modal, Segmented, Tooltip } from "antd";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { App, Dropdown, Modal, Segmented, Tooltip, type MenuProps } from "antd";
 import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Settings2, Trash2, Upload, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -8,7 +8,7 @@ import { useCopyText } from "@/hooks/use-copy-text";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "@/types/canvas";
 import { ImageToolSettingsModal, type ImageToolbarSettingsTool } from "./canvas-image-toolbar-settings-modal";
-import { IMAGE_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, defaultImageQuickToolIds, readImageQuickToolsConfig, type ImageQuickToolId } from "./canvas-image-toolbar-tools";
+import { IMAGE_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, compactImageQuickToolIds, defaultImageQuickToolIds, readImageQuickToolsConfig, type ImageQuickToolId } from "./canvas-image-toolbar-tools";
 
 type CanvasNodeHoverToolbarProps = {
     node: CanvasNodeData | null;
@@ -78,6 +78,9 @@ export function CanvasNodeHoverToolbar({
     const [draftImageToolIds, setDraftImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
     const [draftShowImageToolLabels, setDraftShowImageToolLabels] = useState(true);
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
+    const [moreToolsOpen, setMoreToolsOpen] = useState(false);
+    const toolbarRef = useRef<HTMLDivElement>(null);
+    const [toolbarBounds, setToolbarBounds] = useState({ width: 360, height: 44, containerWidth: 0, containerHeight: 0 });
     const { message } = App.useApp();
     const copyText = useCopyText();
 
@@ -90,19 +93,40 @@ export function CanvasNodeHoverToolbar({
             setQuickImageToolIds(config.ids);
             setShowImageToolLabels(config.showLabels);
         } catch {
-            window.localStorage.removeItem(IMAGE_QUICK_TOOLS_STORAGE_KEY);
+            // A malformed preference must not erase the user's stored configuration.
         }
     }, []);
 
     useEffect(() => {
         setImageToolSettingsOpen(false);
+        setMoreToolsOpen(false);
     }, [node?.id]);
+
+    useLayoutEffect(() => {
+        const toolbar = toolbarRef.current;
+        const container = toolbar?.offsetParent as HTMLElement | null;
+        if (!toolbar || !container) return;
+        const measure = () => {
+            const rect = toolbar.getBoundingClientRect();
+            const next = { width: rect.width, height: rect.height, containerWidth: container.clientWidth, containerHeight: container.clientHeight };
+            setToolbarBounds((current) => Object.keys(next).every((key) => current[key as keyof typeof next] === next[key as keyof typeof next]) ? current : next);
+        };
+        measure();
+        const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+        observer?.observe(toolbar);
+        observer?.observe(container);
+        window.addEventListener("resize", measure);
+        return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
+    }, [node?.id, quickImageToolIds, showImageToolLabels]);
 
     if (!node) return null;
 
     const activeNode = node;
-    const left = viewport.x + (node.position.x + node.width / 2) * viewport.k;
-    const top = viewport.y + node.position.y * viewport.k - 14;
+    const { left, top } = clampCanvasNodeToolbarPosition({
+        left: viewport.x + (node.position.x + node.width / 2) * viewport.k,
+        top: viewport.y + node.position.y * viewport.k - 10,
+        ...toolbarBounds,
+    });
     const isImage = node.type === CanvasNodeType.Image;
     const isVideo = node.type === CanvasNodeType.Video;
     const isAudio = node.type === CanvasNodeType.Audio;
@@ -113,7 +137,8 @@ export function CanvasNodeHoverToolbar({
     const isConfig = node.type === CanvasNodeType.Config;
     const canOpenDialog = isText || hasImage || isVideo;
     const canRetry = node.metadata?.status === "error";
-    const quickImageToolIdSet = new Set(quickImageToolIds);
+    const videoRecovery = isVideo && Boolean(node.metadata?.videoTaskId);
+    const visibleImageToolIds = compactImageQuickToolIds(quickImageToolIds);
     const copyImagePrompt = (target: CanvasNodeData) => {
         const prompt = target.metadata?.prompt?.trim();
         if (!prompt) {
@@ -126,7 +151,8 @@ export function CanvasNodeHoverToolbar({
 
     function openImageToolSettings() {
         onKeep(activeNode.id);
-        setDraftImageToolIds(quickImageToolIds);
+        setMoreToolsOpen(false);
+        setDraftImageToolIds(visibleImageToolIds);
         setDraftShowImageToolLabels(showImageToolLabels);
         setImageToolSettingsOpen(true);
     }
@@ -136,7 +162,7 @@ export function CanvasNodeHoverToolbar({
         { id: "delete", title: "移除节点", label: "删除", icon: <Trash2 className="size-4" />, onClick: () => onDelete(node), danger: true },
     ];
     const nodeToolbarTools: ToolbarTool[] = [
-        ...(canRetry ? [{ id: "retry", title: "重新生成", label: "重试", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
+        ...(canRetry && !(videoRecovery && node.metadata?.videoTaskCanRecover === false) ? [{ id: "retry", title: videoRecovery ? "恢复原任务查询，不会重新生成" : "重新生成", label: videoRecovery ? "恢复查询" : "重试", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
         ...(hasImage || hasVideo || isText ? [{ id: "saveAsset", title: "加入我的素材", label: "存素材", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...(hasImage || hasVideo || hasAudio ? [{ id: "download", title: hasAudio ? "下载音频" : hasVideo ? "下载视频" : "下载图片", label: "下载", icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
         ...(canOpenDialog ? [{ id: "edit", title: "编辑", label: "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
@@ -150,8 +176,27 @@ export function CanvasNodeHoverToolbar({
         ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick })) : []),
     ];
-    const toolbarTools = hasImage ? [...baseToolbarTools, ...nodeToolbarTools].filter((tool) => quickImageToolIdSet.has(tool.id as ImageQuickToolId)) : [...baseToolbarTools, ...nodeToolbarTools];
-    const selectableImageToolbarTools = [...baseToolbarTools, ...nodeToolbarTools].filter((tool) => tool.id !== "retry") as ImageToolbarSettingsTool[];
+    const allToolbarTools = [...baseToolbarTools, ...nodeToolbarTools];
+    const toolbarTools = hasImage ? visibleImageToolIds.flatMap((id) => allToolbarTools.find((tool) => tool.id === id) || []) : allToolbarTools;
+    const overflowTools = allToolbarTools.filter((tool) => !toolbarTools.some((visible) => visible.id === tool.id));
+    const selectableImageToolbarTools = allToolbarTools.filter((tool) => !["retry", "info", "delete"].includes(tool.id)) as ImageToolbarSettingsTool[];
+    const menuTool = (tool: ToolbarTool) => ({ key: tool.id, label: tool.label, title: tool.title, icon: <span className="[&_svg]:size-[18px]">{tool.icon}</span>, danger: tool.danger });
+    const moreMenu: MenuProps = {
+        style: { background: "#fff", color: "#27272a", boxShadow: "none" },
+        items: [
+            ...overflowTools.filter((tool) => !["info", "delete"].includes(tool.id)).map(menuTool),
+            { type: "divider" },
+            ...overflowTools.filter((tool) => ["info", "delete"].includes(tool.id)).map(menuTool),
+            { type: "divider" },
+            { key: "customize", label: "自定义工具", icon: <Settings2 className="size-[18px]" /> },
+        ],
+        onClick: ({ key, domEvent }) => {
+            domEvent.stopPropagation();
+            setMoreToolsOpen(false);
+            if (key === "customize") openImageToolSettings();
+            else overflowTools.find((tool) => tool.id === key)?.onClick();
+        },
+    };
 
     const closeImageToolSettings = () => {
         setImageToolSettingsOpen(false);
@@ -161,6 +206,10 @@ export function CanvasNodeHoverToolbar({
     const setDraftImageToolVisible = (id: ImageQuickToolId, visible: boolean) => {
         setDraftImageToolIds((current) => {
             const selected = new Set(current);
+            if (visible && !selected.has(id) && selected.size >= 4) {
+                message.warning("快捷工具最多显示 4 项，其他工具可在“更多”中使用");
+                return current;
+            }
             if (visible) selected.add(id);
             else selected.delete(id);
             return selectableImageToolbarTools.filter((tool) => selected.has(tool.id)).map((tool) => tool.id);
@@ -178,19 +227,44 @@ export function CanvasNodeHoverToolbar({
     return (
         <>
             <div
-                className="absolute z-[70] flex h-12 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-[18px] border border-black/10 bg-white text-[15px] text-[#242529] shadow-[0_8px_28px_rgba(15,23,42,.12)]"
-                style={{ left, top }}
+                ref={toolbarRef}
+                role="toolbar"
+                aria-label={hasImage ? "图片工具栏" : "节点工具栏"}
+                data-canvas-node-toolbar="true"
+                className="absolute z-[70] flex h-11 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-xl border border-[#e4e4e7] bg-white px-1 text-[13px] text-[#27272a] shadow-[0_4px_16px_rgba(24,24,27,.08)]"
+                style={{ left, top, maxWidth: "calc(100% - 24px)" }}
                 onMouseEnter={() => onKeep(node.id)}
                 onMouseLeave={() => {
-                    if (!imageToolSettingsOpen) onLeave();
+                    if (!imageToolSettingsOpen && !moreToolsOpen) onLeave();
                 }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
             >
-                {toolbarTools.map((tool) => (
-                    <ToolbarAction key={tool.id} {...tool} highResolution={tool.id === "upscale" || tool.id === "superResolve"} showLabel={showImageToolLabels} />
-                ))}
-                {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} /> : null}
+                <div className="hide-scrollbar flex min-w-0 items-center overflow-x-auto">
+                    {toolbarTools.map((tool) => (
+                        <ToolbarAction key={tool.id} {...tool} highResolution={tool.id === "upscale" || tool.id === "superResolve"} showLabel={showImageToolLabels} />
+                    ))}
+                </div>
+                {hasImage ? (
+                    <Dropdown
+                        trigger={["click"]}
+                        open={moreToolsOpen}
+                        onOpenChange={(open) => { setMoreToolsOpen(open); if (open) onKeep(node.id); }}
+                        menu={moreMenu}
+                        placement="bottomRight"
+                        autoAdjustOverflow
+                        popupRender={(menu) => (
+                            <div className="thin-scrollbar max-h-[min(480px,calc(100vh-32px))] overflow-y-auto rounded-xl border border-[#e4e4e7] bg-white p-1 shadow-[0_8px_28px_rgba(24,24,27,.12)]" onMouseEnter={() => onKeep(node.id)} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                                {menu}
+                            </div>
+                        )}
+                    >
+                        <button type="button" aria-label="更多图片工具" aria-haspopup="menu" aria-expanded={moreToolsOpen} className={`ml-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 transition hover:bg-[#f4f4f5] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#a1a1aa] ${moreToolsOpen ? "bg-[#f4f4f5]" : ""}`}>
+                            <Ellipsis className="size-[18px]" />
+                            {showImageToolLabels ? <span>更多</span> : null}
+                        </button>
+                    </Dropdown>
+                ) : null}
             </div>
             {hasImage ? (
                 <ImageToolSettingsModal
@@ -206,6 +280,15 @@ export function CanvasNodeHoverToolbar({
             ) : null}
         </>
     );
+}
+
+export function clampCanvasNodeToolbarPosition({ left, top, width, height, containerWidth, containerHeight }: { left: number; top: number; width: number; height: number; containerWidth: number; containerHeight: number }) {
+    const margin = 12;
+    const halfWidth = Math.min(width, Math.max(0, containerWidth - margin * 2)) / 2;
+    return {
+        left: containerWidth > 0 ? Math.min(Math.max(left, margin + halfWidth), Math.max(margin + halfWidth, containerWidth - margin - halfWidth)) : left,
+        top: containerHeight > 0 ? Math.min(Math.max(top, margin + height), Math.max(margin + height, containerHeight - margin)) : top,
+    };
 }
 
 export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeData | null; open: boolean; onClose: () => void }) {
@@ -283,8 +366,8 @@ function ToolbarAction({ title, label, icon, onClick, showLabel, active = false,
     const hasText = showLabel && Boolean(label);
     return (
         <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" styles={{ root: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}>
-            <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap px-1.5 ${danger ? "text-[#ef4444]" : ""}`} style={highResolution && !danger ? { color: theme.toolbar.highResolution } : undefined} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick(); }} aria-label={title}>
-                <span className={`flex h-9 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-[#f0f0f1] ${active ? "bg-[#eeeeef]" : ""}`} style={highResolution ? { border: `1px solid ${theme.toolbar.highResolution}` } : undefined}>
+            <button type="button" className={`group relative flex h-9 shrink-0 items-center whitespace-nowrap rounded-lg px-0.5 focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-[#a1a1aa] ${danger ? "text-[#ef4444]" : ""}`} style={highResolution && !danger ? { color: theme.toolbar.highResolution } : undefined} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick(); }} aria-label={title}>
+                <span className={`flex h-8 items-center ${hasText ? "gap-1.5 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-[#f4f4f5] [&_svg]:size-[18px] ${active ? "bg-[#f4f4f5]" : ""}`}>
                     {icon}
                     {hasText ? <span>{label}</span> : null}
                 </span>

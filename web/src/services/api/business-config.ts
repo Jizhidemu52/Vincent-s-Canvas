@@ -1,7 +1,10 @@
+import { deploymentFeatures } from "@/lib/deployment-features";
+
 export type PublicModel = {
     id: string;
     name: string;
     modelId: string;
+    imageParameterProfile?: import("@/lib/image-model-settings").ImageParameterProfile;
     capabilities: string[];
     creditCost: number;
     rmbCost: number;
@@ -43,9 +46,9 @@ export function estimateServerUsage(config: BusinessConfig, input: { operationTy
     const requestedModelId = input.modelId || boundModelId;
     const model = requestedModelId ? config.models.find((item) => item.id === requestedModelId || item.modelId === requestedModelId || item.name === requestedModelId) : undefined;
     return {
-        credits: ((price?.credits || 0) + (model?.creditCost || 0)) * quantity,
+        credits: deploymentFeatures.creditsEnabled ? ((price?.credits || 0) + (model?.creditCost || 0)) * quantity : 0,
         rmbCost: Math.round(((price?.rmbCost || 0) + (model?.rmbCost || 0)) * quantity * 10_000) / 10_000,
-        configured: Boolean(price && (!input.toolKey || boundModelId) && (!requestedModelId || model)),
+        configured: Boolean((!deploymentFeatures.creditsEnabled || price) && (!input.toolKey || boundModelId) && (!requestedModelId || model)),
     };
 }
 

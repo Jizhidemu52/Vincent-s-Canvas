@@ -9,16 +9,19 @@ import { useSearchParams } from "react-router-dom";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
-import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
+import { VideoSettingsPanel, videoResolutionLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { standaloneEdition } from "@/lib/standalone-edition";
+import { deploymentFeatures } from "@/lib/deployment-features";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
-import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
-import { happyHorseModes, isHappyHorseVideoConfig, normalizeHappyHorseDuration, normalizeHappyHorseRatio, normalizeHappyHorseResolution, type HappyHorseMode } from "@/lib/happyhorse-video";
-import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
+import { seedanceReferenceLabel } from "@/lib/seedance-video";
+import { happyHorseModes, isHappyHorseVideoConfig, type HappyHorseMode } from "@/lib/happyhorse-video";
+import { getVideoModelParameterSpec, normalizeVideoModelConfig } from "@/lib/video-model-parameters";
+import { createLatestVideoPreview, hydrateVideoLogMedia } from "./video-log-media";
+import { deleteStoredMedia, resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { QueuedTaskPausedError, recoverQueuedTask } from "@/services/api/generation-tasks";
 import { fetchServerAssetContent } from "@/services/api/server-assets";
 import { hydratePromptReuse } from "@/services/api/prompts";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -45,6 +48,7 @@ type GenerationResult = {
     status: "pending" | "success" | "failed";
     video?: GeneratedVideo;
     error?: string;
+    recovery?: { task: VideoGenerationTask; canRecover: boolean };
 };
 
 type GenerationLog = {
@@ -58,6 +62,7 @@ type GenerationLog = {
     references: ReferenceImage[];
     videoReferences: ReferenceVideo[];
     audioReferences: ReferenceAudio[];
+    happyHorseMode?: HappyHorseMode;
     durationMs: number;
     size: string;
     resolution: string;
@@ -66,12 +71,12 @@ type GenerationLog = {
     task?: VideoGenerationTask;
     video?: GeneratedVideo;
     error?: string;
+    canRecover?: boolean;
 };
 
 type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
-type UploadTarget = "generic" | "image" | "video";
 
 const LOG_STORE_KEY = "wireless-canvas:video_generation_logs";
 const logStore = localforage.createInstance({ name: "wireless-canvas", storeName: "video_generation_logs" });
@@ -84,6 +89,8 @@ export default function VideoPage() {
     const loadedReuseTokenRef = useRef(new Set<string>());
     const generateRef = useRef<() => Promise<void>>(async () => undefined);
     const restoredInitialResultRef = useRef(false);
+    const previewLoader = useRef(createLatestVideoPreview()).current;
+    const logRefreshRevisionRef = useRef(0);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -100,6 +107,11 @@ export default function VideoPage() {
     const [audioReferences, setAudioReferences] = useState<ReferenceAudio[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [previewError, setPreviewError] = useState("");
+    const [readingReferences, setReadingReferences] = useState(false);
+    const [referenceError, setReferenceError] = useState("");
+    const [referencesOpen, setReferencesOpen] = useState(false);
     const [running, setRunning] = useState(false);
     const [logsOpen, setLogsOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -111,12 +123,16 @@ export default function VideoPage() {
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [happyHorseMode, setHappyHorseMode] = useState<HappyHorseMode>("text");
-    const [uploadTarget, setUploadTarget] = useState<UploadTarget>("generic");
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
+    const videoConfig = buildVideoConfig(effectiveConfig, model);
     const isHappyHorse = isHappyHorseVideoConfig({ ...effectiveConfig, model, videoModel: model });
+    const modelSpec = getVideoModelParameterSpec(model);
+    const maxImageReferences = isHappyHorse && happyHorseMode === "first-frame" ? 1 : modelSpec?.maxImages || 0;
+    const optionalReferenceCount = (isHappyHorse ? 0 : references.length + videoReferences.length) + audioReferences.length;
+    useEffect(() => { if (optionalReferenceCount) setReferencesOpen(true); }, [optionalReferenceCount]);
     const estimatedUsage = estimate({ operationType: "video_generation", modelId: modelOptionName(model), quantity: 1 });
-    const quotaBlocked = !standaloneEdition && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
+    const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const canGenerate = Boolean(prompt.trim() || (isHappyHorse && happyHorseMode === "first-frame")) && !quotaBlocked;
 
     const handleMissingModelConfig = () => {
@@ -142,6 +158,10 @@ export default function VideoPage() {
 
     useEffect(() => {
         void refreshLogs();
+        return () => {
+            logRefreshRevisionRef.current += 1;
+            previewLoader.invalidate();
+        };
     }, []);
 
     useEffect(() => {
@@ -149,8 +169,13 @@ export default function VideoPage() {
         restoredInitialResultRef.current = true;
         const latest = logs.find((log) => log.status === "成功" && log.video);
         if (!latest?.video) return;
-        setResults([{ id: latest.video.id, status: "success", video: latest.video }]);
-    }, [logs, results.length, running]);
+        setPreviewLoading(true);
+        void previewLoader.load(
+            () => hydrateVideoLogMedia(latest, { image: resolveImageUrl, media: resolveMediaUrl }, false),
+            (resolved) => { setPreviewLoading(false); if (resolved.video) setResults([{ id: resolved.video.id, status: "success", video: resolved.video }]); },
+            () => { setPreviewLoading(false); setPreviewError("最近视频暂时无法读取，可以从生成记录重新选择。"); },
+        );
+    }, [logs, message, previewLoader, results.length, running]);
 
     useEffect(() => {
         const presetPrompt = searchParams.get("prompt");
@@ -178,9 +203,9 @@ export default function VideoPage() {
             setReferences(nextReferences);
             payload.warnings.forEach((warning) => message.warning(warning));
             if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请先选择管理员当前启用的视频模型");
-            const cost = standaloneEdition ? "本机版直接生成" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
+            const cost = !deploymentFeatures.creditsEnabled ? "不计积分" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
             if (payload.mode === "fill_and_generate") {
-                modal.confirm({ title: "确认使用当前配置生成视频？", content: standaloneEdition ? "确认后将直接提交视频生成任务。" : `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
+                modal.confirm({ title: "确认使用当前配置生成视频？", content: !deploymentFeatures.creditsEnabled ? "确认后将直接提交视频生成任务。" : `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
             } else message.success(`模板已填入，当前预计 ${cost}`);
         }).catch((error) => {
             loadedReuseTokenRef.current.delete(token);
@@ -190,97 +215,20 @@ export default function VideoPage() {
 
     const addReferences = async (files?: FileList | null) => {
         const selectedFiles = Array.from(files || []);
-        if (isHappyHorse) {
-            await addHappyHorseReferences(selectedFiles);
-            return;
-        }
-        const unsupported = selectedFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/") && !isSupportedAudioFile(file));
-        if (unsupported.length) message.warning("已忽略不支持的参考素材，请使用图片、mp4/mov 视频或 mp3/wav 音频");
-        const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.images - references.length);
-        const videoFiles = selectedFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.videos - videoReferences.length);
-        const audioFiles = selectedFiles.filter((file) => isSupportedAudioFile(file) && file.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.audios - audioReferences.length);
-        if (selectedFiles.some((file) => file.type.startsWith("image/") && file.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes)) message.warning("已忽略超过 30MB 的参考图");
-        if (selectedFiles.some((file) => file.type.startsWith("video/") && file.size > SEEDANCE_REFERENCE_LIMITS.videoMaxBytes)) message.warning("已忽略超过 50MB 的参考视频");
-        if (selectedFiles.some((file) => isSupportedAudioFile(file) && file.size > SEEDANCE_REFERENCE_LIMITS.audioMaxBytes)) message.warning("已忽略超过 15MB 的参考音频");
+        if (selectedFiles.some((file) => !isSupportedVideoImage(file))) throw new Error("当前入口支持 JPEG、PNG、WebP 图片，单张非空且不超过 10MB；视频和音频参考暂未接入。");
+        if (references.length + selectedFiles.length > maxImageReferences) throw new Error(`当前模型或模式最多使用 ${maxImageReferences} 张图片，请先移除多余参考图。`);
         const nextReferences = await Promise.all(
-            imageFiles.map(async (file) => {
+            selectedFiles.map(async (file) => {
                 const image = await uploadImage(file);
                 return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
             }),
         );
-        const nextVideoReferences = await Promise.all(
-            videoFiles.map(async (file) => {
-                const video = await uploadMediaFile(file, "video-reference");
-                return { id: nanoid(), name: file.name, type: video.mimeType, url: video.url, storageKey: video.storageKey, bytes: video.bytes, width: video.width, height: video.height, durationMs: video.durationMs };
-            }),
-        );
-        const nextAudioReferences = filterAudioReferencesByDuration(
-            audioReferences,
-            await Promise.all(
-                audioFiles.map(async (file) => {
-                    const audio = await uploadMediaFile(file, "audio-reference");
-                    return { id: nanoid(), name: file.name, type: audio.mimeType, url: audio.url, storageKey: audio.storageKey, durationMs: audio.durationMs };
-                }),
-            ),
-            message.warning,
-        );
-        setReferences((value) => [...value, ...nextReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
-        setVideoReferences((value) => [...value, ...nextVideoReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
-        setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
-    };
-
-    const addHappyHorseReferences = async (files: File[]) => {
-        const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-        const videoFiles = files.filter((file) => file.type === "video/mp4" || file.type === "video/quicktime");
-        if (happyHorseMode === "first-frame" || happyHorseMode === "reference") {
-            if (!imageFiles.length) {
-                message.warning("请选择图片文件");
-                return;
-            }
-            const max = happyHorseMode === "first-frame" ? 1 : 9;
-            const next = await Promise.all(imageFiles.slice(0, max).map(async (file) => {
-                if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} 超过 10MB`);
-                const image = await uploadImage(file);
-                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
-            }));
-            setReferences(next);
-            return;
-        }
-        if (happyHorseMode === "edit") {
-            if (uploadTarget === "video") {
-                const file = videoFiles[0];
-                if (!file) {
-                    message.warning("视频编辑仅支持 mp4 或 mov 源视频");
-                    return;
-                }
-                if (file.size > 100 * 1024 * 1024) throw new Error("源视频不能超过 100MB");
-                const video = await uploadMediaFile(file, "video-reference");
-                setVideoReferences([{ id: nanoid(), name: file.name, type: video.mimeType, url: video.url, storageKey: video.storageKey, bytes: video.bytes, width: video.width, height: video.height, durationMs: video.durationMs }]);
-                return;
-            }
-            const next = await Promise.all(imageFiles.slice(0, Math.max(0, 5 - references.length)).map(async (file) => {
-                if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} 超过 10MB`);
-                const image = await uploadImage(file);
-                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
-            }));
-            setReferences((current) => [...current, ...next].slice(0, 5));
-        }
+        setReferences((value) => [...value, ...nextReferences]);
     };
 
     const switchHappyHorseMode = (next: HappyHorseMode) => {
+        if (next === "edit") return;
         setHappyHorseMode(next);
-        if (next === "text") {
-            setReferences([]);
-            setVideoReferences([]);
-        } else if (next === "first-frame") {
-            setReferences((current) => current.slice(0, 1));
-            setVideoReferences([]);
-        } else if (next === "reference") {
-            setReferences((current) => current.slice(0, 9));
-            setVideoReferences([]);
-        } else {
-            setReferences((current) => current.slice(0, 5));
-        }
     };
 
     const addReferencesFromClipboard = async () => {
@@ -291,19 +239,24 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的图片");
                 return;
             }
+            if (references.length + blobs.length > maxImageReferences) throw new Error(`当前模型最多使用 ${maxImageReferences} 张图片，请先移除多余参考图。`);
+            if (blobs.some((blob) => !isSupportedVideoImage(blob))) throw new Error("参考图仅支持 JPEG、PNG、WebP，单张非空且不超过 10MB。");
             const nextReferences = await Promise.all(
-                blobs.slice(0, SEEDANCE_REFERENCE_LIMITS.images - references.length).map(async (blob, index) => {
+                blobs.map(async (blob, index) => {
                     const image = await uploadImage(blob);
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
             );
-            setReferences((value) => [...value, ...nextReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
+            setReferences((value) => [...value, ...nextReferences]);
             message.success(`已读取 ${nextReferences.length} 张参考图`);
-        } catch {
-            message.error("剪切板里没有可读取的图片");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "剪切板里没有可读取的图片");
         }
     };
     const generate = async () => {
+        previewLoader.invalidate();
+        setPreviewLoading(false);
+        setPreviewError("");
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
         setElapsedMs(0);
@@ -314,7 +267,7 @@ export default function VideoPage() {
         setStartedAt(batchStartedAt);
         try {
             const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences, undefined, snapshot.happyHorseMode);
-            const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", task });
+            const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, happyHorseMode: snapshot.happyHorseMode, durationMs: 0, status: "生成中", task });
             await saveLog(log);
             void pollGenerationLog(log, snapshot.config);
         } catch (error) {
@@ -328,6 +281,7 @@ export default function VideoPage() {
                     references: snapshot.references,
                     videoReferences: snapshot.videoReferences,
                     audioReferences: snapshot.audioReferences,
+                    happyHorseMode: snapshot.happyHorseMode,
                     durationMs: performance.now() - batchStartedAt,
                     status: "失败",
                     error: errorMessage,
@@ -365,19 +319,26 @@ export default function VideoPage() {
             message.error("参考图生视频需要上传 1-9 张图片");
             return null;
         }
-        if (isHappyHorse && happyHorseMode === "edit" && videoReferences.length !== 1) {
-            message.error("视频编辑需要上传一段源视频");
+        if (videoReferences.length || audioReferences.length || (isHappyHorse && happyHorseMode === "edit")) {
+            message.error("当前接入不支持视频/音频参考或视频编辑，请先移除下方旧参考素材并选择图片生成模式；历史记录会保留。");
             return null;
         }
-        const videoReferenceError = isHappyHorse ? "" : seedanceVideoReferenceError(videoReferences);
-        if (videoReferenceError) {
-            message.error(`${videoReferenceError}。${seedanceVideoReferenceHint}`);
+        const requestReferences = isHappyHorse && happyHorseMode === "text" ? [] : references;
+        if (requestReferences.length > maxImageReferences) {
+            message.error(`当前模型或模式最多使用 ${maxImageReferences} 张图片，请先移除多余参考图。`);
             return null;
         }
-        return { text, config: buildVideoConfig(effectiveConfig, model), references: [...references], videoReferences: [...videoReferences], audioReferences: isHappyHorse ? [] : [...audioReferences], happyHorseMode: isHappyHorse ? happyHorseMode : undefined };
+        return { text, config: buildVideoConfig(effectiveConfig, model), references: [...requestReferences], videoReferences: [], audioReferences: [], happyHorseMode: isHappyHorse ? happyHorseMode : undefined };
     };
 
-    const retryResult = () => {
+    const retryResult = (result: GenerationResult) => {
+        if (result.recovery) {
+            if (!result.recovery.canRecover) { message.warning("原任务提交状态待核查，请勿重复生成"); return; }
+            const log = logs.find((item) => item.task?.id === result.recovery?.task.id);
+            if (!log) { message.error("原任务记录暂未读取，请从生成记录中重新打开"); return; }
+            void pollGenerationLog(log, undefined, true);
+            return;
+        }
         void generate();
     };
 
@@ -402,15 +363,22 @@ export default function VideoPage() {
         if (payload.kind === "text") {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
+            if (references.length >= maxImageReferences) { message.warning(`当前模型或模式最多使用 ${maxImageReferences} 张图片，请先移除多余参考图。`); return; }
             const stored = await uploadImage(payload.dataUrl);
-            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
+            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
+            if (isHappyHorse && happyHorseMode === "text") setHappyHorseMode(references.length ? "reference" : "first-frame");
         } else if (payload.kind === "video") {
-            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height }].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
+            message.warning("当前视频模型只接入图片参考，暂不能插入视频；原素材仍保留在我的素材中。");
+            return;
         }
         setAssetPickerOpen(false);
     };
 
     const createSession = () => {
+        restoredInitialResultRef.current = true;
+        previewLoader.invalidate();
+        setPreviewLoading(false);
+        setPreviewError("");
         setPrompt("");
         setReferences([]);
         setVideoReferences([]);
@@ -442,7 +410,9 @@ export default function VideoPage() {
     };
 
     const refreshLogs = async () => {
+        const revision = ++logRefreshRevisionRef.current;
         const nextLogs = await readStoredLogs();
+        if (revision !== logRefreshRevisionRef.current) return nextLogs;
         setLogs(nextLogs);
         resumePendingLogs(nextLogs);
         return nextLogs;
@@ -454,14 +424,16 @@ export default function VideoPage() {
         }
     };
 
-    const pollGenerationLog = async (log: GenerationLog, configOverride?: AiConfig) => {
+    const pollGenerationLog = async (log: GenerationLog, configOverride?: AiConfig, recover = false) => {
         if (!log.task || activeLogIdsRef.current.has(log.id)) return;
         activeLogIdsRef.current.add(log.id);
         setRunning(true);
         setStartedAt((value) => value || performance.now());
-        setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
+        setResults([{ id: log.id, status: "pending" }]);
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
+        let terminalFailure = false;
         try {
+            if (recover) await recoverQueuedTask(log.task.id);
             for (let attempt = 0; attempt < 120; attempt += 1) {
                 const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
                 if (state.status === "completed") {
@@ -477,7 +449,7 @@ export default function VideoPage() {
                         mimeType: stored.mimeType,
                     };
                     setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
-                    await saveLog({ ...log, status: "成功", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
+                    await saveLog({ ...log, status: "成功", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined, canRecover: undefined });
                     addAsset({
                         kind: "video",
                         title: "视频创作结果",
@@ -485,19 +457,20 @@ export default function VideoPage() {
                         tags: ["视频创作"],
                         source: "视频创作",
                         data: { url: nextVideo.url, storageKey: nextVideo.storageKey, width: nextVideo.width, height: nextVideo.height, bytes: nextVideo.bytes, mimeType: nextVideo.mimeType },
-                        metadata: { source: "video-page", module: "视频创作", prompt: log.prompt, model: log.model, recreatePath: `/video?prompt=${encodeURIComponent(log.prompt)}&model=${encodeURIComponent(log.model)}` },
+                        metadata: { source: "video-page", module: "视频创作", prompt: log.prompt, model: log.model, ...(stored.serverAssetId ? { serverAssetId: stored.serverAssetId } : {}), recreatePath: `/video?prompt=${encodeURIComponent(log.prompt)}&model=${encodeURIComponent(log.model)}` },
                     });
                     message.success("视频已生成");
                     return;
                 }
-                if (state.status === "failed") throw new Error(state.error);
-                if (attempt === 119) throw new Error("视频生成超时，请稍后重试");
+                if (state.status === "failed") { terminalFailure = true; throw new Error(state.error); }
+                if (attempt === 119) throw new Error("本次查询超时，可恢复查询原任务，不会重新生成");
                 await delay(2500);
             }
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "生成失败";
-            setResults([{ id: log.id, status: "failed", error: errorMessage }]);
-            await saveLog({ ...log, status: "失败", durationMs: Date.now() - log.createdAt, error: errorMessage });
+            const canRecover = error instanceof QueuedTaskPausedError ? error.canRecover : terminalFailure ? undefined : true;
+            setResults([{ id: log.id, status: "failed", error: errorMessage, ...(canRecover !== undefined ? { recovery: { task: log.task, canRecover } } : {}) }]);
+            await saveLog({ ...log, status: "失败", durationMs: Date.now() - log.createdAt, error: errorMessage, canRecover });
             message.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
@@ -509,25 +482,49 @@ export default function VideoPage() {
     };
 
     const previewGenerationLog = (log: GenerationLog) => {
+        restoredInitialResultRef.current = true;
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
-        setReferences(log.references || []);
-        setVideoReferences(log.videoReferences || []);
-        setAudioReferences(log.audioReferences || []);
+        setHappyHorseMode(log.happyHorseMode || (log.videoReferences.length ? "edit" : log.references.length === 1 ? "first-frame" : log.references.length ? "reference" : "text"));
+        setReferences([]);
+        setVideoReferences([]);
+        setAudioReferences([]);
+        setResults([]);
+        setPreviewLoading(true);
+        setPreviewError("");
         if (log.config.videoModel || log.model) updateConfig("videoModel", log.config.videoModel || log.model);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.vquality) updateConfig("vquality", log.config.vquality);
         if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
         if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
-        setResults(log.status === "生成中" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || "生成失败" }]);
+        void previewLoader.load(
+            () => hydrateVideoLogMedia(log, { image: resolveImageUrl, media: resolveMediaUrl }),
+            (resolved) => {
+                setPreviewLoading(false);
+                setReferences(resolved.references);
+                setVideoReferences(resolved.videoReferences);
+                setAudioReferences(resolved.audioReferences);
+                setResults(resolved.status === "生成中" ? [{ id: resolved.id, status: "pending" }] : resolved.video ? [{ id: resolved.video.id, status: "success", video: resolved.video }] : [{ id: resolved.id, status: "failed", error: resolved.error || "生成失败", ...(resolved.task && resolved.canRecover !== undefined ? { recovery: { task: resolved.task, canRecover: resolved.canRecover } } : {}) }]);
+            },
+            (error) => { setPreviewLoading(false); setPreviewError(error instanceof Error ? error.message : "记录中的媒体暂时无法读取"); },
+        );
+    };
+
+    const readReferenceFiles = async (files: FileList | null) => {
+        if (!files?.length || readingReferences) return;
+        setReadingReferences(true);
+        setReferenceError("");
+        try { await addReferences(files); }
+        catch (error) { setReferenceError(error instanceof Error ? error.message : "参考素材读取失败，请重新选择文件"); }
+        finally { setReadingReferences(false); }
     };
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-            <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[320px_minmax(0,1fr)]">
-                <aside className="thin-scrollbar hidden min-h-0 overflow-y-auto rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:block">
+        <div className="wb-page flex h-full flex-col overflow-hidden">
+            <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[280px_minmax(0,1fr)]">
+                <aside className="wb-surface thin-scrollbar hidden min-h-0 overflow-y-auto p-4 lg:block">
                     <LogPanel
                         logs={logs}
                         selectedLogIds={selectedLogIds}
@@ -539,10 +536,10 @@ export default function VideoPage() {
                     />
                 </aside>
 
-                <section className="grid gap-3 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[420px_minmax(0,1fr)]">
-                    <div className="thin-scrollbar flex flex-col rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto">
+                <section className="grid gap-4 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[minmax(380px,420px)_minmax(0,1fr)]">
+                    <div className="wb-surface thin-scrollbar flex flex-col p-5 lg:min-h-0 lg:overflow-y-auto">
                         <div className="flex items-start justify-between gap-3">
-                            <h1 className="text-2xl font-semibold text-stone-950 dark:text-stone-100">视频创作台</h1>
+                            <div><p className="wb-eyebrow">动态影像工作台</p><h1 className="wb-title">视频创作</h1></div>
                             <div className="flex shrink-0 gap-2 lg:hidden">
                                 <Button icon={<History className="size-4" />} onClick={() => setLogsOpen(true)}>
                                     记录
@@ -552,17 +549,20 @@ export default function VideoPage() {
                                 </Button>
                             </div>
                         </div>
+                        <p className="wb-description">写下镜头与动作，添加参考素材，让静态想法动起来。</p>
+                        {readingReferences ? <div role="status" className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在处理参考素材…</div> : null}
+                        {referenceError ? <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-950/30 dark:text-red-300">{referenceError}</p> : null}
 
                         <div className="mt-6 space-y-5">
                             <div>
                                 <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">提示词</span>
+                                    <span className="shrink-0 text-base font-semibold">提示词</span>
                                     <div className="flex gap-2">
                                         <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
-                                            查看提示词库
+                                            提示词库
                                         </Button>
                                         <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
-                                            查看我的素材
+                                            我的素材
                                         </Button>
                                     </div>
                                 </div>
@@ -573,18 +573,16 @@ export default function VideoPage() {
                                 <HappyHorseInputs
                                     mode={happyHorseMode}
                                     references={references}
-                                    videos={videoReferences}
                                     onModeChange={switchHappyHorseMode}
-                                    onUpload={(target) => {
-                                        setUploadTarget(target);
-                                        fileInputRef.current?.click();
-                                    }}
+                                    onUpload={() => fileInputRef.current?.click()}
                                     onRemoveImage={(id) => setReferences((current) => current.filter((item) => item.id !== id))}
-                                    onRemoveVideo={(id) => setVideoReferences((current) => current.filter((item) => item.id !== id))}
-                                    keepSourceAudio={effectiveConfig.videoGenerateAudio === "true"}
-                                    onKeepSourceAudioChange={(value) => updateConfig("videoGenerateAudio", String(value))}
                                 />
-                            ) : <>
+                            ) : null}
+                            <p className="text-xs leading-5 text-muted-foreground">当前入口支持 JPEG/PNG/WebP 图片参考，单张不超过 10MB；视频与音频参考暂未接入。</p>
+                            {!isHappyHorse || videoReferences.length || audioReferences.length ? <details open={referencesOpen} onToggle={(event) => setReferencesOpen(event.currentTarget.open)} className="rounded-xl border border-border p-3">
+                                <summary className="cursor-pointer text-sm font-medium text-foreground">{isHappyHorse ? "旧参考素材（暂不能提交）" : "参考素材"}<span className="ml-2 text-xs font-normal text-muted-foreground">{optionalReferenceCount ? optionalReferenceCount + " 个已添加" : "可选 · 点击添加"}</span></summary>
+                                <div className="mt-4 space-y-4">
+                            {!isHappyHorse ? <>
                             <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">参考图</span>
@@ -613,16 +611,14 @@ export default function VideoPage() {
                                             </button>
                                         </div>
                                     ))}
-                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图，最多 9 张</div> : null}
+                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图，最多 {maxImageReferences} 张</div> : null}
                                 </div>
+                                <p className="mt-2 text-xs leading-5 text-muted-foreground">{modelSpec?.imageInputHint}</p>
                             </div>
-
-                            <div className="min-w-0">
+                            </> : null}
+                            {videoReferences.length ? <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">参考视频</span>
-                                    <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
-                                        上传
-                                    </Button>
+                                    <span className="text-sm font-semibold">旧视频参考 · 暂不能提交，请移除</span>
                                 </div>
                                 <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700">
                                     {videoReferences.map((item, index) => (
@@ -632,7 +628,7 @@ export default function VideoPage() {
                                             <ReferenceOrderButtons index={index} total={videoReferences.length} onMove={(offset) => setVideoReferences((value) => moveListItem(value, index, offset))} />
                                             <button
                                                 type="button"
-                                                className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
+                                                className="absolute right-1 top-1 flex size-7 items-center justify-center rounded bg-black/60 text-white"
                                                 onClick={() => setVideoReferences((value) => value.filter((ref) => ref.id !== item.id))}
                                                 aria-label="移除参考视频"
                                             >
@@ -640,17 +636,12 @@ export default function VideoPage() {
                                             </button>
                                         </div>
                                     ))}
-                                    {!videoReferences.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考视频，最多 3 个</div> : null}
                                 </div>
-                            </div>
-                            </>}
+                            </div> : null}
 
-                            <div className="min-w-0">
+                            {audioReferences.length ? <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">参考音频</span>
-                                    <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
-                                        上传
-                                    </Button>
+                                    <span className="text-sm font-semibold">旧音频参考 · 暂不能提交，请移除</span>
                                 </div>
                                 <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700">
                                     {audioReferences.map((item, index) => (
@@ -664,7 +655,7 @@ export default function VideoPage() {
                                             <ReferenceOrderButtons index={index} total={audioReferences.length} onMove={(offset) => setAudioReferences((value) => moveListItem(value, index, offset))} />
                                             <button
                                                 type="button"
-                                                className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
+                                                className="absolute right-1 top-1 flex size-7 items-center justify-center rounded bg-black/60 text-white"
                                                 onClick={() => setAudioReferences((value) => value.filter((ref) => ref.id !== item.id))}
                                                 aria-label="移除参考音频"
                                             >
@@ -672,13 +663,15 @@ export default function VideoPage() {
                                             </button>
                                         </div>
                                     ))}
-                                    {!audioReferences.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">暂无参考音频，最多 3 个，mp3/wav，单个 15MB 内</div> : null}
                                 </div>
-                            </div>
+                            </div> : null}
+
+                                </div>
+                            </details> : null}
 
                             <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {modelOptionLabel(effectiveConfig, model)} · {normalizeResolution(effectiveConfig.vquality)}p · {videoSizeLabel(effectiveConfig.size)} · {normalizeVideoSeconds(effectiveConfig.videoSeconds)}s
+                                    {modelOptionLabel(effectiveConfig, model)} · {videoResolutionLabel(videoConfig.vquality)} · {videoSizeLabel(videoConfig.size)} · {videoConfig.videoSeconds}s
                                 </span>
                                 <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     调整
@@ -686,42 +679,45 @@ export default function VideoPage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} referenceCount={isHappyHorse && happyHorseMode === "text" ? 0 : references.length} imageMode={isHappyHorse ? happyHorseMode : undefined} />
                             </div>
                         </div>
 
                         <div className="mt-auto pt-6">
                             <div className="mb-3 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs dark:border-stone-800 dark:bg-stone-900">
-                                <span>{standaloneEdition ? "本机版直接生成" : `预计消耗 ${estimatedUsage.configured ? estimatedUsage.credits : "待配置"} 积分`}</span>
-                                <span>{standaloneEdition ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
+                                <span>{!deploymentFeatures.creditsEnabled ? "不计积分" : `预计消耗 ${estimatedUsage.configured ? estimatedUsage.credits : "待配置"} 积分`}</span>
+                                <span>{!deploymentFeatures.authenticationEnabled ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
                             </div>
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                开始生成
+                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running || readingReferences || previewLoading} onClick={() => void generate()}>
+                                {running ? "正在生成视频" : "生成视频"}
                             </Button>
                         </div>
                     </div>
 
-                    <div className="thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5">
+                    <div className="wb-surface thin-scrollbar p-5 lg:min-h-0 lg:overflow-y-auto">
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <h2 className="text-xl font-semibold">生成结果</h2>
-                            {running ? <Tag className="m-0 px-2 py-1">等待 {formatDuration(elapsedMs)}</Tag> : null}
+                            {running ? <Tag className="m-0 px-2 py-1">用时 {formatDuration(elapsedMs)}</Tag> : null}
                         </div>
+                        {previewError ? <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><p>{previewError}</p>{previewLog ? <Button className="mt-3" onClick={() => previewGenerationLog(previewLog)}>重新读取记录</Button> : null}</div> : null}
                         {results.length ? (
                             <div className="grid gap-4">
                                 {results.map((result) =>
                                     result.status === "success" && result.video ? (
                                         <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
-                                        <FailedVideoCard key={result.id} error={result.error || "生成失败"} onRetry={retryResult} />
+                                        <FailedVideoCard key={result.id} error={result.error || "生成失败"} recovery={result.recovery} onRetry={() => retryResult(result)} />
                                     ) : (
                                         <PendingVideoCard key={result.id} />
                                     ),
                                 )}
                             </div>
                         ) : (
-                            <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
-                                <VideoIcon className="mb-4 size-11 text-stone-400" />
-                                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有生成视频" />
+                            <div className="wb-empty min-h-[320px] lg:min-h-[500px]">
+                                {previewLoading ? <LoaderCircle className="size-9 animate-spin" /> : <VideoIcon className="size-9" />}
+                                <strong>{previewLoading ? "正在读取这段视频" : "下一段精彩，从这里开始"}</strong>
+                                <p>{previewLoading ? "只加载当前记录，其他视频保留在历史中。" : "先选模型，再描述画面。生成后可以直接播放、下载，或保存到我的素材。"}</p>
+                                {!previewLoading && !prompt ? <Button onClick={() => setPrompt("镜头缓慢推进，展示一件白色衬衫的面料纹理与领口细节。自然柔光，背景简洁，主体保持一致，动作平稳。")} icon={<Sparkles className="size-4" />}>填入一段示例</Button> : null}
                             </div>
                         )}
                     </div>
@@ -730,15 +726,16 @@ export default function VideoPage() {
             <input
                 ref={fileInputRef}
                 type="file"
-                accept={isHappyHorse ? (uploadTarget === "video" ? "video/mp4,video/quicktime,.mp4,.mov" : "image/jpeg,image/png,image/bmp,image/webp") : "image/*,video/mp4,video/quicktime,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav"}
-                multiple={!isHappyHorse || happyHorseMode === "reference" || (happyHorseMode === "edit" && uploadTarget === "image")}
+                accept="image/jpeg,image/png,image/webp"
+                multiple={maxImageReferences > 1}
                 className="hidden"
+                disabled={readingReferences}
                 onChange={(event) => {
-                    void addReferences(event.target.files);
+                    void readReferenceFiles(event.target.files);
                     event.target.value = "";
                 }}
             />
-            <Drawer title="生成记录" placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
+            <Drawer title="生成记录" placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)} destroyOnHidden>
                 <LogPanel
                     logs={logs}
                     selectedLogIds={selectedLogIds}
@@ -751,7 +748,7 @@ export default function VideoPage() {
             </Drawer>
             <Drawer title="参数" placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} referenceCount={isHappyHorse && happyHorseMode === "text" ? 0 : references.length} imageMode={isHappyHorse ? happyHorseMode : undefined} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
@@ -763,23 +760,19 @@ export default function VideoPage() {
     );
 }
 
-function HappyHorseInputs({ mode, references, videos, onModeChange, onUpload, onRemoveImage, onRemoveVideo, keepSourceAudio, onKeepSourceAudioChange }: { mode: HappyHorseMode; references: ReferenceImage[]; videos: ReferenceVideo[]; onModeChange: (mode: HappyHorseMode) => void; onUpload: (target: UploadTarget) => void; onRemoveImage: (id: string) => void; onRemoveVideo: (id: string) => void; keepSourceAudio: boolean; onKeepSourceAudioChange: (value: boolean) => void }) {
-    const active = happyHorseModes.find((item) => item.value === mode)!;
+function HappyHorseInputs({ mode, references, onModeChange, onUpload, onRemoveImage }: { mode: HappyHorseMode; references: ReferenceImage[]; onModeChange: (mode: HappyHorseMode) => void; onUpload: () => void; onRemoveImage: (id: string) => void }) {
+    const active = happyHorseModes.find((item) => item.value === mode);
     return (
         <div className="space-y-4">
             <div>
                 <div className="mb-2 text-base font-semibold">生成方式</div>
                 <div className="grid grid-cols-2 gap-2">
-                    {happyHorseModes.map((item) => <button key={item.value} type="button" className={`rounded-lg border px-3 py-2 text-left text-sm transition ${mode === item.value ? "border-orange-500 bg-orange-50 text-orange-800 dark:bg-orange-950/20 dark:text-orange-200" : "border-stone-200 hover:border-orange-300 dark:border-stone-800"}`} onClick={() => onModeChange(item.value)}><span className="block font-medium">{item.label}</span><span className="mt-0.5 block text-xs opacity-65">{item.description}</span></button>)}
+                    {happyHorseModes.filter((item) => item.value !== "edit").map((item) => <button key={item.value} type="button" className={`rounded-lg border px-3 py-2 text-left text-sm transition ${mode === item.value ? "border-orange-500 bg-orange-50 text-orange-800 dark:bg-orange-950/20 dark:text-orange-200" : "border-stone-200 hover:border-orange-300 dark:border-stone-800"}`} onClick={() => onModeChange(item.value)}><span className="block font-medium">{item.label}</span><span className="mt-0.5 block text-xs opacity-65">{item.description}</span></button>)}
                 </div>
             </div>
-            {mode === "text" ? <div className="rounded-lg border border-dashed border-stone-300 px-3 py-4 text-sm text-stone-500 dark:border-stone-700">{active.description}。支持 3-15 秒，输出比例和分辨率在下方设置。</div> : null}
-            {mode === "first-frame" || mode === "reference" ? <MediaStrip title={mode === "first-frame" ? "首帧图片" : "参考图片"} hint={mode === "first-frame" ? "上传 1 张图片，jpg/png/bmp/webp，单张不超过 10MB" : "上传 1-9 张图片，jpg/png/bmp/webp，单张不超过 10MB"} images={references} onUpload={() => onUpload("image")} onRemoveImage={onRemoveImage} /> : null}
-            {mode === "edit" ? <>
-                <VideoStrip videos={videos} onUpload={() => onUpload("video")} onRemove={onRemoveVideo} />
-                <MediaStrip title="风格参考图（可选）" hint="最多 5 张图片；视频编辑将使用公司对象存储提供的 HTTPS 地址。" images={references} onUpload={() => onUpload("image")} onRemoveImage={onRemoveImage} />
-                <label className="flex items-center justify-between rounded-lg border border-stone-200 px-3 py-2 text-sm dark:border-stone-800"><span>保留源视频原声</span><input type="checkbox" checked={keepSourceAudio} onChange={(event) => onKeepSourceAudioChange(event.target.checked)} /></label>
-            </> : null}
+            {mode === "text" ? <div className="rounded-lg border border-dashed border-stone-300 px-3 py-4 text-sm text-stone-500 dark:border-stone-700">{active?.description}。支持 3-15 秒，输出比例和分辨率在下方设置。{references.length ? `已保留 ${references.length} 张参考图，文生视频时不提交；切回图片模式可继续使用。` : ""}</div> : null}
+            {mode === "first-frame" || mode === "reference" ? <MediaStrip title={mode === "first-frame" ? "首帧图片" : "参考图片"} hint={mode === "first-frame" ? "上传 1 张图片，JPEG/PNG/WebP，单张不超过 10MB" : "上传 1-9 张图片，JPEG/PNG/WebP，单张不超过 10MB"} images={references} onUpload={onUpload} onRemoveImage={onRemoveImage} /> : null}
+            {mode === "edit" ? <p role="alert" className="text-sm text-red-600">当前接口未接入视频编辑，请切换上方生成方式。旧素材仍保留。</p> : null}
         </div>
     );
 }
@@ -788,11 +781,7 @@ function MediaStrip({ title, hint, images, onUpload, onRemoveImage }: { title: s
     return <div className="min-w-0"><div className="mb-2 flex items-center justify-between gap-3"><span className="text-base font-semibold">{title}</span><Button size="small" icon={<Upload className="size-3.5" />} onClick={onUpload}>上传</Button></div><div className="flex min-h-24 gap-2 overflow-x-auto rounded-lg border border-dashed border-stone-300 p-2 dark:border-stone-700">{images.map((item) => <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800"><img src={item.dataUrl} alt={item.name} className="size-full object-cover" /><button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => onRemoveImage(item.id)} aria-label="移除图片"><Trash2 className="size-3.5" /></button></div>)}{!images.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">{hint}</div> : null}</div></div>;
 }
 
-function VideoStrip({ videos, onUpload, onRemove }: { videos: ReferenceVideo[]; onUpload: () => void; onRemove: (id: string) => void }) {
-    return <div className="min-w-0"><div className="mb-2 flex items-center justify-between gap-3"><span className="text-base font-semibold">源视频</span><Button size="small" icon={<Upload className="size-3.5" />} onClick={onUpload}>上传</Button></div><div className="flex min-h-24 gap-2 overflow-x-auto rounded-lg border border-dashed border-stone-300 p-2 dark:border-stone-700">{videos.map((item) => <div key={item.id} className="group relative h-20 w-32 shrink-0 overflow-hidden rounded-md border border-stone-200 bg-black dark:border-stone-800"><video src={item.url} className="size-full object-cover" muted preload="metadata" /><button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => onRemove(item.id)} aria-label="移除源视频"><Trash2 className="size-3.5" /></button></div>)}{!videos.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">上传 mp4/mov，3-60 秒、100MB 内；生成最多处理前 15 秒。</div> : null}</div></div>;
-}
-
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+function GenerationSettings({ config, model, updateConfig, openConfigDialog, referenceCount, imageMode }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void; referenceCount: number; imageMode?: HappyHorseMode }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
@@ -802,7 +791,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
-                <VideoSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
+                <VideoSettingsPanel config={{ ...config, model, videoModel: model }} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" referenceCount={referenceCount} imageMode={imageMode} />
             </div>
         </>
     );
@@ -811,7 +800,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
 function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedVideo; onDownload: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void }) {
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <video src={video.url} controls className="aspect-video w-full bg-black object-contain" />
+            <video src={video.url} controls preload="metadata" className="aspect-video w-full bg-black object-contain" />
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
                     <span>
@@ -844,18 +833,18 @@ function PendingVideoCard() {
     );
 }
 
-function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+function FailedVideoCard({ error, recovery, onRetry }: { error: string; recovery?: GenerationResult["recovery"]; onRetry: () => void }) {
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-video flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="text-sm font-medium text-red-600 dark:text-red-300">生成失败</div>
+                <div className="text-sm font-medium text-red-600 dark:text-red-300">{recovery ? "原任务查询暂停" : "生成失败"}</div>
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
                     {error}
                 </Typography.Paragraph>
             </div>
             <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
-                <Button size="small" danger onClick={onRetry}>
-                    重试
+                <Button size="small" danger disabled={recovery?.canRecover === false} onClick={onRetry}>
+                    {recovery ? recovery.canRecover ? "恢复查询原任务" : "提交状态待核查" : "重新生成"}
                 </Button>
             </div>
         </div>
@@ -879,6 +868,8 @@ function LogPanel({
     onDeleteSelected: () => void;
     onPreviewLog: (log: GenerationLog) => void;
 }) {
+    const [visibleCount, setVisibleCount] = useState(40);
+    const visibleLogs = logs.slice(0, visibleCount);
     const allSelected = Boolean(logs.length) && selectedLogIds.length === logs.length;
     const toggleAll = () => onSelectedLogIdsChange(allSelected ? [] : logs.map((log) => log.id));
 
@@ -900,7 +891,7 @@ function LogPanel({
                 </Button>
             </div>
             <div className="space-y-3">
-                {logs.map((log) => (
+                {visibleLogs.map((log) => (
                     <LogCard
                         key={log.id}
                         log={log}
@@ -910,6 +901,7 @@ function LogPanel({
                         onClick={() => onPreviewLog(log)}
                     />
                 ))}
+                {visibleCount < logs.length ? <Button block className="!h-10" onClick={() => setVisibleCount((value) => value + 40)}>加载更多记录（剩余 {logs.length - visibleCount} 条）</Button> : null}
                 {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-stone-300 text-center text-sm text-stone-500 dark:border-stone-700">暂无生成记录</div> : null}
             </div>
         </>
@@ -929,7 +921,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                     <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
                     <div className="mt-2 flex flex-wrap gap-1">
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.size}</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.resolution}p</Tag>
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{videoResolutionLabel(log.resolution)}</Tag>
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.seconds}s</Tag>
                     </div>
                 </div>
@@ -953,32 +945,13 @@ async function readStoredLogs() {
         await logStore.iterate<GenerationLog, void>((value) => {
             logs.push(value);
         });
-        return (await Promise.all(logs.map(normalizeLog))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        return logs.map(normalizeLog).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     } catch {
         return [];
     }
 }
 
-async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
-    const video = log.video?.storageKey ? { ...log.video, url: await resolveMediaUrl(log.video.storageKey, log.video.url) } : log.video;
-    const videoReferences = await Promise.all(
-        (log.videoReferences || []).map(async (item) => ({
-            ...item,
-            url: item.storageKey ? await resolveMediaUrl(item.storageKey, item.url) : item.url,
-        })),
-    );
-    const audioReferences = await Promise.all(
-        (log.audioReferences || []).map(async (item) => ({
-            ...item,
-            url: item.storageKey ? await resolveMediaUrl(item.storageKey, item.url) : item.url,
-        })),
-    );
-    const references = await Promise.all(
-        (log.references || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
-    );
+function normalizeLog(log: Partial<GenerationLog>): GenerationLog {
     const config = normalizeLogConfig(log);
     return {
         id: log.id || nanoid(),
@@ -988,16 +961,18 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         time: log.time || new Date().toLocaleString("zh-CN", { hour12: false }),
         model: log.model || config.videoModel || "",
         config,
-        references,
-        videoReferences,
-        audioReferences,
+        references: log.references || [],
+        videoReferences: log.videoReferences || [],
+        audioReferences: log.audioReferences || [],
+        happyHorseMode: log.happyHorseMode,
         durationMs: log.durationMs || 0,
         size: log.size || config.size || "",
         resolution: normalizeResolution(log.resolution || config.vquality || ""),
         seconds: log.seconds || config.videoSeconds || "",
         status: log.status || "成功",
         task: log.task,
-        video,
+        canRecover: log.canRecover,
+        video: log.video,
         error: log.error,
     };
 }
@@ -1012,28 +987,8 @@ function serializeLog(log: GenerationLog): GenerationLog {
     };
 }
 
-function isSupportedAudioFile(file: File) {
-    return file.type === "audio/mpeg" || file.type === "audio/mp3" || file.type === "audio/wav" || file.type === "audio/x-wav" || /\.(mp3|wav)$/i.test(file.name);
-}
-
-function filterAudioReferencesByDuration(existing: ReferenceAudio[], next: ReferenceAudio[], warn: (content: string) => void) {
-    let total = existing.reduce((sum, item) => sum + (item.durationMs || 0), 0);
-    const accepted: ReferenceAudio[] = [];
-    let skipped = false;
-    for (const item of next) {
-        if (item.durationMs && (item.durationMs < 2000 || item.durationMs > 15000)) {
-            skipped = true;
-            continue;
-        }
-        if (item.durationMs && total + item.durationMs > 15000) {
-            skipped = true;
-            continue;
-        }
-        total += item.durationMs || 0;
-        accepted.push(item);
-    }
-    if (skipped) warn("已忽略不符合时长要求的参考音频：单个 2-15 秒，总时长不超过 15 秒");
-    return accepted;
+function isSupportedVideoImage(blob: Blob) {
+    return ["image/jpeg", "image/png", "image/webp"].includes(blob.type) && blob.size > 0 && blob.size <= 10 * 1024 * 1024;
 }
 
 function moveListItem<T>(items: T[], index: number, offset: number) {
@@ -1073,6 +1028,7 @@ function buildLog({
     references,
     videoReferences,
     audioReferences,
+    happyHorseMode,
     durationMs,
     status,
     task,
@@ -1085,6 +1041,7 @@ function buildLog({
     references: ReferenceImage[];
     videoReferences: ReferenceVideo[];
     audioReferences: ReferenceAudio[];
+    happyHorseMode?: HappyHorseMode;
     durationMs: number;
     status: GenerationLog["status"];
     task?: VideoGenerationTask;
@@ -1111,6 +1068,7 @@ function buildLog({
         references,
         videoReferences,
         audioReferences,
+        happyHorseMode,
         durationMs,
         size: logConfig.size,
         resolution: logConfig.vquality,
@@ -1123,32 +1081,16 @@ function buildLog({
 }
 
 function buildVideoConfig(config: AiConfig, model: string): AiConfig {
-    const seedance = isSeedanceVideoConfig({ ...config, model });
-    const happyHorse = isHappyHorseVideoConfig({ ...config, model, videoModel: model });
     return {
         ...config,
         model,
         videoModel: model,
-        size: happyHorse ? normalizeHappyHorseRatio(config.size) : seedance ? normalizeSeedanceRatio(config.size) : normalizeVideoSize(config.size),
-        videoSeconds: happyHorse ? normalizeHappyHorseDuration(config.videoSeconds) : normalizeVideoSeconds(config.videoSeconds),
-        vquality: happyHorse ? normalizeHappyHorseResolution(config.vquality) : normalizeResolution(config.vquality),
-        videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),
-        videoWatermark: String(boolConfig(config.videoWatermark, false)),
+        ...normalizeVideoModelConfig({ ...config, model, videoModel: model }),
     };
 }
 
-function normalizeVideoSeconds(value: string) {
-    if (String(value).trim() === "-1") return "-1";
-    const seconds = Math.floor(Number(value) || 6);
-    return String(Math.max(1, Math.min(20, seconds)));
-}
-
-function normalizeVideoSize(value: string) {
-    return normalizeVideoSizeValue(value);
-}
-
 function normalizeResolution(value: string) {
-    return normalizeVideoResolutionValue(value);
+    return value.trim().replace(/p$/i, "");
 }
 
 function delay(ms: number) {

@@ -2,8 +2,11 @@ import localforage from "localforage";
 
 import { nanoid } from "nanoid";
 import { readImageMeta } from "@/lib/image-utils";
+import { createDedupedAsyncResolver } from "@/lib/deduped-async-resolver";
+import { cacheObjectUrl, releaseObjectUrl, releaseUnusedObjectUrls } from "@/lib/object-url-cache";
 
 export type UploadedImage = {
+    originalFileName?: string;
     url: string;
     storageKey: string;
     width: number;
@@ -14,26 +17,29 @@ export type UploadedImage = {
 
 const store = localforage.createInstance({ name: "wireless-canvas", storeName: "image_files" });
 const objectUrls = new Map<string, string>();
+const loadObjectUrl = createDedupedAsyncResolver(async (storageKey: string) => {
+    const blob = await store.getItem<Blob>(storageKey);
+    if (!blob) return "";
+    const url = URL.createObjectURL(blob);
+    cacheObjectUrl(objectUrls, storageKey, url);
+    return url;
+});
 
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
+    cacheObjectUrl(objectUrls, storageKey, url);
     const meta = await readImageMeta(url);
-    return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
+    return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType, ...(typeof File !== "undefined" && input instanceof File ? { originalFileName: input.name } : {}) };
 }
 
 export async function resolveImageUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
-    const blob = await store.getItem<Blob>(storageKey);
-    if (!blob) return fallback;
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
-    return url;
+    return (await loadObjectUrl(storageKey)) || fallback;
 }
 
 export async function getImageBlob(storageKey: string) {
@@ -43,22 +49,23 @@ export async function getImageBlob(storageKey: string) {
 export async function setImageBlob(storageKey: string, blob: Blob) {
     await store.setItem(storageKey, blob);
     const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
+    cacheObjectUrl(objectUrls, storageKey, url);
     return url;
 }
 
-export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
-    const url = image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
+export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }, resolveUrl = resolveImageUrl) {
+    // Persisted files are authoritative: dataUrl may be an object URL from an earlier page load.
+    const url = await resolveUrl(image.storageKey, image.dataUrl || image.url || "");
     if (!url || url.startsWith("data:")) return url;
-    return blobToDataUrl(await (await fetch(url)).blob());
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`参考图读取失败（${response.status}），请重新添加图片`);
+    return blobToDataUrl(await response.blob());
 }
 
 export async function deleteStoredImages(keys: Iterable<string>) {
     await Promise.all(
         Array.from(new Set(keys)).map(async (key) => {
-            const url = objectUrls.get(key);
-            if (url) URL.revokeObjectURL(url);
-            objectUrls.delete(key);
+            releaseObjectUrl(objectUrls, key);
             await store.removeItem(key);
         }),
     );
@@ -71,6 +78,11 @@ export async function cleanupUnusedImages(usedData: unknown) {
         if (!usedKeys.has(key)) unused.push(key);
     });
     await deleteStoredImages(unused);
+}
+
+/** Release image object URLs not visible in the current workspace without deleting local files. */
+export function releaseUnusedImageObjectUrls(usedData: unknown) {
+    releaseUnusedObjectUrls(objectUrls, collectImageStorageKeys(usedData));
 }
 
 export function collectImageStorageKeys(value: unknown, keys = new Set<string>()) {

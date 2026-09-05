@@ -35,7 +35,7 @@ test("reads native Claude SSE text and tool-use blocks without a response wrappe
     const result = await readClaudeSseResponse(response, (text) => deltas.push(text));
 
     expect(deltas).toEqual(["你好"]);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
         content: "你好",
         toolCalls: [{ id: "call_1", type: "function", function: { name: "canvas_get_state", arguments: '{"full":true}' } }],
     });

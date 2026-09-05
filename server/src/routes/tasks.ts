@@ -8,13 +8,18 @@ import { requireRole } from "../rbac";
 import {
   BillingError,
   enqueueTask,
+  queueScore,
   recalculateBatch,
   transitionBatchTasks,
   transitionTask,
   type QueueTaskAction,
+  type TaskPriority,
 } from "../tasks";
 import type { AuthenticatedRequest } from "../types";
 import { assertModuleEnabled, moduleForOperation } from "../module-flags";
+import { getVideoModelCapability, isSupportedVideoModelId, type ProviderVideoSource } from "../video-models";
+import { preflightVideoTask } from "../video-task-preflight";
+import { APIMART_VIDEO_IMAGE_MAX_BYTES, isApiMartImageMimeType } from "../apimart-upload";
 
 const base = z.object({
   requestId: z.string().min(8).max(200),
@@ -26,7 +31,7 @@ const base = z.object({
   priority: z.enum(["normal", "priority", "urgent"]).default("normal"),
 });
 const singleSchema = base.extend({
-  sourceUrls: z.array(z.string().max(2_000)).max(20).default([]),
+  sourceUrls: z.array(z.string().max(2_000)).max(30).default([]),
 });
 const batchSchema = base.extend({
   items: z
@@ -40,7 +45,7 @@ const batchSchema = base.extend({
 });
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
-const taskSelect = `t.id,t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
+const taskSelect = `t.id,t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
 const batchSelect = `b.id,b.request_id AS "requestId",b.user_id AS "userId",u.display_name AS "userName",b.department_id AS "departmentId",b.project_id AS "projectId",b.operation_type AS "operationType",m.name AS "modelName",b.priority,b.status,b.total_items AS "totalItems",b.completed_items AS "completedItems",b.failed_items AS "failedItems",stats.waiting_items AS "waitingItems",stats.processing_items AS "processingItems",stats.paused_items AS "pausedItems",stats.cancelled_items AS "cancelledItems",stats.planned_credits AS "plannedCredits",stats.consumed_credits AS "consumedCredits",stats.consumed_rmb_cost AS "consumedRmbCost",b.created_at AS "createdAt",b.updated_at AS "updatedAt"`;
 const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COUNT(*) FILTER (WHERE t.status='waiting')::int AS waiting_items,
@@ -52,8 +57,81 @@ const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COALESCE(SUM(t.rmb_cost) FILTER (WHERE t.status='success'),0)::float8 AS consumed_rmb_cost
   FROM tasks t WHERE t.batch_id=b.id) stats ON true`;
 
-export function createTasksRouter(db: Database, cache: Cache) {
+export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = true) {
   const router = Router();
+
+  router.post("/preflight", async (request, response, next) => {
+    try {
+      const input = singleSchema.parse(request.body);
+      if (input.operationType !== "video_generation") {
+        response.status(400).json({ error: "UNSUPPORTED_OPERATION", message: "此预检入口仅支持视频任务" });
+        return;
+      }
+      await assertModuleEnabled(db, "video");
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const result = await db.query<{ id: string; modelId: string }>(
+        `SELECT m.id,m.model_id AS "modelId" FROM model_configs m JOIN providers p ON p.id=m.provider_id
+         WHERE m.id=$1 AND m.enabled=true AND p.enabled=true AND p.protocol='apimart' AND p.encrypted_credentials IS NOT NULL AND 'video'=ANY(m.capabilities)`,
+        [input.modelConfigId ?? null],
+      );
+      const model = result.rows[0];
+      if (!model || !isSupportedVideoModelId(model.modelId)) {
+        response.status(400).json({ error: "MODEL_DISABLED", message: "所选视频模型未启用或尚不支持" });
+        return;
+      }
+      const capability = getVideoModelCapability(model.modelId);
+      if (input.sourceUrls.length < capability.minImages || input.sourceUrls.length > capability.maxImages) {
+        response.status(400).json({ error: "INVALID_VIDEO_INPUT", message: `此模型支持 ${capability.minImages}–${capability.maxImages} 张参考图` });
+        return;
+      }
+      const sources: ProviderVideoSource[] = [];
+      for (const url of input.sourceUrls) {
+        const id = url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i)?.[1];
+        const assetResult = id ? await db.query<{ id: string; mimeType: string; byteSize: number }>(
+          `SELECT id,mime_type AS "mimeType",byte_size AS "byteSize" FROM assets
+           WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL`, [id, actor.id],
+        ) : null;
+        const asset = assetResult?.rows[0];
+        if (!asset || !isApiMartImageMimeType(asset.mimeType) || Number(asset.byteSize) <= 0 || Number(asset.byteSize) > APIMART_VIDEO_IMAGE_MAX_BYTES) {
+          response.status(400).json({ error: "INVALID_SOURCE", message: "参考图不存在、无权访问、超过 10MB 或非 JPEG/PNG/WebP/GIF 格式" });
+          return;
+        }
+        // Preflight only validates owned stored metadata. Runtime uploads the bytes before video submission.
+        sources.push({ mimeType: asset.mimeType, bytes: new Uint8Array(), publicUrl: `asset://${asset.id}` });
+      }
+      try {
+        const preflight = preflightVideoTask({ model: model.modelId, prompt: input.prompt, parameters: input.parameters, sources });
+        response.json({ ok: true, requestId: input.requestId, normalized: preflight.normalized });
+      } catch (error) {
+        response.status(400).json({ error: "INVALID_VIDEO_INPUT", message: error instanceof Error ? error.message : "视频参数不正确" });
+      }
+    } catch (error) { next(error); }
+  });
+
+  router.post("/:id/recover", async (request, response, next) => {
+    try {
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const result = await db.query<{ id: string; requestId: string; status: string; operationType: string; upstreamTaskId: string | null; submissionStartedAt: string | null; attempts: number; priority: TaskPriority; queuedAt: string }>(
+        `SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.id=$1 AND t.user_id=$2`,
+        [request.params.id, actor.id],
+      );
+      const task = result.rows[0];
+      if (!task) {
+        response.status(404).json({ error: "NOT_FOUND", message: "任务不存在" });
+        return;
+      }
+      const canPollOriginalVideo = task.operationType === "video_generation" && Boolean(task.upstreamTaskId);
+      let recovered = false;
+      if (task.status === "waiting" && ((!task.submissionStartedAt && task.attempts === 0) || canPollOriginalVideo)) {
+        await cache.zAdd("tasks:queue", { score: queueScore(task.priority, new Date(task.queuedAt).getTime()), value: task.id });
+        recovered = true;
+      } else if (task.status === "paused" && canPollOriginalVideo) {
+        recovered = Boolean(await transitionTask(db, cache, task.id, "resume", false));
+        if (recovered) task.status = "waiting";
+      }
+      response.json({ task, recovered, message: recovered ? "已恢复原任务，未创建新任务或重新扣费" : task.status === "processing" ? "原任务仍在处理中，未重复提交" : "已读取原任务状态；此状态不会自动重新生成" });
+    } catch (error) { next(error); }
+  });
 
   router.post("/", async (request, response, next) => {
     try {
@@ -76,6 +154,7 @@ export function createTasksRouter(db: Database, cache: Cache) {
       response.status(201).json({
         task: await enqueueTask(db, cache, {
           ...input,
+          creditsEnabled,
           userId: actor.id,
           departmentId: actor.departmentId,
         }),
@@ -102,12 +181,14 @@ export function createTasksRouter(db: Database, cache: Cache) {
           .json({ error: "FORBIDDEN", message: "设计师只能提交普通任务" });
         return;
       }
-      const batchId = randomUUID();
-      await db.query(
+      const requestedBatchId = randomUUID();
+      const insertedBatch = await db.query<{ id: string }>(
         `INSERT INTO batch_tasks(id,request_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,priority,total_items)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         ON CONFLICT(request_id) DO NOTHING
+         RETURNING id`,
         [
-          batchId,
+          requestedBatchId,
           input.requestId,
           actor.id,
           actor.departmentId,
@@ -119,12 +200,23 @@ export function createTasksRouter(db: Database, cache: Cache) {
           input.items.length,
         ],
       );
+      let batchId: string = requestedBatchId;
+      if (!insertedBatch.rows[0]) {
+        const existingBatch = await db.query<{ id: string }>(
+          "SELECT id FROM batch_tasks WHERE request_id=$1 AND user_id=$2",
+          [input.requestId, actor.id],
+        );
+        if (!existingBatch.rows[0])
+          throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他账号占用");
+        batchId = existingBatch.rows[0].id;
+      }
       const tasks = [];
       const failures = [];
       for (const [index, item] of input.items.entries()) {
         try {
           const task = await enqueueTask(db, cache, {
             ...input,
+            creditsEnabled,
             requestId: `${input.requestId}:${index}`,
             sourceUrls: item.sourceUrls,
             userId: actor.id,
@@ -218,6 +310,22 @@ export function createTasksRouter(db: Database, cache: Cache) {
     } catch (error) {
       next(error);
     }
+  });
+
+  router.get("/:id", async (request, response, next) => {
+    try {
+      const id = z.string().uuid().parse(request.params.id);
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const result = await db.query(
+        `SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.id=$1 AND t.user_id=$2`,
+        [id, actor.id],
+      );
+      if (!result.rows[0]) {
+        response.status(404).json({ error: "NOT_FOUND", message: "任务不存在或无权访问" });
+        return;
+      }
+      response.json({ task: result.rows[0] });
+    } catch (error) { next(error); }
   });
 
   router.post("/batches/:id/:action", async (request, response, next) => {

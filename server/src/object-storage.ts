@@ -1,4 +1,5 @@
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { AppConfig } from "./config";
 
 export class ObjectStorage {
@@ -10,4 +11,10 @@ export class ObjectStorage {
     async put(key: string, body: Uint8Array, contentType: string) { if (!this.configured) throw new Error("公司对象存储尚未配置"); await this.client.send(new PutObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key, Body: body, ContentType: contentType })); }
     async head(key: string) { return this.client.send(new HeadObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key })); }
     async get(key: string) { return this.client.send(new GetObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key })); }
+    async signedDownloadUrl(key: string, expiresIn = 3600) {
+        if (!this.configured) throw new Error("公司对象存储尚未配置");
+        const url = await getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key }), { expiresIn });
+        if (!url.startsWith("https://")) throw new Error("视频参考图需要上游可访问的 HTTPS 对象存储地址");
+        return url;
+    }
 }

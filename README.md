@@ -4,6 +4,8 @@
 
 一句话理解：这是一个“设计师前台创作工具 + 管理员后台管控中心”。
 
+第一次安装请看 [安装部署指南](docs/manual/installation-guide.md)，包含 Windows 单机免登录、局域网、模型配置和公司完整部署。软件怎么用请看 [图文操作手册](docs/manual/user-guide.md)，覆盖画布选图 / 多图顺序 / Agent / 下载备份，以及图像、视频、聊天、素材、提示词和管理后台。
+
 第一次部署、不熟悉代码或 Docker 时，请先按 [无脑部署手册](docs/manual/beginner-deployment.md) 操作。仓库内已包含完整源码：`web/` 前端、`server/` 服务端、`docs/` 手册、`ops/` 运维脚本与 `docker-compose.yml`；`.env`、API Key、数据库和素材数据会刻意留在本地而不上传 GitHub。
 
 生产服务器部署、企业微信、工作流、备份恢复和 40 人压测请参阅：[生产部署与验收手册](docs/manual/production-deployment.md)。第一阶段每项需求的实现与证据见：[第一阶段验收矩阵](docs/manual/phase-one-acceptance.md)。GPT-Image-2 的后台接入步骤见：[操作手册](docs/manual/operation-manual.md#87-接入-api-mart-gpt-image-2)。

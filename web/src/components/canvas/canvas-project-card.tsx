@@ -1,4 +1,5 @@
-import { Check, Download, Pencil, Trash2, X } from "lucide-react";
+import { Check, Download, Pencil, Trash2, X, LayoutGrid } from "lucide-react";
+import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Input } from "antd";
 
@@ -20,6 +21,7 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
     const editing = editingId === project.id;
     const selected = selectedIds.includes(project.id);
+    const cover = project.nodes.find(node => node.type === "image" && (node.metadata?.storageKey || node.metadata?.content));
     const open = () => navigate(`/canvas/${project.id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`);
     const saveTitle = () => {
         renameProject(project.id, editingTitle);
@@ -27,7 +29,11 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
     };
 
     return (
-        <article className="group flex min-h-44 cursor-pointer flex-col justify-between rounded-2xl bg-[#f1eee8] p-5 transition hover:bg-[#ebe6dc] dark:bg-white/5 dark:hover:bg-white/10" onClick={() => !editing && open()}>
+        <article className="wb-surface group flex cursor-pointer flex-col overflow-hidden transition hover:shadow-sm" onClick={() => !editing && open()}>
+            <div className="flex h-36 items-center justify-center overflow-hidden border-b border-stone-200/60 bg-stone-100 dark:border-stone-800 dark:bg-stone-800">
+                {cover ? <CanvasPersistedMediaPreview kind="image" storageKey={cover.metadata?.storageKey} url={cover.metadata?.content} alt={project.title} className="h-full w-full object-cover" /> : <LayoutGrid size={28} className="text-stone-400" />}
+            </div>
+            <div className="p-4">
             <div className="flex items-start gap-3">
                 <input
                     type="checkbox"
@@ -48,14 +54,14 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                             open();
                         }}
                     >
-                        <h2 className="truncate text-xl font-semibold">{project.title}</h2>
-                        <p className="mt-3 text-sm leading-6 text-stone-600 dark:text-stone-400">
+                        <h2 className="truncate text-base font-semibold">{project.title}</h2>
+                        <p className="mt-1 text-xs leading-6 text-stone-500 dark:text-stone-400">
                             {project.nodes.length} 个节点 · {project.connections.length} 条连线
                         </p>
                     </button>
                 )}
             </div>
-            <div className="mt-8 flex items-end justify-between gap-3">
+            <div className="mt-4 flex items-center justify-between gap-2">
                 <p className="text-xs text-stone-500">更新于 {new Date(project.updatedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
                 <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
                     {editing ? (
@@ -71,6 +77,7 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                         </>
                     )}
                 </div>
+            </div>
             </div>
         </article>
     );

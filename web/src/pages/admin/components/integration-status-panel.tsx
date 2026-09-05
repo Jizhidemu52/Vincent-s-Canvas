@@ -37,7 +37,7 @@ export function IntegrationStatusPanel() {
         <div className="space-y-4">
             {status?.taskRuntime.mockMode ? <Alert type="warning" showIcon message="当前仍在模拟任务模式，正式上线前必须关闭 TASK_MOCK_MODE" /> : null}
             <div className="flex items-center justify-between">
-                <div className="text-sm text-stone-500">Worker 并发：{status?.taskRuntime.workerConcurrency ?? "-"}</div>
+                <div className="text-sm text-[var(--muted-foreground)]">Worker 并发：{status?.taskRuntime.workerConcurrency ?? "-"}</div>
                 <Button icon={<RefreshCw className="size-4" />} loading={loading} onClick={() => void refresh()}>刷新状态</Button>
             </div>
             <Table<StatusRow>

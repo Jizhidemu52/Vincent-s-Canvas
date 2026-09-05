@@ -142,7 +142,7 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                         },
                     ]}
                 />
-                <section className="rounded-md border border-stone-200 bg-white p-4">
+                <section className="wb-surface p-5">
                     <h3 className="mb-4 text-base font-semibold">创建价格草稿</h3>
                     <Form form={priceForm} layout="vertical" initialValues={{ operationType: "image_generation", label: "生成一张图", credits: 8, rmbCost: 0.8 }} onFinish={savePrice}>
                         <Form.Item name="operationType" label="操作类型" rules={[{ required: true }]}>
@@ -157,7 +157,7 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                         <Form.Item name="rmbCost" label="人民币成本" rules={[{ required: true }]}>
                             <InputNumber className="w-full" min={0} precision={4} />
                         </Form.Item>
-                        <Button type="primary" htmlType="submit" block>
+                        <Button className="!h-10" type="primary" htmlType="submit" block>
                             保存草稿
                         </Button>
                     </Form>
@@ -200,7 +200,7 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                     },
                 ]}
             />
-            <section className="rounded-md border border-stone-200 bg-white p-4">
+            <section className="wb-surface p-5">
                 <h3 className="mb-4 text-base font-semibold">{editingModelId ? "编辑模型" : "新增模型"}</h3>
                 <Form form={modelForm} layout="vertical" initialValues={{ capabilities: ["generate"], creditCost: 4, rmbCost: 0.4, concurrencyLimit: 5, enabled: true }} onFinish={saveModel}>
                     <Form.Item name="providerId" label="Provider" rules={[{ required: true }]}>
@@ -235,7 +235,7 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                     <Form.Item name="enabled" label="启用" valuePropName="checked">
                         <Switch />
                     </Form.Item>
-                    <Button type="primary" htmlType="submit" block>
+                    <Button className="!h-10" type="primary" htmlType="submit" block>
                         保存到服务端
                     </Button>
                 </Form>

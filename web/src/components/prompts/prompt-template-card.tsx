@@ -18,20 +18,20 @@ export function PromptTemplateCard({ item, editable, canSubmit, onReuse, onEdit,
         ...(editable && onDelete ? [{ key: "delete", danger: true, label: "删除", icon: <Trash2 className="size-4" />, onClick: onDelete }] : []),
     ];
     return (
-        <article className="flex min-h-[280px] flex-col overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm transition hover:border-orange-300 hover:shadow-md dark:border-stone-800 dark:bg-stone-950">
-            <div className="flex h-28 items-end bg-[linear-gradient(135deg,#fff7ed,#fed7aa)] p-4 dark:bg-[linear-gradient(135deg,#292524,#431407)]">
-                <div className="rounded-md bg-black px-2 py-1 text-xs font-semibold text-white">{promptTargetLabels[item.targetTool]}</div>
+        <article className="wb-surface flex min-h-[288px] flex-col overflow-hidden transition-colors hover:border-orange-300 dark:hover:border-orange-800">
+            <div className="flex items-center justify-between px-5 pt-5">
+                <span className="rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{promptTargetLabels[item.targetTool]}</span>
+                <Tooltip title={item.favorite ? "取消收藏" : "收藏"}><Button type="text" className="!size-9" aria-label={item.favorite ? "取消收藏" : "收藏"} icon={<Heart className={`size-4 ${item.favorite ? "fill-orange-500 text-orange-500" : ""}`} />} onClick={onFavorite} /></Tooltip>
             </div>
-            <div className="flex min-h-0 flex-1 flex-col p-4">
+            <div className="flex min-h-0 flex-1 flex-col p-5 pt-3">
                 <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold text-stone-950 dark:text-white">{item.title}</h2><p className="mt-1 text-xs text-stone-500">v{item.version} · 使用 {item.useCount} 次</p></div>
-                    <Tooltip title={item.favorite ? "取消收藏" : "收藏"}><Button type="text" size="small" aria-label={item.favorite ? "取消收藏" : "收藏"} icon={<Heart className={`size-4 ${item.favorite ? "fill-orange-500 text-orange-500" : ""}`} />} onClick={onFavorite} /></Tooltip>
+                    <div className="min-w-0 flex-1"><h2 className="line-clamp-2 text-base font-semibold leading-6 text-foreground">{item.title}</h2><p className="mt-1.5 text-xs text-muted-foreground">版本 {item.version} · 已使用 {item.useCount} 次</p></div>
                 </div>
-                <p className="mt-3 line-clamp-3 text-xs leading-5 text-stone-600 dark:text-stone-300">{item.prompt}</p>
+                <p className="mt-4 line-clamp-3 text-sm leading-6 text-muted-foreground">{item.prompt}</p>
                 <div className="mt-3 flex flex-wrap gap-1">{item.category ? <Tag color="orange">{item.category}</Tag> : null}{item.tags.slice(0, 3).map((tag) => <Tag key={tag}>{tag}</Tag>)}</div>
                 <div className="mt-auto flex gap-2 pt-4">
-                    <Button type="primary" block onClick={() => onReuse("fill")} icon={<Play className="size-4" />}>仅填入</Button>
-                    <Dropdown menu={{ items: menu }} trigger={["click"]}><Tooltip title="更多操作"><Button aria-label="更多操作" icon={<Ellipsis className="size-4" />} /></Tooltip></Dropdown>
+                    <Button type="primary" block className="!h-10" onClick={() => onReuse("fill")} icon={<Play className="size-4" />}>仅填入</Button>
+                    <Dropdown menu={{ items: menu }} trigger={["click"]}><Tooltip title="更多操作"><Button className="!h-10 !w-10" aria-label="更多操作" icon={<Ellipsis className="size-4" />} /></Tooltip></Dropdown>
                 </div>
             </div>
         </article>

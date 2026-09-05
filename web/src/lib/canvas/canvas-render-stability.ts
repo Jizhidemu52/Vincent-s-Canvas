@@ -4,13 +4,14 @@ import type { CanvasNodeData } from "@/types/canvas";
 
 export type CanvasNodeRenderState = {
     data: CanvasNodeData;
+    themeKey: string;
     renderQuality: CanvasRenderQuality;
-    scale: number;
     isSelected: boolean;
     isRelated: boolean;
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
     isConnecting: boolean;
+    isRunning: boolean;
     editRequestNonce: number;
     showPanel: boolean;
     showImageInfo: boolean;
@@ -21,19 +22,21 @@ export type CanvasNodeRenderState = {
     batchClosing: boolean;
     batchOpening: boolean;
     batchRecovering: boolean;
+    configInputSummaryKey: string;
     batchMotion?: { x: number; y: number; index: number };
 };
 
 export function canvasNodeRenderStateEqual(previous: CanvasNodeRenderState, next: CanvasNodeRenderState) {
     return (
         previous.data === next.data &&
+        previous.themeKey === next.themeKey &&
         previous.renderQuality === next.renderQuality &&
-        previous.scale === next.scale &&
         previous.isSelected === next.isSelected &&
         previous.isRelated === next.isRelated &&
         previous.isFocusRelated === next.isFocusRelated &&
         previous.isConnectionTarget === next.isConnectionTarget &&
         previous.isConnecting === next.isConnecting &&
+        previous.isRunning === next.isRunning &&
         previous.editRequestNonce === next.editRequestNonce &&
         previous.showPanel === next.showPanel &&
         previous.showImageInfo === next.showImageInfo &&
@@ -42,6 +45,7 @@ export function canvasNodeRenderStateEqual(previous: CanvasNodeRenderState, next
         previous.batchClosing === next.batchClosing &&
         previous.batchOpening === next.batchOpening &&
         previous.batchRecovering === next.batchRecovering &&
+        previous.configInputSummaryKey === next.configInputSummaryKey &&
         sameMotion(previous.batchMotion, next.batchMotion) &&
         sameReference(previous.resourceLabel, next.resourceLabel) &&
         sameReferences(previous.mentionReferences, next.mentionReferences)

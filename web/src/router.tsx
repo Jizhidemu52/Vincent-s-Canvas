@@ -1,10 +1,11 @@
 import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from "react";
-import { createBrowserRouter, Outlet } from "react-router-dom";
+import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
 
 import UserLayout from "@/layouts/user-layout";
 import { AuthGate } from "@/components/auth/auth-gate";
 import { ModuleGate } from "@/components/auth/module-gate";
 import { standaloneEdition } from "@/lib/standalone-edition";
+import { deploymentFeatures } from "@/lib/deployment-features";
 import type { ModuleKey } from "@/services/api/modules";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
@@ -67,10 +68,9 @@ export const router = createBrowserRouter([
         ),
         children: [
             { path: "/", element: protectedRoute(HomePage) },
-            ...(!standaloneEdition ? [
+            ...(deploymentFeatures.authenticationEnabled ? [
                 { path: "/login", element: routeElement(LoginPage) },
-                { path: "/change-password", element: protectedRoute(ChangePasswordPage) },
-            ] : []),
+            ] : [{ path: "/login", element: <Navigate to="/" replace /> }]),
             { path: "/image", element: moduleRoute(ImagePage, imageModule) },
             { path: "/video", element: moduleRoute(VideoPage, "video") },
             { path: "/assets", element: moduleRoute(AssetsPage, "assets") },
@@ -79,7 +79,9 @@ export const router = createBrowserRouter([
             { path: "/my-prompts", element: moduleRoute(MyPromptsPage, "prompts") },
             ...(!standaloneEdition ? [
                 { path: "/admin", element: protectedRoute(AdminPage, true) },
+                // Hiding role entrances must not lock operators out of maintenance.
                 { path: "/admin/login", element: routeElement(AdminLoginPage) },
+                { path: "/change-password", element: protectedRoute(ChangePasswordPage) },
             ] : []),
             { path: "/canvas", element: moduleRoute(CanvasPage, canvasModule) },
             { path: "/chat", element: moduleRoute(ChatPage, "gpt-chat") },

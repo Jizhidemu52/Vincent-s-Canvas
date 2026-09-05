@@ -1,5 +1,6 @@
 import type { CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
-import type { CanvasConnection } from "@/types/canvas";
+import { boundsForViewport, type CanvasBounds } from "@/lib/canvas/canvas-spatial-index";
+import type { CanvasConnection, ViewportTransform } from "@/types/canvas";
 
 export type CanvasConnectionDrawItem = {
     id?: string;
@@ -44,6 +45,15 @@ export function filterCanvasConnectionDrawBatches(
 }
 
 /**
+ * Nodes stay mounted with overscan so a pan never exposes a blank region.
+ * Connection drawing is more expensive, so it uses only the actual screen
+ * bounds (plus a small screen-space safety margin) on each animation frame.
+ */
+export function canvasConnectionViewportBounds(viewport: ViewportTransform, canvasSize: { width: number; height: number }, screenPadding = 16): CanvasBounds {
+    return boundsForViewport(viewport, canvasSize.width, canvasSize.height, screenPadding / Math.max(viewport.k, 0.0001));
+}
+
+/**
  * Keeps stable draw batches during a drag. A viewport may contain hundreds of
  * links while only the links attached to the moved node need fresh geometry.
  */
@@ -55,26 +65,45 @@ export function createCanvasConnectionDrawCache(resolveGeometry: (connection: Ca
     let batches: CanvasConnectionDrawBatches = { regular: [], active: [] };
     let activeIds = new Set<string>();
 
-    const rebuild = (connections: CanvasConnection[], nextActiveIds: ReadonlySet<string>) => {
-        items = [];
-        itemById = new Map<string, CanvasConnectionDrawItem>();
-        connectionById = new Map(connections.map((connection) => [connection.id, connection]));
+    const reconcile = (connections: CanvasConnection[], nextActiveIds: ReadonlySet<string>) => {
+        const nextConnectionById = new Map(connections.map((connection) => [connection.id, connection]));
+        const nextItemById = new Map<string, CanvasConnectionDrawItem>();
+        const nextItems: CanvasConnectionDrawItem[] = [];
+
         connections.forEach((connection) => {
-            const geometry = resolveGeometry(connection);
+            const previousConnection = connectionById.get(connection.id);
+            const previousItem = itemById.get(connection.id);
+            const canReuseGeometry = previousItem && previousConnection === connection;
+            const geometry = canReuseGeometry ? previousItem.geometry : resolveGeometry(connection);
             if (!geometry) return;
-            const item = { id: connection.id, geometry, active: nextActiveIds.has(connection.id) };
-            items.push(item);
-            itemById.set(connection.id, item);
+
+            const item = canReuseGeometry ? previousItem : { id: connection.id, geometry, active: false };
+            nextItemById.set(connection.id, item);
+            nextItems.push(item);
         });
-        activeIds = new Set(nextActiveIds);
-        batches = createCanvasConnectionDrawBatches(items);
+
+        const activeChanged = !sameConnectionIds(activeIds, nextActiveIds);
+        if (activeChanged) {
+            nextItems.forEach((item) => {
+                item.active = nextActiveIds.has(item.id || "");
+            });
+            activeIds = new Set(nextActiveIds);
+        }
+
+        const itemOrderChanged = nextItems.length !== items.length || nextItems.some((item, index) => item !== items[index]);
+        connectionById = nextConnectionById;
+        itemById = nextItemById;
+        if (itemOrderChanged || activeChanged) {
+            items = nextItems;
+            batches = createCanvasConnectionDrawBatches(items);
+        }
     };
 
     return {
         sync(connections: CanvasConnection[], nextActiveIds: ReadonlySet<string>, affectedConnectionIds: ReadonlySet<string>, refreshAll: boolean): CanvasConnectionDrawBatches {
             if (previousConnections !== connections) {
                 previousConnections = connections;
-                rebuild(connections, nextActiveIds);
+                reconcile(connections, nextActiveIds);
                 return batches;
             }
 
@@ -104,16 +133,20 @@ function sameConnectionIds(previous: ReadonlySet<string>, next: ReadonlySet<stri
     return previous.size === next.size && Array.from(previous).every((id) => next.has(id));
 }
 
-export function drawCanvasConnectionBatches(context: CanvasRenderingContext2D, batches: CanvasConnectionDrawBatches, palette: CanvasConnectionPalette): boolean {
+export function drawCanvasConnectionBatches(context: CanvasRenderingContext2D, batches: CanvasConnectionDrawBatches, palette: CanvasConnectionPalette, visibleBounds?: CanvasBounds): boolean {
     try {
         const drawBatch = (batch: CanvasConnectionDrawItem[], active: boolean) => {
             if (!batch.length) return;
             context.beginPath();
+            let drawn = 0;
             batch.forEach(({ geometry }) => {
+                if (visibleBounds && !connectionGeometryIntersectsBounds(geometry, visibleBounds)) return;
                 const { start, controlOne, controlTwo, end } = geometry.points;
                 context.moveTo(start.x, start.y);
                 context.bezierCurveTo(controlOne.x, controlOne.y, controlTwo.x, controlTwo.y, end.x, end.y);
+                drawn += 1;
             });
+            if (!drawn) return;
             context.strokeStyle = active ? palette.activeStroke : palette.stroke;
             context.lineWidth = active ? 3 : 2;
             context.globalAlpha = active ? 1 : 0.82;
@@ -131,6 +164,11 @@ export function drawCanvasConnectionBatches(context: CanvasRenderingContext2D, b
     } catch {
         return false;
     }
+}
+
+function connectionGeometryIntersectsBounds(geometry: CanvasConnectionGeometry, bounds: CanvasBounds) {
+    const connectionBounds = geometry.bounds;
+    return connectionBounds.maxX > bounds.minX && connectionBounds.minX < bounds.maxX && connectionBounds.maxY > bounds.minY && connectionBounds.minY < bounds.maxY;
 }
 
 export function drawCanvasConnections(context: CanvasRenderingContext2D, items: CanvasConnectionDrawItem[], palette: CanvasConnectionPalette): boolean {

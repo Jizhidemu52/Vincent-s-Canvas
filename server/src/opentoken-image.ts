@@ -36,8 +36,8 @@ export function buildOpenTokenImageRequest(input: OpenTokenImageInput): OpenToke
   const references = input.references || [];
   const modelId = input.modelId || "gpt-image-2";
   const headers = { authorization: `Bearer ${input.apiKey}` };
-  const size = normalizeOpenTokenImageSize(input.size);
-  const quality = normalizeOpenTokenImageQuality(input.quality, input.resolution);
+  const size = modelId === "gemini-3.1-flash-image" ? undefined : normalizeOpenTokenImageSize(input.size);
+  const quality = modelId === "gemini-3.1-flash-image" ? undefined : normalizeOpenTokenImageQuality(input.quality, input.resolution);
   if (references.length) {
     const form = new FormData();
     form.set("model", modelId);

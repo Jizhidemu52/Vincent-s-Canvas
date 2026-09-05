@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createCanvasConnectionSpatialIndex, selectCanvasSpatialIndexConnections } from "@/lib/canvas/canvas-connection-spatial-index";
+import { createCanvasConnectionSpatialIndex, refreshCanvasConnectionSpatialIndex, selectCanvasSpatialIndexConnections } from "@/lib/canvas/canvas-connection-spatial-index";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
 const node = (id: string, x: number, y: number): CanvasNodeData => ({
@@ -38,4 +38,36 @@ test("keeps extremely long connections as bounded global candidates", () => {
 
     expect(index.globalConnectionIds.has("very-long")).toBe(true);
     expect(selectCanvasSpatialIndexConnections(index, { minX: 0, minY: 0, maxX: 800, maxY: 500 }).map((item) => item.id)).toEqual(["very-long"]);
+});
+
+test("reuses connection cells when endpoints keep the same geometry", () => {
+    const originalLeft = node("left", 0, 0);
+    const originalRight = node("right", 600, 0);
+    const links = [connection("link", "left", "right")];
+    const index = createCanvasConnectionSpatialIndex(links, new Map([["left", originalLeft], ["right", originalRight]]));
+    const updatedLinks = links.map((item) => ({ ...item }));
+
+    const refreshed = refreshCanvasConnectionSpatialIndex(
+        index,
+        updatedLinks,
+        new Map([
+            ["left", { ...originalLeft, title: "updated" }],
+            ["right", { ...originalRight, metadata: { content: "updated" } }],
+        ]),
+    );
+
+    expect(refreshed.cells).toBe(index.cells);
+    expect(refreshed.boundsByConnectionId).toBe(index.boundsByConnectionId);
+    expect(refreshed.connectionsById.get("link")).toBe(updatedLinks[0]);
+});
+
+test("rebuilds connection cells when an endpoint geometry moves", () => {
+    const left = node("left", 0, 0);
+    const right = node("right", 600, 0);
+    const links = [connection("link", "left", "right")];
+    const index = createCanvasConnectionSpatialIndex(links, new Map([["left", left], ["right", right]]));
+
+    const refreshed = refreshCanvasConnectionSpatialIndex(index, links, new Map([["left", left], ["right", { ...right, position: { x: 5000, y: 0 } }]]));
+
+    expect(refreshed.cells).not.toBe(index.cells);
 });

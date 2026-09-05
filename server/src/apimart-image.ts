@@ -25,6 +25,9 @@ const GPT_MODELS = new Set(["gpt-image-2", "gpt-image-2-ext", "vcen-gpt2"]);
 
 const IMAGE_STATUSES = new Set(["pending", "submitted", "processing", "queued", "running"]);
 const IMAGE_FAILURE_STATUSES = new Set(["failed", "cancelled", "canceled"]);
+// Verified against the provider's live request tables; see docs/manual/image-model-parameters.md.
+const GPT_RATIOS = new Set(["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"]);
+const GEMINI_RATIOS = new Set(["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "21:9", "1:4", "4:1", "1:8", "8:1"]);
 
 export function apiMartImageModel(modelId: string): ApiMartImageModel | null {
   const normalized = modelId.trim().toLowerCase();
@@ -40,6 +43,7 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
   if (!kind) throw new Error(`不支持的 APIMart 图片模型：${input.modelId}`);
 
   const references = input.sourceDataUrls || [];
+  validateInlineReferences(references, kind);
   if (kind === "midjourney-blend") {
     if (references.length < 2 || references.length > 4)
       throw new Error("Midjourney Blend requires 2 to 4 reference images");
@@ -47,7 +51,7 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
       path: "/midjourney/generations/blend",
       payload: {
         image_urls: references,
-        size: normalizeAspect(input.parameters.size),
+        size: normalizeAspect(input.parameters.size, kind),
         speed: normalizeMidjourneySpeed(input.parameters.midjourneySpeed),
       },
       pollIntervalMs: 2_000,
@@ -55,13 +59,13 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
     };
   }
   if (kind === "midjourney") {
-    if (references.length) throw new Error("Midjourney 文生图不支持此处上传参考图，请改用 GPT-Image-2 或 Gemini 图片模型");
     return {
       path: "/midjourney/generations",
       payload: {
-        prompt: withMidjourneyAspect(input.prompt, input.parameters.size),
-        size: normalizeAspect(input.parameters.size),
-        version: String(input.parameters.midjourneyVersion || "6.1"),
+        prompt: input.prompt,
+        size: normalizeAspect(input.parameters.size, kind),
+        ...(input.parameters.midjourneyVersion ? { version: String(input.parameters.midjourneyVersion) } : {}),
+        ...(references.length ? { image_urls: references } : {}),
         speed: normalizeMidjourneySpeed(input.parameters.midjourneySpeed),
       },
       pollIntervalMs: 2_000,
@@ -69,22 +73,21 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
     };
   }
 
-  const maximumReferences = kind === "gpt-image-2" ? 16 : 14;
+  const maximumReferences = kind === "gpt-image-2" ? 15 : 14;
   if (references.length > maximumReferences) {
     throw new Error(`${kind === "gpt-image-2" ? "GPT-Image-2" : "Gemini 3.1 Flash"} 最多支持 ${maximumReferences} 张参考图`);
   }
 
-  const count = normalizeCount(input.parameters.count, 10);
   const payload: Record<string, unknown> = {
     model: normalizeModelId(kind, input.modelId),
     prompt: input.prompt,
-    n: count,
-    size: normalizeAspect(input.parameters.size),
+    n: 1, // UI batch counts are split into independent tasks before reaching the adapter.
+    size: normalizeAspect(input.parameters.size, kind),
     resolution: kind === "gpt-image-2" ? normalizeGptResolution(input.parameters.resolution) : normalizeGeminiResolution(input.parameters.resolution),
   };
   if (references.length) payload.image_urls = references;
   if (kind === "gemini-3.1-flash-image-preview") {
-    if (input.parameters.officialFallback === true) payload.official_fallback = true;
+    if (input.parameters.officialFallback === true && !String(payload.model).endsWith("-official")) payload.official_fallback = true;
     if (input.parameters.googleSearch === true) payload.google_search = true;
     if (input.parameters.googleImageSearch === true) {
       payload.google_search = true;
@@ -127,21 +130,30 @@ export async function runApiMartImageTask(input: ApiMartImageInput & { baseUrl: 
 function normalizeModelId(kind: ApiMartImageModel, modelId: string) {
   if (kind === "gpt-image-2") return "gpt-image-2";
   if (kind === "midjourney" || kind === "midjourney-blend") return "midjourney";
-  return modelId.trim() === "nano-banana-2" ? "gemini-3.1-flash-image-preview-official" : "gemini-3.1-flash-image-preview";
+  return ["nano-banana-2", "gemini-3.1-flash-image-preview-official"].includes(modelId.trim()) ? "gemini-3.1-flash-image-preview-official" : "gemini-3.1-flash-image-preview";
 }
 
-function normalizeCount(value: unknown, maximum: number) {
-  const count = Number(value ?? 1);
-  return Number.isInteger(count) && count >= 1 ? Math.min(count, maximum) : 1;
-}
-
-function normalizeAspect(value: unknown) {
+function normalizeAspect(value: unknown, kind: ApiMartImageModel) {
   const raw = String(value || "1:1").toLowerCase();
-  if (raw === "auto") return "auto";
-  const match = raw.match(/(?:^|[^0-9])(1:1|3:2|2:3|4:3|3:4|5:4|4:5|16:9|9:16|2:1|1:2|3:1|1:3|21:9|9:21|1:4|4:1|1:8|8:1)(?:$|[^0-9])/);
-  if (match) return match[1]!;
-  if (/^\d{3,5}x\d{3,5}$/.test(raw)) return raw;
-  return "1:1";
+  if (kind === "gpt-image-2" && (GPT_RATIOS.has(raw) || /^[1-9]\d*x[1-9]\d*$/.test(raw))) return raw;
+  if (kind === "gemini-3.1-flash-image-preview" && GEMINI_RATIOS.has(raw)) return raw;
+  if (kind.startsWith("midjourney") && /^[1-9]\d*:[1-9]\d*$/.test(raw)) return raw;
+  throw new Error(`${kind} 不支持尺寸或比例 ${raw}，请按当前模型的参数面板重新选择`);
+}
+
+function validateInlineReferences(references: string[], kind: ApiMartImageModel) {
+  const perImage = kind === "gpt-image-2" ? 20 * 1024 * 1024 : kind === "gemini-3.1-flash-image-preview" ? 10 * 1024 * 1024 : 12 * 1024 * 1024;
+  let totalBytes = 0;
+  for (const reference of references) {
+    if (!reference.startsWith("data:")) continue;
+    const match = reference.match(/^data:([^;,]+);base64,(.*)$/s);
+    if (!match) throw new Error("参考图必须为完整的 base64 Data URI");
+    if (kind === "gemini-3.1-flash-image-preview" && !["image/jpeg", "image/png", "image/webp"].includes(match[1]!)) throw new Error("Gemini 参考图仅支持 JPEG、PNG 或 WebP");
+    const bytes = Buffer.byteLength(match[2]!, "base64");
+    totalBytes += bytes;
+    if (bytes > perImage) throw new Error(`单张参考图超过 ${perImage / 1024 / 1024} MB，请压缩后重试`);
+  }
+  if (kind === "gpt-image-2" && totalBytes > 256 * 1024 * 1024) throw new Error("GPT-Image-2 参考图总大小不能超过 256 MB");
 }
 
 function normalizeMidjourneySpeed(value: unknown) {
@@ -160,12 +172,6 @@ function normalizeGeminiResolution(value: unknown) {
   if (resolution === "2k") return "2K";
   if (resolution === "4k") return "4K";
   return "1K";
-}
-
-function withMidjourneyAspect(prompt: string, size: unknown) {
-  if (/--ar\s+\S+/i.test(prompt)) return prompt;
-  const aspect = normalizeAspect(size);
-  return aspect === "1:1" ? prompt : `${prompt.trim()} --ar ${aspect}`;
 }
 
 function readTaskId(value: unknown) {

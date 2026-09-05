@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { App, Button } from "antd";
 import { Download, FileUp, MessageSquareText, Plus } from "lucide-react";
@@ -19,6 +19,8 @@ export default function CanvasPage() {
     const [searchParams] = useSearchParams();
     const inputRef = useRef<HTMLInputElement>(null);
     const autoOpenRef = useRef(false);
+    const importLockRef = useRef(false);
+    const [importing, setImporting] = useState(false);
     const hydrated = useCanvasStore((state) => state.hydrated);
     const projects = useCanvasStore((state) => state.projects);
     const createProject = useCanvasStore((state) => state.createProject);
@@ -36,7 +38,9 @@ export default function CanvasPage() {
     };
     const createAndEnter = () => enterProject(createProject(`无线画布 ${projects.length + 1}`));
     const importCanvas = async (file?: File) => {
-        if (!file) return;
+        if (!file || importLockRef.current) return;
+        importLockRef.current = true;
+        setImporting(true);
         try {
             const zip = await readZip(file);
             const projectFile = zip.get("projects.json");
@@ -57,6 +61,8 @@ export default function CanvasPage() {
         } catch {
             message.error("导入失败，请选择有效的画布压缩包");
         } finally {
+            importLockRef.current = false;
+            setImporting(false);
             if (inputRef.current) inputRef.current.value = "";
         }
     };
@@ -70,32 +76,33 @@ export default function CanvasPage() {
     if (hydrated && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500">正在打开画布...</main>;
 
     return (
-        <main className="h-full overflow-auto bg-background text-stone-950 dark:text-stone-100">
-            <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
-                <header className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-6 dark:border-stone-800">
+        <main className="wb-page h-full overflow-auto">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-5 sm:p-8">
+                <header className="wb-page-header">
                     <div>
-                        <p className="text-xs text-stone-500">{chatMode ? "在线功能" : "画布库"}</p>
-                        <h1 className="mt-3 text-3xl font-semibold">{chatMode ? "GPT 对话" : "无线画布"}</h1>
+                        <p className="wb-eyebrow">{chatMode ? "在线功能" : "画布库"}</p>
+                        <h1 className="wb-title">{chatMode ? "GPT 对话" : "无线画布"}</h1>
+                        {!chatMode ? <p className="wb-description">{projects.length} 个画布 · 保存在当前浏览器，重要项目记得导出备份。</p> : null}
                         {chatMode ? <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-500 dark:text-stone-400">选择或新建一个画布后，助手会围绕当前项目内容进行对话、拆解提示词和生成建议，后台会把相关任务归入画布项目历史。</p> : null}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         {selectedIds.length ? (
                             <>
                                 <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `无线画布-${selectedIds.length}个项目`)}>
                                     导出选中
                                 </Button>
-                                <Button disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>
+                                <Button danger disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>
                                     删除选中
                                 </Button>
                             </>
                         ) : null}
                         {projects.length ? (
-                            <Button disabled={!hydrated} onClick={() => setDeleteIds(projects.map((project) => project.id))}>
+                            <Button type="text" danger disabled={!hydrated} onClick={() => setDeleteIds(projects.map((project) => project.id))}>
                                 删除全部
                             </Button>
                         ) : null}
-                        <Button disabled={!hydrated} icon={<FileUp className="size-4" />} onClick={() => inputRef.current?.click()}>
-                            导入画布
+                        <Button disabled={!hydrated} loading={importing} icon={<FileUp className="size-4" />} onClick={() => inputRef.current?.click()}>
+                            {importing ? "正在导入…" : "导入画布"}
                         </Button>
                         <Button disabled={!hydrated} type="primary" icon={<Plus className="size-4" />} onClick={createAndEnter}>
                             {chatMode ? "新建对话画布" : "新建画布"}
@@ -124,7 +131,7 @@ export default function CanvasPage() {
                         ))}
                     </div>
                 ) : (
-                    <section className="flex min-h-[360px] flex-col items-center justify-center border-y border-stone-200 text-center dark:border-stone-800">
+                    <section className="wb-surface wb-empty min-h-[360px]">
                         <h2 className="text-xl font-medium">还没有画布</h2>
                         <p className="mt-3 text-sm text-stone-500">{chatMode ? "新建一个对话画布后，就可以围绕项目素材持续讨论和生成。" : "新建一个画布后，就可以独立保存节点、连线和画布外观。"}</p>
                         <Button type="primary" className="mt-6" icon={<Plus className="size-4" />} onClick={createAndEnter}>

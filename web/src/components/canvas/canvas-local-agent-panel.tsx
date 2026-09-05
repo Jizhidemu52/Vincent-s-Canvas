@@ -12,6 +12,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary } from "@/stores/canvas/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
+import { agentMessageWindow, DEFAULT_AGENT_MESSAGE_WINDOW, expandAgentMessageWindow } from "@/lib/canvas/agent-message-window";
 
 const PANEL_MOTION_SECONDS = 0.5;
 const MAX_ATTACHMENTS = 6;
@@ -39,16 +40,19 @@ type AgentWorkspace = { canvasId: string; workspacePath: string; activeThreadId?
 type AgentThreadsResponse = { ok?: boolean; workspace?: AgentWorkspace; data?: AgentThreadSummary[] };
 type AgentThreadResponse = { ok?: boolean; workspace?: AgentWorkspace; thread?: AgentThreadSummary; messages?: AgentChatItem[] };
 type AgentConfigResponse = { ok?: boolean; url?: string; token?: string; hasToken?: boolean };
+const EMPTY_AGENT_SNAPSHOT: CanvasAgentSnapshot = { projectId: "", title: "", nodes: [], connections: [], selectedNodeIds: [], viewport: { x: 0, y: 0, k: 1 } };
 
-export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedded, headless, autoConnect, onApplyOps, onUndoOps }: { snapshot: CanvasAgentSnapshot; canUndoOps: boolean; collapsed?: boolean; embedded?: boolean; headless?: boolean; autoConnect?: boolean; onApplyOps: (ops: CanvasAgentOp[]) => unknown; onUndoOps: () => CanvasAgentSnapshot | null }) {
+export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotRef, canUndoOps, collapsed, embedded, headless, autoConnect, onApplyOps, onUndoOps }: { snapshot?: CanvasAgentSnapshot; snapshotRef?: { current: CanvasAgentSnapshot }; canUndoOps: boolean; collapsed?: boolean; embedded?: boolean; headless?: boolean; autoConnect?: boolean; onApplyOps: (ops: CanvasAgentOp[]) => unknown; onUndoOps: () => CanvasAgentSnapshot | null }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useUserStore((state) => state.user);
     const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
     const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, messages, eventLogs, threads, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, activity, connectError, pendingTool, setAgentState, addMessage: pushMessage, addEventLog: pushEventLog, clearEventLogs } = useCanvasAgentStore();
     const [resizing, setResizing] = useState(false);
+    const [messageRenderLimit, setMessageRenderLimit] = useState(DEFAULT_AGENT_MESSAGE_WINDOW);
     const listRef = useRef<HTMLDivElement>(null);
-    const snapshotRef = useRef(snapshot);
+    const fallbackSnapshotRef = useRef<CanvasAgentSnapshot>(snapshot || EMPTY_AGENT_SNAPSHOT);
+    const snapshotRef: { current: CanvasAgentSnapshot } = externalSnapshotRef || fallbackSnapshotRef;
     const confirmToolsRef = useRef(confirmTools);
     const pendingToolRef = useRef<AgentPendingToolCall | null>(null);
     const onApplyOpsRef = useRef(onApplyOps);
@@ -59,6 +63,8 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     const clientIdRef = useRef(createClientId());
     const endpoint = useMemo(() => url.trim().replace(/\/$/, ""), [url]);
     const urlAgentAutoConnect = searchParams.has("agentUrl") && searchParams.has("agentToken");
+    const renderedMessageWindow = useMemo(() => agentMessageWindow(messages.length, messageRenderLimit), [messageRenderLimit, messages.length]);
+    const renderedMessages = useMemo(() => messages.slice(renderedMessageWindow.start), [messages, renderedMessageWindow.start]);
     const loadThreads = useCallback(async () => {
         const projectId = snapshotRef.current.projectId;
         if ((!connectedRef.current && !useCanvasAgentStore.getState().connected) || !projectId) return;
@@ -84,8 +90,11 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     }, [endpoint, setAgentState, token]);
 
     useEffect(() => {
-        snapshotRef.current = snapshot;
+        if (snapshot) fallbackSnapshotRef.current = snapshot;
     }, [snapshot]);
+    useEffect(() => {
+        setMessageRenderLimit(DEFAULT_AGENT_MESSAGE_WINDOW);
+    }, [activeThreadId]);
     useEffect(() => {
         confirmToolsRef.current = confirmTools;
     }, [confirmTools]);
@@ -159,13 +168,21 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
 
     useEffect(() => {
         if (connected) void loadThreads();
-    }, [connected, loadThreads, snapshot.projectId]);
+    }, [connected, loadThreads, snapshotRef]);
 
     useEffect(() => {
         if (!connected) return;
-        const timer = setTimeout(() => void postState(endpoint, token, clientIdRef.current, snapshot), 300);
-        return () => clearTimeout(timer);
-    }, [connected, endpoint, snapshot, token]);
+        let lastPosted: CanvasAgentSnapshot | null = null;
+        const postLatestState = () => {
+            const latest = snapshotRef.current;
+            if (latest === lastPosted) return;
+            lastPosted = latest;
+            void postState(endpoint, token, clientIdRef.current, latest);
+        };
+        postLatestState();
+        const timer = window.setInterval(postLatestState, 320);
+        return () => window.clearInterval(timer);
+    }, [connected, endpoint, snapshotRef, token]);
 
     const sendPrompt = async () => {
         const text = prompt.trim();
@@ -539,8 +556,15 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
             ) : (
                 <>
                     <div ref={listRef} className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-                        {messages.map((item) => (
-                            <AgentChatMessage key={item.id} item={agentMessageToChatMessage(item)} theme={theme} user={user} />
+                        {renderedMessageWindow.hidden ? (
+                            <div className="flex justify-center">
+                                <Button size="small" type="text" onClick={() => setMessageRenderLimit((current) => expandAgentMessageWindow(current, messages.length))}>
+                                    加载更早消息（{renderedMessageWindow.hidden} 条）
+                                </Button>
+                            </div>
+                        ) : null}
+                        {renderedMessages.map((item) => (
+                            <AgentChatMessage key={item.id} item={item} theme={theme} user={user} />
                         ))}
                         {pendingTool ? <AgentPendingToolCard summary={summarizeCanvasAgentOps(pendingTool.input?.ops || []) || toolName(pendingTool.name)} detail={{ requestId: pendingTool.requestId, name: pendingTool.name, input: pendingTool.input }} theme={theme} onReject={rejectPendingTool} onApprove={approvePendingTool} /> : null}
                         {waiting && !pendingTool ? <AgentWorkingMessage theme={theme} /> : null}
@@ -780,10 +804,6 @@ async function postState(endpoint: string, token: string, clientId: string, snap
 
 async function postToolResult(endpoint: string, token: string, clientId: string, body: { requestId: string; result?: unknown; error?: string }) {
     await fetch(`${endpoint}/canvas/result?token=${encodeURIComponent(token)}&clientId=${encodeURIComponent(clientId)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-}
-
-function agentMessageToChatMessage(item: AgentChatItem) {
-    return { ...item, attachments: item.attachments?.map(agentAttachmentToChatAttachment) };
 }
 
 function agentAttachmentToChatAttachment(item: AgentAttachment): CanvasAgentChatAttachment {

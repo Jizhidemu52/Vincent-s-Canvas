@@ -16,7 +16,7 @@ export function listAvailableDemoModels<T extends Record<string, unknown>>(
   );
 
   return models.filter(
-    (model) => model.enabled === true && configuredProviderIds.has(String(model.providerId)),
+    (model) => model.enabled === true && !String(model.modelId).startsWith("demo-") && configuredProviderIds.has(String(model.providerId)),
   );
 }
 

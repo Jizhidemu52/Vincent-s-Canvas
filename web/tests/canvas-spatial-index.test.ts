@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { boundsForViewport, createCanvasSpatialIndex, queryCanvasSpatialIndex, selectCanvasSpatialIndexNodes, selectIndexedCanvasNodes } from "@/lib/canvas/canvas-spatial-index";
+import { boundsForViewport, createCanvasSpatialIndex, queryCanvasSpatialIndex, refreshCanvasSpatialGeometryIndex, refreshCanvasSpatialIndex, selectCanvasSpatialIndexNodes, selectIndexedCanvasNodes } from "@/lib/canvas/canvas-spatial-index";
+import { createCanvasNodeMap, refreshCanvasNodeMap } from "@/lib/canvas/canvas-node-map";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const node = (id: string, x: number, y: number, width = 100, height = 100): CanvasNodeData => ({
@@ -41,5 +42,87 @@ describe("canvas spatial index", () => {
         const index = createCanvasSpatialIndex(nodes, 1024);
 
         expect(selectCanvasSpatialIndexNodes(index, { minX: -50, minY: -50, maxX: 2400, maxY: 200 }).map((candidate) => candidate.id)).toEqual(["later", "earlier"]);
+    });
+
+    test("reuses the spatial grid when only node content changes", () => {
+        const original = { ...node("visible", 80, 40), metadata: { content: "existing" } };
+        const index = createCanvasSpatialIndex([original], 1024);
+        const updated = { ...original, title: "renamed", metadata: { content: "changed" } };
+
+        const refreshed = refreshCanvasSpatialIndex(index, [updated]);
+
+        expect(refreshed.cells).toBe(index.cells);
+        expect(refreshed.boundsByNodeId).toBe(index.boundsByNodeId);
+        expect(refreshed.nodesById.get("visible")).toBe(updated);
+    });
+
+    test("keeps a geometry-only index fully stable for content updates", () => {
+        const original = node("visible", 80, 40);
+        const index = createCanvasSpatialIndex([original], 1024);
+        const updated = { ...original, title: "streamed", metadata: { content: "new token", status: "loading" as const } };
+
+        expect(refreshCanvasSpatialGeometryIndex(index, [updated])).toBe(index);
+    });
+
+    test("trusts an unchanged live node map and skips a redundant geometry scan", () => {
+        const original = { ...node("visible", 80, 40), metadata: { content: "existing" } };
+        const nodeMap = createCanvasNodeMap([original]);
+        const index = createCanvasSpatialIndex([original], 1024, nodeMap);
+        const updated = { ...original, title: "streamed", metadata: { content: "next token" } };
+
+        expect(refreshCanvasNodeMap(nodeMap, [updated])).toBe(nodeMap);
+        const staleArray = [{ ...updated, position: { x: 9999, y: 40 } }];
+        expect(refreshCanvasSpatialGeometryIndex(index, staleArray, nodeMap)).toBe(index);
+        expect(selectCanvasSpatialIndexNodes(index, { minX: 0, minY: 0, maxX: 300, maxY: 300 })[0]).toBe(updated);
+    });
+
+    test("keeps the full index stable when supplied node map only changes content", () => {
+        const original = { ...node("visible", 80, 40), metadata: { content: "existing" } };
+        const nodeMap = createCanvasNodeMap([original]);
+        const index = createCanvasSpatialIndex([original], 1024, nodeMap);
+        const updated = { ...original, metadata: { content: "streamed" } };
+
+        expect(refreshCanvasNodeMap(nodeMap, [updated])).toBe(nodeMap);
+        const refreshed = refreshCanvasSpatialIndex(index, [updated], nodeMap);
+
+        expect(refreshed).toBe(index);
+        expect(selectCanvasSpatialIndexNodes(refreshed, { minX: 0, minY: 0, maxX: 300, maxY: 300 })[0]).toBe(updated);
+    });
+
+    test("updates only changed records while keeping a multi-node content map stable", () => {
+        const first = { ...node("first", 80, 40), metadata: { content: "old" } };
+        const second = { ...node("second", 180, 40), metadata: { content: "unchanged" } };
+        const nodeMap = createCanvasNodeMap([first, second]);
+        const changedFirst = { ...first, metadata: { content: "new" } };
+
+        const refreshed = refreshCanvasNodeMap(nodeMap, [changedFirst, second]);
+
+        expect(refreshed).toBe(nodeMap);
+        expect(refreshed.get("first")).toBe(changedFirst);
+        expect(refreshed.get("second")).toBe(second);
+    });
+
+    test("refreshes the live node map when a batch root changes child visibility", () => {
+        const original = {
+            ...node("batch-root", 80, 40),
+            metadata: { isBatchRoot: true, imageBatchExpanded: false, batchChildIds: ["batch-child"] },
+        };
+        const nodeMap = createCanvasNodeMap([original]);
+        const expanded = { ...original, metadata: { ...original.metadata, imageBatchExpanded: true } };
+
+        const refreshed = refreshCanvasNodeMap(nodeMap, [expanded]);
+
+        expect(refreshed).not.toBe(nodeMap);
+        expect(refreshed.get("batch-root")).toBe(expanded);
+    });
+
+    test("rebuilds the spatial grid after a node geometry change", () => {
+        const original = node("visible", 80, 40);
+        const index = createCanvasSpatialIndex([original], 1024);
+
+        const refreshed = refreshCanvasSpatialIndex(index, [{ ...original, position: { x: 4096, y: 40 } }]);
+
+        expect(refreshed.cells).not.toBe(index.cells);
+        expect(queryCanvasSpatialIndex(refreshed, { minX: 4000, minY: 0, maxX: 4300, maxY: 200 })).toEqual(["visible"]);
     });
 });

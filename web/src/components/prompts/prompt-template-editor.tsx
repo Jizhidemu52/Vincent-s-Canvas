@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Form, Input, InputNumber, Modal, Select } from "antd";
+import { deploymentFeatures } from "@/lib/deployment-features";
 
 import { listServerAssets, type ServerAsset } from "@/services/api/server-assets";
 import { promptTargetLabels, type PromptSnapshotInput, type PromptTargetTool, type PromptTemplate } from "@/services/api/prompts";
@@ -53,7 +54,7 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
                 </div>
                 <Form.Item name="prompt" label="完整提示词" rules={[{ required: true, whitespace: true, max: 20_000 }]}><Input.TextArea rows={7} maxLength={20_000} showCount placeholder="保存可以直接复用的完整提示词" /></Form.Item>
                 <div className="grid gap-x-4 md:grid-cols-2">
-                    <Form.Item name="modelConfigId" label="模型快照"><Select allowClear showSearch optionFilterProp="label" placeholder="可不指定，由复用时选择" options={models.map((model) => ({ value: model.id, label: `${model.name} · ${model.creditCost} 模型积分` }))} /></Form.Item>
+                    <Form.Item name="modelConfigId" label="模型快照"><Select allowClear showSearch optionFilterProp="label" placeholder="可不指定，由复用时选择" options={models.map((model) => ({ value: model.id, label: deploymentFeatures.creditsEnabled ? `${model.name} · ${model.creditCost} 模型积分` : model.name }))} /></Form.Item>
                     <Form.Item name="referenceAssetIds" label="参考图"><Select mode="multiple" allowClear maxTagCount="responsive" placeholder="从我的素材选择" options={assets.map((asset) => ({ value: asset.id, label: asset.filename }))} /></Form.Item>
                 </div>
                 <div className="grid gap-x-4 md:grid-cols-3">

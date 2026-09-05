@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { buildConfigGenerationInputsByNodeId, buildNodeGenerationInputs } from "@/components/canvas/canvas-node-generation";
+import { buildConfigGenerationInputsByNodeId, buildNodeGenerationInputs, createConfigGenerationInputIndex } from "@/components/canvas/canvas-node-generation";
+import { createCanvasNodeMap, refreshCanvasNodeMap } from "@/lib/canvas/canvas-node-map";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
 const node = (id: string, type: CanvasNodeType, content?: string): CanvasNodeData => ({
@@ -27,4 +28,27 @@ test("indexes generation inputs for every config with the same connection orderi
 
     expect(indexed.get(configA.id)).toEqual(buildNodeGenerationInputs(configA.id, nodes, connections));
     expect(indexed.get(configB.id)).toEqual([]);
+});
+
+test("lazily resolves and reuses only the requested config input list", () => {
+    const image = node("image", CanvasNodeType.Image, "data:image/png;base64,one");
+    const text = node("text", CanvasNodeType.Text, "prompt");
+    const config = node("config", CanvasNodeType.Config);
+    const index = createConfigGenerationInputIndex([image, text, config], [connection("text-config", "text", "config"), connection("image-config", "image", "config")]);
+
+    const first = index.get(config.id);
+    expect(first.map((input) => input.nodeId)).toEqual(["text", "image"]);
+    expect(index.get(config.id)).toBe(first);
+    expect(index.get(image.id)).toEqual([]);
+});
+
+test("reads updated config input content from a stable node map", () => {
+    const text = node("text", CanvasNodeType.Text, "first draft");
+    const config = node("config", CanvasNodeType.Config);
+    const map = createCanvasNodeMap([text, config]);
+    const index = createConfigGenerationInputIndex([text, config], [connection("text-config", "text", "config")], map);
+    const updatedText = { ...text, metadata: { content: "latest draft" } };
+
+    expect(refreshCanvasNodeMap(map, [updatedText, config])).toBe(map);
+    expect(index.get(config.id)[0]?.text).toBe("latest draft");
 });

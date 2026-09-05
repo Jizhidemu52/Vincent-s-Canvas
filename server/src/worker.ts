@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createCache, createDatabase, type Cache, type Database } from "./db";
 import { decryptSecret } from "./security";
 import { settleReservation } from "./billing";
-import { queueScore, recalculateBatch, type TaskPriority } from "./tasks";
+import { TASK_LEASE_SECONDS, queueScore, recalculateBatch, restoreWaitingTasksToQueue, type TaskPriority } from "./tasks";
 import { ObjectStorage } from "./object-storage";
 import {
   decodeWorkflowImage,
@@ -14,8 +14,9 @@ import {
 } from "./workflow-runtime";
 import {
   buildOpenAiAudioRequest,
-  buildOpenAiVideoFields,
-  unwrapProviderEnvelope,
+  runApiMartVideoTask,
+  VideoProviderFailure,
+  VideoSubmissionClaimLost,
 } from "./media-runtime";
 import { recordAssetEvent } from "./asset-events";
 import { classifyDesignDirection } from "./design-direction";
@@ -34,6 +35,8 @@ type WorkRow = {
   parameters: Record<string, unknown>;
   source_urls: string[];
   attempts: number;
+  upstream_task_id: string | null;
+  upstream_submission_started_at: string | null;
   priority: TaskPriority;
   model_id: string | null;
   concurrency_limit: number | null;
@@ -59,6 +62,7 @@ const db = createDatabase(config.DATABASE_URL);
 const cache = await createCache(config.REDIS_URL);
 const storage = new ObjectStorage(config);
 let stopping = false;
+let reconcilingQueue = false;
 
 async function nextTask() {
   const result = await cache.zPopMin("tasks:queue");
@@ -67,13 +71,14 @@ async function nextTask() {
 
 async function runTask(taskId: string) {
   const claimed = await db.query<WorkRow>(
-    `UPDATE tasks SET status='processing',started_at=COALESCE(started_at,now()),attempts=attempts+1,updated_at=now()
+    `UPDATE tasks SET status='processing',started_at=COALESCE(started_at,now()),attempts=attempts+1,
+        lease_expires_at=now()+($2::int * interval '1 second'),updated_at=now()
         WHERE id=$1 AND status='waiting' RETURNING id,request_id,batch_id,prompt,source_urls,attempts,priority,model_config_id`,
-    [taskId],
+    [taskId, TASK_LEASE_SECONDS],
   );
   if (!claimed.rows[0]) return;
   const details = await db.query<WorkRow>(
-    `SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.parameters,t.source_urls,t.attempts,t.priority,m.model_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
+    `SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.parameters,t.source_urls,t.attempts,t.upstream_task_id,t.upstream_submission_started_at,t.priority,m.model_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
         FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id AND w.enabled=true WHERE t.id=$1`,
     [taskId],
   );
@@ -86,7 +91,7 @@ async function runTask(taskId: string) {
   if (running > (task.concurrency_limit ?? 5)) {
     await cache.decr(semaphoreKey);
     await db.query(
-      "UPDATE tasks SET status='waiting',updated_at=now() WHERE id=$1 AND status='processing'",
+      "UPDATE tasks SET status='waiting',lease_expires_at=NULL,updated_at=now() WHERE id=$1 AND status='processing'",
       [task.id],
     );
     await cache.zAdd("tasks:queue", {
@@ -95,7 +100,10 @@ async function runTask(taskId: string) {
     });
     return;
   }
+  const stopLeaseHeartbeat = startTaskLeaseHeartbeat(taskId);
   try {
+    if (config.TASK_MOCK_MODE === "true" && (task.operation_type === "video_generation" || task.operation_type === "audio_generation"))
+      throw new Error("模拟模式不提供真实视频或音频，请配置真实服务后生成");
     const providerResults =
       config.TASK_MOCK_MODE === "true"
         ? [{ bytes: Buffer.from(mockSvg(task.id)), mimeType: "image/svg+xml" }]
@@ -106,7 +114,7 @@ async function runTask(taskId: string) {
     try {
       await client.query("BEGIN");
       await client.query(
-        "UPDATE tasks SET status='success',result_urls=$1,completed_at=now(),updated_at=now() WHERE id=$2",
+        "UPDATE tasks SET status='success',result_urls=$1,lease_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$2",
         [JSON.stringify(resultUrls), task.id],
       );
       await client.query(
@@ -122,11 +130,18 @@ async function runTask(taskId: string) {
       client.release();
     }
   } catch (error) {
+    if (error instanceof VideoSubmissionClaimLost) return;
     const reason =
       error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
-    if (task.attempts < 3) {
+    if (task.operation_type === "video_generation" && task.upstream_submission_started_at && !(error instanceof VideoProviderFailure)) {
+      // Keep the original reservation while upstream work may still exist. Recovery only polls its persisted ID.
       await db.query(
-        "UPDATE tasks SET status='waiting',failure_reason=$1,updated_at=now() WHERE id=$2",
+        "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND status='processing'",
+        [task.upstream_task_id ? `${reason}；已暂停，可恢复查询原视频任务，不会重新生成` : `${reason}；提交状态待核实，不会自动重新生成`, task.id],
+      );
+    } else if ((task.operation_type !== "video_generation" || !task.upstream_submission_started_at) && task.attempts < 3) {
+      await db.query(
+        "UPDATE tasks SET status='waiting',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2",
         [reason, task.id],
       );
       await cache.zAdd("tasks:queue", {
@@ -138,7 +153,7 @@ async function runTask(taskId: string) {
         () => undefined,
       );
       await db.query(
-        "UPDATE tasks SET status='failed',failure_reason=$1,completed_at=now(),updated_at=now() WHERE id=$2",
+        "UPDATE tasks SET status='failed',failure_reason=$1,lease_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$2",
         [reason, task.id],
       );
       await db.query(
@@ -153,10 +168,13 @@ async function runTask(taskId: string) {
       );
     }
   } finally {
+    stopLeaseHeartbeat();
     await cache.decr(semaphoreKey);
     if (task.batch_id) await recalculateBatch(db, task.batch_id);
   }
 }
+
+import { openAiImageParameters } from "./openai-image-parameters";
 
 async function executeProvider(task: WorkRow) {
   if (!task.protocol || !task.base_url || !task.model_id)
@@ -166,6 +184,10 @@ async function executeProvider(task: WorkRow) {
   const credentials = JSON.parse(
     decryptSecret(task.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY),
   ) as Record<string, string>;
+  if (task.operation_type === "video_generation") {
+    if (task.protocol !== "apimart") throw new Error("当前视频执行器仅支持已配置的 APIMart 视频模型，请检查 Provider 协议");
+    return executeApiMartVideo(task, credentials);
+  }
   if (task.workflow_config_id && task.submit_path && task.output_path)
     return executeWorkflow(task, credentials);
   if (task.protocol === "apimart")
@@ -175,8 +197,6 @@ async function executeProvider(task: WorkRow) {
     : {};
   if (task.protocol === "openai" && task.operation_type === "audio_generation")
     return executeOpenAiAudio(task, authorization);
-  if (task.protocol === "openai" && task.operation_type === "video_generation")
-    return executeOpenAiVideo(task, authorization);
   let response: Response;
   if (
     task.protocol === "openai" &&
@@ -188,8 +208,9 @@ async function executeProvider(task: WorkRow) {
     form.set("prompt", task.prompt);
     form.set("n", "1");
     form.set("response_format", "b64_json");
-    for (const [index, url] of task.source_urls.entries()) {
-      const source = await loadSourceAsset(url, task.user_id);
+    for (const [key, value] of Object.entries(openAiImageParameters(task.parameters, task.model_id))) form.set(key, String(value));
+    const sourceAssets = await loadSourceAssets(task.source_urls, task.user_id);
+    for (const [index, source] of sourceAssets.entries()) {
       form.append(
         "image",
         new Blob([Uint8Array.from(source.bytes).buffer], {
@@ -216,6 +237,7 @@ async function executeProvider(task: WorkRow) {
             prompt: task.prompt,
             n: 1,
             response_format: "b64_json",
+            ...openAiImageParameters(task.parameters, task.model_id),
           }
         : {
             model: task.model_id,
@@ -259,9 +281,7 @@ async function executeApiMartImage(
   task: WorkRow,
   credentials: Record<string, string>,
 ) {
-  const sourceAssets = await Promise.all(
-    task.source_urls.map((url) => loadSourceAsset(url, task.user_id)),
-  );
+  const sourceAssets = await loadSourceAssets(task.source_urls, task.user_id);
   const outputUrls = await runApiMartImageTask({
     baseUrl: task.base_url!,
     apiKey: credentials.apiKey || "",
@@ -304,91 +324,41 @@ async function executeOpenAiAudio(
   ];
 }
 
-async function executeOpenAiVideo(
-  task: WorkRow,
-  authorization: Record<string, string>,
-) {
-  const fields = buildOpenAiVideoFields(
-    task.model_id!,
-    task.prompt,
-    task.parameters,
-  );
-  const form = new FormData();
-  form.set("model", fields.model);
-  form.set("prompt", fields.prompt);
-  form.set("seconds", fields.seconds);
-  if (fields.size) form.set("size", fields.size);
-  form.set("resolution_name", fields.resolution);
-  form.set("preset", fields.preset);
-  for (const [index, url] of task.source_urls.entries()) {
-    const source = await loadSourceAsset(url, task.user_id);
-    if (!source.mimeType.startsWith("image/")) continue;
-    form.append(
-      "input_reference[]",
-      new Blob([Uint8Array.from(source.bytes).buffer], {
-        type: source.mimeType,
-      }),
-      source.filename || `reference-${index + 1}.png`,
-    );
-  }
-  const createdResponse = await fetch(
-    `${task.base_url!.replace(/\/$/, "")}/videos`,
-    {
-      method: "POST",
-      headers: authorization,
-      body: form,
-      signal: AbortSignal.timeout(180_000),
+async function executeApiMartVideo(task: WorkRow, credentials: Record<string, string>) {
+  if (!storage.configured) throw new Error("公司对象存储尚未配置，不能保存生成视频");
+  const sources = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id);
+  const url = await runApiMartVideoTask({
+    baseUrl: task.base_url!, apiKey: credentials.apiKey || "", modelId: task.model_id!, prompt: task.prompt,
+    parameters: task.parameters, sources, upstreamTaskId: task.upstream_task_id,
+    submissionStarted: Boolean(task.upstream_submission_started_at),
+    beforeSubmit: async () => {
+      const claimed = await db.query(
+        "UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id",
+        [task.id],
+      );
+      if (claimed.rows[0]) task.upstream_submission_started_at = new Date().toISOString();
+      return Boolean(claimed.rows[0]);
     },
-  );
-  if (!createdResponse.ok)
-    throw new Error(
-      `视频 Provider ${createdResponse.status}: ${(await createdResponse.text()).slice(0, 500)}`,
-    );
-  const created = unwrapProviderEnvelope(await createdResponse.json()) as {
-    id?: string;
-    status?: string;
-    error?: { message?: string };
-  };
-  if (!created.id) throw new Error("视频 Provider 没有返回任务 ID");
-  const deadline = Date.now() + fields.timeoutSeconds * 1000;
-  while (Date.now() < deadline) {
-    await Bun.sleep(2_000);
-    const statusResponse = await fetch(
-      `${task.base_url!.replace(/\/$/, "")}/videos/${encodeURIComponent(created.id)}`,
-      { headers: authorization, signal: AbortSignal.timeout(60_000) },
-    );
-    if (!statusResponse.ok)
-      throw new Error(`视频状态查询失败 ${statusResponse.status}`);
-    const status = unwrapProviderEnvelope(await statusResponse.json()) as {
-      status?: string;
-      error?: { message?: string };
-    };
-    if (status.status === "failed" || status.status === "cancelled")
-      throw new Error(status.error?.message || "视频生成失败");
-    if (status.status !== "completed") continue;
-    const content = await fetch(
-      `${task.base_url!.replace(/\/$/, "")}/videos/${encodeURIComponent(created.id)}/content`,
-      { headers: authorization, signal: AbortSignal.timeout(180_000) },
-    );
-    if (!content.ok) throw new Error(`视频下载失败 ${content.status}`);
-    return [
-      {
-        bytes: Buffer.from(await content.arrayBuffer()),
-        mimeType:
-          content.headers.get("content-type")?.split(";")[0] || "video/mp4",
-      },
-    ];
-  }
-  throw new Error("视频生成超时");
+    onSubmitted: async (id) => {
+      task.upstream_task_id = id;
+      await db.query("UPDATE tasks SET upstream_task_id=$1,updated_at=now() WHERE id=$2", [id, task.id]);
+    },
+  });
+  const response = await fetch(url, { signal: AbortSignal.timeout(180_000) });
+  if (!response.ok) throw new Error(`视频下载失败（${response.status}）`);
+  const contentType = response.headers.get("content-type")?.split(";")[0] || "video/mp4";
+  const mimeType = contentType === "application/octet-stream" ? "video/mp4" : contentType;
+  if (!mimeType.startsWith("video/")) throw new Error("上游返回的不是视频文件");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (!bytes.byteLength) throw new Error("视频结果为空");
+  return [{ bytes, mimeType }];
 }
 
 async function executeWorkflow(
   task: WorkRow,
   credentials: Record<string, string>,
 ) {
-  const sourceAssets = await Promise.all(
-    task.source_urls.map((url) => loadSourceAsset(url, task.user_id)),
-  );
+  const sourceAssets = await loadSourceAssets(task.source_urls, task.user_id);
   if (
     (task.model_id === "gpt-image-2" || task.model_id === "gpt-image-2-ext") &&
     sourceAssets.length > 16
@@ -503,7 +473,39 @@ function joinUrl(base: string, path: string) {
   return `${base.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
 }
 
-async function loadSourceAsset(url: string, userId: string) {
+type SourceAsset = {
+  objectKey: string;
+  bytes: Uint8Array;
+  mimeType: string;
+  filename: string;
+};
+
+async function loadSourceAssets(urls: string[], userId: string, concurrency = 4): Promise<SourceAsset[]> {
+  const assets: SourceAsset[] = [];
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < urls.length) {
+      const index = nextIndex++;
+      assets[index] = await loadSourceAsset(urls[index]!, userId);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), urls.length) }, worker));
+  return assets;
+}
+
+function startTaskLeaseHeartbeat(taskId: string) {
+  const interval = setInterval(() => {
+    void db
+      .query(
+        "UPDATE tasks SET lease_expires_at=now()+($2::int * interval '1 second'),updated_at=now() WHERE id=$1 AND status='processing'",
+        [taskId, TASK_LEASE_SECONDS],
+      )
+      .catch((error) => console.error(`Unable to renew task lease ${taskId}`, error));
+  }, Math.floor((TASK_LEASE_SECONDS * 1_000) / 3));
+  return () => clearInterval(interval);
+}
+
+async function loadSourceAsset(url: string, userId: string): Promise<SourceAsset> {
   const match = url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i);
   if (!match) throw new Error("参考图不是公司素材地址");
   const result = await db.query<{
@@ -518,6 +520,7 @@ async function loadSourceAsset(url: string, userId: string) {
   if (!asset) throw new Error("参考图不存在或无权访问");
   const object = await storage.get(asset.object_key);
   return {
+    objectKey: asset.object_key,
     bytes: await object.Body!.transformToByteArray(),
     mimeType: asset.mime_type,
     filename: asset.filename,
@@ -642,12 +645,28 @@ async function workerLoop() {
   }
 }
 
-console.log(`Starting ${config.WORKER_CONCURRENCY} task workers`);
+async function reconcileTaskQueue() {
+  if (reconcilingQueue) return;
+  reconcilingQueue = true;
+  try {
+    const recovered = await restoreWaitingTasksToQueue(db, cache);
+    if (recovered) console.log(`Reconciled ${recovered} waiting task(s) into the queue`);
+  } catch (error) {
+    console.error("Task queue reconciliation failed", error);
+  } finally {
+    reconcilingQueue = false;
+  }
+}
+
+const restoredTaskCount = await restoreWaitingTasksToQueue(db, cache);
+console.log(`Restored ${restoredTaskCount} waiting task(s); starting ${config.WORKER_CONCURRENCY} task workers`);
+const queueReconciliationTimer = setInterval(() => void reconcileTaskQueue(), 60_000);
 const workers = Array.from({ length: config.WORKER_CONCURRENCY }, () =>
   workerLoop(),
 );
 const shutdown = () => {
   stopping = true;
+  clearInterval(queueReconciliationTimer);
 };
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);

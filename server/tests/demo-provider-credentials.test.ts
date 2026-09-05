@@ -39,6 +39,7 @@ describe("demo provider credentials", () => {
         { id: "opentoken-gpt", providerId: "opentoken", enabled: true },
         { id: "apimart-gpt", providerId: "apimart", enabled: true },
         { id: "disabled", providerId: "opentoken", enabled: false },
+        { id: "placeholder", modelId: "demo-image", providerId: "opentoken", enabled: true },
       ],
       [
         { id: "opentoken", hasCredentials: true },

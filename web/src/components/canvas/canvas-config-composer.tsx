@@ -4,6 +4,7 @@ import { Button, Image } from "antd";
 import { FileText, Image as ImageIcon, Music2, Video, X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { NodeGenerationInput } from "./canvas-node-generation";
 
@@ -31,7 +32,12 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
-    const tokens = useMemo(() => parseComposerTokens(value), [value]);
+    const [draftValue, setDraftValue] = useState(value);
+    const onChangeRef = useRef(onChange);
+    onChangeRef.current = onChange;
+    const draftRef = useRef<ReturnType<typeof createCanvasTextDraft> | null>(null);
+    if (!draftRef.current) draftRef.current = createCanvasTextDraft(value, (next) => onChangeRef.current(next));
+    const tokens = useMemo(() => parseComposerTokens(draftValue), [draftValue]);
     const referenceById = useMemo(() => new Map(inputs.map((input) => [input.nodeId, input])), [inputs]);
     const candidates = useMemo(() => {
         if (!mention) return [];
@@ -55,11 +61,19 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
         });
     }, [inputs, referenceById, theme, tokens]);
 
+    useEffect(() => {
+        setDraftValue((current) => (current === value ? current : value));
+        draftRef.current?.reset(value);
+    }, [value]);
+
+    useEffect(() => () => draftRef.current?.flush(), []);
+
     const syncFromEditor = () => {
         const editor = editorRef.current;
         if (!editor) return;
         const next = serializeEditor(editor);
-        onChange(next);
+        setDraftValue(next);
+        draftRef.current?.change(next);
         syncMention();
     };
 
@@ -99,7 +113,10 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
             placeCaretAtEnd(editor);
         }
         closeMention();
-        onChange(serializeEditor(editor));
+        const next = serializeEditor(editor);
+        setDraftValue(next);
+        draftRef.current?.reset(next);
+        onChange(next);
     };
 
     const stopCanvasInteraction = (event: PointerEvent | MouseEvent) => event.stopPropagation();
@@ -121,7 +138,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                 <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
             </div>
             <div className="relative rounded-xl border" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
-                {!value.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-7" style={{ color: theme.node.placeholder }}>输入提示词，按 @ 引用连接的图片或文本</div> : null}
+                {!draftValue.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-7" style={{ color: theme.node.placeholder }}>输入提示词，按 @ 引用连接的图片或文本</div> : null}
                 <div
                     ref={editorRef}
                     contentEditable

@@ -33,12 +33,15 @@ export type CanvasStoredImageReference = {
 };
 
 export type CanvasNodeMetadata = {
+    originalFileName?: string;
     content?: string;
     composerContent?: string;
     prompt?: string;
     draftPrompt?: string;
     status?: CanvasNodeStatus;
     errorDetails?: string;
+    videoTaskId?: string;
+    videoTaskCanRecover?: boolean;
     fontSize?: number;
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
@@ -149,6 +152,10 @@ export type CanvasAssistantAttachment = {
     id: string;
     name: string;
     url: string;
+    storageKey?: string;
+    serverAssetId?: string;
+    width?: number;
+    height?: number;
     mediaType: "image" | "video";
 };
 

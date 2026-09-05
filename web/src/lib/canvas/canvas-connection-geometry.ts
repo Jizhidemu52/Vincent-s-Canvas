@@ -1,6 +1,8 @@
 import type { CanvasBounds } from "@/lib/canvas/canvas-spatial-index";
 import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
 
+const MAX_CONNECTION_GEOMETRY_CACHE_ENTRIES = 1024;
+
 export type CanvasConnectionGeometry = {
     d: string;
     points: {
@@ -56,6 +58,7 @@ export function createConnectionGeometryCache() {
         get(connection: CanvasConnection, from: CanvasNodeData, to: CanvasNodeData): CanvasConnectionGeometry {
             const existing = entries.get(connection.id);
             if (existing?.from === from && existing.to === to) return existing.geometry;
+            if (entries.size >= MAX_CONNECTION_GEOMETRY_CACHE_ENTRIES) entries.delete(entries.keys().next().value as string);
             const geometry = createConnectionGeometry(from, to);
             entries.set(connection.id, { from, to, geometry });
             return geometry;

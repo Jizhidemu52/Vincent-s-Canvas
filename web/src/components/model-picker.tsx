@@ -5,7 +5,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/u
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
 import { standaloneEdition } from "@/lib/standalone-edition";
-import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { deploymentFeatures } from "@/lib/deployment-features";
+import { modelOptionLabel, modelOptionName, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { filterServerModelsByCapability, getModelPickerOptions, modelCapabilityLabel, resolveModelPickerSource, resolveModelPickerValue, type ModelPickerSource } from "@/lib/model-picker-options";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -16,16 +19,37 @@ type ModelPickerProps = {
     fullWidth?: boolean;
     placeholder?: string;
     onMissingConfig?: () => void;
+    modelsSource?: ModelPickerSource;
+    disabled?: boolean;
 };
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
+export function shouldRefreshModelPickerConfig(capability: ModelCapability | undefined, status: "idle" | "loading" | "ready" | "error", source: ModelPickerSource = "server") {
+    return source === "server" && Boolean(capability) && status === "idle";
+}
+
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, modelsSource, disabled = false }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const canManageConfig = useCanManageConfig();
-    const [serverModels,setServerModels]=useState<Array<{modelId:string;name:string;creditCost:number;capabilities:string[]}>>([]);
-    useEffect(()=>{if(!capability)return;const required=capability==="image"?["generate","edit"]:[capability==="text"?"chat":capability];fetch("/api/models",{credentials:"include"}).then((response)=>response.ok?response.json():Promise.reject()).then((result:{models:Array<{modelId:string;name:string;creditCost:number;capabilities:string[]}>})=>setServerModels(result.models.filter((model)=>!model.modelId.startsWith("demo-")&&required.some((item)=>model.capabilities.includes(item))))).catch(()=>setServerModels([]));},[capability]);
-    const options = useMemo(() => capability ? serverModels.map((model)=>model.modelId) : Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, serverModels, value]);
-    const current = value || "";
+    const businessConfigStatus = useBusinessConfigStore((state) => state.status);
+    const refreshBusinessConfig = useBusinessConfigStore((state) => state.refresh);
+    const businessModels = useBusinessConfigStore((state) => state.models);
+    const source = resolveModelPickerSource(config.channelMode, modelsSource ?? (capability ? "server" : undefined), standaloneEdition);
+    const usesServerModels = source === "server" && Boolean(capability);
+    const serverModels = useMemo(() => usesServerModels && businessConfigStatus === "ready" ? filterServerModelsByCapability(businessModels, capability) : [], [businessConfigStatus, businessModels, capability, usesServerModels]);
+    useEffect(() => {
+        if (!shouldRefreshModelPickerConfig(capability, businessConfigStatus, source)) return;
+        void refreshBusinessConfig().catch(() => undefined);
+    }, [businessConfigStatus, capability, refreshBusinessConfig, source]);
+    const options = useMemo(
+        () => getModelPickerOptions(config, capability, serverModels, source, value),
+        [capability, config, serverModels, source, value],
+    );
+    const current = resolveModelPickerValue(value, options, source);
+    const emptyLabel = usesServerModels && businessConfigStatus !== "ready"
+        ? businessConfigStatus === "error" ? "模型配置加载失败" : "正在加载模型…"
+        : emptyModelLabel(config, capability, canManageConfig, source);
+    const currentLabel = current ? serverModels.find((model) => model.modelId === current)?.name || modelOptionLabel(config, current) : options.length ? placeholder : emptyLabel;
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {
@@ -39,12 +63,13 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         <Select
             open={open}
             value={current}
+            disabled={disabled}
             onOpenChange={(nextOpen) => {
-                if (nextOpen && !options.length && config.channelMode === "local" && canManageConfig) onMissingConfig?.();
+                if (nextOpen && !options.length && source === "local" && canManageConfig) onMissingConfig?.();
                 if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
                 setOpen(nextOpen);
             }}
-            onValueChange={onChange}
+            onValueChange={(model) => { if (options.includes(model)) onChange(model); }}
         >
             <SelectTrigger
                 className={cn(
@@ -55,10 +80,10 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 )}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={current ? serverModels.find((model)=>model.modelId===current)?.name||modelOptionLabel(config, current) : placeholder}
+                title={currentLabel}
             >
                 <ModelIcon model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? serverModels.find((model)=>model.modelId===current)?.name||modelOptionLabel(config, current) : placeholder}</span>
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{currentLabel}</span>
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
@@ -78,7 +103,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                     ))
                 ) : (
                     <SelectItem value="__empty__" disabled>
-                        {emptyModelLabel(config, capability, canManageConfig)}
+                        {emptyLabel}
                     </SelectItem>
                 )}
             </SelectContent>
@@ -86,8 +111,9 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     );
 }
 
-function emptyModelLabel(config: AiConfig, capability?: ModelCapability, canManageConfig = false) {
-    const label = capability === "image" ? "生图" : capability === "video" ? "视频" : capability === "text" ? "文本" : capability === "audio" ? "音频" : "";
+function emptyModelLabel(config: AiConfig, capability?: ModelCapability, canManageConfig = false, source: ModelPickerSource = "local") {
+    const label = modelCapabilityLabel(capability);
+    if (source === "server") return `暂无可用${label}模型${canManageConfig ? "，请在后台配置" : "，请联系管理员配置"}`;
     if (!canManageConfig) return `暂无可用${label}模型，请联系管理员配置模型`;
     if (capability && config.models.length) return "请先在上方配置可选模型";
     return config.models.length ? `暂无匹配的${label}模型` : "请先到配置里添加渠道和模型";
@@ -97,7 +123,7 @@ function ModelLabel({ config, model, serverModel }: { config: AiConfig; model: s
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
-            <span className="truncate">{serverModel ? (standaloneEdition ? serverModel.name : `${serverModel.name} · 模型 ${serverModel.creditCost} 积分`) : modelOptionLabel(config, model)}</span>
+            <span className="truncate">{serverModel ? (!deploymentFeatures.creditsEnabled ? serverModel.name : `${serverModel.name} · 模型 ${serverModel.creditCost} 积分`) : modelOptionLabel(config, model)}</span>
         </span>
     );
 }

@@ -4,6 +4,7 @@
   "defaultOpen": true,
   "pages": [
     "local-development",
-    "canvas-data-structure"
+    "canvas-data-structure",
+    "backend-database"
   ]
 }

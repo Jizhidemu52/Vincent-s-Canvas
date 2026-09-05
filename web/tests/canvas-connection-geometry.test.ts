@@ -18,6 +18,18 @@ test("caches geometry by connection and endpoint references", () => {
     expect(first.d).toContain("M 100 25 C");
 });
 
+test("bounds cached connection geometry during a long pan across the canvas", () => {
+    const cache = createConnectionGeometryCache();
+    const firstConnection: CanvasConnection = { id: "connection-0", fromNodeId: source.id, toNodeId: target.id };
+    const firstGeometry = cache.get(firstConnection, source, target);
+
+    for (let index = 1; index <= 1024; index += 1) {
+        cache.get({ id: `connection-${index}`, fromNodeId: source.id, toNodeId: target.id }, source, target);
+    }
+
+    expect(cache.get(firstConnection, source, target)).not.toBe(firstGeometry);
+});
+
 test("indexes only adjacent connection ids for a node", () => {
     const connections: CanvasConnection[] = [
         { id: "ab", fromNodeId: "a", toNodeId: "b" },

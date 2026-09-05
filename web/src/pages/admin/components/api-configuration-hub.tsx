@@ -174,17 +174,17 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                                 {tools.map((tool) => {
                                     const state = toolState(tool);
                                     return (
-                                        <section key={tool.toolKey} className="rounded-md border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+                                        <section key={tool.toolKey} className="wb-surface p-5">
                                             <div className="flex items-start justify-between gap-3">
                                                 <div>
-                                                    <h3 className="font-semibold text-stone-950 dark:text-stone-100">{tool.label}</h3>
-                                                    <p className="mt-1 text-xs text-stone-500">{tool.providerName || "未选择 API 服务"} · {tool.modelName || "未选择模型"}</p>
+                                                    <h3 className="font-semibold text-[var(--foreground)]">{tool.label}</h3>
+                                                    <p className="mt-1 text-xs text-[var(--muted-foreground)]">{tool.providerName || "未选择 API 服务"} · {tool.modelName || "未选择模型"}</p>
                                                 </div>
                                                 <Tag color={state.ready ? "green" : "orange"}>{state.ready ? "已配置" : "待配置"}</Tag>
                                             </div>
-                                            <div className="mt-4 min-h-12 text-sm text-stone-600 dark:text-stone-300">
+                                            <div className="mt-4 min-h-12 text-sm text-[var(--muted-foreground)]">
                                                 {state.ready ? `设计师端显示 ${state.credits} 积分/次` : state.reason}
-                                                {tool.workflowName ? <div className="mt-1 text-xs text-stone-500">工作流：{tool.workflowName}</div> : null}
+                                                {tool.workflowName ? <div className="mt-1 text-xs text-[var(--muted-foreground)]">工作流：{tool.workflowName}</div> : null}
                                             </div>
                                             <Button icon={state.ready ? <CheckCircle2 className="size-4" /> : <Settings2 className="size-4" />} onClick={() => openTool(tool)} loading={loading} disabled={!isAdmin} block>
                                                 {state.ready ? "修改配置" : "立即配置"}
@@ -230,7 +230,7 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                     </div>
                     {selectedTool?.operationType === "inpaint" ? <Alert className="mb-4" type="warning" showIcon title="图片编辑和角度控制共用局部编辑基础价格；模型绑定仍各自独立。" /> : null}
                     <Form.Item name="enabled" label="设计师端启用" valuePropName="checked"><Switch /></Form.Item>
-                    <Button type="primary" htmlType="submit" loading={saving} block>保存并同步到设计师端</Button>
+                    <Button className="!h-10" type="primary" htmlType="submit" loading={saving} block>保存并同步到设计师端</Button>
                 </Form>
             </Modal>
         </div>

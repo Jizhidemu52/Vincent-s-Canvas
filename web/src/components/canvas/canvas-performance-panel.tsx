@@ -1,6 +1,8 @@
+import { memo } from "react";
+
 import type { CanvasInteractionMetrics } from "@/lib/canvas/canvas-performance-metrics";
 
-export function CanvasPerformancePanel({ metrics }: { metrics: CanvasInteractionMetrics | null }) {
+export const CanvasPerformancePanel = memo(function CanvasPerformancePanel({ metrics }: { metrics: CanvasInteractionMetrics | null }) {
     if (!metrics) return null;
 
     return (
@@ -14,9 +16,10 @@ export function CanvasPerformancePanel({ metrics }: { metrics: CanvasInteraction
                 <span>P95 {metrics.p95FrameMs}ms</span>
                 <span>long {metrics.longFrameCount}</span>
                 <span>max {metrics.maxFrameMs}ms</span>
+                <span>stalled {metrics.stalledFrameGapCount}</span>
                 <span>nodes {metrics.visibleNodes}/{metrics.totalNodes}</span>
                 <span>links {metrics.visibleConnections}/{metrics.totalConnections}</span>
             </div>
         </aside>
     );
-}
+});

@@ -4,6 +4,7 @@ export type CanvasQuickGeneratePanelRenderState = {
     prompt: string;
     model: string;
     size: string;
+    quality: string;
     count: number;
     references: readonly unknown[];
     running: boolean;
@@ -15,10 +16,12 @@ export type CanvasQuickGeneratePanelRenderState = {
     onPromptChange: (value: string) => void;
     onModelChange: (value: string) => void;
     onSizeChange: (value: string) => void;
+    onQualityChange: (value: string) => void;
     onCountChange: (value: number) => void;
     onPickReferences: () => void;
     onRemoveReference: (id: string) => void;
     onClearReferences: () => void;
+    onMoveReference: (id: string, targetId: string) => void;
     onMissingConfig: () => void;
     onGenerate: () => void;
 };
@@ -35,6 +38,7 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
         previous.prompt === next.prompt &&
         previous.model === next.model &&
         previous.size === next.size &&
+        previous.quality === next.quality &&
         previous.count === next.count &&
         previous.references === next.references &&
         previous.running === next.running &&
@@ -46,10 +50,12 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
         previous.onPromptChange === next.onPromptChange &&
         previous.onModelChange === next.onModelChange &&
         previous.onSizeChange === next.onSizeChange &&
+        previous.onQualityChange === next.onQualityChange &&
         previous.onCountChange === next.onCountChange &&
         previous.onPickReferences === next.onPickReferences &&
         previous.onRemoveReference === next.onRemoveReference &&
         previous.onClearReferences === next.onClearReferences &&
+        previous.onMoveReference === next.onMoveReference &&
         previous.onMissingConfig === next.onMissingConfig &&
         previous.onGenerate === next.onGenerate
     );

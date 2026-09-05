@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { beginCanvasHover, commitCanvasHover, endCanvasHover } from "@/lib/canvas/canvas-hover-stability";
+import { beginCanvasHover, commitCanvasHover, endCanvasHover, resetCanvasHover } from "@/lib/canvas/canvas-hover-stability";
 
 describe("canvas hover stability", () => {
     test("drops a transient hover before it can update the external highlight", () => {
@@ -19,5 +19,9 @@ describe("canvas hover stability", () => {
 
     test("clears a stable hover when the pointer leaves without a replacement", () => {
         expect(endCanvasHover({ activeId: "node-a", pendingId: null }, "node-a")).toEqual({ activeId: null, pendingId: null });
+    });
+
+    test("resets both active and pending hover state when canvas movement begins", () => {
+        expect(resetCanvasHover({ activeId: "active", pendingId: "pending" })).toEqual({ activeId: null, pendingId: null });
     });
 });

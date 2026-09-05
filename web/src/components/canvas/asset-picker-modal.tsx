@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Button, Empty, Input, Modal, Pagination, Tag } from "antd";
 import { Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { needsCanvasAssetPreviewResolution, resolveCanvasAssetPreview } from "@/lib/canvas/canvas-asset-preview";
+import { resolveImageUrl } from "@/services/image-storage";
+import { resolveMediaUrl } from "@/services/file-storage";
 import { canUserAccessAsset, useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -37,7 +40,28 @@ const kindOptions = [
     { label: "视频", value: "video" },
 ];
 
-function PickerCard({ title, kind, cover, selected, onClick }: { title: string; kind: string; cover: string; selected?: boolean; onClick: () => void }) {
+function PickerCard({ asset, selected, onClick }: { asset: Asset; selected?: boolean; onClick: () => void }) {
+    const fallback = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : asset.kind === "video" ? asset.data.url : "");
+    const needsResolution = (asset.kind === "image" || asset.kind === "video") && needsCanvasAssetPreviewResolution(asset);
+    const [cover, setCover] = useState(() => (needsResolution ? "" : fallback));
+    useEffect(() => {
+        let active = true;
+        if (asset.kind === "text" || !needsResolution) {
+            setCover(fallback);
+            return;
+        }
+        setCover("");
+        void resolveCanvasAssetPreview(asset, { resolveImage: resolveImageUrl, resolveMedia: resolveMediaUrl })
+            .then((url) => {
+                if (active) setCover(url);
+            })
+            .catch(() => {
+                if (active) setCover("");
+            });
+        return () => {
+            active = false;
+        };
+    }, [asset, fallback, needsResolution]);
     return (
         <button
             type="button"
@@ -45,14 +69,14 @@ function PickerCard({ title, kind, cover, selected, onClick }: { title: string; 
             onClick={onClick}
         >
             {cover ? (
-                <img src={cover} alt={title} className="aspect-[4/3] w-full object-cover" />
+                <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" />
             ) : (
-                <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-3 text-center text-xs leading-5 text-stone-500 dark:bg-stone-800 dark:text-stone-400">{title}</div>
+                <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-3 text-center text-xs leading-5 text-stone-500 dark:bg-stone-800 dark:text-stone-400">{asset.title}</div>
             )}
             <div className="p-2.5">
                 <div className="flex items-center justify-between gap-2">
-                    <span className="line-clamp-1 text-xs font-medium text-stone-800 dark:text-stone-200">{title}</span>
-                    <Tag className="m-0 shrink-0 text-[10px]">{kind === "image" ? "图片" : kind === "video" ? "视频" : "文本"}</Tag>
+                    <span className="line-clamp-1 text-xs font-medium text-stone-800 dark:text-stone-200">{asset.title}</span>
+                    <Tag className="m-0 shrink-0 text-[10px]">{asset.kind === "image" ? "图片" : asset.kind === "video" ? "视频" : "文本"}</Tag>
                 </div>
             </div>
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-950/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-stone-950/55 group-hover:opacity-100">插入</div>
@@ -64,18 +88,19 @@ function MyAssetsTab({ onInsert, onInsertMany, selectionMode }: { onInsert?: (pa
     const assets = useAssetStore((state) => state.assets);
     const user = useUserStore((state) => state.user);
     const [keyword, setKeyword] = useState("");
+    const deferredKeyword = useDeferredValue(keyword);
     const [kindFilter, setKindFilter] = useState("all");
     const [page, setPage] = useState(1);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
     const filtered = useMemo(() => {
-        const query = keyword.trim().toLowerCase();
+        const query = deferredKeyword.trim().toLowerCase();
         return assets
             .filter((asset) => canUserAccessAsset(asset, user))
             .filter((a) => selectionMode === "multiple-images" ? a.kind === "image" : a.kind === "text" || a.kind === "image" || a.kind === "video")
             .filter((a) => kindFilter === "all" || a.kind === kindFilter)
             .filter((a) => !query || [a.title, ...(a.tags || [])].join(" ").toLowerCase().includes(query));
-    }, [assets, keyword, kindFilter, user]);
+    }, [assets, deferredKeyword, kindFilter, user]);
 
     const visible = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
 
@@ -143,7 +168,7 @@ function MyAssetsTab({ onInsert, onInsertMany, selectionMode }: { onInsert?: (pa
             {visible.length ? (
                 <div className="grid grid-cols-4 gap-3">
                     {visible.map((asset) => (
-                        <PickerCard key={asset.id} title={asset.title} kind={asset.kind} cover={asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "")} selected={selectedIds.has(asset.id)} onClick={() => handleInsert(asset)} />
+                        <PickerCard key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} onClick={() => handleInsert(asset)} />
                     ))}
                 </div>
             ) : (

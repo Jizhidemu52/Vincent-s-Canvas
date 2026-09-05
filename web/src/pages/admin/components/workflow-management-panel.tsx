@@ -129,7 +129,7 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
                     },
                 ]}
             />
-            <section className="rounded-md border border-stone-200 bg-white p-4">
+            <section className="wb-surface p-5">
                 <div className="mb-4 flex items-center justify-between">
                     <h3 className="text-base font-semibold">{selectedId ? "编辑工作流" : "新增工作流"}</h3>
                     {selectedId ? (
@@ -221,7 +221,7 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
                     <Form.Item name="enabled" label="启用" valuePropName="checked">
                         <Switch />
                     </Form.Item>
-                    <Button type="primary" htmlType="submit" block>
+                    <Button className="!h-10" type="primary" htmlType="submit" block>
                         保存工作流
                     </Button>
                 </Form>

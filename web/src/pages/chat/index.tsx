@@ -1,11 +1,14 @@
 import { App, Button, Tooltip } from "antd";
-import { Bot, CheckCircle2, ChevronDown, CornerDownLeft, FileText, ImagePlus, MessageSquarePlus, Paperclip, PanelLeftClose, PanelLeftOpen, Send, Sparkles, Trash2, WandSparkles, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Bot, CheckCircle2, ChevronDown, CornerDownLeft, FileText, ImagePlus, LoaderCircle, MessageSquarePlus, Paperclip, PanelLeftClose, PanelLeftOpen, Send, Sparkles, Trash2, WandSparkles, X } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 
 import { cn } from "@/lib/utils";
-import { standaloneEdition } from "@/lib/standalone-edition";
+import { deploymentFeatures } from "@/lib/deployment-features";
 import { createClientId } from "@/lib/client-id";
 import { CHAT_ATTACHMENT_ACCEPT, parseChatAttachment, type ParsedChatAttachment } from "@/lib/chat-attachments";
+import { latestChatContext } from "@/lib/chat-context";
+import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
+import { createChatStreamBuffer } from "./chat-stream-buffer";
 import { requestEdit, requestGeneration, requestImageQuestion, type AiTextMessage } from "@/services/api/image";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -89,56 +92,112 @@ async function compressChatImage(file: File) {
 }
 
 export default function ChatPage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const user = useUserStore((state) => state.user);
     const config = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const storageKey = `${storagePrefix}${user?.id || "anonymous"}`;
     const [models, setModels] = useState<ChatModel[]>([]);
+    const [modelsLoading, setModelsLoading] = useState(true);
+    const [modelError, setModelError] = useState("");
+    const [modelReload, setModelReload] = useState(0);
     const [selectedModel, setSelectedModel] = useState("");
     const [mode, setMode] = useState<ChatMode>("chat");
     const [agentTask, setAgentTask] = useState<AgentTask>("brief");
-    const [sidebarOpen, setSidebarOpen] = useState(true);
-    const [sessions, setSessions] = useState<ChatSession[]>([createSession()]);
+    const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches);
+    const [sessions, setSessionsState] = useState<ChatSession[]>(() => [createSession()]);
+    const sessionsRef = useRef(sessions);
+    const [loadedStorageKey, setLoadedStorageKey] = useState<string | null>(null);
+    const loadedStorageKeyRef = useRef<string | null>(null);
+    const setSessions = useCallback((update: SetStateAction<ChatSession[]>) => {
+        const next = typeof update === "function" ? update(sessionsRef.current) : update;
+        // Keep a synchronous snapshot: pagehide cannot wait for another React commit.
+        sessionsRef.current = next;
+        setSessionsState(next);
+    }, []);
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
     const [draft, setDraft] = useState("");
     const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+    const [readingAttachments, setReadingAttachments] = useState(false);
     const [isSending, setIsSending] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const followBottomRef = useRef(true);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const activeStreamRef = useRef<ReturnType<typeof createChatStreamBuffer> | null>(null);
+    const persistence = useMemo(() => createDeferredPersistQueue<ChatSession[]>(400, (value) => {
+        try {
+            localStorage.setItem(storageKey, JSON.stringify(storedSessions(value)));
+        } catch {
+            // Keep the last successful snapshot if storage is unavailable or full.
+        }
+    }), [storageKey]);
 
     useEffect(() => {
+        const flush = () => {
+            activeStreamRef.current?.flush();
+            if (loadedStorageKeyRef.current === storageKey) persistence.schedule(sessionsRef.current);
+            persistence.flush();
+        };
+        window.addEventListener("pagehide", flush);
+        return () => {
+            window.removeEventListener("pagehide", flush);
+            flush();
+            activeStreamRef.current?.dispose();
+        };
+    }, [persistence, storageKey]);
+
+    useEffect(() => {
+        // The quick image picker temporarily narrows this attribute. Restore
+        // the documented full attachment set after every React render.
         if (fileInputRef.current) fileInputRef.current.accept = CHAT_ATTACHMENT_ACCEPT;
-    }, []);
+    });
 
     useEffect(() => {
         setSessions(readSessions(storageKey));
-    }, [storageKey]);
+        loadedStorageKeyRef.current = storageKey;
+        setLoadedStorageKey(storageKey);
+    }, [setSessions, storageKey]);
 
     useEffect(() => {
         const active = sessions.find((item) => item.id === activeSessionId);
         if (!active) setActiveSessionId(sessions[0]?.id || null);
-        try {
-            localStorage.setItem(storageKey, JSON.stringify(storedSessions(sessions)));
-        } catch {
-            // Never let browser storage limits break an active design conversation.
-            localStorage.removeItem(storageKey);
-        }
-    }, [activeSessionId, sessions, storageKey]);
+    }, [activeSessionId, sessions]);
 
     useEffect(() => {
+        // Account changes must not persist the previous account's sessions under the new key.
+        if (loadedStorageKey !== storageKey) return;
+        persistence.schedule(sessions);
+        if (!isSending) persistence.flush();
+    }, [isSending, loadedStorageKey, persistence, sessions, storageKey]);
+
+    useEffect(() => {
+        let active = true;
+        setModelsLoading(true);
+        setModelError("");
         fetch("/api/models", { credentials: "include" })
             .then((response) => response.ok ? response.json() : Promise.reject(new Error("无法加载对话模型")))
             .then((data: { models: ChatModel[] }) => {
+                if (!active) return;
                 const available = data.models.filter((item) => item.capabilities.includes("chat"));
                 setModels(data.models);
                 setSelectedModel((current) => current && available.some((item) => item.modelId === current) ? current : available[0]?.modelId || "");
             })
-            .catch(() => setModels([]));
-    }, []);
+            .catch(() => { if (active) { setModels([]); setModelError("模型列表暂时无法读取，请重试。"); } })
+            .finally(() => { if (active) setModelsLoading(false); });
+        return () => { active = false; };
+    }, [modelReload]);
 
     useEffect(() => {
-        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+        followBottomRef.current = true;
+    }, [activeSessionId]);
+
+    useEffect(() => {
+        const current = sessions.find((item) => item.id === activeSessionId) || sessions[0];
+        if (!current?.messages.length) {
+            scrollRef.current?.scrollTo({ top: 0, behavior: "instant" });
+            return;
+        }
+        if (followBottomRef.current) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "instant" });
     }, [sessions, activeSessionId, isSending]);
 
     const activeSession = useMemo(() => sessions.find((item) => item.id === activeSessionId) || sessions[0], [activeSessionId, sessions]);
@@ -147,11 +206,15 @@ export default function ChatPage() {
     // creation mode submits real provider tasks and must never select one first.
     const imageModels = useMemo(() => models.filter((item) => !item.modelId.startsWith("demo-") && item.capabilities.some((capability) => ["generate", "edit"].includes(capability))), [models]);
     const availableModels = mode === "create" ? imageModels : chatModels;
+    useEffect(() => {
+        setSelectedModel((current) => availableModels.some((item) => item.modelId === current) ? current : availableModels[0]?.modelId || "");
+    }, [availableModels]);
     const selected = availableModels.find((item) => item.modelId === selectedModel);
     const selectedClaude = /^claude-(opus|sonnet|fable)-5$/i.test(selectedModel);
     const agent = agentTasks.find((item) => item.id === agentTask)!;
 
     const updateSession = (id: string, update: (session: ChatSession) => ChatSession) => {
+        if (loadedStorageKeyRef.current !== storageKey) return;
         setSessions((current) => current.map((session) => session.id === id ? update(session) : session));
     };
 
@@ -164,18 +227,18 @@ export default function ChatPage() {
         setAttachments([]);
     };
 
-    const switchMode = (nextMode: ChatMode) => {
+    const switchMode = useCallback((nextMode: ChatMode) => {
         setMode(nextMode);
         const available = nextMode === "create" ? imageModels : chatModels;
         setSelectedModel((current) => available.some((item) => item.modelId === current) ? current : available[0]?.modelId || "");
-    };
+    }, [chatModels, imageModels]);
 
-    const continueEditing = (image: { id: string; dataUrl: string }) => {
+    const continueEditing = useCallback((image: { id: string; dataUrl: string }) => {
         switchMode("create");
         setAttachments([{ id: createClientId(), name: "上一版生成结果.png", mimeType: "image/png", size: dataUrlBytes(image.dataUrl), dataUrl: image.dataUrl }]);
         setDraft("");
         message.success("已带入上一版图片，输入修改要求后即可继续编辑");
-    };
+    }, [message, switchMode]);
 
     const removeSession = (id: string) => {
         setSessions((current) => {
@@ -189,7 +252,7 @@ export default function ChatPage() {
 
     const send = async () => {
         const text = draft.trim();
-        if ((!text && !attachments.length) || isSending || !activeSession) return;
+        if ((!text && !attachments.length) || isSending || readingAttachments || !activeSession) return;
         if (!selectedModel || !selected) {
             message.warning(mode === "create" ? "管理员尚未启用可用的图像生成模型" : "管理员尚未启用可用的对话模型");
             return;
@@ -204,14 +267,21 @@ export default function ChatPage() {
         const userMessage: ChatMessage = { id: createClientId(), role: "user", content: text || "请分析我上传的内容。", attachments, createdAt: new Date().toISOString() };
         const assistantId = createClientId();
         const taskInstruction = mode === "agent" ? `${agent.prompt}\n\n请使用清晰标题、短列表和具体可执行建议。` : "";
-        const history: AiTextMessage[] = activeSession.messages
+        const history: AiTextMessage[] = latestChatContext(activeSession.messages
             .filter((item): item is ChatMessage & { role: "user" | "assistant" } => item.role === "user" || item.role === "assistant")
-            .map((item) => ({ role: item.role, content: messageContent(item) }));
+            .map((item) => ({ role: item.role, content: messageTextContent(item) })));
 
         updateSession(sessionId, (session) => ({ ...session, mode, title: session.messages.length ? session.title : text.slice(0, 18), messages: [...session.messages, userMessage], updatedAt: new Date().toISOString() }));
         setDraft("");
         setAttachments([]);
         setIsSending(true);
+        followBottomRef.current = true;
+        const stream = createChatStreamBuffer((content) => updateSession(sessionId, (session) => ({
+            ...session,
+            messages: [...session.messages.filter((item) => item.id !== assistantId), { id: assistantId, role: "assistant", content, createdAt: new Date().toISOString() }],
+            updatedAt: new Date().toISOString(),
+        })));
+        activeStreamRef.current = stream;
         try {
             if (mode === "create") {
                 const references: ReferenceImage[] = attachments
@@ -232,30 +302,31 @@ export default function ChatPage() {
             const response = await requestImageQuestion(
                 { ...config, model: selectedModel, textModel: selectedModel, systemPrompt: taskInstruction },
                 [...history, { role: "user", content: messageContent(userMessage) }],
-                (content) => updateSession(sessionId, (session) => ({
-                    ...session,
-                    messages: [...session.messages.filter((item) => item.id !== assistantId), { id: assistantId, role: "assistant", content, createdAt: new Date().toISOString() }],
-                    updatedAt: new Date().toISOString(),
-                })),
+                stream.push,
             );
+            stream.cancel();
             updateSession(sessionId, (session) => ({
                 ...session,
                 messages: [...session.messages.filter((item) => item.id !== assistantId), { id: assistantId, role: "assistant", content: response || "模型没有返回内容。", createdAt: new Date().toISOString() }],
                 updatedAt: new Date().toISOString(),
             }));
         } catch (error) {
+            stream.flush();
             updateSession(sessionId, (session) => ({
                 ...session,
-                messages: [...session.messages, { id: assistantId, role: "error", content: error instanceof Error ? error.message : "对话请求失败", createdAt: new Date().toISOString() }],
+                messages: [...session.messages, { id: createClientId(), role: "error", content: error instanceof Error ? error.message : "对话请求失败", createdAt: new Date().toISOString() }],
                 updatedAt: new Date().toISOString(),
             }));
         } finally {
+            stream.cancel();
+            if (activeStreamRef.current === stream) activeStreamRef.current = null;
             setIsSending(false);
         }
     };
 
     const addFiles = async (files: FileList | null) => {
-        if (!files?.length) return;
+        if (!files?.length || readingAttachments) return;
+        setReadingAttachments(true);
         const candidates = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
         const next: ChatAttachment[] = [];
         let totalBytes = attachments.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
@@ -278,41 +349,83 @@ export default function ChatPage() {
             }
         }
         if (next.length) setAttachments((current) => [...current, ...next].slice(0, 5));
+        setReadingAttachments(false);
     };
 
     return (
-        <main className="h-full bg-[#f4f3ef] p-3 md:p-5">
-            <div className="mx-auto flex h-full max-w-[1540px] overflow-hidden rounded-lg border border-orange-100 bg-[#fffdf8] shadow-[0_18px_50px_rgba(76,38,10,0.08)]">
-                <aside className={cn("flex shrink-0 flex-col border-r border-orange-100 bg-[#fbf8f1] transition-[width] duration-200", sidebarOpen ? "w-[260px]" : "w-0 overflow-hidden border-r-0") }>
+        <main className="wb-page h-full min-h-0 p-3 md:p-5">
+            <div className="wb-surface relative mx-auto flex h-full max-w-[1600px] overflow-hidden">
+                {sidebarOpen ? <button type="button" aria-label="关闭会话列表" className="absolute inset-0 z-10 bg-black/25 md:hidden" onClick={() => setSidebarOpen(false)} /> : null}
+                <aside inert={!sidebarOpen} aria-hidden={!sidebarOpen} className={cn("absolute inset-y-0 left-0 z-20 flex shrink-0 flex-col border-r border-border bg-background transition-[width] duration-200 md:relative md:inset-auto", sidebarOpen ? "w-[260px]" : "w-0 overflow-hidden border-r-0")}>
                     <div className="flex items-center justify-between px-4 py-4">
-                        <div className="flex items-center gap-2 text-sm font-bold text-stone-900"><Bot className="size-4 text-orange-600" /> 对话记录</div>
-                        <Tooltip title="新建对话"><button type="button" onClick={() => startSession()} className="grid size-8 place-items-center rounded-md border border-orange-200 bg-white text-orange-700 hover:bg-orange-50"><MessageSquarePlus className="size-4" /></button></Tooltip>
+                        <div className="flex items-center gap-2 text-sm font-semibold"><Bot className="size-4 text-orange-600" /> 对话记录</div>
+                        <div className="flex">
+                            <Tooltip title="新建对话"><button type="button" aria-label="新建对话" onClick={() => startSession()} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted"><MessageSquarePlus className="size-4" /></button></Tooltip>
+                            <button type="button" aria-label="收起会话" onClick={() => setSidebarOpen(false)} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted md:hidden"><X className="size-4" /></button>
+                        </div>
                     </div>
-                    <div className="px-3"><Button block icon={<Sparkles className="size-4" />} onClick={() => startSession("agent")} className="!h-10 !border-0 !bg-orange-600 !font-semibold !text-white hover:!bg-orange-700">新建 Agent 任务</Button></div>
-                    <div className="mt-5 min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-3">
-                        {sessions.map((session) => <button key={session.id} type="button" onClick={() => { setActiveSessionId(session.id); setMode(session.mode); }} className={cn("group flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left transition", session.id === activeSession?.id ? "bg-stone-900 text-white" : "text-stone-600 hover:bg-white")}>
-                            <span className={cn("grid size-7 shrink-0 place-items-center rounded-md", session.id === activeSession?.id ? "bg-white/10" : "bg-orange-50 text-orange-600")}>{session.mode === "agent" ? <WandSparkles className="size-3.5" /> : <Bot className="size-3.5" />}</span>
-                            <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold">{sessionTitle(session)}</span><span className={cn("mt-0.5 block text-[11px]", session.id === activeSession?.id ? "text-stone-300" : "text-stone-400")}>{session.mode === "agent" ? "Agent 任务" : "聊天"} · {new Date(session.updatedAt).toLocaleDateString()}</span></span>
-                            <span onClick={(event) => { event.stopPropagation(); removeSession(session.id); }} className={cn("grid size-6 place-items-center rounded opacity-0 transition group-hover:opacity-100", session.id === activeSession?.id ? "hover:bg-white/10" : "hover:bg-orange-50")} aria-label="删除会话"><Trash2 className="size-3.5" /></span>
-                        </button>)}
+                    <div className="px-3"><Button type="primary" block icon={<Sparkles className="size-4" />} onClick={() => startSession("agent")} className="!h-10">新建 Agent 任务</Button></div>
+                    <div className="mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-3">
+                        {sessions.map((session) => <div key={session.id} className={cn("group flex w-full items-center gap-1 rounded-xl pr-1 transition-colors", session.id === activeSession?.id ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}>
+                            <button type="button" onClick={() => { setActiveSessionId(session.id); setMode(session.mode); if (window.innerWidth < 768) setSidebarOpen(false); }} className="flex min-w-0 flex-1 items-center gap-2 px-3 py-3 text-left">
+                                <span className="grid size-7 shrink-0 place-items-center rounded-lg opacity-75">{session.mode === "agent" ? <WandSparkles className="size-4" /> : session.mode === "create" ? <ImagePlus className="size-4" /> : <Bot className="size-4" />}</span>
+                                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{sessionTitle(session)}</span><span className="mt-1 block text-[11px] opacity-65">{session.mode === "agent" ? "Agent 任务" : session.mode === "create" ? "图片创作" : "聊天"} · {new Date(session.updatedAt).toLocaleDateString()}</span></span>
+                            </button>
+                            <button type="button" onClick={() => modal.confirm({ title: "删除这段对话？", content: "会话仅保存在当前浏览器，删除后无法恢复。", okText: "删除", cancelText: "保留", okButtonProps: { danger: true }, onOk: () => removeSession(session.id) })} className="grid size-8 shrink-0 place-items-center rounded-lg opacity-50 transition hover:opacity-100 focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-60" aria-label="删除会话"><Trash2 className="size-4" /></button>
+                        </div>)}
                     </div>
-                    <div className="border-t border-orange-100 px-4 py-3 text-[11px] leading-5 text-stone-400">会话仅保存在当前浏览器；模型和密钥始终由服务端管理。</div>
+                    <div className="border-t border-border px-4 py-4 text-xs leading-6 text-muted-foreground">对话保存在当前浏览器。<br />模型与密钥由服务端统一管理。</div>
                 </aside>
 
                 <section className="flex min-w-0 flex-1 flex-col">
-                    <header className="flex min-h-16 items-center gap-3 border-b border-orange-100 px-4 md:px-6">
-                        <Tooltip title={sidebarOpen ? "收起会话" : "展开会话"}><button type="button" onClick={() => setSidebarOpen((value) => !value)} className="grid size-8 place-items-center rounded-md text-stone-500 hover:bg-orange-50 hover:text-orange-700">{sidebarOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}</button></Tooltip>
-                        <div className="min-w-0 flex-1"><h1 className="text-sm font-bold text-stone-900">LLM 对话</h1><p className="mt-0.5 truncate text-[11px] text-stone-400">{mode === "agent" ? `Agent · ${agent.description}` : mode === "create" ? "调用图像模型 · 生成与改图" : "一问一答 · 设计思路与提示词协作"}</p></div>
-                        <div className="hidden items-center gap-2 sm:flex"><span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700"><CheckCircle2 className="size-3.5" /> 服务端已连接</span><div className="relative"><select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} className="h-8 max-w-[220px] appearance-none rounded-md border border-orange-200 bg-white py-0 pl-3 pr-8 text-xs font-semibold text-stone-700 outline-none focus:border-orange-500"><option value="">选择模型</option>{availableModels.map((item) => <option key={item.modelId} value={item.modelId}>{item.name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-2 top-2 size-3.5 text-stone-400" /></div></div>
+                    <header className="flex min-h-24 flex-wrap items-center gap-3 border-b border-border px-4 py-4 md:px-6">
+                        <Tooltip title={sidebarOpen ? "收起会话" : "展开会话"}><button type="button" aria-label={sidebarOpen ? "收起会话" : "展开会话"} onClick={() => setSidebarOpen((value) => !value)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted">{sidebarOpen ? <PanelLeftClose className="size-5" /> : <PanelLeftOpen className="size-5" />}</button></Tooltip>
+                        <div className="min-w-0 flex-1"><h1 className="wb-title">LLM 对话</h1><p className="mt-1 text-sm text-muted-foreground">{mode === "agent" ? "把设计需求，拆成下一步行动。" : mode === "create" ? "聊一个想法，也创作一张图片。" : "设计思路、提示词、素材分析，一起想清楚。"}</p></div>
+                        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
+                            <span role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground">{modelsLoading ? <LoaderCircle className="size-3.5 animate-spin" /> : availableModels.length ? <CheckCircle2 className="size-3.5" /> : null}{modelsLoading ? "读取模型中" : availableModels.length ? availableModels.length + " 个可用模型" : "暂无可用模型"}</span>
+                            <div className="relative min-w-0"><select aria-label="对话模型" disabled={modelsLoading || !availableModels.length} value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} className="h-10 max-w-[240px] appearance-none rounded-xl border border-border bg-card py-0 pl-3 pr-9 text-sm text-foreground outline-none disabled:opacity-50"><option value="">{modelsLoading ? "正在读取模型" : "选择模型"}</option>{availableModels.map((item) => <option key={item.modelId} value={item.modelId}>{item.name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-3 size-4 text-muted-foreground" /></div>
+                        </div>
                     </header>
+                    {modelError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{modelError}</span><Button onClick={() => setModelReload((value) => value + 1)}>重试加载</Button></div> : null}
 
-                    <div className="border-b border-orange-100 px-4 py-3 md:px-6"><div className="inline-flex rounded-md bg-orange-50 p-1"><button type="button" onClick={() => switchMode("chat")} className={cn("flex h-8 items-center gap-2 rounded px-3 text-xs font-bold transition", mode === "chat" ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-800")}><Bot className="size-3.5" /> 聊天</button><button type="button" onClick={() => switchMode("create")} className={cn("flex h-8 items-center gap-2 rounded px-3 text-xs font-bold transition", mode === "create" ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-800")}><ImagePlus className="size-3.5" /> 创作</button><button type="button" onClick={() => switchMode("agent")} className={cn("flex h-8 items-center gap-2 rounded px-3 text-xs font-bold transition", mode === "agent" ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-800")}><WandSparkles className="size-3.5" /> Agent</button></div>{selectedClaude && mode !== "create" ? <ClaudeChatControls stream={config.claudeStream !== "false"} thinking={config.claudeThinking === "true"} maxTokens={config.claudeMaxTokens} onStreamChange={(value) => updateConfig("claudeStream", String(value))} onThinkingChange={(value) => updateConfig("claudeThinking", String(value))} onMaxTokensChange={(value) => updateConfig("claudeMaxTokens", value)} /> : null}{mode === "agent" ? <div className="mt-3 flex flex-wrap gap-2">{agentTasks.map((item) => <button key={item.id} type="button" onClick={() => setAgentTask(item.id)} className={cn("rounded-full border px-3 py-1.5 text-xs font-semibold transition", agentTask === item.id ? "border-orange-500 bg-orange-600 text-white" : "border-orange-200 bg-white text-stone-600 hover:border-orange-400")}>{item.label}</button>)}</div> : mode === "create" ? <p className="mt-3 text-xs text-stone-500">不上传图片时为文生图；上传图片后为图片编辑。生成结果会进入历史与素材库。</p> : null}</div>
-
-                    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-8 md:px-[10%]">
-                        {!activeSession?.messages.length ? <div className="mx-auto flex max-w-xl flex-col items-center pt-[10vh] text-center"><div className="grid size-12 place-items-center rounded-lg bg-orange-600 text-white shadow-lg shadow-orange-200">{mode === "create" ? <ImagePlus className="size-6" /> : <Bot className="size-6" />}</div><h2 className="mt-5 text-2xl font-bold text-stone-900">{mode === "agent" ? "开始一项设计任务" : mode === "create" ? "描述你要生成的图片" : "从一个问题开始"}</h2><p className="mt-2 max-w-md text-sm leading-6 text-stone-500">{mode === "agent" ? agent.description : mode === "create" ? "选择后台启用的图像模型；上传图片可直接进行 AI 改图。" : "向已启用的 LLM 询问设计方向、提示词、项目拆解或素材分析。"}</p><div className="mt-6 flex flex-wrap justify-center gap-2">{mode === "create" ? <button type="button" onClick={() => setDraft("为这件服装生成一组高级感棚拍主图") } className="rounded-md border border-orange-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600 hover:border-orange-400 hover:text-orange-700">试试图片创作</button> : (mode === "agent" ? agentTasks : agentTasks.slice(0, 2)).map((item) => <button key={item.id} type="button" onClick={() => { if (mode === "agent") setAgentTask(item.id); setDraft(item.prompt); }} className="rounded-md border border-orange-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600 hover:border-orange-400 hover:text-orange-700">{item.label}</button>)}</div></div> : <div className="mx-auto max-w-3xl space-y-6">{activeSession.messages.map((item) => <ChatBubble key={item.id} message={item} onContinueEditing={continueEditing} />)}{isSending ? <div className="flex items-center gap-2 text-sm text-stone-400"><span className="size-4 animate-spin rounded-full border-2 border-orange-200 border-t-orange-600" /> {mode === "create" ? "正在生成图片…" : "正在思考…"}</div> : null}</div>}
+                    <div className="border-b border-border px-4 py-3 md:px-6">
+                        <div className="inline-flex gap-1 rounded-xl bg-muted p-1">
+                            <button type="button" aria-pressed={mode === "chat"} onClick={() => switchMode("chat")} className={cn("flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors", mode === "chat" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}><Bot className="size-4" />聊天</button>
+                            <button type="button" aria-pressed={mode === "create"} onClick={() => switchMode("create")} className={cn("flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors", mode === "create" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}><ImagePlus className="size-4" />创作</button>
+                            <button type="button" aria-pressed={mode === "agent"} onClick={() => switchMode("agent")} className={cn("flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors", mode === "agent" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}><WandSparkles className="size-4" />Agent</button>
+                        </div>
+                        {selectedClaude && mode !== "create" ? <ClaudeChatControls model={selectedModel} stream={config.claudeStream !== "false"} thinking={config.claudeThinking === "true"} maxTokens={config.claudeMaxTokens} onStreamChange={(value) => updateConfig("claudeStream", String(value))} onThinkingChange={(value) => updateConfig("claudeThinking", String(value))} onMaxTokensChange={(value) => updateConfig("claudeMaxTokens", value)} /> : null}
+                        {mode === "agent" ? <div className="mt-3 flex flex-wrap gap-2">{agentTasks.map((item) => <button key={item.id} type="button" aria-pressed={agentTask === item.id} onClick={() => setAgentTask(item.id)} className={cn("min-h-9 rounded-lg border px-3 py-1.5 text-sm transition-colors", agentTask === item.id ? "border-orange-300 bg-orange-50 text-orange-800 dark:border-orange-800 dark:bg-orange-950/30 dark:text-orange-200" : "border-border text-muted-foreground hover:bg-muted")}>{item.label}</button>)}</div> : mode === "create" ? <p className="mt-3 text-sm text-muted-foreground">直接描述即可生图；上传参考图片后，输入想修改的地方。</p> : null}
                     </div>
 
-                    <div className="border-t border-orange-100 bg-[#fffdf8] px-4 py-4 md:px-[10%]"><div className="mx-auto max-w-3xl"><div className="rounded-lg border border-orange-200 bg-white p-2 shadow-sm focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-100">{attachments.length ? <div className="flex flex-wrap gap-2 px-1 pb-2">{attachments.map((item) => <div key={item.id} className="group relative flex h-14 max-w-[170px] items-center gap-2 rounded-md border border-orange-100 bg-orange-50/60 p-1.5">{item.dataUrl ? <img src={item.dataUrl} alt="" className="size-10 rounded object-cover" /> : <span className="grid size-10 place-items-center rounded bg-white text-orange-600"><FileText className="size-4" /></span>}<span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-stone-600">{item.name}</span><button type="button" aria-label={`移除 ${item.name}`} onClick={() => setAttachments((current) => current.filter((attachment) => attachment.id !== item.id))} className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-orange-200 bg-white text-stone-500 shadow-sm hover:text-red-600"><X className="size-3" /></button></div>)}</div> : null}<textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void send(); } }} placeholder={mode === "create" ? "描述要生成的图片；上传图片后可直接写改图要求…" : mode === "agent" ? `${agent.prompt}…` : "输入你的问题，或上传图片/文本文件…"} className="min-h-[78px] w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 text-stone-800 outline-none placeholder:text-stone-400" /><div className="flex items-center justify-between gap-3 border-t border-stone-100 px-1 pt-2"><div className="flex items-center gap-1"><Tooltip title="上传图片或文本文件"><button type="button" onClick={() => fileInputRef.current?.click()} className="grid size-8 place-items-center rounded-md text-stone-500 hover:bg-orange-50 hover:text-orange-700" aria-label="上传文件"><Paperclip className="size-4" /></button></Tooltip><Tooltip title="上传图片"><button type="button" onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "image/*"; fileInputRef.current.click(); } }} className="grid size-8 place-items-center rounded-md text-stone-500 hover:bg-orange-50 hover:text-orange-700" aria-label="上传图片"><ImagePlus className="size-4" /></button></Tooltip><span className="hidden text-[11px] text-stone-400 sm:inline">图片 / 文本文件 · 最多 5 个</span></div><Button type="primary" disabled={(!draft.trim() && !attachments.length) || isSending || !selectedModel} loading={isSending} onClick={() => void send()} icon={mode === "create" ? <Sparkles className="size-3.5" /> : <Send className="size-3.5" />} className="!h-8 !border-0 !bg-orange-600 !px-3 !text-xs !font-bold hover:!bg-orange-700">{mode === "create" ? (standaloneEdition ? "生成图片" : `生成图片${selected ? ` · ${selected.creditCost}积分` : ""}`) : "发送"}</Button></div><input ref={fileInputRef} type="file" multiple accept="image/*,.txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" className="hidden" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} /></div><p className="mt-2 flex items-center gap-1.5 text-[11px] text-stone-400"><CornerDownLeft className="size-3" /> {mode === "create" ? (standaloneEdition ? "本机版：生成结果会保存在本机素材库。" : "调用图像模型才会扣积分；上传、预览和输入提示词不扣费。") : (standaloneEdition ? "本机免登录版" : "模型和权限由管理员后台统一配置。")}</p></div></div>
+                    <div ref={scrollRef} onScroll={(event) => { const element = event.currentTarget; followBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-[8%]">
+                        {!activeSession?.messages.length ? <div className="wb-empty mx-auto max-w-xl !min-h-0 !py-2">
+                            <div className="hidden size-12 place-items-center rounded-2xl bg-muted text-foreground [@media(min-height:850px)]:grid">{mode === "create" ? <ImagePlus className="size-6" /> : <Bot className="size-6" />}</div>
+                            <h2 className="mt-2 text-xl font-semibold text-foreground sm:text-2xl">{mode === "agent" ? "把想法，变成一项设计任务" : mode === "create" ? "下一张作品，从一个想法开始" : "从一个问题开始"}</h2>
+                            <p>{mode === "agent" ? agent.description : mode === "create" ? "选择图像模型，写下画面；也可以上传已有图片，继续修改。" : "聊聊设计方向，整理提示词，或上传素材一起分析。"}</p>
+                            <div className="mt-3 flex flex-wrap justify-center gap-2">{mode === "create" ? <Button className="!h-10" onClick={() => setDraft("为这件服装生成一组高级感棚拍主图")}>试试图片创作</Button> : (mode === "agent" ? agentTasks : agentTasks.slice(0, 2)).map((item) => <Button key={item.id} className="!h-10" onClick={() => { if (mode === "agent") setAgentTask(item.id); setDraft(item.prompt); }}>{item.label}</Button>)}</div>
+                        </div> : <div className="mx-auto max-w-3xl space-y-6">{activeSession.messages.map((item) => <ChatBubble key={item.id} message={item} onContinueEditing={continueEditing} />)}{isSending ? <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{mode === "create" ? "正在生成图片…" : "正在思考与整理…"}</div> : null}</div>}
+                    </div>
+
+                    <div className="border-t border-border bg-card px-4 py-4 md:px-[8%]">
+                        <div className="mx-auto max-w-3xl">
+                            <div className="rounded-2xl border border-input bg-background p-3 focus-within:border-orange-400">
+                                {attachments.length ? <div className="flex flex-wrap gap-2 pb-3">{attachments.map((item) => <div key={item.id} className="group relative flex h-14 max-w-[180px] items-center gap-2 rounded-xl border border-border bg-card p-1.5">{item.dataUrl ? <img src={item.dataUrl} alt="" className="size-10 rounded-lg object-cover" /> : <span className="grid size-10 place-items-center rounded-lg bg-muted text-muted-foreground"><FileText className="size-5" /></span>}<span className="min-w-0 flex-1 truncate text-xs font-medium">{item.name}</span><button type="button" aria-label={"移除 " + item.name} onClick={() => setAttachments((current) => current.filter((attachment) => attachment.id !== item.id))} className="absolute -right-1.5 -top-1.5 grid size-6 place-items-center rounded-full border border-border bg-card text-muted-foreground hover:text-red-600"><X className="size-3.5" /></button></div>)}</div> : null}
+                                {readingAttachments ? <div role="status" className="mb-2 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在读取附件，请稍候…</div> : null}
+                                <textarea aria-label="对话内容" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void send(); } }} placeholder={mode === "create" ? "描述要生成的图片，或写下对参考图片的修改要求…" : mode === "agent" ? agent.prompt + "…" : "输入你的问题，或上传图片、文档一起分析…"} className="min-h-[80px] w-full resize-none bg-transparent px-1 py-1 text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground" />
+                                <div className="flex items-center justify-between gap-3 border-t border-border pt-2">
+                                    <div className="flex items-center gap-1">
+                                        <Tooltip title="上传图片、PDF、Word、表格或文本"><button type="button" disabled={readingAttachments || attachments.length >= 5} onClick={() => fileInputRef.current?.click()} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label="上传文件"><Paperclip className="size-5" /></button></Tooltip>
+                                        <Tooltip title="上传图片"><button type="button" disabled={readingAttachments || attachments.length >= 5} onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "image/*"; fileInputRef.current.click(); } }} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label="上传图片"><ImagePlus className="size-5" /></button></Tooltip>
+                                        <span className="hidden text-xs text-muted-foreground sm:inline">图片 / 文档 / 表格 · 最多 5 个</span>
+                                    </div>
+                                    <Button type="primary" disabled={(!draft.trim() && !attachments.length) || isSending || readingAttachments || !selectedModel} loading={isSending} onClick={() => void send()} icon={mode === "create" ? <Sparkles className="size-4" /> : <Send className="size-4" />} className="!h-10 !px-4">{mode === "create" ? (!deploymentFeatures.creditsEnabled ? "生成图片" : "生成图片" + (selected ? " · " + selected.creditCost + "积分" : "")) : "发送"}</Button>
+                                </div>
+                                <input ref={fileInputRef} type="file" multiple disabled={readingAttachments} accept={CHAT_ATTACHMENT_ACCEPT} className="hidden" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} />
+                            </div>
+                            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"><CornerDownLeft className="size-3.5" /><span>Ctrl / ⌘ + Enter 发送</span><span className="opacity-45">·</span><span>{mode === "create" ? (!deploymentFeatures.creditsEnabled ? "生成结果会保存在素材库" : "上传与预览不扣费，生成图片才会扣积分") : (!deploymentFeatures.authenticationEnabled ? "免登录创作" : "模型由管理员统一配置")}</span></p>
+                        </div>
+                    </div>
                 </section>
             </div>
         </main>
@@ -326,20 +439,42 @@ function messageContent(message: ChatMessage): AiTextMessage["content"] {
     return images.length ? [{ type: "text" as const, text }, ...images] : text;
 }
 
-function ChatBubble({ message, onContinueEditing }: { message: ChatMessage; onContinueEditing: (image: { id: string; dataUrl: string }) => void }) {
-    const isUser = message.role === "user";
-    return <div className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")}><div className={cn("grid size-8 shrink-0 place-items-center rounded-md", isUser ? "order-2 bg-stone-900 text-white" : message.role === "error" ? "bg-red-50 text-red-600" : "bg-orange-100 text-orange-700")}>{isUser ? <span className="text-xs font-bold">我</span> : message.role === "error" ? <span className="text-xs font-bold">!</span> : <Bot className="size-4" />}</div><div className={cn("max-w-[86%] rounded-lg px-4 py-3 text-sm leading-7", isUser ? "order-1 bg-stone-900 text-white" : message.role === "error" ? "border border-red-100 bg-red-50 text-red-700" : "border border-orange-100 bg-white text-stone-700 shadow-sm")}><div className="whitespace-pre-wrap">{message.content}</div>{message.generatedImages?.length ? <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">{message.generatedImages.map((item) => <div key={item.id} className="overflow-hidden rounded-md border border-orange-100 bg-orange-50/30"><img src={item.dataUrl} alt="生成结果" className="aspect-square w-full object-cover" /><div className="flex border-t border-orange-100"><button type="button" onClick={() => onContinueEditing(item)} className="flex-1 px-2 py-1 text-[11px] font-semibold text-orange-700 hover:bg-orange-100">继续编辑</button><a href={item.dataUrl} download="wireless-canvas.png" className="border-l border-orange-100 px-2 py-1 text-[11px] font-semibold text-stone-600 hover:bg-orange-100">下载</a></div></div>)}</div> : null}{message.attachments?.length ? <div className="mt-3 flex flex-wrap gap-2">{message.attachments.map((item) => item.dataUrl ? <img key={item.id} src={item.dataUrl} alt={item.name} className="max-h-40 rounded-md border border-white/20 object-cover" /> : <span key={item.id} className={cn("inline-flex items-center gap-1 rounded px-2 py-1 text-xs", isUser ? "bg-white/10" : "bg-orange-50 text-orange-700")}><FileText className="size-3.5" />{item.name}</span>)}</div> : null}</div></div>;
+// Historical images are retained in the session UI, but only the current turn
+// sends binary image data. This keeps long conversations below provider limits.
+function messageTextContent(message: ChatMessage) {
+    const content = messageContent(message);
+    return typeof content === "string" ? content : content.flatMap((item) => item.type === "text" ? [item.text] : []).join("\n");
 }
 
-function ClaudeChatControls({ stream, thinking, maxTokens, onStreamChange, onThinkingChange, onMaxTokensChange }: { stream: boolean; thinking: boolean; maxTokens: string; onStreamChange: (value: boolean) => void; onThinkingChange: (value: boolean) => void; onMaxTokensChange: (value: string) => void }) {
-    return <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-violet-100 bg-violet-50/50 px-3 py-2 text-xs text-stone-600">
-        <span className="font-semibold text-violet-800">Claude 原生参数</span>
+const ChatBubble = memo(function ChatBubble({ message, onContinueEditing }: { message: ChatMessage; onContinueEditing: (image: { id: string; dataUrl: string }) => void }) {
+    const isUser = message.role === "user";
+    return (
+        <div className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")}>
+            <div className={cn("grid size-8 shrink-0 place-items-center rounded-xl", isUser ? "order-2 bg-foreground text-background" : message.role === "error" ? "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300" : "bg-muted text-muted-foreground")}>{isUser ? <span className="text-xs font-semibold">我</span> : message.role === "error" ? <span className="text-xs font-semibold">!</span> : <Bot className="size-4" />}</div>
+            <div className={cn("min-w-0 max-w-[86%] rounded-2xl px-4 py-3 text-sm leading-7", isUser ? "order-1 bg-foreground text-background" : message.role === "error" ? "border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200" : "border border-border bg-card text-foreground")}>
+                <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.content}</div>
+                {message.generatedImages?.length ? <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">{message.generatedImages.map((item) => <div key={item.id} className="overflow-hidden rounded-xl border border-border bg-muted">
+                    <img src={item.dataUrl} alt="生成结果" loading="lazy" decoding="async" className="max-h-80 w-full object-contain" />
+                    <div className="flex border-t border-border"><button type="button" onClick={() => onContinueEditing(item)} className="min-h-10 flex-1 px-3 py-2 text-xs font-medium text-foreground hover:bg-card">继续编辑</button><a href={item.dataUrl} download="wireless-canvas.png" className="min-h-10 border-l border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-card">下载</a></div>
+                </div>)}</div> : null}
+                {message.attachments?.length ? <div className="mt-3 flex flex-wrap gap-2">{message.attachments.map((item) => item.dataUrl ? <img key={item.id} src={item.dataUrl} alt={item.name} loading="lazy" decoding="async" className="max-h-40 rounded-xl border border-border object-contain" /> : <span key={item.id} className={cn("inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs", isUser ? "bg-background/10" : "bg-muted text-muted-foreground")}><FileText className="size-3.5" />{item.name}</span>)}</div> : null}
+            </div>
+        </div>
+    );
+});
+
+function ClaudeChatControls({ model, stream, thinking, maxTokens, onStreamChange, onThinkingChange, onMaxTokensChange }: { model: string; stream: boolean; thinking: boolean; maxTokens: string; onStreamChange: (value: boolean) => void; onThinkingChange: (value: boolean) => void; onMaxTokensChange: (value: string) => void }) {
+    const alwaysThinking = model.toLowerCase() === "claude-fable-5";
+    return <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">Claude 原生参数</span>
         <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={stream} onChange={(event) => onStreamChange(event.target.checked)} /> 流式输出</label>
-        <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={thinking} onChange={(event) => onThinkingChange(event.target.checked)} /> 深度思考</label>
-        <label className="inline-flex items-center gap-1.5">最大输出
-            <select value={maxTokens} onChange={(event) => onMaxTokensChange(event.target.value)} className="h-6 rounded border border-violet-200 bg-white px-1 text-xs outline-none">
+        {alwaysThinking ? <span title="Fable 5 不支持关闭思考，也不支持旧版固定思考预算。">自适应思考 · 始终开启</span> : <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={thinking} onChange={(event) => onThinkingChange(event.target.checked)} /> 自适应思考</label>}
+        <label className="inline-flex items-center gap-1.5" title="总输出预算包含思考与可见回复；16384 是当前项目限制，不是模型官方最大值。">总输出预算
+            <select value={maxTokens} onChange={(event) => onMaxTokensChange(event.target.value)} className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none">
                 {["1024", "2048", "4096", "8192", "16384"].map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
         </label>
+        <a href="https://docs.apimart.ai/cn/api-reference/texts/general/claude-messages" target="_blank" rel="noreferrer" className="underline underline-offset-2">接口说明</a>
+        <span className="w-full text-[11px] leading-4">预算包含思考与回复；当前项目上限 16384 tokens。参数不适用于其他模型。</span>
     </div>;
 }

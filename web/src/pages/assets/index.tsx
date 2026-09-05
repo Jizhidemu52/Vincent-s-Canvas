@@ -1,17 +1,20 @@
-import { BookmarkPlus, Check, Copy, Download, PencilLine, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { BookmarkPlus, Check, Copy, Download, LoaderCircle, PencilLine, Plus, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
 import { useNavigate } from "react-router-dom";
 
 import { useCopyText } from "@/hooks/use-copy-text";
+import { needsCanvasAssetPreviewResolution, resolveCanvasAssetPreview } from "@/lib/canvas/canvas-asset-preview";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
 import { createClientId } from "@/lib/client-id";
-import { uploadImage } from "@/services/image-storage";
+import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { resolveMediaUrl } from "@/services/file-storage";
 import { cn } from "@/lib/utils";
 import { canUserAccessAsset, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
+import { buildAssetSearchIndex, searchAssetIndex } from "./asset-search";
 import {
     deleteServerAsset,
     fetchServerAssetContent,
@@ -57,8 +60,13 @@ export default function AssetsPage() {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInputRef = useRef<HTMLInputElement>(null);
     const batchImageInputRef = useRef<HTMLInputElement>(null);
+    const refreshRevisionRef = useRef(0);
     const localAssets = useAssetStore((state) => state.assets);
     const [serverAssets, setServerAssets] = useState<ServerAsset[]>([]);
+    const [serverLoading, setServerLoading] = useState(true);
+    const [serverError, setServerError] = useState("");
+    const [assetAction, setAssetAction] = useState("");
+    const assetActionRef = useRef(false);
     const [serverProjects, setServerProjects] = useState<UserProject[]>([]);
     const [serverAssetIds, setServerAssetIds] = useState<Set<string>>(new Set());
     const user = useUserStore((state) => state.user);
@@ -66,9 +74,10 @@ export default function AssetsPage() {
     const updateAsset = useAssetStore((state) => state.updateAsset);
     const removeAsset = useAssetStore((state) => state.removeAsset);
     const [keyword, setKeyword] = useState("");
+    const deferredKeyword = useDeferredValue(keyword);
     const [kindFilter, setKindFilter] = useState<AssetKind | "all">("all");
     const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(10);
+    const [pageSize, setPageSize] = useState(12);
     const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
     const [isAssetOpen, setIsAssetOpen] = useState(false);
     const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
@@ -82,9 +91,14 @@ export default function AssetsPage() {
     const tags = Form.useWatch("tags", form) || [];
     const content = Form.useWatch("content", form) || "";
     const refreshServerAssets = async () => {
+        const revision = ++refreshRevisionRef.current;
+        setServerLoading(true);
+        setServerError("");
         try {
             const result = await listServerAssets();
-            setServerAssets(result.assets);
+            if (revision !== refreshRevisionRef.current) return;
+            // The library currently renders image/video/text. Audio references remain available to video tasks.
+            setServerAssets(result.assets.filter((asset) => asset.kind !== "other"));
             setServerAssetIds(new Set(result.assets.map((asset) => asset.id)));
             setPreviewAsset((current) => {
                 if (!current) return current;
@@ -92,26 +106,30 @@ export default function AssetsPage() {
                 return refreshed ? serverAssetToLocal(refreshed) : current;
             });
         }
-        catch (error) { message.error(error instanceof Error ? error.message : "公司素材加载失败"); }
+        catch (error) { if (revision === refreshRevisionRef.current) setServerError(error instanceof Error ? error.message : "公司素材加载失败"); }
+        finally { if (revision === refreshRevisionRef.current) setServerLoading(false); }
     };
-    useEffect(() => { void refreshServerAssets(); }, []);
+    useEffect(() => { void refreshServerAssets(); return () => { refreshRevisionRef.current += 1; }; }, [user?.id]);
     useEffect(() => { void listServerProjects().then((result) => setServerProjects(result.projects)).catch(() => setServerProjects([])); }, []);
     const assets = useMemo(() => [...serverAssets.map(serverAssetToLocal), ...localAssets.filter((asset) => !serverAssetIds.has(asset.id) && !serverAssetIds.has(metadataString(asset, "serverAssetId")))], [localAssets, serverAssetIds, serverAssets]);
     const validAssets = useMemo(() => assets.filter((asset) => canUserAccessAsset(asset, user) && (asset.kind === "text" || asset.kind === "image" || asset.kind === "video")), [assets, user]);
 
-    const filteredAssets = useMemo(() => {
-        const query = keyword.trim().toLowerCase();
-        return validAssets.filter((asset) => {
-            if (kindFilter !== "all" && asset.kind !== kindFilter) return false;
-            if (!query) return true;
-            return assetSearchText(asset).includes(query);
-        });
-    }, [validAssets, keyword, kindFilter]);
+    const searchIndex = useMemo(() => buildAssetSearchIndex(validAssets), [validAssets]);
+    const filteredAssets = useMemo(() => searchAssetIndex(searchIndex, deferredKeyword, kindFilter), [searchIndex, deferredKeyword, kindFilter]);
 
     const visibleAssets = useMemo(() => {
         const start = (page - 1) * pageSize;
         return filteredAssets.slice(start, start + pageSize);
     }, [filteredAssets, page, pageSize]);
+
+    const runAssetAction = async (label: string, run: () => Promise<void>) => {
+        if (assetActionRef.current) return;
+        assetActionRef.current = true;
+        setAssetAction(label);
+        try { await run(); }
+        catch (error) { message.error(error instanceof Error ? error.message : "素材操作未完成，请重试"); }
+        finally { assetActionRef.current = false; setAssetAction(""); }
+    };
 
     useEffect(() => {
         const maxPage = Math.max(1, Math.ceil(filteredAssets.length / pageSize));
@@ -201,7 +219,16 @@ export default function AssetsPage() {
         if (asset.kind !== "image" && asset.kind !== "video") return;
         const filename = `${asset.title || "asset"}.${asset.data.mimeType.split("/")[1] || "png"}`;
         if (!serverAssetIds.has(asset.id)) {
-            saveAs(asset.kind === "video" ? asset.data.url : asset.data.dataUrl, filename);
+            try {
+                const source = await resolveCanvasAssetPreview(asset, { resolveImage: resolveImageUrl, resolveMedia: resolveMediaUrl });
+                if (!source) {
+                    message.error("素材文件不存在或尚未完成同步");
+                    return;
+                }
+                saveAs(source, filename);
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "素材读取失败，请重试");
+            }
             return;
         }
         try {
@@ -255,7 +282,10 @@ export default function AssetsPage() {
             message.warning("请选择图片文件");
             return;
         }
-        for (const file of imageFiles) await uploadServerAsset(file, { title: file.name, tags: ["手动上传"], source: "manual-upload", module: "素材库", originalFileName: file.name });
+        for (const [index, file] of imageFiles.entries()) {
+            setAssetAction(`正在上传 ${index + 1} / ${imageFiles.length}：${file.name}`);
+            await uploadServerAsset(file, { title: file.name, tags: ["手动上传"], source: "manual-upload", module: "素材库", originalFileName: file.name });
+        }
         await refreshServerAssets();
         message.success(`已上传 ${imageFiles.length} 张图片`);
         if (batchImageInputRef.current) batchImageInputRef.current.value = "";
@@ -323,15 +353,22 @@ export default function AssetsPage() {
     };
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-background text-stone-900 dark:text-stone-100">
-            <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] px-6 py-8 [background-size:16px_16px] dark:bg-[radial-gradient(rgba(245,245,244,.14)_1px,transparent_1px)]">
-                <div className="pb-8">
-                    <div className="mx-auto max-w-5xl text-center">
-                        <h1 className="text-4xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">我的素材</h1>
-                        <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">收藏常用文本和图片，按类型、标题和标签快速查找。</p>
-                    </div>
+        <div className="wb-page flex h-full flex-col overflow-hidden">
+            <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
+                <div className="mx-auto max-w-7xl pb-6">
+                    <header className="wb-header">
+                        <div>
+                            <p className="wb-eyebrow">素材工作台</p>
+                            <h1 className="wb-title">我的素材</h1>
+                            <p className="wb-description">把文本、图片和视频整理在一起。收藏、下载，或带着原提示词继续创作。</p>
+                        </div>
+                        <div className="wb-toolbar">
+                            <Button size="large" icon={<Plus className="size-4" />} onClick={openCreate}>新增素材</Button>
+                            <Button size="large" type="primary" icon={<Upload className="size-4" />} disabled={Boolean(assetAction)} onClick={() => batchImageInputRef.current?.click()}>上传图片</Button>
+                        </div>
+                    </header>
 
-                    <div className="mx-auto mt-8 w-full max-w-2xl">
+                    <div className="w-full max-w-2xl">
                         <Input.Search
                             className="w-full"
                             size="large"
@@ -350,7 +387,7 @@ export default function AssetsPage() {
                         />
                     </div>
 
-                    <div className="mx-auto mt-6 grid max-w-6xl gap-3 text-left">
+                    <div className="mt-5 grid gap-3 text-left">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-center">
                                 <div className="text-xs font-medium text-stone-500 dark:text-stone-400">类型</div>
@@ -370,34 +407,15 @@ export default function AssetsPage() {
                                     ))}
                                 </div>
                             </div>
-                            <div className="flex flex-wrap gap-4">
-                                <button
-                                    type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={() => void exportAllAssets()}
-                                >
-                                    导出素材
-                                </button>
-                                <button
-                                    type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={() => assetInputRef.current?.click()}
-                                >
-                                    导入素材
-                                </button>
-                                <button
-                                    type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={() => batchImageInputRef.current?.click()}
-                                >
-                                    批量上传图片
-                                </button>
-                                <button type="button" className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300" onClick={openCreate}>
-                                    新增素材
-                                </button>
+                            <div className="wb-toolbar">
+                                <span className="text-sm text-muted-foreground">共 {filteredAssets.length} 个素材</span>
+                                <Button icon={<Download className="size-4" />} disabled={Boolean(assetAction) || !validAssets.length} onClick={() => void runAssetAction("正在整理导出文件…", exportAllAssets)}>导出素材</Button>
+                                <Button icon={<Upload className="size-4" />} disabled={Boolean(assetAction)} onClick={() => assetInputRef.current?.click()}>导入素材包</Button>
                             </div>
                         </div>
                     </div>
+                    {assetAction || serverLoading ? <div role="status" className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{assetAction || "正在同步素材列表…"}</div> : null}
+                    {serverError ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{serverError}；已保留当前本地素材。</span><Button onClick={() => void refreshServerAssets()}>重试加载</Button></div> : null}
                 </div>
 
                 <div className="mx-auto flex max-w-7xl flex-col gap-5">
@@ -416,7 +434,7 @@ export default function AssetsPage() {
                         ))}
                     </div>
 
-                    {!visibleAssets.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有找到素材" className="py-20" /> : null}
+                    {!visibleAssets.length && !serverLoading ? <div className="wb-surface wb-empty"><Upload className="size-8" /><strong>{keyword || kindFilter !== "all" ? "没有找到匹配素材" : "先收好你的第一份素材"}</strong><p>{keyword || kindFilter !== "all" ? "试试更短的关键词，或清除筛选查看全部内容。" : "上传常用参考图，或新增文本素材。生成的作品也会出现在这里。"}</p>{keyword || kindFilter !== "all" ? <Button onClick={() => { setKeyword(""); setKindFilter("all"); setPage(1); }}>清除筛选</Button> : <Button type="primary" disabled={Boolean(assetAction)} onClick={() => batchImageInputRef.current?.click()}>上传图片</Button>}</div> : null}
 
                     <div className="flex justify-center">
                         <Pagination
@@ -424,7 +442,7 @@ export default function AssetsPage() {
                             pageSize={pageSize}
                             total={filteredAssets.length}
                             showSizeChanger
-                            pageSizeOptions={[10, 20, 50, 100]}
+                            pageSizeOptions={[12, 24, 48, 96]}
                             onChange={(nextPage, nextPageSize) => {
                                 setPage(nextPage);
                                 setPageSize(nextPageSize);
@@ -556,8 +574,8 @@ export default function AssetsPage() {
                 onSetCompanyVisibility={setCompanyVisibility}
             />
 
-            <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importAssetZip(event.target.files?.[0])} />
-            <input ref={batchImageInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => void importImageFiles(event.target.files)} />
+            <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" disabled={Boolean(assetAction)} onChange={(event) => { const file = event.target.files?.[0]; void runAssetAction("正在导入素材包…", () => importAssetZip(file)); }} />
+            <input ref={batchImageInputRef} type="file" accept="image/*" multiple className="hidden" disabled={Boolean(assetAction)} onChange={(event) => { const files = event.target.files; void runAssetAction("正在准备上传…", () => importImageFiles(files)); }} />
 
             <Modal title="删除素材" open={Boolean(deletingAsset)} onCancel={() => setDeletingAsset(null)} onOk={confirmDelete} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除「{deletingAsset?.title}」吗？删除后会从我的素材中移除。
@@ -583,6 +601,57 @@ function serverAssetToLocal(asset: ServerAsset): Asset {
     return { ...common, kind: "image", data: { dataUrl: common.coverUrl, storageKey: asset.id, width: 0, height: 0, bytes: asset.byteSize, mimeType: asset.mimeType } };
 }
 
+function useResolvedAssetMedia(asset: Asset | null) {
+    const fallback = asset ? asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : asset.kind === "video" ? asset.data.url : "") : "";
+    const [source, setSource] = useState(() => (asset && (asset.kind === "image" || asset.kind === "video") && needsCanvasAssetPreviewResolution(asset) ? "" : fallback));
+
+    useEffect(() => {
+        let active = true;
+        if (!asset || (asset.kind !== "image" && asset.kind !== "video")) {
+            setSource("");
+            return;
+        }
+        if (!needsCanvasAssetPreviewResolution(asset)) {
+            setSource(fallback);
+            return;
+        }
+        setSource("");
+        void resolveCanvasAssetPreview(asset, { resolveImage: resolveImageUrl, resolveMedia: resolveMediaUrl })
+            .then((url) => {
+                if (active) setSource(url);
+            })
+            .catch(() => {
+                if (active) setSource("");
+            });
+        return () => { active = false; };
+    }, [asset, fallback]);
+
+    return source;
+}
+
+function AssetPlaceholder({ asset }: { asset: Asset }) {
+    return <div className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-muted p-6 text-center text-sm leading-7 text-muted-foreground"><p className="line-clamp-6 break-words">{asset.kind === "text" ? asset.data.content.slice(0, 600) : "暂无封面"}</p></div>;
+}
+
+function AssetCover({ asset }: { asset: Asset }) {
+    const source = useResolvedAssetMedia(asset);
+    if (!source) return <AssetPlaceholder asset={asset} />;
+    if (asset.kind === "video") return <video src={source} muted playsInline preload="metadata" className="aspect-[4/3] w-full object-cover" />;
+    return <img src={source} alt={asset.title} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />;
+}
+
+function AssetDetailPreview({ asset }: { asset: Asset }) {
+    const source = useResolvedAssetMedia(asset);
+    if (!source) return <AssetPlaceholder asset={asset} />;
+    if (asset.kind === "video") return <AssetPlaceholder asset={asset} />;
+    return <Image src={source} alt={asset.title} className="rounded-lg" />;
+}
+
+function ResolvedAssetVideo({ asset, className, controls = false }: { asset: Extract<Asset, { kind: "video" }>; className?: string; controls?: boolean }) {
+    const source = useResolvedAssetMedia(asset);
+    return source ? <video src={source} controls={controls} preload="metadata" className={className} /> : null;
+}
+
 function AssetCard({
     asset,
     onOpen,
@@ -600,19 +669,18 @@ function AssetCard({
     onReplicate: () => void;
     onDelete: () => void;
 }) {
-    const cover = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "");
     const summary = assetSummary(asset);
     return (
         <Card
             hoverable
-            className="overflow-hidden"
+            className="wb-surface overflow-hidden"
             styles={{ body: { padding: 0 } }}
             cover={
                 <button type="button" className="block w-full text-left" onClick={onOpen}>
-                    {cover ? (
-                        <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" />
+                    {asset.kind === "image" || asset.kind === "video" ? (
+                        <AssetCover asset={asset} />
                     ) : (
-                        <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm leading-6 text-stone-600 dark:bg-stone-900 dark:text-stone-300">{asset.kind === "text" ? asset.data.content : "暂无封面"}</div>
+                        <AssetPlaceholder asset={asset} />
                     )}
                 </button>
             }
@@ -621,14 +689,14 @@ function AssetCard({
                 <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                            <h2 className="line-clamp-1 text-sm font-semibold text-stone-950 dark:text-stone-100">{asset.title}</h2>
+                            <h2 className="line-clamp-1 text-base font-semibold text-foreground">{asset.title}</h2>
                             <Typography.Text type="secondary" className="mt-1 block text-xs">
                                 {asset.source || "未标注来源"}
                             </Typography.Text>
                         </div>
                         <Tag className="m-0 shrink-0 text-[11px]">{asset.kind === "image" ? "图片" : asset.kind === "video" ? "视频" : "文本"}</Tag>
                     </div>
-                    <Typography.Paragraph type="secondary" ellipsis={{ rows: 3 }} className="!mb-0 !mt-2 !text-xs !leading-5">
+                    <Typography.Paragraph type="secondary" ellipsis={{ rows: 3 }} className="!mb-0 !mt-3 !text-sm !leading-6">
                         {summary}
                     </Typography.Paragraph>
                     <div className="mt-3 flex flex-wrap gap-1.5">
@@ -705,7 +773,6 @@ function AssetDrawer({
     onShareDepartment: (asset: Asset, remove?: boolean) => void | Promise<void>;
     onSetCompanyVisibility: (asset: Asset, visibility: "private" | "company") => void | Promise<void>;
 }) {
-    const cover = asset ? asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "") : "";
     const isOwner = asset?.ownerId === currentUserId;
     const isAdmin = currentUserRole === "super_admin" || currentUserRole === "department_admin";
     const visibility = asset ? metadataString(asset, "visibilityScope") : "private";
@@ -713,9 +780,9 @@ function AssetDrawer({
         <Drawer title="素材详情" open={Boolean(asset)} size="large" onClose={onClose}>
             {asset ? (
                 <div className="space-y-5">
-                    {cover ? (
-                        <Image src={cover} alt={asset.title} className="rounded-lg" />
-                    ) : (
+                    {asset.kind === "image" ? (
+                        <AssetDetailPreview asset={asset} />
+                    ) : asset.kind === "video" ? null : (
                         <div className="rounded-lg border border-stone-200 bg-stone-50 p-5 text-sm leading-6 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">{asset.kind === "text" ? asset.data.content : "暂无封面"}</div>
                     )}
                     <div>
@@ -739,7 +806,7 @@ function AssetDrawer({
                         {asset.kind === "text" ? (
                             <Typography.Paragraph className="mt-2 whitespace-pre-wrap">{asset.data.content}</Typography.Paragraph>
                         ) : asset.kind === "video" ? (
-                            <video src={asset.data.url} controls className="mt-2 aspect-video w-full rounded-lg bg-black" />
+                            <ResolvedAssetVideo asset={asset} controls className="mt-2 aspect-video w-full rounded-lg bg-black" />
                         ) : (
                             <Typography.Text className="mt-2 block">
                                 {asset.data.width}x{asset.data.height} · {formatBytes(asset.data.bytes)} · {asset.data.mimeType}
@@ -806,23 +873,9 @@ function AssetDrawer({
 }
 
 function assetSummary(asset: Asset) {
-    if (asset.kind === "text") return asset.data.content;
-    return `${asset.data.width}x${asset.data.height} · ${formatBytes(asset.data.bytes)} · ${asset.data.mimeType}`;
-}
-
-function assetSearchText(asset: Asset) {
-    return [
-        asset.title,
-        asset.source || "",
-        asset.note || "",
-        metadataString(asset, "prompt"),
-        metadataString(asset, "model"),
-        metadataString(asset, "module"),
-        (asset.tags || []).join(" "),
-        asset.kind === "text" ? asset.data.content : asset.data.mimeType,
-    ]
-        .join(" ")
-        .toLowerCase();
+    if (asset.kind === "text") return asset.data.content.length > 280 ? `${asset.data.content.slice(0, 280)}…` : asset.data.content;
+    const dimensions = asset.data.width > 0 && asset.data.height > 0 ? `${asset.data.width} × ${asset.data.height}` : "尺寸未记录";
+    return `${dimensions} · ${formatBytes(asset.data.bytes)} · ${asset.data.mimeType}`;
 }
 
 function AssetTrace({ asset }: { asset: Asset }) {
@@ -879,7 +932,7 @@ function resultStatusLabel(status: string) {
 }
 
 function canReplicate(asset: Asset) {
-    return Boolean(buildRecreateUrl(asset));
+    return Boolean(metadataString(asset, "recreatePath") || (metadataString(asset, "prompt") || (asset.kind === "text" ? asset.data.content : "")).trim());
 }
 
 function buildRecreateUrl(asset: Asset) {

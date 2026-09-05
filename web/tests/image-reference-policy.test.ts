@@ -32,9 +32,10 @@ test("labels and keys an asset reference independently from an upload", () => {
 
 test("enforces documented GPT, Gemini and Midjourney reference limits", () => {
     expect(validateImageReferences("gpt-image-2", Array.from({ length: 17 }, (_, index) => ref(String(index)))).message).toContain("16");
+    expect(validateImageReferences("vcen-gpt2", Array.from({ length: 16 }, (_, index) => ref(String(index)))).message).toContain("15");
     expect(validateImageReferences("gemini-3.1-flash-image-preview", Array.from({ length: 15 }, (_, index) => ref(String(index)))).message).toContain("14");
     expect(validateImageReferences("midjourney-blend", [ref("one")]).message).toContain("2 至 4");
-    expect(validateImageReferences("midjourney", [ref("one")]).valid).toBe(false);
+    expect(validateImageReferences("midjourney", [ref("one")]).valid).toBe(true);
 });
 
 test("validates legacy plain reference images used by the canvas generation pipeline", () => {

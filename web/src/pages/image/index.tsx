@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { useSearchParams } from "react-router-dom";
 import localforage from "localforage";
@@ -11,7 +11,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { standaloneEdition } from "@/lib/standalone-edition";
+import { deploymentFeatures } from "@/lib/deployment-features";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { toolModeOperation, type AdminToolMode } from "@/lib/admin-domain";
 import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
@@ -26,7 +26,10 @@ import { useUserStore } from "@/stores/use-user-store";
 import { fetchServerAssetContent, recordServerAssetEvent } from "@/services/api/server-assets";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ImageReferenceItem, ImageReferenceOrigin, ReferenceImage } from "@/types/image";
-import { SeamlessStitchPage } from "@/pages/image/seamless-stitch";
+import { hydrateImageLogMedia } from "./image-log-media";
+import { ImageLogThumbnail } from "./image-log-thumbnail";
+import "./image-workbench.css";
+const SeamlessStitchPage = lazy(() => import("@/pages/image/seamless-stitch").then(module => ({ default: module.SeamlessStitchPage })));
 import { hydratePromptReuse, savePromptFromTask } from "@/services/api/prompts";
 
 type GeneratedImage = {
@@ -72,20 +75,7 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
-type ImageModelProfile = {
-    kind: "standard" | "gpt" | "midjourney" | "midjourney-blend" | "gemini";
-    maxCount: number;
-    tip: string;
-};
-
-function imageModelProfile(model: string): ImageModelProfile {
-    const normalized = model.toLowerCase();
-    if (normalized.includes("midjourney-blend")) return { kind: "midjourney-blend", maxCount: 1, tip: "Midjourney Blend merges 2 to 4 reference images. The prompt is not sent to the model." };
-    if (normalized.includes("midjourney")) return { kind: "midjourney", maxCount: 1, tip: "Midjourney only supports text-to-image here. Reference images are not sent." };
-    if (normalized.includes("gemini-3.1-flash") || normalized.includes("nano-banana-2")) return { kind: "gemini", maxCount: 10, tip: "Gemini 3.1 Flash supports multiple images, up to 10 outputs per submission, with up to 14 reference images." };
-    if (normalized.includes("gpt-image-2") || normalized.includes("vcen-gpt2")) return { kind: "gpt", maxCount: 10, tip: "GPT-Image-2 supports 1K / 2K / 4K, 15 aspect ratios or custom pixel sizes, up to 10 outputs and 16 references." };
-    return { kind: "standard", maxCount: 10, tip: "The available options follow the administrator-selected model configuration." };
-}
+import { normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
 
 const LOG_STORE_KEY = "wireless-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
@@ -112,7 +102,7 @@ const imageToolModes: Record<GenerationToolMode, { title: string; description: s
     },
     "image-edit": {
         title: "图片编辑",
-        description: "基于参考图做局部编辑、替换、修复或风格调整，失败不会重复扣费。",
+        description: "基于参考图做局部编辑、替换、修复或风格调整。",
         placeholder: "描述要编辑的位置、保留内容和希望得到的结果",
         button: "开始编辑",
         projectId: "tool-image-edit",
@@ -135,7 +125,7 @@ function resolveImageToolMode(value: string | null): GenerationToolMode {
 
 export default function ImagePage() {
     const [searchParams] = useSearchParams();
-    return searchParams.get("tool") === "seamless-stitch" ? <SeamlessStitchPage /> : <ImageGenerationPage />;
+    return searchParams.get("tool") === "seamless-stitch" ? <Suspense fallback={<div className="wb-page wb-empty" role="status">正在打开无缝拼接…</div>}><SeamlessStitchPage /></Suspense> : <ImageGenerationPage />;
 }
 
 function ImageGenerationPage() {
@@ -146,6 +136,8 @@ function ImageGenerationPage() {
     const loadedReuseTokenRef = useRef(new Set<string>());
     const generateRef = useRef<() => Promise<void>>(async () => undefined);
     const restoredInitialResultRef = useRef(false);
+    const previewRevision = useRef(0);
+    const [previewLoading, setPreviewLoading] = useState(false);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -175,17 +167,16 @@ function ImageGenerationPage() {
     const toolModeConfig = imageToolModes[toolMode];
     const operationType = toolModeOperation(toolMode) as "image_generation" | "inpaint" | "upscale";
     const model = effectiveConfig.imageModel || effectiveConfig.model;
-    const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
     const adminModelId = modelOptionName(model);
-    const selectedModelProfile = imageModelProfile(adminModelId);
+    const selectedModelProfile = useImageModelProfile(adminModelId);
+    const generationCount = Number(normalizeImageModelSettings(config, selectedModelProfile).count);
     const referenceValidation = validateImageReferences(adminModelId, references);
     const estimatedUsage = estimate({ operationType, modelId: adminModelId, quantity: generationCount });
-    const quotaBlocked = !standaloneEdition && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
+    const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const missingReference = toolModeConfig.requiresReference && references.length === 0;
-    const unsupportedMidjourneyReferences = selectedModelProfile.kind === "midjourney" && references.length > 0;
     const invalidBlendReferences = selectedModelProfile.kind === "midjourney-blend" && (references.length < 2 || references.length > 4);
     const requiresPrompt = selectedModelProfile.kind !== "midjourney-blend";
-    const canGenerate = (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !unsupportedMidjourneyReferences && !invalidBlendReferences && referenceValidation.valid;
+    const canGenerate = (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid;
 
     const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))]));
     const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin))));
@@ -214,8 +205,13 @@ function ImageGenerationPage() {
         restoredInitialResultRef.current = true;
         const latest = logs.find((log) => log.status === "成功" && log.images.length);
         if (!latest) return;
-        setResults(latest.images.map((image) => ({ id: image.id, status: "success", image })));
+        const revision = ++previewRevision.current;
+        void hydrateImageLogMedia(latest, resolveImageUrl, false).then(log => {
+            if (revision === previewRevision.current) setResults(log.images.map(image => ({ id: image.id, status: "success", image })));
+        }).catch(() => undefined);
     }, [logs, results.length, running]);
+
+    useEffect(() => () => { previewRevision.current += 1; }, []);
 
     useEffect(() => {
         const presetPrompt = searchParams.get("prompt");
@@ -262,9 +258,9 @@ function ImageGenerationPage() {
             restoreReferences(nextReferences, "template");
             payload.warnings.forEach((warning) => message.warning(warning));
             if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请先选择管理员当前启用的模型");
-            const cost = standaloneEdition ? "本机版直接生成" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
+            const cost = !deploymentFeatures.creditsEnabled ? "不计积分" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
             if (payload.mode === "fill_and_generate") {
-                modal.confirm({ title: "确认使用当前配置生成？", content: standaloneEdition ? "确认后将直接提交生成任务。" : `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
+                modal.confirm({ title: "确认使用当前配置生成？", content: !deploymentFeatures.creditsEnabled ? "确认后将直接提交生成任务。" : `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
             } else message.success(`模板已填入，当前预计 ${cost}`);
         }).catch((error) => { loadedReuseTokenRef.current.delete(token); message.error(error instanceof Error ? error.message : "模板复用失败"); });
     }, [message, modal, searchParams, updateConfig]);
@@ -429,6 +425,8 @@ function ImageGenerationPage() {
     };
 
     const createSession = () => {
+        previewRevision.current += 1;
+        setPreviewLoading(false);
         setPrompt("");
         setReferences([]);
         setResults([]);
@@ -456,6 +454,12 @@ function ImageGenerationPage() {
     const refreshLogs = async () => setLogs(await readStoredLogs());
 
     const previewGenerationLog = async (log: GenerationLog) => {
+        const revision = ++previewRevision.current;
+        setPreviewLoading(true);
+        try {
+        const hydrated = await hydrateImageLogMedia(log, resolveImageUrl);
+        if (revision !== previewRevision.current) return;
+        log = hydrated;
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
@@ -465,20 +469,21 @@ function ImageGenerationPage() {
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
+        } catch (error) {
+            if (revision === previewRevision.current) message.error(error instanceof Error ? error.message : "生成记录读取失败，请重试");
+        } finally { if (revision === previewRevision.current) setPreviewLoading(false); }
     };
 
     const buildRequestSnapshot = () => {
+        previewRevision.current += 1;
+        setPreviewLoading(false);
         const text = prompt.trim();
-        if (!text) {
+        if (!text && selectedModelProfile.requiresPrompt) {
             message.error("请输入生图提示词");
             return null;
         }
-        if (unsupportedMidjourneyReferences) {
-            message.error("Midjourney does not support reference images in text-to-image mode. Remove them or choose GPT-Image-2 / Gemini.");
-            return null;
-        }
         if (invalidBlendReferences) {
-            message.error("Midjourney Blend requires two to four reference images.");
+            message.error("Midjourney Blend 需要 2–4 张参考图。");
             return null;
         }
         if (!referenceValidation.valid) {
@@ -491,7 +496,7 @@ function ImageGenerationPage() {
     const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
-            const requestOptions = { operationType, tool: toolMode };
+            const requestOptions = { operationType: selectedModelProfile.kind === "midjourney-blend" ? "image_generation" as const : operationType, tool: toolMode };
             const result = selectedModelProfile.kind === "midjourney-blend"
                 ? await requestGeneration(snapshot.config, snapshot.text, requestOptions, snapshot.references)
                 : snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
@@ -516,9 +521,9 @@ function ImageGenerationPage() {
     };
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-            <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[320px_minmax(0,1fr)]">
-                <aside className="thin-scrollbar hidden min-h-0 overflow-y-auto rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:block">
+        <div className="wb-page image-workbench flex h-full flex-col overflow-hidden">
+            <main className="image-workbench-layout grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto p-5 lg:grid-cols-[228px_minmax(0,1fr)] lg:overflow-hidden">
+                <aside className="wb-surface thin-scrollbar hidden min-h-0 overflow-y-auto p-4 lg:block">
                     <LogPanel
                         logs={logs}
                         selectedLogIds={selectedLogIds}
@@ -530,13 +535,13 @@ function ImageGenerationPage() {
                     />
                 </aside>
 
-                <section className="grid gap-3 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[420px_minmax(0,1fr)]">
-                    <div className="thin-scrollbar flex flex-col rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto">
+                <section className="grid gap-4 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[minmax(340px,400px)_minmax(0,1fr)]">
+                    <div className="wb-surface thin-scrollbar flex flex-col p-6 lg:min-h-0 lg:overflow-y-auto">
                         <div>
                             <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                    <h1 className="text-2xl font-semibold text-stone-950 dark:text-stone-100">{toolModeConfig.title}</h1>
-                                    <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">{toolModeConfig.description}</p>
+                                    <p className="wb-eyebrow">图像工作室</p><h1 className="wb-title">{toolModeConfig.title}</h1>
+                                    <p className="wb-description">{toolModeConfig.description}</p>
                                 </div>
                                 <div className="flex shrink-0 gap-2 lg:hidden">
                                     <Button icon={<History className="size-4" />} onClick={() => setLogsOpen(true)}>
@@ -562,7 +567,7 @@ function ImageGenerationPage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={toolModeConfig.placeholder} />
+                                <Input.TextArea aria-label="图像提示词" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={6} disabled={running || !selectedModelProfile.requiresPrompt} placeholder={selectedModelProfile.requiresPrompt ? toolModeConfig.placeholder : "这个模型直接合成参考图，不需要填写文字"} />
                             </div>
 
                             <ReferenceImageTray
@@ -591,25 +596,25 @@ function ImageGenerationPage() {
                         <div className="mt-auto pt-6">
                             <div className="mb-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
                                 <div className="flex items-center justify-between gap-3">
-                                    <span>{standaloneEdition ? "本机版直接生成" : `预计消耗 ${estimatedUsage.credits} 积分`}</span>
-                                    <span>{standaloneEdition ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
+                                    <span>{!deploymentFeatures.creditsEnabled ? "不计积分" : `预计消耗 ${estimatedUsage.credits} 积分`}</span>
+                                    <span>{!deploymentFeatures.authenticationEnabled ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
                                 </div>
                                 {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{toolModeConfig.title}需要先添加至少一张参考图。</div> : null}
                                 {!referenceValidation.valid ? <div className="mt-1 text-red-500">{referenceValidation.message}</div> : null}
                                 {quotaBlocked ? <div className="mt-1 text-red-500">额度不足，无法提交生成任务。</div> : null}
                             </div>
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                {toolModeConfig.button}
+                                {running ? "正在生成，请稍候…" : toolModeConfig.button}
                             </Button>
                         </div>
                     </div>
 
-                    <div className="thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5">
+                    <div className="wb-surface thin-scrollbar p-6 lg:min-h-0 lg:overflow-y-auto">
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <div>
                                 <h2 className="text-xl font-semibold">生成结果</h2>
                             </div>
-                            {running ? <Tag className="m-0 px-2 py-1">等待 {formatDuration(elapsedMs)}</Tag> : null}
+                            {previewLoading ? <span role="status" className="text-sm text-muted-foreground">正在读取记录…</span> : running ? <Tag className="m-0 px-2 py-1">等待 {formatDuration(elapsedMs)}</Tag> : null}
                         </div>
                         {results.length ? (
                             <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
@@ -624,9 +629,9 @@ function ImageGenerationPage() {
                                 )}
                             </div>
                         ) : (
-                            <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
-                                <ImagePlus className="mb-4 size-11 text-stone-400" />
-                                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有生成图片" />
+                            <div className="wb-empty lg:min-h-[480px]">
+                                <ImagePlus size={42} strokeWidth={1.2} />
+                                <strong>第一张作品，从一句描述开始</strong><p>在左侧写下画面内容，选择模型和参数，点击「{toolModeConfig.button}」。结果会出现在这里。</p>
                             </div>
                         )}
                     </div>
@@ -683,17 +688,17 @@ function ImageGenerationPage() {
 
 function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const profile = imageModelProfile(modelOptionName(model));
+    const profile = useImageModelProfile(model);
 
     return (
         <>
-            <label className="col-span-2 block min-w-0 sm:col-span-1">
+            <label className="col-span-2 block min-w-0">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
-                <span className="mt-2 block text-xs leading-5 text-stone-500 dark:text-stone-400">{profile.tip}</span>
+                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" modelsSource="server" fullWidth className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
+                {profile.verified ? <span className="mt-2 block text-xs leading-5" style={{ color: "var(--wb-muted)" }}>{profile.tip}</span> : null}
             </label>
             <div className="col-span-2">
-                <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={profile.maxCount} quickCount={profile.maxCount === 1 ? 1 : 10} profile={profile.kind} />
+                <ImageSettingsPanel config={{ ...config, model, imageModel: model }} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
             </div>
         </>
     );
@@ -849,7 +854,7 @@ function LogPanel({
 }
 
 function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: GenerationLog; selected: boolean; active: boolean; onSelectedChange: (checked: boolean) => void; onClick: () => void }) {
-    const thumbnails = (log.thumbnails || []).filter(Boolean).slice(0, 4);
+    const thumbnails = log.images.slice(0, 4);
 
     return (
         <button
@@ -865,7 +870,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                         {thumbnails.length ? (
                             <div className="mt-2 flex gap-1 overflow-hidden">
                                 {thumbnails.map((image, index) => (
-                                    <img key={`${log.id}-${index}`} src={image} alt="" className="size-8 shrink-0 rounded-md object-cover" />
+                                    <ImageLogThumbnail key={`${log.id}-${index}`} image={image} />
                                 ))}
                             </div>
                         ) : null}
@@ -904,26 +909,16 @@ async function readStoredLogs() {
         await logStore.iterate<GenerationLog, void>((value) => {
             values.push(value);
         });
-        const logs = await Promise.all(values.map(normalizeLog));
+        const logs = values.map(normalizeLog);
         return logs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     } catch {
         return [];
     }
 }
 
-async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
-    const references = await Promise.all(
-        (log.references || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
-    );
-    const images = await Promise.all(
-        (log.images || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
-    );
+function normalizeLog(log: Partial<GenerationLog>): GenerationLog {
+    const references = log.references || [];
+    const images = log.images || [];
     const config = normalizeLogConfig(log);
     return {
         id: log.id || nanoid(),

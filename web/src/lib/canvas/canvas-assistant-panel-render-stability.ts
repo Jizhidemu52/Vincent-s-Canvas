@@ -15,9 +15,11 @@ export type CanvasMediaWorkflowAction =
     | { type: "open_result"; messageId: string };
 
 export type CanvasAssistantPanelRenderState = {
-    nodes: CanvasNodeData[];
+    layout?: "sidebar" | "wide";
+    onToggleLayout?: () => void;
     selectedNodeIds: Set<string>;
-    snapshot: CanvasAgentSnapshot;
+    selectedNodes: CanvasNodeData[];
+    snapshotRef: { current: CanvasAgentSnapshot };
     sessions: CanvasAssistantSession[];
     activeSessionId: string | null;
     onSelectNodeIds: (ids: Set<string>) => void;
@@ -36,14 +38,17 @@ export type CanvasAssistantPanelRenderState = {
 
 /**
  * The Agent panel includes chat history and media previews. While a node is
- * dragged or resized, none of its props change, so retain that expensive
- * subtree until its actual canvas context or conversation changes.
+ * changed in the current canvas. The full canvas snapshot is read through a
+ * stable reference when the Agent performs an action, so unrelated results
+ * from a batch do not re-render the chat history.
  */
 export function canvasAssistantPanelPropsEqual(previous: CanvasAssistantPanelRenderState, next: CanvasAssistantPanelRenderState) {
     return (
-        previous.nodes === next.nodes &&
+        previous.layout === next.layout &&
+        previous.onToggleLayout === next.onToggleLayout &&
         previous.selectedNodeIds === next.selectedNodeIds &&
-        previous.snapshot === next.snapshot &&
+        previous.selectedNodes === next.selectedNodes &&
+        previous.snapshotRef === next.snapshotRef &&
         previous.sessions === next.sessions &&
         previous.activeSessionId === next.activeSessionId &&
         previous.onSelectNodeIds === next.onSelectNodeIds &&

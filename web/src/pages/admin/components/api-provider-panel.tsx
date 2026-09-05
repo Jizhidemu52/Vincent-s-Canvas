@@ -47,9 +47,9 @@ export function ApiProviderPanel({ isAdmin }: { isAdmin: boolean }) {
                     { title: "状态", render: (_, record: ServerProvider) => <Tag color={record.enabled ? "green" : "red"}>{record.enabled ? "启用" : "停用"}</Tag> },
                     { title: "服务端凭据", render: (_, record: ServerProvider) => <Tag color={record.hasCredentials ? "green" : "default"}>{record.hasCredentials ? "已加密配置" : "未配置"}</Tag> },
                 ]} />
-                <div className="rounded-md border border-orange-200 bg-orange-50 px-4 py-3 text-sm leading-6 text-orange-950">API Key 只会随本次请求发送到业务后端，使用 AES-256-GCM 加密后保存。此页面和普通模型列表都不会返回密钥、密钥片段或环境变量名。</div>
+                <div className="wb-surface px-4 py-3 text-sm leading-6 text-[var(--muted-foreground)]">API Key 只会随本次请求发送到业务后端，使用 AES-256-GCM 加密后保存。此页面和普通模型列表都不会返回密钥、密钥片段或环境变量名。</div>
             </div>
-            <section className="rounded-md border border-stone-200 bg-white p-4">
+            <section className="wb-surface p-5">
                 <div className="mb-4 flex items-center justify-between"><Typography.Title level={3} className="!m-0 !text-base">{selected ? "编辑 Provider" : "新增 Provider"}</Typography.Title><Button size="small" onClick={() => setSelectedId(null)}>新增</Button></div>
                 <Form form={form} layout="vertical" disabled={!isAdmin} initialValues={{ protocol: "openai", enabled: true }} onFinish={submit}>
                     <Form.Item name="name" label="显示名称" rules={[{ required: true }]}><Input /></Form.Item>
@@ -59,7 +59,7 @@ export function ApiProviderPanel({ isAdmin }: { isAdmin: boolean }) {
                     <Form.Item name="apiKey" label="API Key"><Input.Password placeholder={selected?.hasCredentials ? "留空保持现有凭据" : "输入服务端密钥"} /></Form.Item>
                     {form.getFieldValue("protocol") === "runninghub" ? <Form.Item name="walletApiKey" label="Wallet API Key"><Input.Password /></Form.Item> : null}
                     {form.getFieldValue("protocol") === "volcengine" ? <Space className="w-full" orientation="vertical"><Form.Item name="accessKeyId" label="Access Key ID"><Input.Password /></Form.Item><Form.Item name="secretAccessKey" label="Secret Access Key"><Input.Password /></Form.Item></Space> : null}
-                    <Button type="primary" htmlType="submit" block>保存到服务端</Button>
+                    <Button className="!h-10" type="primary" htmlType="submit" block>保存到服务端</Button>
                 </Form>
             </section>
         </div>

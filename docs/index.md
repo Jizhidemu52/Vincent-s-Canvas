@@ -6,10 +6,15 @@
 - [功能介绍](/docs/overview/features)
 - [Docker 部署](/docs/overview/docker)
 - [无脑部署手册](manual/beginner-deployment.md)
+- [安装部署指南：单机、局域网与公司完整部署](manual/installation-guide.md)
 - [生产部署与验收](manual/production-deployment.md)
 
 ## 操作手册
 
+- [图文操作手册：画布、其他板块与数据备份](manual/user-guide.md)
+- [图像模型参数与官方文档核对](manual/image-model-parameters.md)
+- [视频模型参数与官方文档核对](manual/video-model-parameters.md)
+- [聊天模型参数与接口对应](manual/chat-model-parameters.md)
 - [完整新手操作手册](manual/operation-manual.md)
 - [我的提示词、团队模板与公共提示词库操作手册](manual/prompt-template-guide.md)
 - [第一阶段验收矩阵](manual/phase-one-acceptance.md)
@@ -20,6 +25,7 @@
 
 - [本地开发](/docs/backend/local-development)
 - [画布数据结构](/docs/backend/canvas-data-structure)
+- [数据库结构与迁移](/docs/backend/backend-database)
 
 ## 当前架构
 

@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 
 import { nanoid } from "nanoid";
+import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
+import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, withCanvasStorageLock } from "@/lib/canvas/canvas-persistence-merge";
 import { localForageStorage } from "@/lib/localforage-storage";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -35,8 +37,33 @@ type CanvasStore = {
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
 const CANVAS_STORE_KEY = "wireless-canvas:canvas_store";
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
+const pendingProjectChanges = new Map<string, CanvasProject | null>();
+const projectWriteBuffer = createProjectChangeBuffer<CanvasProject>();
+type PersistWrite = { name: string; value: StorageValue<CanvasStore>; changes: Map<string, CanvasProject | null> };
+let persistWriteChain: Promise<void> = Promise.resolve();
+const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, value, changes }) => {
+    pendingProjectChanges.clear();
+    // IndexedDB writes are asynchronous. Keep their order stable so a slow
+    // older snapshot can never finish after and overwrite a newer edit.
+    persistWriteChain = persistWriteChain
+        .catch(() => undefined)
+        .then(() => projectWriteBuffer.write(changes, retainedChanges => withCanvasStorageLock(name, async () => {
+            const stored = await localForageStorage.getItem(name);
+            const current = stored ? JSON.parse(stored) as StorageValue<CanvasStore> : null;
+            const projects = mergeProjectChanges(current?.state.projects || [], retainedChanges);
+            await localForageStorage.setItem(name, JSON.stringify({ ...value, state: { ...value.state, projects } }));
+        })))
+        .catch(error => { console.error("画布自动保存失败，改动将随下次编辑重试；请先导出重要作品。", error); });
+});
+
+if (typeof window !== "undefined") {
+    const flushCanvasPersistence = () => persistQueue.flush();
+    window.addEventListener("pagehide", flushCanvasPersistence);
+    window.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") flushCanvasPersistence();
+    });
+}
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
@@ -49,14 +76,22 @@ const canvasStorage: PersistStorage<CanvasStore> = {
     setItem: (name, value) => {
         const nextState = value.state as PersistedCanvasState;
         if (queuedPersistState && queuedPersistState.projects === nextState.projects) return;
+        collectProjectChanges(queuedPersistState?.projects || [], nextState.projects, pendingProjectChanges);
         queuedPersistState = nextState;
-        if (saveTimer) clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => {
-            saveTimer = null;
-            void localForageStorage.setItem(name, JSON.stringify(value));
-        }, 400);
+        persistQueue.schedule({ name, value, changes: new Map(pendingProjectChanges) });
     },
-    removeItem: (name) => localForageStorage.removeItem(name),
+    removeItem: (name) => {
+        persistQueue.clear();
+        pendingProjectChanges.clear();
+        persistWriteChain = persistWriteChain
+            .catch(() => undefined)
+            .then(() => withCanvasStorageLock(name, async () => {
+                await localForageStorage.removeItem(name);
+                projectWriteBuffer.clear();
+            }))
+            .then(() => undefined);
+        return persistWriteChain;
+    },
 };
 
 export const useCanvasStore = create<CanvasStore>()(
@@ -76,7 +111,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     connections: [],
                     chatSessions: [],
                     activeChatId: null,
-                    backgroundMode: "lines",
+                    backgroundMode: "dots",
                     showImageInfo: false,
                     viewport: initialViewport,
                 };
@@ -94,7 +129,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     connections: source.connections || [],
                     chatSessions: source.chatSessions || [],
                     activeChatId: source.activeChatId || null,
-                    backgroundMode: source.backgroundMode || "lines",
+                    backgroundMode: source.backgroundMode || "dots",
                     showImageInfo: source.showImageInfo || false,
                     viewport: source.viewport || initialViewport,
                 };

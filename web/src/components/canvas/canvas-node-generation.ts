@@ -120,22 +120,43 @@ export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[
     });
 }
 
-export function buildConfigGenerationInputsByNodeId(nodes: CanvasNodeData[], connections: CanvasConnection[]) {
-    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+/**
+ * Config nodes are often sparse on a large canvas. Keep their incoming
+ * relationship index compact and materialize the richer generation input
+ * objects only when a visible config node needs them.
+ */
+export function createConfigGenerationInputIndex(nodes: CanvasNodeData[], connections: CanvasConnection[], nodeById: ReadonlyMap<string, CanvasNodeData> = new Map(nodes.map((node) => [node.id, node]))) {
+    const sourceIdsByConfigId = new Map<string, string[]>();
     const inputsByConfigId = new Map<string, NodeGenerationInput[]>();
-    nodes.forEach((node) => {
-        if (node.type === CanvasNodeType.Config) inputsByConfigId.set(node.id, []);
-    });
 
     connections.forEach((connection) => {
-        if (!inputsByConfigId.has(connection.toNodeId)) return;
-        const source = nodeById.get(connection.fromNodeId);
-        if (!source) return;
-        const input = generationInputForNode(source);
-        if (input) inputsByConfigId.get(connection.toNodeId)?.push(input);
+        const target = nodeById.get(connection.toNodeId);
+        if (target?.type !== CanvasNodeType.Config) return;
+        const sourceIds = sourceIdsByConfigId.get(target.id) || [];
+        sourceIds.push(connection.fromNodeId);
+        sourceIdsByConfigId.set(target.id, sourceIds);
     });
 
-    return inputsByConfigId;
+    return {
+        get(configNodeId: string) {
+            const cached = inputsByConfigId.get(configNodeId);
+            const configNode = nodeById.get(configNodeId);
+            if (configNode?.type !== CanvasNodeType.Config) return [];
+            const inputs = (sourceIdsByConfigId.get(configNodeId) || []).flatMap((sourceId) => {
+                const source = nodeById.get(sourceId);
+                const input = source ? generationInputForNode(source) : null;
+                return input ? [input] : [];
+            });
+            if (cached && sameGenerationInputs(cached, inputs)) return cached;
+            inputsByConfigId.set(configNodeId, inputs);
+            return inputs;
+        },
+    };
+}
+
+export function buildConfigGenerationInputsByNodeId(nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    const index = createConfigGenerationInputIndex(nodes, connections);
+    return new Map(nodes.filter((node) => node.type === CanvasNodeType.Config).map((node) => [node.id, index.get(node.id)]));
 }
 
 export function buildNodeResponseMessages(context: NodeGenerationContext): AiTextMessage[] {
@@ -172,6 +193,25 @@ function generationInputForNode(node: CanvasNodeData): NodeGenerationInput | nul
     return text ? { nodeId: node.id, type: "text", title: node.title, text } : null;
 }
 
+function sameGenerationInputs(first: NodeGenerationInput[], second: NodeGenerationInput[]) {
+    return first.length === second.length && first.every((input, index) => sameGenerationInput(input, second[index]));
+}
+
+function sameGenerationInput(first: NodeGenerationInput, second?: NodeGenerationInput) {
+    return (
+        first.nodeId === second?.nodeId &&
+        first.type === second.type &&
+        first.title === second.title &&
+        first.text === second.text &&
+        first.image?.dataUrl === second.image?.dataUrl &&
+        first.image?.storageKey === second.image?.storageKey &&
+        first.video?.url === second.video?.url &&
+        first.video?.storageKey === second.video?.storageKey &&
+        first.audio?.url === second.audio?.url &&
+        first.audio?.storageKey === second.audio?.storageKey
+    );
+}
+
 function generationLabel(type: NodeGenerationInput["type"], index: number) {
     if (type === "image") return imageReferenceLabel(index);
     if (type === "video") return seedanceReferenceLabel("video", index);
@@ -183,7 +223,8 @@ function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
     if (node.type !== CanvasNodeType.Image || !node.metadata?.content) return null;
     return {
         id: node.id,
-        name: `${node.title || node.id}.png`,
+        name: node.metadata.originalFileName || node.title || node.id,
+        originalFileName: node.metadata.originalFileName,
         type: node.metadata.mimeType || "image/png",
         dataUrl: node.metadata.content,
         storageKey: node.metadata.storageKey,

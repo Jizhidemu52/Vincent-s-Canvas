@@ -13,6 +13,7 @@ function state(overrides: Partial<CanvasQuickGeneratePanelRenderState> = {}): Ca
         prompt: "红色针织连衣裙",
         model: "open-gpt2",
         size: "1:1",
+        quality: "auto",
         count: 2,
         references,
         running: false,
@@ -24,10 +25,12 @@ function state(overrides: Partial<CanvasQuickGeneratePanelRenderState> = {}): Ca
         onPromptChange: noop,
         onModelChange: noop,
         onSizeChange: noop,
+        onQualityChange: noop,
         onCountChange: noop,
         onPickReferences: noop,
         onRemoveReference: noop,
         onClearReferences: noop,
+        onMoveReference: noop,
         onMissingConfig: noop,
         onGenerate: noop,
         ...overrides,
@@ -41,6 +44,7 @@ describe("canvas quick-generate panel render stability", () => {
 
     test("refreshes the panel when a generation setting changes", () => {
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ count: 3 }))).toBe(false);
+        expect(canvasQuickGeneratePanelPropsEqual(state(), state({ quality: "high" }))).toBe(false);
     });
 
     test("refreshes the panel when a reference collection changes", () => {

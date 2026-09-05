@@ -16,13 +16,14 @@ const node: CanvasNodeData = {
 function state(overrides: Partial<CanvasNodeRenderState> = {}): CanvasNodeRenderState {
     return {
         data: node,
+        themeKey: "light",
         renderQuality: "full",
-        scale: 1,
         isSelected: false,
         isRelated: false,
         isFocusRelated: false,
         isConnectionTarget: false,
         isConnecting: false,
+        isRunning: false,
         editRequestNonce: 0,
         showPanel: false,
         showImageInfo: false,
@@ -33,6 +34,7 @@ function state(overrides: Partial<CanvasNodeRenderState> = {}): CanvasNodeRender
         batchClosing: false,
         batchOpening: false,
         batchRecovering: false,
+        configInputSummaryKey: "0:0:0:0",
         batchMotion: undefined,
         ...overrides,
     };
@@ -45,8 +47,12 @@ describe("canvas node render stability", () => {
 
     test("refreshes a node when its interactive state or data changes", () => {
         expect(canvasNodeRenderStateEqual(state(), state({ isSelected: true }))).toBe(false);
-        expect(canvasNodeRenderStateEqual(state(), state({ scale: 0.8 }))).toBe(false);
         expect(canvasNodeRenderStateEqual(state(), state({ renderQuality: "moving" } as Partial<CanvasNodeRenderState>))).toBe(false);
         expect(canvasNodeRenderStateEqual(state(), state({ data: { ...node, position: { x: 180, y: 80 } } }))).toBe(false);
+        expect(canvasNodeRenderStateEqual(state(), state({ configInputSummaryKey: "0:2:0:0" }))).toBe(false);
+    });
+
+    test("refreshes a node when the parent canvas theme changes", () => {
+        expect(canvasNodeRenderStateEqual(state(), { ...state(), themeKey: "dark" } as CanvasNodeRenderState)).toBe(false);
     });
 });

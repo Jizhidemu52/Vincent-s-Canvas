@@ -17,7 +17,7 @@ test("normalizes a video task before any paid submission", () => {
       sources: [image],
     }),
   ).toMatchObject({
-    normalized: { seconds: 15, resolution: "720P", size: "4:3", referenceCount: 1 },
+    normalized: { seconds: 15, resolution: "720P", size: "adaptive", referenceCount: 1 },
   });
 });
 

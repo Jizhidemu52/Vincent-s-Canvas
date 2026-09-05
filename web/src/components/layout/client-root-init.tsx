@@ -13,6 +13,10 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const refreshModules = useModuleStore((state) => state.refresh);
 
     useEffect(() => {
+        if (authStatus === "idle") void hydrateSession();
+    }, [authStatus, hydrateSession]);
+
+    useEffect(() => {
         if (authStatus !== "authenticated") return;
         const syncProjects = async () => {
             await Promise.allSettled(

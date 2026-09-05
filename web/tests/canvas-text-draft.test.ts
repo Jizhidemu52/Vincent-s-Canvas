@@ -46,3 +46,15 @@ test("flushes a pending text draft when editing finishes", () => {
 
     expect(committed).toEqual(["prompt"]);
 });
+
+test("drops a stale pending draft when an external value replaces it", () => {
+    const timers = createTimers();
+    const committed: string[] = [];
+    const draft = createCanvasTextDraft("first", (value) => committed.push(value), timers.scheduler);
+
+    draft.change("local pending edit");
+    draft.reset("external replacement");
+    timers.run();
+
+    expect(committed).toEqual([]);
+});

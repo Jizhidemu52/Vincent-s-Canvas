@@ -1,6 +1,6 @@
-import { App, Button, DatePicker, Input, Select, Space, Table, Tag, Tooltip } from "antd";
+import { Alert, App, Button, DatePicker, Input, Select, Space, Table, Tag, Tooltip } from "antd";
 import { Download, Pause, Play, RefreshCw, Search, XCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { saveAs } from "file-saver";
 
 import {
@@ -39,34 +39,48 @@ const statusText: Record<string, string> = {
     paused: "已暂停",
 };
 
-export function TaskManagementPanel() {
+export function TaskManagementPanel({ active = true }: { active?: boolean }) {
     const { message } = App.useApp();
     const [tasks, setTasks] = useState<ServerTask[]>([]);
     const [batches, setBatches] = useState<ServerBatch[]>([]);
     const [loading, setLoading] = useState(true);
     const [acting, setActing] = useState("");
+    const [error, setError] = useState("");
+    const [updatedAt, setUpdatedAt] = useState("");
+    const requestSequence = useRef(0);
+    const refreshing = useRef(false);
+    const actingRef = useRef("");
 
-    const refresh = async () => {
-        setLoading(true);
+    const refresh = useCallback(async (background = false) => {
+        if (refreshing.current) return;
+        refreshing.current = true;
+        const sequence = ++requestSequence.current;
+        if (!background) setLoading(true);
         try {
             const [taskResult, batchResult] = await Promise.all([listAdminTasks(), listAdminBatches()]);
+            if (sequence !== requestSequence.current) return;
             setTasks(taskResult.tasks);
             setBatches(batchResult.batches);
+            setError("");
+            setUpdatedAt(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "任务加载失败");
+            if (sequence === requestSequence.current) setError(error instanceof Error ? error.message : "任务加载失败");
         } finally {
-            setLoading(false);
+            if (sequence === requestSequence.current) { refreshing.current = false; setLoading(false); }
         }
-    };
+    }, []);
 
     useEffect(() => {
+        if (!active) return;
         void refresh();
-        const timer = window.setInterval(() => void refresh(), 10_000);
-        return () => window.clearInterval(timer);
-    }, []);
+        const timer = window.setInterval(() => { if (!document.hidden) void refresh(true); }, 10_000);
+        return () => { window.clearInterval(timer); requestSequence.current++; refreshing.current = false; };
+    }, [active, refresh]);
 
     const runBatchAction = async (batch: ServerBatch, action: TaskControlAction) => {
         const key = `batch:${batch.id}:${action}`;
+        if (actingRef.current) return;
+        actingRef.current = key;
         setActing(key);
         try {
             const result = await controlAdminBatch(batch.id, action);
@@ -75,12 +89,15 @@ export function TaskManagementPanel() {
         } catch (error) {
             message.error(error instanceof Error ? error.message : "批量任务操作失败");
         } finally {
+            actingRef.current = "";
             setActing("");
         }
     };
 
     const runTaskAction = async (task: ServerTask, action: TaskControlAction) => {
         const key = `task:${task.id}:${action}`;
+        if (actingRef.current) return;
+        actingRef.current = key;
         setActing(key);
         try {
             await controlAdminTask(task.id, action);
@@ -89,18 +106,22 @@ export function TaskManagementPanel() {
         } catch (error) {
             message.error(error instanceof Error ? error.message : "任务操作失败");
         } finally {
+            actingRef.current = "";
             setActing("");
         }
     };
 
     return (
-        <div className="grid gap-5">
-            <div className="flex justify-end">
-                <Button icon={<RefreshCw className="size-4" />} onClick={refresh}>
+        <div className="grid min-w-0 gap-5">
+            <div className="wb-toolbar justify-between">
+                <p className="text-sm text-[var(--muted-foreground)]" role="status">{updatedAt ? `更新于 ${updatedAt} · 当前页每 10 秒自动同步` : "正在读取任务状态…"}</p>
+                <Button className="!h-10" loading={loading} icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>
                     刷新
                 </Button>
             </div>
+            {error ? <Alert type="warning" showIcon title="任务状态暂未更新" description={error} action={<Button onClick={() => void refresh()} loading={loading}>重试</Button>} /> : null}
             <Table
+                className="wb-surface min-w-0 overflow-hidden"
                 rowKey="id"
                 size="small"
                 loading={loading}
@@ -147,6 +168,7 @@ export function TaskManagementPanel() {
                 ]}
             />
             <Table
+                className="wb-surface min-w-0 overflow-hidden"
                 rowKey="id"
                 size="small"
                 loading={loading}
@@ -237,16 +259,20 @@ export function HistoryManagementPanel() {
     };
     useEffect(() => {
         void refresh(filters, page, pageSize);
+        return () => { requestSequence.current++; };
     }, [filters, page, pageSize]);
 
     useEffect(() => {
+        let cancelled = false;
         listAdminHistoryOptions()
             .then((result) => {
+                if (cancelled) return;
                 setDesigners(result.users);
                 setModels(result.models);
                 setOperations(result.operations);
             })
-            .catch((error) => message.error(error instanceof Error ? error.message : "筛选选项加载失败"));
+            .catch((error) => { if (!cancelled) message.error(error instanceof Error ? error.message : "筛选选项加载失败"); });
+        return () => { cancelled = true; };
     }, []);
 
     const updateFilters = (patch: Partial<AdminHistoryFilters>) => {
@@ -271,7 +297,7 @@ export function HistoryManagementPanel() {
     };
     return (
         <div className="grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-3">
-            <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2">
+            <div className="wb-toolbar w-full min-w-0 max-w-full">
                 <Select className="w-44" allowClear placeholder="全部设计师" value={filters.userId} onChange={(value) => updateFilters({ userId: value })} options={designers} />
                 <Select className="w-44" allowClear placeholder="全部模型" value={filters.modelId} onChange={(value) => updateFilters({ modelId: value })} options={models} />
                 <Select className="w-44" allowClear placeholder="全部操作" value={filters.operationType} onChange={(value) => updateFilters({ operationType: value })} options={operations} />
@@ -296,11 +322,11 @@ export function HistoryManagementPanel() {
                         })
                     }
                 />
-                <Button className="ml-auto" icon={<Download className="size-4" />} loading={exporting} disabled={!total} onClick={exportCsv}>
+                <Button className="ml-auto !h-10" icon={<Download className="size-4" />} loading={exporting} disabled={!total} onClick={exportCsv}>
                     导出当前结果
                 </Button>
             </div>
-            <div className="min-w-0 max-w-full overflow-hidden">
+            <div className="wb-surface min-w-0 max-w-full overflow-hidden">
                 <Table
                     rowKey="id"
                     size="small"

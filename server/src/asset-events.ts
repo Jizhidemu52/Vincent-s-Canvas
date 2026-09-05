@@ -102,14 +102,7 @@ type AssetSnapshot = {
 };
 
 export function projectAssetEvents(events: AssetEventRecord[]): AssetProjection {
-  const reversedIds = new Set(
-    events
-      .filter((event) => event.eventType === "asset.event_reversed" && event.sourceEventId)
-      .map((event) => event.sourceEventId!),
-  );
-  const active = events.filter(
-    (event) => event.eventType !== "asset.event_reversed" && !reversedIds.has(event.id),
-  );
+  const active = activeAssetEvents(events);
   let resultStatus: AssetResultStatus = "unused";
   let score = 0;
   let downloadCount = 0;
@@ -132,6 +125,18 @@ export function projectAssetEvents(events: AssetEventRecord[]): AssetProjection 
     firstDownloadedAt,
     eventCount: active.length,
   };
+}
+
+/** Returns the current event stream after append-only reversals are applied. */
+export function activeAssetEvents(events: AssetEventRecord[]) {
+  const reversedIds = new Set(
+    events
+      .filter((event) => event.eventType === "asset.event_reversed" && event.sourceEventId)
+      .map((event) => event.sourceEventId!),
+  );
+  return events.filter(
+    (event) => event.eventType !== "asset.event_reversed" && !reversedIds.has(event.id),
+  );
 }
 
 export function canManageResultState(actor: SessionUser, ownerUserId: string, departmentId: string | null, groupId: string | null = null) {
@@ -280,7 +285,11 @@ export async function listAssetEvents(db: Database, assetIds: string[]) {
     [assetIds],
   );
   const grouped = new Map<string, AssetEventRecord[]>();
-  for (const event of result.rows) grouped.set(event.assetId, [...(grouped.get(event.assetId) ?? []), event]);
+  for (const event of result.rows) {
+    const events = grouped.get(event.assetId);
+    if (events) events.push(event);
+    else grouped.set(event.assetId, [event]);
+  }
   return new Map(assetIds.map((assetId) => {
     const events = grouped.get(assetId) ?? [];
     return [assetId, { events, projection: projectAssetEvents(events) }];

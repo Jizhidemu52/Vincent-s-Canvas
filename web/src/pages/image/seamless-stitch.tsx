@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Empty, Image, InputNumber, Segmented, Tag } from "antd";
 import { ClipboardPaste, Download, FolderPlus, Grid2x2, ImagePlus, LoaderCircle, RotateCcw, Upload } from "lucide-react";
 import { saveAs } from "file-saver";
@@ -6,7 +6,7 @@ import { nanoid } from "nanoid";
 import { useSearchParams } from "react-router-dom";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
-import { standaloneEdition } from "@/lib/standalone-edition";
+import { deploymentFeatures } from "@/lib/deployment-features";
 import { resolveToolModel } from "@/services/api/business-config";
 import { DEFAULT_SEAMLESS_STITCH_PARAMETERS, requestSeamlessStitch, type SeamlessStitchParameters } from "@/services/api/internal-ai";
 import { listQueuedTasks, type QueuedTask } from "@/services/api/generation-tasks";
@@ -35,6 +35,10 @@ export function SeamlessStitchPage() {
     const restoredHistoryTaskIdRef = useRef<string | null>(null);
     const runStitchRef = useRef<() => Promise<void>>(async () => undefined);
     const sourceRef = useRef<ReferenceImage | null>(null);
+    const historyBusyRef = useRef(false);
+    const previewSequenceRef = useRef(0);
+    const submitLockRef = useRef(false);
+    const mountedRef = useRef(true);
     const user = useUserStore((state) => state.user);
     const hydrateSession = useUserStore((state) => state.hydrateSession);
     const estimate = useBusinessConfigStore((state) => state.estimate);
@@ -48,43 +52,68 @@ export function SeamlessStitchPage() {
     const [running, setRunning] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [history, setHistory] = useState<QueuedTask[]>([]);
+    const [historyLoading, setHistoryLoading] = useState(true);
+    const [historyError, setHistoryError] = useState("");
+    const [previewLoading, setPreviewLoading] = useState(false);
     const seamlessModel = resolveToolModel({ models, tools, prices: [] }, "seamless-stitch");
     const estimatedUsage = estimate({ operationType: "seamless_stitch", toolKey: "seamless-stitch", quantity: 1 });
-    const quotaBlocked = !standaloneEdition && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
+    const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
 
-    const refreshHistory = async () => {
+    const refreshHistory = useCallback(async () => {
+        if (historyBusyRef.current) return;
+        historyBusyRef.current = true;
         try {
             const tasks = await listQueuedTasks();
+            if (!mountedRef.current) return;
             setHistory(tasks.filter((task) => task.operationType === "seamless_stitch").slice(0, 20));
+            setHistoryError("");
         } catch {
-            // The result panel remains usable if history is temporarily unavailable.
+            if (mountedRef.current) setHistoryError("历史记录暂时未能加载，当前图片仍可使用。");
+        } finally {
+            historyBusyRef.current = false;
+            if (mountedRef.current) setHistoryLoading(false);
         }
-    };
+    }, []);
 
     const openHistoryTask = async (task: QueuedTask) => {
         const imageUrl = task.resultUrls[0];
-        if (!imageUrl) return;
+        if (!imageUrl || submitLockRef.current) return;
+        const sequence = ++previewSequenceRef.current;
+        setPreviewLoading(true);
         try {
             const image = await uploadImage(imageUrl);
+            if (!mountedRef.current || sequence !== previewSequenceRef.current) return;
             restoredHistoryTaskIdRef.current = task.id;
             setResult({ status: "success", image, durationMs: 0 });
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "历史图片读取失败");
+            if (sequence === previewSequenceRef.current) message.error(error instanceof Error ? error.message : "历史图片读取失败");
+        } finally {
+            if (mountedRef.current && sequence === previewSequenceRef.current) setPreviewLoading(false);
         }
     };
 
     useEffect(() => {
+        mountedRef.current = true;
         void refreshHistory();
-        const timer = window.setInterval(() => void refreshHistory(), 2_000);
+        const onVisible = () => { if (document.visibilityState === "visible") void refreshHistory(); };
+        document.addEventListener("visibilitychange", onVisible);
+        return () => { mountedRef.current = false; ++previewSequenceRef.current; document.removeEventListener("visibilitychange", onVisible); };
+    }, [refreshHistory]);
+    const hasActiveHistory = history.some(task => ["queued", "pending", "processing", "running"].includes(task.status));
+    useEffect(() => {
+        if (!running && !hasActiveHistory) return;
+        const timer = window.setInterval(() => { if (document.visibilityState === "visible") void refreshHistory(); }, 4_000);
         return () => window.clearInterval(timer);
-    }, []);
+    }, [hasActiveHistory, refreshHistory, running]);
 
     useEffect(() => {
-        if (running || result.status !== "idle") return;
+        if (running || previewLoading || result.status !== "idle") return;
         const latest = history.find((task) => task.status === "success" && task.resultUrls[0]);
         if (!latest || latest.id === restoredHistoryTaskIdRef.current) return;
+        // Auto-restore once; a broken preview can still be retried explicitly.
+        restoredHistoryTaskIdRef.current = latest.id;
         void openHistoryTask(latest);
-    }, [history, result.status, running]);
+    }, [history, result.status, running, previewLoading]);
 
     const setSourceFromBlob = async (blob: Blob, name: string) => {
         const uploaded = await uploadImage(blob);
@@ -132,32 +161,35 @@ export function SeamlessStitchPage() {
     };
 
     const runStitch = async () => {
-        if (running) return;
+        if (submitLockRef.current) return;
         const activeSource = sourceRef.current || source;
         if (!activeSource) {
             message.error("请先上传一张需要无缝拼接的图片");
             return;
         }
-        await hydrateSession();
+        submitLockRef.current = true;
+        setRunning(true);
+        try {
+        if (deploymentFeatures.authenticationEnabled) await hydrateSession();
         const currentUser = useUserStore.getState().user;
-        if (!currentUser || currentUser.status !== "active") {
+        if (deploymentFeatures.authenticationEnabled && (!currentUser || currentUser.status !== "active")) {
             message.error("当前设计师账号不可用");
             return;
         }
-        if (!estimatedUsage.configured || !seamlessModel) {
+        if ((deploymentFeatures.creditsEnabled && !estimatedUsage.configured) || !seamlessModel) {
             message.error("管理员尚未启用无缝拼接模型或价格");
             return;
         }
-        if (estimatedUsage.configured && currentUser.creditBalance < estimatedUsage.credits) {
+        if (deploymentFeatures.creditsEnabled && currentUser && estimatedUsage.configured && currentUser.creditBalance < estimatedUsage.credits) {
             message.error(`额度不足：需要 ${estimatedUsage.credits} 积分，当前剩余 ${currentUser.creditBalance} 积分`);
             return;
         }
 
         const prompt = `无缝拼接：切割 ${parameters.cutWidth}，重绘 ${parameters.redrawWidth}，羽化 ${parameters.blurAmount}，强度 ${parameters.redrawStrength}，步数 ${parameters.steps}`;
         const startedAt = performance.now();
-        setRunning(true);
+        ++previewSequenceRef.current;
+        setPreviewLoading(false);
         setResult({ status: "pending" });
-        try {
             const response = await requestSeamlessStitch(activeSource, parameters, seamlessModel.id);
             const uploaded = await uploadImage(response.dataUrl);
             addAsset({
@@ -173,7 +205,7 @@ export function SeamlessStitchPage() {
                     toolMode: "seamless-stitch",
                     operationType: "seamless_stitch",
                     projectId: "tool-seamless-stitch",
-                    designerId: currentUser.id,
+                    designerId: currentUser?.id,
                     prompt,
                     model: seamlessModel.name,
                     modelId: seamlessModel.modelId,
@@ -184,12 +216,13 @@ export function SeamlessStitchPage() {
                 },
             });
             setResult({ status: "success", image: uploaded, durationMs: performance.now() - startedAt });
-            message.success(standaloneEdition ? "无缝拼接完成" : `无缝拼接完成，预计消耗 ${estimatedUsage.credits} 积分`);
+            message.success(!deploymentFeatures.creditsEnabled ? "无缝拼接完成" : `无缝拼接完成，预计消耗 ${estimatedUsage.credits} 积分`);
         } catch (error) {
             const reason = error instanceof Error ? error.message : "无缝拼接失败";
             setResult({ status: "failed", error: reason });
             message.error(reason);
         } finally {
+            submitLockRef.current = false;
             setRunning(false);
             void refreshHistory();
         }
@@ -213,8 +246,8 @@ export function SeamlessStitchPage() {
             const cost = payload.pricing.estimate?.totalCredits ?? estimatedUsage.credits;
             if (payload.mode === "fill_and_generate") {
                 if (!firstAssetId) message.info("模板参数已填入，请先选择一张图片后再生成。");
-                else modal.confirm({ title: "确认开始无缝拼接？", content: standaloneEdition ? "确认后将直接提交生成任务。" : `当前实际消耗 ${cost} 积分。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => runStitchRef.current() });
-            } else message.success(standaloneEdition ? "模板已填入" : `模板已填入，当前消耗 ${cost} 积分/次`);
+                else modal.confirm({ title: "确认开始无缝拼接？", content: !deploymentFeatures.creditsEnabled ? "确认后将直接提交生成任务。" : `当前实际消耗 ${cost} 积分。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => runStitchRef.current() });
+            } else message.success(!deploymentFeatures.creditsEnabled ? "模板已填入" : `模板已填入，当前消耗 ${cost} 积分/次`);
         }).catch((error) => {
             loadedReuseTokenRef.current.delete(token);
             message.error(error instanceof Error ? error.message : "模板复用失败");
@@ -222,19 +255,19 @@ export function SeamlessStitchPage() {
     }, [estimatedUsage.credits, message, modal, searchParams]);
 
     return (
-        <div className="flex h-full min-h-0 flex-col overflow-hidden bg-stone-50 text-stone-950 dark:bg-stone-950 dark:text-stone-100">
-            <main className="grid min-h-0 flex-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[390px_minmax(0,1fr)_280px] lg:overflow-hidden">
-                <section className="thin-scrollbar flex min-h-0 flex-col overflow-y-auto rounded-lg border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+        <div className="wb-page flex h-full min-h-0 flex-col overflow-hidden">
+            <main className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 xl:grid-cols-[340px_minmax(0,1fr)_210px] xl:overflow-hidden">
+                <section className="wb-surface thin-scrollbar flex min-h-0 flex-col overflow-y-auto p-4">
                     <div className="flex items-start justify-between gap-3">
                         <div>
-                            <div className="mb-3 grid size-10 place-items-center rounded-lg bg-black text-orange-300">
+                            <div className="mb-3 grid size-10 place-items-center rounded-lg bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300">
                                 <Grid2x2 className="size-5" />
                             </div>
                             <h1 className="text-2xl font-semibold">无缝拼接</h1>
                             <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">把单张花纹或纹理处理成可连续平铺的无缝素材。</p>
                         </div>
-                        <Tag color="orange" className="m-0 shrink-0">
-                            {standaloneEdition ? "本机版" : `${estimatedUsage.credits} 积分/次`}
+                        <Tag className="m-0 shrink-0">
+                            {!deploymentFeatures.creditsEnabled ? "不计积分" : `${estimatedUsage.credits} 积分/次`}
                         </Tag>
                     </div>
 
@@ -255,14 +288,14 @@ export function SeamlessStitchPage() {
                         </div>
                         <button
                             type="button"
-                            className="group relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-lg border border-dashed border-orange-300 bg-orange-50/40 transition hover:border-orange-500 dark:bg-orange-950/10"
+                            className="group relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 transition hover:border-stone-500 dark:border-stone-700 dark:bg-stone-950/30"
                             onClick={() => fileInputRef.current?.click()}
                         >
                             {source ? (
                                 <img src={source.dataUrl} alt={source.name} className="size-full object-contain" />
                             ) : (
                                 <span className="flex flex-col items-center gap-3 text-sm text-stone-500">
-                                    <span className="grid size-12 place-items-center rounded-full bg-white text-orange-500 shadow-sm dark:bg-stone-900">
+                                    <span className="grid size-12 place-items-center rounded-full bg-white text-stone-500 shadow-sm dark:bg-stone-900">
                                         <ImagePlus className="size-5" />
                                     </span>
                                     选择一张花纹或纹理图片
@@ -298,20 +331,22 @@ export function SeamlessStitchPage() {
                     <div className="mt-auto pt-6">
                         <div className="mb-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs dark:border-stone-800 dark:bg-stone-950">
                             <div className="flex items-center justify-between gap-3">
-                                <span>{standaloneEdition ? "本机版直接生成" : `本次消耗 ${estimatedUsage.credits} 积分`}</span>
-                                <span>{standaloneEdition ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
+                                <span>{!deploymentFeatures.creditsEnabled ? "不计积分" : `本次消耗 ${estimatedUsage.credits} 积分`}</span>
+                                <span>{!deploymentFeatures.authenticationEnabled ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
                             </div>
                             {quotaBlocked ? <div className="mt-1 text-red-500">额度不足，无法提交任务。</div> : null}
                         </div>
-                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!estimatedUsage.configured || !seamlessModel || running} onClick={() => void runStitch()}>
+                        {!seamlessModel ? <p className="mb-3 text-xs leading-5 text-stone-500">此工具尚未配置，管理员启用无缝拼接模型后即可使用。</p> : null}
+                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!source || (deploymentFeatures.creditsEnabled && !estimatedUsage.configured) || !seamlessModel || running || quotaBlocked} onClick={() => void runStitch()}>
                             开始无缝拼接
                         </Button>
                     </div>
                 </section>
 
-                <section className="thin-scrollbar min-h-0 overflow-y-auto rounded-lg border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-800 dark:bg-stone-900 lg:p-5">
+                <section className="wb-surface thin-scrollbar min-h-0 overflow-y-auto p-4 lg:p-5">
                     <div className="mb-4 flex items-center justify-between gap-3">
-                        <h2 className="text-xl font-semibold">处理结果</h2>
+                        <h2 className="text-lg font-semibold">处理结果</h2>
+                        {previewLoading ? <span role="status" className="text-xs text-stone-500">正在读取历史图片…</span> : null}
                         {result.status === "success" ? <Tag color="green">已完成</Tag> : result.status === "pending" ? <Tag color="orange">处理中</Tag> : null}
                     </div>
                     {result.status === "pending" ? (
@@ -355,19 +390,21 @@ export function SeamlessStitchPage() {
                     ) : (
                         <div className="flex min-h-[520px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 dark:border-stone-700">
                             <Grid2x2 className="mb-4 size-12 text-stone-300" />
-                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="处理结果将在这里显示" />
+                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先上传花纹图片，选择预设，再点击开始无缝拼接" />
                         </div>
                     )}
                 </section>
 
-                <aside className="thin-scrollbar min-h-0 overflow-y-auto rounded-lg border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+                <aside className="wb-surface thin-scrollbar min-h-0 overflow-y-auto p-4">
                     <div className="mb-4 flex items-center justify-between gap-3">
                         <div>
                             <h2 className="text-base font-semibold">历史出图</h2>
                             <p className="mt-1 text-xs text-stone-500">最近 20 条无缝拼接任务</p>
                         </div>
-                        <Tag color="orange">{history.length}</Tag>
+                        <Tag>{history.length}</Tag>
                     </div>
+                    {historyLoading ? <p role="status" className="py-8 text-center text-xs text-stone-500">正在加载历史…</p> : null}
+                    {historyError ? <div role="alert" className="mb-3 text-xs leading-5 text-stone-500">{historyError}<Button size="small" className="mt-2" onClick={() => void refreshHistory()}>重试</Button></div> : null}
                     {history.length ? (
                         <div className="space-y-3">
                             {history.map((task) => {
@@ -375,7 +412,7 @@ export function SeamlessStitchPage() {
                                 const time = task.createdAt ? new Date(task.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "刚刚";
                                 return (
                                     <article key={task.id} className="overflow-hidden rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-950">
-                                        {task.status === "success" && imageUrl ? <button type="button" className="block w-full" onClick={() => void openHistoryTask(task)} title="查看处理结果"><img src={imageUrl} alt="无缝拼接历史结果" className="aspect-square w-full object-cover transition hover:opacity-80" /></button> : (
+                                        {task.status === "success" && imageUrl ? <button type="button" disabled={running} className="block w-full" onClick={() => void openHistoryTask(task)} title="查看处理结果"><img loading="lazy" decoding="async" src={imageUrl} alt="无缝拼接历史结果" className="aspect-square w-full object-cover transition hover:opacity-80" /></button> : (
                                             <div className="flex aspect-square flex-col items-center justify-center gap-2 px-3 text-center text-xs text-stone-500">
                                                 {task.status === "processing" ? <LoaderCircle className="size-5 animate-spin text-orange-500" /> : <Grid2x2 className="size-5 text-red-400" />}
                                                 <span>{task.status === "processing" ? "正在等待内部 AI 返回" : task.failureReason || "处理失败"}</span>

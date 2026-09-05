@@ -64,27 +64,30 @@ describe("APIMart video model requests", () => {
       prompt: "make it move",
       duration: 4,
       resolution: "768P",
-      aspect_ratio: "9:16",
       first_frame_image: publicImage.publicUrl,
     });
+    expect(request.size).toBe("adaptive");
+    expect(request.body).not.toHaveProperty("aspect_ratio");
     expect(request.body).not.toHaveProperty("image_urls");
   });
 
-  test("uses the first selected frame when MiniMax H3 receives multiple images", () => {
+  test("keeps all selected MiniMax images in reference mode without mixing frame fields", () => {
     const secondImage: ProviderVideoSource = { mimeType: "image/jpeg", bytes: new Uint8Array([1, 2, 3]), publicUrl: "https://assets.example.test/end.jpg" };
     const request = buildVideoProviderRequest("MiniMax-H3", "make it move", {}, [publicImage, secondImage]);
 
     expect(request.body).toMatchObject({
-      first_frame_image: publicImage.publicUrl,
+      image_urls: [publicImage.publicUrl, secondImage.publicUrl],
     });
-    expect(request.body).not.toHaveProperty("image_urls");
+    expect(request.body).not.toHaveProperty("first_frame_image");
+    expect(request.body).not.toHaveProperty("last_frame_image");
+    expect(() => buildVideoProviderRequest("MiniMax-H3", "test", {}, Array(10).fill(publicImage))).toThrow("up to 9");
   });
 
   test("keeps Seedance automatic duration and adaptive framing", () => {
     const request = buildVideoProviderRequest("doubao-seedance-2.5", "make it move", { seconds: -1, resolution: "480P", size: "auto", generateAudio: false }, [publicImage]);
 
     expect(request.body).toMatchObject({
-      model: "doubao-seedance-2.5",
+      model: "seedance-2.5",
       duration: -1,
       resolution: "480p",
       size: "adaptive",
@@ -100,10 +103,11 @@ describe("APIMart video model requests", () => {
       model: "wan2.7",
       duration: 2,
       resolution: "720P",
-      size: "1:1",
       image_urls: [publicImage.publicUrl],
       prompt_extend: true,
     });
+    expect(request.size).toBe("adaptive");
+    expect(request.body).not.toHaveProperty("size");
   });
 
   test("rejects a local-only image before submitting it to a URL-only provider", () => {
@@ -119,9 +123,10 @@ describe("APIMart video model requests", () => {
       model: "happyhorse-1.1",
       duration: 15,
       resolution: "720P",
-      size: "4:3",
       first_frame_image: publicImage.publicUrl,
     });
+    expect(request.size).toBe("adaptive");
+    expect(request.body).not.toHaveProperty("size");
     expect(request.body).not.toHaveProperty("image_urls");
   });
 
@@ -129,5 +134,23 @@ describe("APIMart video model requests", () => {
     expect(() => buildVideoProviderRequest("happyhorse-1.1", "make it move", {}, [image])).toThrow(
       "happyhorse-1.1 requires an https:// or asset:// image URL",
     );
+  });
+
+  test("HappyHorse explicit reference mode preserves a single reference instead of treating it as a first frame", () => {
+    const request = buildVideoProviderRequest("happyhorse-1.1", "reference image", { happyHorseMode: "reference", size: "4:3" }, [publicImage]);
+    expect(request.body).toMatchObject({ image_urls: [publicImage.publicUrl], size: "4:3" });
+    expect(request.body).not.toHaveProperty("first_frame_image");
+    expect(() => buildVideoProviderRequest("happyhorse-1.1", "test", { happyHorseMode: "edit" })).toThrow("mode only");
+    expect(() => buildVideoProviderRequest("happyhorse-1.1", "test", { happyHorseMode: "text" }, [publicImage])).toThrow("does not accept images");
+    expect(() => buildVideoProviderRequest("happyhorse-1.1", "test", { happyHorseMode: "first-frame" }, [publicImage, publicImage])).toThrow("exactly one");
+  });
+
+  test("documented 1080p, MiniMax watermark and prompt limits reach preflight", () => {
+    expect(buildVideoProviderRequest("doubao-seedance-2.5", "test", { resolution: "1080P" }).body).toMatchObject({ model: "seedance-2.5", resolution: "1080p" });
+    expect(buildVideoProviderRequest("MiniMax-H3", "test", { watermark: true }).body.watermark).toBe(true);
+    for (const [model, maximum] of [["MiniMax-H3", 7000], ["wan2.7", 5000], ["happyhorse-1.1", 2500]] as const) {
+      expect(() => buildVideoProviderRequest(model, "文".repeat(maximum + 1))).toThrow("characters or fewer");
+    }
+    for (const model of ["MiniMax-H3", "happyhorse-1.1"] as const) expect(() => buildVideoProviderRequest(model, "test", {}, [{ ...publicImage, mimeType: "image/gif" }])).toThrow("does not accept GIF");
   });
 });

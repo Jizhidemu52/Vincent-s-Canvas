@@ -1,4 +1,5 @@
 export type ReferenceImage = {
+    originalFileName?: string;
     id: string;
     name: string;
     type: string;

@@ -1,8 +1,14 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import React, { forwardRef, memo, startTransition, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
+import { canvasGridPreviewUpdate } from "@/lib/canvas/canvas-grid-preview-update";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { canvasViewportTransform, zoomViewportAtPoint } from "@/lib/canvas/canvas-viewport-interaction";
+import { canvasViewportContentStyle } from "@/lib/canvas/canvas-viewport-rendering";
+import { shouldRefreshCanvasVirtualization } from "@/lib/canvas/canvas-viewport-virtualization";
+import { bindCanvasPointerInteractionEnd } from "@/lib/canvas/canvas-pointer-interaction";
+import { canvasWheelZoomFactor } from "@/lib/canvas/canvas-wheel-zoom";
+import { shouldCanvasCaptureWheel } from "@/lib/canvas/canvas-wheel-target";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ViewportTransform } from "@/types/canvas";
 
@@ -10,10 +16,13 @@ type WirelessCanvasProps = {
     containerRef: React.RefObject<HTMLDivElement | null>;
     viewport: ViewportTransform;
     backgroundMode?: CanvasBackgroundMode;
+    interactionMode?: "select" | "hand";
     onViewportChange: (viewport: ViewportTransform) => void;
     onViewportPreview?: (viewport: ViewportTransform) => void;
     onInteractionChange?: (isInteracting: boolean) => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
+    onOverviewNodePointerDown?: (event: React.PointerEvent<HTMLDivElement>) => boolean;
+    onConnectionPointerDown?: (event: React.PointerEvent<HTMLDivElement>) => boolean;
     onCanvasDeselect?: () => void;
     onContextMenu?: (event: React.MouseEvent) => void;
     onDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
@@ -26,7 +35,7 @@ export type WirelessCanvasHandle = {
 };
 
 export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasProps>(function WirelessCanvas(
-    { containerRef, viewport, backgroundMode = "lines", onViewportChange, onViewportPreview, onInteractionChange, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, underlay, children },
+    { containerRef, viewport, backgroundMode = "lines", interactionMode, onViewportChange, onViewportPreview, onInteractionChange, onCanvasMouseDown, onOverviewNodePointerDown, onConnectionPointerDown, onCanvasDeselect, onContextMenu, onDrop, underlay, children },
     ref,
 ) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -41,14 +50,33 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
     });
     const contentRef = useRef<HTMLDivElement>(null);
     const gridRef = useRef<HTMLDivElement>(null);
+    const gridSizeRef = useRef<string | null>(null);
     const liveViewportRef = useRef(viewport);
+    const lastVirtualizationViewportRef = useRef(viewport);
+    const virtualizationRefreshDistanceRef = useRef(240);
+    const isCanvasInteractionRef = useRef(false);
     const frameRef = useRef<number | null>(null);
     const pendingViewportRef = useRef<ViewportTransform | null>(null);
     const wheelCommitTimerRef = useRef<number | null>(null);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
+    const [isCanvasInteracting, setIsCanvasInteracting] = useState(false);
+
+    const reportCanvasInteraction = useCallback(
+        (isInteracting: boolean) => {
+            if (isCanvasInteractionRef.current === isInteracting) return;
+            isCanvasInteractionRef.current = isInteracting;
+            if (isInteracting) lastVirtualizationViewportRef.current = liveViewportRef.current;
+            setIsCanvasInteracting(isInteracting);
+            onInteractionChange?.(isInteracting);
+        },
+        [onInteractionChange],
+    );
 
     useEffect(() => {
-        if (!panState.current.isPanning) liveViewportRef.current = viewport;
+        if (!panState.current.isPanning) {
+            liveViewportRef.current = viewport;
+            lastVirtualizationViewportRef.current = viewport;
+        }
     }, [viewport]);
 
     useEffect(
@@ -84,10 +112,13 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
             const content = contentRef.current;
             if (content) content.style.transform = canvasViewportTransform(next);
             const grid = gridRef.current;
-            if (grid && backgroundMode !== "blank") {
-                const gridSize = (backgroundMode === "dots" ? 16 : 48) * next.k;
-                grid.style.backgroundSize = `${gridSize}px ${gridSize}px`;
-                grid.style.backgroundPosition = `${next.x % gridSize}px ${next.y % gridSize}px`;
+            const gridUpdate = canvasGridPreviewUpdate(backgroundMode, next, gridSizeRef.current);
+            if (grid && gridUpdate) {
+                if (gridUpdate.gridSize) {
+                    grid.style.backgroundSize = `${gridUpdate.gridSize} ${gridUpdate.gridSize}`;
+                    gridSizeRef.current = gridUpdate.gridSize;
+                }
+                grid.style.backgroundPosition = gridUpdate.backgroundPosition;
             }
             onViewportPreview?.(next);
         },
@@ -116,8 +147,22 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         const next = pendingViewportRef.current || liveViewportRef.current;
         pendingViewportRef.current = null;
         applyLiveViewport(next);
+        lastVirtualizationViewportRef.current = next;
         onViewportChange(next);
     }, [applyLiveViewport, onViewportChange]);
+
+    const publishVirtualizedViewport = useCallback(
+        (next: ViewportTransform) => {
+            if (!shouldRefreshCanvasVirtualization(lastVirtualizationViewportRef.current, next, virtualizationRefreshDistanceRef.current)) return;
+            liveViewportRef.current = next;
+            lastVirtualizationViewportRef.current = next;
+            // The compositor already received the live transform. Mounting the
+            // next virtualized node window can yield to pointer input instead
+            // of competing with an active pan or wheel gesture.
+            startTransition(() => onViewportChange(next));
+        },
+        [onViewportChange],
+    );
 
     const previewViewport = useCallback(
         (next: ViewportTransform) => {
@@ -135,24 +180,25 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
 
     const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
-        if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
+        if (!shouldCanvasCaptureWheel(target)) return;
 
-        const delta = -event.deltaY;
-        const factor = Math.pow(1.1, delta / 100);
         const current = pendingViewportRef.current || liveViewportRef.current;
-        const newScale = clampCanvasZoom(current.k * factor);
+        const newScale = clampCanvasZoom(current.k * canvasWheelZoomFactor(event.deltaY));
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
 
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
-        onInteractionChange?.(true);
-        queueLiveViewport(zoomViewportAtPoint(current, { x: mouseX, y: mouseY }, newScale));
+        virtualizationRefreshDistanceRef.current = Math.max(160, Math.max(rect.width, rect.height) / 2);
+        reportCanvasInteraction(true);
+        const next = zoomViewportAtPoint(current, { x: mouseX, y: mouseY }, newScale);
+        queueLiveViewport(next);
+        publishVirtualizedViewport(next);
         if (wheelCommitTimerRef.current) window.clearTimeout(wheelCommitTimerRef.current);
         wheelCommitTimerRef.current = window.setTimeout(() => {
             wheelCommitTimerRef.current = null;
             commitLiveViewport();
-            onInteractionChange?.(false);
+            reportCanvasInteraction(false);
         }, 120);
     };
 
@@ -162,14 +208,25 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         if (target?.closest("[data-connection-create-menu]")) return;
         const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id]");
 
-        if (event.button === 0 && (event.ctrlKey || event.metaKey) && isBackgroundClick) {
+        const handActive = interactionMode === "hand" || (interactionMode !== undefined && isSpacePressed);
+        if (!handActive && event.button === 0 && isBackgroundClick && onOverviewNodePointerDown?.(event)) {
+            event.preventDefault();
+            return;
+        }
+
+        if (!handActive && event.button === 0 && isBackgroundClick && onConnectionPointerDown?.(event)) {
+            event.preventDefault();
+            return;
+        }
+
+        if (event.button === 0 && !handActive && (interactionMode === "select" || event.ctrlKey || event.metaKey) && isBackgroundClick) {
             event.preventDefault();
             event.currentTarget.setPointerCapture(event.pointerId);
             onCanvasMouseDown?.(event);
             return;
         }
 
-        if (event.button === 1 || (event.button === 0 && !isSpacePressed && isBackgroundClick)) {
+        if (event.button === 1 || (event.button === 0 && (handActive || (!isSpacePressed && isBackgroundClick)))) {
             event.preventDefault();
             event.currentTarget.setPointerCapture(event.pointerId);
             const current = pendingViewportRef.current || liveViewportRef.current;
@@ -182,7 +239,8 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
                 initialK: current.k,
                 hasMoved: false,
             };
-            onInteractionChange?.(true);
+            virtualizationRefreshDistanceRef.current = Math.max(160, Math.max(event.currentTarget.clientWidth, event.currentTarget.clientHeight) / 2);
+            reportCanvasInteraction(true);
             document.body.style.cursor = "grabbing";
             return;
         }
@@ -202,11 +260,13 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
                 panState.current.hasMoved = true;
             }
 
-            queueLiveViewport({
+            const next = {
                 x: panState.current.initialX + dx,
                 y: panState.current.initialY + dy,
                 k: panState.current.initialK,
-            });
+            };
+            queueLiveViewport(next);
+            publishVirtualizedViewport(next);
         };
 
         const handlePointerUp = () => {
@@ -218,33 +278,44 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
                 commitLiveViewport();
             }
             panState.current.isPanning = false;
-            onInteractionChange?.(false);
+            reportCanvasInteraction(false);
             document.body.style.cursor = "default";
         };
 
         window.addEventListener("pointermove", handlePointerMove);
-        window.addEventListener("pointerup", handlePointerUp);
+        const unbindPointerInteractionEnd = bindCanvasPointerInteractionEnd(window, handlePointerUp);
         return () => {
             window.removeEventListener("pointermove", handlePointerMove);
-            window.removeEventListener("pointerup", handlePointerUp);
+            unbindPointerInteractionEnd();
         };
-    }, [commitLiveViewport, onCanvasDeselect, onInteractionChange, queueLiveViewport]);
+    }, [commitLiveViewport, onCanvasDeselect, publishVirtualizedViewport, queueLiveViewport, reportCanvasInteraction]);
 
     useEffect(() => {
         const container = containerRef.current;
         if (!container) return;
 
-        const preventWheelScroll = (event: WheelEvent) => event.preventDefault();
-        container.addEventListener("wheel", preventWheelScroll, { passive: false });
-        return () => container.removeEventListener("wheel", preventWheelScroll);
+        const preventCanvasWheelScroll = (event: WheelEvent) => {
+            const target = event.target instanceof Element ? event.target : null;
+            if (shouldCanvasCaptureWheel(target)) event.preventDefault();
+        };
+        container.addEventListener("wheel", preventCanvasWheelScroll, { passive: false });
+        return () => container.removeEventListener("wheel", preventCanvasWheelScroll);
     }, [containerRef]);
 
     return (
         <div
             ref={containerRef}
-            className="relative h-full w-full cursor-grab select-none overflow-hidden"
+            className={`relative h-full w-full select-none overflow-hidden ${interactionMode === "select" && !isSpacePressed ? "cursor-default" : "cursor-grab"}`}
             style={{ background: theme.canvas.background }}
             onPointerDown={handlePointerDown}
+            onPointerDownCapture={(event) => {
+                if (event.button !== 0 && event.button !== 1) return;
+                if (interactionMode !== "hand" && !(interactionMode && isSpacePressed) && event.button !== 1) return;
+                const target = event.target instanceof Element ? event.target : null;
+                if (target?.closest("[data-canvas-no-zoom],[data-connection-create-menu]")) return;
+                event.stopPropagation();
+                handlePointerDown(event);
+            }}
             onWheel={handleWheel}
             onContextMenu={onContextMenu}
             onDragOver={(event) => event.preventDefault()}
@@ -255,9 +326,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
             <div
                 ref={contentRef}
                 className="absolute z-[1] origin-top-left"
-                style={{
-                    transform: canvasViewportTransform(viewport),
-                }}
+                style={canvasViewportContentStyle(isCanvasInteracting ? liveViewportRef.current : viewport, isCanvasInteracting)}
             >
                 {children}
             </div>
@@ -265,7 +334,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
     );
 });
 
-function CanvasGrid({ gridRef, viewport, mode }: { gridRef: React.RefObject<HTMLDivElement | null>; viewport: ViewportTransform; mode: CanvasBackgroundMode }) {
+const CanvasGrid = memo(function CanvasGrid({ gridRef, viewport, mode }: { gridRef: React.RefObject<HTMLDivElement | null>; viewport: ViewportTransform; mode: CanvasBackgroundMode }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     if (mode === "blank") return null;
 
@@ -287,4 +356,4 @@ function CanvasGrid({ gridRef, viewport, mode }: { gridRef: React.RefObject<HTML
             }}
         />
     );
-}
+});

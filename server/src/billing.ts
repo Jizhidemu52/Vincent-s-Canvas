@@ -1,4 +1,5 @@
 import type { Database } from "./db";
+import type { PoolClient } from "pg";
 import { withTransaction } from "./db-transaction";
 import { ensureGroupCreditPeriod } from "./group-credits";
 import {
@@ -99,9 +100,11 @@ export async function reserveCredits(
     operationType: string;
     modelConfigId?: string | null;
     quantity: number;
+    creditsEnabled?: boolean;
   },
+  transactionClient?: PoolClient,
 ) {
-  return withTransaction(db, async (client) => {
+  const reserve = async (client: PoolClient) => {
     const existing = await client.query<{
       status: string;
       credits: number;
@@ -126,7 +129,8 @@ export async function reserveCredits(
       "SELECT credits,rmb_cost,version FROM pricing_rule_versions WHERE operation_type=$1 AND status='published'",
       [input.operationType],
     );
-    const price = priceResult.rows[0];
+    const creditsEnabled = input.creditsEnabled !== false;
+    const price = priceResult.rows[0] ?? (!creditsEnabled ? { credits: 0, rmb_cost: "0", version: 0 } : undefined);
     if (!price)
       throw new BillingError(
         "PRICE_NOT_CONFIGURED",
@@ -159,10 +163,10 @@ export async function reserveCredits(
     }
     const snapshot = calculatePrice({
       operationType: input.operationType,
-      operationCredits: price.credits,
+      operationCredits: creditsEnabled ? price.credits : 0,
       operationRmb: Number(price.rmb_cost),
       modelId: model?.id ?? null,
-      modelCredits: model?.credit_cost ?? 0,
+      modelCredits: creditsEnabled ? model?.credit_cost ?? 0 : 0,
       modelRmb: Number(model?.rmb_cost ?? 0),
       quantity: input.quantity,
       priceVersion: price.version,
@@ -174,6 +178,14 @@ export async function reserveCredits(
     const identity = identityResult.rows[0];
     if (!identity)
       throw new BillingError("ACCOUNT_DISABLED", "账号不存在或已停用");
+    if (!creditsEnabled) {
+      await client.query(
+        `INSERT INTO credit_reservations(request_id,user_id,operation_type,model_config_id,quantity,credits,rmb_cost,price_snapshot)
+         VALUES($1,$2,$3,$4,$5,0,$6,$7)`,
+        [input.requestId, input.userId, input.operationType, model?.id ?? null, input.quantity, snapshot.totalRmb, { ...snapshot, billingDisabled: true }],
+      );
+      return { status: "held", credits: 0, rmbCost: snapshot.totalRmb, snapshot, duplicate: false };
+    }
     let departmentBalance: number | null = null;
     if (identity.department_id) {
       const departmentResult = await client.query<{
@@ -311,7 +323,8 @@ export async function reserveCredits(
       snapshot,
       duplicate: false,
     };
-  });
+  };
+  return transactionClient ? reserve(transactionClient) : withTransaction(db, reserve);
 }
 
 export async function settleReservation(
@@ -333,9 +346,11 @@ export async function settleReservation(
       group_period_start: string | null;
       status: string;
       credit_period_start: string;
+      billing_disabled: boolean;
     }>(
       `SELECT id,user_id,department_id,credits,department_credits,personal_credits,group_credits,
-              group_id,group_period_start::text,status,credit_period_start::text
+              group_id,group_period_start::text,status,credit_period_start::text,
+              COALESCE((price_snapshot->>'billingDisabled')::boolean,false) AS billing_disabled
          FROM credit_reservations WHERE request_id=$1 FOR UPDATE`,
       [requestId],
     );
@@ -344,6 +359,11 @@ export async function settleReservation(
       throw new BillingError("RESERVATION_NOT_FOUND", "额度冻结记录不存在");
     if (reservation.status !== "held")
       return { status: reservation.status, duplicate: true };
+    if (reservation.billing_disabled) {
+      const status = outcome === "capture" ? "captured" : "released";
+      await client.query("UPDATE credit_reservations SET status=$1,settled_at=now() WHERE id=$2", [status, reservation.id]);
+      return { status, duplicate: false };
+    }
     if (outcome === "capture") {
       await client.query(
         "UPDATE credit_reservations SET status='captured',settled_at=now() WHERE id=$1",

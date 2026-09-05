@@ -81,10 +81,11 @@ describe("canvas batch item mapping", () => {
         ]);
     });
 
-    test("maps image sizes to GPT-Image-2 ratios and resolutions", () => {
-        expect(imageTaskParameters({ size: "2048x1152" } as never)).toEqual({ size: "16:9", resolution: "2k" });
-        expect(imageTaskParameters({ size: "2160x3840" } as never)).toEqual({ size: "9:16", resolution: "4k" });
-        expect(imageTaskParameters({ size: "auto" } as never)).toEqual({ size: "auto", resolution: "1k" });
+    test("preserves adapter-supported exact dimensions and resolution instead of silently remapping ratios", () => {
+        expect(imageTaskParameters({ model: "vcen-gpt2", size: "2048x1152", quality: "2k" } as never)).toEqual({ size: "2048x1152", resolution: "2k" });
+        expect(imageTaskParameters({ model: "vcen-gpt2", size: "2160x3840", quality: "4k" } as never)).toEqual({ size: "2160x3840", resolution: "4k" });
+        expect(imageTaskParameters({ model: "gpt-image-2", size: "1536x1024", quality: "high" } as never)).toEqual({ size: "1536x1024", quality: "high" });
+        expect(imageTaskParameters({ model: "gemini-3.1-flash-image", size: "3:4", quality: "4k" } as never)).toEqual({});
     });
 
     test("keeps original file positions after an earlier upload fails", () => {
