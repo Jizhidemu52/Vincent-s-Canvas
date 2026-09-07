@@ -18,7 +18,7 @@ import type { AuthenticatedRequest, SessionUser } from "../types";
 const createSchema = z.object({
   filename: z.string().trim().min(1).max(255),
   mimeType: z.string().min(1).max(120),
-  byteSize: z.number().int().min(1).max(100 * 1024 * 1024),
+  byteSize: z.number().int().min(1).max(200 * 1024 * 1024),
   kind: z.enum(["image", "video", "text", "other"]).default("image"),
   projectId: z.string().uuid().nullish(),
   clientReferenceId: z.string().trim().min(8).max(160).optional(),
@@ -117,7 +117,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
     } catch (error) { next(error); }
   });
 
-  router.put("/:id/upload", express.raw({ type: "*/*", limit: "100mb" }), async (request, response, next) => {
+  router.put("/:id/upload", express.raw({ type: "*/*", limit: "200mb" }), async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const result = await db.query<{ object_key: string; mime_type: string; byte_size: number }>(

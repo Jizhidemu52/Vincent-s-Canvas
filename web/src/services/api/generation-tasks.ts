@@ -31,7 +31,7 @@ export class QueuedTaskFailedError extends Error {
 }
 export type GenerationVideoCapability = { seconds: readonly [number, number]; resolutions: readonly string[]; sizes: readonly string[]; minImages: number; maxImages: number; firstFrameRequired: boolean; supportsAudio: boolean };
 export type GenerationCapabilityModel = { id: string; name: string; modelId: string; capability: GenerationVideoCapability };
-export type QueuedMediaInput = { modelId: string; prompt: string; operationType: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; signal?: AbortSignal; onSubmitted?: (task: QueuedTask) => void };
+export type QueuedMediaInput = { modelId: string; prompt: string; operationType: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; sourceMetadata?: Record<string, unknown>[]; sourceOrder?: Array<{ kind: "file" | "url"; index: number }>; signal?: AbortSignal; onSubmitted?: (task: QueuedTask) => void };
 export type QueuedBatchItem = QueuedTask & { itemIndex: number };
 export type QueuedBatchFailure = { index: number; reason: string };
 export type QueuedBatchAction = "pause" | "resume" | "cancel";
@@ -208,8 +208,10 @@ export function createQueuedMediaTaskPayloads(input: {
 export async function submitQueuedMediaTask(input: QueuedMediaInput) {
     const model = await resolvePublicModel(input.modelId);
     const sourceUrls = [...(input.sourceUrls || [])];
-    for (const file of input.sourceFiles || []) {
-        const id = await uploadServerAsset(file, { title: file.name, source: "task-reference" });
+    const uploadedUrls: string[] = [];
+    for (const [index, file] of (input.sourceFiles || []).entries()) {
+        const id = await uploadServerAsset(file, { ...input.sourceMetadata?.[index], title: file.name, source: "task-reference" });
+        uploadedUrls.push(`/api/assets/${id}/content`);
         sourceUrls.push(`/api/assets/${id}/content`);
     }
     const [preflightPayload, submitPayload] = createQueuedMediaTaskPayloads({
@@ -219,7 +221,7 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
         modelConfigId: model.id,
         prompt: input.prompt,
         parameters: input.parameters || {},
-        sourceUrls,
+        sourceUrls: input.sourceOrder ? input.sourceOrder.map((source) => source.kind === "file" ? uploadedUrls[source.index] : input.sourceUrls![source.index]) : sourceUrls,
     });
     if (input.operationType === "video_generation") {
         const preflight = await request<{ ok: boolean; normalized: Record<string, unknown> }>("/api/tasks/preflight", {

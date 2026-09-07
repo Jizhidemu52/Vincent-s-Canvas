@@ -1,7 +1,7 @@
 import { dataUrlToFile } from "@/lib/image-utils";
-import { getVideoModelParameterSpec, videoModelRequestParameters } from "@/lib/video-model-parameters";
+import { videoModelRequestParameters, videoReferenceError } from "@/lib/video-model-parameters";
 import { getQueuedTask, QueuedTaskPausedError, recoverQueuedMedia, requestQueuedMedia, submitQueuedMediaTask } from "@/services/api/generation-tasks";
-import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { HappyHorseMode } from "@/lib/happyhorse-video";
@@ -61,19 +61,40 @@ export async function storeGeneratedVideo(result: VideoGenerationResult, options
 
 async function queuedVideoInput(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions, happyHorseMode?: HappyHorseMode) {
     const modelId = modelOptionName(config.model || config.videoModel);
-    const spec = getVideoModelParameterSpec(config);
-    if (references.length > (spec?.maxImages ?? 0)) throw new Error(`当前视频模型最多支持 ${spec?.maxImages ?? 0} 张参考图`);
-    if (videoReferences.length || audioReferences.length) throw new Error("当前视频接口尚未接入视频或音频参考，请移除这些参考后重试。");
-    if (happyHorseMode === "edit") throw new Error("HappyHorse 1.1 不支持视频编辑，请切换文生、首帧或参考图模式。");
-    if (modelId === "happyhorse-1.1") {
-        if (happyHorseMode === "text" && references.length) throw new Error("文生视频模式不接收图片，请移除参考图或切换模式。");
-        if (happyHorseMode === "first-frame" && references.length !== 1) throw new Error("首帧图生视频需要恰好 1 张图片。");
-        if (happyHorseMode === "reference" && !references.length) throw new Error("参考图模式需要 1–9 张图片。");
-    }
-    const parameters = { ...videoModelRequestParameters(config), ...(modelId === "happyhorse-1.1" && happyHorseMode ? { happyHorseMode } : {}) };
+    // Preserve the legacy HappyHorse mode when callers still carry the default auto mode.
+    const requestConfig = happyHorseMode && (!config.videoMode || config.videoMode === "auto") ? { ...config, videoMode: happyHorseMode } : config;
+    const error = videoReferenceError(requestConfig, references, videoReferences, audioReferences);
+    if (error) throw new Error(error);
+    const parameters = { ...videoModelRequestParameters(requestConfig), ...(modelId === "happyhorse-1.1" && happyHorseMode ? { happyHorseMode } : {}) };
     const sourceFiles: File[] = [];
     const sourceUrls: string[] = [];
-    for (const image of references) sourceFiles.push(dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) }));
+    const sourceMetadata: Record<string, unknown>[] = [];
+    const sourceOrder: Array<{ kind: "file" | "url"; index: number }> = [];
+    const addFile = (file: File, metadata: Record<string, unknown>) => {
+        sourceOrder.push({ kind: "file", index: sourceFiles.length });
+        sourceFiles.push(file);
+        sourceMetadata.push(metadata);
+    };
+    const resolvedImages: ReferenceImage[] = [];
+    const resolvedVideos: ReferenceVideo[] = [];
+    const resolvedAudios: ReferenceAudio[] = [];
+    for (const image of references) {
+        const file = dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) });
+        resolvedImages.push({ ...image, bytes: file.size, type: file.type });
+        addFile(file, { width: image.width, height: image.height });
+    }
+    for (const [kind, items] of [["video", videoReferences], ["audio", audioReferences]] as const) {
+        for (const item of items) {
+            const source = await resolveVideoReferenceSource(item, kind, options?.signal);
+            const resolved = { ...item, ...(source instanceof File ? { bytes: source.size, type: source.type } : {}) };
+            if (kind === "video") resolvedVideos.push(resolved as ReferenceVideo);
+            else resolvedAudios.push(resolved as ReferenceAudio);
+            if (source instanceof File) addFile(source, { durationMs: item.durationMs, width: (item as ReferenceVideo).width, height: (item as ReferenceVideo).height, fps: (item as ReferenceVideo).fps });
+            else { sourceOrder.push({ kind: "url", index: sourceUrls.length }); sourceUrls.push(source); }
+        }
+    }
+    const resolvedError = videoReferenceError(requestConfig, resolvedImages, resolvedVideos, resolvedAudios);
+    if (resolvedError) throw new Error(resolvedError);
     return {
         modelId,
         prompt,
@@ -81,6 +102,33 @@ async function queuedVideoInput(config: AiConfig, prompt: string, references: Re
         parameters,
         sourceFiles,
         sourceUrls,
+        sourceMetadata,
+        sourceOrder,
         signal: options?.signal,
     };
+}
+
+/** Local persistent bytes take priority over expired object URLs; never send blob: to the server. */
+export async function resolveVideoReferenceSource(reference: ReferenceVideo | ReferenceAudio, kind: "video" | "audio", signal?: AbortSignal, readBlob = getMediaBlob): Promise<File | string> {
+    if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
+    const stored = reference.storageKey ? await readBlob(reference.storageKey) : null;
+    const toFile = (blob: Blob) => {
+        if (!blob.size) throw new Error(`${reference.name || "参考素材"} 文件为空`);
+        const mime = blob.type && blob.type !== "application/octet-stream" ? blob.type : reference.type;
+        if (!mime?.startsWith(`${kind}/`)) throw new Error("参考素材格式与视频/音频类型不一致，请重新导入");
+        return new File([blob], reference.name || `${kind}-reference.${kind === "video" ? "mp4" : "mp3"}`, { type: mime });
+    };
+    if (stored) return toFile(stored);
+    const url = reference.url?.trim();
+    if (!url) throw new Error("本地参考素材已丢失，请重新导入原文件");
+    if (/^\/api\/assets\/[\w-]+\/content(?:\?[^#]*)?$/.test(url)) return url;
+    if (/^https?:\/\//i.test(url)) {
+        const parsed = new URL(url);
+        if (parsed.username || parsed.password) throw new Error("参考素材 URL 不能包含账号凭据");
+        return url;
+    }
+    if (!url.startsWith("blob:") && !url.startsWith(`data:${kind}/`)) throw new Error("参考素材地址无效，请重新导入原文件");
+    const response = await fetch(url, { signal });
+    if (!response.ok) throw new Error("本地参考素材读取失败，请重新导入原文件");
+    return toFile(await response.blob());
 }

@@ -8,6 +8,7 @@ export type ReferenceVideo = {
     width?: number;
     height?: number;
     durationMs?: number;
+    fps?: number;
 };
 
 export type ReferenceAudio = {
@@ -17,4 +18,5 @@ export type ReferenceAudio = {
     url: string;
     storageKey?: string;
     durationMs?: number;
+    bytes?: number;
 };

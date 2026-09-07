@@ -25,6 +25,7 @@ const schema = z.object({
     tools: z.array(z.unknown()).max(100).default([]),
     toolChoice: z.unknown().optional(),
     webSearch: z.boolean().optional(),
+    gemini: z.object({ maxOutputTokens: z.number().int().min(1).max(16384) }).optional(),
     claude: z.object({
         stream: z.boolean().optional(),
         thinking: z.boolean().optional(),
@@ -43,6 +44,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 tools: ResponseTool[];
                 toolChoice?: unknown;
                 webSearch?: boolean;
+                gemini?: { maxOutputTokens: number };
                 claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
             };
             await assertModuleEnabled(db, "gpt-chat");
@@ -114,7 +116,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
 export async function requestChatCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number }; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
 ): Promise<ChatCompletionResult> {
     if (model.protocol === "gemini") return requestGeminiCompletion(model, credentials, input);
     if (model.protocol === "anthropic") return requestClaudeCompletion(model, credentials, input);
@@ -293,7 +295,7 @@ async function requestOpenAiCompletion(
 async function requestGeminiCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean },
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number } },
 ) {
     const upstream = await fetch(buildGeminiGenerateUrl(model.base_url, model.model_id), {
         method: "POST",
@@ -335,7 +337,11 @@ export function toGeminiContents(input: ResponseInput[]): Array<{ role: string; 
     });
 }
 
-export function buildGeminiRequestBody(input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean }) {
+export function buildGeminiRequestBody(input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number } }) {
+    const maxOutputTokens = input.gemini?.maxOutputTokens;
+    if (maxOutputTokens !== undefined && (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 16384)) {
+        throw new ChatProtocolError("INVALID_GEMINI_MAX_OUTPUT_TOKENS", "Gemini 输出 token 上限必须是 1–16384 的整数");
+    }
     const declarations = input.tools.map((tool) => ({
         name: tool.name,
         ...(tool.description ? { description: tool.description } : {}),
@@ -348,6 +354,7 @@ export function buildGeminiRequestBody(input: { input: ResponseInput[]; tools: R
     ];
     return {
         contents: toGeminiContents(input.input),
+        ...(maxOutputTokens !== undefined ? { generationConfig: { maxOutputTokens } } : {}),
         ...(tools.length ? {
             tools,
             ...(declarations.length ? {

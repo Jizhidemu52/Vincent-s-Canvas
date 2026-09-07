@@ -24,18 +24,20 @@ flowchart LR
 
 需要公司 IT 提供：
 
-- 一台 Linux 服务器或私有云主机，以及 SSH/控制台权限。
-- 一个正式域名，例如 `canvas.company.com`。
-- 该域名的 HTTPS 证书或公司现有自动签发网关。
-- 允许网关转发到服务器 `3000` 端口的规则。
-- 企业微信自建应用的 Corp ID、Agent ID、Secret 和可信回调域配置权限。
+- 目标 Linux 服务器的地址、SSH 端口、登录账号及可用认证方式；私钥或密码通过受控渠道提供，不贴到聊天或 Git。需要确认 Docker/Compose 权限和代码部署目录。
+- 一个正式域名，以及 DNS、HTTPS 证书或公司现有网关的管理方式；说明只对内网开放还是允许公网访问。
+- 网关转发到服务器 `3000` 端口的规则；确认该目录和端口是否已有服务，是否有需保留的数据。
+- 持久化磁盘与备份存放位置。默认 Compose 使用本机 PostgreSQL、Redis 和 MinIO 卷；若要复用公司现有数据库或对象存储，应先提供对应连接方案，不直接套用默认 Compose。
+- 若启用企业微信，提供自建应用的 Corp ID、Agent ID、Secret 和可信回调域配置权限；暂不启用时无需为账号密码登录开通企业微信应用。
+
+在目标服务器、连接方式和入口域名未明确前，只能完成源码、配置说明和测试环境验证，不能把本机演示地址或 CI 通过当成“公司服务器已部署”。当前演示服务中的作品应先由用户下载、导出画布备份，再单独安排迁移；不要通过重启演示服务来代替正式部署。
 
 如果公司已有统一入口网关、WAF、零信任访问平台或内网域名，优先复用，不需要为了本项目单独购买 VPN。不要把 `3000`、`3100`、`5432`、`6379`、`9000` 或 `9001` 直接开放到公网。
 
 ```bash
 git clone https://github.com/Jizhidemu52/Vincent-s-Canvas.git
 cd Vincent-s-Canvas
-cp .env.example .env
+test -e .env || cp .env.example .env
 ```
 
 编辑 `.env`，至少替换：
@@ -44,6 +46,17 @@ cp .env.example .env
 - `BOOTSTRAP_ADMIN_PASSWORD`
 - `PROVIDER_ENCRYPTION_KEY`
 - `S3_SECRET_ACCESS_KEY`
+
+`.env.example` 中的 `WECOM_CALLBACK_URL` 默认是示例地址，其他三项为空。这样原样启动会被判定为企业微信配置不完整。暂不启用企业微信时，必须将四项全部清空：
+
+```dotenv
+WECOM_CORP_ID=
+WECOM_AGENT_ID=
+WECOM_SECRET=
+WECOM_CALLBACK_URL=
+```
+
+启用时四项填写正式值，并把示例域名替换为自己的 HTTPS 域名。不要仅删除预检的 `--require-wecom` 参数却保留半套配置。
 
 生成 Provider 加密密钥：
 
@@ -54,7 +67,7 @@ openssl rand -base64 32
 启动前运行生产预检。已安装 Bun 时：
 
 ```bash
-bun ops/preflight/production-preflight.ts --require-wecom
+bun --env-file=.env ops/preflight/production-preflight.ts
 ```
 
 服务器只有 Docker 时：
@@ -63,10 +76,12 @@ bun ops/preflight/production-preflight.ts --require-wecom
 docker run --rm --env-file .env \
   -v "$PWD:/workspace:ro" -w /workspace \
   oven/bun:1.3.13 \
-  bun ops/preflight/production-preflight.ts --require-wecom
+  bun ops/preflight/production-preflight.ts
 ```
 
-预检只输出通过项、缺失变量名和修复提示，不打印密码、Secret 或加密密钥。必须达到 `0 项错误` 才进入正式启动；首次管理员创建后的“删除初始密码”属于提醒项。
+需要企业微信扫码登录时，在以上预检命令末尾加 `--require-wecom`。预检只输出通过项、缺失变量名和修复提示，不打印密码、Secret 或加密密钥。首次部署仍必须提供有效初始管理员密码，达到 `0 项错误` 才进入正式启动；后续移除初始密码按下一节的只读复验流程处理。
+
+预检默认只校验配置，并不证明 HTTPS 入口、对象存储、Provider 或公司网络已经可用。正式启动、业务测试与备份验证仍需实际执行。
 
 ## 2. 启动
 
@@ -92,11 +107,34 @@ curl http://localhost:3000/api/health
 
 首次启动会自动执行 PostgreSQL 迁移、创建 MinIO Bucket、启用对象版本保护，并创建首位超级管理员。
 
-打开 `http://服务器地址:3000/admin/login`：
+通过公司 HTTPS 网关打开 `https://正式域名/admin/login`，不要把初始管理员密码通过公网裸 HTTP 发送：
 
 1. 使用 `.env` 中的超级管理员账号和初始密码登录。
 2. 按页面要求修改密码。
-3. 成功后从 `.env` 删除 `BOOTSTRAP_ADMIN_PASSWORD`。
+3. 确认可用超级管理员已完成改密后，从 `.env` **删除整行** `BOOTSTRAP_ADMIN_PASSWORD`，不要改成 `BOOTSTRAP_ADMIN_PASSWORD=`；运行时会拒绝空字符串。
+
+### 移除初始密码后的复验
+
+默认预检服务于首次引导，仍要求初始密码；已初始化环境用 `--after-bootstrap`。该模式只读查询目标数据库，确认至少一个启用、可密码登录且完成首次改密的超级管理员，才允许初始密码缺失。数据库连接失败、尚未迁移、管理员不可用或没有完成改密，都不会按“已经初始化”放行。
+
+在部署仓库根目录执行（数据库已启动，API 镜像已构建）：
+
+```bash
+docker compose run --rm --no-deps \
+  -v "$PWD:/workspace:ro" -w /workspace \
+  api bun ops/preflight/production-preflight.ts --after-bootstrap
+```
+
+该一次性容器继承 `api` 的网络和 `DATABASE_URL`，读取已编辑的 `.env`；覆盖默认启动命令，所以不会执行迁移、创建管理员或启动另一份 API，也不需要挂载 Docker socket。需要企业微信时追加 `--require-wecom`。有 Bun 且已通过受控方式提供正确 `DATABASE_URL` 的环境，也可运行 `bun --env-file=.env ops/preflight/production-preflight.ts --after-bootstrap`；不要为宿主预检临时开放数据库公网端口。
+
+复验通过后，在维护窗口重建 API/Worker 容器以移除旧容器环境中的初始密码：
+
+```bash
+docker compose up -d --force-recreate api worker
+docker compose ps
+```
+
+这会短暂影响服务，应先确认没有处理中任务，并通知使用者。不要用 `docker compose restart` 代替，它不会加载变更后的环境变量。Provider 加密密钥和数据库/对象存储密码不是一次性初始密码，不能在此步骤一并删除或随意重置。
 
 ## 3. 开通设计师
 
@@ -127,7 +165,7 @@ WECOM_SECRET=
 WECOM_CALLBACK_URL=https://你的域名/api/auth/wecom/callback
 ```
 
-四项必须同时填写，不能只填一部分；生产环境回调地址必须使用 HTTPS，否则 API 会拒绝启动。`WECOM_SECRET` 只写入服务器 `.env`，不能写进前端、截图或 GitHub。
+四项必须同时填写，不能只填一部分；生产环境回调地址必须使用 HTTPS，路径必须是 `/api/auth/wecom/callback`，且不能保留 `canvas.example.com` 示例域名。暂不启用时四项全部置空，包含回调地址，否则 API 会拒绝启动。`WECOM_SECRET` 只写入服务器 `.env`，不能写进前端、截图或 GitHub。
 
 账号匹配规则：
 
@@ -174,6 +212,21 @@ docker compose up -d api
 
 API Key 由后端加密保存，浏览器只显示“已配置”。`API 服务与密钥`、`工作流（高级）` 和 `模型（高级）` 仍可用于复杂配置，但不再占用三个独立后台入口。
 
+### 上游读取参考素材的对象存储入口
+
+默认 Compose 的 `api` 和 `worker` 会把内部 `S3_ENDPOINT` 设为 `http://minio:9000`，用于系统读写。外部视频 Provider 无法访问这个地址；参考图、视频和音频的签名下载地址需要上游可达的 HTTPS 入口。
+
+`S3_PUBLIC_ENDPOINT` 用于对外签名，内部 `S3_ENDPOINT` 可以保持不变。例如公司已有受控对象存储入口时：
+
+```dotenv
+S3_ENDPOINT=http://minio:9000
+S3_PUBLIC_ENDPOINT=https://公司实际的对象存储域名
+```
+
+公共入口必须指向同一份对象、Bucket 与凭据，并正确转发签名请求的 Host、路径及查询参数；不能填一个未配置转发的域名或另一套独立 Bucket。若公司直接使用已有 HTTPS S3 服务，则按实际连接方案配置内部读写端点；不要以为只修改 `.env` 就覆盖了默认 Compose 的内部端点设置。
+
+不要把 MinIO 管理端口直接暴露公网，也不需要把整个 Bucket 改成匿名公开。先由公司 IT 提供受控 HTTPS 对象入口并验证签名文件可在上游访问，再进行一次最小视频/音频参考任务；签名链接只在必要范围内使用，不放进公开文档或日志。未提供域名和入口前，不能把本地上传成功或 CI 模拟出图通过说成“真实上游已成功取回视频/音频素材”。
+
 模板变量：
 
 ```text
@@ -204,7 +257,7 @@ docker compose up -d api worker
 
 ## 7. 备份与恢复
 
-`backup` 容器每 15 分钟执行一次压缩 `pg_dump`，保存到 MinIO 的 `backups/postgres/`。MinIO Bucket 已启用版本保护。
+`backup` 容器每 15 分钟执行一次压缩 `pg_dump`，保存到 MinIO 的 `backups/postgres/`。MinIO Bucket 已启用版本保护。默认数据库和 MinIO 仍在同一台机器；这不是异机灾备。正式上线需按公司要求把数据库备份、素材对象与必要加密配置另存到独立受控位置，浏览器中的画布另行导出。
 
 查看备份日志：
 
@@ -212,12 +265,12 @@ docker compose up -d api worker
 docker compose logs --tail=100 backup
 ```
 
-恢复前先停止 API 和 Worker：
+恢复会覆盖目标数据库，先确认备份对象、目标环境和维护窗口。先停止 Web、API、Worker 和 Backup，避免新请求或自动备份在恢复期间写入，再将示例备份路径替换为已经核实存在的对象：
 
 ```bash
-docker compose stop api worker
-docker compose run --rm backup restore.sh backups/postgres/20260710T120000Z.dump
-docker compose up -d api worker
+docker compose stop web api worker backup
+docker compose run --rm --no-deps backup restore.sh backups/postgres/已核实的备份文件.dump
+docker compose up -d api worker web backup
 ```
 
 每季度至少执行一次恢复演练，并记录恢复耗时。验收目标为 RPO 不超过 15 分钟、RTO 不超过 4 小时。

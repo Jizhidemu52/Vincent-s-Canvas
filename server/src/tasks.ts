@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { BillingError, reserveCredits, settleReservation } from "./billing";
 import type { Cache, Database } from "./db";
 import { withTransaction } from "./db-transaction";
+import { preflightStoredVideoTask } from "./stored-video-preflight";
 
 export type TaskPriority = "normal" | "priority" | "urgent";
 export type QueueTaskAction = "pause" | "resume" | "cancel";
@@ -111,6 +112,11 @@ export async function enqueueTask(
         shouldQueue: existing.rows[0].status === "waiting",
         queuePriority: existing.rows[0].priority,
       };
+    }
+    if (input.operationType === "video_generation") {
+      const checked = await preflightStoredVideoTask(client, input);
+      input.parameters = { ...input.parameters, ...checked.normalized };
+      await client.query("UPDATE tasks SET parameters=$1 WHERE id=$2", [input.parameters, taskId]);
     }
     const reservation = await reserveCredits(db, {
       requestId: input.requestId,

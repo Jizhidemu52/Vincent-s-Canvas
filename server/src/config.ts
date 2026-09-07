@@ -22,6 +22,7 @@ const schema = z.object({
     WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(40).default(10),
     TASK_MOCK_MODE: z.enum(["true", "false"]).default("false"),
     S3_ENDPOINT: z.string().url().optional(),
+    S3_PUBLIC_ENDPOINT: z.string().url().optional().or(z.literal("")),
     S3_REGION: z.string().default("us-east-1"),
     S3_BUCKET: z.string().default("wireless-canvas"),
     S3_ACCESS_KEY_ID: z.string().optional(),

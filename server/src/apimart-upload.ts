@@ -36,7 +36,7 @@ export async function uploadApiMartImage(input: {
   return result.url;
 }
 
-function isPublicHttpsUrl(value: string) {
+export function isPublicHttpsUrl(value: string) {
   try {
     const url = new URL(value);
     if (url.protocol !== "https:" || url.username || url.password) return false;

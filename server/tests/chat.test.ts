@@ -19,6 +19,14 @@ afterEach(() => {
 });
 
 describe("Gemini native chat protocol", () => {
+    test("bounds optional output tokens without changing the default request", () => {
+        expect(buildGeminiRequestBody({ input: [], tools: [], gemini: { maxOutputTokens: 256 } }).generationConfig).toEqual({ maxOutputTokens: 256 });
+        expect(buildGeminiRequestBody({ input: [], tools: [] })).not.toHaveProperty("generationConfig");
+        for (const maxOutputTokens of [0, 1.5, 16385, NaN]) {
+            expect(() => buildGeminiRequestBody({ input: [], tools: [], gemini: { maxOutputTokens } })).toThrow(ChatProtocolError);
+        }
+    });
+
     test("builds the native APIMart endpoint from both root and v1 base URLs", () => {
         expect(buildGeminiGenerateUrl("https://api.apimart.ai", "gemini-3.1-pro-preview"))
             .toBe("https://api.apimart.ai/v1beta/models/gemini-3.1-pro-preview:generateContent");

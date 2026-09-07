@@ -17,9 +17,7 @@ import {
 } from "../tasks";
 import type { AuthenticatedRequest } from "../types";
 import { assertModuleEnabled, moduleForOperation } from "../module-flags";
-import { getVideoModelCapability, isSupportedVideoModelId, type ProviderVideoSource } from "../video-models";
-import { preflightVideoTask } from "../video-task-preflight";
-import { APIMART_VIDEO_IMAGE_MAX_BYTES, isApiMartImageMimeType } from "../apimart-upload";
+import { preflightStoredVideoTask } from "../stored-video-preflight";
 
 const base = z.object({
   requestId: z.string().min(8).max(200),
@@ -31,7 +29,7 @@ const base = z.object({
   priority: z.enum(["normal", "priority", "urgent"]).default("normal"),
 });
 const singleSchema = base.extend({
-  sourceUrls: z.array(z.string().max(2_000)).max(30).default([]),
+  sourceUrls: z.array(z.string().max(2_000)).max(50).default([]),
 });
 const batchSchema = base.extend({
   items: z
@@ -57,7 +55,7 @@ const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COALESCE(SUM(t.rmb_cost) FILTER (WHERE t.status='success'),0)::float8 AS consumed_rmb_cost
   FROM tasks t WHERE t.batch_id=b.id) stats ON true`;
 
-export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = true) {
+export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = true, videoPreflight = preflightStoredVideoTask) {
   const router = Router();
 
   router.post("/preflight", async (request, response, next) => {
@@ -69,43 +67,12 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
       }
       await assertModuleEnabled(db, "video");
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const result = await db.query<{ id: string; modelId: string }>(
-        `SELECT m.id,m.model_id AS "modelId" FROM model_configs m JOIN providers p ON p.id=m.provider_id
-         WHERE m.id=$1 AND m.enabled=true AND p.enabled=true AND p.protocol='apimart' AND p.encrypted_credentials IS NOT NULL AND 'video'=ANY(m.capabilities)`,
-        [input.modelConfigId ?? null],
-      );
-      const model = result.rows[0];
-      if (!model || !isSupportedVideoModelId(model.modelId)) {
-        response.status(400).json({ error: "MODEL_DISABLED", message: "所选视频模型未启用或尚不支持" });
-        return;
-      }
-      const capability = getVideoModelCapability(model.modelId);
-      if (input.sourceUrls.length < capability.minImages || input.sourceUrls.length > capability.maxImages) {
-        response.status(400).json({ error: "INVALID_VIDEO_INPUT", message: `此模型支持 ${capability.minImages}–${capability.maxImages} 张参考图` });
-        return;
-      }
-      const sources: ProviderVideoSource[] = [];
-      for (const url of input.sourceUrls) {
-        const id = url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i)?.[1];
-        const assetResult = id ? await db.query<{ id: string; mimeType: string; byteSize: number }>(
-          `SELECT id,mime_type AS "mimeType",byte_size AS "byteSize" FROM assets
-           WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL`, [id, actor.id],
-        ) : null;
-        const asset = assetResult?.rows[0];
-        if (!asset || !isApiMartImageMimeType(asset.mimeType) || Number(asset.byteSize) <= 0 || Number(asset.byteSize) > APIMART_VIDEO_IMAGE_MAX_BYTES) {
-          response.status(400).json({ error: "INVALID_SOURCE", message: "参考图不存在、无权访问、超过 10MB 或非 JPEG/PNG/WebP/GIF 格式" });
-          return;
-        }
-        // Preflight only validates owned stored metadata. Runtime uploads the bytes before video submission.
-        sources.push({ mimeType: asset.mimeType, bytes: new Uint8Array(), publicUrl: `asset://${asset.id}` });
-      }
-      try {
-        const preflight = preflightVideoTask({ model: model.modelId, prompt: input.prompt, parameters: input.parameters, sources });
-        response.json({ ok: true, requestId: input.requestId, normalized: preflight.normalized });
-      } catch (error) {
-        response.status(400).json({ error: "INVALID_VIDEO_INPUT", message: error instanceof Error ? error.message : "视频参数不正确" });
-      }
-    } catch (error) { next(error); }
+      const preflight = await videoPreflight(db, { ...input, userId: actor.id });
+      response.json({ ok: true, requestId: input.requestId, normalized: preflight.normalized });
+    } catch (error) {
+      if (error instanceof BillingError) { response.status(400).json({ error: error.code, message: error.message }); return; }
+      next(error);
+    }
   });
 
   router.post("/:id/recover", async (request, response, next) => {

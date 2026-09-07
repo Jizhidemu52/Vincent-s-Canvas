@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import express, { type ErrorRequestHandler, type Router } from "express";
 import type { Server } from "node:http";
 import { createTasksRouter } from "../src/routes/tasks";
+import { preflightStoredVideoTask } from "../src/stored-video-preflight";
 
 const actorId = "10000000-0000-4000-8000-000000000001";
 const modelId = "20000000-0000-4000-8000-000000000001";
@@ -142,8 +143,10 @@ describe("production generation routes", () => {
   });
 
   test("preflight accepts a local owned image without a public URL or upstream work", async () => {
-    const deps = dependencies();
-    const url = await serve(createTasksRouter(deps.database as never, deps.cache as never));
+    const deps = dependencies({ asset: { id: assetId, objectKey: "owned/image.png", mimeType: "image/png", byteSize: 512 } });
+    const url = await serve(createTasksRouter(deps.database as never, deps.cache as never, true, (db, input) => preflightStoredVideoTask(db, input, "", {
+      readSource: async () => new Uint8Array(512), probe: async () => ({ width: 768, height: 768 }),
+    })));
     const response = await post(`${url}/preflight`, videoInput({ sourceUrls: [`/api/assets/${assetId}/content`] }));
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ normalized: { referenceCount: 1 } });

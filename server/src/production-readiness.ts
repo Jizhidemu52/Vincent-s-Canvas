@@ -1,10 +1,10 @@
 export type ReadinessCheck = { key: string; level: "pass" | "warning" | "error"; message: string };
 
-type Options = { requireWeCom?: boolean; allowMockMode?: boolean };
+type Options = { requireWeCom?: boolean; allowMockMode?: boolean; bootstrapAdminVerified?: boolean };
 
 const required = [
     "POSTGRES_PASSWORD", "NODE_ENV", "SESSION_COOKIE_NAME", "SESSION_TTL_SECONDS", "TRUST_PROXY",
-    "BOOTSTRAP_ADMIN_USERNAME", "BOOTSTRAP_ADMIN_DISPLAY_NAME", "BOOTSTRAP_ADMIN_PASSWORD",
+    "BOOTSTRAP_ADMIN_USERNAME", "BOOTSTRAP_ADMIN_DISPLAY_NAME",
     "PROVIDER_ENCRYPTION_KEY", "WORKER_CONCURRENCY", "TASK_MOCK_MODE",
     "S3_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY",
 ] as const;
@@ -13,11 +13,19 @@ const weComFields = ["WECOM_CORP_ID", "WECOM_AGENT_ID", "WECOM_SECRET", "WECOM_C
 export function validateProductionEnvironment(env: Record<string, string | undefined>, options: Options = {}) {
     const checks: ReadinessCheck[] = [];
     const add = (key: string, level: ReadinessCheck["level"], message: string) => checks.push({ key, level, message });
-    const present = (key: string) => Boolean(env[key]?.trim() && !env[key]!.startsWith("replace-with"));
+    const present = (key: string) => Boolean(env[key]?.trim() && !env[key]!.trim().startsWith("replace-with"));
 
     for (const key of required) {
         const value = env[key]?.trim();
         if (!value || value.startsWith("replace-with")) add(key, "error", `${key} 尚未填写正式值`);
+    }
+
+    if (env.BOOTSTRAP_ADMIN_PASSWORD === undefined && options.bootstrapAdminVerified === true) {
+        add("BOOTSTRAP_ADMIN_PASSWORD", "pass", "已确认现有管理员完成改密，初始密码已从环境中移除");
+    } else if (!present("BOOTSTRAP_ADMIN_PASSWORD")) {
+        add("BOOTSTRAP_ADMIN_PASSWORD", "error", options.bootstrapAdminVerified
+            ? "初始密码变量仍为空值或示例值；完成改密后应删除整行，不能保留 BOOTSTRAP_ADMIN_PASSWORD="
+            : "首次部署必须填写至少 12 位正式初始密码；已初始化环境请使用 --after-bootstrap 只读复验");
     }
 
     if (present("NODE_ENV")) add("NODE_ENV", env.NODE_ENV === "production" ? "pass" : "error", env.NODE_ENV === "production" ? "运行模式为 production" : "NODE_ENV 必须为 production");
@@ -36,18 +44,24 @@ export function validateProductionEnvironment(env: Record<string, string | undef
     if (configuredWeCom.length === 0 && options.requireWeCom) {
         add("WECOM", "error", "要求企业微信登录，但四项企业微信配置均为空");
     } else if (configuredWeCom.length > 0 && configuredWeCom.length < weComFields.length) {
-        add("WECOM", "error", `企业微信配置不完整，缺少 ${weComFields.filter((key) => !env[key]?.trim()).join("、")}`);
+        add("WECOM", "error", `企业微信配置不完整，缺少 ${weComFields.filter((key) => !env[key]?.trim()).join("、")}；暂不启用时请把四项全部清空，包括 WECOM_CALLBACK_URL`);
     } else if (configuredWeCom.length === weComFields.length) {
+        for (const key of weComFields) {
+            if (!present(key)) add(key, "error", `${key} 不能使用示例占位值`);
+        }
         validateUrl(env, "WECOM_CALLBACK_URL", true, add);
         try {
             const callback = new URL(env.WECOM_CALLBACK_URL!);
+            if (callback.hostname === "example.com" || callback.hostname.endsWith(".example.com")) {
+                add("WECOM_CALLBACK_URL", "error", "企业微信回调仍使用 example.com 示例域名，必须替换为公司实际 HTTPS 域名");
+            }
             add("WECOM_CALLBACK_PATH", callback.pathname === "/api/auth/wecom/callback" ? "pass" : "error", callback.pathname === "/api/auth/wecom/callback" ? "企业微信回调路径正确" : "企业微信回调路径必须为 /api/auth/wecom/callback");
         } catch { /* URL check already reports the error. */ }
     } else {
         add("WECOM", "warning", "企业微信未启用，账号密码登录仍可使用");
     }
 
-    if (env.BOOTSTRAP_ADMIN_PASSWORD && !env.BOOTSTRAP_ADMIN_PASSWORD.startsWith("replace-with")) {
+    if (present("BOOTSTRAP_ADMIN_PASSWORD")) {
         add("BOOTSTRAP_ADMIN_PASSWORD_CLEANUP", "warning", "首位超级管理员创建并改密后，应从服务器环境中删除初始密码");
     }
     return checks;

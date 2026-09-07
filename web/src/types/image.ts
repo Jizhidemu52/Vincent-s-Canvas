@@ -7,6 +7,9 @@ export type ReferenceImage = {
     url?: string;
     storageKey?: string;
     sourceAssetId?: string;
+    bytes?: number;
+    width?: number;
+    height?: number;
 };
 
 export type ImageReferenceOrigin = "upload" | "asset" | "canvas" | "connection" | "clipboard" | "generated" | "template";

@@ -21,6 +21,8 @@ import {
 import { recordAssetEvent } from "./asset-events";
 import { classifyDesignDirection } from "./design-direction";
 import { runApiMartImageTask } from "./apimart-image";
+import { videoSourceMetadata, type ProviderVideoSource } from "./video-models";
+import { probeMediaBytes } from "./media-probe";
 
 type WorkRow = {
   id: string;
@@ -327,9 +329,13 @@ async function executeOpenAiAudio(
 async function executeApiMartVideo(task: WorkRow, credentials: Record<string, string>) {
   if (!storage.configured) throw new Error("公司对象存储尚未配置，不能保存生成视频");
   const sources = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id);
+  const providerSources: ProviderVideoSource[] = [];
+  for (const source of sources) {
+    providerSources.push({ ...source, ...await probeMediaBytes(source.bytes, source.mimeType), publicUrl: source.mimeType.startsWith("image/") ? undefined : await storage.signedDownloadUrl(source.objectKey, 1800) });
+  }
   const url = await runApiMartVideoTask({
     baseUrl: task.base_url!, apiKey: credentials.apiKey || "", modelId: task.model_id!, prompt: task.prompt,
-    parameters: task.parameters, sources, upstreamTaskId: task.upstream_task_id,
+    parameters: task.parameters, sources: providerSources, upstreamTaskId: task.upstream_task_id,
     submissionStarted: Boolean(task.upstream_submission_started_at),
     beforeSubmit: async () => {
       const claimed = await db.query(
@@ -473,7 +479,7 @@ function joinUrl(base: string, path: string) {
   return `${base.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
 }
 
-type SourceAsset = {
+type SourceAsset = ProviderVideoSource & {
   objectKey: string;
   bytes: Uint8Array;
   mimeType: string;
@@ -512,8 +518,9 @@ async function loadSourceAsset(url: string, userId: string): Promise<SourceAsset
     object_key: string;
     mime_type: string;
     filename: string;
+    metadata?: Record<string, unknown>;
   }>(
-    "SELECT object_key,mime_type,filename FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",
+    "SELECT object_key,mime_type,filename,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",
     [match[1], userId],
   );
   const asset = result.rows[0];
@@ -524,6 +531,7 @@ async function loadSourceAsset(url: string, userId: string): Promise<SourceAsset
     bytes: await object.Body!.transformToByteArray(),
     mimeType: asset.mime_type,
     filename: asset.filename,
+    ...videoSourceMetadata(asset.metadata),
   };
 }
 

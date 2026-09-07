@@ -11,13 +11,16 @@ import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
 import { resolveDemoHost } from "./demo-network-config";
 import { runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
 import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, readClaudeResponse, readGeminiResponse } from "./routes/chat";
-import { createDemoPublicAssetUrl, normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
+import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
+import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./demo-video-sources";
 import { decodeInlineImageResult } from "./demo-task-result-assets";
 import { syncDemoProject } from "./demo-projects";
 import { createDemoBatchTaskInputs } from "./demo-batch-tasks";
 import { buildVideoProviderRequest, getVideoModelCapability, isSupportedVideoModelId, supportedVideoModelIds, type ProviderVideoSource, type SupportedVideoModelId, type VideoProviderParameters, videoTaskStatusPath } from "./video-models";
-import { preflightVideoTask } from "./video-task-preflight";
-import { uploadApiMartImage, validateApiMartVideoImage } from "./apimart-upload";
+import { isPublicHttpsUrl } from "./apimart-upload";
+import { preflightVideoSources, prepareVideoProviderSources } from "./video-source-preparation";
+import { probeMediaBytes, type MediaMetadata } from "./media-probe";
+import { readDemoRecovery } from "./demo-state-recovery";
 
 const sessions = new Map<string, string>();
 const modules = [
@@ -345,6 +348,9 @@ const demoToolConfigurations = toolDefinitions.map((tool, index) => ({
   enabled: true,
 }));
 type DemoAsset = {
+  /** Set only from a provider result by this server, never from upload metadata. */
+  upstreamUrl?: string;
+  byteSize?: number;
   id: string;
   ownerUserId: string;
   filename: string;
@@ -394,6 +400,12 @@ const standaloneMode = Boolean(standaloneDemoUser);
 const standaloneWebDirectory = process.env.STANDALONE_WEB_DIR?.trim() || "";
 const demoPublicVideoAssetAccess = new Map<string, { assetId: string; expiresAt: number }>();
 const demoTasks = new Map<string, DemoTask>();
+if (process.env.DEMO_RECOVERY_FILE) {
+  const recovered = readDemoRecovery(await Bun.file(process.env.DEMO_RECOVERY_FILE).json());
+  for (const value of recovered.assets) { const asset = value as DemoAsset; demoAssets.set(asset.id, asset); }
+  for (const value of recovered.tasks) { const task = value as DemoTask; demoTasks.set(task.id, task); }
+  console.info(`Recovered ${demoAssets.size} local assets and ${demoTasks.size} tasks.`);
+}
 const internalAiConfig: DemoInternalAiConfig = {
   seamlessUrl: "",
   appKey: null,
@@ -457,78 +469,32 @@ function toGeminiDemoContents(input: DemoResponseInput[]) {
 type DemoGeminiPayload = { candidates?: Array<{ content?: { parts?: Array<{ text?: string; thoughtSignature?: string; functionCall?: { name?: string; args?: Record<string, unknown> } }> } }> };
 type DemoResponseTool = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 
-async function callDemoGemini(input: { input: DemoResponseInput[]; tools: DemoResponseTool[]; toolChoice?: unknown; webSearch?: boolean }) {
+async function callDemoGemini(input: { input: DemoResponseInput[]; tools: DemoResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number } }) {
   const endpoint = `${apiMartBaseUrl.replace(/\/v1$/, "")}/v1beta/models/gemini-3.1-pro-preview:generateContent`;
   const body = buildGeminiRequestBody(input);
-  try {
-    const upstream = await fetch(endpoint, {
-      method: "POST",
-      headers: { authorization: `Bearer ${apiMartApiKey}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(180_000),
-    });
-    if (!upstream.ok) throw new Error(`Gemini Provider ${upstream.status}: ${(await upstream.text()).slice(0, 500)}`);
-    return readGeminiResponse(await upstream.json() as DemoGeminiPayload);
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("socket connection was closed unexpectedly")) throw error;
-    return readGeminiResponse(await callDemoGeminiWithNode(endpoint, body));
-  }
-}
-
-// This is local-demo-only: Windows hosts without certificate-revocation access can make Bun fetch fail.
-async function callDemoGeminiWithNode(endpoint: string, body: unknown): Promise<DemoGeminiPayload> {
-  const node = Bun.which("node");
-  if (!node) throw new Error("本机 Node.js 不可用，无法完成 Gemini 本地 HTTPS 回退请求");
-  const script = `
-    let input = "";
-    for await (const chunk of process.stdin) input += chunk;
-    const response = await fetch(process.env.APIMART_ENDPOINT, {
-      method: "POST",
-      headers: { authorization: \`Bearer \${process.env.APIMART_API_KEY}\`, "content-type": "application/json" },
-      body: input,
-      signal: AbortSignal.timeout(180000),
-    });
-    const text = await response.text();
-    if (!response.ok) throw new Error(\`Gemini Provider \${response.status}: \${text.slice(0, 500)}\`);
-    process.stdout.write(text);
-  `;
-  const child = Bun.spawn([node, "--input-type=module", "-e", script], {
-    stdin: new Blob([JSON.stringify(body)]),
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, APIMART_API_KEY: apiMartApiKey, APIMART_ENDPOINT: endpoint },
+  const upstream = await fetch(endpoint, {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiMartApiKey}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(180_000),
   });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  if (exitCode !== 0) throw new Error(stderr.trim() || "Gemini 本地 HTTPS 回退请求失败");
-  return JSON.parse(stdout) as DemoGeminiPayload;
+  if (!upstream.ok) throw new Error(`Gemini Provider ${upstream.status}: ${(await upstream.text()).slice(0, 500)}`);
+  // A disconnected paid POST may already have been accepted; never resubmit it automatically.
+  return readGeminiResponse(await upstream.json() as DemoGeminiPayload);
 }
 
 const demoPort = Number(process.env.DEMO_PORT || 3100);
 const demoHost = resolveDemoHost();
 
-function createProviderVideoSources(model: SupportedVideoModelId, sources: DemoAsset[]) {
-  // Preflight only: validate local bytes and reserve a logical asset URI, never submit this URI upstream.
-  sources.forEach(validateApiMartVideoImage);
-  if (!demoPublicAssetOrigin)
-    return { sources: sources.map((source) => ({ ...source, publicUrl: `asset://pending-upload/${source.id}` })) as ProviderVideoSource[], accessTokens: [] as string[] };
-  const accessTokens: string[] = [];
-  const providerSources = sources.map((source) => {
-    const accessToken = crypto.randomUUID();
-    accessTokens.push(accessToken);
-    demoPublicVideoAssetAccess.set(accessToken, {
-      assetId: source.id,
-      expiresAt: Date.now() + 25 * 60_000,
-    });
-    return {
-      ...source,
-      publicUrl: createDemoPublicAssetUrl(demoPublicAssetOrigin, source.id, accessToken),
-    };
-  });
-  return { sources: providerSources as ProviderVideoSource[], accessTokens };
+const demoSourceProbes = new WeakMap<Uint8Array, MediaMetadata>();
+async function createProviderVideoSources(_model: SupportedVideoModelId, sources: DemoAsset[]) {
+  const verified: DemoAsset[] = [];
+  for (const source of sources) {
+    const metadata = demoSourceProbes.get(source.bytes) || await probeMediaBytes(source.bytes, source.mimeType);
+    demoSourceProbes.set(source.bytes, metadata);
+    verified.push({ ...source, metadata });
+  }
+  return createDemoProviderVideoSources(verified, demoPublicAssetOrigin, demoPublicVideoAssetAccess);
 }
 
 async function callDemoClaude(modelId: string, input: { input: DemoResponseInput[]; tools: DemoResponseTool[]; toolChoice?: unknown; stream?: boolean; thinking?: boolean; maxTokens?: number }) {
@@ -618,6 +584,7 @@ function completeDemoImageTask(task: DemoTask, ownerUserId: string, resultUrl: s
 }
 
 Bun.serve({
+  maxRequestBodySize: 210 * 1024 * 1024,
   port: demoPort,
   hostname: demoHost,
   idleTimeout: DEMO_STREAM_IDLE_TIMEOUT_SECONDS,
@@ -753,6 +720,7 @@ Bun.serve({
         tools?: DemoResponseTool[];
         toolChoice?: unknown;
         webSearch?: boolean;
+        gemini?: { maxOutputTokens: number };
         claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
       };
       const selectedModel = String(input.modelId || "");
@@ -764,7 +732,7 @@ Bun.serve({
         if (selectedModel !== "gemini-3.1-pro-preview" && input.claude?.stream)
           return await callDemoClaudeStream(selectedModel, { input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, thinking: input.claude.thinking, maxTokens: input.claude.maxTokens });
         return json(selectedModel === "gemini-3.1-pro-preview"
-          ? await callDemoGemini({ input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, webSearch: input.webSearch })
+          ? await callDemoGemini({ input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, webSearch: input.webSearch, gemini: input.gemini })
           : await callDemoClaude(selectedModel, { input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, stream: input.claude?.stream, thinking: input.claude?.thinking, maxTokens: input.claude?.maxTokens }));
       } catch (error) {
         return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "Gemini request failed" }, 502);
@@ -790,10 +758,10 @@ Bun.serve({
       if (
         !Number.isFinite(input.byteSize) ||
         Number(input.byteSize) <= 0 ||
-        Number(input.byteSize) > 100 * 1024 * 1024
+        Number(input.byteSize) > 200 * 1024 * 1024
       )
         return json(
-          { error: "INVALID_ASSET_SIZE", message: "素材大小必须在 100MB 以内" },
+          { error: "INVALID_ASSET_SIZE", message: "素材大小必须在 200MB 以内" },
           400,
         );
       const existing = input.clientReferenceId
@@ -812,6 +780,7 @@ Bun.serve({
         clientReferenceId: input.clientReferenceId,
         projectId: input.projectId,
         metadata: input.metadata,
+        byteSize: Number(input.byteSize),
       });
       return json(
         { assetId, uploadUrl: `/api/assets/${assetId}/content-upload` },
@@ -827,9 +796,9 @@ Bun.serve({
       if (!asset || asset.ownerUserId !== user.id)
         return json({ error: "NOT_FOUND", message: "上传素材不存在" }, 404);
       const bytes = new Uint8Array(await request.arrayBuffer());
-      if (!bytes.byteLength || bytes.byteLength > 100 * 1024 * 1024)
+      if (!bytes.byteLength || bytes.byteLength > 200 * 1024 * 1024 || bytes.byteLength !== asset.byteSize)
         return json(
-          { error: "INVALID_ASSET_SIZE", message: "素材大小必须在 100MB 以内" },
+          { error: "INVALID_ASSET_SIZE", message: "素材大小必须在 200MB 以内且与上传申请一致" },
           400,
         );
       asset.bytes = bytes;
@@ -924,9 +893,9 @@ Bun.serve({
       const modelId = model.modelId as SupportedVideoModelId;
       let accessTokens: string[] = [];
       try {
-        const providerSources = createProviderVideoSources(modelId, sources);
+        const providerSources = await createProviderVideoSources(modelId, sources);
         accessTokens = providerSources.accessTokens;
-        const preflight = preflightVideoTask({ model: modelId, prompt: input.prompt || "", parameters: input.parameters || {}, sources: providerSources.sources });
+        const preflight = preflightVideoSources(modelId, input.prompt || "", input.parameters || {}, providerSources.sources);
         return json({ ok: true, requestId: input.requestId || crypto.randomUUID(), normalized: preflight.normalized });
       } catch (error) {
         return json({ error: "INVALID_VIDEO_INPUT", message: error instanceof Error ? error.message : "Invalid video parameters" }, 400);
@@ -991,9 +960,10 @@ Bun.serve({
         const parameters = (input.parameters || {}) as VideoProviderParameters;
         let accessTokens: string[] = [];
         try {
-          const providerSources = createProviderVideoSources(modelId, sources);
+          const providerSources = await createProviderVideoSources(modelId, sources);
           accessTokens = providerSources.accessTokens;
-          preflightVideoTask({ model: modelId, prompt: input.prompt || "", parameters, sources: providerSources.sources });
+          const checked = preflightVideoSources(modelId, input.prompt || "", parameters, providerSources.sources);
+          Object.assign(parameters, checked.normalized);
         } catch (error) {
           return json(
             {
@@ -1036,7 +1006,7 @@ Bun.serve({
           credits,
           createdAt: now(),
         };
-        Object.assign(task, { prompt: input.prompt || "", parameters: input.parameters || {}, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
+        Object.assign(task, { prompt: input.prompt || "", parameters, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
         demoTasks.set(task.id, task);
         if (features.creditsEnabled) user.creditBalance -= credits;
         void runVideoTask(task, user, modelId, input.prompt || "", parameters, sources);
@@ -1884,22 +1854,9 @@ async function recoverVideoTask(
   }
 }
 
-function resolveOwnedVideoSources(
-  sourceUrls: string[],
-  user: { id: string },
-): DemoAsset[] | Response {
-  const sources: DemoAsset[] = [];
-  for (const sourceUrl of sourceUrls) {
-    const assetId = sourceUrl.match(/^\/api\/assets\/([0-9a-f-]+)\/content$/i)?.[1];
-    const source = assetId ? demoAssets.get(assetId) : undefined;
-    if (!source || source.ownerUserId !== user.id || !source.bytes.byteLength)
-      return json(
-        { error: "INVALID_SOURCE", message: "A selected video reference is unavailable" },
-        400,
-      );
-    sources.push(source);
-  }
-  return sources;
+function resolveOwnedVideoSources(sourceUrls: string[], user: { id: string }): DemoAsset[] | Response {
+  try { return resolveOwnedDemoVideoSources(sourceUrls, user.id, demoAssets); }
+  catch (error) { return json({ error: "INVALID_SOURCE", message: error instanceof Error ? error.message : "参考素材不可用" }, 400); }
 }
 
 function classifyVideoTaskError(error: unknown) {
@@ -1918,9 +1875,9 @@ async function callVideoProvider(
   onSubmitted?: (upstreamTaskId: string) => void,
   onSubmissionStarting?: () => void,
 ) {
-  sources.forEach(validateApiMartVideoImage);
-  const uploadedSources: ProviderVideoSource[] = [];
-  for (const source of sources) uploadedSources.push({ ...source, publicUrl: await uploadApiMartImage({ baseUrl: apiMartBaseUrl, apiKey: apiMartApiKey, bytes: source.bytes, mimeType: source.mimeType, filename: source.filename }) });
+  const resolved = await createProviderVideoSources(model, sources);
+  try {
+  const uploadedSources = await prepareVideoProviderSources({ model, prompt, parameters, sources: resolved.sources, baseUrl: apiMartBaseUrl, apiKey: apiMartApiKey });
   const { body } = buildVideoProviderRequest(model, prompt, parameters, uploadedSources);
   onSubmissionStarting?.();
   const submitted = await fetch(`${apiMartBaseUrl}/videos/generations`, {
@@ -1942,7 +1899,10 @@ async function callVideoProvider(
   const taskId = created.data?.[0]?.task_id;
   if (!taskId) throw new Error(`${model} did not return a task ID`);
   onSubmitted?.(taskId);
-  return pollVideoProviderTask(model, taskId);
+  return await pollVideoProviderTask(model, taskId);
+  } finally {
+    revokeProviderVideoSources(resolved.accessTokens);
+  }
 }
 
 class DemoVideoTerminalError extends Error {}
@@ -1953,7 +1913,7 @@ async function storeDemoVideoResult(task: DemoTask, url: string) {
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (!bytes.byteLength) throw new Error("视频结果为空，可恢复查询原任务");
   const id = crypto.randomUUID();
-  demoAssets.set(id, { id, ownerUserId: task.ownerUserId, filename: `video-${task.id}.mp4`, mimeType: "video/mp4", bytes, createdAt: now(), projectId: task.projectId, taskId: task.id });
+  demoAssets.set(id, { id, ownerUserId: task.ownerUserId, filename: `video-${task.id}.mp4`, mimeType: "video/mp4", bytes, createdAt: now(), projectId: task.projectId, taskId: task.id, upstreamUrl: isPublicHttpsUrl(url) ? url : undefined });
   return `/api/assets/${id}/content`;
 }
 

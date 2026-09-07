@@ -42,8 +42,8 @@ describe("video model parameter contract", () => {
 
     test("switching models resets unsupported choices instead of submitting stale settings", () => {
         const previous = { ...configFor("default::MiniMax-H3"), size: "adaptive", vquality: "720p", videoSeconds: "30", videoGenerateAudio: "true", videoWatermark: "true" };
-        expect(normalizeVideoModelConfig(previous)).toEqual({ size: "16:9", vquality: "2K", videoSeconds: "5", videoGenerateAudio: "false", videoWatermark: "true" });
-        expect(videoModelRequestParameters(previous)).toEqual({ seconds: 5, resolution: "2K", size: "16:9", watermark: true });
+        expect(normalizeVideoModelConfig(previous)).toEqual({ size: "16:9", vquality: "2K", videoSeconds: "5", videoMode: "auto", videoGenerateAudio: "false", videoWatermark: "true" });
+        expect(videoModelRequestParameters(previous)).toEqual({ videoMode: "auto", seconds: 5, resolution: "2K", size: "16:9", watermark: true });
     });
 
     test("valid shared choices survive a model switch, including resolution casing", () => {
@@ -85,18 +85,19 @@ describe("video model parameter contract", () => {
         expect(() => videoModelRequestParameters(configFor("unknown-video"))).toThrow("参数规格");
     });
 
-    test("unsupported references and modes fail before uploads, preflight or paid submission", async () => {
+    test("reference limits and unsupported modes fail before uploads, preflight or paid submission", async () => {
         let requests = 0;
         globalThis.fetch = (async () => { requests++; throw new Error("No request should be sent"); }) as typeof fetch;
         for (const model of supportedVideoModelIds) {
             const spec = getVideoModelParameterSpec(model)!;
             await expect(createVideoGenerationTask(configFor(model), "test", Array.from({ length: spec.maxImages + 1 }, (_, index) => ({ id: String(index) })) as any)).rejects.toThrow("最多支持");
-            await expect(createVideoGenerationTask(configFor(model), "test", [], [{ id: "video", url: "/api/assets/video/content" }] as any)).rejects.toThrow("尚未接入");
-            await expect(createVideoGenerationTask(configFor(model), "test", [], [], [{ id: "audio", url: "/api/assets/audio/content" }] as any)).rejects.toThrow("尚未接入");
         }
+        await expect(createVideoGenerationTask(configFor("happyhorse-1.1"), "test", [], [{ id: "video", url: "/api/assets/video/content" }] as any)).rejects.toThrow("不支持视频参考");
+        await expect(createVideoGenerationTask(configFor("happyhorse-1.1"), "test", [], [], [{ id: "audio", url: "/api/assets/audio/content" }] as any)).rejects.toThrow("不支持音频参考");
+        await expect(createVideoGenerationTask(configFor("MiniMax-H3"), "test", [], [], [{ id: "audio", url: "/api/assets/audio/content" }] as any)).rejects.toThrow("必须搭配参考图或视频");
         await expect(createVideoGenerationTask(configFor("happyhorse-1.1"), "test", [], [], [], undefined, "edit")).rejects.toThrow("不支持视频编辑");
         await expect(createVideoGenerationTask(configFor("happyhorse-1.1"), "test", [], [], [], undefined, "first-frame")).rejects.toThrow("恰好 1 张");
-        await expect(createVideoGenerationTask(configFor("happyhorse-1.1"), "test", [], [], [], undefined, "reference")).rejects.toThrow("需要 1–9 张");
+        await expect(createVideoGenerationTask(configFor("happyhorse-1.1"), "test", [], [], [], undefined, "reference")).rejects.toThrow("参考模式需要至少 1 个参考素材");
         expect(requests).toBe(0);
     });
 

@@ -50,6 +50,7 @@ export type CanvasNodeMetadata = {
     quality?: string;
     count?: number;
     seconds?: string;
+    videoMode?: string;
     vquality?: string;
     generateAudio?: string;
     watermark?: string;
@@ -74,6 +75,7 @@ export type CanvasNodeMetadata = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    fps?: number;
 };
 
 export type CanvasNodeData = {

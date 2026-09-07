@@ -20,6 +20,7 @@ services:
       DATABASE_URL: postgres://wireless_canvas:${POSTGRES_PASSWORD}@postgres:5432/wireless_canvas
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,6 +44,7 @@ services:
       DATABASE_URL: postgres://wireless_canvas:${POSTGRES_PASSWORD}@postgres:5432/wireless_canvas
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-}
     depends_on:
       api:
         condition: service_healthy

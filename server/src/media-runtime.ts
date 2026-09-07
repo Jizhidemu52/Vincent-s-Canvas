@@ -1,5 +1,5 @@
-import { buildVideoProviderRequest, getVideoModelCapability, isSupportedVideoModelId, videoTaskStatusPath, type ProviderVideoSource, type VideoProviderParameters } from "./video-models";
-import { uploadApiMartImage, validateApiMartVideoImage } from "./apimart-upload";
+import { buildVideoProviderRequest, isSupportedVideoModelId, videoTaskStatusPath, type ProviderVideoSource, type VideoProviderParameters } from "./video-models";
+import { prepareVideoProviderSources } from "./video-source-preparation";
 
 export class VideoProviderFailure extends Error {}
 export class VideoSubmissionClaimLost extends Error {}
@@ -27,14 +27,7 @@ export async function runApiMartVideoTask(input: {
     if (input.submissionStarted) throw new Error("视频提交状态未知；为避免重复收费，已停止自动提交，请核查上游任务");
     if (!input.prompt.trim()) throw new Error("请填写视频描述");
     const sources = input.sources || [];
-    const capability = getVideoModelCapability(input.modelId);
-    if (sources.length < capability.minImages || sources.length > capability.maxImages) throw new Error("视频参考图数量超出模型限制");
-    sources.forEach(validateApiMartVideoImage);
-    const uploadedSources: ProviderVideoSource[] = [];
-    for (const source of sources) {
-      const publicUrl = await uploadApiMartImage({ ...source, baseUrl, apiKey: input.apiKey }, { fetch: request });
-      uploadedSources.push({ ...source, publicUrl });
-    }
+    const uploadedSources = await prepareVideoProviderSources({ model: input.modelId, prompt: input.prompt, parameters: input.parameters, sources, baseUrl, apiKey: input.apiKey }, { fetch: request });
     const { body } = buildVideoProviderRequest(input.modelId, input.prompt.trim(), input.parameters, uploadedSources);
     if (!await input.beforeSubmit()) throw new VideoSubmissionClaimLost("视频提交已被其他执行器接管；不会重复生成");
     const submitted = await request(`${baseUrl}/videos/generations`, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(180_000) });
