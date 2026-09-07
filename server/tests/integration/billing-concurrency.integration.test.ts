@@ -121,7 +121,7 @@ integration("PostgreSQL billing concurrency", () => {
     for (let index = 0; index < (options.users ?? 2); index += 1) {
       const user = await database.query<{ id: string }>(
         `INSERT INTO users(username,display_name,department_id,credit_balance,credit_limit,monthly_credit_limit)
-         VALUES($1,$1,$2,$3,$3,$3) RETURNING id`,
+         VALUES($1::text,$1::text,$2,$3,$3,$3) RETURNING id`,
         [`concurrency-${tag}-${index}`, departmentId, options.personal ?? 100],
       );
       userIds.push(user.rows[0]!.id);
