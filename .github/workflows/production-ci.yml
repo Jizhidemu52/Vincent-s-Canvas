@@ -96,7 +96,7 @@ jobs:
             fi
             sleep 1
           done
-          RUN_INTEGRATION_TESTS=true bun test tests/integration/identity-rbac.integration.test.ts
+          RUN_INTEGRATION_TESTS=true bun test tests/integration/
 
   frontend:
     runs-on: ubuntu-latest
@@ -109,6 +109,9 @@ jobs:
         with:
           bun-version: 1.3.13
       - run: bun install --frozen-lockfile
+      - name: Install backend adapter dependencies for cross-layer chat tests
+        working-directory: server
+        run: bun install --frozen-lockfile
       - run: bun run build
       - run: bun test
 

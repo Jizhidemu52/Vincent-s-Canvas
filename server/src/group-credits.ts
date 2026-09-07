@@ -43,7 +43,7 @@ async function lockGroupPolicy(client: PoolClient, groupId: string) {
             shared_credit_per_request_limit,shared_credit_daily_user_limit,
             shared_credit_monthly_user_limit,
             date_trunc('month', timezone('Asia/Shanghai', now()))::date::text AS current_period_start
-       FROM designer_groups WHERE id=$1 FOR UPDATE`,
+       FROM designer_groups WHERE id=$1 FOR NO KEY UPDATE`,
     [groupId],
   );
   const group = result.rows[0];

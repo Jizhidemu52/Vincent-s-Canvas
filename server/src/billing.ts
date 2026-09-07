@@ -192,7 +192,8 @@ export async function reserveCredits(
         credit_balance: number;
         credit_limit: number;
       }>(
-        "SELECT credit_balance,credit_limit FROM departments WHERE id=$1 FOR UPDATE",
+        // Task foreign keys already hold KEY SHARE; serialize balances without a lock upgrade deadlock.
+        "SELECT credit_balance,credit_limit FROM departments WHERE id=$1 FOR NO KEY UPDATE",
         [identity.department_id],
       );
       const department = departmentResult.rows[0];
@@ -418,7 +419,7 @@ export async function settleReservation(
     }
     if (reservation.department_id && reservation.department_credits > 0) {
       const department = await client.query<{ credit_balance: number }>(
-        "SELECT credit_balance FROM departments WHERE id=$1 FOR UPDATE",
+        "SELECT credit_balance FROM departments WHERE id=$1 FOR NO KEY UPDATE",
         [reservation.department_id],
       );
       if (department.rows[0]) {

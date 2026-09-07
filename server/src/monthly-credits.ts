@@ -21,7 +21,7 @@ export async function ensureMonthlyCreditPeriod(
     `SELECT credit_balance,credit_limit,monthly_credit_limit,temporary_credit_adjustment,
             credit_period_start::text,
             date_trunc('month', timezone('Asia/Shanghai', now()))::date::text AS current_period_start
-       FROM users WHERE id=$1 FOR UPDATE`,
+       FROM users WHERE id=$1 FOR NO KEY UPDATE`,
     [userId],
   );
   const user = result.rows[0];
