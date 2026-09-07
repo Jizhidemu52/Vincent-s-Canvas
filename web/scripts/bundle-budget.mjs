@@ -4,8 +4,9 @@ import { gzipSync } from "node:zlib";
 
 export const CANVAS_PROJECT_BUDGET = {
     rawBytes: 250 * 1024,
-    // Includes 128 B for shared IME/control guards and interrupted-pan cleanup.
-    gzipBytes: 77 * 1024 + 512,
+    // Adds 512 B for the lazy image-editor entry and durable save/rollback wiring.
+    // The editor and raster implementation remain in separate on-demand chunks.
+    gzipBytes: 78 * 1024,
 };
 
 export function bundleBudgetViolations(entries) {

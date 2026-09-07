@@ -5,6 +5,7 @@ export type OpenTokenReferenceImage = {
 };
 
 export type OpenTokenImageModel = "gpt-image-2" | "gemini-3.1-flash-image";
+export const OPENAI_IMAGE_TIMEOUT_MS = 600_000;
 
 export type OpenTokenImageInput = {
   baseUrl: string;
@@ -14,6 +15,8 @@ export type OpenTokenImageInput = {
   size?: string;
   quality?: "low" | "medium" | "high" | "auto";
   resolution?: "1k" | "2k" | "4k";
+  background?: "transparent";
+  output_format?: "png";
   references?: OpenTokenReferenceImage[];
 };
 
@@ -45,6 +48,10 @@ export function buildOpenTokenImageRequest(input: OpenTokenImageInput): OpenToke
     form.set("n", "1");
     if (size) form.set("size", size);
     if (quality) form.set("quality", quality);
+    if (input.background === "transparent") {
+      form.set("background", "transparent");
+      form.set("output_format", "png");
+    }
     for (const reference of references) {
       const bytes = new Uint8Array(reference.bytes).buffer;
       form.append("image", new Blob([bytes], { type: reference.mimeType }), reference.filename);
@@ -109,7 +116,7 @@ export async function runOpenTokenImage(input: OpenTokenImageInput): Promise<str
     method: request.method,
     headers: request.headers,
     body: request.form || JSON.stringify(request.body),
-    signal: AbortSignal.timeout(180_000),
+    signal: AbortSignal.timeout(OPENAI_IMAGE_TIMEOUT_MS),
   });
   if (!response.ok) {
     const message = openTokenErrorMessage(await response.json().catch(() => null));

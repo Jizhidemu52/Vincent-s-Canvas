@@ -1,4 +1,5 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
+import { assetMetadataSchema } from "./asset-metadata";
 import { imageParameterProfile } from "./image-parameter-profile";
 import { openAiImageParameters } from "./openai-image-parameters";
 import { deploymentFeatures } from "./deployment-features";
@@ -1265,6 +1266,15 @@ Bun.serve({
       task.updatedAt = now();
       void recoverVideoTask(task, task.providerModel, task.upstreamTaskId);
       return json({ task, recovered: true, message: "Task status is being queried without a new generation submission" });
+    }
+
+    if (/^\/api\/assets\/[^/]+\/metadata$/.test(path) && request.method === "PATCH") {
+      const asset = demoAssets.get(path.split("/")[3]!);
+      if (!asset || asset.ownerUserId !== user.id) return json({ error: "NOT_FOUND", message: "素材不存在或无权编辑" }, 404);
+      const parsed = assetMetadataSchema.safeParse(await request.json());
+      if (!parsed.success) return json({ error: "INVALID_INPUT", message: "素材名称、标签或备注格式不正确" }, 400);
+      asset.metadata = { ...asset.metadata, ...parsed.data };
+      return new Response(null, { status: 204 });
     }
 
     if (path === "/api/assets" && request.method === "GET") {

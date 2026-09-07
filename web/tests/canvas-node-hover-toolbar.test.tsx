@@ -36,7 +36,7 @@ function toolbarHarness() {
     };
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
-    const handlers = Object.fromEntries(["onKeep", "onLeave", "onInfo", "onEditText", "onDecreaseFont", "onIncreaseFont", "onToggleDialog", "onGenerateImage", "onUpload", "onDownload", "onSaveAsset", "onMaskEdit", "onCrop", "onSplit", "onUpscale", "onSuperResolve", "onAngle", "onViewImage", "onReversePrompt", "onRetry", "onToggleFreeResize", "onDelete"].map((name) => [name, (target?: CanvasNodeData) => calls.push({ name, node: target })]));
+    const handlers = Object.fromEntries(["onKeep", "onLeave", "onInfo", "onEditText", "onDecreaseFont", "onIncreaseFont", "onToggleDialog", "onGenerateImage", "onUpload", "onDownload", "onSaveAsset", "onManualEdit", "onMaskEdit", "onCrop", "onSplit", "onUpscale", "onSuperResolve", "onAngle", "onViewImage", "onReversePrompt", "onRetry", "onToggleFreeResize", "onDelete"].map((name) => [name, (target?: CanvasNodeData) => calls.push({ name, node: target })]));
     const render = () => { index = 0; return module.exports.CanvasNodeHoverToolbar({ node, viewport: { x: 0, y: 0, k: 1 }, ...handlers }); };
     return { node, calls, render, exports: module.exports };
 }
@@ -50,14 +50,14 @@ function elements(value: unknown): ReactElement<any>[] {
 
 describe("compact image toolbar", () => {
     test("defaults to four common actions while preserving stored customization data", () => {
-        expect(defaultImageQuickToolIds).toEqual(["edit", "maskEdit", "crop", "download"]);
+        expect(defaultImageQuickToolIds).toEqual(["manualEdit", "edit", "maskEdit", "download"]);
         const saved = { ids: ["info", "delete", "saveAsset", "download", "edit", "copyPrompt", "upscale"], showLabels: false };
         expect(readImageQuickToolsConfig(saved)).toEqual(saved);
     });
 
     test("shows only the four common image actions on the first surface", () => {
         const view = elements(toolbarHarness().render());
-        expect(view.filter((element) => typeof element.props.id === "string" && typeof element.props.onClick === "function").map((element) => element.props.id)).toEqual(["edit", "maskEdit", "crop", "download"]);
+        expect(view.filter((element) => typeof element.props.id === "string" && typeof element.props.onClick === "function").map((element) => element.props.id)).toEqual(["manualEdit", "edit", "maskEdit", "download"]);
         const more = view.find((element) => element.props["aria-label"] === "更多图片工具");
         expect(more?.props["aria-haspopup"]).toBe("menu");
     });
@@ -70,7 +70,7 @@ describe("compact image toolbar", () => {
         const opened = elements(harness.render());
         expect(opened.find((element) => element.props.menu?.items)?.props.open).toBe(true);
         expect(opened.find((element) => Array.isArray(element.props.selectedIds))?.props.open).toBe(false);
-        const actions: Record<string, string> = { info: "onInfo", delete: "onDelete", retry: "onRetry", saveAsset: "onSaveAsset", copyPrompt: "onCopyPrompt", reversePrompt: "onReversePrompt", replace: "onUpload", resize: "onToggleFreeResize", split: "onSplit", upscale: "onUpscale", superResolve: "onSuperResolve", angle: "onAngle", view: "onViewImage" };
+        const actions: Record<string, string> = { info: "onInfo", delete: "onDelete", retry: "onRetry", saveAsset: "onSaveAsset", copyPrompt: "onCopyPrompt", reversePrompt: "onReversePrompt", replace: "onUpload", resize: "onToggleFreeResize", crop: "onCrop", split: "onSplit", upscale: "onUpscale", superResolve: "onSuperResolve", angle: "onAngle", view: "onViewImage" };
         const items = dropdown.props.menu.items.flatMap((item: any) => item.children || [item]);
         for (const [id, handler] of Object.entries(actions)) {
             expect(items.some((item: any) => item.key === id)).toBe(true);

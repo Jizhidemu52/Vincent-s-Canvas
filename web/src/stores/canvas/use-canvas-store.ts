@@ -43,6 +43,7 @@ const pendingProjectChanges = new Map<string, CanvasProject | null>();
 const projectWriteBuffer = createProjectChangeBuffer<CanvasProject>();
 type PersistWrite = { name: string; value: StorageValue<CanvasStore>; changes: Map<string, CanvasProject | null> };
 let persistWriteChain: Promise<void> = Promise.resolve();
+let lastPersistError: unknown = null;
 const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, value, changes }) => {
     pendingProjectChanges.clear();
     // IndexedDB writes are asynchronous. Keep their order stable so a slow
@@ -55,8 +56,16 @@ const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, valu
             const projects = mergeProjectChanges(current?.state.projects || [], retainedChanges);
             await localForageStorage.setItem(name, JSON.stringify({ ...value, state: { ...value.state, projects } }));
         })))
-        .catch(error => { console.error("画布自动保存失败，改动将随下次编辑重试；请先导出重要作品。", error); });
+        .then(() => { lastPersistError = null; })
+        .catch(error => { lastPersistError = error; console.error("画布自动保存失败，改动将随下次编辑重试；请先导出重要作品。", error); });
 });
+
+/** Explicit save actions wait for the same ordered queue used by autosave. */
+export async function flushCanvasPersistence() {
+    persistQueue.flush();
+    await persistWriteChain;
+    if (lastPersistError) throw new Error("画布写入本机失败，请保留编辑面板并重试保存");
+}
 
 if (typeof window !== "undefined") {
     const flushCanvasPersistence = () => persistQueue.flush();

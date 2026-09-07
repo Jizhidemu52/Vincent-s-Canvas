@@ -5,6 +5,8 @@ import { saveAs } from "file-saver";
 import { useNavigate } from "react-router-dom";
 
 import { useCopyText } from "@/hooks/use-copy-text";
+import { useAsyncAction } from "@/hooks/use-async-action";
+import { useWorkbenchField } from "@/hooks/use-workbench-field";
 import { needsCanvasAssetPreviewResolution, resolveCanvasAssetPreview } from "@/lib/canvas/canvas-asset-preview";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
 import { createClientId } from "@/lib/client-id";
@@ -17,6 +19,7 @@ import { exportAssets, readAssetPackage } from "./asset-transfer";
 import { buildAssetSearchIndex, searchAssetIndex } from "./asset-search";
 import {
     deleteServerAsset,
+    updateServerAssetMetadata,
     fetchServerAssetContent,
     listServerAssets,
     listServerProjects,
@@ -61,6 +64,7 @@ export default function AssetsPage() {
     const assetInputRef = useRef<HTMLInputElement>(null);
     const batchImageInputRef = useRef<HTMLInputElement>(null);
     const refreshRevisionRef = useRef(0);
+    const assetRequestRef = useRef<AbortController | null>(null);
     const localAssets = useAssetStore((state) => state.assets);
     const [serverAssets, setServerAssets] = useState<ServerAsset[]>([]);
     const [serverLoading, setServerLoading] = useState(true);
@@ -73,12 +77,16 @@ export default function AssetsPage() {
     const addAsset = useAssetStore((state) => state.addAsset);
     const updateAsset = useAssetStore((state) => state.updateAsset);
     const removeAsset = useAssetStore((state) => state.removeAsset);
-    const [keyword, setKeyword] = useState("");
+    const [keyword, setKeyword] = useWorkbenchField("assets:keyword", "");
     const deferredKeyword = useDeferredValue(keyword);
-    const [kindFilter, setKindFilter] = useState<AssetKind | "all">("all");
-    const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(12);
+    const [kindFilter, setKindFilter] = useWorkbenchField<AssetKind | "all">("assets:kind", "all");
+    const [page, setPage] = useWorkbenchField("assets:page", 1);
+    const [pageSize, setPageSize] = useWorkbenchField("assets:pageSize", 12);
     const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+    const editingServerAsset = Boolean(editingAsset && serverAssetIds.has(editingAsset.id));
+    const { pending: savingAsset, run: runSave } = useAsyncAction(`asset-save:${editingAsset?.id || "new"}`);
+    const { pending: deleting, run: runDelete } = useAsyncAction("asset-delete");
+    const { run: runSavePrompt } = useAsyncAction("asset-save-prompt");
     const [isAssetOpen, setIsAssetOpen] = useState(false);
     const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
     const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
@@ -92,10 +100,13 @@ export default function AssetsPage() {
     const content = Form.useWatch("content", form) || "";
     const refreshServerAssets = async () => {
         const revision = ++refreshRevisionRef.current;
+        assetRequestRef.current?.abort();
+        const controller = new AbortController();
+        assetRequestRef.current = controller;
         setServerLoading(true);
         setServerError("");
         try {
-            const result = await listServerAssets();
+            const result = await listServerAssets(controller.signal);
             if (revision !== refreshRevisionRef.current) return;
             // The library currently renders image/video/text. Audio references remain available to video tasks.
             setServerAssets(result.assets.filter((asset) => asset.kind !== "other"));
@@ -109,8 +120,20 @@ export default function AssetsPage() {
         catch (error) { if (revision === refreshRevisionRef.current) setServerError(error instanceof Error ? error.message : "公司素材加载失败"); }
         finally { if (revision === refreshRevisionRef.current) setServerLoading(false); }
     };
-    useEffect(() => { void refreshServerAssets(); return () => { refreshRevisionRef.current += 1; }; }, [user?.id]);
-    useEffect(() => { void listServerProjects().then((result) => setServerProjects(result.projects)).catch(() => setServerProjects([])); }, []);
+    useEffect(() => {
+        setServerAssets([]);
+        setServerAssetIds(new Set());
+        void refreshServerAssets();
+        return () => { refreshRevisionRef.current += 1; assetRequestRef.current?.abort(); };
+    }, [user?.id]);
+    useEffect(() => {
+        const controller = new AbortController();
+        setServerProjects([]);
+        void listServerProjects(controller.signal).then((result) => {
+            if (!controller.signal.aborted) setServerProjects(result.projects);
+        }).catch(() => undefined);
+        return () => controller.abort();
+    }, [user?.id]);
     const assets = useMemo(() => [...serverAssets.map(serverAssetToLocal), ...localAssets.filter((asset) => !serverAssetIds.has(asset.id) && !serverAssetIds.has(metadataString(asset, "serverAssetId")))], [localAssets, serverAssetIds, serverAssets]);
     const validAssets = useMemo(() => assets.filter((asset) => canUserAccessAsset(asset, user) && (asset.kind === "text" || asset.kind === "image" || asset.kind === "video")), [assets, user]);
 
@@ -132,9 +155,10 @@ export default function AssetsPage() {
     };
 
     useEffect(() => {
+        if (serverLoading || keyword !== deferredKeyword) return;
         const maxPage = Math.max(1, Math.ceil(filteredAssets.length / pageSize));
         setPage((value) => Math.min(value, maxPage));
-    }, [filteredAssets.length, pageSize]);
+    }, [filteredAssets.length, pageSize, serverLoading, keyword, deferredKeyword, setPage]);
 
     const openCreate = () => {
         setEditingAsset(null);
@@ -171,7 +195,10 @@ export default function AssetsPage() {
             metadata: editingAsset?.metadata || { source: "manual" },
         };
 
-        if (!editingAsset && values.kind === "text") {
+        if (editingAsset && editingServerAsset) {
+            await updateServerAssetMetadata(editingAsset.id, { title: base.title, tags: base.tags, source: base.source || "", note: base.note || "" });
+            await refreshServerAssets();
+        } else if (!editingAsset && values.kind === "text") {
             const file = new File([(values.content || "").trim()], `${values.title.trim() || "text"}.txt`, { type: "text/plain;charset=utf-8" });
             await uploadServerAsset(file, { title: values.title.trim(), tags: values.tags || [], source: values.source || "手动添加", note: values.note || "", content: (values.content || "").trim() });
             await refreshServerAssets();
@@ -452,11 +479,13 @@ export default function AssetsPage() {
                 </div>
             </main>
 
-            <Modal title={editingAsset ? "编辑素材" : "新增素材"} open={isAssetOpen} width={980} onCancel={() => setIsAssetOpen(false)} onOk={() => void saveAsset()} okText="保存" cancelText="取消" destroyOnHidden>
+            <Modal title={editingAsset ? "编辑素材" : "新增素材"} open={isAssetOpen} width={980} onCancel={() => { if (!savingAsset) setIsAssetOpen(false); }} onOk={() => void runSave(saveAsset)} confirmLoading={savingAsset} cancelButtonProps={{ disabled: savingAsset }} closable={!savingAsset} keyboard={!savingAsset} maskClosable={!savingAsset} okText="保存" cancelText="取消" destroyOnHidden>
+                {editingServerAsset ? <p className="mb-4 text-sm text-muted-foreground">修改标题、标签、来源说明和备注将保存到服务端；原始文件和生成记录保持不变。</p> : null}
                 <div className="grid gap-6 pt-1 lg:grid-cols-[minmax(0,1fr)_320px]">
-                    <Form form={form} layout="vertical" requiredMark={false} initialValues={{ kind: "text", tags: [] }}>
+                    <Form form={form} layout="vertical" requiredMark={false} disabled={savingAsset} initialValues={{ kind: "text", tags: [] }}>
                         <Form.Item name="kind" label="类型">
                             <Select
+                                disabled={editingServerAsset || savingAsset}
                                 options={[
                                     { label: "文本", value: "text" },
                                     { label: "图片", value: "image" },
@@ -464,36 +493,36 @@ export default function AssetsPage() {
                                 onChange={(value) => setFormKind(value)}
                             />
                         </Form.Item>
-                        <Form.Item name="title" label="标题" rules={[{ required: true, message: "请输入标题" }]}>
-                            <Input size="large" placeholder="给素材起一个容易检索的名字" />
+                        <Form.Item name="title" label="标题" rules={[{ required: true, whitespace: true, max: 255, message: "请输入标题（最多255字）" }]}>
+                            <Input size="large" maxLength={255} placeholder="给素材起一个容易检索的名字" />
                         </Form.Item>
                         <Form.Item name="coverUrl" label="封面 URL">
                             <Space.Compact className="w-full">
-                                <Input placeholder="可粘贴图片 URL，也可以上传本地封面" />
-                                <Button icon={<Upload className="size-3.5" />} onClick={() => coverInputRef.current?.click()}>
+                                <Input disabled={editingServerAsset || savingAsset} placeholder="可粘贴图片 URL，也可以上传本地封面" />
+                                <Button disabled={editingServerAsset || savingAsset} icon={<Upload className="size-3.5" />} onClick={() => coverInputRef.current?.click()}>
                                     上传
                                 </Button>
                             </Space.Compact>
                         </Form.Item>
                         <Form.Item name="tags" label="标签">
-                            <Select mode="tags" tokenSeparators={[",", "，"]} placeholder="输入标签后回车" />
+                            <Select mode="tags" maxCount={20} tokenSeparators={[",", "，"]} placeholder="输入标签后回车" />
                         </Form.Item>
                         <div className="grid gap-4 sm:grid-cols-2">
                             <Form.Item name="source" label="来源">
-                                <Input placeholder="手动添加 / 画布 / 提示词库" />
+                                <Input maxLength={120} placeholder="手动添加 / 画布 / 提示词库" />
                             </Form.Item>
                             <Form.Item name="note" label="备注">
-                                <Input placeholder="可选" />
+                                <Input maxLength={2000} placeholder="可选" />
                             </Form.Item>
                         </div>
                         {formKind === "text" ? (
-                            <Form.Item name="content" label="文本内容" rules={[{ required: true, message: "请输入文本内容" }]}>
-                                <Input.TextArea rows={8} placeholder="保存提示词、说明文案、参考描述等文本素材" />
+                            <Form.Item name="content" label="文本内容" rules={[{ required: !editingServerAsset, whitespace: true, message: "请输入文本内容" }]}>
+                                <Input.TextArea disabled={editingServerAsset || savingAsset} rows={8} placeholder="保存提示词、说明文案、参考描述等文本素材" />
                             </Form.Item>
                         ) : (
                             <Form.Item label="图片内容" required>
                                 <div className="rounded-lg border border-dashed border-stone-300 p-4 dark:border-stone-700">
-                                    <Button icon={<Upload className="size-4" />} onClick={() => imageInputRef.current?.click()}>
+                                    <Button disabled={editingServerAsset || savingAsset} icon={<Upload className="size-4" />} onClick={() => imageInputRef.current?.click()}>
                                         选择图片文件
                                     </Button>
                                     {imageDraft ? (
@@ -567,7 +596,7 @@ export default function AssetsPage() {
                 onCopy={copyAssetText}
                 onDownload={downloadImage}
                 onReplicate={replicateAsset}
-                onSavePrompt={saveAssetPrompt}
+                onSavePrompt={(asset) => runSavePrompt(() => saveAssetPrompt(asset))}
                 onResultAction={recordResultAction}
                 onAddProject={(asset) => { setProjectAsset(asset); setSelectedProjectId(metadataString(asset, "projectId") || undefined); }}
                 onShareDepartment={shareWithDepartment}
@@ -577,7 +606,7 @@ export default function AssetsPage() {
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" disabled={Boolean(assetAction)} onChange={(event) => { const file = event.target.files?.[0]; void runAssetAction("正在导入素材包…", () => importAssetZip(file)); }} />
             <input ref={batchImageInputRef} type="file" accept="image/*" multiple className="hidden" disabled={Boolean(assetAction)} onChange={(event) => { const files = event.target.files; void runAssetAction("正在准备上传…", () => importImageFiles(files)); }} />
 
-            <Modal title="删除素材" open={Boolean(deletingAsset)} onCancel={() => setDeletingAsset(null)} onOk={confirmDelete} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
+            <Modal title="删除素材" open={Boolean(deletingAsset)} onCancel={() => { if (!deleting) setDeletingAsset(null); }} onOk={() => void runDelete(confirmDelete)} confirmLoading={deleting} cancelButtonProps={{ disabled: deleting }} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除「{deletingAsset?.title}」吗？删除后会从我的素材中移除。
             </Modal>
             <Modal title="加入正式项目" open={Boolean(projectAsset)} onCancel={() => setProjectAsset(null)} onOk={() => void addToProject()} okText="确认加入" cancelText="取消">
@@ -595,7 +624,7 @@ export default function AssetsPage() {
 
 function serverAssetToLocal(asset: ServerAsset): Asset {
     const title = typeof asset.metadata.title === "string" ? asset.metadata.title : asset.filename;
-    const common = { id: asset.id, ownerId: asset.ownerUserId, title, coverUrl: `/api/assets/${asset.id}/content`, tags: Array.isArray(asset.metadata.tags) ? asset.metadata.tags.map(String) : [], source: asset.source, note: typeof asset.metadata.note === "string" ? asset.metadata.note : undefined, metadata: { ...asset.metadata, serverAssetId: asset.id, designerId: asset.ownerUserId, departmentId: asset.departmentId, projectId: asset.projectId, operationType: asset.operationType, module: typeof asset.metadata.module === "string" ? asset.metadata.module : asset.operationType, prompt: asset.prompt, model: typeof asset.metadata.model === "string" ? asset.metadata.model : asset.modelName, modelName: asset.modelName, resultStatus: asset.resultStatus, usabilityScore: asset.usabilityScore, downloadCount: asset.downloadCount, visibilityScope: asset.visibilityScope, firstDownloadedAt: asset.firstDownloadedAt }, createdAt: asset.createdAt, updatedAt: asset.createdAt };
+    const common = { id: asset.id, ownerId: asset.ownerUserId, title, coverUrl: `/api/assets/${asset.id}/content`, tags: Array.isArray(asset.metadata.tags) ? asset.metadata.tags.map(String) : [], source: typeof asset.metadata.source === "string" ? asset.metadata.source : asset.source, note: typeof asset.metadata.note === "string" ? asset.metadata.note : undefined, metadata: { ...asset.metadata, serverAssetId: asset.id, designerId: asset.ownerUserId, departmentId: asset.departmentId, projectId: asset.projectId, operationType: asset.operationType, module: typeof asset.metadata.module === "string" ? asset.metadata.module : asset.operationType, prompt: asset.prompt, model: typeof asset.metadata.model === "string" ? asset.metadata.model : asset.modelName, modelName: asset.modelName, resultStatus: asset.resultStatus, usabilityScore: asset.usabilityScore, downloadCount: asset.downloadCount, visibilityScope: asset.visibilityScope, firstDownloadedAt: asset.firstDownloadedAt }, createdAt: asset.createdAt, updatedAt: asset.createdAt };
     if (asset.kind === "text") return { ...common, kind: "text", data: { content: typeof asset.metadata.content === "string" ? asset.metadata.content : "" } };
     if (asset.kind === "video") return { ...common, kind: "video", data: { url: common.coverUrl, storageKey: asset.id, width: 0, height: 0, bytes: asset.byteSize, mimeType: asset.mimeType } };
     return { ...common, kind: "image", data: { dataUrl: common.coverUrl, storageKey: asset.id, width: 0, height: 0, bytes: asset.byteSize, mimeType: asset.mimeType } };

@@ -68,7 +68,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                         }
                     }} />
                 <CanvasQuickReferenceTray references={references} disabled={running} onMove={onMoveReference} onRemove={onRemoveReference} onClear={onClearReferences} />
-                <p className="cw-selection-hint">{references.length ? "按上方顺序使用参考图，生成新图并保留原图" : "点击或框选画布图片，自动添加为参考图"}</p>
+                <p className="cw-selection-hint">{references.length ? "按上方顺序编辑参考图，原图保留。取消选中不会清空参考图。" : "点击或框选画布图片，自动添加为参考图"}</p>
                 {!referenceValidation.valid ? <p className="cw-reference-error" role="alert">{referenceValidation.message}</p> : null}
             </div>
             <div className="cw-generator-footer">

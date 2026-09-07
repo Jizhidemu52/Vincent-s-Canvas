@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { Form, Input, InputNumber, Modal, Select } from "antd";
+import { Alert, Form, Input, InputNumber, Modal, Select } from "antd";
+import { useAsyncAction } from "@/hooks/use-async-action";
+import { getBusinessConfig } from "@/services/api/business-config";
+import { mergePromptEditorParameters } from "@/lib/prompt-editor-parameters";
 import { deploymentFeatures } from "@/lib/deployment-features";
 
 import { listServerAssets, type ServerAsset } from "@/services/api/server-assets";
@@ -16,38 +19,44 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
     const [form] = Form.useForm<FormValues>();
     const [models, setModels] = useState<ModelOption[]>([]);
     const [assets, setAssets] = useState<ServerAsset[]>([]);
-    const [saving, setSaving] = useState(false);
+    const { pending: saving, run } = useAsyncAction(`prompt-editor:${initial?.id || "new"}`);
+    const [optionError, setOptionError] = useState("");
 
     useEffect(() => {
         if (!open) return;
-        void Promise.all([
-            fetch("/api/models", { credentials: "include" }).then((response) => response.ok ? response.json() : Promise.reject()).then((data: { models: ModelOption[] }) => setModels(data.models)),
-            listServerAssets().then((data) => setAssets(data.assets.filter((asset) => asset.kind === "image" && asset.status === "ready"))),
-        ]).catch(() => undefined);
+        let active = true;
+        const controller = new AbortController();
+        setModels([]); setAssets([]); setOptionError("");
+        void Promise.allSettled([getBusinessConfig(), listServerAssets(controller.signal)]).then(([modelResult, assetResult]) => {
+            if (!active) return;
+            if (modelResult.status === "fulfilled") setModels(modelResult.value.models);
+            if (assetResult.status === "fulfilled") setAssets(assetResult.value.assets.filter((asset) => asset.kind === "image" && asset.status === "ready"));
+            if (modelResult.status === "rejected" || assetResult.status === "rejected") setOptionError("模型或参考图选项加载失败，已有选择仍保留；可关闭后重新打开以重试。");
+        });
+        form.resetFields();
         form.setFieldsValue(initial ? {
             title: initial.title, prompt: initial.prompt, targetTool: initial.targetTool, modelConfigId: initial.modelConfigId ?? undefined,
             size: stringValue(initial.parameters.size), quality: stringValue(initial.parameters.quality), quantity: numberValue(initial.parameters.quantity) ?? numberValue(initial.parameters.count) ?? 1,
             category: initial.category, tags: initial.tags, referenceAssetIds: initial.referenceAssetIds, notes: initial.notes,
         } : { targetTool: "image-generation", quantity: 1, quality: "auto", tags: [], referenceAssetIds: [] });
+        return () => { active = false; controller.abort(); };
     }, [form, initial, open]);
 
-    const save = async () => {
+    const save = () => run(async () => {
         const values = await form.validateFields();
-        setSaving(true);
-        try {
             await onSubmit({
                 title: values.title, prompt: values.prompt, targetTool: values.targetTool, modelConfigId: values.modelConfigId ?? null,
-                parameters: { size: values.size || undefined, quality: values.quality || undefined, quantity: values.quantity || 1 },
+                parameters: mergePromptEditorParameters(initial?.parameters, values),
                 referenceAssetIds: values.referenceAssetIds || [], category: values.category || "", tags: values.tags || [], notes: values.notes || "",
                 sourceTaskId: initial?.sourceTaskId, sourceAssetId: initial?.sourceAssetId,
             });
             form.resetFields();
-        } finally { setSaving(false); }
-    };
+    });
 
     return (
-        <Modal title={title} open={open} onCancel={onCancel} onOk={() => void save()} okText="保存模板" cancelText="取消" confirmLoading={saving} width={760} destroyOnHidden>
-            <Form form={form} layout="vertical" className="pt-3">
+        <Modal title={title} open={open} onCancel={() => { if (!saving) onCancel(); }} onOk={() => void save()} okText="保存模板" cancelText="取消" confirmLoading={saving} cancelButtonProps={{ disabled: saving }} closable={!saving} keyboard={!saving} maskClosable={!saving} width={760} destroyOnHidden>
+            {optionError ? <Alert type="warning" showIcon message={optionError} /> : null}
+            <Form form={form} layout="vertical" className="pt-3" disabled={saving}>
                 <div className="grid gap-x-4 md:grid-cols-2">
                     <Form.Item name="title" label="模板名称" rules={[{ required: true, whitespace: true, max: 120 }]}><Input maxLength={120} showCount placeholder="例如：女装白底商品图" /></Form.Item>
                     <Form.Item name="targetTool" label="适用板块" rules={[{ required: true }]}><Select options={Object.entries(promptTargetLabels).map(([value, label]) => ({ value, label }))} /></Form.Item>

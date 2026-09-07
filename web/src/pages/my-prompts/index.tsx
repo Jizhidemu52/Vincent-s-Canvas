@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { App, Button, Empty, Input, Select, Spin, Switch } from "antd";
+import { App, Button, Input, Pagination, Select, Spin, Switch } from "antd";
+import { useWorkbenchField } from "@/hooks/use-workbench-field";
 import { BookOpen, Plus, Search } from "lucide-react";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { createPromptListLoader } from "@/lib/prompt-list-loader";
@@ -21,19 +22,22 @@ export default function MyPromptsPage() {
     const [items, setItems] = useState<PromptTemplate[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState("");
-    const [query, setQuery] = useState("");
-    const [sort, setSort] = useState<"updated" | "recent" | "used">("updated");
-    const [favorite, setFavorite] = useState(false);
+    const [query, setQuery] = useWorkbenchField("my-prompts:query", "");
+    const [sort, setSort] = useWorkbenchField<"updated" | "recent" | "used">("my-prompts:sort", "updated");
+    const [favorite, setFavorite] = useWorkbenchField("my-prompts:favorite", false);
+    const [page, setPage] = useWorkbenchField("my-prompts:page", 1);
+    const [pageSize, setPageSize] = useWorkbenchField("my-prompts:pageSize", 24);
+    const [total, setTotal] = useState(0);
     const [editing, setEditing] = useState<PromptTemplate | null>(null);
     const [editorOpen, setEditorOpen] = useState(false);
     const [loader] = useState(createPromptListLoader);
 
     const load = useCallback(() => loader.load(
-        () => listPromptTemplates({ scope: "personal", query, sort, favorite: favorite ? true : undefined, pageSize: 100 }),
-        (result) => setItems(result.templates),
+        () => listPromptTemplates({ scope: "personal", query, sort, favorite: favorite ? true : undefined, page, pageSize }),
+        (result) => { setItems(result.templates); setTotal(result.total); setPage((value) => Math.min(value, Math.max(1, Math.ceil(result.total / pageSize)))); },
         (error) => setLoadError(error instanceof Error ? error.message : "加载个人提示词失败"),
         (value) => { setLoading(value); if (value) setLoadError(""); },
-    ), [favorite, loader, message, query, sort]);
+    ), [favorite, loader, page, pageSize, query, setPage, sort]);
 
     useEffect(() => {
         const timer = window.setTimeout(() => void load(), 250);
@@ -61,15 +65,15 @@ export default function MyPromptsPage() {
                     <Button size="large" type="primary" icon={<Plus className="size-4" />} onClick={() => { setEditing(null); setEditorOpen(true); }}>新建模板</Button>
                 </header>
                 <section className="wb-toolbar mb-6">
-                    <Input className="max-w-md" allowClear prefix={<Search className="size-4 text-stone-400" />} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、提示词或分类" />
-                    <Select value={sort} onChange={setSort} options={[{ value: "updated", label: "最近更新" }, { value: "recent", label: "最近使用" }, { value: "used", label: "使用最多" }]} />
-                    <label className="flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300"><Switch size="small" checked={favorite} onChange={setFavorite} />只看收藏</label>
-                    <span aria-live="polite" className="ml-auto text-xs text-stone-500">{loading && items.length ? "正在更新 · " : ""}共 {items.length} 个模板</span>
+                    <Input className="max-w-md" allowClear prefix={<Search className="size-4 text-stone-400" />} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="搜索名称、提示词或分类" />
+                    <Select value={sort} onChange={(value) => { setSort(value); setPage(1); }} options={[{ value: "updated", label: "最近更新" }, { value: "recent", label: "最近使用" }, { value: "used", label: "使用最多" }]} />
+                    <label className="flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300"><Switch size="small" checked={favorite} onChange={(value) => { setFavorite(value); setPage(1); }} />只看收藏</label>
+                    <span aria-live="polite" className="ml-auto text-xs text-stone-500">{loading && items.length ? "正在更新 · " : ""}共 {total} 个模板</span>
                 </section>
                 {loadError ? <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{loadError}</span><Button onClick={() => void load()}>重新加载</Button></div> : null}
                 {loading && !items.length ? <div className="flex min-h-80 items-center justify-center"><Spin /></div> : items.length ? (
                     <section aria-busy={loading} className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{items.map((item) => (
-                        <PromptTemplateCard key={item.id} item={item} editable canSubmit={Boolean(groupId)} onReuse={(mode) => void reuse(item, mode)}
+                        <PromptTemplateCard key={item.id} item={item} editable canSubmit={Boolean(groupId)} onReuse={(mode) => reuse(item, mode)}
                             onEdit={() => { setEditing(item); setEditorOpen(true); }}
                             onCopy={async () => { await copyPromptTemplate(item.id); message.success("已复制为新模板"); await load(); }}
                             onFavorite={async () => { await setPromptFavorite(item.id, !item.favorite); await load(); }}
@@ -78,6 +82,7 @@ export default function MyPromptsPage() {
                         />
                     ))}</section>
                 ) : !loadError ? <div className="wb-surface wb-empty"><BookOpen className="size-9" /><strong>{query || favorite ? "没有匹配的模板" : "留住一次满意的创作"}</strong><p>{query || favorite ? "换个关键词，或关闭收藏筛选看看。" : "新建模板记录提示词，也可以从生成结果中一键保存。模板仅你本人可管理。"}</p>{query || favorite ? <Button onClick={() => { setQuery(""); setFavorite(false); }}>清除筛选</Button> : <Button type="primary" onClick={() => { setEditing(null); setEditorOpen(true); }}>创建第一个模板</Button>}</div> : null}
+                {total > 0 ? <Pagination className="mt-6 flex justify-center" current={page} pageSize={pageSize} total={total} showSizeChanger pageSizeOptions={[24, 48, 96]} onChange={(next, size) => { setPage(size !== pageSize ? 1 : next); setPageSize(size); }} /> : null}
             </div>
             <PromptTemplateEditor open={editorOpen} initial={editing} title={editing ? "编辑个人模板" : "新建个人模板"} onCancel={() => { setEditorOpen(false); setEditing(null); }} onSubmit={save} />
         </main>

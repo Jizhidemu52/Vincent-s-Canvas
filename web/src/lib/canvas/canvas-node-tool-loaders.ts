@@ -6,6 +6,10 @@ export function loadCanvasNodeCropDialog() {
     return import("@/components/canvas/canvas-node-crop-dialog").then(({ CanvasNodeCropDialog }) => ({ default: CanvasNodeCropDialog }));
 }
 
+export function loadCanvasImageEditorDialog() {
+    return import("@/components/canvas/canvas-image-editor-dialog").then(({ CanvasImageEditorDialog }) => ({ default: CanvasImageEditorDialog }));
+}
+
 export function loadCanvasNodeMaskEditDialog() {
     return import("@/components/canvas/canvas-node-mask-edit-dialog").then(({ CanvasNodeMaskEditDialog }) => ({ default: CanvasNodeMaskEditDialog }));
 }

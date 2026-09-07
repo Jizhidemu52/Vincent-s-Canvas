@@ -10,7 +10,7 @@ test("the six configured image models expose only their adapter's supported opti
     for (const model of ["gpt-image-2"]) {
         const profile = imageModelProfile(model, []);
         expect(profile.qualityLabel).toBe("画质");
-        expect(profile.sizes).toEqual(["1024x1024", "1536x1024", "1024x1536"]);
+        expect(profile.sizes).toEqual(["1024x1024", "1536x1024", "1024x1536", "auto"]);
         expect(profile.customSize).toBe(false);
     }
     expect(imageModelProfile("vcen-gpt2", []).qualities).toEqual(["1k", "2k", "4k"]);
@@ -36,6 +36,7 @@ test("changing models resets unsupported quality, dimensions and output counts",
 });
 
 test("actual image task payloads preserve ultrawide, custom size, Gemini half-K and Midjourney speed", () => {
+    expect(imageTaskParameters({ ...defaultConfig, model: "gpt-image-2", size: "auto", quality: "auto" })).toEqual({ size: "auto", quality: "auto" });
     expect(imageTaskParameters({ ...defaultConfig, model: "vcen-gpt2", size: "21:9", quality: "4k" })).toEqual({ size: "21:9", resolution: "4k" });
     expect(imageTaskParameters({ ...defaultConfig, model: "vcen-gpt2", size: "1280x960", quality: "2k" })).toEqual({ size: "1280x960", resolution: "2k" });
     expect(imageTaskParameters({ ...defaultConfig, model: "gemini-3.1-flash-image-preview", size: "4:3", quality: "0.5k" })).toEqual({ size: "4:3", resolution: "0.5k" });
@@ -46,6 +47,8 @@ test("shared node and image-page settings render model-specific controls without
     const render = (model: string) => renderToStaticMarkup(<ImageSettingsPanel config={{ ...defaultConfig, model }} theme={canvasThemes.light} onConfigChange={() => undefined} />);
     const openai = render("gpt-image-2");
     expect(openai).toContain("画质");
+    expect(openai).toContain("自适应");
+    expect(openai).toContain("仅影响下次 AI 生成，不改变已有图片");
     expect(openai).not.toContain("0.5K");
     expect(openai).not.toContain("16倍数对齐");
     expect(render("vcen-gpt2")).toContain("16倍数对齐");

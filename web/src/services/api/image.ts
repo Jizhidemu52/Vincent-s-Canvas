@@ -64,13 +64,16 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const validation = validateImageReferences(modelOptionName(config.model || config.imageModel), references);
     if (!validation.valid) throw new Error(validation.message);
     const count = Number(normalizeImageModelSettings(config, profile).count);
+    const transparent = profile.kind === "standard" && references.length === 1 && !mask
+        && await import("@/lib/image-alpha").then(module => module.imageHasTransparency(references[0]!));
+    options?.signal?.throwIfAborted();
     return requestQueuedImages({
         modelId: modelOptionName(config.model || config.imageModel),
         prompt: withSystemPrompt(config, buildImageReferencePromptText(prompt, references)),
         count,
         operationType: options?.operationType || "inpaint",
         tool: options?.tool,
-        parameters: imageTaskParameters(config),
+        parameters: { ...imageTaskParameters(config), ...(transparent ? { background: "transparent", output_format: "png" } : {}) },
         references: [...references, ...(mask ? [mask] : [])],
         signal: options?.signal,
     });

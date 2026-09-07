@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
-import { Brush, Camera, Copy, FileText, Grid2x2, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
+import { Brush, Camera, Copy, FileText, Grid2x2, Lock, LockOpen, Maximize2, PencilRuler, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
 
 import type { CanvasNodeData } from "@/types/canvas";
 
-export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
+export type ImageNodeActionToolId = "manualEdit" | "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | "edit" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
+    onManualEdit: (node: CanvasNodeData) => void;
     onUpload: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onMaskEdit: (node: CanvasNodeData) => void;
@@ -41,6 +42,11 @@ export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v6";
 const allBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download", "edit"];
 
 export const imageToolDefinitions: ImageToolDefinition[] = [
+    {
+        id: "manualEdit", defaultVisible: true, panelLabel: "编辑图片", label: "编辑图片", title: "编辑图片",
+        icon: () => <PencilRuler className="size-[18px]" />,
+        run: (node, handlers) => handlers.onManualEdit(node),
+    },
     {
         id: "copyPrompt",
         defaultVisible: true,
@@ -143,7 +149,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     },
 ];
 
-export const defaultImageQuickToolIds: ImageQuickToolId[] = ["edit", "maskEdit", "crop", "download"];
+export const defaultImageQuickToolIds: ImageQuickToolId[] = ["manualEdit", "edit", "maskEdit", "download"];
 
 /** Keep old preferences intact while preventing a legacy full-width toolbar. */
 export function compactImageQuickToolIds(ids: ImageQuickToolId[]) {

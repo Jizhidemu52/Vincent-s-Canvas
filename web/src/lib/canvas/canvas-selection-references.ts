@@ -4,14 +4,19 @@ import { originalCanvasImageFileName } from "@/lib/canvas/canvas-image-filename"
 
 export type CanvasSelectionReference = ReferenceImage & { canvasNodeId?: string };
 
-/** Selection owns canvas references; uploads stay independent. Existing order survives drag/zoom/metadata updates. */
+/** Selecting images replaces canvas references; deselection never clears the edit draft. */
 export function syncCanvasSelectionReferences(
     current: CanvasSelectionReference[],
     selectedIds: ReadonlySet<string>,
     nodeById: ReadonlyMap<string, CanvasNodeData>,
 ): CanvasSelectionReference[] {
     const selected = new Map<string, CanvasSelectionReference>();
-    for (const id of selectedIds) {
+    const imageIds = Array.from(selectedIds).filter(id => {
+        const node = nodeById.get(id);
+        return node?.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey);
+    });
+    const referenceIds = imageIds.length ? imageIds : current.flatMap(reference => reference.canvasNodeId ? [reference.canvasNodeId] : []);
+    for (const id of referenceIds) {
         const node = nodeById.get(id);
         if (node?.type !== CanvasNodeType.Image || !(node.metadata?.content || node.metadata?.storageKey)) continue;
         const content = node.metadata.content || "";
@@ -26,7 +31,8 @@ export function syncCanvasSelectionReferences(
     for (const reference of current) {
         if (!reference.canvasNodeId) { next.push(reference); continue; }
         const updated = selected.get(reference.canvasNodeId);
-        if (!updated) continue;
+        // A removed canvas node does not invalidate its already attached image snapshot.
+        if (!updated) { if (!imageIds.length) next.push(reference); continue; }
         const unchanged = reference.name === updated.name && reference.type === updated.type &&
             reference.dataUrl === updated.dataUrl && reference.url === updated.url && reference.storageKey === updated.storageKey && reference.originalFileName === updated.originalFileName;
         next.push(unchanged ? reference : updated);

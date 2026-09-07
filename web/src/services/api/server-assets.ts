@@ -40,10 +40,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
 
-export const listServerAssets = () => request<{ assets: ServerAsset[] }>("/api/assets");
+export const listServerAssets = (signal?: AbortSignal) => request<{ assets: ServerAsset[] }>("/api/assets", { signal });
 export const listAdminServerAssets = () => request<{ assets: ServerAsset[] }>("/api/admin/assets");
 export const listAdminServerProjects = () => request<{ projects: ServerProject[] }>("/api/admin/projects");
-export const listServerProjects = () => request<{ projects: UserProject[] }>("/api/projects");
+export const listServerProjects = (signal?: AbortSignal) => request<{ projects: UserProject[] }>("/api/projects", { signal });
 
 export async function uploadServerAsset(file: File, metadata: Record<string, unknown> = {}, options: { projectId?: string; clientReferenceId?: string } = {}) {
     const created = await request<{ assetId: string; uploadUrl: string | null }>("/api/assets/upload-request", {
@@ -85,4 +85,6 @@ export const unshareServerAssetWithDepartment = (id: string, departmentId: strin
     request<void>(`/api/assets/${id}/share`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "department", targetId: departmentId }) });
 
 export const deleteServerAsset = (id: string) => request<void>(`/api/assets/${id}`, { method: "DELETE" });
+export const updateServerAssetMetadata = (id: string, input: { title: string; tags: string[]; source: string; note: string }) =>
+    request<void>(`/api/assets/${id}/metadata`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
 import { createClientId } from "@/lib/client-id";

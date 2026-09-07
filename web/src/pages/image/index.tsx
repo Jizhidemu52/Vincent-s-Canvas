@@ -6,6 +6,10 @@ import localforage from "localforage";
 import { saveAs } from "file-saver";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { GenerationElapsed } from "@/components/generation-elapsed";
+import { upsertGenerationLog } from "@/lib/generation-log-update";
+import { useWorkbenchField } from "@/hooks/use-workbench-field";
+import { workbenchSubmissions } from "@/lib/submission-gate";
 import { ReferenceImageTray } from "@/components/reference-images/reference-image-tray";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
@@ -137,6 +141,7 @@ function ImageGenerationPage() {
     const generateRef = useRef<() => Promise<void>>(async () => undefined);
     const restoredInitialResultRef = useRef(false);
     const previewRevision = useRef(0);
+    const logRefreshRevision = useRef(0);
     const [previewLoading, setPreviewLoading] = useState(false);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
@@ -147,7 +152,7 @@ function ImageGenerationPage() {
     const user = useUserStore((state) => state.user);
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const addAsset = useAssetStore((state) => state.addAsset);
-    const [prompt, setPrompt] = useState("");
+    const [prompt, setPrompt] = useWorkbenchField(`image:${resolveImageToolMode(searchParams.get("tool"))}:prompt`, "");
     const [references, setReferences] = useState<ImageReferenceItem[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
@@ -158,7 +163,6 @@ function ImageGenerationPage() {
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [referenceAssetPickerOpen, setReferenceAssetPickerOpen] = useState(false);
     const [startedAt, setStartedAt] = useState(0);
-    const [elapsedMs, setElapsedMs] = useState(0);
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -191,13 +195,8 @@ function ImageGenerationPage() {
     };
 
     useEffect(() => {
-        if (!running || !startedAt) return;
-        const timer = window.setInterval(() => setElapsedMs(performance.now() - startedAt), 1000);
-        return () => window.clearInterval(timer);
-    }, [running, startedAt]);
-
-    useEffect(() => {
         void refreshLogs();
+        return () => { logRefreshRevision.current += 1; };
     }, []);
 
     useEffect(() => {
@@ -323,7 +322,9 @@ function ImageGenerationPage() {
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
 
-        setElapsedMs(0);
+        const release = workbenchSubmissions.acquire(`image:${user.id}`);
+        if (!release) { message.info("图片任务正在处理，请勿重复提交"); return; }
+
         setRunning(true);
         setPreviewLog(null);
         setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" })));
@@ -356,9 +357,12 @@ function ImageGenerationPage() {
                 status: successCount ? "成功" : "失败",
                 images: logImages,
             });
-            saveLog(log);
+            await saveLog(log);
             successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
+        } catch (error) {
+            message.error(`结果仍保留在页面，但本地记录保存失败：${error instanceof Error ? error.message : "请检查浏览器存储空间"}`);
         } finally {
+            release();
             setRunning(false);
         }
     };
@@ -430,7 +434,6 @@ function ImageGenerationPage() {
         setPrompt("");
         setReferences([]);
         setResults([]);
-        setElapsedMs(0);
         setStartedAt(0);
         setSelectedLogIds([]);
         setPreviewLog(null);
@@ -438,7 +441,7 @@ function ImageGenerationPage() {
 
     const deleteSelectedLogs = () => {
         const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
-        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
+        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs).catch((error) => message.error(error instanceof Error ? error.message : "记录删除失败"));
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
@@ -447,11 +450,21 @@ function ImageGenerationPage() {
         setDeleteConfirmOpen(false);
     };
 
-    const saveLog = (log: GenerationLog) => {
-        void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
+    const saveLog = async (log: GenerationLog) => {
+        await logStore.setItem(log.id, serializeLog(log));
+        logRefreshRevision.current += 1;
+        setLogs((current) => upsertGenerationLog(current, log));
     };
 
-    const refreshLogs = async () => setLogs(await readStoredLogs());
+    const refreshLogs = async () => {
+        const revision = ++logRefreshRevision.current;
+        try {
+            const next = await readStoredLogs();
+            if (revision === logRefreshRevision.current) setLogs(next);
+        } catch (error) {
+            if (revision === logRefreshRevision.current) message.error(error instanceof Error ? error.message : "历史记录读取失败，请检查浏览器存储");
+        }
+    };
 
     const previewGenerationLog = async (log: GenerationLog) => {
         const revision = ++previewRevision.current;
@@ -512,12 +525,22 @@ function ImageGenerationPage() {
         }
     };
 
-    const retryResult = (index: number) => {
+    const retryResult = async (index: number) => {
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
+        const release = workbenchSubmissions.acquire(`image:${user?.id}`);
+        if (!release) { message.info("图片任务正在处理，请勿重复提交"); return; }
+        setRunning(true);
+        setStartedAt(performance.now());
         setPreviewLog(null);
         setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined }));
-        void runGenerationSlot(index, snapshot).catch(() => {});
+        try {
+            const image = await runGenerationSlot(index, snapshot);
+            const stored = await uploadImage(image.dataUrl);
+            await saveLog(buildLog({ prompt: snapshot.text, model, config: { ...snapshot.config, count: "1" }, references: snapshot.references, durationMs: image.durationMs, successCount: 1, failCount: 0, status: "成功", images: [{ ...image, dataUrl: stored.url, storageKey: stored.storageKey }] }));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "重试未完成");
+        } finally { release(); setRunning(false); }
     };
 
     return (
@@ -535,10 +558,10 @@ function ImageGenerationPage() {
                     />
                 </aside>
 
-                <section className="grid gap-4 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[minmax(340px,400px)_minmax(0,1fr)]">
-                    <div className="wb-surface thin-scrollbar flex flex-col p-6 lg:min-h-0 lg:overflow-y-auto">
+                <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[minmax(340px,400px)_minmax(0,1fr)]">
+                    <div className="wb-surface thin-scrollbar flex min-w-0 flex-col p-6 lg:min-h-0 lg:overflow-y-auto">
                         <div>
-                            <div className="flex items-start justify-between gap-3">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div className="min-w-0">
                                     <p className="wb-eyebrow">图像工作室</p><h1 className="wb-title">{toolModeConfig.title}</h1>
                                     <p className="wb-description">{toolModeConfig.description}</p>
@@ -556,9 +579,9 @@ function ImageGenerationPage() {
 
                         <div className="mt-6 space-y-5">
                             <div>
-                                <div className="mb-2 flex items-center justify-between gap-3">
+                                <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                                     <span className="text-base font-semibold">提示词</span>
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-wrap gap-2">
                                         <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
                                             查看提示词库
                                         </Button>
@@ -595,7 +618,7 @@ function ImageGenerationPage() {
 
                         <div className="mt-auto pt-6">
                             <div className="mb-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
-                                <div className="flex items-center justify-between gap-3">
+                                <div className="flex flex-wrap items-center justify-between gap-3">
                                     <span>{!deploymentFeatures.creditsEnabled ? "不计积分" : `预计消耗 ${estimatedUsage.credits} 积分`}</span>
                                     <span>{!deploymentFeatures.authenticationEnabled ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
                                 </div>
@@ -609,12 +632,12 @@ function ImageGenerationPage() {
                         </div>
                     </div>
 
-                    <div className="wb-surface thin-scrollbar p-6 lg:min-h-0 lg:overflow-y-auto">
+                    <div className="wb-surface thin-scrollbar min-w-0 p-6 lg:min-h-0 lg:overflow-y-auto">
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <div>
                                 <h2 className="text-xl font-semibold">生成结果</h2>
                             </div>
-                            {previewLoading ? <span role="status" className="text-sm text-muted-foreground">正在读取记录…</span> : running ? <Tag className="m-0 px-2 py-1">等待 {formatDuration(elapsedMs)}</Tag> : null}
+                            {previewLoading ? <span role="status" className="text-sm text-muted-foreground">正在读取记录…</span> : running ? <Tag className="m-0 px-2 py-1">等待 <GenerationElapsed startedAt={startedAt} /></Tag> : null}
                         </div>
                         {results.length ? (
                             <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
@@ -911,8 +934,8 @@ async function readStoredLogs() {
         });
         const logs = values.map(normalizeLog);
         return logs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    } catch {
-        return [];
+    } catch (error) {
+        throw new Error(`图片历史读取失败：${error instanceof Error ? error.message : "浏览器存储不可用"}`);
     }
 }
 

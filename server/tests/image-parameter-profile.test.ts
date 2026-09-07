@@ -19,3 +19,9 @@ test("OpenAI image generations and edits forward selected quality and dimensions
   expect(edited.form?.get("quality")).toBe("high");
   expect(edited.form?.get("size")).toBe("1536x1024");
 });
+
+test("transparent edit output parameters survive the demo and worker parameter adapter", () => {
+  expect(openAiImageParameters({ background: "transparent", output_format: "jpeg" }, "gpt-image-2")).toMatchObject({ background: "transparent", output_format: "png" });
+  expect(openAiImageParameters({}, "gpt-image-2")).not.toHaveProperty("background");
+  expect(openAiImageParameters({ background: "transparent" }, "gemini-3.1-flash-image")).toEqual({});
+});

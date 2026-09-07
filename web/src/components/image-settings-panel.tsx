@@ -51,6 +51,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <ChevronDown size={13} aria-hidden />
                 </label>
             </div>
+            <p className="text-xs leading-5" style={{ color: theme.node.muted }}>仅影响下次 AI 生成，不改变已有图片。{normalized.size === "auto" ? "自适应由模型结合描述和参考图决定输出尺寸。" : "修改原图请使用「编辑图片」中的裁剪。"}</p>
             <div className="ip-row">
                 <span className="ip-label">{profile.qualityLabel}</span>
                 <div className="ip-segments" role="group" aria-label={profile.qualityLabel}>
@@ -89,5 +90,5 @@ export function imageQualityLabel(value: string) {
 }
 
 export function imageSizeLabel(size: string) {
-    return ({ auto: "自动", "1024x1024": "1:1", "1536x1024": "3:2", "1024x1536": "2:3" } as Record<string, string>)[size] || size;
+    return ({ auto: "自适应", "1024x1024": "1:1", "1536x1024": "3:2", "1024x1536": "2:3" } as Record<string, string>)[size] || size;
 }

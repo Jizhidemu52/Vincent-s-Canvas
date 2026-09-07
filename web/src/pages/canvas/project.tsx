@@ -50,7 +50,7 @@ import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { useCanvasDesktopLayout } from "@/hooks/use-canvas-desktop-layout";
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
-import { useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { flushCanvasPersistence, useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
@@ -100,6 +100,7 @@ import {
     loadAssetPickerModal,
     loadCanvasNodeAngleDialog,
     loadCanvasNodeCropDialog,
+    loadCanvasImageEditorDialog,
     loadCanvasNodeMaskEditDialog,
     loadCanvasNodeSplitDialog,
     loadCanvasNodeUpscaleDialog,
@@ -136,6 +137,7 @@ const CanvasAssistantPanel = lazy(loadCanvasAssistantPanel);
 const CanvasLocalAgentPanel = lazy(loadCanvasLocalAgentPanel);
 const CanvasNodeAngleDialog = lazy(loadCanvasNodeAngleDialog);
 const CanvasNodeCropDialog = lazy(loadCanvasNodeCropDialog);
+const CanvasImageEditorDialog = lazy(loadCanvasImageEditorDialog);
 const CanvasNodeMaskEditDialog = lazy(loadCanvasNodeMaskEditDialog);
 const CanvasNodeSplitDialog = lazy(loadCanvasNodeSplitDialog);
 const CanvasNodeUpscaleDialog = lazy(loadCanvasNodeUpscaleDialog);
@@ -502,6 +504,7 @@ function WirelessCanvasPage() {
     const [editRequestNonce, setEditRequestNonce] = useState(0);
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
+    const [manualEditNode, setManualEditNode] = useState<CanvasNodeData | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
     const [maskEditModel, setMaskEditModel] = useState("");
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
@@ -669,6 +672,7 @@ function WirelessCanvasPage() {
         const restoreToken = lifecycle.begin();
         const invalidateRestore = () => lifecycle.invalidate(restoreToken);
         setProjectLoaded(false);
+        setManualEditNode(null);
         textStreamBufferRef.current?.cancel();
         setStreamedTextById((current) => (current.size ? new Map() : current));
         abortPendingCanvasRequests(generationRequestsRef.current);
@@ -1545,6 +1549,7 @@ function WirelessCanvasPage() {
             setEditingNodeId((current) => (current && allIds.has(current) ? null : current));
             setInfoNodeId((current) => (current && allIds.has(current) ? null : current));
             setCropNodeId((current) => (current && allIds.has(current) ? null : current));
+            setManualEditNode((current) => current && allIds.has(current.id) ? null : current);
             setMaskEditNodeId((current) => (current && allIds.has(current) ? null : current));
             setAngleNodeId((current) => (current && allIds.has(current) ? null : current));
             setPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
@@ -1578,6 +1583,7 @@ function WirelessCanvasPage() {
         setConnections([]);
         setInfoNodeId(null);
         setCropNodeId(null);
+        setManualEditNode(null);
         setMaskEditNodeId(null);
         setAngleNodeId(null);
         setPreviewNodeId(null);
@@ -2484,6 +2490,29 @@ function WirelessCanvasPage() {
         },
         [effectiveConfig.model, effectiveConfig.textModel, message],
     );
+
+    const saveManualImageEdit = async (image: UploadedImage) => {
+        if (!manualEditNode || savedProjectIdRef.current !== projectId) throw new Error("画布已切换，请重新打开图片编辑");
+        const { applyCanvasImageEdit, rollbackCanvasImageEdit } = await import("@/lib/canvas/canvas-image-edit");
+        if (savedProjectIdRef.current !== projectId) throw new Error("画布已切换，请重新打开图片编辑");
+        const before = nodesRef.current;
+        const next = applyCanvasImageEdit(before, manualEditNode, image);
+        projectSaveQueueRef.current?.flush();
+        nodesRef.current = next;
+        setNodes(next);
+        updateProject(projectId, { nodes: next });
+        try { await flushCanvasPersistence(); }
+        catch (error) {
+            if (savedProjectIdRef.current === projectId) {
+                const restored = rollbackCanvasImageEdit(nodesRef.current, before, image.storageKey);
+                projectSaveQueueRef.current?.flush();
+                nodesRef.current = restored;
+                setNodes(restored);
+                updateProject(projectId, { nodes: restored });
+            }
+            throw error;
+        }
+    };
 
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
         if (!node.metadata?.content) return;
@@ -4676,6 +4705,7 @@ function WirelessCanvasPage() {
                             onDownload={downloadNodeImage}
                             onSaveAsset={(node) => void saveNodeAsset(node)}
                             onMaskEdit={(node) => setMaskEditNodeId(node.id)}
+                            onManualEdit={(node) => { if (node.metadata?.status === "loading") { message.info("请等待这张图片生成完成后再编辑"); return; } setDialogNodeId(null); setManualEditNode(node); }}
                             onCrop={(node) => setCropNodeId(node.id)}
                             onSplit={(node) => setSplitNodeId(node.id)}
                             onUpscale={(node) => setUpscaleNodeId(node.id)}
@@ -4755,6 +4785,12 @@ function WirelessCanvasPage() {
                 {infoNode ? (
                     <Suspense fallback={null}>
                         <CanvasNodeInfoModal node={infoNode} open onClose={() => setInfoNodeId(null)} />
+                    </Suspense>
+                ) : null}
+
+                {manualEditNode?.metadata?.content ? (
+                    <Suspense fallback={null}>
+                        <CanvasImageEditorDialog key={`${projectId}:${manualEditNode.id}`} node={manualEditNode} onClose={() => setManualEditNode(null)} onConfirm={saveManualImageEdit} />
                     </Suspense>
                 ) : null}
 

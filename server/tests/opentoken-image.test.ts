@@ -7,6 +7,14 @@ import {
 } from "../src/opentoken-image";
 
 describe("OpenToken image protocol adapter", () => {
+  test("native transparent edits preserve source bytes and send PNG output parameters", async () => {
+    const bytes = new Uint8Array([137, 80, 78, 71, 0, 1, 255]);
+    const request = buildOpenTokenImageRequest({ baseUrl: "https://example.test/v1", apiKey: "test", prompt: "衣领改紫色", background: "transparent", references: [{ filename: "原图.png", mimeType: "image/png", bytes }] });
+    expect(request.form?.get("background")).toBe("transparent");
+    expect(request.form?.get("output_format")).toBe("png");
+    expect(new Uint8Array(await (request.form?.get("image") as Blob).arrayBuffer())).toEqual(bytes);
+    expect(request.form?.get("prompt")).toBe("衣领改紫色");
+  });
   test("builds an OpenAI-compatible GPT-Image-2 generation request", () => {
     expect(
       buildOpenTokenImageRequest({

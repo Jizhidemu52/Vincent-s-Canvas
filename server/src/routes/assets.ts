@@ -10,6 +10,7 @@ import {
   type AssetEventType,
 } from "../asset-events";
 import { writeAudit } from "../audit";
+import { assetMetadataSchema } from "../asset-metadata";
 import type { Database } from "../db";
 import { ObjectStorage } from "../object-storage";
 import { requireRole } from "../rbac";
@@ -200,6 +201,22 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       const projected = await listAssetEvents(db, [request.params.id]);
       response.status(201).json({ eventId, projection: projected.get(request.params.id)!.projection });
     } catch (error) { if (!sendAssetEventError(response, error)) next(error); }
+  });
+
+  router.patch("/:id/metadata", async (request, response, next) => {
+    try {
+      const input = assetMetadataSchema.parse(request.body);
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const result = await db.query<{ id: string; department_id: string | null }>(
+        `UPDATE assets SET metadata=COALESCE(metadata,'{}'::jsonb) || $2::jsonb,updated_at=now()
+         WHERE id=$1 AND deleted_at IS NULL AND (owner_user_id=$3 OR $4='super_admin' OR ($4='department_admin' AND department_id=$5 AND $5::uuid IS NOT NULL))
+         RETURNING id,department_id`,
+        [request.params.id, JSON.stringify(input), actor.id, actor.role, actor.departmentId],
+      );
+      if (!result.rows[0]) { response.status(404).json({ error: "NOT_FOUND", message: "素材不存在或无权编辑" }); return; }
+      await writeAudit(db, { actor, action: "asset.metadata_updated", targetType: "asset", targetId: request.params.id, departmentId: result.rows[0].department_id, result: "success", detail: { fields: Object.keys(input) }, ip: request.ip });
+      response.status(204).end();
+    } catch (error) { next(error); }
   });
 
   router.patch("/:id/visibility", async (request, response, next) => {

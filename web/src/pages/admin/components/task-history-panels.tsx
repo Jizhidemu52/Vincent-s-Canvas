@@ -2,6 +2,8 @@ import { Alert, App, Button, DatePicker, Input, Select, Space, Table, Tag, Toolt
 import { Download, Pause, Play, RefreshCw, Search, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { saveAs } from "file-saver";
+import dayjs from "dayjs";
+import { useWorkbenchField } from "@/hooks/use-workbench-field";
 
 import {
     availableBatchActions,
@@ -233,10 +235,10 @@ export function HistoryManagementPanel() {
     const [operations, setOperations] = useState<Array<{ value: string; label: string }>>([]);
     const [loading, setLoading] = useState(true);
     const [exporting, setExporting] = useState(false);
-    const [filters, setFilters] = useState<AdminHistoryFilters>({});
-    const [projectDraft, setProjectDraft] = useState("");
-    const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(50);
+    const [filters, setFilters] = useWorkbenchField<AdminHistoryFilters>("history:filters", {});
+    const [projectDraft, setProjectDraft] = useWorkbenchField("history:projectDraft", "");
+    const [page, setPage] = useWorkbenchField("history:page", 1);
+    const [pageSize, setPageSize] = useWorkbenchField("history:pageSize", 50);
     const [total, setTotal] = useState(0);
     const requestSequence = useRef(0);
 
@@ -315,6 +317,7 @@ export function HistoryManagementPanel() {
                     <Button aria-label="查询项目" icon={<Search className="size-4" />} onClick={applyProjectFilter} />
                 </Space.Compact>
                 <DatePicker.RangePicker
+                    value={filters.from && filters.to ? [dayjs(filters.from), dayjs(filters.to)] : null}
                     onChange={(dates) =>
                         updateFilters({
                             from: dates?.[0]?.startOf("day").toISOString(),

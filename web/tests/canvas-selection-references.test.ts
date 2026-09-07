@@ -35,8 +35,20 @@ describe("canvas selection reference composition", () => {
         const upload = { id: "upload", name: "uploaded.png", type: "image/png", dataUrl: "blob:upload" };
         const refs = sync([upload], ["red", "blue"]);
         expect(sync(refs, ["blue"]).map((ref) => ref.id)).toEqual(["upload", "canvas:blue"]);
-        expect(sync(refs, [])).toEqual([upload]);
+        expect(sync([upload], [])).toEqual([upload]);
         expect(sync([], [])).toEqual([]);
+    });
+    test("clicking blank canvas or a non-image node keeps the edit reference draft", () => {
+        const refs = sync([], ["red"]);
+        expect(sync(refs, [])).toBe(refs);
+        const mixed = new Map(byId); mixed.set("text", { ...red, id: "text", type: CanvasNodeType.Text });
+        expect(sync(refs, ["text"], mixed)).toBe(refs);
+        expect(sync(refs, [], new Map())).toBe(refs);
+    });
+    test("a deselected edit draft still receives the latest saved image", () => {
+        const refs = sync([], ["red"]);
+        const fresh = new Map(byId); fresh.set("red", image("red", { storageKey: "edited-red", content: "blob:edited-red" }));
+        expect(sync(refs, [], fresh)[0]).toMatchObject({ storageKey: "edited-red", dataUrl: "blob:edited-red" });
     });
     test("refreshes persisted media identity without resetting reference order", () => {
         const refs = moveImageReference(sync([], ["red", "blue"]), 0, 1);

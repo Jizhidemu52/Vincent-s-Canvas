@@ -15,7 +15,7 @@ test("the same composer switches between creation and editing with numbered refe
     expect(markup).toContain("生成修改图");
     expect(markup).toContain("参考图 1：reference-0，点击调整顺序");
     expect(markup).toContain("参考图 2：reference-1，点击调整顺序");
-    expect(markup).toContain("生成新图并保留原图");
+    expect(markup).toContain("原图保留。取消选中不会清空参考图");
 });
 test("too many references remain visible but cannot be submitted", () => {
     const markup = render(17);

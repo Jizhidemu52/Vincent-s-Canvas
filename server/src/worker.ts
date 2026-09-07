@@ -177,6 +177,7 @@ async function runTask(taskId: string) {
 }
 
 import { openAiImageParameters } from "./openai-image-parameters";
+import { OPENAI_IMAGE_TIMEOUT_MS } from "./opentoken-image";
 
 async function executeProvider(task: WorkRow) {
   if (!task.protocol || !task.base_url || !task.model_id)
@@ -225,7 +226,7 @@ async function executeProvider(task: WorkRow) {
       method: "POST",
       headers: authorization,
       body: form,
-      signal: AbortSignal.timeout(180_000),
+      signal: AbortSignal.timeout(OPENAI_IMAGE_TIMEOUT_MS),
     });
   } else {
     const endpoint =
