@@ -10,12 +10,12 @@ type CanvasNodeMediaPreviewResolvers = {
 };
 
 /**
- * Persisted browser Blob URLs are invalid after a refresh. Resolve them only
- * when their virtualized canvas node actually enters the DOM.
+ * A backup can contain a local file plus an expired server or Blob URL.
+ * Prefer the local file, resolving only when its virtualized node mounts;
+ * the storage resolver keeps the original URL as a fallback if the file is missing.
  */
 export function needsCanvasNodeMediaPreviewResolution(source: CanvasNodeMediaPreviewSource) {
-    if (!source.storageKey || (source.type !== "image" && source.type !== "video" && source.type !== "audio")) return false;
-    return !source.content || source.content.startsWith("blob:");
+    return Boolean(source.storageKey && (source.type === "image" || source.type === "video" || source.type === "audio"));
 }
 
 export async function resolveCanvasNodeMediaPreview(source: CanvasNodeMediaPreviewSource, resolvers: CanvasNodeMediaPreviewResolvers) {
