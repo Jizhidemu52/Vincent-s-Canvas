@@ -215,7 +215,7 @@ integration("PostgreSQL billing concurrency", () => {
       const userId = data.userIds[0]!;
       const group = await database.query<{ id: string }>(
         `INSERT INTO designer_groups(department_id,name,code,monthly_shared_credit_limit)
-         VALUES($1,$2,$2,100) RETURNING id`, [data.departmentId, randomUUID()],
+         VALUES($1,$2::text,$2::text,100) RETURNING id`, [data.departmentId, randomUUID()],
       );
       const groupId = group.rows[0]!.id;
       await database.query("INSERT INTO group_memberships(group_id,user_id) VALUES($1,$2)", [groupId, userId]);
