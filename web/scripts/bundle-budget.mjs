@@ -4,8 +4,8 @@ import { gzipSync } from "node:zlib";
 
 export const CANVAS_PROJECT_BUDGET = {
     rawBytes: 250 * 1024,
-    // Advanced video mode/reference controls add a small amount to the canvas entry.
-    gzipBytes: 77 * 1024 + 384,
+    // Includes 128 B for shared IME/control guards and interrupted-pan cleanup.
+    gzipBytes: 77 * 1024 + 512,
 };
 
 export function bundleBudgetViolations(entries) {

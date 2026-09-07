@@ -21,6 +21,7 @@ import { useAssetStore, type AssetInput } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { loadCanvasImageTools } from "@/lib/canvas/canvas-image-tool-loader";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
+import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { zoomViewportAtCanvasCenter } from "@/lib/canvas/canvas-viewport-interaction";
 import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { App, Button, Dropdown, Input, Modal, Progress } from "antd";
@@ -2133,49 +2134,34 @@ function WirelessCanvasPage() {
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
-            const target = event.target instanceof Element ? event.target : null;
-            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true'],[data-canvas-no-zoom]")) return;
+            if (shouldIgnoreCanvasShortcut(event, event.target)) return;
 
             const key = event.key.toLowerCase();
-            const isModifierShortcut = event.metaKey || event.ctrlKey;
+            const isModifierShortcut = (event.metaKey || event.ctrlKey) && !event.altKey;
 
-            if (isModifierShortcut && !event.altKey && key === "z") {
+            if (isModifierShortcut && ["z", "y", "a", "c", "v"].includes(key)) {
                 event.preventDefault();
-                if (event.shiftKey) redoCanvas();
-                else undoCanvas();
-                return;
-            }
-
-            if (isModifierShortcut && !event.altKey && key === "y") {
-                event.preventDefault();
-                redoCanvas();
-                return;
-            }
-
-            if (isModifierShortcut && !event.altKey && key === "a") {
-                event.preventDefault();
-                commitSelectedNodeIds(new Set(nodesRef.current.map((node) => node.id)));
-                setSelectedConnectionId(null);
-                setContextMenu(null);
-                cancelSelectionPreview();
-                return;
-            }
-
-            if (isModifierShortcut && !event.altKey && key === "c") {
-                event.preventDefault();
-                copySelectedNodes();
-                return;
-            }
-
-            if (isModifierShortcut && !event.altKey && key === "v") {
-                event.preventDefault();
-                if (!pasteCopiedNodes()) void pasteSystemClipboard();
+                switch (key) {
+                    case "z":
+                        if (event.shiftKey) redoCanvas();
+                        else undoCanvas();
+                        break;
+                    case "y": redoCanvas(); break;
+                    case "a":
+                        commitSelectedNodeIds(new Set(nodesRef.current.map((node) => node.id)));
+                        setSelectedConnectionId(null);
+                        setContextMenu(null);
+                        cancelSelectionPreview();
+                        break;
+                    case "c": copySelectedNodes(); break;
+                    case "v":
+                        if (!event.repeat && !pasteCopiedNodes()) void pasteSystemClipboard();
+                        break;
+                }
                 return;
             }
 
             if (event.key === "Delete" || event.key === "Backspace") {
-                const target = event.target;
-                if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return;
                 // Backspace otherwise triggers the browser's navigation history,
                 // which can take the designer out of the current canvas.
                 event.preventDefault();

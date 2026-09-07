@@ -7,6 +7,7 @@ import { canvasViewportTransform, zoomViewportAtPoint } from "@/lib/canvas/canva
 import { canvasViewportContentStyle } from "@/lib/canvas/canvas-viewport-rendering";
 import { shouldRefreshCanvasVirtualization } from "@/lib/canvas/canvas-viewport-virtualization";
 import { bindCanvasPointerInteractionEnd } from "@/lib/canvas/canvas-pointer-interaction";
+import { bindCanvasSpaceKey } from "@/lib/canvas/canvas-keyboard";
 import { canvasWheelZoomFactor } from "@/lib/canvas/canvas-wheel-zoom";
 import { shouldCanvasCaptureWheel } from "@/lib/canvas/canvas-wheel-target";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -87,24 +88,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         [],
     );
 
-    useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.code !== "Space") return;
-            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
-            setIsSpacePressed(true);
-        };
-
-        const handleKeyUp = (event: KeyboardEvent) => {
-            if (event.code === "Space") setIsSpacePressed(false);
-        };
-
-        window.addEventListener("keydown", handleKeyDown);
-        window.addEventListener("keyup", handleKeyUp);
-        return () => {
-            window.removeEventListener("keydown", handleKeyDown);
-            window.removeEventListener("keyup", handleKeyUp);
-        };
-    }, []);
+    useEffect(() => bindCanvasSpaceKey(window, setIsSpacePressed), []);
 
     const applyLiveViewport = useCallback(
         (next: ViewportTransform) => {
@@ -269,13 +253,13 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
             publishVirtualizedViewport(next);
         };
 
-        const handlePointerUp = () => {
+        const handlePointerUp = (event: Event) => {
             if (!panState.current.isPanning) return;
 
-            if (!panState.current.hasMoved) {
-                onCanvasDeselect?.();
-            } else {
+            if (panState.current.hasMoved) {
                 commitLiveViewport();
+            } else if (event.type === "pointerup") {
+                onCanvasDeselect?.();
             }
             panState.current.isPanning = false;
             reportCanvasInteraction(false);

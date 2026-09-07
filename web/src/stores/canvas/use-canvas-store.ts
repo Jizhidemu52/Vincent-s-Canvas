@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
 import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, withCanvasStorageLock } from "@/lib/canvas/canvas-persistence-merge";
 import { localForageStorage } from "@/lib/localforage-storage";
+import { applyCanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
 
@@ -150,9 +151,15 @@ export const useCanvasStore = create<CanvasStore>()(
                 }),
             replaceProjects: (projects) => set({ projects }),
             updateProject: (id, patch) =>
-                set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),
-                })),
+                set((state) => {
+                    const index = state.projects.findIndex((project) => project.id === id);
+                    if (index < 0) return state;
+                    const updated = applyCanvasProjectPatch(state.projects[index], patch);
+                    if (updated === state.projects[index]) return state;
+                    const projects = state.projects.slice();
+                    projects[index] = updated;
+                    return { projects };
+                }),
         }),
         {
             name: CANVAS_STORE_KEY,
