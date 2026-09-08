@@ -1,5 +1,11 @@
 # 无线画布
 
+宝塔服务器下载/编译慢时，使用 [完整离线镜像安装包](docs/manual/baota-offline-installation.md)：在 GitHub Actions 手动构建，上传后导入启动，无需服务器拉代码或安装项目依赖。
+
+Linux 服务器安装请看 [Linux 部署指南](docs/manual/linux-deployment.md)：完整 Docker Compose 服务、HTTPS、模型配置、备份与升级。
+
+CentOS 7.6、12 核 / 64 GB / 14 TB 数据盘环境请看 [专用安装手册](docs/manual/centos7-installation.md)，包含旧系统兼容性检查、数据盘布局及既有服务保护。
+
 无线画布是一套给公司内部设计团队使用的 AI 创作工作台。它把项目、文生图、细节增强、图片编辑、角度控制、无缝拼接、视频创作、提示词库、素材库、无线画布、设计师额度、模型 API、价格规则、历史记录、批量任务和审计日志放在同一个系统里。
 
 一句话理解：这是一个“设计师前台创作工具 + 管理员后台管控中心”。

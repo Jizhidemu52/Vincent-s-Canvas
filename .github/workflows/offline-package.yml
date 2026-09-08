@@ -1,0 +1,31 @@
+name: Baota offline installation package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - uses: docker/setup-buildx-action@v3
+      - name: Build complete Linux amd64 package
+        run: bash ops/offline/build.sh "$RUNNER_TEMP/wireless-canvas-offline-amd64"
+      - name: Verify packaged service startup without pulling or building
+        run: bash ops/offline/smoke.sh "$RUNNER_TEMP/wireless-canvas-offline-amd64"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wireless-canvas-offline-amd64-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/wireless-canvas-offline-amd64.tar
+            ${{ runner.temp }}/wireless-canvas-offline-amd64.tar.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

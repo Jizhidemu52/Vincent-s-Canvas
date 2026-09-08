@@ -2,9 +2,13 @@
 
 ## 项目介绍
 
+- [宝塔快速安装：完整离线镜像包](manual/baota-offline-installation.md)
+
 - [快速开始](/docs/overview/quick-start)
 - [功能介绍](/docs/overview/features)
 - [Docker 部署](/docs/overview/docker)
+- [Linux 部署指南](manual/linux-deployment.md)
+- [CentOS 7.6 专用安装手册：12 核 / 64 GB / 14 TB](manual/centos7-installation.md)
 - [无脑部署手册](manual/beginner-deployment.md)
 - [安装部署指南：单机、局域网与公司完整部署](manual/installation-guide.md)
 - [生产部署与验收](manual/production-deployment.md)
