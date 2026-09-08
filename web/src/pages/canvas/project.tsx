@@ -490,6 +490,7 @@ function WirelessCanvasPage() {
     const [quickGenerateCount, setQuickGenerateCount] = useState(2);
     const [quickGenerateReferences, setQuickGenerateReferences] = useState<CanvasSelectionReference[]>([]);
     const [quickGenerateRunning, setQuickGenerateRunning] = useState(false);
+    const quickSubmissionRef = useRef<symbol | null>(null);
     const [batchEditOpen, setBatchEditOpen] = useState(false);
     const [batchEditPrompt, setBatchEditPrompt] = useState("");
     const [batchEditItems, setBatchEditItems] = useState<BatchEditFileItem[]>([]);
@@ -2911,6 +2912,7 @@ function WirelessCanvasPage() {
     );
 
     const runQuickCanvasGeneration = useCallback(async () => {
+        if (quickSubmissionRef.current) return;
         const prompt = quickGeneratePrompt.trim();
         const model = quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model;
         const modelId = modelOptionName(model);
@@ -2986,6 +2988,16 @@ function WirelessCanvasPage() {
         let successCount = 0;
         let failureCount = 0;
 
+        const submission = Symbol();
+        quickSubmissionRef.current = submission;
+        const awaitingSubmission = new Set(targetIds);
+        const finishSubmission = (targetId: string) => {
+            awaitingSubmission.delete(targetId);
+            if (!awaitingSubmission.size && quickSubmissionRef.current === submission) {
+                quickSubmissionRef.current = null;
+                setQuickGenerateRunning(false);
+            }
+        };
         setQuickGenerateRunning(true);
         setNodes((current) => [...current, ...placeholders]);
         if (!sourceNodes.length) setSelectedNodeIds(new Set(targetIds));
@@ -2997,9 +3009,10 @@ function WirelessCanvasPage() {
         await Promise.all(
             targetIds.map(async (targetId, index) => {
                 try {
+                    const options = { signal: controller.signal, onSubmitted: () => finishSubmission(targetId) };
                     const generated = operationType === "inpaint"
-                        ? await requestEdit(generationConfig, prompt, references, undefined, { signal: controller.signal }).then((items) => items[0])
-                        : await requestGeneration(generationConfig, prompt, { signal: controller.signal }, references).then((items) => items[0]);
+                        ? await requestEdit(generationConfig, prompt, references, undefined, options).then((items) => items[0])
+                        : await requestGeneration(generationConfig, prompt, options, references).then((items) => items[0]);
                     if (!generated) throw new Error("接口没有返回图片");
 
                     const uploaded = await uploadImage(generated.dataUrl);
@@ -3054,13 +3067,13 @@ function WirelessCanvasPage() {
                         setNodes((current) => current.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node)));
                     }
                 } finally {
+                    finishSubmission(targetId);
                     finishGenerationRequest(targetId, controller);
                 }
             }),
         );
 
-        setQuickGenerateRunning(false);
-        setRunningNodeId(null);
+        setRunningNodeId((current) => current === targetIds[0] ? null : current);
         if (failureCount) {
             message.warning(`画布生图完成，成功 ${successCount} 张，失败 ${failureCount} 张`);
         } else {

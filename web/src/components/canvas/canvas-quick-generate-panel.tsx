@@ -81,7 +81,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                     </fieldset>
                 <div className={`cw-generate-action ${disabled ? "is-disabled" : ""}`}>
                     <button type="button" className="cw-generate-button" disabled={disabled} onClick={onGenerate}>
-                        {running ? <><LoaderCircle size={16} className="animate-spin" />生成中…</> : references.length ? "生成修改图" : "生成"}
+                        {running ? <><LoaderCircle size={16} className="animate-spin" />提交中…</> : references.length ? "生成修改图" : "生成"}
                     </button>
                     {deploymentFeatures.creditsEnabled ? <span className="cw-estimate" title={`预计 ¥${estimateRmb.toFixed(2)}，剩余 ${remainingCredits ?? "-"} 积分`}>{estimateCredits} 积分</span> : <span className="cw-shortcut" aria-hidden>Ctrl ↵</span>}
                 </div>

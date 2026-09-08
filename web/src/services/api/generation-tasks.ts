@@ -71,7 +71,7 @@ export function createImageTaskRequests(input: {
     }));
 }
 
-export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; references?: ReferenceImage[]; signal?: AbortSignal }) {
+export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; references?: ReferenceImage[]; signal?: AbortSignal; onSubmitted?: () => void }) {
     const model = await resolvePublicModel(input.modelId);
     const sourceUrls: string[] = [];
     for (const reference of input.references || []) {
@@ -102,6 +102,7 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
     const rejected = submitted.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (rejected) throw rejected.reason instanceof Error ? rejected.reason : new Error("任务提交失败");
     const ids = submitted.map((result) => (result as PromiseFulfilledResult<{ task: { id: string } }>).value.task.id);
+    input.onSubmitted?.();
 
     void refreshSessionBalance();
     try {

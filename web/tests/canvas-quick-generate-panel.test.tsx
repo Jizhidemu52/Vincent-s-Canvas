@@ -23,9 +23,9 @@ test("too many references remain visible but cannot be submitted", () => {
     expect(markup).toContain('role="alert"');
     expect(markup).toMatch(/class="cw-generate-button" disabled=""/);
 });
-test("an in-flight edit locks reference removal, sorting and duplicate submission", () => {
+test("uploading and submitting locks reference changes and duplicate submission", () => {
     const markup = render(2, true);
     expect(markup).toMatch(/aria-label="移除参考图 1" disabled=""/);
     expect(markup).toMatch(/class="cw-generate-button" disabled=""/);
-    expect(markup).toContain("生成中…");
+    expect(markup).toContain("提交中…");
 });
