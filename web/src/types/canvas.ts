@@ -195,6 +195,7 @@ export type SelectionBox = {
 };
 
 export type ContextMenuState =
+    | { type: "canvas"; x: number; y: number; canvasPosition: Position }
     | {
           type: "node";
           x: number;

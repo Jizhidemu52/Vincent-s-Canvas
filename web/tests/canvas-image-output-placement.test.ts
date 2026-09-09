@@ -15,3 +15,8 @@ test("avoids existing media and subsequent lower rows without moving any source"
 test("empty-canvas generation stays centered", () => {
     expect(placeCanvasImageOutputs([], [], { width: 240, height: 240 }, { x: 500, y: 400 })).toEqual({ x: 380, y: 280 });
 });
+test("an explicit cursor position anchors the batch even if it overlaps other nodes", () => {
+    const position = { x: 12.5, y: -43.25 };
+    expect(placeCanvasImageOutputs([source], [source], { width: 516, height: 516 }, { x: 500, y: 400 }, 36, position)).toEqual(position);
+    expect(placeCanvasImageOutputs([source], [source], { width: 516, height: 516 }, { x: 500, y: 400 }, 36, null)).toEqual({ x: 276, y: 0 });
+});

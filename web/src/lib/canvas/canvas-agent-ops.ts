@@ -20,6 +20,9 @@ export type CanvasAgentSnapshot = {
     connections: CanvasConnection[];
     selectedNodeIds: string[];
     viewport: ViewportTransform;
+    viewportSize?: { width: number; height: number };
+    viewportOcclusions?: Array<{ x: number; y: number; width: number; height: number }>;
+    previewNodeId?: string | null;
 };
 
 export function summarizeCanvasAgentOps(ops?: CanvasAgentOp[]) {

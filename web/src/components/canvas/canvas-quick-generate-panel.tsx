@@ -24,7 +24,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     embedded = false, open, prompt, model, size, quality, count, references, running,
     estimateCredits, estimateRmb, remainingCredits, config, onClose, onPromptChange,
     onModelChange, onSizeChange, onQualityChange, onCountChange, onPickReferences, onRemoveReference,
-    onClearReferences, onMoveReference, onMissingConfig, onGenerate,
+    onClearReferences, onMoveReference, onMissingConfig, onGenerate, positioned, onClearPosition,
 }: CanvasQuickGeneratePanelProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const models = useBusinessConfigStore((state) => state.models);
@@ -53,6 +53,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
             onWheel={(event) => event.stopPropagation()}>
             {!embedded ? <div className="cw-tabs"><span>创建</span><button className="cw-icon" aria-label="关闭画布生图" onClick={onClose}><X size={16} /></button></div> : null}
             <div className="cw-generator-body">
+                {positioned ? <div className="mb-3 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span>下一次生成放在右键位置</span><button type="button" className="shrink-0 hover:underline" onClick={onClearPosition}>取消定位</button></div> : null}
                 <div className="cw-media-kind"><ImageIcon size={15} /><span>{references.length ? "编辑图像" : "图像"}</span>{profile.documentationUrl ? <a className="cw-model-info" href={profile.documentationUrl} target="_blank" rel="noreferrer" title={`${profile.tip} 点击查看接口文档`} aria-label="查看当前模型接口文档"><Info size={14} /></a> : <span className="cw-model-info" title={profile.tip}><Info size={14} /></span>}</div>
                 <div className="cw-model-row">
                 <ModelPicker config={config} value={availableModel} capability="image" modelsSource="server" disabled={running} fullWidth onChange={onModelChange}

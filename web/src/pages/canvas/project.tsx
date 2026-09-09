@@ -484,6 +484,7 @@ function WirelessCanvasPage() {
     const isCanvasDesktopLayout = useCanvasDesktopLayout();
     const [quickGenerateOpen, setQuickGenerateOpen] = useState(() => isCanvasDesktopLayout);
     const [quickGeneratePrompt, setQuickGeneratePrompt] = useState("");
+    const [quickGeneratePosition, setQuickGeneratePosition] = useState<Position | null>(null);
     const [quickGenerateModel, setQuickGenerateModel] = useState(effectiveConfig.imageModel || effectiveConfig.model);
     const [quickGenerateSize, setQuickGenerateSize] = useState(effectiveConfig.size || defaultConfig.size);
     const [quickGenerateQuality, setQuickGenerateQuality] = useState(effectiveConfig.quality || defaultConfig.quality);
@@ -673,6 +674,8 @@ function WirelessCanvasPage() {
         const restoreToken = lifecycle.begin();
         const invalidateRestore = () => lifecycle.invalidate(restoreToken);
         setProjectLoaded(false);
+        setQuickGeneratePosition(null);
+        setContextMenu(null);
         setManualEditNode(null);
         textStreamBufferRef.current?.cancel();
         setStreamedTextById((current) => (current.size ? new Map() : current));
@@ -1439,8 +1442,8 @@ function WirelessCanvasPage() {
         [activeResourceReferenceByNodeId, globalResourceReferenceIndex],
     );
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(
-        () => ({ projectId, title: currentProject?.title || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
-        [connections, currentProject?.title, nodes, projectId, selectedNodeIds, viewport],
+        () => ({ projectId, title: currentProject?.title || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport, viewportSize: size, previewNodeId }),
+        [connections, currentProject?.title, nodes, projectId, selectedNodeIds, viewport, size, previewNodeId],
     );
     const agentSnapshotRef = useRef(agentSnapshot);
     agentSnapshotRef.current = agentSnapshot;
@@ -1588,6 +1591,7 @@ function WirelessCanvasPage() {
         setMaskEditNodeId(null);
         setAngleNodeId(null);
         setPreviewNodeId(null);
+        setQuickGeneratePosition(null);
         setRunningNodeId(null);
         deselectCanvas();
         setClearConfirmOpen(false);
@@ -2964,7 +2968,7 @@ function WirelessCanvasPage() {
         const { x: startX, y: startY } = placeCanvasImageOutputs(nodesRef.current, sourceNodes, {
             width: columns * nodeSize.width + (columns - 1) * gap,
             height: rows * nodeSize.height + (rows - 1) * gap,
-        }, origin, gap);
+        }, origin, gap, quickGeneratePosition);
         const targetIds = Array.from({ length: count }, () => `quick-image-${nanoid()}`);
         const generationType: CanvasImageGenerationType = references.length ? "edit" : "generation";
         const placeholders: CanvasNodeData[] = targetIds.map((id, index) => ({
@@ -3000,6 +3004,7 @@ function WirelessCanvasPage() {
         };
         setQuickGenerateRunning(true);
         setNodes((current) => [...current, ...placeholders]);
+        setQuickGeneratePosition(null);
         if (!sourceNodes.length) setSelectedNodeIds(new Set(targetIds));
         setSelectedConnectionId(null);
         setDialogNodeId(null);
@@ -3022,7 +3027,7 @@ function WirelessCanvasPage() {
                             node.id === targetId
                                 ? {
                                       ...node,
-                                      position: {
+                                      position: quickGeneratePosition ? node.position : {
                                           x: node.position.x + node.width / 2 - resultSize.width / 2,
                                           y: node.position.y + node.height / 2 - resultSize.height / 2,
                                       },
@@ -3092,6 +3097,7 @@ function WirelessCanvasPage() {
         quickGenerateCount,
         quickGenerateModel,
         quickGeneratePrompt,
+        quickGeneratePosition,
         quickGenerateReferences,
         quickGenerateSize,
         quickGenerateQuality,
@@ -3513,14 +3519,14 @@ function WirelessCanvasPage() {
         event.preventDefault();
         const connection = canvasConnectionFallback ? null : findConnectionAtClientPoint(event.clientX, event.clientY);
         if (!connection) {
-            setContextMenu(null);
+            setContextMenu({ type: "canvas", x: event.clientX, y: event.clientY, canvasPosition: screenToCanvas(event.clientX, event.clientY) });
             return;
         }
 
         setSelectedConnectionId(connection.id);
         setSelectedNodeIds(new Set());
         setContextMenu({ type: "connection", x: event.clientX, y: event.clientY, connectionId: connection.id });
-    }, [canvasConnectionFallback, findConnectionAtClientPoint]);
+    }, [canvasConnectionFallback, findConnectionAtClientPoint, screenToCanvas]);
 
     const handleGenerateNode = useCallback(
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void) => {
@@ -4462,13 +4468,14 @@ function WirelessCanvasPage() {
     const addAudioNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Audio), [createNode]);
     const addTextNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Text), [createNode]);
     const addConfigNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Config), [createNode]);
-    const openQuickGenerateFromToolbar = useCallback(() => { setQuickGenerateOpen(true); closeAgent(); }, [closeAgent]);
+    const openQuickGenerateFromToolbar = useCallback(() => { setQuickGeneratePosition(null); setQuickGenerateOpen(true); closeAgent(); }, [closeAgent]);
     const openBatchEditFromToolbar = useCallback(() => setBatchEditOpen(true), []);
     const uploadFromToolbar = useCallback(() => handleUploadRequest(), [handleUploadRequest]);
     const deleteSelectedNodesFromToolbar = useCallback(() => deleteNodes(new Set(selectedNodeIdsRef.current)), [deleteNodes]);
     const openClearCanvasFromToolbar = useCallback(() => setClearConfirmOpen(true), []);
     const openAssetsFromToolbar = useCallback(() => setAssetPickerOpen(true), []);
-    const closeQuickGeneratePanel = useCallback(() => setQuickGenerateOpen(false), []);
+    const closeQuickGeneratePanel = useCallback(() => { setQuickGeneratePosition(null); setQuickGenerateOpen(false); }, []);
+    const clearQuickGeneratePosition = useCallback(() => setQuickGeneratePosition(null), []);
     const pickQuickGenerateReferences = useCallback(() => quickReferenceInputRef.current?.click(), []);
     const removeQuickGenerateReference = useCallback((id: string) => {
         const nodeId = quickGenerateReferences.find((reference) => reference.id === id)?.canvasNodeId;
@@ -4506,7 +4513,7 @@ function WirelessCanvasPage() {
 <Suspense fallback={isCanvasDesktopLayout ? <div className="cw-panel-loading">正在加载编辑区…</div> : null}>
                     <CanvasQuickGeneratePanel
                         embedded={isCanvasDesktopLayout}
-                        open={quickGenerateOpen}
+                        open={quickGenerateOpen && !assistantOpen}
                         prompt={quickGeneratePrompt}
                         model={quickGenerateModel}
                         size={quickGenerateSize}
@@ -4514,6 +4521,8 @@ function WirelessCanvasPage() {
                         count={quickGenerateCount}
                         references={quickGenerateReferences}
                         running={quickGenerateRunning}
+                        positioned={Boolean(quickGeneratePosition)}
+                        onClearPosition={clearQuickGeneratePosition}
                         estimateCredits={quickGenerateEstimate.credits}
                         estimateRmb={quickGenerateEstimate.rmbCost}
                         remainingCredits={user?.creditBalance}
@@ -4776,6 +4785,13 @@ function WirelessCanvasPage() {
                     <CanvasNodeContextMenu
                         menu={contextMenu}
                         onClose={() => setContextMenu(null)}
+                        onGenerate={() => {
+                            if (contextMenu.type !== "canvas") return;
+                            openQuickGenerateFromToolbar();
+                            setQuickGeneratePosition(contextMenu.canvasPosition);
+                            setContextMenu(null);
+                            requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-testid="canvas-quick-generate-panel"] textarea')?.focus());
+                        }}
                         onDuplicate={() => {
                             if (contextMenu.type !== "node") return;
                             duplicateNode(contextMenu.nodeId);
@@ -4784,7 +4800,7 @@ function WirelessCanvasPage() {
                         onDelete={() => {
                             if (contextMenu.type === "node") {
                                 deleteNodes(new Set([contextMenu.nodeId]));
-                            } else {
+                            } else if (contextMenu.type === "connection") {
                                 deleteConnection(contextMenu.connectionId);
                             }
                             setContextMenu(null);

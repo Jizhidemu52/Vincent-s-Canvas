@@ -8,6 +8,8 @@ export type CanvasQuickGeneratePanelRenderState = {
     count: number;
     references: readonly unknown[];
     running: boolean;
+    positioned?: boolean;
+    onClearPosition?: () => void;
     estimateCredits: number;
     estimateRmb: number;
     remainingCredits?: number;
@@ -42,6 +44,8 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
         previous.count === next.count &&
         previous.references === next.references &&
         previous.running === next.running &&
+        previous.positioned === next.positioned &&
+        previous.onClearPosition === next.onClearPosition &&
         previous.estimateCredits === next.estimateCredits &&
         previous.estimateRmb === next.estimateRmb &&
         previous.remainingCredits === next.remainingCredits &&

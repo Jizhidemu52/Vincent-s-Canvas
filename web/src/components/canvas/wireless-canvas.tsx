@@ -289,6 +289,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
     return (
         <div
             ref={containerRef}
+            data-canvas-viewport
             className={`relative h-full w-full select-none overflow-hidden ${interactionMode === "select" && !isSpacePressed ? "cursor-default" : "cursor-grab"}`}
             style={{ background: theme.canvas.background }}
             onPointerDown={handlePointerDown}

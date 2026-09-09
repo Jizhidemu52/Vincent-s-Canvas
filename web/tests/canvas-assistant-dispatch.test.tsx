@@ -19,7 +19,7 @@ const code = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
 }).outputText;
 
-function panelHarness(options: { replies: ToolResponseResult[]; selected?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile }) {
+function panelHarness(options: { replies: ToolResponseResult[]; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile }) {
     const states: unknown[] = [];
     const refs: unknown[] = [];
     let stateIndex = 0;
@@ -29,12 +29,17 @@ function panelHarness(options: { replies: ToolResponseResult[]; selected?: Canva
     const imageUploads: string[] = [];
     const videoStores: unknown[] = [];
     const config = { ...configModule.defaultConfig, model: "text-model", textModel: "text-model", imageModel: "gpt-image-2", videoModel: "MiniMax-H3", size: "3:4", quality: "2k", canvasImageCount: "2", videoSeconds: "6", vquality: "1080P", videoGenerateAudio: "true" };
-    const snapshotRef: { current: CanvasAgentSnapshot } = { current: { projectId: "project", title: "Canvas", nodes: options.selected || [], connections: [], selectedNodeIds: (options.selected || []).map((node) => node.id), viewport: { x: 0, y: 0, k: 1 } } };
+    const snapshotRef: { current: CanvasAgentSnapshot } = { current: { projectId: "project", title: "Canvas", nodes: options.nodes || options.selected || [], connections: [], selectedNodeIds: (options.selected || []).map((node) => node.id), viewport: { x: 0, y: 0, k: 1 }, viewportSize: { width: 800, height: 600 } } };
     const imageRequest = async (type: string, args: any[]) => {
         requests.push({ type, args });
         return options.generate ? options.generate() : [{ id: "generated-image", dataUrl: "/api/assets/result/content" }];
     };
     const dependencies: Record<string, unknown> = {
+        "@/lib/canvas/canvas-assistant-media": {
+            captureCanvasContextSnapshot: (snapshot: CanvasAgentSnapshot) => snapshot,
+            readCanvasContextImage: async (node: CanvasNodeData) => `data:image/jpeg;base64,${node.id}`,
+            readCanvasContextVideo: async (node: CanvasNodeData) => [{ seconds: 0, dataUrl: `data:image/jpeg;base64,${node.id}-frame` }],
+        },
         react: {
             ...React,
             memo: (component: unknown) => component,
@@ -83,6 +88,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; selected?: Canva
     const messages = (): CanvasAssistantMessage[] => states.flatMap((value) => Array.isArray(value) ? value.flatMap((item) => item?.messages || []) : []);
     return {
         requests, config, snapshotRef, composer, messages, assets, imageUploads, videoStores,
+        toggleContext() { findElements(render()).find((element) => element.type === "button" && typeof element.props["aria-pressed"] === "boolean")!.props.onClick(); },
         referencePreviews() {
             const rows = findElements(render()).filter((element) => typeof element.type === "function" && element.type.name === "MessageReferences");
             const chips = rows.flatMap((element) => findElements((element.type as Function)(element.props))).filter((element) => typeof element.type === "function" && element.type.name === "AssistantReferenceChip");
@@ -117,6 +123,25 @@ function tool(name: string, args: Record<string, unknown>): ToolResponseResult {
 }
 
 describe("canvas assistant submission", () => {
+    test("automatically sends unselected visible pixels and video frames, and the toggle disables only automatic media", async () => {
+        const logo: CanvasNodeData = { id: "logo", type: CanvasNodeType.Image, title: "素材 A", position: { x: 20, y: 20 }, width: 200, height: 200, metadata: { content: "blob:logo" } };
+        const clip = { ...logo, id: "clip", type: CanvasNodeType.Video };
+        const hidden = { ...logo, id: "offscreen", position: { x: 3000, y: 0 } };
+        const harness = panelHarness({ nodes: [logo, clip, hidden], replies: [{ content: "已看到标志和抽样画面", toolCalls: [] }, { content: "自动读取已关闭", toolCalls: [] }] });
+        await harness.submit("当前画布上是什么？");
+        expect(harness.requests.map((request) => request.type)).toEqual(["agent"]);
+        const content = harness.requests[0].args[1].at(-1).content;
+        expect(content.filter((part: any) => part.type === "image_url").map((part: any) => part.image_url.url)).toEqual(["data:image/jpeg;base64,logo", "data:image/jpeg;base64,clip-frame"]);
+        expect(harness.messages().find((message) => message.role === "user")?.detail?.canvasContext).toMatchObject({ included: 2 });
+        harness.toggleContext();
+        await harness.uploadReference();
+        await harness.submit("现在只分析上传图");
+        const disabledContent = harness.requests.at(-1)!.args[1].at(-1).content;
+        expect(disabledContent.filter((part: any) => part.type === "image_url")).toHaveLength(1);
+        expect(disabledContent.find((part: any) => part.type === "image_url").image_url.url).toContain("dXBsb2FkZWQtcmVmZXJlbmNl");
+        expect(JSON.stringify(disabledContent)).not.toContain("本轮自动画布上下文");
+    });
+
     test("answers an ordinary question through the chat model without starting media generation", async () => {
         const harness = panelHarness({ replies: [{ content: "图片是静态画面，视频包含连续画面。", toolCalls: [] }] });
         await harness.submit("图片和视频有什么区别？先解释，不要生成");
