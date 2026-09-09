@@ -10,13 +10,16 @@ const image = { url: "blob:edited", storageKey: "image:edited", width: 600, heig
 test("manual edit replaces the selected node in place and preserves its provenance and references", () => {
     const other = { ...node, id: "other" };
     const result = applyCanvasImageEdit([node, other], node, image);
-    expect(result[0]).toMatchObject({ id: node.id, position: node.position, width: 300, height: 300, metadata: { content: image.url, storageKey: image.storageKey, prompt: "Original prompt", originalFileName: "shirt.png", naturalWidth: 600, naturalHeight: 600 } });
+    expect(result[0]).toMatchObject({ id: node.id, position: node.position, width: 300, height: 300, metadata: { content: image.url, storageKey: image.storageKey, prompt: "Original prompt", originalFileName: "shirt.png", naturalWidth: 600, naturalHeight: 600, imageName: "shirt", imageVersion: 2 } });
     expect(result[1]).toBe(other);
     expect(node.metadata?.storageKey).toBe("image:original");
     const context = buildNodeGenerationContext("other", result, [{ id: "link", fromNodeId: "original", toNodeId: "other" }], "继续 AI 编辑");
     expect(context.referenceImages.some(reference => reference.storageKey === image.storageKey)).toBe(true);
     expect(context.referenceImages.some(reference => reference.storageKey === "image:original")).toBe(false);
     expect(applyCanvasImageEdit(result, node, image)).toBe(result);
+    const third = applyCanvasImageEdit(result, result[0], { ...image, storageKey: "image:v3", url: "blob:v3" });
+    expect(third[0].metadata?.imageVersion).toBe(3);
+    expect(node.metadata?.imageVersion).toBeUndefined();
 });
 
 test("editing either a batch cover or its primary child keeps both images synchronized", () => {

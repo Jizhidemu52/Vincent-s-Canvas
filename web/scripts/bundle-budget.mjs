@@ -4,11 +4,9 @@ import { gzipSync } from "node:zlib";
 
 export const CANVAS_PROJECT_BUDGET = {
     rawBytes: 250 * 1024,
-    // Adds 512 B for the lazy image-editor entry and durable save/rollback wiring.
-    // The editor and raster implementation remain in separate on-demand chunks.
-    // Allow 256 B for independent quick-generation submission lifecycle tracking.
-    // Allow another 256 B for explicit cursor placement and live Agent viewport metadata.
-    gzipBytes: 78 * 1024 + 512,
+    // The canvas owns placement, naming and export entry points. Image editing,
+    // PDF generation and assistant processing remain separate on-demand chunks.
+    gzipBytes: 80 * 1024,
 };
 
 export function bundleBudgetViolations(entries) {

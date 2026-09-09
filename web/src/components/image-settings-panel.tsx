@@ -51,7 +51,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <ChevronDown size={13} aria-hidden />
                 </label>
             </div>
-            <p className="text-xs leading-5" style={{ color: theme.node.muted }}>仅影响下次 AI 生成，不改变已有图片。{normalized.size === "auto" ? "自适应由模型结合描述和参考图决定输出尺寸。" : "修改原图请使用「编辑图片」中的裁剪。"}</p>
+            <p className="text-xs leading-5" style={{ color: theme.node.muted }}>仅影响下次 AI 生成，不改变已有图片。{normalized.size === "auto" ? "自适应由模型结合描述和参考图决定输出尺寸。" : "精确像素尺寸请使用「编辑图片」中的自定义尺寸。"}</p>
             <div className="ip-row">
                 <span className="ip-label">{profile.qualityLabel}</span>
                 <div className="ip-segments" role="group" aria-label={profile.qualityLabel}>

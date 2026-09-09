@@ -120,7 +120,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const addAssets = (payloads: InsertAssetPayload[]) => {
         void Promise.all(payloads.filter((payload): payload is Extract<InsertAssetPayload, { kind: "image" }> => payload.kind === "image").map(async (payload) => {
             const stored = await uploadImage(payload.dataUrl);
-            return createImageReferenceItem({ id: createClientId(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "asset");
+            return createImageReferenceItem({ id: createClientId(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, imageName: payload.imageName, imageVersion: payload.imageVersion }, "asset");
         })).then((items) => saveReferences(dedupeImageReferences([...imageReferences, ...items])));
         setAssetPickerOpen(false);
     };

@@ -23,8 +23,30 @@ export function imageMimeFromFileName(name: string) {
 
 export function canvasImageDownloadFileName(node: CanvasNodeData) {
     const original = originalCanvasImageFileName(node);
-    if (original) return original;
-    const mime = node.metadata?.mimeType || node.metadata?.content?.match(/^data:([^;,]+)/)?.[1] || "image/png";
-    const extension = mime === "image/jpeg" ? "jpg" : mime === "image/svg+xml" ? "svg" : mime.split("/")[1] || "png";
-    return `canvas-image-${node.id}.${extension}`;
+    const mime = node.metadata?.mimeType || node.metadata?.content?.match(/^data:([^;,]+)/)?.[1] || (original && imageMimeFromFileName(original)) || "image/png";
+    const extension = original && imageMimeFromFileName(original) === mime ? original.match(imageExtensionPattern)![1] : mime === "image/jpeg" ? "jpg" : mime === "image/svg+xml" ? "svg" : mime === "image/tiff" ? "tif" : mime.split("/")[1] || "png";
+    return `${canvasImageExportStem(node)}.${extension.replace(/[^a-z0-9]/gi, "") || "png"}`;
+}
+
+export function canvasImageVersion(node: CanvasNodeData) {
+    const value = node.metadata?.imageVersion;
+    return value && Number.isSafeInteger(value) && value > 0 ? value : 1;
+}
+
+export function canvasImageBaseName(node: CanvasNodeData) {
+    return (node.metadata?.imageName || originalCanvasImageFileName(node) || node.title || `图片-${node.id}`).replace(imageExtensionPattern, "");
+}
+
+export function canvasImageExportStem(node: CanvasNodeData) {
+    const base = canvasImageBaseName(node).replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim().slice(0, 160) || "图片";
+    return `${base}_v${canvasImageVersion(node)}`;
+}
+
+/** A derived image keeps the primary reference's identity, not its prompt title. */
+export function canvasImageReferenceIdentity(reference?: ReferenceImage) {
+    if (!reference) return { imageVersion: 1 };
+    return {
+        imageName: (reference.imageName || reference.originalFileName || reference.name).replace(imageExtensionPattern, ""),
+        imageVersion: (reference.imageVersion && Number.isSafeInteger(reference.imageVersion) && reference.imageVersion > 0 ? reference.imageVersion : 1) + 1,
+    };
 }

@@ -1,6 +1,6 @@
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import type { UploadedImage } from "@/services/image-storage";
-import { originalCanvasImageFileName } from "./canvas-image-filename";
+import { canvasImageBaseName, canvasImageVersion, originalCanvasImageFileName } from "./canvas-image-filename";
 
 /** Keep node IDs/connections stable and synchronize the primary image of a collapsed batch. */
 export function applyCanvasImageEdit(nodes: CanvasNodeData[], original: CanvasNodeData, image: UploadedImage) {
@@ -21,6 +21,7 @@ export function applyCanvasImageEdit(nodes: CanvasNodeData[], original: CanvasNo
             ...node.metadata, content: image.url, storageKey: image.storageKey, naturalWidth: image.width, naturalHeight: image.height,
             mimeType: image.mimeType, bytes: image.bytes, status: "success" as const, errorDetails: undefined, freeResize: false,
             originalFileName: originalName.replace(/\.[^.]+$/, "") + ".png",
+            imageName: canvasImageBaseName(current), imageVersion: canvasImageVersion(current) + 1,
         } };
     });
 }

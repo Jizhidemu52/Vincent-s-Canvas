@@ -22,6 +22,9 @@ export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 
 export type CanvasStoredImageReference = {
+    originalFileName?: string;
+    imageName?: string;
+    imageVersion?: number;
     referenceKey: string;
     id: string;
     name: string;
@@ -34,6 +37,8 @@ export type CanvasStoredImageReference = {
 
 export type CanvasNodeMetadata = {
     originalFileName?: string;
+    imageName?: string;
+    imageVersion?: number;
     content?: string;
     composerContent?: string;
     prompt?: string;
@@ -104,6 +109,9 @@ export type CanvasAssistantReference = {
 };
 
 export type CanvasAssistantImage = {
+    imageName?: string;
+    imageVersion?: number;
+    mimeType?: string;
     id: string;
     dataUrl: string;
     storageKey?: string;

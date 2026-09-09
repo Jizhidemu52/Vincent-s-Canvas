@@ -9,6 +9,9 @@ import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { GenerationElapsed } from "@/components/generation-elapsed";
 import { upsertGenerationLog } from "@/lib/generation-log-update";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
+import { useImageCopyEditor } from "@/hooks/use-image-copy-editor";
+import { imageCopyEditorNode } from "@/lib/image-edit-copy";
+import { canvasImageDownloadFileName, canvasImageReferenceIdentity } from "@/lib/canvas/canvas-image-filename";
 import { workbenchSubmissions } from "@/lib/submission-gate";
 import { ReferenceImageTray } from "@/components/reference-images/reference-image-tray";
 import { ModelPicker } from "@/components/model-picker";
@@ -34,6 +37,7 @@ import { hydrateImageLogMedia } from "./image-log-media";
 import { ImageLogThumbnail } from "./image-log-thumbnail";
 import "./image-workbench.css";
 const SeamlessStitchPage = lazy(() => import("@/pages/image/seamless-stitch").then(module => ({ default: module.SeamlessStitchPage })));
+const CanvasImageEditorDialog = lazy(() => import("@/components/canvas/canvas-image-editor-dialog").then(module => ({ default: module.CanvasImageEditorDialog })));
 import { hydratePromptReuse, savePromptFromTask } from "@/services/api/prompts";
 
 type GeneratedImage = {
@@ -46,6 +50,9 @@ type GeneratedImage = {
     bytes: number;
     mimeType?: string;
     sourceTaskId?: string;
+    imageName?: string;
+    imageVersion?: number;
+    imageOriginId?: string;
 };
 
 type GenerationResult = {
@@ -155,6 +162,12 @@ function ImageGenerationPage() {
     const [prompt, setPrompt] = useWorkbenchField(`image:${resolveImageToolMode(searchParams.get("tool"))}:prompt`, "");
     const [references, setReferences] = useState<ImageReferenceItem[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
+    const imageEditor = useImageCopyEditor((copy, image) => {
+        setResults(current => current.some(result => result.id === copy.assetId) ? current : [...current, { id: copy.assetId, status: "success", image: {
+            id: copy.assetId, dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType, durationMs: 0,
+            imageName: copy.node.metadata?.imageName, imageVersion: copy.node.metadata?.imageVersion, imageOriginId: copy.originId,
+        } }]);
+    });
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [running, setRunning] = useState(false);
     const [logsOpen, setLogsOpen] = useState(false);
@@ -368,13 +381,21 @@ function ImageGenerationPage() {
     };
     generateRef.current = generate;
 
-    const downloadImage = (image: GeneratedImage, index: number) => {
-        saveAs(image.dataUrl, `image-${index + 1}.png`);
+    const resultEditorNode = (image: GeneratedImage, index: number) => imageCopyEditorNode({ ...image, title: image.imageName || `生成结果 ${index + 1}` });
+
+    const openResultEditor = (image: GeneratedImage, index: number) => {
+        const sourceLog = logs.find(log => log.images.some(item => item.id === image.id));
+        imageEditor.open({ node: resultEditorNode(image, index), originId: image.imageOriginId, sourceTaskId: image.sourceTaskId, prompt: sourceLog?.prompt || prompt, model: sourceLog?.model || model });
+    };
+
+    const downloadImage = async (image: GeneratedImage, index: number) => {
+        try { saveAs(await resolveImageUrl(image.storageKey, image.dataUrl), canvasImageDownloadFileName(resultEditorNode(image, index))); }
+        catch (error) { message.error(error instanceof Error ? error.message : "原图读取失败"); }
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
         const stored = await uploadImage(image.dataUrl);
-        appendReferences([{ id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }], "generated");
+        appendReferences([{ id: nanoid(), name: image.imageName || `result-${index + 1}.png`, imageName: image.imageName, imageVersion: image.imageVersion, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }], "generated");
         message.success("已加入参考图");
     };
 
@@ -382,13 +403,14 @@ function ImageGenerationPage() {
         const stored = await uploadImage(image.dataUrl);
         addAsset({
             kind: "image",
-            title: `生成结果 ${index + 1}`,
+            title: image.imageName ? `${image.imageName}_v${image.imageVersion || 1}` : `生成结果 ${index + 1}`,
             coverUrl: stored.url,
             tags: [],
             source: "生图工作台",
             data: { dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType },
             metadata: {
                 source: "image-page",
+                imageName: image.imageName, imageVersion: image.imageVersion || 1,
                 module: toolModeConfig.title,
                 prompt,
                 toolMode,
@@ -421,7 +443,7 @@ function ImageGenerationPage() {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
-            appendReferences([{ id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }], "asset");
+            appendReferences([{ id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, imageName: payload.imageName, imageVersion: payload.imageVersion }], "asset");
         } else {
             message.warning("生图工作台只能使用文本或图片素材");
         }
@@ -516,7 +538,7 @@ function ImageGenerationPage() {
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, sourceTaskId: image.sourceTaskId, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
+            const nextImage = { id: image.id, dataUrl: image.dataUrl, sourceTaskId: image.sourceTaskId, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl), mimeType: meta.mimeType, ...canvasImageReferenceIdentity(snapshot.references[0]) };
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
@@ -643,7 +665,7 @@ function ImageGenerationPage() {
                             <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} />
+                                        <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} />
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => retryResult(index)} />
                                     ) : (
@@ -696,7 +718,7 @@ function ImageGenerationPage() {
                 onInsertMany={(payloads) => {
                     void Promise.all(payloads.filter((payload): payload is Extract<InsertAssetPayload, { kind: "image" }> => payload.kind === "image").map(async (payload) => {
                         const stored = await uploadImage(payload.dataUrl);
-                        return { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey };
+                        return { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, imageName: payload.imageName, imageVersion: payload.imageVersion };
                     })).then((items) => appendReferences(items, "asset"));
                     setReferenceAssetPickerOpen(false);
                 }}
@@ -705,6 +727,12 @@ function ImageGenerationPage() {
             <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedLogIds.length} 条生成记录吗？
             </Modal>
+            {imageEditor.node ? <Suspense fallback={<Modal title="编辑原图" open footer={null} onCancel={imageEditor.close}><p role="status">正在读取图片编辑器…</p></Modal>}>
+                <CanvasImageEditorDialog node={imageEditor.node} onClose={imageEditor.close} onConfirm={imageEditor.confirm}
+                    saveHint="另存到我的素材 · 原图和生成历史保持不变 · 不调用 AI"
+                    successMessage="新版本已保存到我的素材，原图和生成历史保持不变"
+                    cancelDescription="原图和生成历史不会改变，未保存的修改将丢弃。" />
+            </Suspense> : null}
         </div>
     );
 }
@@ -731,6 +759,7 @@ function ResultImageCard({
     image,
     index,
     onEdit,
+    onEditOriginal,
     onDownload,
     onSaveAsset,
     onSavePrompt,
@@ -738,6 +767,7 @@ function ResultImageCard({
     image: GeneratedImage;
     index: number;
     onEdit: (image: GeneratedImage, index: number) => void;
+    onEditOriginal: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
     onSavePrompt: (image: GeneratedImage) => void;
@@ -746,6 +776,7 @@ function ResultImageCard({
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
             <Image src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="aspect-square object-cover" />
             <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
+                {image.imageName ? <div className="truncate text-xs font-medium" title={`${image.imageName}_v${image.imageVersion || 1}`}>{image.imageName}_v{image.imageVersion || 1}</div> : null}
                 <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
                     <span>
                         {image.width}x{image.height}
@@ -753,7 +784,12 @@ function ResultImageCard({
                     <span>{formatBytes(image.bytes)}</span>
                     <span>{formatDuration(image.durationMs)}</span>
                 </div>
-                <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="grid min-w-0 grid-cols-2 gap-2">
+                    <Tooltip title="直接编辑原始图片，另存为新版本，不调用 AI">
+                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<PenLine className="size-3.5" />} onClick={() => onEditOriginal(image, index)}>
+                            编辑原图
+                        </Button>
+                    </Tooltip>
                     <Tooltip title="添加到素材">
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)}>
                             添加到素材

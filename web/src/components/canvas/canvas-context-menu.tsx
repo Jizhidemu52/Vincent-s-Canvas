@@ -1,12 +1,12 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { PencilLine, Plus, Trash2 } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ContextMenuState } from "@/types/canvas";
 
-export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete, onGenerate }: { menu: ContextMenuState; onClose: () => void; onDuplicate: () => void; onDelete: () => void; onGenerate?: () => void }) {
+export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete, onGenerate, onRename }: { menu: ContextMenuState; onClose: () => void; onDuplicate: () => void; onDelete: () => void; onGenerate?: () => void; onRename?: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     useEffect(() => {
@@ -22,10 +22,11 @@ export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete, on
     return (
         <div
             className="fixed z-[80] min-w-44 overflow-hidden rounded-xl border py-1 shadow-2xl"
-            style={{ left: Math.max(8, Math.min(menu.x, window.innerWidth - 192)), top: Math.max(8, Math.min(menu.y, window.innerHeight - (menu.type === "node" ? 88 : 48))), background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+            style={{ left: Math.max(8, Math.min(menu.x, window.innerWidth - 192)), top: Math.max(8, Math.min(menu.y, window.innerHeight - (menu.type === "node" ? 128 : 48))), background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onPointerDown={(event) => event.stopPropagation()}
         >
             {menu.type === "node" ? <MenuButton icon={<Plus className="size-4" />} label="Duplicate" onClick={onDuplicate} /> : null}
+            {menu.type === "node" && onRename ? <MenuButton icon={<PencilLine className="size-4" />} label="重命名" onClick={onRename} /> : null}
             {menu.type === "canvas" ? <MenuButton icon={<Plus className="size-4" />} label="生成" onClick={onGenerate} /> : <MenuButton icon={<Trash2 className="size-4" />} label="Delete" onClick={onDelete} danger />}
         </div>
     );

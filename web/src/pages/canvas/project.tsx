@@ -60,7 +60,7 @@ import { createCanvasMentionReferenceIndex, createCanvasResourceReferenceIndex }
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { syncCanvasSelectionReferences, type CanvasSelectionReference } from "@/lib/canvas/canvas-selection-references";
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
-import { originalCanvasImageFileName, originalReferenceFileName } from "@/lib/canvas/canvas-image-filename";
+import { canvasImageBaseName, canvasImageExportStem, canvasImageVersion, canvasImageReferenceIdentity, originalCanvasImageFileName, originalReferenceFileName } from "@/lib/canvas/canvas-image-filename";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createCanvasBatchRenderIndex } from "@/lib/canvas/canvas-batch-motion";
@@ -138,6 +138,7 @@ const CanvasLocalAgentPanel = lazy(loadCanvasLocalAgentPanel);
 const CanvasNodeAngleDialog = lazy(loadCanvasNodeAngleDialog);
 const CanvasNodeCropDialog = lazy(loadCanvasNodeCropDialog);
 const CanvasImageEditorDialog = lazy(loadCanvasImageEditorDialog);
+const CanvasImagePdfDialog = lazy(() => import("@/components/canvas/canvas-image-pdf-dialog").then(module => ({ default: module.CanvasImagePdfDialog })));
 const CanvasNodeMaskEditDialog = lazy(loadCanvasNodeMaskEditDialog);
 const CanvasNodeSplitDialog = lazy(loadCanvasNodeSplitDialog);
 const CanvasNodeUpscaleDialog = lazy(loadCanvasNodeUpscaleDialog);
@@ -507,6 +508,8 @@ function WirelessCanvasPage() {
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [manualEditNode, setManualEditNode] = useState<CanvasNodeData | null>(null);
+    const [imageExport, setImageExport] = useState<{ nodes: CanvasNodeData[]; ids: string[] } | null>(null);
+    const [renameNode, setRenameNode] = useState<{ id: string; name: string } | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
     const [maskEditModel, setMaskEditModel] = useState("");
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
@@ -677,6 +680,8 @@ function WirelessCanvasPage() {
         setQuickGeneratePosition(null);
         setContextMenu(null);
         setManualEditNode(null);
+        setImageExport(null);
+        setRenameNode(null);
         textStreamBufferRef.current?.cancel();
         setStreamedTextById((current) => (current.size ? new Map() : current));
         abortPendingCanvasRequests(generationRequestsRef.current);
@@ -2430,7 +2435,7 @@ function WirelessCanvasPage() {
             const dataUrl = node.metadata.storageKey ? "" : node.metadata.content;
             addAsset({
                 kind: "image",
-                title: node.metadata?.prompt?.slice(0, 24) || "画布图片",
+                title: canvasImageExportStem(node),
                 coverUrl: node.metadata.content,
                 tags: [],
                 source: "无线画布",
@@ -2450,6 +2455,7 @@ function WirelessCanvasPage() {
                     model: node.metadata?.model,
                     projectId,
                     recreatePath: `/image?tool=${node.metadata?.generationType === "edit" ? "image-edit" : "image-generation"}&prompt=${encodeURIComponent(String(node.metadata?.prompt || ""))}&model=${encodeURIComponent(String(node.metadata?.model || ""))}`,
+                    imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node),
                 },
             });
             message.success("已加入我的素材");
@@ -2536,6 +2542,7 @@ function WirelessCanvasPage() {
             metadata: {
                 ...imageMetadata(image),
                 originalFileName: originalCanvasImageFileName(node),
+                imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node) + 1,
                 prompt: node.metadata?.prompt,
             },
         };
@@ -2571,6 +2578,7 @@ function WirelessCanvasPage() {
                         metadata: {
                             ...imageMetadata(image),
                             originalFileName: originalCanvasImageFileName(node),
+                            imageName: `${canvasImageBaseName(node)} ${piece.row + 1}-${piece.column + 1}`, imageVersion: canvasImageVersion(node) + 1,
                             prompt: node.metadata?.prompt,
                         },
                     } satisfies CanvasNodeData;
@@ -2611,7 +2619,7 @@ function WirelessCanvasPage() {
             const userPrompt = payload.prompt.trim();
             const prompt = `只修改蒙版透明区域，其他区域保持不变。${userPrompt}`;
             const childId = nanoid();
-            const source = { id: node.id, name: node.title || node.id, originalFileName: originalCanvasImageFileName(node), type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
+            const source = { id: node.id, name: node.title || node.id, originalFileName: originalCanvasImageFileName(node), imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node), type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
             const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [source]);
             setMaskEditNodeId(null);
             setRunningNodeId(childId);
@@ -2647,6 +2655,7 @@ function WirelessCanvasPage() {
                     metadata: {
                         source: "canvas",
                         module: "局部编辑",
+                        imageName: generationMetadata.imageName, imageVersion: generationMetadata.imageVersion,
                         nodeId: childId,
                         prompt,
                         model: generationConfig.model,
@@ -2685,6 +2694,7 @@ function WirelessCanvasPage() {
             metadata: {
                 ...imageMetadata(image),
                 originalFileName: originalCanvasImageFileName(node),
+                imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node) + 1,
                 prompt: node.metadata?.prompt,
             },
         };
@@ -2707,7 +2717,7 @@ function WirelessCanvasPage() {
             const title = buildAngleLabel(params);
             const prompt = buildAnglePrompt(params);
             const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [
-                { id: node.id, name: node.title || node.id, originalFileName: originalCanvasImageFileName(node), type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey },
+                { id: node.id, name: node.title || node.id, originalFileName: originalCanvasImageFileName(node), imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node), type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey },
             ]);
             setAngleNodeId(null);
             setRunningNodeId(childId);
@@ -2748,6 +2758,7 @@ function WirelessCanvasPage() {
                     metadata: {
                         source: "canvas",
                         module: "角度控制",
+                        imageName: generationMetadata.imageName, imageVersion: generationMetadata.imageVersion,
                         nodeId: childId,
                         prompt,
                         model: generationConfig.model,
@@ -3053,6 +3064,7 @@ function WirelessCanvasPage() {
                         metadata: {
                             source: "canvas",
                             module: "画布生图",
+                            ...canvasImageReferenceIdentity(references[0]),
                             prompt,
                             model,
                             modelId,
@@ -3373,6 +3385,7 @@ function WirelessCanvasPage() {
                                           ...node.metadata,
                                           ...imageMetadata(uploadedResult),
                                           originalFileName: entry.item.file.name,
+                                          imageName: entry.item.file.name.replace(/\.[^.]+$/, ""), imageVersion: 2,
                                           prompt,
                                           generationType: "edit",
                                           model,
@@ -3402,6 +3415,7 @@ function WirelessCanvasPage() {
                         metadata: {
                             source: "canvas",
                             module: "批量改图",
+                            imageName: entry.item.file.name.replace(/\.[^.]+$/, ""), imageVersion: 2,
                             prompt,
                             model,
                             modelId,
@@ -3728,6 +3742,7 @@ function WirelessCanvasPage() {
                                         source: "canvas",
                                         module: "无线画布",
                                         nodeId: targetId,
+                                        imageName: generationMetadata.imageName, imageVersion: generationMetadata.imageVersion,
                                         prompt: effectivePrompt,
                                         model: generationConfig.model,
                                         toolMode: generationType,
@@ -4294,7 +4309,7 @@ function WirelessCanvasPage() {
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
-            const storedImage = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadImage(image.dataUrl);
+            const storedImage = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, width: 1, height: 1, bytes: 0, mimeType: image.mimeType || "image/png" } : await uploadImage(image.dataUrl);
             const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
             const config = fitNodeSize(meta.width, meta.height);
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
@@ -4306,7 +4321,7 @@ function WirelessCanvasPage() {
                 position: { x: center.x - config.width / 2, y: center.y - config.height / 2 },
                 width: config.width,
                 height: config.height,
-                metadata: { ...imageMetadata({ ...storedImage, width: meta.width, height: meta.height }), prompt: image.prompt },
+                metadata: { ...imageMetadata({ ...storedImage, width: meta.width, height: meta.height }), prompt: image.prompt, imageName: image.imageName, imageVersion: image.imageVersion || 1 },
             };
 
             setNodes((prev) => [...prev, node]);
@@ -4358,7 +4373,7 @@ function WirelessCanvasPage() {
                 setSelectedNodeIds(new Set([id]));
             } else {
                 const dataUrl = payload.storageKey ? await resolveImageUrl(payload.storageKey, payload.dataUrl) : payload.dataUrl;
-                await insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.title, dataUrl, storageKey: payload.storageKey });
+                await insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.title, dataUrl, storageKey: payload.storageKey, mimeType: payload.mimeType, imageName: payload.imageName, imageVersion: payload.imageVersion });
             }
             setAssetPickerOpen(false);
             } catch (error) {
@@ -4394,6 +4409,20 @@ function WirelessCanvasPage() {
         const { exportCanvasProjects } = await loadCanvasExport();
         await exportCanvasProjects([currentProject], currentProject.title || "无线画布");
     }, [currentProject]);
+
+    const openImageExport = useCallback(() => {
+        setImageExport({ nodes: nodesRef.current, ids: Array.from(selectedNodeIdsRef.current) });
+    }, []);
+
+    const saveNodeName = () => {
+        const name = renameNode?.name.trim();
+        if (!name || !renameNode) return;
+        setNodes(current => current.map(node => node.id === renameNode.id ? {
+            ...node, title: name,
+            ...(node.type === CanvasNodeType.Image ? { metadata: { ...node.metadata, imageName: name } } : {}),
+        } : node));
+        setRenameNode(null);
+    };
 
     const shareCurrentCanvas = useCallback(async () => {
         try {
@@ -4571,6 +4600,7 @@ function WirelessCanvasPage() {
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
                     onExport={exportCurrentCanvas}
+                    onExportImages={openImageExport}
                     onShare={shareFromTopBar}
                     agentOpen={assistantOpen}
                     compactAgentStatus={compactAgentStatus}
@@ -4797,6 +4827,12 @@ function WirelessCanvasPage() {
                             duplicateNode(contextMenu.nodeId);
                             setContextMenu(null);
                         }}
+                        onRename={() => {
+                            if (contextMenu.type !== "node") return;
+                            const node = nodesRef.current.find(item => item.id === contextMenu.nodeId);
+                            if (node) setRenameNode({ id: node.id, name: node.type === CanvasNodeType.Image ? canvasImageBaseName(node) : node.title });
+                            setContextMenu(null);
+                        }}
                         onDelete={() => {
                             if (contextMenu.type === "node") {
                                 deleteNodes(new Set([contextMenu.nodeId]));
@@ -4810,6 +4846,12 @@ function WirelessCanvasPage() {
 
                 <input ref={imageInputRef} type="file" accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav" className="hidden" onChange={handleImageInputChange} />
                 <input ref={quickReferenceInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleQuickReferenceInputChange} />
+
+                <Modal title="重命名图片或节点" open={Boolean(renameNode)} onCancel={() => setRenameNode(null)} onOk={saveNodeName} okText="保存名称" cancelText="取消" okButtonProps={{ disabled: !renameNode?.name.trim() }} destroyOnHidden>
+                    <Input aria-label="图片或节点名称" autoFocus maxLength={120} value={renameNode?.name || ""} onChange={event => setRenameNode(current => current ? { ...current, name: event.target.value } : current)} onPressEnter={saveNodeName} />
+                    <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>修改名称不改变图片内容或版本号。图片下载时会附带当前版本。</p>
+                </Modal>
+                {imageExport ? <Suspense fallback={null}><CanvasImagePdfDialog nodes={imageExport.nodes} defaultSelectedIds={imageExport.ids} defaultName={currentProject?.title || "图片集"} onClose={() => setImageExport(null)} /></Suspense> : null}
 
                 {infoNode ? (
                     <Suspense fallback={null}>
@@ -5064,6 +5106,7 @@ const CanvasTopBar = memo(function CanvasTopBar({
     onUndo,
     onRedo,
     onExport,
+    onExportImages,
     onShare,
     agentOpen,
     compactAgentStatus,
@@ -5094,6 +5137,7 @@ const CanvasTopBar = memo(function CanvasTopBar({
                         { type: "divider" },
                         { key: "import", icon: <Upload className="size-4" />, label: "导入素材", onClick: onImportImage },
                         { key: "export", icon: <Download className="size-4" />, label: "导出画布", onClick: onExport },
+                        { key: "export-images", icon: <Images className="size-4" />, label: "导出图片集 / PDF", onClick: onExportImages },
                         { type: "divider" },
                         { key: "undo", disabled: !canUndo, icon: <Undo2 className="size-4" />, label: <MenuLabel text="撤销" shortcut="Ctrl Z" />, onClick: onUndo },
                         { key: "redo", disabled: !canRedo, icon: <Redo2 className="size-4" />, label: <MenuLabel text="重做" shortcut="Ctrl Shift Z" />, onClick: onRedo },
@@ -5234,7 +5278,7 @@ function serverAssetIdFromContentUrl(url: string) {
 }
 
 function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
-    return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType, ...(image.originalFileName ? { originalFileName: image.originalFileName } : {}) };
+    return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType, ...(image.originalFileName ? { originalFileName: image.originalFileName, imageName: image.originalFileName.replace(/\.[^.]+$/, ""), imageVersion: 1 } : {}) };
 }
 
 function workflowImageCandidatesFromResult(result: CanvasGenerationResult | undefined): CanvasAgentMediaWorkflow["candidates"] {
@@ -5257,6 +5301,7 @@ function audioMetadata(audio: UploadedFile): CanvasNodeMetadata {
 function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: AiConfig, count: number, references: ReferenceImage[]): CanvasNodeMetadata {
     return {
         originalFileName: originalReferenceFileName(references),
+        ...canvasImageReferenceIdentity(references[0]),
         generationType: type,
         model: config.model,
         size: config.size,

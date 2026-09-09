@@ -1,6 +1,6 @@
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import type { ReferenceImage } from "@/types/image";
-import { originalCanvasImageFileName } from "@/lib/canvas/canvas-image-filename";
+import { canvasImageBaseName, canvasImageVersion, originalCanvasImageFileName } from "@/lib/canvas/canvas-image-filename";
 
 export type CanvasSelectionReference = ReferenceImage & { canvasNodeId?: string };
 
@@ -25,6 +25,7 @@ export function syncCanvasSelectionReferences(
             type: node.metadata.mimeType || "image/png", dataUrl: content, url: content,
             storageKey: node.metadata.storageKey,
             originalFileName: originalCanvasImageFileName(node),
+            imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node),
         });
     }
     const next: CanvasSelectionReference[] = [];
@@ -34,7 +35,7 @@ export function syncCanvasSelectionReferences(
         // A removed canvas node does not invalidate its already attached image snapshot.
         if (!updated) { if (!imageIds.length) next.push(reference); continue; }
         const unchanged = reference.name === updated.name && reference.type === updated.type &&
-            reference.dataUrl === updated.dataUrl && reference.url === updated.url && reference.storageKey === updated.storageKey && reference.originalFileName === updated.originalFileName;
+            reference.dataUrl === updated.dataUrl && reference.url === updated.url && reference.storageKey === updated.storageKey && reference.originalFileName === updated.originalFileName && reference.imageName === updated.imageName && reference.imageVersion === updated.imageVersion;
         next.push(unchanged ? reference : updated);
         selected.delete(reference.canvasNodeId);
     }

@@ -11,7 +11,7 @@ import { useUserStore } from "@/stores/use-user-store";
 
 export type InsertAssetPayload =
     | { kind: "text"; content: string; title: string }
-    | { kind: "image"; dataUrl: string; title: string; storageKey?: string }
+    | { kind: "image"; dataUrl: string; title: string; storageKey?: string; mimeType?: string; imageName?: string; imageVersion?: number }
     | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number };
 
 type Props = {
@@ -115,7 +115,7 @@ function MyAssetsTab({ onInsert, onInsertMany, selectionMode }: { onInsert?: (pa
         }
         return asset.kind === "video"
             ? { kind: "video", url: asset.data.url, storageKey: asset.data.storageKey, title: asset.title, width: asset.data.width, height: asset.data.height }
-            : { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, title: asset.title };
+            : { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, title: asset.title, mimeType: asset.data.mimeType, imageName: typeof asset.metadata?.imageName === "string" ? asset.metadata.imageName : undefined, imageVersion: typeof asset.metadata?.imageVersion === "number" ? asset.metadata.imageVersion : undefined };
     };
 
     const handleInsert = (asset: Asset) => {

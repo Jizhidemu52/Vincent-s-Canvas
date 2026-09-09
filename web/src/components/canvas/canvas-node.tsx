@@ -17,6 +17,7 @@ import { shouldShowCanvasTextStream } from "@/lib/canvas/canvas-text-stream-visi
 import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
 import type { CanvasResizeBounds } from "@/lib/canvas/canvas-resize-preview";
 import { formatBytes } from "@/lib/image-utils";
+import { canvasImageBaseName, canvasImageVersion } from "@/lib/canvas/canvas-image-filename";
 import { resolveImageUrl } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -825,7 +826,7 @@ function ImageInfoBar({ node }: { node: CanvasNodeData }) {
     return (
         <div className="pointer-events-none absolute bottom-3 right-3 z-40 max-w-[calc(100%-24px)]">
             <span className="max-w-full truncate rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
-                {width} x {height}
+                {canvasImageBaseName(node)} · v{canvasImageVersion(node)} · {width} x {height}
                 {size ? ` · ${size}` : ""}
             </span>
         </div>

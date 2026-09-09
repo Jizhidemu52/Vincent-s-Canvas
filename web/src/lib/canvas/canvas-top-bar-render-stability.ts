@@ -22,6 +22,7 @@ export type CanvasTopBarRenderState = {
     onUndo: () => void;
     onRedo: () => void;
     onExport: () => void;
+    onExportImages?: () => void;
     onShare: () => void;
     agentOpen: boolean;
     compactAgentStatus?: CanvasCompactAgentStatus;
@@ -56,6 +57,7 @@ export function canvasTopBarPropsEqual(previous: CanvasTopBarRenderState, next: 
         previous.onUndo === next.onUndo &&
         previous.onRedo === next.onRedo &&
         previous.onExport === next.onExport &&
+        previous.onExportImages === next.onExportImages &&
         previous.onShare === next.onShare &&
         previous.agentOpen === next.agentOpen &&
         compactAgentStatusEqual(previous.compactAgentStatus, next.compactAgentStatus) &&

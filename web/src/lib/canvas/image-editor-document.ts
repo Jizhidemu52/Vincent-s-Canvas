@@ -1,5 +1,9 @@
 export type EditorPoint = { x: number; y: number };
 export type EditorRect = EditorPoint & { width: number; height: number };
+export type EditorSize = { width: number; height: number };
+export type EditorResizeMode = "contain" | "cover" | "stretch";
+export const EDITOR_MAX_DIMENSION = 8192;
+export const EDITOR_MAX_PIXELS = 25_000_000;
 type PaintStyle = { color: string; width: number; clip?: EditorRect };
 export type ImageEditorMark =
     | ({ kind: "brush"; points: EditorPoint[] } & PaintStyle)
@@ -9,7 +13,25 @@ export type ImageEditorOperation = ImageEditorMark
     | { kind: "crop"; rect: EditorRect }
     | { kind: "mosaic"; rect: EditorRect; blockSize: number }
     | { kind: "rotate" }
+    | { kind: "resize"; width: number; height: number; mode: EditorResizeMode }
     | { kind: "move-rectangle"; index: number; dx: number; dy: number };
+
+export function editorSizeError({ width, height }: EditorSize): string {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) return "宽度和高度必须是大于 0 的整数像素";
+    if (width > EDITOR_MAX_DIMENSION || height > EDITOR_MAX_DIMENSION) return "宽度和高度均不能超过 8192 像素";
+    if (width * height > EDITOR_MAX_PIXELS) return "图片总像素不能超过 2500 万，请减小宽度或高度";
+    return "";
+}
+
+/** Center the current document on a transparent target canvas; only stretch changes its aspect ratio. */
+export function editorResizeGeometry(source: EditorSize, target: EditorSize, mode: EditorResizeMode = "contain") {
+    const error = editorSizeError(source) || editorSizeError(target);
+    if (error) throw new Error(error);
+    let scaleX = target.width / source.width, scaleY = target.height / source.height;
+    if (mode !== "stretch") scaleX = scaleY = mode === "cover" ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
+    const width = source.width * scaleX, height = source.height * scaleY;
+    return { x: (target.width - width) / 2, y: (target.height - height) / 2, width, height, scaleX, scaleY };
+}
 
 function positionedOperations(operations: readonly ImageEditorOperation[]) {
     return operations.map((op, index) => {
@@ -20,7 +42,7 @@ function positionedOperations(operations: readonly ImageEditorOperation[]) {
     });
 }
 
-/** Project annotation bounds through subsequent crops/rotations for screen-space hit testing. */
+/** Project annotation bounds through subsequent geometry edits for screen-space hit testing. */
 export function editorRectangles(operations: readonly ImageEditorOperation[], original: { width: number; height: number }) {
     const positioned = positionedOperations(operations);
     return positioned.flatMap((op, index) => {
@@ -36,16 +58,36 @@ export function editorRectangles(operations: readonly ImageEditorOperation[], or
                 start = { x: size.height - start.y, y: start.x };
                 end = { x: size.height - end.y, y: end.x };
                 size = { width: size.height, height: size.width };
+            } else if (next.kind === "resize") {
+                const geometry = editorResizeGeometry(size, next, next.mode);
+                start = { x: start.x * geometry.scaleX + geometry.x, y: start.y * geometry.scaleY + geometry.y };
+                end = { x: end.x * geometry.scaleX + geometry.x, y: end.y * geometry.scaleY + geometry.y };
+                size = { width: next.width, height: next.height };
             }
         }
         return [{ index, x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) }];
     });
 }
 
-export function editorRectangleMove(operations: readonly ImageEditorOperation[], index: number, delta: EditorPoint): ImageEditorOperation {
+export function editorRectangleMove(operations: readonly ImageEditorOperation[], index: number, delta: EditorPoint, original: EditorSize): ImageEditorOperation {
     let { x: dx, y: dy } = delta;
+    let size = editorDocumentSize(original, operations.slice(0, index + 1));
+    const transforms: ({ kind: "rotate" } | { kind: "resize"; scaleX: number; scaleY: number })[] = [];
+    for (const op of operations.slice(index + 1)) {
+        if (op.kind === "rotate") {
+            transforms.push(op);
+            size = { width: size.height, height: size.width };
+        } else if (op.kind === "resize") {
+            transforms.push({ kind: "resize", ...editorResizeGeometry(size, op, op.mode) });
+            size = { width: op.width, height: op.height };
+        } else if (op.kind === "crop") size = { width: op.rect.width, height: op.rect.height };
+    }
     // Translate the user's current-image drag back into the annotation's original coordinates.
-    for (const op of operations.slice(index + 1)) if (op.kind === "rotate") [dx, dy] = [dy, -dx];
+    // Reverse the order as nonuniform scaling and rotation do not commute.
+    for (const transform of transforms.reverse()) {
+        if (transform.kind === "rotate") [dx, dy] = [dy, -dx];
+        else { dx /= transform.scaleX; dy /= transform.scaleY; }
+    }
     return { kind: "move-rectangle", index, dx, dy };
 }
 
@@ -67,6 +109,11 @@ export function editorDocumentSize(original: { width: number; height: number }, 
     for (const op of operations) {
         if (op.kind === "crop") size = { width: op.rect.width, height: op.rect.height };
         if (op.kind === "rotate") size = { width: size.height, height: size.width };
+        if (op.kind === "resize") {
+            const error = editorSizeError(op);
+            if (error) throw new Error(error);
+            size = { width: op.width, height: op.height };
+        }
     }
     return size;
 }
@@ -129,12 +176,17 @@ export function renderEditorDocument(canvas: HTMLCanvasElement, image: HTMLImage
     context.drawImage(image, 0, 0);
     for (const op of positionedOperations(operations)) {
         if (op.kind === "move-rectangle") continue;
-        if (op.kind === "crop" || op.kind === "rotate") {
+        if (op.kind === "crop" || op.kind === "rotate" || op.kind === "resize") {
+            const geometry = op.kind === "resize" ? editorResizeGeometry(canvas, op, op.mode) : null;
             const copy = document.createElement("canvas");
-            copy.width = op.kind === "crop" ? op.rect.width : canvas.height;
-            copy.height = op.kind === "crop" ? op.rect.height : canvas.width;
+            copy.width = op.kind === "crop" ? op.rect.width : op.kind === "resize" ? op.width : canvas.height;
+            copy.height = op.kind === "crop" ? op.rect.height : op.kind === "resize" ? op.height : canvas.width;
             const target = context2d(copy);
             if (op.kind === "crop") target.drawImage(canvas, op.rect.x, op.rect.y, op.rect.width, op.rect.height, 0, 0, copy.width, copy.height);
+            else if (geometry) {
+                target.imageSmoothingQuality = "high";
+                target.drawImage(canvas, geometry.x, geometry.y, geometry.width, geometry.height);
+            }
             else { target.translate(copy.width, 0); target.rotate(Math.PI / 2); target.drawImage(canvas, 0, 0); }
             canvas.width = copy.width; canvas.height = copy.height;
             context.drawImage(copy, 0, 0);

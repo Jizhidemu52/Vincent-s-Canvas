@@ -5,6 +5,7 @@ import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import { getGenerationResourceNodes } from "@/lib/canvas/canvas-resource-references";
+import { canvasImageBaseName, canvasImageVersion } from "@/lib/canvas/canvas-image-filename";
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -205,6 +206,8 @@ function sameGenerationInput(first: NodeGenerationInput, second?: NodeGeneration
         first.text === second.text &&
         first.image?.dataUrl === second.image?.dataUrl &&
         first.image?.storageKey === second.image?.storageKey &&
+        first.image?.imageName === second.image?.imageName &&
+        first.image?.imageVersion === second.image?.imageVersion &&
         first.video?.url === second.video?.url &&
         first.video?.storageKey === second.video?.storageKey &&
         first.audio?.url === second.audio?.url &&
@@ -225,6 +228,7 @@ function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
         id: node.id,
         name: node.metadata.originalFileName || node.title || node.id,
         originalFileName: node.metadata.originalFileName,
+        imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node),
         type: node.metadata.mimeType || "image/png",
         dataUrl: node.metadata.content,
         storageKey: node.metadata.storageKey,

@@ -1,5 +1,5 @@
 import { BookmarkPlus, Check, Copy, Download, LoaderCircle, PencilLine, Plus, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
 import { useNavigate } from "react-router-dom";
@@ -7,6 +7,8 @@ import { useNavigate } from "react-router-dom";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
+import { useImageCopyEditor } from "@/hooks/use-image-copy-editor";
+import { imageCopyEditorNode } from "@/lib/image-edit-copy";
 import { needsCanvasAssetPreviewResolution, resolveCanvasAssetPreview } from "@/lib/canvas/canvas-asset-preview";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
 import { createClientId } from "@/lib/client-id";
@@ -34,6 +36,8 @@ import {
     type UserProject,
 } from "@/services/api/server-assets";
 import { savePromptFromAsset } from "@/services/api/prompts";
+
+const CanvasImageEditorDialog = lazy(() => import("@/components/canvas/canvas-image-editor-dialog").then(module => ({ default: module.CanvasImageEditorDialog })));
 
 type AssetFormValues = {
     kind: AssetKind;
@@ -89,6 +93,24 @@ export default function AssetsPage() {
     const { run: runSavePrompt } = useAsyncAction("asset-save-prompt");
     const [isAssetOpen, setIsAssetOpen] = useState(false);
     const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
+    const imageEditor = useImageCopyEditor(copy => {
+        const saved = useAssetStore.getState().assets.find(asset => asset.id === copy.assetId);
+        if (saved) setPreviewAsset(saved);
+    });
+    const openImageEditor = (asset: Asset) => {
+        if (asset.kind !== "image") return;
+        imageEditor.open({
+            node: imageCopyEditorNode({ id: asset.id, title: asset.title, ...asset.data,
+                imageName: typeof asset.metadata?.imageName === "string" ? asset.metadata.imageName : undefined,
+                imageVersion: typeof asset.metadata?.imageVersion === "number" ? asset.metadata.imageVersion : undefined,
+                originalFileName: typeof asset.metadata?.originalFileName === "string" ? asset.metadata.originalFileName : undefined }),
+            originId: metadataString(asset, "imageOriginId") || undefined,
+            sourceAssetId: metadataString(asset, "serverAssetId") || asset.id,
+            sourceTaskId: metadataString(asset, "sourceTaskId") || undefined,
+            prompt: metadataString(asset, "prompt"), model: metadataString(asset, "model"), tags: asset.tags, note: asset.note,
+        });
+        setPreviewAsset(null);
+    };
     const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
     const [projectAsset, setProjectAsset] = useState<Asset | null>(null);
     const [selectedProjectId, setSelectedProjectId] = useState<string>();
@@ -595,6 +617,7 @@ export default function AssetsPage() {
                 onClose={() => setPreviewAsset(null)}
                 onCopy={copyAssetText}
                 onDownload={downloadImage}
+                onEditOriginal={openImageEditor}
                 onReplicate={replicateAsset}
                 onSavePrompt={(asset) => runSavePrompt(() => saveAssetPrompt(asset))}
                 onResultAction={recordResultAction}
@@ -602,6 +625,12 @@ export default function AssetsPage() {
                 onShareDepartment={shareWithDepartment}
                 onSetCompanyVisibility={setCompanyVisibility}
             />
+            {imageEditor.node ? <Suspense fallback={<Modal title="编辑原图" open footer={null} onCancel={imageEditor.close}><p role="status">正在读取图片编辑器…</p></Modal>}>
+                <CanvasImageEditorDialog node={imageEditor.node} onClose={imageEditor.close} onConfirm={imageEditor.confirm}
+                    saveHint="另存到我的素材 · 原始素材保持不变 · 不调用 AI"
+                    successMessage="新版本已保存到我的素材，原始素材保持不变"
+                    cancelDescription="原始素材不会改变，未保存的修改将丢弃。" />
+            </Suspense> : null}
 
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" disabled={Boolean(assetAction)} onChange={(event) => { const file = event.target.files?.[0]; void runAssetAction("正在导入素材包…", () => importAssetZip(file)); }} />
             <input ref={batchImageInputRef} type="file" accept="image/*" multiple className="hidden" disabled={Boolean(assetAction)} onChange={(event) => { const files = event.target.files; void runAssetAction("正在准备上传…", () => importImageFiles(files)); }} />
@@ -781,6 +810,7 @@ function AssetDrawer({
     onClose,
     onCopy,
     onDownload,
+    onEditOriginal,
     onReplicate,
     onSavePrompt,
     onResultAction,
@@ -795,6 +825,7 @@ function AssetDrawer({
     onClose: () => void;
     onCopy: (asset: Asset) => void;
     onDownload: (asset: Asset) => void | Promise<void>;
+    onEditOriginal: (asset: Asset) => void;
     onReplicate: (asset: Asset) => void | Promise<void>;
     onSavePrompt: (asset: Asset) => void | Promise<void>;
     onResultAction: (asset: Asset, eventType: AssetEventType) => void | Promise<void>;
@@ -849,7 +880,10 @@ function AssetDrawer({
                             <Typography.Paragraph className="mt-1">{asset.note}</Typography.Paragraph>
                         </div>
                     ) : null}
-                    <Space>
+                    <Space wrap>
+                        {asset.kind === "image" ? (
+                            <Button icon={<PencilLine className="size-4" />} onClick={() => onEditOriginal(asset)}>编辑原图</Button>
+                        ) : null}
                         {asset.kind === "text" ? (
                             <Button type="primary" icon={<Copy className="size-4" />} onClick={() => onCopy(asset)}>
                                 复制文本
