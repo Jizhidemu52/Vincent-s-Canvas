@@ -25,6 +25,15 @@ describe("demo provider credentials", () => {
     expect(result.apiMartApiKey).toBe("working-key");
   });
 
+  test("OpenToken Claude updates the same runtime key as OpenToken images and GPT", () => {
+    const providerIds = { apiMartProviderId: "apimart", openTokenProviderId: "opentoken", openTokenClaudeProviderId: "opentoken-claude" };
+    const initial = { apiMartApiKey: "unchanged-apimart", openTokenApiKey: "old-opentoken" };
+    const updated = applyDemoProviderCredentials(initial, "opentoken-claude", { apiKey: " new-shared-key " }, providerIds);
+    expect(updated).toEqual({ apiMartApiKey: "unchanged-apimart", openTokenApiKey: "new-shared-key" });
+    expect(applyDemoProviderCredentials(updated, "opentoken", { apiKey: " " }, providerIds)).toEqual(updated);
+    expect(applyDemoProviderCredentials(updated, "opentoken", { apiKey: "next-shared-key" }, providerIds).openTokenApiKey).toBe("next-shared-key");
+  });
+
   test("keeps video configuration IDs distinct from OpenToken image models", () => {
     const models = resolveDemoExternalProviders({});
     const imageIds = [models.openTokenGptImage2ModelId, models.officialNanoBanana2ModelId];

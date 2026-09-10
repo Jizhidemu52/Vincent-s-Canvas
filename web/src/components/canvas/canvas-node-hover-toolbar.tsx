@@ -75,6 +75,7 @@ export function CanvasNodeHoverToolbar({
     onToggleFreeResize,
     onDelete,
 }: CanvasNodeHoverToolbarProps) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
     const [showImageToolLabels, setShowImageToolLabels] = useState(true);
     const [draftImageToolIds, setDraftImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
@@ -184,7 +185,7 @@ export function CanvasNodeHoverToolbar({
     const selectableImageToolbarTools = allToolbarTools.filter((tool) => !["retry", "info", "delete"].includes(tool.id)) as ImageToolbarSettingsTool[];
     const menuTool = (tool: ToolbarTool) => ({ key: tool.id, label: tool.label, title: tool.title, icon: <span className="[&_svg]:size-[18px]">{tool.icon}</span>, danger: tool.danger });
     const moreMenu: MenuProps = {
-        style: { background: "#fff", color: "#27272a", boxShadow: "none" },
+        style: { background: theme.toolbar.panel, color: theme.node.text, boxShadow: "none" },
         items: [
             ...overflowTools.filter((tool) => !["info", "delete"].includes(tool.id)).map(menuTool),
             { type: "divider" },
@@ -233,8 +234,8 @@ export function CanvasNodeHoverToolbar({
                 role="toolbar"
                 aria-label={hasImage ? "图片工具栏" : "节点工具栏"}
                 data-canvas-node-toolbar="true"
-                className="absolute z-[70] flex h-11 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-xl border border-[#e4e4e7] bg-white px-1 text-[13px] text-[#27272a] shadow-[0_4px_16px_rgba(24,24,27,.08)]"
-                style={{ left, top, maxWidth: "calc(100% - 24px)" }}
+                className="absolute z-[70] flex h-10 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-lg border px-1 text-xs shadow-[0_2px_8px_rgba(24,24,27,.06)]"
+                style={{ left, top, maxWidth: "calc(100% - 24px)", background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text, "--node-tool-hover": theme.toolbar.itemHover } as React.CSSProperties}
                 onMouseEnter={() => onKeep(node.id)}
                 onMouseLeave={() => {
                     if (!imageToolSettingsOpen && !moreToolsOpen) onLeave();
@@ -256,12 +257,12 @@ export function CanvasNodeHoverToolbar({
                         placement="bottomRight"
                         autoAdjustOverflow
                         popupRender={(menu) => (
-                            <div className="thin-scrollbar max-h-[min(480px,calc(100vh-32px))] overflow-y-auto rounded-xl border border-[#e4e4e7] bg-white p-1 shadow-[0_8px_28px_rgba(24,24,27,.12)]" onMouseEnter={() => onKeep(node.id)} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                            <div className="thin-scrollbar max-h-[min(480px,calc(100vh-32px))] overflow-y-auto rounded-lg border p-1 shadow-[0_4px_16px_rgba(24,24,27,.10)]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }} onMouseEnter={() => onKeep(node.id)} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
                                 {menu}
                             </div>
                         )}
                     >
-                        <button type="button" aria-label="更多图片工具" aria-haspopup="menu" aria-expanded={moreToolsOpen} className={`ml-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 transition hover:bg-[#f4f4f5] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#a1a1aa] ${moreToolsOpen ? "bg-[#f4f4f5]" : ""}`}>
+                        <button type="button" aria-label="更多图片工具" aria-haspopup="menu" aria-expanded={moreToolsOpen} className={`ml-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 transition hover:bg-[var(--node-tool-hover)] focus-visible:outline-2 focus-visible:outline-offset-1 ${moreToolsOpen ? "bg-[var(--node-tool-hover)]" : ""}`}>
                             <Ellipsis className="size-[18px]" />
                             {showImageToolLabels ? <span>更多</span> : null}
                         </button>
@@ -367,9 +368,9 @@ function ToolbarAction({ title, label, icon, onClick, showLabel, active = false,
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const hasText = showLabel && Boolean(label);
     return (
-        <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" styles={{ root: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}>
+        <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color={theme.node.panel} styles={{ container: { color: theme.node.text, fontSize: 12 } }}>
             <button type="button" className={`group relative flex h-9 shrink-0 items-center whitespace-nowrap rounded-lg px-0.5 focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-[#a1a1aa] ${danger ? "text-[#ef4444]" : ""}`} style={highResolution && !danger ? { color: theme.toolbar.highResolution } : undefined} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick(); }} aria-label={title}>
-                <span className={`flex h-8 items-center ${hasText ? "gap-1.5 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-[#f4f4f5] [&_svg]:size-[18px] ${active ? "bg-[#f4f4f5]" : ""}`}>
+                <span className={`flex h-8 items-center ${hasText ? "gap-1.5 px-2" : "justify-center px-2"} rounded-md transition group-hover:bg-[var(--node-tool-hover)] [&_svg]:size-4 ${active ? "bg-[var(--node-tool-hover)]" : ""}`}>
                     {icon}
                     {hasText ? <span>{label}</span> : null}
                 </span>

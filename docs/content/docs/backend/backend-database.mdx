@@ -35,4 +35,6 @@ description: 正式数据存储边界及任务恢复和访客身份字段
 
 ## 更新和备份
 
+`021_chat_provider_protocols.sql` 扩展 `providers.protocol` 的检查约束，允许 `openai-chat` 和 `anthropic`，保留原有协议值。现有 `openai` 继续用于 Responses／图片接口；新增选项分别用于 Chat Completions 和 Messages。正式环境需先应用该迁移，才能保存这两种新协议的 Provider。
+
 升级时由现有迁移入口按顺序应用 SQL，不在生产数据库中试删表解决启动错误。数据库备份还需搭配对象存储文件与 Provider 加密密钥；仅复制数据库不能恢复所有成果文件。部署步骤见仓库 `docs/manual/production-deployment.md`。

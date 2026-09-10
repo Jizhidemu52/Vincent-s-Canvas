@@ -148,7 +148,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
 }
 
 export function isClaudeModel(modelId: string) {
-    return /^claude-(opus|sonnet|fable)-5$/i.test(modelId.trim());
+    return /^claude-(opus|sonnet|fable)-5$/i.test(modelId.trim()) || modelId.trim().toLowerCase() === "claude-fable-5-1";
 }
 
 function normalizeClaudeMaxTokens(value: string | undefined) {

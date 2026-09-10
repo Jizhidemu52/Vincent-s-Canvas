@@ -4,7 +4,11 @@ export type OpenTokenReferenceImage = {
   bytes: Uint8Array;
 };
 
-export type OpenTokenImageModel = "gpt-image-2" | "gemini-3.1-flash-image";
+const openTokenImageModelIds = ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-3.1-flash-image"] as const;
+export type OpenTokenImageModel = typeof openTokenImageModelIds[number];
+export function isOpenTokenImageModel(value: unknown): value is OpenTokenImageModel {
+  return openTokenImageModelIds.some(modelId => modelId === value);
+}
 export const OPENAI_IMAGE_TIMEOUT_MS = 600_000;
 
 export type OpenTokenImageInput = {
@@ -117,6 +121,8 @@ export async function runOpenTokenImage(input: OpenTokenImageInput): Promise<str
     headers: request.headers,
     body: request.form || JSON.stringify(request.body),
     signal: AbortSignal.timeout(OPENAI_IMAGE_TIMEOUT_MS),
+  }).catch((error) => {
+    throw new Error(`OpenToken image submission transport failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   });
   if (!response.ok) {
     const message = openTokenErrorMessage(await response.json().catch(() => null));
@@ -124,7 +130,9 @@ export async function runOpenTokenImage(input: OpenTokenImageInput): Promise<str
   }
   const result = parseOpenTokenImageResponse(await response.json());
   if ("base64" in result) return `data:image/png;base64,${result.base64}`;
-  const image = await fetch(result.url, { signal: AbortSignal.timeout(120_000) });
+  const image = await fetch(result.url, { signal: AbortSignal.timeout(120_000) }).catch((error) => {
+    throw new Error(`OpenToken image result download transport failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  });
   if (!image.ok) throw new Error(`OpenToken image download failed: ${image.status}`);
   const mimeType = image.headers.get("content-type")?.split(";")[0] || "image/png";
   return `data:${mimeType};base64,${Buffer.from(await image.arrayBuffer()).toString("base64")}`;

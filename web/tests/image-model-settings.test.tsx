@@ -6,12 +6,13 @@ import { defaultConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 
-test("the six configured image models expose only their adapter's supported options", () => {
-    for (const model of ["gpt-image-2"]) {
+test("configured image models expose only their adapter's supported options", () => {
+    for (const model of ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
         const profile = imageModelProfile(model, []);
         expect(profile.qualityLabel).toBe("画质");
         expect(profile.sizes).toEqual(["1024x1024", "1536x1024", "1024x1536", "auto"]);
         expect(profile.customSize).toBe(false);
+        expect(imageTaskParameters({ ...defaultConfig, model, size: "auto", quality: "auto" })).toEqual({ size: "auto", quality: "auto" });
     }
     expect(imageModelProfile("vcen-gpt2", []).qualities).toEqual(["1k", "2k", "4k"]);
     expect(imageModelProfile("gemini-3.1-flash-image-preview", []).qualities).toEqual(["0.5k", "1k", "2k", "4k"]);

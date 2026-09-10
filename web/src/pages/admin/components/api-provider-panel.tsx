@@ -4,7 +4,17 @@ import { useEffect, useState } from "react";
 import { createServerProvider, listServerProviders, updateServerProvider, type ProviderProtocol, type ServerProvider } from "@/services/api/model-configuration";
 
 type Values = { name: string; protocol: ProviderProtocol; baseUrl: string; enabled: boolean; apiKey?: string; walletApiKey?: string; accessKeyId?: string; secretAccessKey?: string };
-const protocolOptions = ["openai", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"].map((value) => ({ label: value === "apimart" ? "APIMart 图片异步" : value, value }));
+const protocolOptions: Array<{ value: ProviderProtocol; label: string }> = [
+    { value: "openai", label: "OpenAI（Responses / 图片）" },
+    { value: "openai-chat", label: "OpenAI（Chat Completions）" },
+    { value: "anthropic", label: "Anthropic（Messages）" },
+    { value: "gemini", label: "gemini" },
+    { value: "apimart", label: "APIMart 图片异步" },
+    { value: "volcengine", label: "volcengine" },
+    { value: "runninghub", label: "runninghub" },
+    { value: "comfyui", label: "comfyui" },
+    { value: "custom", label: "custom" },
+];
 
 export function ApiProviderPanel({ isAdmin }: { isAdmin: boolean }) {
     const { message } = App.useApp();

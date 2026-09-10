@@ -149,7 +149,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     },
 ];
 
-export const defaultImageQuickToolIds: ImageQuickToolId[] = ["manualEdit", "edit", "maskEdit", "download"];
+export const defaultImageQuickToolIds: ImageQuickToolId[] = ["manualEdit", "edit", "download"];
 
 /** Keep old preferences intact while preventing a legacy full-width toolbar. */
 export function compactImageQuickToolIds(ids: ImageQuickToolId[]) {

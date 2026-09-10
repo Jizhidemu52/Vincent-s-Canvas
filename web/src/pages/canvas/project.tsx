@@ -49,6 +49,7 @@ import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal"
 import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { useCanvasDesktopLayout } from "@/hooks/use-canvas-desktop-layout";
+import { shouldOpenCanvasCreationPanel } from "@/lib/canvas/canvas-layout-breakpoint";
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
 import { flushCanvasPersistence, useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -94,7 +95,7 @@ import { createCanvasVisibleNodeCache } from "@/lib/canvas/canvas-visible-node-c
 import { createCanvasNodeMap, refreshCanvasNodeMap } from "@/lib/canvas/canvas-node-map";
 import { CANVAS_AGENT_PANEL_MOTION_MS } from "@/lib/canvas/canvas-agent-panel-constants";
 import { loadCanvasAssistantPanel, loadCanvasLocalAgentPanel } from "@/lib/canvas/canvas-agent-panel-loaders";
-import { loadCanvasConfigComposer, loadCanvasInspectorPanel, loadCanvasNodePromptPanel, loadCanvasQuickGeneratePanel } from "@/lib/canvas/canvas-node-panel-loaders";
+import { loadCanvasConfigComposer, loadCanvasNodePromptPanel, loadCanvasQuickGeneratePanel } from "@/lib/canvas/canvas-node-panel-loaders";
 import { loadCanvasNodeHoverToolbar, loadCanvasNodeInfoModal } from "@/lib/canvas/canvas-node-hover-loaders";
 import {
     loadAssetPickerModal,
@@ -146,7 +147,6 @@ const AssetPickerModal = lazy(loadAssetPickerModal);
 const CanvasConfigComposer = lazy(loadCanvasConfigComposer);
 const CanvasNodePromptPanel = lazy(loadCanvasNodePromptPanel);
 const CanvasQuickGeneratePanel = lazy(loadCanvasQuickGeneratePanel);
-const CanvasInspectorPanel = lazy(loadCanvasInspectorPanel);
 const CanvasNodeHoverToolbar = lazy(loadCanvasNodeHoverToolbar);
 const CanvasNodeInfoModal = lazy(loadCanvasNodeInfoModal);
 
@@ -483,7 +483,7 @@ function WirelessCanvasPage() {
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const isCanvasDesktopLayout = useCanvasDesktopLayout();
-    const [quickGenerateOpen, setQuickGenerateOpen] = useState(() => isCanvasDesktopLayout);
+    const [quickGenerateOpen, setQuickGenerateOpen] = useState(false);
     const [quickGeneratePrompt, setQuickGeneratePrompt] = useState("");
     const [quickGeneratePosition, setQuickGeneratePosition] = useState<Position | null>(null);
     const [quickGenerateModel, setQuickGenerateModel] = useState(effectiveConfig.imageModel || effectiveConfig.model);
@@ -721,6 +721,7 @@ function WirelessCanvasPage() {
         const commitRestoredProject = (restoredNodes: CanvasNodeData[], restoredSessions: CanvasAssistantSession[]) => {
             if (!lifecycle.isCurrent(restoreToken)) return;
             setNodes(restoredNodes);
+            setQuickGenerateOpen(shouldOpenCanvasCreationPanel(restoredNodes.length, window.innerWidth));
             setConnections(project.connections);
             setChatSessions(restoredSessions);
             setActiveChatId(project.activeChatId || null);
@@ -1350,8 +1351,9 @@ function WirelessCanvasPage() {
     useEffect(() => {
         performanceCountsRef.current = { totalNodes: nodes.length, visibleNodes: visibleNodes.length, totalConnections: connections.length, visibleConnections: visibleConnections.length };
     }, [connections.length, nodes.length, visibleConnections.length, visibleNodes.length]);
-    const selectedInspectorNode = selectedNodeIds.size === 1 ? nodeById.get(selectedNodeIds.values().next().value!) || null : null;
-    const toolbarNode = selectedNodeIds.size > 1 ? null : selectedInspectorNode || (toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null);
+    const singleSelectedNode = selectedNodeIds.size === 1 ? nodeById.get(selectedNodeIds.values().next().value!) || null : null;
+    const hoveredToolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
+    const toolbarNode = selectedNodeIds.size > 1 ? null : singleSelectedNode || (hoveredToolbarNode?.type === CanvasNodeType.Image ? null : hoveredToolbarNode);
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
     const maskEditNode = maskEditNodeId ? nodeById.get(maskEditNodeId) || null : null;
@@ -1361,13 +1363,9 @@ function WirelessCanvasPage() {
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
-    const activeNodeId = hasMultipleSelectedNodes ? null : selectedInspectorNode?.id || hoveredNodeId;
+    const activeNodeId = hasMultipleSelectedNodes ? null : singleSelectedNode?.id || hoveredNodeId;
     useEffect(() => {
         setQuickGenerateReferences((current) => syncCanvasSelectionReferences(current, selectedNodeIds, nodeById));
-        if (Array.from(selectedNodeIds).some((id) => {
-            const node = nodeById.get(id);
-            return node?.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey);
-        })) setQuickGenerateOpen(true);
     }, [nodes, nodeById, selectedNodeIds]);
     const batchChildCountById = batchIndexes.childCountByRootId;
     const batchMotionForNode = batchIndexes.getMotion;
@@ -1925,7 +1923,6 @@ function WirelessCanvasPage() {
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
             if (clickedNode?.type === CanvasNodeType.Image && (clickedNode.metadata?.content || clickedNode.metadata?.storageKey)) {
                 setDialogNodeId(null);
-                setQuickGenerateOpen(true);
             } else if (clickedNode?.type === CanvasNodeType.Text) {
                 setDialogNodeId((current) => (current === clickedNodeId ? current : null));
             } else {
@@ -4574,10 +4571,11 @@ function WirelessCanvasPage() {
 
     return (
         <main className="cw-workspace relative flex h-full min-h-0 overflow-hidden" data-theme={canvasThemeKey} style={{ background: theme.canvas.background, color: theme.node.text }}>
-            <aside data-testid="canvas-left-generator-rail" className={`cw-create-panel cw-surface ${assistantOpen ? "is-hidden" : ""}`}>
+            <aside data-testid="canvas-left-generator-rail" className={`cw-create-panel ${quickGenerateOpen ? "cw-surface" : "is-collapsed"} ${assistantOpen ? "is-hidden" : ""}`}>
                 <div className="cw-tabs" role="tablist" aria-label="创作模式">
                     <button role="tab" aria-selected={!assistantOpen} type="button" onClick={openQuickGenerateFromToolbar}>创建</button>
                     <button role="tab" aria-selected={assistantOpen} type="button" onClick={toggleAgentFromTopBar}>对话</button>
+                    <button type="button" className="cw-icon" style={{ marginLeft: "auto" }} aria-label={quickGenerateOpen ? "收起创建面板" : "展开创建面板"} aria-expanded={quickGenerateOpen} onClick={quickGenerateOpen ? closeQuickGeneratePanel : openQuickGenerateFromToolbar}><ChevronDown size={16} className={quickGenerateOpen ? "rotate-180" : undefined} /></button>
                 </div>
                 {isCanvasDesktopLayout ? quickGeneratePanel : null}
             </aside>
@@ -4740,7 +4738,7 @@ function WirelessCanvasPage() {
                 </WirelessCanvas>
                 {performanceModeEnabled ? <CanvasPerformancePanel metrics={performanceMetrics} /> : null}
 
-                {!isNodeDragging && !nodeImageSettingsOpen && toolbarNode ? (
+                {!isNodeDragging && !nodeImageSettingsOpen && !(quickGenerateOpen && !isCanvasDesktopLayout && !assistantOpen) && toolbarNode ? (
                     <Suspense fallback={null}>
                         <CanvasNodeHoverToolbar
                             node={toolbarNode}
@@ -4799,14 +4797,6 @@ function WirelessCanvasPage() {
                 >
                     <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onScalePreview={previewZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={toggleMiniMap} />
                 </CanvasToolbar>
-
-                {selectedInspectorNode ? <Suspense fallback={null}><CanvasInspectorPanel
-                    selectedNode={selectedInspectorNode}
-                    backgroundMode={backgroundMode}
-                    showImageInfo={showImageInfo}
-                    onBackgroundModeChange={setBackgroundMode}
-                    onShowImageInfoChange={setShowImageInfo}
-                /></Suspense> : null}
 
                 {isMiniMapOpen ? <Minimap nodes={minimapNodes} viewport={viewport} viewportSize={size} onViewportPreview={previewMinimapViewport} onViewportChange={commitViewport} /> : null}
 
@@ -5129,7 +5119,7 @@ const CanvasTopBar = memo(function CanvasTopBar({
     return (
         <>
             <div className="cw-topbar">
-                <div className={`cw-project-card cw-surface ${agentOpen ? "is-agent-open" : ""}`}>
+                <div className={`cw-project-card ${agentOpen ? "is-agent-open" : ""}`}>
                     <Dropdown trigger={["click"]} menu={{ items: [
                         { key: "home", icon: <Home className="size-4" />, label: "主页", onClick: onHome },
                         { key: "projects", icon: <Images className="size-4" />, label: "我的画布", onClick: onProjects },
@@ -5157,7 +5147,7 @@ const CanvasTopBar = memo(function CanvasTopBar({
                     </div>
                     <button type="button" className="cw-share" title="复制当前画布链接；跨设备请导出画布文件" onClick={onShare}>分享</button>
                 </div>
-                <div className="cw-account-card cw-surface">
+                <div className="cw-account-card">
                     {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} /> : null}
                     <UserStatusActions variant="canvas" />
                 </div>

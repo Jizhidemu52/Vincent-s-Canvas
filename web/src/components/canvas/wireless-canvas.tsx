@@ -94,7 +94,14 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         (next: ViewportTransform) => {
             liveViewportRef.current = next;
             const content = contentRef.current;
-            if (content) content.style.transform = canvasViewportTransform(next);
+            if (content) {
+                content.style.transform = canvasViewportTransform(next);
+                const nodeUiScale = String(1 / Math.max(next.k, 0.0001));
+                // Zoom updates memoized node controls too; panning keeps this inherited value unchanged.
+                if (content.style.getPropertyValue("--canvas-node-ui-scale") !== nodeUiScale) {
+                    content.style.setProperty("--canvas-node-ui-scale", nodeUiScale);
+                }
+            }
             const grid = gridRef.current;
             const gridUpdate = canvasGridPreviewUpdate(backgroundMode, next, gridSizeRef.current);
             if (grid && gridUpdate) {
@@ -333,7 +340,7 @@ const CanvasGrid = memo(function CanvasGrid({ gridRef, viewport, mode }: { gridR
     return (
         <div
             ref={gridRef}
-            className="pointer-events-none absolute inset-0 opacity-70"
+            className="pointer-events-none absolute inset-0 opacity-20"
             style={{
                 backgroundImage,
                 backgroundSize: `${gridSize}px ${gridSize}px`,

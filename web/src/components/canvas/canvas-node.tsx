@@ -152,13 +152,17 @@ export const CanvasNode = React.memo(function CanvasNode({
     const effectiveHovered = canvasNodeEffectiveHover(hovered, renderQuality);
     const useOverview = renderQuality === "overview" && !isActive && !showPanel && !effectiveHovered;
     const useMovingPlaceholder = shouldUseCanvasNodeMovingPlaceholder({ type: data.type, renderQuality, active: isActive, hovered: effectiveHovered, showPanel });
-    const showNodeControls = shouldRenderCanvasNodeControls({ renderQuality, hovered: effectiveHovered, selected: isSelected, connecting: isConnecting });
+    const controlState = { renderQuality, hovered: effectiveHovered, selected: isSelected, connecting: isConnecting, isImage: hasImageContent };
+    const showResizeControls = shouldRenderCanvasNodeControls({ ...controlState, kind: "resize" });
+    const showConnectionControls = shouldRenderCanvasNodeControls({ ...controlState, kind: "connection" });
     const contentRenderQuality: CanvasRenderQuality = useOverview ? "overview" : renderQuality === "overview" ? "full" : renderQuality;
     const effectiveResizePreview = previewBounds ?? localResizePreview;
     const position = previewPosition ?? effectiveResizePreview?.position ?? data.position;
     const width = effectiveResizePreview?.width ?? data.width;
     const height = effectiveResizePreview?.height ?? data.height;
-    const imageBorderColor = isActive ? theme.canvas.selectionStroke : isRelated && !isBatchChild ? theme.node.muted : "transparent";
+    // A zero-blur ring retains fractional widths; native outlines round up when zoomed in.
+    const imageFrameRing = isSelected || effectiveHovered || isConnectionTarget ? `0 0 0 calc(1px * var(--canvas-node-ui-scale, 1)) ${theme.canvas.selectionStroke}` : undefined;
+    const showResourceLabel = showImageInfo || isSelected || effectiveHovered || isConnecting;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const textDraftRef = useRef<ReturnType<typeof createCanvasTextDraft> | null>(null);
     const resizePreviewFrameRef = useRef<number | null>(null);
@@ -372,11 +376,12 @@ export const CanvasNode = React.memo(function CanvasNode({
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
             <div
-                className="relative h-full w-full overflow-visible rounded-3xl border-2"
+                data-canvas-image-frame={hasImageContent ? (isSelected ? "selected" : effectiveHovered ? "hovered" : "idle") : undefined}
+                className={`relative h-full w-full overflow-visible ${hasImageContent ? "rounded-none" : "rounded-3xl border-2"}`}
                 style={{
                     background: hasImageContent || hasVideoContent ? "transparent" : theme.node.fill,
-                    borderColor: hasImageContent ? imageBorderColor : isActive ? theme.canvas.selectionStroke : isRelated ? theme.node.muted : theme.node.stroke,
-                    boxShadow: isMoving ? undefined : isActive ? `0 0 0 1px ${theme.canvas.selectionStroke}55, 0 16px 40px rgba(15,23,42,.10)` : isRelated && !isBatchChild ? `0 0 0 1px ${theme.node.muted}55, 0 18px 48px rgba(0,0,0,.14)` : undefined,
+                    borderColor: isActive ? theme.canvas.selectionStroke : isRelated ? theme.node.muted : theme.node.stroke,
+                    boxShadow: hasImageContent ? imageFrameRing : isMoving ? undefined : isActive ? `0 0 0 1px ${theme.canvas.selectionStroke}55, 0 16px 40px rgba(15,23,42,.10)` : isRelated && !isBatchChild ? `0 0 0 1px ${theme.node.muted}55, 0 18px 48px rgba(0,0,0,.14)` : undefined,
                 }}
                 onMouseDown={(event) => {
                     if (event.target instanceof Element && event.target.closest("[data-canvas-no-zoom]")) return;
@@ -443,17 +448,14 @@ export const CanvasNode = React.memo(function CanvasNode({
                 </div>
 
                 {!useOverview && showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
-                {!useOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} theme={theme} /> : null}
+                {!useOverview && showResourceLabel && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} theme={theme} /> : null}
 
                 {!useOverview && !hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
 
-                {showNodeControls ? <><ResizeHandle corner="top-left" onMouseDown={handleResizeMouseDown} />
-                <ResizeHandle corner="top-right" onMouseDown={handleResizeMouseDown} />
-                <ResizeHandle corner="bottom-left" onMouseDown={handleResizeMouseDown} />
-                <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} /></> : null}
+                {showResizeControls ? <>{(["top-left", "top-right", "bottom-left", "bottom-right"] as ResizeCorner[]).map((corner) => <ResizeHandle key={corner} corner={corner} theme={theme} onMouseDown={handleResizeMouseDown} />)}</> : null}
             </div>
 
-            {showNodeControls ? <><ConnectionHandleDot side="left" theme={theme} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
+            {showConnectionControls ? <><ConnectionHandleDot side="left" theme={theme} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
             <ConnectionHandleDot side="right" theme={theme} visible={data.type !== CanvasNodeType.Config && (effectiveHovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /></> : null}
 
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
@@ -739,7 +741,7 @@ function ImageContent({
 
     return (
         <BatchFrame theme={theme} batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
-            <div className="h-full w-full overflow-hidden rounded-3xl">
+            <div className="h-full w-full overflow-hidden">
                 {previewUrl ? (
                     <img
                         src={previewUrl}
@@ -870,21 +872,24 @@ function BatchFrame({ theme, batchCount, batchExpanded, batchOpening, batchRecov
         </div>
     );
 }
-function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDown: (event: React.MouseEvent, corner: ResizeCorner) => void }) {
+function ResizeHandle({ corner, theme, onMouseDown }: { corner: ResizeCorner; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onMouseDown: (event: React.MouseEvent, corner: ResizeCorner) => void }) {
     const positionClass = {
-        "top-left": "-left-[14px] -top-[14px] cursor-nwse-resize",
-        "top-right": "-right-[14px] -top-[14px] cursor-nesw-resize",
-        "bottom-left": "-bottom-[14px] -left-[14px] cursor-nesw-resize",
-        "bottom-right": "-bottom-[14px] -right-[14px] cursor-nwse-resize",
+        "top-left": "left-0 top-0 cursor-nwse-resize",
+        "top-right": "right-0 top-0 cursor-nesw-resize",
+        "bottom-left": "bottom-0 left-0 cursor-nesw-resize",
+        "bottom-right": "bottom-0 right-0 cursor-nwse-resize",
     }[corner];
 
-    return <div className={`absolute z-50 size-7 ${positionClass}`} onMouseDown={(event) => onMouseDown(event, corner)} />;
+    return <div data-canvas-resize-handle={corner} className={`absolute z-50 grid size-7 place-items-center ${positionClass}`} style={{ transform: `translate(${corner.endsWith("right") ? "50%" : "-50%"}, ${corner.startsWith("bottom") ? "50%" : "-50%"}) scale(var(--canvas-node-ui-scale, 1))` }} onMouseDown={(event) => onMouseDown(event, corner)}>
+        <span className="pointer-events-none block size-[7px] border" style={{ background: theme.node.panel, borderColor: theme.canvas.selectionStroke }} />
+    </div>;
 }
 
 function ConnectionHandleDot({ side, theme, visible, onMouseDown }: { side: "left" | "right"; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
 
     return (
         <div
+            data-canvas-connection-handle={side}
             className={`absolute top-1/2 z-30 flex size-12 -translate-y-1/2 cursor-crosshair items-center justify-center transition-opacity duration-150 ${
                 side === "left" ? "-left-6" : "-right-6"
             } ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}

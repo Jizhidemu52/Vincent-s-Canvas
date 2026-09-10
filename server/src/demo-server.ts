@@ -10,8 +10,8 @@ import { listAvailableDemoModels, resolveDemoExternalProviders, videoModelConfig
 import { applyDemoProviderCredentials } from "./demo-provider-credentials";
 import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
 import { resolveDemoHost } from "./demo-network-config";
-import { runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
-import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, readClaudeResponse, readGeminiResponse } from "./routes/chat";
+import { isOpenTokenImageModel, runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
+import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
 import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
 import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./demo-video-sources";
 import { decodeInlineImageResult } from "./demo-task-result-assets";
@@ -85,11 +85,18 @@ const gptImage2ProviderId = "30000000-0000-4000-8000-000000000002";
 const openTokenProviderId = "30000000-0000-4000-8000-000000000005";
 const openTokenBaseUrl = (process.env.OPENTOKEN_BASE_URL || "https://cn2.gw.opentoken.io/v1").replace(/\/$/, "");
 let openTokenApiKey = process.env.OPENTOKEN_API_KEY?.trim() || "";
+const demoProviderApiKeys = new Map<string, string>();
 const externalProviders = resolveDemoExternalProviders({ openTokenApiKey, apiMartApiKey });
-const { hasOpenToken, hasApiMart, openTokenGptImage2ModelId, openTokenGptImage2ApiModelId, openTokenGptImage2DisplayName, officialNanoBanana2ModelId, openTokenGeminiDisplayName, officialNanoBanana2Capabilities, apiMartGptImage2ModelId, apiMartGptImage2PublicModelId, claudeModelIds } = externalProviders;
+const { hasOpenToken, hasApiMart, openTokenGptImage2ModelId, openTokenGptImage2ApiModelId, openTokenGptImage2DisplayName, openTokenGptImage25Models, openTokenGptChatModel, openTokenClaudeModel, officialNanoBanana2ModelId, openTokenGeminiDisplayName, officialNanoBanana2Capabilities, apiMartGptImage2ModelId, apiMartGptImage2PublicModelId, claudeModelIds } = externalProviders;
 const gptImage2ModelId = apiMartGptImage2ModelId;
 const geminiProviderId = "30000000-0000-4000-8000-000000000003";
 const claudeProviderId = "30000000-0000-4000-8000-000000000006";
+const openTokenClaudeProviderId = "30000000-0000-4000-8000-000000000007";
+function demoChatProviderApiKey(providerId: string) {
+  if ([openTokenProviderId, openTokenClaudeProviderId].includes(providerId)) return openTokenApiKey;
+  return demoProviderApiKeys.get(providerId)
+    || ([gptImage2ProviderId, geminiProviderId, claudeProviderId].includes(providerId) ? apiMartApiKey : "");
+}
 const geminiModelId = "40000000-0000-4000-8000-000000000101";
 const geminiFlashImageModelId = "40000000-0000-4000-8000-000000000102";
 const midjourneyModelId = "40000000-0000-4000-8000-000000000103";
@@ -155,6 +162,49 @@ const demoModels: Array<Record<string, unknown>> = toolDefinitions.map(
     concurrencyLimit: 2,
     enabled: true,
   });
+  for (const model of openTokenGptImage25Models) {
+    demoModels.push({
+      ...model,
+      providerId: openTokenProviderId,
+      providerName: "OpenToken",
+      workflowConfigId: null,
+      workflowName: null,
+      replacementModelConfigId: null,
+      capabilities: ["generate", "edit"],
+      creditCost: 4,
+      rmbCost: 0,
+      concurrencyLimit: 2,
+      enabled: true,
+    });
+  }
+  demoProviders.push({
+    id: openTokenClaudeProviderId,
+    name: "OpenToken Claude",
+    protocol: "anthropic",
+    baseUrl: openTokenBaseUrl,
+    enabled: true,
+    hasCredentials: Boolean(openTokenApiKey),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  for (const [model, providerId, providerName] of [
+    [openTokenGptChatModel, openTokenProviderId, "OpenToken"],
+    [openTokenClaudeModel, openTokenClaudeProviderId, "OpenToken Claude"],
+  ] as const) {
+    demoModels.push({
+      ...model,
+      providerId,
+      providerName,
+      workflowConfigId: null,
+      workflowName: null,
+      replacementModelConfigId: null,
+      capabilities: ["chat", "vision", "tools"],
+      creditCost: 0,
+      rmbCost: 0,
+      concurrencyLimit: 2,
+      enabled: true,
+    });
+  }
   demoModels.push({
     id: officialNanoBanana2ModelId,
     providerId: openTokenProviderId,
@@ -448,6 +498,7 @@ function publicAccounts() {
 type DemoResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type DemoResponseInput =
   | { role: "system" | "user" | "assistant"; content: string | DemoResponseContent[] }
+  | { type: "claude_assistant"; content: Array<Record<string, unknown>> }
   | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string }
   | { type: "function_call_output"; call_id: string; output: string };
 
@@ -725,6 +776,49 @@ Bun.serve({
         claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
       };
       const selectedModel = String(input.modelId || "");
+      const openTokenChatModel = demoModels.find((model) =>
+        [openTokenGptChatModel.id, openTokenClaudeModel.id].includes(String(model.id)) &&
+        (model.id === selectedModel || model.modelId === selectedModel),
+      );
+      if (openTokenChatModel) {
+        const provider = demoProviders.find((item) => item.id === openTokenChatModel.providerId && item.enabled === true);
+        if (!provider || openTokenChatModel.enabled !== true || !(openTokenChatModel.capabilities as string[]).includes("chat"))
+          return json({ error: "MODEL_DISABLED", message: "管理员尚未启用该对话模型" }, 400);
+        const protocols = openTokenChatModel.id === openTokenClaudeModel.id ? ["anthropic"] : ["openai", "openai-chat"];
+        if (!protocols.includes(String(provider.protocol)))
+          return json({ error: "MODEL_PROTOCOL_MISMATCH", message: "所选 API 协议与当前对话模型不匹配" }, 400);
+        const apiKey = demoChatProviderApiKey(String(provider.id));
+        if (!provider.hasCredentials || !apiKey)
+          return json({ error: "PROVIDER_NOT_CONFIGURED", message: "所选对话 API 服务尚未配置服务端密钥" }, 503);
+        const model = {
+          model_id: String(openTokenChatModel.modelId),
+          base_url: String(provider.baseUrl),
+          protocol: String(provider.protocol),
+          encrypted_credentials: null,
+        };
+        const chatInput = {
+          input: input.input || [],
+          tools: input.tools || [],
+          toolChoice: input.toolChoice,
+          webSearch: input.webSearch,
+          claude: input.claude ? {
+            ...input.claude,
+            maxTokens: Math.max(1, Math.min(16_384, Math.floor(input.claude.maxTokens || 2048))),
+          } : undefined,
+        };
+        try {
+          if (model.protocol === "anthropic" && input.claude?.stream) {
+            const upstream = await requestClaudeStream(model, { apiKey }, chatInput);
+            return new Response(upstream.body, {
+              status: upstream.status,
+              headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform" },
+            });
+          }
+          return json(await requestChatCompletion(model, { apiKey }, chatInput));
+        } catch (error) {
+          return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "OpenToken request failed" }, 502);
+        }
+      }
       if (selectedModel !== "gemini-3.1-pro-preview" && !claudeModelIds.includes(selectedModel as (typeof claudeModelIds)[number]))
         return json({ error: "MODEL_DISABLED", message: "管理员尚未启用该对话模型" }, 400);
       if (!apiMartApiKey)
@@ -1047,7 +1141,7 @@ Bun.serve({
             typeof item.modelId === "string" &&
             ((Boolean(openTokenApiKey) &&
               item.providerId === openTokenProviderId &&
-              (item.id === openTokenGptImage2ModelId || item.id === officialNanoBanana2ModelId)) ||
+              isOpenTokenImageModel(item.modelId)) ||
               (Boolean(apiMartApiKey) &&
                 item.providerId === gptImage2ProviderId &&
                 apiMartImageModel(item.modelId))) &&
@@ -1057,7 +1151,7 @@ Bun.serve({
           return json(
             {
               error: "MODEL_DISABLED",
-              message: "所选 APIMart 图片模型未启用",
+              message: "所选图片模型未启用或当前渠道未配置",
             },
             400,
           );
@@ -1085,7 +1179,7 @@ Bun.serve({
         if ((imageModelId === "midjourney" || imageModelId === "midjourney-blend") && input.operationType !== "image_generation")
           return json({ error: "MODEL_CAPABILITY_MISMATCH", message: "Midjourney 当前只支持文生图，请选择 GPT-Image-2 或 Gemini 图片模型进行编辑" }, 400);
         const apiMartModel = model.providerId === openTokenProviderId ? null : apiMartImageModel(imageModelId);
-        const isGptImage2 = imageModelId === "gpt-image-2" || apiMartModel === "gpt-image-2";
+        const isGptImage2 = imageModelId.startsWith("gpt-image-2") || apiMartModel === "gpt-image-2";
         if (sources.length > (isGptImage2 ? 16 : imageModelId === "midjourney" ? 0 : imageModelId === "midjourney-blend" ? 4 : 14))
           return json(
             {
@@ -1433,13 +1527,16 @@ Bun.serve({
       request.method === "POST"
     ) {
       const input = (await request.json()) as Record<string, unknown>;
+      const credentials = input.credentials as Record<string, unknown> | undefined;
+      const apiKey = typeof credentials?.apiKey === "string" ? credentials.apiKey.trim() : "";
       const provider: Record<string, unknown> = {
         ...input,
         id: crypto.randomUUID(),
-        hasCredentials: Boolean(input.credentials),
+        hasCredentials: ["openai", "openai-chat", "anthropic"].includes(String(input.protocol)) ? Boolean(apiKey) : Boolean(input.credentials),
         createdAt: now(),
         updatedAt: now(),
       };
+      if (apiKey) demoProviderApiKeys.set(String(provider.id), apiKey);
       delete provider.credentials;
       demoProviders.push(provider);
       return json({ provider }, 201);
@@ -1453,6 +1550,9 @@ Bun.serve({
       );
       if (!provider) return json({ message: "API 服务不存在" }, 404);
       const input = (await request.json()) as Record<string, unknown>;
+      const credentials = input.credentials as Record<string, unknown> | undefined;
+      const apiKey = typeof credentials?.apiKey === "string" ? credentials.apiKey.trim() : "";
+      if (apiKey) demoProviderApiKeys.set(String(provider.id), apiKey);
       Object.assign(
         provider,
         input,
@@ -1463,10 +1563,18 @@ Bun.serve({
         { apiMartApiKey, openTokenApiKey },
         String(provider.id),
         input.credentials as Record<string, unknown> | undefined,
-        { apiMartProviderId: gptImage2ProviderId, openTokenProviderId },
+        { apiMartProviderId: gptImage2ProviderId, openTokenProviderId, openTokenClaudeProviderId },
       );
       apiMartApiKey = updatedCredentials.apiMartApiKey;
       openTokenApiKey = updatedCredentials.openTokenApiKey;
+      if ([openTokenProviderId, openTokenClaudeProviderId].includes(String(provider.id))) {
+        for (const sharedProvider of demoProviders.filter((item) => [openTokenProviderId, openTokenClaudeProviderId].includes(String(item.id)))) {
+          sharedProvider.hasCredentials = Boolean(openTokenApiKey);
+          sharedProvider.updatedAt = provider.updatedAt;
+        }
+      } else if (["openai", "openai-chat", "anthropic"].includes(String(provider.protocol))) {
+        provider.hasCredentials = Boolean(demoChatProviderApiKey(String(provider.id)));
+      }
       delete provider.credentials;
       return json({ provider });
     }

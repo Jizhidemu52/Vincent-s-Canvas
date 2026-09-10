@@ -1,7 +1,22 @@
 import { expect, test } from "bun:test";
+import { resolve } from "node:path";
 import * as XLSX from "xlsx";
 
-import { MAX_CHAT_ATTACHMENT_TEXT_LENGTH, MAX_WORKBOOK_MODEL_TEXT_LENGTH, chatAttachmentParserKind, formatPdfText, formatWorkbookText, isSupportedChatAttachment, parseChatAttachment, truncateChatAttachmentText, truncateWorkbookText } from "../src/lib/chat-attachments";
+import { CHAT_ATTACHMENT_ACCEPT, MAX_CHAT_ATTACHMENT_TEXT_LENGTH, MAX_WORKBOOK_MODEL_TEXT_LENGTH, chatAttachmentParserKind, formatPdfText, formatWorkbookText, isSupportedChatAttachment, openChatAttachmentPicker, parseChatAttachment, truncateChatAttachmentText, truncateWorkbookText } from "../src/lib/chat-attachments";
+
+test("restores document types when opening files after cancelling the image picker", () => {
+    const openedAccepts: string[] = [];
+    const input = {
+        accept: CHAT_ATTACHMENT_ACCEPT,
+        click() { openedAccepts.push(this.accept); },
+    };
+
+    openChatAttachmentPicker(input, true);
+    // Cancelling the native picker does not necessarily trigger a React render.
+    openChatAttachmentPicker(input);
+
+    expect(openedAccepts).toEqual(["image/*", CHAT_ATTACHMENT_ACCEPT]);
+});
 
 test("loads heavyweight office parsers only for the matching attachment type", () => {
     expect(chatAttachmentParserKind({ name: "notes.txt", type: "text/plain" })).toBeNull();
@@ -80,3 +95,36 @@ test("marks a workbook as shortened when it is sampled across worksheets", async
     expect(attachment.truncated).toBe(true);
     expect(attachment.textContent).toContain("[工作表：Requirements]");
 });
+
+test("extracts actual PDF attachment text and preserves page boundaries", async () => {
+    const { PDFDocument } = await import("pdf-lib");
+    const pdf = await PDFDocument.create();
+    pdf.addPage().drawText("PDF_CHECK_BLUE_731");
+    pdf.addPage().drawText("PDF_CHECK_SECOND_942");
+    const attachment = await parseChatAttachment(new File([await pdf.save()], "check.pdf", { type: "application/pdf" }));
+
+    expect(attachment.kind).toBe("text");
+    expect(attachment.textContent).toContain("[第 1 页]\nPDF_CHECK_BLUE_731");
+    expect(attachment.textContent).toContain("[第 2 页]\nPDF_CHECK_SECOND_942");
+});
+
+test("includes a locally hosted PDF worker in the production attachment bundle", async () => {
+    const { build } = await import("vite");
+    const result = await build({
+        configFile: false,
+        envDir: false,
+        root: resolve(import.meta.dir, ".."),
+        logLevel: "silent",
+        build: {
+            write: false,
+            minify: false,
+            rollupOptions: { input: resolve(import.meta.dir, "../src/lib/chat-attachments.ts"), preserveEntrySignatures: "strict" },
+        },
+    });
+    const bundles = Array.isArray(result) ? result : [result];
+    const output = bundles.flatMap((bundle) => "output" in bundle ? bundle.output : []);
+    const worker = output.find((item) => item.type === "asset" && /pdf\.worker-[^/]+\.mjs$/.test(item.fileName));
+
+    expect(worker).toBeDefined();
+    expect(output.some((item) => item.type === "chunk" && item.code.includes(worker!.fileName))).toBe(true);
+}, 30_000);

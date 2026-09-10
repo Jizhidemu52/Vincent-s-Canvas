@@ -4,7 +4,8 @@ import { Bot, Copy, Cpu, History, ImageIcon, Maximize2, MoreHorizontal, PanelLef
 import { Button, Dropdown, Modal, Popover, Segmented, Switch, Tooltip } from "antd";
 import { motion } from "motion/react";
 
-import { modelOptionName, normalizeModelOptionValue, resolveModelChannel, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionName, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { ModelPicker } from "@/components/model-picker";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
 import { requestEdit, requestGeneration, requestImageQuestion, requestToolResponse, toolResponseToInput, type AiTextMessage, type ClaudeAssistantContent, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall, type ToolResponseResult } from "@/services/api/image";
@@ -962,7 +963,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         </Tooltip>
                         {canManageConfig ? (
                             <Tooltip title="配置">
-                                <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<Settings2 className="size-4" />} onClick={() => openConfigDialog(false)} />
+                                <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<Settings2 className="size-4" />} onClick={() => setView("setup")} />
                             </Tooltip>
                         ) : null}
                     </>
@@ -970,7 +971,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             /> : null}
 
             {canManageConfig && view === "setup" ? (
-                <OnlineAgentSetupView theme={theme} activeModel={activeModel} onOpenConfig={() => openConfigDialog(true)} />
+                <OnlineAgentSetupView theme={theme} config={effectiveConfig} disabled={isRunning} onModelChange={(model) => updateConfig("textModel", model)} />
             ) : (
                 <div className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
                     {view === "history" ? (
@@ -1088,6 +1089,10 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                             </div>
                         </div>
                     ) : null}
+                    <div className="mx-4 mb-2 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }} data-testid="canvas-agent-text-model">
+                        <span className="shrink-0">对话模型</span>
+                        <AgentTextModelPicker config={effectiveConfig} value={effectiveConfig.textModel} disabled={isRunning} onChange={(model) => updateConfig("textModel", model)} />
+                    </div>
                     <div className="mx-4 mb-2 flex items-center justify-between gap-2 text-[11px]" style={{ color: theme.node.muted }} data-testid="canvas-auto-context">
                         <span title="发送时读取可见、选中和预览中的素材；视频提供抽样画面，不含声音。关闭后仍保留画布结构与手动参考。">{autoContext ? "自动读取画布 · 图片、视频画面与文字" : "自动读取已关闭 · 仅结构与手动参考"}</span>
                         <button type="button" className="shrink-0 hover:underline" aria-pressed={autoContext} onClick={() => setAutoContext((current) => !current)}>{autoContext ? "关闭" : "开启"}</button>
@@ -1109,7 +1114,6 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         generationControls={<AgentGenerationControls settings={generationSettings} config={effectiveConfig} imageCapabilities={imageCapabilities} videoCapabilities={videoCapabilities} theme={theme} onChange={updateGenerationSettings}
                             loading={capabilitiesLoading} error={capabilityError} onRetry={loadCapabilities}
                             extra={<div className="mt-3 grid gap-3 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
-                                <div className="flex items-center justify-between gap-2"><span>对话模型</span><AgentTextModelPicker config={effectiveConfig} value={effectiveConfig.textModel} onChange={(model) => updateConfig("textModel", model)} /></div>
                                 <div className="flex items-center justify-between"><span>Agent</span><AgentModeSwitch value={agentMode} theme={theme} onChange={onAgentModeChange} /></div>
                                 <label className="flex items-center justify-between">工具执行前确认<Switch size="small" checked={confirmTools} onChange={(confirmTools) => setAgentState({ confirmTools })} /></label>
                                 <CanvasPromptLibrary onSelect={setPrompt} />
@@ -1172,7 +1176,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                             { type: "divider" },
                             { key: "online", label: `${agentMode === "online" ? "✓ " : ""}网站 Agent`, onClick: () => onAgentModeChange("online") },
                             { key: "local", label: `${agentMode === "local" ? "✓ " : ""}本机 Agent`, onClick: () => onAgentModeChange("local") },
-                            ...(canManageConfig ? [{ key: "config", label: "连接配置", onClick: () => openConfigDialog(false) }] : []),
+                            ...(canManageConfig ? [{ key: "config", label: "连接配置", onClick: () => { onAgentModeChange("online"); setView("setup"); } }] : []),
                         ] }}><button type="button" className="cw-icon" aria-label="对话选项"><MoreHorizontal className="size-4" /></button></Dropdown>
                     </div>
                 </header>
@@ -1182,49 +1186,17 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     );
 }, canvasAssistantPanelPropsEqual);
 
-function AgentTextModelPicker({ config, value, onChange }: { config: AiConfig; value: string; onChange: (model: string) => void }) {
-    const options = useMemo(() => Array.from(new Set([value, ...selectableModelsByCapability(config, "text")].filter(Boolean))), [config, value]);
-    const current = value || "";
+function AgentTextModelPicker({ config, value, onChange, disabled = false }: { config: AiConfig; value: string; onChange: (model: string) => void; disabled?: boolean }) {
     return (
-        <Select value={current} onValueChange={onChange}>
-            <SelectTrigger
-                hideChevron
-                className="h-7 min-w-0 max-w-[220px] gap-1.5 border-0 bg-transparent px-1 py-0 text-xs font-normal shadow-none hover:bg-transparent hover:opacity-75 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:ring-0 dark:bg-transparent dark:hover:bg-transparent"
-                title={current ? `${modelOptionName(current)} · ${resolveModelChannel(config, current).name}` : "选择文本模型"}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-            >
-                <AgentModelIcon model={current} />
-                <span className="min-w-0 truncate">{current ? modelOptionName(current) : "选择文本模型"}</span>
-                {current ? <span className="shrink-0 opacity-55">{resolveModelChannel(config, current).name}</span> : null}
-            </SelectTrigger>
-            <SelectContent
-                data-canvas-no-zoom
-                className="z-[1200] w-72 max-w-[calc(100vw-24px)]"
-                position="popper"
-                align="start"
-                side="bottom"
-                sideOffset={6}
-                onPointerDown={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-            >
-                {options.length ? (
-                    options.map((model) => (
-                        <SelectItem key={model} value={model} textValue={`${modelOptionName(model)} ${resolveModelChannel(config, model).name}`}>
-                            <span className="flex min-w-0 items-center gap-2">
-                                <AgentModelIcon model={model} />
-                                <span className="min-w-0 flex-1 truncate">{modelOptionName(model)}</span>
-                                <span className="shrink-0 text-xs opacity-55">{resolveModelChannel(config, model).name}</span>
-                            </span>
-                        </SelectItem>
-                    ))
-                ) : (
-                    <SelectItem value="__empty_text_model__" disabled>
-                        暂无文本模型
-                    </SelectItem>
-                )}
-            </SelectContent>
-        </Select>
+        <ModelPicker
+            config={config}
+            value={value}
+            onChange={onChange}
+            capability="text"
+            modelsSource="server"
+            disabled={disabled}
+            className="h-7 min-w-0 max-w-[260px] rounded-md border-0 bg-transparent px-1 py-0 text-xs shadow-none"
+        />
     );
 }
 
@@ -1382,26 +1354,26 @@ function AssistantHistory({ sessions, activeSession, onOpen, onDelete }: { sessi
     );
 }
 
-function OnlineAgentSetupView({ theme, activeModel, onOpenConfig }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; activeModel: string; onOpenConfig: () => void }) {
+function OnlineAgentSetupView({ theme, config, onModelChange, disabled = false }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; config: AiConfig; onModelChange: (model: string) => void; disabled?: boolean }) {
     return (
         <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
             <div className="space-y-4">
                 <div>
                     <div className="text-base font-semibold leading-6">连接配置</div>
                     <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>
-                        网站 Agent 直接使用当前网页配置的文本模型和 API。
+                        网站 Agent 使用后台已启用的对话模型和 API。选择会同步到网页全局文本模型配置，无需在这里填写密钥。
                     </div>
                 </div>
                 <div className="rounded-lg border p-3" style={{ borderColor: theme.node.stroke }}>
                     <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
-                            <div className="text-sm font-medium leading-5">文本模型</div>
-                            <div className="mt-1 truncate text-xs leading-5" style={{ color: theme.node.muted }}>
-                                {activeModel || "未配置模型"}
+                            <div className="text-sm font-medium leading-5">对话模型</div>
+                            <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>
+                                <AgentTextModelPicker config={config} value={config.textModel} disabled={disabled} onChange={onModelChange} />
                             </div>
                         </div>
-                        <Button className="!h-8 !px-3" type="primary" icon={<Settings2 className="size-4" />} onClick={onOpenConfig}>
-                            配置
+                        <Button className="!h-8 !px-3" type="primary" icon={<Settings2 className="size-4" />} href="/admin?tab=api" target="_blank" rel="noopener noreferrer">
+                            后台模型配置
                         </Button>
                     </div>
                 </div>

@@ -7,7 +7,7 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
     const { selectedCount, canUndo, canRedo, onAddImage, onAddVideo, onAddAudio, onAddText, onAddConfig, onOpenQuickGenerate, onOpenBatchEdit, onUndo, onRedo, onUpload, onDelete, onClear, onDeselect, onOpenMyAssets, backgroundMode, showImageInfo, onBackgroundModeChange, onShowImageInfoChange, interactionMode = "select", onInteractionModeChange, children } = props;
     return (
         <div data-testid="canvas-top-tool-rail" className="cw-dock">
-            <div className="cw-tools cw-surface">
+            <div className="cw-tools">
                 <Tooltip title="选择 / 框选"><button type="button" className="cw-icon" aria-label="选择 / 框选" aria-pressed={interactionMode === "select"} onClick={() => onInteractionModeChange?.("select")}><MousePointer2 className="size-4" /></button></Tooltip>
                 <Tooltip title="移动画布"><button type="button" className="cw-icon" aria-label="移动画布" aria-pressed={interactionMode === "hand"} onClick={() => { onDeselect(); onInteractionModeChange?.("hand"); }}><Hand className="size-4" /></button></Tooltip>
                 <Tooltip title="上传素材"><button type="button" className="cw-icon" aria-label="上传素材" onClick={onUpload}><Upload className="size-4" /></button></Tooltip>
@@ -30,7 +30,7 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
                 <Tooltip title="撤销"><button type="button" className="cw-icon" aria-label="撤销" disabled={!canUndo} onClick={onUndo}><Undo2 className="size-4" /></button></Tooltip>
                 <Tooltip title="重做"><button type="button" className="cw-icon" aria-label="重做" disabled={!canRedo} onClick={onRedo}><Redo2 className="size-4" /></button></Tooltip>
             </div>
-            <div className="cw-tools cw-surface">
+            <div className="cw-tools">
                 <Tooltip title="我的素材"><button type="button" className="cw-icon" aria-label="我的素材" onClick={onOpenMyAssets}><FolderOpen className="size-4" /></button></Tooltip>
                 {children}
             </div>

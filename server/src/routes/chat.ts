@@ -120,6 +120,7 @@ export async function requestChatCompletion(
 ): Promise<ChatCompletionResult> {
     if (model.protocol === "gemini") return requestGeminiCompletion(model, credentials, input);
     if (model.protocol === "anthropic") return requestClaudeCompletion(model, credentials, input);
+    if (model.protocol === "openai-chat") return requestOpenAiChatCompletion(model, credentials, input);
     if (model.protocol === "openai" || model.protocol === "custom") return requestOpenAiCompletion(model, credentials, input);
     throw new ChatProtocolError("PROTOCOL_NOT_SUPPORTED", "当前对话入口暂不支持该 Provider 协议");
 }
@@ -129,13 +130,9 @@ async function requestClaudeCompletion(
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
 ) {
-    const upstream = await fetch(`${model.base_url.replace(/\/$/, "")}/v1/messages`, {
+    const upstream = await fetch(claudeMessagesUrl(model.base_url), {
         method: "POST",
-        headers: {
-            "x-api-key": credentials.apiKey || "",
-            "anthropic-version": ANTHROPIC_MESSAGES_VERSION,
-            "content-type": "application/json",
-        },
+        headers: claudeHeaders(credentials),
         body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking }) }),
         signal: AbortSignal.timeout(180000),
     });
@@ -148,15 +145,27 @@ export async function requestClaudeStream(
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; claude?: { thinking?: boolean; maxTokens?: number } },
 ) {
-    const upstream = await fetch(`${model.base_url.replace(/\/$/, "")}/v1/messages`, {
+    const upstream = await fetch(claudeMessagesUrl(model.base_url), {
         method: "POST",
-        headers: { "x-api-key": credentials.apiKey || "", "anthropic-version": ANTHROPIC_MESSAGES_VERSION, "content-type": "application/json" },
+        headers: claudeHeaders(credentials),
         body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking, stream: true }) }),
         signal: AbortSignal.timeout(180000),
     });
     if (!upstream.ok) throw await upstreamError("Claude Provider", upstream);
     if (!upstream.body) throw new ChatProtocolError("CLAUDE_STREAM_EMPTY", "Claude 流式响应为空");
     return upstream;
+}
+
+function claudeMessagesUrl(baseUrl: string) {
+    return `${baseUrl.replace(/\/$/, "").replace(/\/v1$/, "")}/v1/messages`;
+}
+
+function claudeHeaders(credentials: Record<string, string>) {
+    const headers = requestHeaders(credentials);
+    // OpenToken documents Bearer auth; retain x-api-key for existing native providers.
+    if (credentials.apiKey) headers.set("x-api-key", credentials.apiKey);
+    headers.set("anthropic-version", ANTHROPIC_MESSAGES_VERSION);
+    return headers;
 }
 
 export function buildClaudeMessagesRequest(
@@ -211,6 +220,9 @@ export function buildClaudeMessagesRequest(
 }
 
 function claudeThinkingParameters(options: { modelId?: string; maxTokens: number; thinking?: boolean }) {
+    // OpenToken does not document a thinking override for this alias. Use its
+    // default instead of guessing Claude 5 or legacy budget semantics.
+    if (options.modelId?.toLowerCase() === "claude-fable-5-1") return {};
     // ApiMart delegates parameter semantics to Anthropic. Claude 5 rejects the
     // legacy enabled/budget_tokens setting; Fable 5 also rejects disabled.
     if (/^claude-(opus|sonnet|fable)-5$/i.test(options.modelId || "")) {
@@ -290,6 +302,51 @@ async function requestOpenAiCompletion(
             ...(item.thoughtSignature ? { thoughtSignature: item.thoughtSignature } : {}),
         }));
     return { content, toolCalls };
+}
+
+async function requestOpenAiChatCompletion(
+    model: ChatModel,
+    credentials: Record<string, string>,
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown },
+): Promise<ChatCompletionResult> {
+    type Message = { role: string; content: unknown; tool_calls?: ToolCall[]; tool_call_id?: string };
+    const messages: Message[] = [];
+    for (const item of input.input) {
+        if ("role" in item) {
+            messages.push({ role: item.role, content: typeof item.content === "string" ? item.content : item.content.map(part =>
+                part.type === "input_text" ? { type: "text", text: part.text } : { type: "image_url", image_url: { url: part.image_url } },
+            ) });
+        } else if (item.type === "function_call") {
+            const call: ToolCall = { id: item.call_id, type: "function", function: { name: item.name, arguments: item.arguments } };
+            const previous = messages.at(-1);
+            if (previous?.role === "assistant" && previous.tool_calls) previous.tool_calls.push(call);
+            else messages.push({ role: "assistant", content: null, tool_calls: [call] });
+        } else if (item.type === "function_call_output") {
+            messages.push({ role: "tool", content: item.output, tool_call_id: item.call_id });
+        } else {
+            throw new ChatProtocolError("CHAT_HISTORY_PROTOCOL_MISMATCH", "该会话包含 Claude 原生工具记录，请新建对话后切换接口协议。");
+        }
+    }
+    const toolChoice = input.toolChoice && typeof input.toolChoice === "object" && "name" in input.toolChoice
+        ? { type: "function", function: { name: input.toolChoice.name } } : input.toolChoice ?? "auto";
+    const upstream = await fetch(`${model.base_url.replace(/\/$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: requestHeaders(credentials),
+        body: JSON.stringify({
+            model: model.model_id,
+            messages,
+            ...(input.tools.length ? {
+                tools: input.tools.map(({ type, ...definition }) => ({ type, function: definition })),
+                tool_choice: toolChoice,
+                parallel_tool_calls: false,
+            } : {}),
+        }),
+        signal: AbortSignal.timeout(180000),
+    });
+    if (!upstream.ok) throw await upstreamError("Chat Completions Provider", upstream);
+    const body = await upstream.json() as { choices?: Array<{ message?: { content?: string | null; tool_calls?: ToolCall[] }; finish_reason?: string }> };
+    const choice = body.choices?.[0];
+    return { content: choice?.message?.content || "", toolCalls: choice?.message?.tool_calls || [], ...(choice?.finish_reason ? { stopReason: choice.finish_reason } : {}) };
 }
 
 async function requestGeminiCompletion(

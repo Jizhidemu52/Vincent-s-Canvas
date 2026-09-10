@@ -1,12 +1,58 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 
 import {
   buildOpenTokenImageRequest,
+  isOpenTokenImageModel,
   openTokenErrorMessage,
   parseOpenTokenImageResponse,
+  runOpenTokenImage,
 } from "../src/opentoken-image";
 
 describe("OpenToken image protocol adapter", () => {
+  test("distinguishes submission and result-download transport failures without resubmitting", async () => {
+    const fetchMock = spyOn(globalThis, "fetch");
+    const input = { baseUrl: "https://opentoken.test/v1", apiKey: "test-key", prompt: "test" };
+    let calls = 0;
+    try {
+      fetchMock.mockImplementation(Object.assign(async () => { calls += 1; throw new Error("unknown certificate verification error"); }, { preconnect() {} }));
+      await expect(runOpenTokenImage(input)).rejects.toThrow("OpenToken image submission transport failed: unknown certificate verification error");
+      expect(calls).toBe(1);
+      calls = 0;
+      fetchMock.mockImplementation(Object.assign(async () => {
+        calls += 1;
+        if (calls === 1) return Response.json({ data: [{ url: "https://image.test/result.png" }] });
+        throw new Error("unknown certificate verification error");
+      }, { preconnect() {} }));
+      await expect(runOpenTokenImage(input)).rejects.toThrow("OpenToken image result download transport failed: unknown certificate verification error");
+      expect(calls).toBe(2);
+    } finally { fetchMock.mockRestore(); }
+  });
+
+  test("accepts both GPT Image 2.5 image models without admitting chat or unknown models", () => {
+    expect(isOpenTokenImageModel("gpt-image-2.5-flare")).toBe(true);
+    expect(isOpenTokenImageModel("gpt-image-2.5-sunburst")).toBe(true);
+    expect(isOpenTokenImageModel("gpt-image-2")).toBe(true);
+    expect(isOpenTokenImageModel("gemini-3.1-flash-image")).toBe(true);
+    expect(isOpenTokenImageModel("gpt-5.5")).toBe(false);
+    expect(isOpenTokenImageModel("gpt-image-2.5-unknown")).toBe(false);
+    expect(isOpenTokenImageModel(undefined)).toBe(false);
+  });
+
+  for (const modelId of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"] as const) {
+    test(`${modelId} is preserved in generation and reference-image edit requests`, () => {
+      const input = { baseUrl: "https://example.test/v1", apiKey: "shared-test-key", modelId, prompt: "A green vase", size: "auto", quality: "auto" as const };
+      const generation = buildOpenTokenImageRequest(input);
+      expect(generation.url).toBe("https://example.test/v1/images/generations");
+      expect(generation.body).toMatchObject({ model: modelId, n: 1, size: "auto", quality: "auto" });
+      expect(generation.headers.authorization).toBe("Bearer shared-test-key");
+      const edit = buildOpenTokenImageRequest({ ...input, references: [{ filename: "source.png", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]) }] });
+      expect(edit.url).toBe("https://example.test/v1/images/edits");
+      expect(edit.form?.get("model")).toBe(modelId);
+      expect(edit.form?.getAll("image")).toHaveLength(1);
+      expect(edit.headers.authorization).toBe(generation.headers.authorization);
+    });
+  }
+
   test("native transparent edits preserve source bytes and send PNG output parameters", async () => {
     const bytes = new Uint8Array([137, 80, 78, 71, 0, 1, 255]);
     const request = buildOpenTokenImageRequest({ baseUrl: "https://example.test/v1", apiKey: "test", prompt: "衣领改紫色", background: "transparent", references: [{ filename: "原图.png", mimeType: "image/png", bytes }] });

@@ -1,6 +1,6 @@
-import { memo, useEffect } from "react";
-import { ImageIcon, Info, LoaderCircle, Paperclip, X } from "lucide-react";
-import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { memo, useEffect, useId, useState } from "react";
+import { ChevronDown, ImageIcon, Info, LoaderCircle, Paperclip, X } from "lucide-react";
+import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
 import { CanvasQuickReferenceTray } from "@/components/canvas/canvas-quick-reference-tray";
 import { ModelPicker } from "@/components/model-picker";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -27,6 +27,8 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     onClearReferences, onMoveReference, onMissingConfig, onGenerate, positioned, onClearPosition,
 }: CanvasQuickGeneratePanelProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const [settingsExpanded, setSettingsExpanded] = useState(false);
+    const settingsId = useId();
     const models = useBusinessConfigStore((state) => state.models);
     const modelStatus = useBusinessConfigStore((state) => state.status);
     const availableModel = modelStatus === "ready" ? resolveCapabilityModel(config, "image", models, model) : "";
@@ -35,6 +37,8 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     }, [availableModel, model, modelStatus, onModelChange, running]);
     const profile = imageModelProfile(availableModel || model, models);
     const settings = normalizeImageModelSettings({ size, quality, count: String(count) }, profile);
+    const sizeSummary = settings.size.includes("x") ? settings.size.replace("x", " × ") : imageSizeLabel(settings.size);
+    const settingsSummary = `${profile.verified ? `${sizeSummary} · ${profile.qualityLabel}${imageQualityLabel(settings.quality)}` : "渠道默认参数"} · ${settings.count}${profile.maxCount > 1 ? " 张" : " 个任务"}`;
     useEffect(() => {
         if (running || !availableModel) return;
         if (size !== settings.size) onSizeChange(settings.size);
@@ -46,12 +50,12 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     const disabled = running || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid;
     return (
         <div data-testid="canvas-quick-generate-panel" data-canvas-no-zoom
-            className={embedded ? "cw-generator" : "cw-generator cw-generator-mobile cw-surface"}
+            className={embedded ? "cw-generator" : "cw-generator cw-generator-mobile cw-surface max-h-[calc(100dvh-144px)] overflow-y-auto"}
             style={{ color: theme.node.text }}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}>
-            {!embedded ? <div className="cw-tabs"><span>创建</span><button className="cw-icon" aria-label="关闭画布生图" onClick={onClose}><X size={16} /></button></div> : null}
+            {!embedded ? <div className="cw-tabs"><span>创建</span><button className="cw-icon" style={{ marginLeft: "auto" }} aria-label="关闭画布生图" onClick={onClose}><X size={16} /></button></div> : null}
             <div className="cw-generator-body">
                 {positioned ? <div className="mb-3 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span>下一次生成放在右键位置</span><button type="button" className="shrink-0 hover:underline" onClick={onClearPosition}>取消定位</button></div> : null}
                 <div className="cw-media-kind"><ImageIcon size={15} /><span>{references.length ? "编辑图像" : "图像"}</span>{profile.documentationUrl ? <a className="cw-model-info" href={profile.documentationUrl} target="_blank" rel="noreferrer" title={`${profile.tip} 点击查看接口文档`} aria-label="查看当前模型接口文档"><Info size={14} /></a> : <span className="cw-model-info" title={profile.tip}><Info size={14} /></span>}</div>
@@ -69,11 +73,20 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                         }
                     }} />
                 <CanvasQuickReferenceTray references={references} disabled={running} onMove={onMoveReference} onRemove={onRemoveReference} onClear={onClearReferences} />
-                <p className="cw-selection-hint">{references.length ? "按上方顺序编辑参考图，原图保留。取消选中不会清空参考图。" : "点击或框选画布图片，自动添加为参考图"}</p>
+                <details className="cw-selection-hint">
+                    <summary className="cursor-pointer py-1"><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Info size={12} aria-hidden /><span>{references.length ? "参考图说明" : "点击或框选画布图片添加参考图"}</span></span></summary>
+                    <p className="pt-1">按上方顺序编辑参考图，原图保留。取消选中不会清空参考图；请用移除或清空按钮调整。</p>
+                </details>
                 {!referenceValidation.valid ? <p className="cw-reference-error" role="alert">{referenceValidation.message}</p> : null}
             </div>
             <div className="cw-generator-footer">
-                    <fieldset disabled={running || !availableModel} className="min-w-0 border-0 p-0">
+                    <button type="button" id={`${settingsId}-toggle`} aria-expanded={settingsExpanded} aria-controls={settingsId}
+                        className="flex w-full cursor-pointer items-center justify-between gap-2 rounded py-2 text-left text-xs hover:bg-[var(--cw-soft)]"
+                        onClick={() => setSettingsExpanded(value => !value)}>
+                        <span className="min-w-0"><span className="block">生成设置</span><span className="mt-1 block break-words text-[11px]" style={{ color: theme.node.muted }}>{settingsSummary}</span></span>
+                        <ChevronDown size={14} aria-hidden className={`shrink-0 ${settingsExpanded ? "rotate-180" : ""}`} />
+                    </button>
+                    <fieldset id={settingsId} hidden={!settingsExpanded} aria-labelledby={`${settingsId}-toggle`} disabled={running || !availableModel} className="max-h-[min(36dvh,320px)] min-w-0 overflow-y-auto border-0 p-0">
                         <ImageSettingsPanel config={{ ...config, model, imageModel: model, ...settings }} theme={theme} showTitle={false} onConfigChange={(key, value) => {
                             if (key === "size") onSizeChange(value);
                             if (key === "quality") onQualityChange(value);

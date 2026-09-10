@@ -5,11 +5,12 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type SetStateA
 import { cn } from "@/lib/utils";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { createClientId } from "@/lib/client-id";
-import { CHAT_ATTACHMENT_ACCEPT, parseChatAttachment, type ParsedChatAttachment } from "@/lib/chat-attachments";
-import { latestChatContext } from "@/lib/chat-context";
+import { CHAT_ATTACHMENT_ACCEPT, openChatAttachmentPicker, parseChatAttachment, type ParsedChatAttachment } from "@/lib/chat-attachments";
+import { buildChatRequestMessages } from "@/lib/chat-context";
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
 import { createChatStreamBuffer } from "./chat-stream-buffer";
-import { requestEdit, requestGeneration, requestImageQuestion, type AiTextMessage } from "@/services/api/image";
+import { chatSessionStorage } from "./chat-session-storage";
+import { isClaudeModel, requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
@@ -35,25 +36,6 @@ function createSession(mode: ChatMode = "chat"): ChatSession {
 function sessionTitle(session: ChatSession) {
     const first = session.messages.find((item) => item.role === "user")?.content.trim();
     return first ? first.slice(0, 18) : session.title || "新对话";
-}
-
-function readSessions(key: string) {
-    try {
-        const parsed = JSON.parse(localStorage.getItem(key) || "[]") as ChatSession[];
-        return Array.isArray(parsed) && parsed.length ? parsed : [createSession()];
-    } catch {
-        return [createSession()];
-    }
-}
-
-function storedSessions(sessions: ChatSession[]) {
-    return sessions.map((session) => ({
-        ...session,
-        messages: session.messages.map(({ generatedImages: _generatedImages, attachments, ...message }) => ({
-            ...message,
-            attachments: attachments?.map(({ id, name, mimeType, size }) => ({ id, name, mimeType, size })),
-        })),
-    }));
 }
 
 function readFileAsDataUrl(file: File) {
@@ -105,10 +87,14 @@ export default function ChatPage() {
     const [mode, setMode] = useState<ChatMode>("chat");
     const [agentTask, setAgentTask] = useState<AgentTask>("brief");
     const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches);
-    const [sessions, setSessionsState] = useState<ChatSession[]>(() => [createSession()]);
+    const [sessions, setSessionsState] = useState<ChatSession[]>([]);
     const sessionsRef = useRef(sessions);
     const [loadedStorageKey, setLoadedStorageKey] = useState<string | null>(null);
     const loadedStorageKeyRef = useRef<string | null>(null);
+    const [sessionLoadError, setSessionLoadError] = useState("");
+    const [sessionSaveError, setSessionSaveError] = useState("");
+    const [sessionReload, setSessionReload] = useState(0);
+    const sessionsReady = loadedStorageKey === storageKey;
     const setSessions = useCallback((update: SetStateAction<ChatSession[]>) => {
         const next = typeof update === "function" ? update(sessionsRef.current) : update;
         // Keep a synchronous snapshot: pagehide cannot wait for another React commit.
@@ -124,18 +110,24 @@ export default function ChatPage() {
     const followBottomRef = useRef(true);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const activeStreamRef = useRef<ReturnType<typeof createChatStreamBuffer> | null>(null);
-    const persistence = useMemo(() => createDeferredPersistQueue<ChatSession[]>(400, (value) => {
+    const preparingMessageRef = useRef(false);
+    const persistSessions = useCallback(async (value: ChatSession[]) => {
         try {
-            localStorage.setItem(storageKey, JSON.stringify(storedSessions(value)));
-        } catch {
-            // Keep the last successful snapshot if storage is unavailable or full.
+            await chatSessionStorage.save(storageKey, value);
+            if (loadedStorageKeyRef.current === storageKey) setSessionSaveError("");
+        } catch (error) {
+            if (loadedStorageKeyRef.current === storageKey) setSessionSaveError(`聊天记录保存失败：${error instanceof Error ? error.message : "本地存储不可用"}。当前内容仍保留在本页，请勿刷新。`);
+            throw error;
         }
-    }), [storageKey]);
+    }, [storageKey]);
+    const persistence = useMemo(() => createDeferredPersistQueue<ChatSession[]>(400, (value) => {
+        void persistSessions(value).catch(() => undefined);
+    }), [persistSessions]);
 
     useEffect(() => {
         const flush = () => {
             activeStreamRef.current?.flush();
-            if (loadedStorageKeyRef.current === storageKey) persistence.schedule(sessionsRef.current);
+            if (loadedStorageKeyRef.current === storageKey && !preparingMessageRef.current) persistence.schedule(sessionsRef.current);
             persistence.flush();
         };
         window.addEventListener("pagehide", flush);
@@ -147,16 +139,26 @@ export default function ChatPage() {
     }, [persistence, storageKey]);
 
     useEffect(() => {
-        // The quick image picker temporarily narrows this attribute. Restore
-        // the documented full attachment set after every React render.
-        if (fileInputRef.current) fileInputRef.current.accept = CHAT_ATTACHMENT_ACCEPT;
-    });
-
-    useEffect(() => {
-        setSessions(readSessions(storageKey));
-        loadedStorageKeyRef.current = storageKey;
-        setLoadedStorageKey(storageKey);
-    }, [setSessions, storageKey]);
+        let cancelled = false;
+        loadedStorageKeyRef.current = null;
+        setLoadedStorageKey(null);
+        setSessionLoadError("");
+        setSessionSaveError("");
+        setSessions([]);
+        setDraft("");
+        setAttachments([]);
+        void chatSessionStorage.load<ChatSession>(storageKey, () => localStorage.getItem(storageKey))
+            .then((stored) => {
+                if (cancelled) return;
+                setSessions(stored.length ? stored : [createSession()]);
+                loadedStorageKeyRef.current = storageKey;
+                setLoadedStorageKey(storageKey);
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) setSessionLoadError(`聊天记录读取失败：${error instanceof Error ? error.message : "本地存储不可用"}。未覆盖原记录。`);
+            });
+        return () => { cancelled = true; };
+    }, [sessionReload, setSessions, storageKey]);
 
     useEffect(() => {
         const active = sessions.find((item) => item.id === activeSessionId);
@@ -165,7 +167,7 @@ export default function ChatPage() {
 
     useEffect(() => {
         // Account changes must not persist the previous account's sessions under the new key.
-        if (loadedStorageKey !== storageKey) return;
+        if (loadedStorageKey !== storageKey || preparingMessageRef.current) return;
         persistence.schedule(sessions);
         if (!isSending) persistence.flush();
     }, [isSending, loadedStorageKey, persistence, sessions, storageKey]);
@@ -210,7 +212,7 @@ export default function ChatPage() {
         setSelectedModel((current) => availableModels.some((item) => item.modelId === current) ? current : availableModels[0]?.modelId || "");
     }, [availableModels]);
     const selected = availableModels.find((item) => item.modelId === selectedModel);
-    const selectedClaude = /^claude-(opus|sonnet|fable)-5$/i.test(selectedModel);
+    const selectedClaude = isClaudeModel(selectedModel);
     const agent = agentTasks.find((item) => item.id === agentTask)!;
 
     const updateSession = (id: string, update: (session: ChatSession) => ChatSession) => {
@@ -219,6 +221,7 @@ export default function ChatPage() {
     };
 
     const startSession = (nextMode: ChatMode = mode) => {
+        if (!sessionsReady) return;
         const session = createSession(nextMode);
         setSessions((current) => [session, ...current]);
         setActiveSessionId(session.id);
@@ -241,6 +244,7 @@ export default function ChatPage() {
     }, [message, switchMode]);
 
     const removeSession = (id: string) => {
+        if (!sessionsReady) return;
         setSessions((current) => {
             const next = current.filter((item) => item.id !== id);
             if (next.length) return next;
@@ -252,7 +256,7 @@ export default function ChatPage() {
 
     const send = async () => {
         const text = draft.trim();
-        if ((!text && !attachments.length) || isSending || readingAttachments || !activeSession) return;
+        if (!sessionsReady || (!text && !attachments.length) || isSending || readingAttachments || !activeSession) return;
         if (!selectedModel || !selected) {
             message.warning(mode === "create" ? "管理员尚未启用可用的图像生成模型" : "管理员尚未启用可用的对话模型");
             return;
@@ -267,14 +271,28 @@ export default function ChatPage() {
         const userMessage: ChatMessage = { id: createClientId(), role: "user", content: text || "请分析我上传的内容。", attachments, createdAt: new Date().toISOString() };
         const assistantId = createClientId();
         const taskInstruction = mode === "agent" ? `${agent.prompt}\n\n请使用清晰标题、短列表和具体可执行建议。` : "";
-        const history: AiTextMessage[] = latestChatContext(activeSession.messages
-            .filter((item): item is ChatMessage & { role: "user" | "assistant" } => item.role === "user" || item.role === "assistant")
-            .map((item) => ({ role: item.role, content: messageTextContent(item) })));
+        const requestMessages = buildChatRequestMessages(activeSession.messages, userMessage);
 
-        updateSession(sessionId, (session) => ({ ...session, mode, title: session.messages.length ? session.title : text.slice(0, 18), messages: [...session.messages, userMessage], updatedAt: new Date().toISOString() }));
-        setDraft("");
-        setAttachments([]);
+        // Commit the full user turn before clearing its draft or making a model
+        // request. A failed write must leave the user's attachments available.
+        const nextSessions = sessionsRef.current.map((session) => session.id === sessionId ? { ...session, mode, title: session.messages.length ? session.title : text.slice(0, 18), messages: [...session.messages, userMessage], updatedAt: new Date().toISOString() } : session);
+        preparingMessageRef.current = true;
+        persistence.clear();
         setIsSending(true);
+        try {
+            await persistSessions(nextSessions);
+        } catch {
+            preparingMessageRef.current = false;
+            setIsSending(false);
+            message.error("聊天记录未保存，消息尚未发送；草稿和附件已保留。");
+            return;
+        }
+        preparingMessageRef.current = false;
+        if (loadedStorageKeyRef.current !== storageKey) { setIsSending(false); return; }
+        updateSession(sessionId, (session) => ({ ...session, mode, title: session.messages.length ? session.title : text.slice(0, 18), messages: [...session.messages, userMessage], updatedAt: new Date().toISOString() }));
+        setDraft((current) => current === draft ? "" : current);
+        const sentAttachmentIds = new Set(attachments.map((item) => item.id));
+        setAttachments((current) => current.filter((item) => !sentAttachmentIds.has(item.id)));
         followBottomRef.current = true;
         const stream = createChatStreamBuffer((content) => updateSession(sessionId, (session) => ({
             ...session,
@@ -301,7 +319,7 @@ export default function ChatPage() {
             }
             const response = await requestImageQuestion(
                 { ...config, model: selectedModel, textModel: selectedModel, systemPrompt: taskInstruction },
-                [...history, { role: "user", content: messageContent(userMessage) }],
+                requestMessages,
                 stream.push,
             );
             stream.cancel();
@@ -320,12 +338,16 @@ export default function ChatPage() {
         } finally {
             stream.cancel();
             if (activeStreamRef.current === stream) activeStreamRef.current = null;
+            if (loadedStorageKeyRef.current === storageKey) {
+                persistence.clear();
+                await persistSessions(sessionsRef.current).catch(() => undefined);
+            }
             setIsSending(false);
         }
     };
 
     const addFiles = async (files: FileList | null) => {
-        if (!files?.length || readingAttachments) return;
+        if (!sessionsReady || !files?.length || readingAttachments) return;
         setReadingAttachments(true);
         const candidates = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
         const next: ChatAttachment[] = [];
@@ -387,6 +409,8 @@ export default function ChatPage() {
                         </div>
                     </header>
                     {modelError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{modelError}</span><Button onClick={() => setModelReload((value) => value + 1)}>重试加载</Button></div> : null}
+                    {!sessionsReady ? <div role={sessionLoadError ? "alert" : "status"} className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{sessionLoadError || "正在读取本地聊天记录…"}</span>{sessionLoadError ? <Button onClick={() => setSessionReload((value) => value + 1)}>重试读取记录</Button> : null}</div> : null}
+                    {sessionSaveError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{sessionSaveError}</span><Button onClick={() => { if (sessionsReady && !preparingMessageRef.current) { persistence.clear(); void persistSessions(sessionsRef.current).catch(() => undefined); } }}>重试保存记录</Button></div> : null}
 
                     <div className="border-b border-border px-4 py-3 md:px-6">
                         <div className="inline-flex gap-1 rounded-xl bg-muted p-1">
@@ -415,13 +439,13 @@ export default function ChatPage() {
                                 <textarea aria-label="对话内容" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void send(); } }} placeholder={mode === "create" ? "描述要生成的图片，或写下对参考图片的修改要求…" : mode === "agent" ? agent.prompt + "…" : "输入你的问题，或上传图片、文档一起分析…"} className="min-h-[80px] w-full resize-none bg-transparent px-1 py-1 text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground" />
                                 <div className="flex items-center justify-between gap-3 border-t border-border pt-2">
                                     <div className="flex items-center gap-1">
-                                        <Tooltip title="上传图片、PDF、Word、表格或文本"><button type="button" disabled={readingAttachments || attachments.length >= 5} onClick={() => fileInputRef.current?.click()} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label="上传文件"><Paperclip className="size-5" /></button></Tooltip>
-                                        <Tooltip title="上传图片"><button type="button" disabled={readingAttachments || attachments.length >= 5} onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "image/*"; fileInputRef.current.click(); } }} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label="上传图片"><ImagePlus className="size-5" /></button></Tooltip>
+                                        <Tooltip title="上传图片、PDF、Word、表格或文本"><button type="button" disabled={!sessionsReady || readingAttachments || attachments.length >= 5} onClick={() => openChatAttachmentPicker(fileInputRef.current)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label="上传文件"><Paperclip className="size-5" /></button></Tooltip>
+                                        <Tooltip title="上传图片"><button type="button" disabled={!sessionsReady || readingAttachments || attachments.length >= 5} onClick={() => openChatAttachmentPicker(fileInputRef.current, true)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label="上传图片"><ImagePlus className="size-5" /></button></Tooltip>
                                         <span className="hidden text-xs text-muted-foreground sm:inline">图片 / 文档 / 表格 · 最多 5 个</span>
                                     </div>
-                                    <Button type="primary" disabled={(!draft.trim() && !attachments.length) || isSending || readingAttachments || !selectedModel} loading={isSending} onClick={() => void send()} icon={mode === "create" ? <Sparkles className="size-4" /> : <Send className="size-4" />} className="!h-10 !px-4">{mode === "create" ? (!deploymentFeatures.creditsEnabled ? "生成图片" : "生成图片" + (selected ? " · " + selected.creditCost + "积分" : "")) : "发送"}</Button>
+                                    <Button type="primary" disabled={!sessionsReady || (!draft.trim() && !attachments.length) || isSending || readingAttachments || !selectedModel} loading={isSending} onClick={() => void send()} icon={mode === "create" ? <Sparkles className="size-4" /> : <Send className="size-4" />} className="!h-10 !px-4">{mode === "create" ? (!deploymentFeatures.creditsEnabled ? "生成图片" : "生成图片" + (selected ? " · " + selected.creditCost + "积分" : "")) : "发送"}</Button>
                                 </div>
-                                <input ref={fileInputRef} type="file" multiple disabled={readingAttachments} accept={CHAT_ATTACHMENT_ACCEPT} className="hidden" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} />
+                                <input ref={fileInputRef} type="file" multiple disabled={!sessionsReady || readingAttachments} accept={CHAT_ATTACHMENT_ACCEPT} className="hidden" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} />
                             </div>
                             <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"><CornerDownLeft className="size-3.5" /><span>Ctrl / ⌘ + Enter 发送</span><span className="opacity-45">·</span><span>{mode === "create" ? (!deploymentFeatures.creditsEnabled ? "生成结果会保存在素材库" : "上传与预览不扣费，生成图片才会扣积分") : (!deploymentFeatures.authenticationEnabled ? "免登录创作" : "模型由管理员统一配置")}</span></p>
                         </div>
@@ -430,20 +454,6 @@ export default function ChatPage() {
             </div>
         </main>
     );
-}
-
-function messageContent(message: ChatMessage): AiTextMessage["content"] {
-    const textFiles = message.attachments?.filter((item) => item.textContent).map((item) => `\n\n[附件：${item.name}]\n${item.textContent}`).join("") || "";
-    const text = `${message.content}${textFiles}`;
-    const images = message.attachments?.filter((item) => item.dataUrl).map((item) => ({ type: "image_url" as const, image_url: { url: item.dataUrl! } })) || [];
-    return images.length ? [{ type: "text" as const, text }, ...images] : text;
-}
-
-// Historical images are retained in the session UI, but only the current turn
-// sends binary image data. This keeps long conversations below provider limits.
-function messageTextContent(message: ChatMessage) {
-    const content = messageContent(message);
-    return typeof content === "string" ? content : content.flatMap((item) => item.type === "text" ? [item.text] : []).join("\n");
 }
 
 const ChatBubble = memo(function ChatBubble({ message, onContinueEditing }: { message: ChatMessage; onContinueEditing: (image: { id: string; dataUrl: string }) => void }) {
@@ -465,16 +475,17 @@ const ChatBubble = memo(function ChatBubble({ message, onContinueEditing }: { me
 
 function ClaudeChatControls({ model, stream, thinking, maxTokens, onStreamChange, onThinkingChange, onMaxTokensChange }: { model: string; stream: boolean; thinking: boolean; maxTokens: string; onStreamChange: (value: boolean) => void; onThinkingChange: (value: boolean) => void; onMaxTokensChange: (value: string) => void }) {
     const alwaysThinking = model.toLowerCase() === "claude-fable-5";
+    const channelDefaultThinking = model.toLowerCase() === "claude-fable-5-1";
     return <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">Claude 原生参数</span>
         <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={stream} onChange={(event) => onStreamChange(event.target.checked)} /> 流式输出</label>
-        {alwaysThinking ? <span title="Fable 5 不支持关闭思考，也不支持旧版固定思考预算。">自适应思考 · 始终开启</span> : <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={thinking} onChange={(event) => onThinkingChange(event.target.checked)} /> 自适应思考</label>}
+        {channelDefaultThinking ? <span title="OpenToken 文档未指定该模型的思考覆盖参数，使用渠道默认行为。">思考模式 · 渠道默认</span> : alwaysThinking ? <span title="Fable 5 不支持关闭思考，也不支持旧版固定思考预算。">自适应思考 · 始终开启</span> : <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={thinking} onChange={(event) => onThinkingChange(event.target.checked)} /> 自适应思考</label>}
         <label className="inline-flex items-center gap-1.5" title="总输出预算包含思考与可见回复；16384 是当前项目限制，不是模型官方最大值。">总输出预算
             <select value={maxTokens} onChange={(event) => onMaxTokensChange(event.target.value)} className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none">
                 {["1024", "2048", "4096", "8192", "16384"].map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
         </label>
-        <a href="https://docs.apimart.ai/cn/api-reference/texts/general/claude-messages" target="_blank" rel="noreferrer" className="underline underline-offset-2">接口说明</a>
+        <a href={channelDefaultThinking ? "https://docs.opentoken.io/api/claude/messages-api/" : "https://docs.apimart.ai/cn/api-reference/texts/general/claude-messages"} target="_blank" rel="noreferrer" className="underline underline-offset-2">接口说明</a>
         <span className="w-full text-[11px] leading-4">预算包含思考与回复；当前项目上限 16384 tokens。参数不适用于其他模型。</span>
     </div>;
 }

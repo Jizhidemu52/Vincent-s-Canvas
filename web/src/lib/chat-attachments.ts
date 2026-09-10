@@ -5,6 +5,12 @@ export const MAX_WORKBOOK_MODEL_TEXT_LENGTH = 8_000;
 const WORKBOOK_TRUNCATION_MARKER = "[Excel \u5de5\u4f5c\u7c3f\u5185\u5bb9\u5df2\u6309\u5de5\u4f5c\u8868\u622a\u65ad]";
 export const CHAT_ATTACHMENT_ACCEPT = "image/*,.txt,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml,.sql,.java,.c,.cpp,.h,.sh,.pdf,.xlsx,.xls,.docx,text/plain,text/markdown,text/csv,application/json,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
+export function openChatAttachmentPicker(input: Pick<HTMLInputElement, "accept" | "click"> | null, imagesOnly = false) {
+    if (!input) return;
+    input.accept = imagesOnly ? "image/*" : CHAT_ATTACHMENT_ACCEPT;
+    input.click();
+}
+
 const TEXT_EXTENSIONS = new Set([
     "txt", "md", "csv", "json", "py", "js", "ts", "tsx", "jsx", "html", "css", "xml", "yaml", "yml", "sql", "java", "c", "cpp", "h", "sh",
 ]);
@@ -127,7 +133,13 @@ async function readFileAsDataUrl(file: File) {
 }
 
 async function extractPdfText(file: File) {
-    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const { getDocument, GlobalWorkerOptions } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    if (typeof window !== "undefined") {
+        // PDF.js only supplies a default worker in Node. Let Vite emit and resolve
+        // the matching local browser worker instead of relying on a CDN or /src path.
+        const { default: workerSrc } = await import("pdfjs-dist/legacy/build/pdf.worker.mjs?url");
+        GlobalWorkerOptions.workerSrc = workerSrc;
+    }
     const task = getDocument({ data: new Uint8Array(await file.arrayBuffer()), useWorkerFetch: false });
     const pdf = await task.promise;
     try {

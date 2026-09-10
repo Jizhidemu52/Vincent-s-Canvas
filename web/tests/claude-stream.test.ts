@@ -13,6 +13,7 @@ test("recognizes only the configured Claude 5 model identifiers", () => {
     expect(isClaudeModel("claude-opus-5")).toBe(true);
     expect(isClaudeModel("claude-sonnet-5")).toBe(true);
     expect(isClaudeModel("claude-fable-5")).toBe(true);
+    expect(isClaudeModel("claude-fable-5-1")).toBe(true);
     expect(isClaudeModel("gemini-3.1-pro-preview")).toBe(false);
 });
 

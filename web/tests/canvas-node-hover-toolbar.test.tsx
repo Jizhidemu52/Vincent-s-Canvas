@@ -5,6 +5,7 @@ import React, { type ReactElement } from "react";
 import ts from "typescript";
 
 import { defaultImageQuickToolIds, readImageQuickToolsConfig } from "@/components/canvas/canvas-image-toolbar-tools";
+import { canvasThemes } from "@/lib/canvas-theme";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const requireModule = createRequire(new URL("../src/components/canvas/canvas-node-hover-toolbar.tsx", import.meta.url));
@@ -12,7 +13,7 @@ const code = ts.transpileModule(readFileSync(new URL("../src/components/canvas/c
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
 }).outputText;
 
-function toolbarHarness() {
+function toolbarHarness(theme: "light" | "dark" = "light") {
     const states: unknown[] = [];
     let index = 0;
     const calls: Array<{ name: string; node?: CanvasNodeData }> = [];
@@ -31,7 +32,7 @@ function toolbarHarness() {
             },
         },
         antd: { ...requireModule("antd"), App: { useApp: () => ({ message: { warning: () => undefined } }) } },
-        "@/stores/use-theme-store": { useThemeStore: (selector: (state: unknown) => unknown) => selector({ theme: "light" }) },
+        "@/stores/use-theme-store": { useThemeStore: (selector: (state: unknown) => unknown) => selector({ theme }) },
         "@/hooks/use-copy-text": { useCopyText: () => () => calls.push({ name: "onCopyPrompt", node }) },
     };
     const module = { exports: {} as any };
@@ -49,15 +50,15 @@ function elements(value: unknown): ReactElement<any>[] {
 }
 
 describe("compact image toolbar", () => {
-    test("defaults to four common actions while preserving stored customization data", () => {
-        expect(defaultImageQuickToolIds).toEqual(["manualEdit", "edit", "maskEdit", "download"]);
+    test("defaults to three common actions while preserving stored customization data", () => {
+        expect(defaultImageQuickToolIds).toEqual(["manualEdit", "edit", "download"]);
         const saved = { ids: ["info", "delete", "saveAsset", "download", "edit", "copyPrompt", "upscale"], showLabels: false };
         expect(readImageQuickToolsConfig(saved)).toEqual(saved);
     });
 
-    test("shows only the four common image actions on the first surface", () => {
+    test("shows only the three common image actions on the first surface", () => {
         const view = elements(toolbarHarness().render());
-        expect(view.filter((element) => typeof element.props.id === "string" && typeof element.props.onClick === "function").map((element) => element.props.id)).toEqual(["manualEdit", "edit", "maskEdit", "download"]);
+        expect(view.filter((element) => typeof element.props.id === "string" && typeof element.props.onClick === "function").map((element) => element.props.id)).toEqual(["manualEdit", "edit", "download"]);
         const more = view.find((element) => element.props["aria-label"] === "更多图片工具");
         expect(more?.props["aria-haspopup"]).toBe("menu");
     });
@@ -70,7 +71,7 @@ describe("compact image toolbar", () => {
         const opened = elements(harness.render());
         expect(opened.find((element) => element.props.menu?.items)?.props.open).toBe(true);
         expect(opened.find((element) => Array.isArray(element.props.selectedIds))?.props.open).toBe(false);
-        const actions: Record<string, string> = { info: "onInfo", delete: "onDelete", retry: "onRetry", saveAsset: "onSaveAsset", copyPrompt: "onCopyPrompt", reversePrompt: "onReversePrompt", replace: "onUpload", resize: "onToggleFreeResize", crop: "onCrop", split: "onSplit", upscale: "onUpscale", superResolve: "onSuperResolve", angle: "onAngle", view: "onViewImage" };
+        const actions: Record<string, string> = { info: "onInfo", delete: "onDelete", retry: "onRetry", saveAsset: "onSaveAsset", maskEdit: "onMaskEdit", copyPrompt: "onCopyPrompt", reversePrompt: "onReversePrompt", replace: "onUpload", resize: "onToggleFreeResize", crop: "onCrop", split: "onSplit", upscale: "onUpscale", superResolve: "onSuperResolve", angle: "onAngle", view: "onViewImage" };
         const items = dropdown.props.menu.items.flatMap((item: any) => item.children || [item]);
         for (const [id, handler] of Object.entries(actions)) {
             expect(items.some((item: any) => item.key === id)).toBe(true);
@@ -86,6 +87,16 @@ describe("compact image toolbar", () => {
         const toolbar = elements(harness.render()).find((element) => element.props["data-canvas-node-toolbar"] === "true")!;
         toolbar.props.onMouseLeave();
         expect(harness.calls.filter((call) => call.name === "onLeave")).toHaveLength(0);
+    });
+
+    test("floating actions and their overflow menu follow the dark canvas theme", () => {
+        const view = elements(toolbarHarness("dark").render());
+        const toolbar = view.find((element) => element.props["data-canvas-node-toolbar"] === "true")!;
+        const dropdown = view.find((element) => element.props.menu?.items)!;
+        expect(toolbar.props.style.background).toBe(canvasThemes.dark.toolbar.panel);
+        expect(toolbar.props.style.color).toBe(canvasThemes.dark.node.text);
+        expect(dropdown.props.menu.style.background).toBe(canvasThemes.dark.toolbar.panel);
+        expect(dropdown.props.menu.style.color).toBe(canvasThemes.dark.node.text);
     });
 
     test("clamps the floating toolbar inside narrow and corner viewports", () => {

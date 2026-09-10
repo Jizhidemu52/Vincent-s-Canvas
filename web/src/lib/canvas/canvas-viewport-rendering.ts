@@ -5,6 +5,7 @@ import type { ViewportTransform } from "@/types/canvas";
 export function canvasViewportContentStyle(viewport: ViewportTransform, isInteracting: boolean) {
     return {
         transform: canvasViewportTransform(viewport),
+        "--canvas-node-ui-scale": 1 / Math.max(viewport.k, 0.0001),
         willChange: isInteracting ? "transform" : "auto",
     } as const;
 }

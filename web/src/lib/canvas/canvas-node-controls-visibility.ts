@@ -5,11 +5,14 @@ type CanvasNodeControlsVisibility = {
     hovered: boolean;
     selected: boolean;
     connecting: boolean;
+    kind?: "resize" | "connection";
+    isImage?: boolean;
 };
 
-/** Keep inactive node hit targets out of the live canvas DOM. */
-export function shouldRenderCanvasNodeControls({ renderQuality, hovered, selected, connecting }: CanvasNodeControlsVisibility) {
+/** Selection owns resize controls; image hover alone only previews its outline. */
+export function shouldRenderCanvasNodeControls({ renderQuality, hovered, selected, connecting, kind = "connection", isImage = false }: CanvasNodeControlsVisibility) {
     if (renderQuality === "moving") return false;
+    if (kind === "resize") return selected;
     const isPassiveOverviewNode = renderQuality === "overview" && !hovered && !selected;
-    return !isPassiveOverviewNode && (hovered || selected || connecting);
+    return !isPassiveOverviewNode && (connecting || (isImage ? selected && hovered : hovered || selected));
 }
