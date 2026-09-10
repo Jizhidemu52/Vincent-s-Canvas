@@ -71,17 +71,23 @@ export function createImageTaskRequests(input: {
     }));
 }
 
-export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; references?: ReferenceImage[]; signal?: AbortSignal; onSubmitted?: () => void }) {
+export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; onSubmissionStarted?: () => void; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
+    input.signal?.throwIfAborted();
     const model = await resolvePublicModel(input.modelId);
+    input.signal?.throwIfAborted();
     const sourceUrls: string[] = [];
     for (const reference of input.references || []) {
+        input.signal?.throwIfAborted();
         const dataUrl = await imageToDataUrl(reference);
+        input.signal?.throwIfAborted();
         const file = dataUrlToFile({ ...reference, dataUrl });
+        input.signal?.throwIfAborted();
         const assetId = await uploadServerAsset(file, { title: reference.name, source: "task-reference" });
+        input.signal?.throwIfAborted();
         sourceUrls.push(`/api/assets/${assetId}/content`);
     }
 
-    const rootRequestId = createClientId();
+    const rootRequestId = input.requestId || createClientId();
     const projectId = currentProjectId("image-workbench");
     const taskRequests = createImageTaskRequests({
         requestId: rootRequestId,
@@ -93,20 +99,26 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
         sourceUrls,
         count: input.count,
     });
+    input.signal?.throwIfAborted();
     const submitted = await Promise.allSettled(
-        taskRequests.map((task) => request<{ task: { id: string } }>("/api/tasks", {
-            method: "POST",
-            body: JSON.stringify(task),
-        })),
+        taskRequests.map(async (task) => {
+            input.signal?.throwIfAborted();
+            input.onSubmissionStarted?.();
+            return request<{ task: { id: string } }>("/api/tasks", {
+                method: "POST",
+                body: JSON.stringify(task),
+                signal: input.signal,
+            });
+        }),
     );
     const rejected = submitted.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (rejected) throw rejected.reason instanceof Error ? rejected.reason : new Error("任务提交失败");
     const ids = submitted.map((result) => (result as PromiseFulfilledResult<{ task: { id: string } }>).value.task.id);
-    input.onSubmitted?.();
+    await input.onSubmitted?.(ids);
 
     void refreshSessionBalance();
     try {
-        const tasks = await waitForTasks(ids, input.signal);
+        const tasks = await waitForTasks(ids, input.signal, undefined, true);
         const failed = tasks.find((task) => task.status === "failed" || task.status === "cancelled");
         if (failed) throw new Error(failed.failureReason || "生成任务失败");
         return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id })));
@@ -240,8 +252,8 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
     return result.task;
 }
 
-export async function getQueuedTask(id: string) {
-    const response = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { credentials: "include" });
+export async function getQueuedTask(id: string, signal?: AbortSignal) {
+    const response = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { credentials: "include", signal });
     if (response.status === 404) return null;
     if (!response.ok) {
         const body = await response.json().catch(() => ({})) as { message?: string };
@@ -269,8 +281,8 @@ export function getImageGenerationModels() {
     return request<{ models: ImageGenerationModel[] }>("/api/models").then(({ models }) => selectImageGenerationModels(models));
 }
 
-export async function listQueuedTasks() {
-    const result = await request<{ tasks: QueuedTask[] }>("/api/tasks");
+export async function listQueuedTasks(signal?: AbortSignal) {
+    const result = await request<{ tasks: QueuedTask[] }>("/api/tasks", { signal });
     return result.tasks;
 }
 
@@ -315,7 +327,7 @@ async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks
         if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
         const tasks = haltOnPaused
             ? await Promise.all(ids.map(async (id) => {
-                const task = await getQueuedTask(id);
+                const task = await getQueuedTask(id, signal);
                 if (!task) throw new Error(`原任务 ${id} 不存在或无权访问`);
                 return task;
             }))

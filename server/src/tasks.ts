@@ -37,6 +37,12 @@ const priorityBand: Record<TaskPriority, number> = {
 };
 export const TASK_LEASE_SECONDS = 180;
 
+export function canAutomaticallyRetryTask(operationType: string, submissionStartedAt: string | null, attempts: number) {
+  // Non-video adapters do not persist an upstream ID that could safely resume
+  // an interrupted paid request. Only video pre-submission work can be retried.
+  return operationType === "video_generation" && !submissionStartedAt && attempts < 3;
+}
+
 export function queueScore(priority: TaskPriority, timestamp = Date.now()) {
   return priorityBand[priority] * 1_000_000_000_000_000 + timestamp;
 }
@@ -44,13 +50,16 @@ export function queueScore(priority: TaskPriority, timestamp = Date.now()) {
 /**
  * Redis is an acceleration layer, not the task source of truth. Rebuild its
  * waiting members from Postgres after a worker restart, and return only
- * expired processing leases to waiting. This covers crashes both before and
- * after the Redis pop without stealing work from a live worker.
+ * expired video leases to waiting for their existing submission-state guards.
+ * Other interrupted work is paused because its upstream outcome is unknown.
  */
 export async function restoreWaitingTasksToQueue(db: Database, cache: Cache) {
   await db.query(
     `UPDATE tasks
-        SET status='waiting',lease_expires_at=NULL,updated_at=now()
+        SET status=CASE WHEN operation_type='video_generation' THEN 'waiting' ELSE 'paused' END,
+            failure_reason=CASE WHEN operation_type='video_generation' THEN failure_reason
+              ELSE '执行中断，原上游提交状态待核实；已暂停，不能直接恢复或自动重新生成' END,
+            lease_expires_at=NULL,updated_at=now()
       WHERE status='processing' AND (lease_expires_at IS NULL OR lease_expires_at <= now())`,
   );
   const pending = await db.query<{ id: string; priority: TaskPriority; queued_at: string }>(
@@ -194,15 +203,17 @@ export async function transitionTask(
     batch_id: string | null;
     status: string;
     priority: TaskPriority;
+    operation_type: string;
+    attempts: number;
   }>(
-    "SELECT id,request_id,batch_id,status,priority FROM tasks WHERE id=$1 AND status IN ('waiting','paused')",
+    "SELECT id,request_id,batch_id,status,priority,operation_type,attempts FROM tasks WHERE id=$1 AND status IN ('waiting','paused')",
     [taskId],
   );
   const task = current.rows[0];
   if (
     !task ||
     (action === "pause" && task.status !== "waiting") ||
-    (action === "resume" && task.status !== "paused")
+    (action === "resume" && (task.status !== "paused" || (task.operation_type !== "video_generation" && task.attempts > 0)))
   )
     return null;
 
@@ -215,7 +226,7 @@ export async function transitionTask(
     await cache.zRem("tasks:queue", taskId);
   } else if (action === "resume") {
     const changed = await db.query(
-      "UPDATE tasks SET status='waiting',queued_at=now(),updated_at=now() WHERE id=$1 AND status='paused' RETURNING id",
+      "UPDATE tasks SET status='waiting',queued_at=now(),updated_at=now() WHERE id=$1 AND status='paused' AND (operation_type='video_generation' OR attempts=0) RETURNING id",
       [taskId],
     );
     if (!changed.rows[0]) return null;

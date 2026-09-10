@@ -3,10 +3,39 @@ import {
   deriveBatchStatus,
   queueScore,
   restoreWaitingTasksToQueue,
+  canAutomaticallyRetryTask,
+  transitionTask,
+  transitionBatchTasks,
   type BatchTaskCounts,
 } from "../src/tasks";
 
 describe("task queue priority", () => {
+  test("does not replay image, audio or workflow work after an uncertain failure", () => {
+    for (const operation of ["image_generation", "image_edit", "audio_generation", "seamless_stitch", "workflow"]) {
+      expect(canAutomaticallyRetryTask(operation, null, 1)).toBe(false);
+    }
+    expect(canAutomaticallyRetryTask("video_generation", null, 1)).toBe(true);
+    expect(canAutomaticallyRetryTask("video_generation", "2026-09-10T00:00:00Z", 1)).toBe(false);
+    expect(canAutomaticallyRetryTask("video_generation", null, 3)).toBe(false);
+  });
+
+  test("single and batch resume cannot replay previously started non-video work", async () => {
+    const task = { id: "image-1", request_id: "request-1", batch_id: "batch-1", status: "paused", priority: "normal", operation_type: "image_generation", attempts: 1 };
+    const writes: string[] = [];
+    const database = { query: async (sql: string) => {
+      if (sql.startsWith("SELECT id FROM tasks")) return { rows: [{ id: task.id }] };
+      if (sql.startsWith("SELECT id,request_id")) return { rows: [task] };
+      if (sql.includes("COUNT(*)::int total")) return { rows: [{ total: 1, paused: 1 }] };
+      writes.push(sql);
+      return { rows: [] };
+    } };
+    const queued: string[] = [];
+    const cache = { zAdd: async (_key: string, value: { value: string }) => (queued.push(value.value), 1) };
+    expect(await transitionTask(database as never, cache as never, task.id, "resume")).toBeNull();
+    expect(await transitionBatchTasks(database as never, cache as never, "batch-1", "resume")).toBe(0);
+    expect(queued).toEqual([]);
+    expect(writes.some((sql) => sql.startsWith("UPDATE tasks"))).toBe(false);
+  });
   test("orders urgent before priority and normal while preserving FIFO time", () => {
     expect(queueScore("urgent", 200)).toBeLessThan(queueScore("priority", 100));
     expect(queueScore("priority", 200)).toBeLessThan(queueScore("normal", 100));

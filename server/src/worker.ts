@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createCache, createDatabase, type Cache, type Database } from "./db";
 import { decryptSecret } from "./security";
 import { settleReservation } from "./billing";
-import { TASK_LEASE_SECONDS, queueScore, recalculateBatch, restoreWaitingTasksToQueue, type TaskPriority } from "./tasks";
+import { TASK_LEASE_SECONDS, canAutomaticallyRetryTask, queueScore, recalculateBatch, restoreWaitingTasksToQueue, type TaskPriority } from "./tasks";
 import { ObjectStorage } from "./object-storage";
 import {
   decodeWorkflowImage,
@@ -23,6 +23,7 @@ import { classifyDesignDirection } from "./design-direction";
 import { runApiMartImageTask } from "./apimart-image";
 import { videoSourceMetadata, type ProviderVideoSource } from "./video-models";
 import { probeMediaBytes } from "./media-probe";
+import { fetchProviderSubmission } from "./provider-submission-transport";
 
 type WorkRow = {
   id: string;
@@ -141,7 +142,7 @@ async function runTask(taskId: string) {
         "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND status='processing'",
         [task.upstream_task_id ? `${reason}；已暂停，可恢复查询原视频任务，不会重新生成` : `${reason}；提交状态待核实，不会自动重新生成`, task.id],
       );
-    } else if ((task.operation_type !== "video_generation" || !task.upstream_submission_started_at) && task.attempts < 3) {
+    } else if (canAutomaticallyRetryTask(task.operation_type, task.upstream_submission_started_at, task.attempts)) {
       await db.query(
         "UPDATE tasks SET status='waiting',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2",
         [reason, task.id],
@@ -222,7 +223,7 @@ async function executeProvider(task: WorkRow) {
         source.filename || `reference-${index + 1}.png`,
       );
     }
-    response = await fetch(`${task.base_url.replace(/\/$/, "")}/images/edits`, {
+    response = await fetchProviderSubmission(`${task.base_url.replace(/\/$/, "")}/images/edits`, {
       method: "POST",
       headers: authorization,
       body: form,
@@ -250,7 +251,7 @@ async function executeProvider(task: WorkRow) {
               Object.entries(credentials).filter(([key]) => key !== "apiKey"),
             ),
           };
-    response = await fetch(endpoint, {
+    response = await fetchProviderSubmission(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json", ...authorization },
       body: JSON.stringify(payload),

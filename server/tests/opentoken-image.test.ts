@@ -11,7 +11,7 @@ import {
 describe("OpenToken image protocol adapter", () => {
   test("distinguishes submission and result-download transport failures without resubmitting", async () => {
     const fetchMock = spyOn(globalThis, "fetch");
-    const input = { baseUrl: "https://opentoken.test/v1", apiKey: "test-key", prompt: "test" };
+    const input = { baseUrl: "http://opentoken.test/v1", apiKey: "test-key", prompt: "test" };
     let calls = 0;
     try {
       fetchMock.mockImplementation(Object.assign(async () => { calls += 1; throw new Error("unknown certificate verification error"); }, { preconnect() {} }));

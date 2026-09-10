@@ -34,6 +34,7 @@ function dependencies(fixture: Fixture = {}) {
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: fixture.moduleEnabled ?? true }] };
       if (sql.includes("FROM model_configs")) return { rows: fixture.model === null ? [] : [fixture.model || { id: modelId, name: "Wan", modelId: "wan2.7", capabilities: ["video"] }] };
       if (sql.includes("FROM assets")) return { rows: fixture.asset === null ? [] : [fixture.asset || { id: assetId, mimeType: "image/png", byteSize: 512, status: "ready" }] };
+      if (sql.startsWith("SELECT id,request_id")) return { rows: fixture.task ? [{ ...fixture.task, operation_type: fixture.task.operationType }] : [] };
       if (sql.includes("FROM tasks")) return { rows: fixture.task ? [fixture.task] : [] };
       throw new Error(`Unexpected query: ${sql}`);
     },

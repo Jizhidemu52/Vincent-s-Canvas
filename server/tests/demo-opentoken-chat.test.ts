@@ -9,10 +9,10 @@ test("demo OpenToken supports shared and independently configured chat providers
   const testEnv = {
     LOCAL_STANDALONE: "true",
     OPENTOKEN_API_KEY: "",
-    OPENTOKEN_BASE_URL: "https://opentoken.test/v1",
+    OPENTOKEN_BASE_URL: "http://opentoken.test/v1",
     APIMART_API_KEY: "test-apimart-key",
     GPT_IMAGE_2_API_KEY: "",
-    APIMART_BASE_URL: "https://apimart.test/v1",
+    APIMART_BASE_URL: "http://apimart.test/v1",
     DEMO_RECOVERY_FILE: "",
     DEMO_PUBLIC_ASSET_ORIGIN: "",
     STANDALONE_WEB_DIR: "",
@@ -37,13 +37,13 @@ test("demo OpenToken supports shared and independently configured chat providers
     const address = String(url);
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     upstreamCalls.push({ url: address, headers: new Headers(init?.headers), body });
-    if (address === "https://opentoken.test/v1/responses") {
+    if (address === "http://opentoken.test/v1/responses") {
       return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: "gpt reply" }] }] });
     }
-    if (address === "https://opentoken.test/v1/chat/completions") {
+    if (address === "http://opentoken.test/v1/chat/completions") {
       return Response.json({ choices: [{ message: { content: "chat completions reply" }, finish_reason: "stop" }] });
     }
-    if (address === "https://opentoken.test/v1/messages") {
+    if (address === "http://opentoken.test/v1/messages") {
       return body.stream
         ? new Response(streamBody, { headers: { "content-type": "text/event-stream" } })
         : Response.json({ content: assistantContent, stop_reason: "tool_use" });
@@ -95,12 +95,12 @@ test("demo OpenToken supports shared and independently configured chat providers
       expect(visibleModels.some((model) => model.modelId === modelId)).toBe(true);
     }
     expect(await (await chat(gptModel.id)).json()).toEqual({ content: "gpt reply", toolCalls: [] });
-    expect(upstreamCalls.at(-1)!.url).toBe("https://opentoken.test/v1/responses");
+    expect(upstreamCalls.at(-1)!.url).toBe("http://opentoken.test/v1/responses");
     expect(upstreamCalls.at(-1)!.headers.get("authorization")).toBe("Bearer shared-from-claude");
     expect(upstreamCalls.at(-1)!.body).toMatchObject({ model: "gpt-6-astra", input: [{ role: "user", content: "hello" }] });
 
     await request(`/api/admin/model-configuration/providers/${openToken.id}`, "PATCH", { credentials: { apiKey: "shared-from-main" } });
-    await request(`/api/admin/model-configuration/providers/${claude.id}`, "PATCH", { baseUrl: "https://opentoken.test", credentials: { apiKey: " " } });
+    await request(`/api/admin/model-configuration/providers/${claude.id}`, "PATCH", { baseUrl: "http://opentoken.test", credentials: { apiKey: " " } });
     const claudeResult = await (await chat(claudeModel.modelId, { claude: { thinking: true } })).json();
     expect(claudeResult).toMatchObject({ claudeAssistantContent: assistantContent, stopReason: "tool_use" });
     expect(upstreamCalls.at(-1)!.headers.get("authorization")).toBe("Bearer shared-from-main");
@@ -123,7 +123,7 @@ test("demo OpenToken supports shared and independently configured chat providers
 
     const createProvider = async (name: string, protocol: string, apiKey?: string) => {
       const response = await request("/api/admin/model-configuration/providers", "POST", {
-        name, protocol, baseUrl: "https://opentoken.test/v1", enabled: true,
+        name, protocol, baseUrl: "http://opentoken.test/v1", enabled: true,
         ...(apiKey === undefined ? {} : { credentials: { apiKey } }),
       });
       expect(response.status).toBe(201);
@@ -134,7 +134,7 @@ test("demo OpenToken supports shared and independently configured chat providers
     const privateChatResult = await chat(gptModel.id);
     expect(privateChatResult.status).toBe(200);
     expect(await privateChatResult.json()).toMatchObject({ content: "chat completions reply", toolCalls: [] });
-    expect(upstreamCalls.at(-1)!.url).toBe("https://opentoken.test/v1/chat/completions");
+    expect(upstreamCalls.at(-1)!.url).toBe("http://opentoken.test/v1/chat/completions");
     expect(upstreamCalls.at(-1)!.headers.get("authorization")).toBe("Bearer private-chat-key");
     await request(`/api/admin/model-configuration/providers/${privateChat.id}`, "PATCH", { credentials: { apiKey: "updated-private-chat-key" } });
     await request(`/api/admin/model-configuration/providers/${privateChat.id}`, "PATCH", { credentials: { apiKey: " " } });
@@ -146,7 +146,7 @@ test("demo OpenToken supports shared and independently configured chat providers
     const privateClaudeResult = await chat(claudeModel.id, { claude: { stream: true } });
     expect(privateClaudeResult.status).toBe(200);
     expect(await privateClaudeResult.text()).toBe(streamBody);
-    expect(upstreamCalls.at(-1)!.url).toBe("https://opentoken.test/v1/messages");
+    expect(upstreamCalls.at(-1)!.url).toBe("http://opentoken.test/v1/messages");
     expect(upstreamCalls.at(-1)!.headers.get("authorization")).toBe("Bearer private-claude-key");
     const privateProviderList = await providers();
     expect(JSON.stringify(privateProviderList)).not.toContain("private-chat-key");
@@ -169,7 +169,7 @@ test("demo OpenToken supports shared and independently configured chat providers
     await request(`/api/admin/model-configuration/models/${gptModel.id}`, "PATCH", { providerId: openToken.id });
     await request(`/api/admin/model-configuration/models/${claudeModel.id}`, "PATCH", { providerId: claude.id });
     expect((await chat(gptModel.id)).status).toBe(200);
-    expect(upstreamCalls.at(-1)!.url).toBe("https://opentoken.test/v1/responses");
+    expect(upstreamCalls.at(-1)!.url).toBe("http://opentoken.test/v1/responses");
     expect(upstreamCalls.at(-1)!.headers.get("authorization")).toBe("Bearer shared-from-main");
     const completedCallCount = upstreamCalls.length;
     await request(`/api/admin/model-configuration/providers/${claude.id}`, "PATCH", { enabled: false });

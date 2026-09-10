@@ -5,13 +5,14 @@ import { openAiImageParameters } from "./openai-image-parameters";
 import { deploymentFeatures } from "./deployment-features";
 import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
 import { resolveStandaloneStaticPath } from "./demo-standalone-web";
-import { apiMartImageModel, buildApiMartImageRequest, runApiMartImageTask } from "./apimart-image";
+import { apiMartImageModel, runApiMartImageTask } from "./apimart-image";
 import { listAvailableDemoModels, resolveDemoExternalProviders, videoModelConfigIds } from "./demo-provider-configuration";
 import { applyDemoProviderCredentials } from "./demo-provider-credentials";
 import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
 import { resolveDemoHost } from "./demo-network-config";
 import { isOpenTokenImageModel, runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
-import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
+import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, chatFunctionToolsSchema, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
+import { fetchProviderSubmission } from "./provider-submission-transport";
 import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
 import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./demo-video-sources";
 import { decodeInlineImageResult } from "./demo-task-result-assets";
@@ -524,7 +525,7 @@ type DemoResponseTool = { type: "function"; name: string; description?: string; 
 async function callDemoGemini(input: { input: DemoResponseInput[]; tools: DemoResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number } }) {
   const endpoint = `${apiMartBaseUrl.replace(/\/v1$/, "")}/v1beta/models/gemini-3.1-pro-preview:generateContent`;
   const body = buildGeminiRequestBody(input);
-  const upstream = await fetch(endpoint, {
+  const upstream = await fetchProviderSubmission(endpoint, {
     method: "POST",
     headers: { authorization: `Bearer ${apiMartApiKey}`, "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -560,7 +561,7 @@ async function callDemoClaude(modelId: string, input: { input: DemoResponseInput
       thinking: input.thinking === true,
     }),
   };
-  const upstream = await fetch(endpoint, {
+  const upstream = await fetchProviderSubmission(endpoint, {
     method: "POST",
     headers: { "x-api-key": apiMartApiKey, "anthropic-version": ANTHROPIC_MESSAGES_VERSION, "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -571,7 +572,7 @@ async function callDemoClaude(modelId: string, input: { input: DemoResponseInput
 }
 
 async function callDemoClaudeStream(modelId: string, input: { input: DemoResponseInput[]; tools: DemoResponseTool[]; toolChoice?: unknown; thinking?: boolean; maxTokens?: number }) {
-  const upstream = await fetch(`${apiMartBaseUrl.replace(/\/v1$/, "")}/v1/messages`, {
+  const upstream = await fetchProviderSubmission(`${apiMartBaseUrl.replace(/\/v1$/, "")}/v1/messages`, {
     method: "POST",
     headers: { "x-api-key": apiMartApiKey, "anthropic-version": ANTHROPIC_MESSAGES_VERSION, "content-type": "application/json" },
     body: JSON.stringify({
@@ -776,6 +777,9 @@ Bun.serve({
         claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
       };
       const selectedModel = String(input.modelId || "");
+      const parsedTools = chatFunctionToolsSchema.safeParse(input.tools);
+      if (!parsedTools.success) return json({ error: "INVALID_TOOLS", message: "对话只允许已声明的 function 工具；图片生成必须通过图像任务入口" }, 400);
+      input.tools = parsedTools.data;
       const openTokenChatModel = demoModels.find((model) =>
         [openTokenGptChatModel.id, openTokenClaudeModel.id].includes(String(model.id)) &&
         (model.id === selectedModel || model.modelId === selectedModel),
@@ -1810,100 +1814,18 @@ async function callApiMartImage(
   parameters: Record<string, unknown>,
   sources: DemoAsset[],
 ) {
-  try {
-    const urls = await runApiMartImageTask({
-      baseUrl: apiMartBaseUrl,
-      apiKey: apiMartApiKey,
-      modelId,
-      prompt,
-      parameters,
-      sourceDataUrls: sources.map((source) => `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`),
-    });
-    const first = urls[0];
-    if (!first) throw new Error("APIMart 图片任务完成但没有结果图片");
-    return downloadApiMartImage(first);
-  } catch (error) {
-    if (!isLocalCertificateError(error)) throw error;
-    return callApiMartImageWithNode(modelId, prompt, parameters, sources);
-  }
-}
-
-// The fallback keeps the exact APIMart request contract when Bun cannot
-// validate the provider certificate on a Windows development machine.
-async function callApiMartImageWithNode(
-  modelId: string,
-  prompt: string,
-  parameters: Record<string, unknown>,
-  sources: DemoAsset[],
-) {
-  const node = Bun.which("node");
-  if (!node) throw new Error("Node.js is unavailable, so the APIMart HTTPS fallback cannot run");
-  const request = buildApiMartImageRequest({
+  const urls = await runApiMartImageTask({
+    baseUrl: apiMartBaseUrl,
+    apiKey: apiMartApiKey,
     modelId,
     prompt,
     parameters,
-    sourceDataUrls: sources.map(
-      (source) => `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`,
-    ),
+    sourceDataUrls: sources.map((source) => `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`),
   });
-  const script = `
-    let raw = "";
-    for await (const chunk of process.stdin) raw += chunk;
-    const input = JSON.parse(raw);
-    const request = (path, init = {}) => fetch(process.env.APIMART_BASE_URL + path, {
-      ...init,
-      headers: { authorization: \`Bearer \${process.env.APIMART_API_KEY}\`, ...(init.headers || {}) },
-    });
-    const submitted = await request(input.path, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input.payload),
-      signal: AbortSignal.timeout(180000),
-    });
-    const createdText = await submitted.text();
-    if (!submitted.ok) throw new Error(\`APIMart image submission failed: \${submitted.status}: \${createdText.slice(0, 500)}\`);
-    const created = JSON.parse(createdText);
-    const first = Array.isArray(created.data) ? created.data[0] : created.data;
-    const taskId = first?.task_id || first?.id || created.task_id || created.id;
-    if (!taskId) throw new Error("APIMart did not return a task ID");
-    const deadline = Date.now() + input.timeoutMs;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, input.pollIntervalMs));
-      const statusResponse = await request(\`/tasks/\${encodeURIComponent(taskId)}\`, { signal: AbortSignal.timeout(60000) });
-      const statusText = await statusResponse.text();
-      if (!statusResponse.ok) throw new Error(\`APIMart task status failed: \${statusResponse.status}\`);
-      const status = JSON.parse(statusText);
-      const data = status.data || status;
-      const state = String(data.status || status.status || "").toLowerCase();
-      const images = Array.isArray((data.result || status.result || {}).images) ? (data.result || status.result).images : [];
-      const outputUrl = images.flatMap((image) => Array.isArray(image?.url) ? image.url : typeof image?.url === "string" ? [image.url] : [])[0];
-      if (outputUrl) {
-        const image = await fetch(outputUrl, { signal: AbortSignal.timeout(120000) });
-        if (!image.ok) throw new Error(\`APIMart image download failed: \${image.status}\`);
-        const mimeType = image.headers.get("content-type")?.split(";")[0] || "image/png";
-        const data = Buffer.from(await image.arrayBuffer()).toString("base64");
-        process.stdout.write(JSON.stringify({ mimeType, data }));
-        process.exit(0);
-      }
-      if (["failed", "cancelled", "canceled"].includes(state)) throw new Error(data.error?.message || data.message || "APIMart image generation failed");
-    }
-    throw new Error("APIMart image generation timed out");
-  `;
-  const child = Bun.spawn([node, "--input-type=module", "-e", script], {
-    stdin: new Blob([JSON.stringify(request)]),
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, APIMART_API_KEY: apiMartApiKey, APIMART_BASE_URL: apiMartBaseUrl },
-  });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  if (exitCode !== 0) throw new Error(stderr.trim() || "APIMart local HTTPS fallback failed");
-  const output = JSON.parse(stdout) as { mimeType?: string; data?: string };
-  if (!output.mimeType || !output.data) throw new Error("APIMart local HTTPS fallback returned no image");
-  return `data:${output.mimeType};base64,${output.data}`;
+  const first = urls[0];
+  if (!first) throw new Error("APIMart 图片任务完成但没有结果图片");
+  // Polling or download failure must never restart a paid generation.
+  return downloadApiMartImage(first);
 }
 
 async function downloadApiMartImage(url: string) {
@@ -2112,12 +2034,7 @@ async function callGptImage2(
   parameters: Record<string, unknown>,
   sources: DemoAsset[],
 ) {
-  try {
-    return await callGptImage2WithBun(prompt, parameters, sources);
-  } catch (error) {
-    if (!isLocalCertificateError(error)) throw error;
-    return callGptImage2WithNode(prompt, parameters, sources);
-  }
+  return callGptImage2WithBun(prompt, parameters, sources);
 }
 
 async function callGptImage2WithBun(
@@ -2127,7 +2044,7 @@ async function callGptImage2WithBun(
 ) {
   const size = normalizeGptImageSize(parameters.size);
   const resolution = normalizeGptImageResolution(parameters.resolution);
-  const submitted = await fetch(`${apiMartBaseUrl}/images/generations`, {
+  const submitted = await fetchProviderSubmission(`${apiMartBaseUrl}/images/generations`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${apiMartApiKey}`,
@@ -2208,79 +2125,6 @@ function isProviderNetworkError(error: unknown) {
   return isLocalCertificateError(error) || /ECONNRESET|secure TLS connection|fetch failed|TLS handshake/i.test(message);
 }
 
-// Local-demo-only fallback for Windows machines where Bun cannot reach a TLS
-// endpoint because certificate-revocation lookup is unavailable on the host.
-async function callGptImage2WithNode(
-  prompt: string,
-  parameters: Record<string, unknown>,
-  sources: DemoAsset[],
-) {
-  const node = Bun.which("node");
-  if (!node) throw new Error("本机 Node.js 不可用，无法完成 GPT-Image-2 本地 HTTPS 回退请求");
-  const script = `
-    let raw = "";
-    for await (const chunk of process.stdin) raw += chunk;
-    const input = JSON.parse(raw);
-    const request = (path, init = {}) => fetch(process.env.APIMART_BASE_URL + path, {
-      ...init,
-      headers: { authorization: \`Bearer \${process.env.APIMART_API_KEY}\`, ...(init.headers || {}) },
-    });
-    const submitted = await request("/images/generations", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model: "gpt-image-2", prompt: input.prompt, n: 1,
-        size: input.size, resolution: input.resolution,
-        ...(input.imageUrls.length ? { image_urls: input.imageUrls } : {}),
-      }),
-      signal: AbortSignal.timeout(180000),
-    });
-    const createdText = await submitted.text();
-    if (!submitted.ok) throw new Error(\`GPT-Image-2 submission failed: \${submitted.status}: \${createdText.slice(0, 500)}\`);
-    const taskId = JSON.parse(createdText).data?.[0]?.task_id;
-    if (!taskId) throw new Error("GPT-Image-2 did not return a task ID");
-    const deadline = Date.now() + 15 * 60_000;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      const statusResponse = await request(\`/tasks/\${encodeURIComponent(taskId)}\`, { signal: AbortSignal.timeout(60000) });
-      const statusText = await statusResponse.text();
-      if (!statusResponse.ok) throw new Error(\`GPT-Image-2 status check failed: \${statusResponse.status}\`);
-      const status = JSON.parse(statusText);
-      if (status.data?.status === "failed") throw new Error(status.data?.error?.message || "GPT-Image-2 generation failed");
-      if (status.data?.status !== "completed") continue;
-      const outputUrl = status.data?.result?.images?.[0]?.url?.[0];
-      if (!outputUrl) throw new Error("GPT-Image-2 completed without an output image");
-      const image = await fetch(outputUrl, { signal: AbortSignal.timeout(120000) });
-      if (!image.ok) throw new Error(\`GPT-Image-2 image download failed: \${image.status}\`);
-      const mimeType = image.headers.get("content-type")?.split(";")[0] || "image/png";
-      const data = Buffer.from(await image.arrayBuffer()).toString("base64");
-      process.stdout.write(JSON.stringify({ mimeType, data }));
-      process.exit(0);
-    }
-    throw new Error("GPT-Image-2 generation timed out");
-  `;
-  const input = {
-    prompt,
-    size: normalizeGptImageSize(parameters.size),
-    resolution: normalizeGptImageResolution(parameters.resolution),
-    imageUrls: sources.map((source) => `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`),
-  };
-  const child = Bun.spawn([node, "--input-type=module", "-e", script], {
-    stdin: new Blob([JSON.stringify(input)]),
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, APIMART_API_KEY: apiMartApiKey, APIMART_BASE_URL: apiMartBaseUrl },
-  });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  if (exitCode !== 0) throw new Error(stderr.trim() || "GPT-Image-2 本地 HTTPS 回退请求失败");
-  const output = JSON.parse(stdout) as { mimeType?: string; data?: string };
-  if (!output.mimeType || !output.data) throw new Error("GPT-Image-2 本地 HTTPS 回退没有返回图片");
-  return `data:${output.mimeType};base64,${output.data}`;
-}
 
 function normalizeGptImageSize(value: unknown) {
   const size = String(value || "1:1").toLowerCase();

@@ -1,3 +1,5 @@
+import { fetchProviderSubmission } from "./provider-submission-transport";
+
 export type OpenTokenReferenceImage = {
   filename: string;
   mimeType: string;
@@ -116,7 +118,7 @@ export function openTokenErrorMessage(value: unknown) {
 export async function runOpenTokenImage(input: OpenTokenImageInput): Promise<string> {
   if (!input.apiKey.trim()) throw new Error("OpenToken API key is not configured");
   const request = buildOpenTokenImageRequest(input);
-  const response = await fetch(request.url, {
+  const response = await fetchProviderSubmission(request.url, {
     method: request.method,
     headers: request.headers,
     body: request.form || JSON.stringify(request.body),

@@ -28,7 +28,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; webSearch?: boolean; onSubmitted?: () => void };
+type RequestOptions = { requestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; webSearch?: boolean; onSubmissionStarted?: () => void; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -47,7 +47,9 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         tool: options?.tool,
         parameters: imageTaskParameters(config),
         references,
+        requestId: options?.requestId,
         signal: options?.signal,
+        onSubmissionStarted: options?.onSubmissionStarted,
         onSubmitted: options?.onSubmitted,
     });
 }
@@ -76,7 +78,9 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         tool: options?.tool,
         parameters: { ...imageTaskParameters(config), ...(transparent ? { background: "transparent", output_format: "png" } : {}) },
         references: [...references, ...(mask ? [mask] : [])],
+        requestId: options?.requestId,
         signal: options?.signal,
+        onSubmissionStarted: options?.onSubmissionStarted,
         onSubmitted: options?.onSubmitted,
     });
 }

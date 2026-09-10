@@ -28,10 +28,10 @@ describe("Gemini native chat protocol", () => {
     });
 
     test("builds the native APIMart endpoint from both root and v1 base URLs", () => {
-        expect(buildGeminiGenerateUrl("https://api.apimart.ai", "gemini-3.1-pro-preview"))
-            .toBe("https://api.apimart.ai/v1beta/models/gemini-3.1-pro-preview:generateContent");
-        expect(buildGeminiGenerateUrl("https://api.apimart.ai/v1/", "gemini-3.1-pro-preview"))
-            .toBe("https://api.apimart.ai/v1beta/models/gemini-3.1-pro-preview:generateContent");
+        expect(buildGeminiGenerateUrl("http://api.apimart.ai", "gemini-3.1-pro-preview"))
+            .toBe("http://api.apimart.ai/v1beta/models/gemini-3.1-pro-preview:generateContent");
+        expect(buildGeminiGenerateUrl("http://api.apimart.ai/v1/", "gemini-3.1-pro-preview"))
+            .toBe("http://api.apimart.ai/v1beta/models/gemini-3.1-pro-preview:generateContent");
     });
 
     test("converts Response input to Gemini native contents and inline images", () => {
@@ -80,14 +80,14 @@ describe("Gemini native chat protocol", () => {
 
     test("sends Gemini native request and reads a direct native response", async () => {
         globalThis.fetch = (async (input, init) => {
-            expect(String(input)).toBe("https://api.apimart.ai/v1beta/models/gemini-3.1-pro-preview:generateContent");
+            expect(String(input)).toBe("http://api.apimart.ai/v1beta/models/gemini-3.1-pro-preview:generateContent");
             expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-key");
             expect(JSON.parse(String(init?.body))).toEqual({ contents: [{ role: "user", parts: [{ text: "ping" }] }] });
             return Response.json({ candidates: [{ content: { parts: [{ text: "pong" }] } }] });
         }) as typeof fetch;
 
         const result = await requestChatCompletion(
-            { model_id: "gemini-3.1-pro-preview", base_url: "https://api.apimart.ai/v1", protocol: "gemini", encrypted_credentials: "unused" },
+            { model_id: "gemini-3.1-pro-preview", base_url: "http://api.apimart.ai/v1", protocol: "gemini", encrypted_credentials: "unused" },
             { apiKey: "test-key" },
             { input: [{ role: "user", content: "ping" }], tools: [] },
         );
@@ -197,7 +197,7 @@ describe("Claude Messages native protocol", () => {
             return new Response(events, { headers: { "content-type": "text/event-stream" } });
         }) as typeof fetch;
         const response = await requestClaudeStream(
-            { model_id: "claude-fable-5", base_url: "https://api.apimart.ai", protocol: "anthropic", encrypted_credentials: "unused" },
+            { model_id: "claude-fable-5", base_url: "http://api.apimart.ai", protocol: "anthropic", encrypted_credentials: "unused" },
             { apiKey: "test-key" },
             { input: [{ role: "user", content: "hello" }], tools: [], claude: { thinking: false, maxTokens: 2048 } },
         );
@@ -206,7 +206,7 @@ describe("Claude Messages native protocol", () => {
 
     test("sends an Anthropic-native endpoint and headers", async () => {
         globalThis.fetch = (async (input, init) => {
-            expect(String(input)).toBe("https://api.apimart.ai/v1/messages");
+            expect(String(input)).toBe("http://api.apimart.ai/v1/messages");
             const headers = new Headers(init?.headers);
             expect(headers.get("x-api-key")).toBe("test-key");
             expect(headers.get("anthropic-version")).toBe("2023-06-01");
@@ -215,7 +215,7 @@ describe("Claude Messages native protocol", () => {
         }) as typeof fetch;
 
         await expect(requestChatCompletion(
-            { model_id: "claude-sonnet-5", base_url: "https://api.apimart.ai", protocol: "anthropic", encrypted_credentials: "unused" },
+            { model_id: "claude-sonnet-5", base_url: "http://api.apimart.ai", protocol: "anthropic", encrypted_credentials: "unused" },
             { apiKey: "test-key" },
             { input: [{ role: "user", content: "ping" }], tools: [] },
         )).resolves.toEqual({ content: "pong", toolCalls: [] });

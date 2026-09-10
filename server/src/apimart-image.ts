@@ -1,3 +1,5 @@
+import { fetchProviderSubmission } from "./provider-submission-transport";
+
 export type ApiMartImageModel = "gpt-image-2" | "gemini-3.1-flash-image-preview" | "midjourney" | "midjourney-blend";
 
 export type ApiMartImageInput = {
@@ -103,7 +105,7 @@ export async function runApiMartImageTask(input: ApiMartImageInput & { baseUrl: 
   const request = buildApiMartImageRequest(input);
   const baseUrl = input.baseUrl.replace(/\/$/, "");
   const headers = { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" };
-  const submit = await fetch(`${baseUrl}${request.path}`, {
+  const submit = await fetchProviderSubmission(`${baseUrl}${request.path}`, {
     method: "POST", headers, body: JSON.stringify(request.payload), signal: AbortSignal.timeout(180_000),
   });
   if (!submit.ok) throw new Error(`APIMart 图片任务提交失败：${submit.status} ${await providerMessage(submit)}`);

@@ -6,6 +6,7 @@ import type { AppConfig } from "../config";
 import type { Database } from "../db";
 import { assertModuleEnabled } from "../module-flags";
 import { decryptSecret } from "../security";
+import { fetchProviderSubmission } from "../provider-submission-transport";
 import type { AuthenticatedRequest } from "../types";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
@@ -19,10 +20,20 @@ type ToolCall = { id: string; type: "function"; function: { name: string; argume
 type ChatCompletionResult = { content: string; toolCalls: ToolCall[]; stopReason?: string; claudeAssistantContent?: Array<Record<string, unknown>> };
 type ChatModel = { model_id: string; base_url: string; protocol: string; encrypted_credentials: string | null };
 
+// This endpoint returns client-side function plans only. Hosted tools (notably
+// image_generation) must not bypass authorized image tasks and their billing.
+export const chatFunctionToolsSchema = z.array(z.object({
+    type: z.literal("function"),
+    name: z.string().min(1).max(200),
+    description: z.string().max(20_000).optional(),
+    parameters: z.record(z.string(), z.unknown()),
+    strict: z.boolean().optional(),
+}).strict()).max(100).default([]);
+
 const schema = z.object({
     modelId: z.string().min(1).max(200),
     input: z.array(z.unknown()).max(200),
-    tools: z.array(z.unknown()).max(100).default([]),
+    tools: chatFunctionToolsSchema,
     toolChoice: z.unknown().optional(),
     webSearch: z.boolean().optional(),
     gemini: z.object({ maxOutputTokens: z.number().int().min(1).max(16384) }).optional(),
@@ -130,7 +141,7 @@ async function requestClaudeCompletion(
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
 ) {
-    const upstream = await fetch(claudeMessagesUrl(model.base_url), {
+    const upstream = await fetchProviderSubmission(claudeMessagesUrl(model.base_url), {
         method: "POST",
         headers: claudeHeaders(credentials),
         body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking }) }),
@@ -145,7 +156,7 @@ export async function requestClaudeStream(
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; claude?: { thinking?: boolean; maxTokens?: number } },
 ) {
-    const upstream = await fetch(claudeMessagesUrl(model.base_url), {
+    const upstream = await fetchProviderSubmission(claudeMessagesUrl(model.base_url), {
         method: "POST",
         headers: claudeHeaders(credentials),
         body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking, stream: true }) }),
@@ -272,7 +283,7 @@ async function requestOpenAiCompletion(
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean },
 ) {
-    const upstream = await fetch(`${model.base_url.replace(/\/$/, "")}/responses`, {
+    const upstream = await fetchProviderSubmission(`${model.base_url.replace(/\/$/, "")}/responses`, {
         method: "POST",
         headers: requestHeaders(credentials),
         body: JSON.stringify({
@@ -329,7 +340,7 @@ async function requestOpenAiChatCompletion(
     }
     const toolChoice = input.toolChoice && typeof input.toolChoice === "object" && "name" in input.toolChoice
         ? { type: "function", function: { name: input.toolChoice.name } } : input.toolChoice ?? "auto";
-    const upstream = await fetch(`${model.base_url.replace(/\/$/, "")}/chat/completions`, {
+    const upstream = await fetchProviderSubmission(`${model.base_url.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",
         headers: requestHeaders(credentials),
         body: JSON.stringify({
@@ -354,7 +365,7 @@ async function requestGeminiCompletion(
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number } },
 ) {
-    const upstream = await fetch(buildGeminiGenerateUrl(model.base_url, model.model_id), {
+    const upstream = await fetchProviderSubmission(buildGeminiGenerateUrl(model.base_url, model.model_id), {
         method: "POST",
         headers: requestHeaders(credentials),
         body: JSON.stringify(buildGeminiRequestBody(input)),

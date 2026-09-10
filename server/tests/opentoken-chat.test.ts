@@ -6,7 +6,7 @@ afterEach(() => { globalThis.fetch = originalFetch; });
 
 test("Chat Completions preserves GPT 6, vision, tools and ordered tool results", async () => {
   globalThis.fetch = (async (url, init) => {
-    expect(String(url)).toBe("https://gw.opentoken.io/v1/chat/completions");
+    expect(String(url)).toBe("http://gw.opentoken.io/v1/chat/completions");
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-shared-key");
     expect(JSON.parse(String(init?.body))).toEqual({
       model: "gpt-6-astra",
@@ -27,7 +27,7 @@ test("Chat Completions preserves GPT 6, vision, tools and ordered tool results",
     return Response.json({ choices: [{ message: { content: "Read another node.", tool_calls: [{ id: "third", type: "function", function: { name: "read_node", arguments: '{"id":"three"}' } }] }, finish_reason: "tool_calls" }] });
   }) as typeof fetch;
   const result = await requestChatCompletion(
-    { model_id: "gpt-6-astra", protocol: "openai-chat", base_url: "https://gw.opentoken.io/v1/", encrypted_credentials: null },
+    { model_id: "gpt-6-astra", protocol: "openai-chat", base_url: "http://gw.opentoken.io/v1/", encrypted_credentials: null },
     { apiKey: "test-shared-key" },
     { input: [
       { role: "system", content: "Inspect the canvas." },
@@ -43,18 +43,18 @@ test("Chat Completions preserves GPT 6, vision, tools and ordered tool results",
 
 test("the existing OpenAI provider continues using Responses for GPT 6", async () => {
   globalThis.fetch = (async (url, init) => {
-    expect(String(url)).toBe("https://gw.opentoken.io/v1/responses");
+    expect(String(url)).toBe("http://gw.opentoken.io/v1/responses");
     expect(JSON.parse(String(init?.body))).toMatchObject({ model: "gpt-6-astra", input: [{ role: "user", content: "hello" }], tools: [] });
     return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: "hello back" }] }] });
   }) as typeof fetch;
-  expect(await requestChatCompletion({ model_id: "gpt-6-astra", protocol: "openai", base_url: "https://gw.opentoken.io/v1", encrypted_credentials: null }, { apiKey: "test" }, { input: [{ role: "user", content: "hello" }], tools: [] })).toEqual({ content: "hello back", toolCalls: [] });
+  expect(await requestChatCompletion({ model_id: "gpt-6-astra", protocol: "openai", base_url: "http://gw.opentoken.io/v1", encrypted_credentials: null }, { apiKey: "test" }, { input: [{ role: "user", content: "hello" }], tools: [] })).toEqual({ content: "hello back", toolCalls: [] });
 });
 
-for (const baseUrl of ["https://gw.opentoken.io", "https://gw.opentoken.io/v1/"]) {
+for (const baseUrl of ["http://gw.opentoken.io", "http://gw.opentoken.io/v1/"]) {
   for (const stream of [false, true]) {
     test(`OpenToken Claude uses Bearer and a single /v1 with ${baseUrl}, stream=${stream}`, async () => {
       globalThis.fetch = (async (url, init) => {
-        expect(String(url)).toBe("https://gw.opentoken.io/v1/messages");
+        expect(String(url)).toBe("http://gw.opentoken.io/v1/messages");
         const headers = new Headers(init?.headers);
         expect(headers.get("authorization")).toBe("Bearer test-shared-key");
         expect(headers.get("anthropic-version")).toBe("2023-06-01");
