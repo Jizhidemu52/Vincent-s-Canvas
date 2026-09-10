@@ -306,9 +306,11 @@ describe("provider submission transport", () => {
   test("malformed compressed streaming output fails promptly and closes upstream without a new POST", async () => {
     let requests = 0;
     let cancelled = false;
+    let resolveUpstreamClosed!: () => void;
+    const upstreamClosed = new Promise<void>((resolve) => { resolveUpstreamClosed = resolve; });
     const server = createHttpsServer({ cert: certificate, key: privateKey }, (request, response) => {
       requests++;
-      request.socket.once("close", () => { cancelled = true; });
+      request.socket.once("close", () => { cancelled = true; resolveUpstreamClosed(); });
       response.writeHead(200, { "content-encoding": "gzip" });
       response.write("this is not gzip");
     });
@@ -324,6 +326,17 @@ describe("provider submission transport", () => {
       expect(streamError.message).toContain("请求已发出，结果待核查，不会自动重新提交");
       expect(streamError.phase).toBe("response");
       expect(streamError.code).toBe("PROVIDER_RESPONSE_STREAM_ERROR");
+      // Child stdout can end before this server's socket close is dispatched.
+      // Await the real event, including when it already happened, with a bound.
+      let closeDeadline: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          upstreamClosed,
+          new Promise<never>((_resolve, reject) => {
+            closeDeadline = setTimeout(() => reject(new Error("Upstream HTTPS socket did not close after the response stream failed")), 1_000);
+          }),
+        ]);
+      } finally { clearTimeout(closeDeadline); }
       expect(requests).toBe(1);
       expect(cancelled).toBe(true);
     } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
