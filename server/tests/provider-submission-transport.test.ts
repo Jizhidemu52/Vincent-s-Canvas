@@ -304,20 +304,68 @@ describe("provider submission transport", () => {
   });
 
   test("malformed compressed streaming output fails promptly and closes upstream without a new POST", async () => {
-    let requests = 0;
-    let cancelled = false;
-    let resolveUpstreamClosed!: () => void;
-    const upstreamClosed = new Promise<void>((resolve) => { resolveUpstreamClosed = resolve; });
-    const server = createHttpsServer({ cert: certificate, key: privateKey }, (request, response) => {
-      requests++;
-      request.socket.once("close", () => { cancelled = true; resolveUpstreamClosed(); });
-      response.writeHead(200, { "content-encoding": "gzip" });
-      response.write("this is not gzip");
+    // Linux CI did not report close through Bun's node:https compatibility
+    // socket. Independently observe actual TCP and TLS closure in native Node.
+    const fixtureScript = `
+      import { createServer } from "node:https";
+      let input = "";
+      for await (const chunk of process.stdin) input += chunk;
+      const { cert, key } = JSON.parse(input);
+      let connections = 0, closedConnections = 0, requests = 0, posts = 0, requestSocketCloses = 0;
+      const publish = (event, details = {}) => process.stdout.write(JSON.stringify({
+        event, connections, closedConnections, requests, posts, requestSocketCloses, ...details,
+      }) + "\\n");
+      const server = createServer({ cert, key }, (request, response) => {
+        requests++;
+        if (request.method === "POST") posts++;
+        publish("request");
+        request.socket.once("close", () => { requestSocketCloses++; publish("tls_close"); });
+        response.writeHead(200, { "content-encoding": "gzip" });
+        response.write("this is not gzip");
+      });
+      server.on("connection", (socket) => {
+        connections++;
+        publish("connection");
+        socket.once("close", () => { closedConnections++; publish("tcp_close"); });
+      });
+      server.on("error", (error) => publish("server_error", { code: error.code, message: error.message }));
+      server.listen(0, "127.0.0.1", () => publish("listening", { port: server.address().port }));
+    `;
+    const fixture = Bun.spawn([Bun.which("node")!, "--input-type=module", "-e", fixtureScript], {
+      stdin: new Blob([JSON.stringify({ cert: certificate, key: privateKey })]), stdout: "pipe", stderr: "pipe", env: { ...process.env },
     });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const fixtureStderr = new Response(fixture.stderr).text();
+    const events: Array<{ event: string; port?: number; connections: number; closedConnections: number; requests: number; posts: number; requestSocketCloses: number }> = [];
+    const reader = fixture.stdout.getReader();
+    const decoder = new TextDecoder();
+    let buffered = "";
+    const nextFixtureEvent = async (timeoutMs: number) => {
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          (async () => {
+            while (!buffered.includes("\n")) {
+              const chunk = await reader.read();
+              if (chunk.done) throw new Error(`Native HTTPS fixture exited before its next event (${await fixture.exited}): ${await fixtureStderr}; events=${JSON.stringify(events)}`);
+              buffered += decoder.decode(chunk.value, { stream: true });
+            }
+            const separator = buffered.indexOf("\n");
+            const event = JSON.parse(buffered.slice(0, separator)) as (typeof events)[number];
+            buffered = buffered.slice(separator + 1);
+            events.push(event);
+            return event;
+          })(),
+          new Promise<never>((_resolve, reject) => {
+            deadline = setTimeout(() => reject(new Error(`Native HTTPS fixture event timed out; events=${JSON.stringify(events)}`)), Math.max(1, timeoutMs));
+          }),
+        ]);
+      } finally { clearTimeout(deadline); }
+    };
     try {
-      const port = (server.address() as { port: number }).port;
-      const response = await fetchProviderSubmission(`https://127.0.0.1:${port}/submit`, { method: "POST", body: "paid job", signal: AbortSignal.timeout(3_000) });
+      const listening = await nextFixtureEvent(2_000);
+      expect(listening.event).toBe("listening");
+      expect(listening.port).toBeGreaterThan(0);
+      const response = await fetchProviderSubmission(`https://127.0.0.1:${listening.port}/submit`, { method: "POST", body: "paid job", signal: AbortSignal.timeout(3_000) });
       expect(response.headers.get("content-encoding")).toBeNull();
       // Bun 1.3.11's native rejects matcher can block child-process I/O;
       // settle the Promise first so this tests transport behavior, not that bug.
@@ -326,19 +374,20 @@ describe("provider submission transport", () => {
       expect(streamError.message).toContain("请求已发出，结果待核查，不会自动重新提交");
       expect(streamError.phase).toBe("response");
       expect(streamError.code).toBe("PROVIDER_RESPONSE_STREAM_ERROR");
-      // Child stdout can end before this server's socket close is dispatched.
-      // Await the real event, including when it already happened, with a bound.
-      let closeDeadline: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([
-          upstreamClosed,
-          new Promise<never>((_resolve, reject) => {
-            closeDeadline = setTimeout(() => reject(new Error("Upstream HTTPS socket did not close after the response stream failed")), 1_000);
-          }),
-        ]);
-      } finally { clearTimeout(closeDeadline); }
-      expect(requests).toBe(1);
-      expect(cancelled).toBe(true);
-    } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
+      const closeDeadline = Date.now() + 1_000;
+      let observed;
+      do {
+        const remaining = closeDeadline - Date.now();
+        if (remaining <= 0) throw new Error(`Native upstream did not close within 1000ms; events=${JSON.stringify(events)}`);
+        observed = await nextFixtureEvent(remaining);
+      } while (observed.closedConnections < 1 || observed.requestSocketCloses < 1);
+      expect(observed).toMatchObject({ requests: 1, posts: 1, connections: 1, closedConnections: 1, requestSocketCloses: 1 });
+    } finally {
+      // Cleanup cannot satisfy closure assertions: all evidence is read first.
+      fixture.kill();
+      await reader.cancel().catch(() => {});
+      await fixture.exited;
+      await fixtureStderr;
+    }
   });
 });
