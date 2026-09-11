@@ -27,7 +27,7 @@ cd Vincent-s-Canvas
 
 | 模式 | 怎么启动 | 登录与积分 | 数据与适用场景 |
 | --- | --- | --- | --- |
-| Windows 单机 / 局域网试用 | `Start-LAN.bat`，底层运行 `server/src/demo-server.ts` | 默认免登录、不扣项目内部积分 | 适合个人使用或可信内网试用；服务端演示数据在内存中，不能当公司多人正式系统 |
+| Windows 单机 / 局域网试用 | `Start-LAN.bat`，底层运行 `server/src/demo-server.ts` | 默认免登录、不扣项目内部积分 | 素材与任务自动保存在本机 SQLite；适合个人或可信内网试用，不能当公司多人正式系统 |
 | 本地开发 | 分别启动 `server` 与 `web` | 由后端部署开关决定 | 方便开发、排错；运行 demo 服务时仍只有演示级持久化能力 |
 | 公司完整部署 | 根目录 `docker compose up -d --build` | 可启用账号、角色、积分，也可按需关闭 | API + Worker + PostgreSQL + Redis + S3/MinIO，适合正式业务数据与权限管理 |
 

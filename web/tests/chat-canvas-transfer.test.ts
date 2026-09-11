@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 
 import { applyCanvasProjectPatch, type CanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
-import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges } from "@/lib/canvas/canvas-persistence-merge";
+import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, type ProjectChange } from "@/lib/canvas/canvas-persistence-merge";
 import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
@@ -61,7 +61,7 @@ function pageCanvasHarness(options: {
     let sessionFailures = options.sessionFailures || 0;
     let canvasWriteQueued = false;
     let lastCanvasError: unknown;
-    let pendingChanges = new Map<string, CanvasProject | null>();
+    let pendingChanges = new Map<string, ProjectChange<CanvasProject>>();
     const writeBuffer = createProjectChangeBuffer<CanvasProject>();
     let persistedProjects = options.project ? [structuredClone(options.project)] : [];
     const sessionDatabase = new Map<string, Session[]>();

@@ -23,6 +23,8 @@ import { isPublicHttpsUrl } from "./apimart-upload";
 import { preflightVideoSources, prepareVideoProviderSources } from "./video-source-preparation";
 import { probeMediaBytes, type MediaMetadata } from "./media-probe";
 import { readDemoRecovery } from "./demo-state-recovery";
+import { DemoStateStore, DemoStorageError } from "./demo-state-store";
+import { fileURLToPath } from "node:url";
 
 const sessions = new Map<string, string>();
 const modules = [
@@ -426,6 +428,7 @@ type DemoTask = {
   operationType: string;
   status: "processing" | "success" | "failed" | "paused";
   submissionStartedAt?: string;
+  refundedAt?: string;
   stage?: "preflight" | "submitted" | "polling" | "downloading" | "succeeded" | "failed";
   errorCode?: string | null;
   upstreamTaskId?: string | null;
@@ -452,12 +455,20 @@ const standaloneMode = Boolean(standaloneDemoUser);
 const standaloneWebDirectory = process.env.STANDALONE_WEB_DIR?.trim() || "";
 const demoPublicVideoAssetAccess = new Map<string, { assetId: string; expiresAt: number }>();
 const demoTasks = new Map<string, DemoTask>();
-if (process.env.DEMO_RECOVERY_FILE) {
-  const recovered = readDemoRecovery(await Bun.file(process.env.DEMO_RECOVERY_FILE).json());
-  for (const value of recovered.assets) { const asset = value as DemoAsset; demoAssets.set(asset.id, asset); }
-  for (const value of recovered.tasks) { const task = value as DemoTask; demoTasks.set(task.id, task); }
-  console.info(`Recovered ${demoAssets.size} local assets and ${demoTasks.size} tasks.`);
+const demoState = new DemoStateStore<DemoAsset, DemoTask>(
+  process.env.DEMO_STATE_PATH?.trim() || fileURLToPath(new URL("../.data/local-demo.sqlite", import.meta.url)),
+);
+if (!demoState.isInitialized()) {
+  const recovered = process.env.DEMO_RECOVERY_FILE
+    ? readDemoRecovery(await Bun.file(process.env.DEMO_RECOVERY_FILE).json())
+    : { assets: [], tasks: [] };
+  demoState.initialize({ assets: recovered.assets as DemoAsset[], tasks: recovered.tasks as DemoTask[] });
 }
+demoState.recoverInterruptedTasks();
+const recoveredState = demoState.load();
+for (const asset of recoveredState.assets) demoAssets.set(asset.id, asset);
+for (const task of recoveredState.tasks) demoTasks.set(task.id, task);
+console.info(`Loaded ${demoAssets.size} local assets and ${demoTasks.size} tasks from durable storage.`);
 const internalAiConfig: DemoInternalAiConfig = {
   seamlessUrl: "",
   appKey: null,
@@ -611,29 +622,51 @@ function publicDemoAssetResponse(asset: DemoAsset) {
   });
 }
 
-function storeDemoTaskResult(task: DemoTask, ownerUserId: string, resultUrl: string) {
-  const inlineImage = decodeInlineImageResult(resultUrl);
-  if (!inlineImage) return resultUrl;
+function saveDemoAsset(asset: DemoAsset) {
+  demoState.save({ assets: [asset] });
+  demoAssets.set(asset.id, asset);
+}
 
-  const assetId = crypto.randomUUID();
-  const extension = inlineImage.mimeType.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "png";
-  demoAssets.set(assetId, {
-    id: assetId,
-    ownerUserId,
-    filename: `generation-${task.id}.${extension}`,
-    taskId: task.id,
-    projectId: task.projectId,
-    mimeType: inlineImage.mimeType,
-    bytes: inlineImage.bytes,
-    createdAt: now(),
+/** Keep running-task aliases, but expose changes only after the whole transaction commits. */
+function updateDemoTask(task: DemoTask, patch: Partial<DemoTask>, assets: DemoAsset[] = []) {
+  const next = { ...task, ...patch };
+  demoState.save({ tasks: [next], assets });
+  for (const asset of assets) demoAssets.set(asset.id, asset);
+  Object.assign(task, next);
+  demoTasks.set(task.id, task);
+}
+
+function pauseDemoTaskForStorageFailure(task: DemoTask) {
+  // Disk may be full/unavailable. Do not claim this transient diagnostic was saved.
+  Object.assign(task, {
+    status: "paused", errorCode: "LOCAL_STORAGE_UNAVAILABLE", updatedAt: now(),
+    failureReason: "本地磁盘写入失败，任务已暂停，当前状态尚未保存。请检查磁盘空间和写入权限；不要重新生成，已有上游任务可在存储恢复后查询。",
   });
-  return `/api/assets/${assetId}/content`;
+  console.error(`Local persistence unavailable for task ${task.id}; no generation replay or refund performed.`);
+}
+
+function finishDemoTaskFailure(task: DemoTask, error: unknown, patch: Partial<DemoTask>, user?: { creditBalance: number }) {
+  if (error instanceof DemoStorageError) { pauseDemoTaskForStorageFailure(task); return; }
+  const refund = patch.status === "failed" && Boolean(user) && !task.refundedAt;
+  try {
+    updateDemoTask(task, { ...patch, updatedAt: now(), ...(refund ? { refundedAt: now() } : {}) });
+    if (refund && user) user.creditBalance += task.credits;
+  } catch (storageError) {
+    if (!(storageError instanceof DemoStorageError)) throw storageError;
+    pauseDemoTaskForStorageFailure(task);
+  }
 }
 
 function completeDemoImageTask(task: DemoTask, ownerUserId: string, resultUrl: string) {
-  task.resultUrls = [storeDemoTaskResult(task, ownerUserId, resultUrl)];
-  task.status = "success";
-  task.updatedAt = now();
+  const inlineImage = decodeInlineImageResult(resultUrl);
+  if (!inlineImage) throw new Error("图片结果为空或格式无效，未保存为成功任务");
+  const assets: DemoAsset[] = [];
+  const id = crypto.randomUUID();
+  const extension = inlineImage.mimeType.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "png";
+  assets.push({ id, ownerUserId, filename: `generation-${task.id}.${extension}`, taskId: task.id,
+    projectId: task.projectId, mimeType: inlineImage.mimeType, bytes: inlineImage.bytes, createdAt: now() });
+  resultUrl = `/api/assets/${id}/content`;
+  updateDemoTask(task, { resultUrls: [resultUrl], status: "success", updatedAt: now() }, assets);
 }
 
 Bun.serve({
@@ -641,6 +674,12 @@ Bun.serve({
   port: demoPort,
   hostname: demoHost,
   idleTimeout: DEMO_STREAM_IDLE_TIMEOUT_SECONDS,
+  error(error) {
+    if (error instanceof DemoStorageError)
+      return json({ error: "LOCAL_STORAGE_UNAVAILABLE", message: "本地数据未能保存，请检查磁盘空间与写入权限后重试。" }, 503);
+    console.error("Local demo request failed", error);
+    return json({ error: "INTERNAL_ERROR", message: "本地服务处理请求失败" }, 500);
+  },
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -869,7 +908,7 @@ Bun.serve({
       if (existing)
         return json({ assetId: existing.id, uploadUrl: existing.bytes.byteLength ? null : `/api/assets/${existing.id}/content-upload`, reused: true }, 201);
       const assetId = crypto.randomUUID();
-      demoAssets.set(assetId, {
+      saveDemoAsset({
         id: assetId,
         ownerUserId: user.id,
         filename: input.filename || "source-image",
@@ -900,8 +939,11 @@ Bun.serve({
           { error: "INVALID_ASSET_SIZE", message: "素材大小必须在 200MB 以内且与上传申请一致" },
           400,
         );
-      asset.bytes = bytes;
-      if (asset.mimeType.startsWith("text/")) asset.metadata = { ...asset.metadata, content: new TextDecoder().decode(bytes) };
+      const currentAsset = demoAssets.get(assetId);
+      if (!currentAsset || currentAsset.ownerUserId !== user.id)
+        return json({ error: "NOT_FOUND", message: "上传素材不存在" }, 404);
+      saveDemoAsset({ ...currentAsset, bytes, ...(currentAsset.mimeType.startsWith("text/")
+        ? { metadata: { ...currentAsset.metadata, content: new TextDecoder().decode(bytes) } } : {}) });
       return empty();
     }
     if (
@@ -1015,6 +1057,12 @@ Bun.serve({
         parameters?: Record<string, unknown>;
         sourceUrls?: string[];
       };
+      const existingTask = input.requestId
+        ? [...demoTasks.values()].find((task) => task.requestId === input.requestId) : undefined;
+      if (existingTask)
+        return existingTask.ownerUserId === user.id
+          ? json({ task: existingTask })
+          : json({ error: "DUPLICATE_REQUEST", message: "任务请求标识已被使用" }, 400);
       if (input.operationType === "video_generation") {
         if (!apiMartApiKey)
           return json(
@@ -1074,6 +1122,13 @@ Bun.serve({
         } finally {
           revokeProviderVideoSources(accessTokens);
         }
+        // Preflight awaits media inspection; another request may have reserved this ID meanwhile.
+        const concurrentTask = input.requestId
+          ? [...demoTasks.values()].find((task) => task.requestId === input.requestId) : undefined;
+        if (concurrentTask)
+          return concurrentTask.ownerUserId === user.id
+            ? json({ task: concurrentTask })
+            : json({ error: "DUPLICATE_REQUEST", message: "任务请求标识已被使用" }, 400);
         const price = demoPrices.find(
           (item) =>
             item.operationType === "video_generation" &&
@@ -1106,7 +1161,7 @@ Bun.serve({
           createdAt: now(),
         };
         Object.assign(task, { prompt: input.prompt || "", parameters, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
-        demoTasks.set(task.id, task);
+        updateDemoTask(task, {});
         if (features.creditsEnabled) user.creditBalance -= credits;
         void runVideoTask(task, user, modelId, input.prompt || "", parameters, sources);
         return json({ task }, 201);
@@ -1227,7 +1282,7 @@ Bun.serve({
           createdAt: now(),
         };
         Object.assign(task, { prompt: input.prompt || "", parameters: input.parameters || {}, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
-        demoTasks.set(task.id, task);
+        updateDemoTask(task, {});
         if (features.creditsEnabled) user.creditBalance -= credits;
         if (model.providerId === openTokenProviderId)
           void runOpenTokenImageTaskForDemo(
@@ -1328,7 +1383,8 @@ Bun.serve({
         credits,
         createdAt: now(),
       };
-      demoTasks.set(task.id, task);
+      Object.assign(task, { prompt: input.prompt || "", parameters, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
+      updateDemoTask(task, {});
       if (features.creditsEnabled) user.creditBalance -= credits;
       void runInternalAiSeamlessTask(task, user, source, parameters);
       return json({ task }, 201);
@@ -1353,15 +1409,13 @@ Bun.serve({
         return json({ error: "NOT_FOUND", message: "Task not found" }, 404);
       if (task.status === "success")
         return json({ task, recovered: false, message: "Task has already completed" });
+      if (task.status === "failed")
+        return json({ task, recovered: false, message: "Task has already failed; no repeated query or refund was performed" });
       if (!task.upstreamTaskId || !task.providerModel)
         return json({ task, recovered: false, message: "No upstream task is available to query" });
       if (task.status === "processing")
         return json({ task, recovered: false, message: "Task is already being queried" });
-      task.status = "processing";
-      task.stage = "polling";
-      task.errorCode = null;
-      task.failureReason = null;
-      task.updatedAt = now();
+      updateDemoTask(task, { status: "processing", stage: "polling", errorCode: null, failureReason: null, updatedAt: now() });
       void recoverVideoTask(task, task.providerModel, task.upstreamTaskId);
       return json({ task, recovered: true, message: "Task status is being queried without a new generation submission" });
     }
@@ -1371,7 +1425,10 @@ Bun.serve({
       if (!asset || asset.ownerUserId !== user.id) return json({ error: "NOT_FOUND", message: "素材不存在或无权编辑" }, 404);
       const parsed = assetMetadataSchema.safeParse(await request.json());
       if (!parsed.success) return json({ error: "INVALID_INPUT", message: "素材名称、标签或备注格式不正确" }, 400);
-      asset.metadata = { ...asset.metadata, ...parsed.data };
+      const currentAsset = demoAssets.get(asset.id);
+      if (!currentAsset || currentAsset.ownerUserId !== user.id)
+        return json({ error: "NOT_FOUND", message: "素材不存在或无权编辑" }, 404);
+      saveDemoAsset({ ...currentAsset, metadata: { ...currentAsset.metadata, ...parsed.data } });
       return new Response(null, { status: 204 });
     }
 
@@ -1774,13 +1831,12 @@ async function runApiMartImageTaskForDemo(
   sources: DemoAsset[],
 ) {
   try {
+    updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
     completeDemoImageTask(task, user.id, await callApiMartImage(modelId, prompt, parameters, sources));
   } catch (error) {
-    task.status = "failed";
-    task.failureReason = isProviderNetworkError(error)
+    finishDemoTaskFailure(task, error, { status: "failed", failureReason: isProviderNetworkError(error)
       ? "无法与图像服务建立安全连接。请检查服务器外网、TLS 证书策略或稍后重试；本次积分已自动退还。"
-      : error instanceof Error ? error.message : "APIMart 图片任务失败";
-    user.creditBalance += task.credits;
+      : error instanceof Error ? error.message : "APIMart 图片任务失败" }, user);
   }
 }
 
@@ -1793,6 +1849,7 @@ async function runOpenTokenImageTaskForDemo(
   sources: DemoAsset[],
 ) {
   try {
+    updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
     completeDemoImageTask(task, user.id, await runOpenTokenImage({
       baseUrl: openTokenBaseUrl,
       apiKey: openTokenApiKey,
@@ -1802,9 +1859,7 @@ async function runOpenTokenImageTaskForDemo(
       references: sources.map((source) => ({ filename: source.filename, mimeType: source.mimeType, bytes: source.bytes })),
     }));
   } catch (error) {
-    task.status = "failed";
-    task.failureReason = error instanceof Error ? error.message : "OpenToken image task failed";
-    user.creditBalance += task.credits;
+    finishDemoTaskFailure(task, error, { status: "failed", failureReason: error instanceof Error ? error.message : "OpenToken image task failed" }, user);
   }
 }
 
@@ -1844,27 +1899,19 @@ async function runVideoTask(
   sources: DemoAsset[],
 ) {
   try {
-    task.stage = "polling";
-    task.updatedAt = now();
+    updateDemoTask(task, { stage: "polling", updatedAt: now() });
     const outputUrl = await callVideoProvider(model, prompt, parameters, sources, (upstreamTaskId) => {
-      task.upstreamTaskId = upstreamTaskId;
-      task.updatedAt = now();
-    }, () => { task.submissionStartedAt = now(); });
-    task.stage = "downloading";
-    task.updatedAt = now();
-    task.resultUrls = [await storeDemoVideoResult(task, outputUrl)];
-    task.status = "success";
-    task.stage = "succeeded";
-    task.updatedAt = now();
+      // Retain the returned ID in memory even if the following durable write fails.
+      try { updateDemoTask(task, { upstreamTaskId, updatedAt: now() }); }
+      catch (error) { task.upstreamTaskId = upstreamTaskId; throw error; }
+    }, () => { updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() }); });
+    updateDemoTask(task, { stage: "downloading", updatedAt: now() });
+    const asset = await downloadDemoVideoResult(task, outputUrl);
+    updateDemoTask(task, { resultUrls: [`/api/assets/${asset.id}/content`], status: "success", stage: "succeeded", updatedAt: now() }, [asset]);
   } catch (error) {
     const paused = Boolean(task.submissionStartedAt) && !(error instanceof DemoVideoTerminalError);
-    task.status = paused ? "paused" : "failed";
-    task.stage = "failed";
-    task.errorCode = classifyVideoTaskError(error);
-    task.failureReason =
-      error instanceof Error ? error.message : "Video task failed";
-    task.updatedAt = now();
-    if (!paused) user.creditBalance += task.credits;
+    finishDemoTaskFailure(task, error, { status: paused ? "paused" : "failed", stage: "failed",
+      errorCode: classifyVideoTaskError(error), failureReason: error instanceof Error ? error.message : "Video task failed" }, user);
   }
 }
 
@@ -1875,22 +1922,14 @@ async function recoverVideoTask(
 ) {
   try {
     const outputUrl = await pollVideoProviderTask(model, upstreamTaskId);
-    task.stage = "downloading";
-    task.updatedAt = now();
-    task.resultUrls = [await storeDemoVideoResult(task, outputUrl)];
-    task.status = "success";
-    task.stage = "succeeded";
-    task.updatedAt = now();
+    updateDemoTask(task, { stage: "downloading", updatedAt: now() });
+    const asset = await downloadDemoVideoResult(task, outputUrl);
+    updateDemoTask(task, { resultUrls: [`/api/assets/${asset.id}/content`], status: "success", stage: "succeeded", updatedAt: now() }, [asset]);
   } catch (error) {
-    task.status = error instanceof DemoVideoTerminalError ? "failed" : "paused";
-    if (task.status === "failed") {
-      const owner = demoAccounts.find((account) => account.user.id === task.ownerUserId)?.user;
-      if (owner) owner.creditBalance += task.credits;
-    }
-    task.stage = "failed";
-    task.errorCode = classifyVideoTaskError(error);
-    task.failureReason = error instanceof Error ? error.message : "Video task status query failed";
-    task.updatedAt = now();
+    const owner = demoAccounts.find((account) => account.user.id === task.ownerUserId)?.user;
+    finishDemoTaskFailure(task, error, { status: error instanceof DemoVideoTerminalError ? "failed" : "paused",
+      stage: "failed", errorCode: classifyVideoTaskError(error),
+      failureReason: error instanceof Error ? error.message : "Video task status query failed" }, owner);
   }
 }
 
@@ -1947,14 +1986,13 @@ async function callVideoProvider(
 
 class DemoVideoTerminalError extends Error {}
 
-async function storeDemoVideoResult(task: DemoTask, url: string) {
+async function downloadDemoVideoResult(task: DemoTask, url: string): Promise<DemoAsset> {
   const response = await fetch(url, { signal: AbortSignal.timeout(180_000) });
   if (!response.ok) throw new Error(`视频下载失败（${response.status}），可恢复查询原任务`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (!bytes.byteLength) throw new Error("视频结果为空，可恢复查询原任务");
   const id = crypto.randomUUID();
-  demoAssets.set(id, { id, ownerUserId: task.ownerUserId, filename: `video-${task.id}.mp4`, mimeType: "video/mp4", bytes, createdAt: now(), projectId: task.projectId, taskId: task.id, upstreamUrl: isPublicHttpsUrl(url) ? url : undefined });
-  return `/api/assets/${id}/content`;
+  return { id, ownerUserId: task.ownerUserId, filename: `video-${task.id}.mp4`, mimeType: "video/mp4", bytes, createdAt: now(), projectId: task.projectId, taskId: task.id, upstreamUrl: isPublicHttpsUrl(url) ? url : undefined };
 }
 
 async function pollVideoProviderTask(model: SupportedVideoModelId, taskId: string) {
@@ -2187,13 +2225,10 @@ async function runInternalAiSeamlessTask(
   parameters: NonNullable<ReturnType<typeof readSeamlessParameters>>,
 ) {
   try {
-    task.resultUrls = [await callInternalAiSeamless(task, source, parameters)];
-    task.status = "success";
+    updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
+    completeDemoImageTask(task, user.id, await callInternalAiSeamless(task, source, parameters));
   } catch (error) {
-    task.status = "failed";
-    task.failureReason =
-      error instanceof Error ? error.message : "内部 AI 无缝拼接失败";
-    user.creditBalance += task.credits;
+    finishDemoTaskFailure(task, error, { status: "failed", failureReason: error instanceof Error ? error.message : "内部 AI 无缝拼接失败" }, user);
   }
 }
 
@@ -2223,8 +2258,8 @@ async function callInternalAiSeamless(
   const output = payload.data?.data?.list?.[0];
   if (typeof output !== "string" || !output.trim())
     throw new Error("内部 AI 未返回图片结果");
-  if (/^https?:\/\//i.test(output) || output.startsWith("data:image/"))
-    return output;
+  if (/^https?:\/\//i.test(output)) return downloadApiMartImage(output);
+  if (output.startsWith("data:image/")) return output;
   const bytes = Buffer.from(output.replace(/^data:[^,]+,/, ""), "base64");
   const mimeType = bytes
     .subarray(0, 8)

@@ -3,7 +3,8 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { nanoid } from "nanoid";
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
-import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, withCanvasStorageLock } from "@/lib/canvas/canvas-persistence-merge";
+import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, type CanvasPersistenceConflict, type ProjectChange } from "@/lib/canvas/canvas-persistence-merge";
+import { updateCanvasStorage } from "@/lib/canvas/canvas-atomic-storage";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { applyCanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
@@ -21,6 +22,7 @@ export type CanvasProject = {
     backgroundMode: CanvasBackgroundMode;
     showImageInfo: boolean;
     viewport: ViewportTransform;
+    persistenceConflict?: CanvasPersistenceConflict;
 };
 
 type CanvasStore = {
@@ -39,9 +41,9 @@ const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
 const CANVAS_STORE_KEY = "wireless-canvas:canvas_store";
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
 let queuedPersistState: PersistedCanvasState | null = null;
-const pendingProjectChanges = new Map<string, CanvasProject | null>();
+const pendingProjectChanges = new Map<string, ProjectChange<CanvasProject>>();
 const projectWriteBuffer = createProjectChangeBuffer<CanvasProject>();
-type PersistWrite = { name: string; value: StorageValue<CanvasStore>; changes: Map<string, CanvasProject | null> };
+type PersistWrite = { name: string; value: StorageValue<CanvasStore>; changes: Map<string, ProjectChange<CanvasProject>> };
 let persistWriteChain: Promise<void> = Promise.resolve();
 let lastPersistError: unknown = null;
 const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, value, changes }) => {
@@ -50,12 +52,25 @@ const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, valu
     // older snapshot can never finish after and overwrite a newer edit.
     persistWriteChain = persistWriteChain
         .catch(() => undefined)
-        .then(() => projectWriteBuffer.write(changes, retainedChanges => withCanvasStorageLock(name, async () => {
-            const stored = await localForageStorage.getItem(name);
-            const current = stored ? JSON.parse(stored) as StorageValue<CanvasStore> : null;
-            const projects = mergeProjectChanges(current?.state.projects || [], retainedChanges);
-            await localForageStorage.setItem(name, JSON.stringify({ ...value, state: { ...value.state, projects } }));
-        })))
+        .then(() => projectWriteBuffer.write(changes, async retainedChanges => {
+            let writtenProjects: CanvasProject[] = [];
+            await updateCanvasStorage(name, stored => {
+                const current = stored ? JSON.parse(stored) as StorageValue<CanvasStore> : null;
+                writtenProjects = mergeProjectChanges(current?.state.projects || [], retainedChanges);
+                return JSON.stringify({ ...value, state: { ...value.state, projects: writtenProjects } });
+            });
+            // The editor owns a separate graph snapshot. Do not rebase its live
+            // project behind its back: its next save would look like deletions.
+            // Newly saved conflict copies can safely appear in the project list.
+            const localProjects = useCanvasStore.getState().projects;
+            const localIds = new Set(localProjects.map(project => project.id));
+            const copies = writtenProjects.filter(project => project.persistenceConflict && !localIds.has(project.id));
+            if (copies.length) {
+                const projects = [...copies, ...localProjects];
+                queuedPersistState = { projects };
+                useCanvasStore.setState({ projects });
+            }
+        }))
         .then(() => { lastPersistError = null; })
         .catch(error => { lastPersistError = error; console.error("画布自动保存失败，改动将随下次编辑重试；请先导出重要作品。", error); });
 });
@@ -95,10 +110,10 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         pendingProjectChanges.clear();
         persistWriteChain = persistWriteChain
             .catch(() => undefined)
-            .then(() => withCanvasStorageLock(name, async () => {
-                await localForageStorage.removeItem(name);
+            .then(async () => {
+                await updateCanvasStorage(name, () => null);
                 projectWriteBuffer.clear();
-            }))
+            })
             .then(() => undefined);
         return persistWriteChain;
     },

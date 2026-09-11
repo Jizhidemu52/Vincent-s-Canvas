@@ -5,7 +5,7 @@ description: 正式数据存储边界及任务恢复和访客身份字段
 
 # 数据库结构与迁移
 
-正式 API 和 Worker 使用 `server/src/migrations/` 中的 PostgreSQL 迁移，完整表结构以这些 SQL 为准。`server/src/demo-server.ts` 使用演示内存状态，不执行正式数据隔离或持久化验收。
+正式 API 和 Worker 使用 `server/src/migrations/` 中的 PostgreSQL 迁移，完整表结构以这些 SQL 为准。`server/src/demo-server.ts` 单独使用本机 SQLite 保存素材和任务，不执行正式多人隔离、额度账本或生产持久化验收。
 
 | 存储 | 负责内容 |
 | --- | --- |
@@ -13,6 +13,19 @@ description: 正式数据存储边界及任务恢复和访客身份字段
 | Redis | 会话、任务队列、限流和并发控制 |
 | S3 / MinIO | 上传文件及生成结果的文件内容 |
 | 浏览器 IndexedDB | 本地画布布局、节点、会话及相关媒体缓存，不是跨设备云同步 |
+| 单机演示 SQLite | 仅演示服务的素材原文件、元数据及任务记录，不替代上述正式存储 |
+
+## 单机演示数据
+
+默认文件是 `server/.data/local-demo.sqlite`，可用服务端 `DEMO_STATE_PATH` 指定持久磁盘路径。数据库使用 WAL 日志和 `synchronous=FULL`，上传/编辑在事务提交后返回成功，生成结果原文件与成功任务在同一事务保存。
+
+| 表 | 字段与约束 |
+| --- | --- |
+| `demo_assets` | `id` 主键、`fields_json` 素材字段、`bytes` 原始 BLOB；空 BLOB 仅用于尚未上传的申请占位 |
+| `demo_tasks` | `id` 主键、唯一 `request_id`、`fields_json` 完整任务状态及上游任务 ID |
+| `demo_state_metadata` | `key` 主键、`value`；`initialized` 防止旧恢复文件重复覆盖新数据 |
+
+启动时仅将遗留 `processing` 任务改为 `paused` 并记录 `LOCAL_PROCESS_INTERRUPTED`，不自动重新生成或退款；视频可沿用已有上游任务 ID 查询。演示登录会话、账号余额、后台临时配置仍在内存中，不能把这里的退款标记当作正式持久账本。现有 `DEMO_RECOVERY_FILE` 仅在新数据库首次初始化时导入；坏数据库或写入失败会报错，不会自动删除并重建为空库。
 
 ## 任务执行与恢复字段
 

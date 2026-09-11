@@ -14,6 +14,7 @@ test("demo OpenToken supports shared and independently configured chat providers
     GPT_IMAGE_2_API_KEY: "",
     APIMART_BASE_URL: "http://apimart.test/v1",
     DEMO_RECOVERY_FILE: "",
+    DEMO_STATE_PATH: ":memory:",
     DEMO_PUBLIC_ASSET_ORIGIN: "",
     STANDALONE_WEB_DIR: "",
   };

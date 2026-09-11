@@ -2,6 +2,7 @@ node_modules/
 dist/
 web/dist/
 server/.env
+server/.data/
 web/.env
 .env
 data/

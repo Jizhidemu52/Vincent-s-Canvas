@@ -6,10 +6,12 @@ import { createConnection, createServer as createTcpServer, type Socket } from "
 import { createServer as createHttpsServer } from "node:https";
 import { createServer as createHttpServer } from "node:http";
 import { fetchProviderSubmission } from "../src/provider-submission-transport";
+import { startNativeNetworkFixture } from "./fixtures/native-network-fixture";
 
 let fixtureDirectory: string;
 let certificate: string;
 let privateKey: string;
+let nativeProxy: Awaited<ReturnType<typeof startNativeNetworkFixture>> | undefined;
 const savedExtraCa = process.env.NODE_EXTRA_CA_CERTS;
 const proxyKeys = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"] as const;
 const savedProxyEnv = Object.fromEntries(proxyKeys.map((key) => [key, process.env[key]]));
@@ -23,9 +25,13 @@ beforeAll(async () => {
   certificate = await readFile(join(fixtureDirectory, "cert.pem"), "utf8");
   privateKey = await readFile(join(fixtureDirectory, "key.pem"), "utf8");
   process.env.NODE_EXTRA_CA_CERTS = join(fixtureDirectory, "cert.pem");
+  // Native fixture readiness separates process/filesystem startup from the
+  // CONNECT protocol deadline and avoids Bun's HTTP socket compatibility layer.
+  nativeProxy = await startNativeNetworkFixture({ cert: certificate, key: privateKey });
 });
 
 afterAll(async () => {
+  await nativeProxy?.close();
   for (const key of proxyKeys) {
     if (savedProxyEnv[key] === undefined) delete process.env[key];
     else process.env[key] = savedProxyEnv[key];
@@ -37,47 +43,29 @@ afterAll(async () => {
 
 describe("provider submission transport", () => {
   test("explicit proxy CONNECT omits model credentials and body, then submits once on authorized target TLS", async () => {
-    const tunnels: Array<{ method?: string; headers: Record<string, unknown>; bytes: number }> = [];
-    const sockets = new Set<Socket>();
-    let requests = 0;
-    const backend = Bun.serve({ port: 0, hostname: "127.0.0.1", tls: { cert: certificate, key: privateKey }, async fetch(request) {
-      requests++;
-      expect(request.headers.get("authorization")).toBe("Bearer model-test-key");
-      expect(request.headers.get("proxy-authorization")).toBeNull();
-      expect(await request.text()).toBe("private model prompt");
-      return Response.json({ id: "proxied-job" });
-    } });
-    const proxy = createHttpServer();
-    proxy.on("connect", (request, socket, head) => {
-      tunnels.push({ method: request.method, headers: request.headers, bytes: head.length });
-      const upstream = createConnection({ host: "127.0.0.1", port: backend.port! }, () => {
-        socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        if (head.length) upstream.write(head);
-        socket.pipe(upstream); upstream.pipe(socket);
-      });
-      sockets.add(socket as Socket); sockets.add(upstream);
-      socket.once("error", () => upstream.destroy()); upstream.once("error", () => socket.destroy());
-    });
-    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    const fixture = nativeProxy!;
     process.env.HTTPS_PROXY = "http://127.0.0.1:1";
-    process.env.https_proxy = `http://proxy-user:proxy-secret@127.0.0.1:${(proxy.address() as { port: number }).port}`;
+    process.env.https_proxy = `http://proxy-user:proxy-secret@127.0.0.1:${fixture.ready.proxyPort}`;
     try {
-      const response = await fetchProviderSubmission(`https://127.0.0.1:${backend.port}/submit`, { method: "POST", headers: { authorization: "Bearer model-test-key" }, body: "private model prompt", signal: AbortSignal.timeout(5_000) });
+      const response = await fetchProviderSubmission(`https://127.0.0.1:${fixture.ready.targetPort}/submit`, { method: "POST", headers: { authorization: "Bearer model-test-key" }, body: "private model prompt", signal: AbortSignal.timeout(3_000) });
       expect(await response.json()).toEqual({ id: "proxied-job" });
-      expect(requests).toBe(1);
+      const submitted = await fixture.waitFor((event) => event.event === "request", 1_000);
+      const closed = await fixture.waitFor((event) => event.event === "backend_close", 1_000);
+      expect(closed).toMatchObject({ requests: 1, connects: 1, connections: 1, closedConnections: 1 });
+      expect(submitted.authorization).toBe("Bearer model-test-key");
+      expect(submitted.proxyAuthorization).toBeUndefined();
+      expect(submitted.body).toBe("private model prompt");
+      const tunnels = fixture.events.filter((event) => event.event === "connect");
       expect(tunnels).toHaveLength(1);
       expect(tunnels[0]!.method).toBe("CONNECT");
-      expect(tunnels[0]!.headers.authorization).toBeUndefined();
-      expect(tunnels[0]!.headers["proxy-authorization"]).toBe(`Basic ${Buffer.from("proxy-user:proxy-secret").toString("base64")}`);
-      expect(tunnels[0]!.bytes).toBe(0);
+      expect(tunnels[0]!.headers?.authorization).toBeUndefined();
+      expect(tunnels[0]!.headers?.["proxy-authorization"]).toBe(`Basic ${Buffer.from("proxy-user:proxy-secret").toString("base64")}`);
+      expect(tunnels[0]!.headBytes).toBe(0);
       expect(JSON.stringify(tunnels)).not.toContain("model-test-key");
       expect(JSON.stringify(tunnels)).not.toContain("private model prompt");
     } finally {
       delete process.env.HTTPS_PROXY;
       delete process.env.https_proxy;
-      for (const socket of sockets) socket.destroy();
-      backend.stop(true);
-      await new Promise<void>((resolve) => proxy.close(() => resolve()));
     }
   });
 

@@ -221,7 +221,7 @@ bun run dev:demo
 
 When the key is present, the local demo exposes `gpt-image-2` for text-to-image and reference-image editing. Text-to-image calls `/images/generations`; requests with one or more reference images call `/images/edits` as multipart form data. This is a local demo integration only; production credentials remain configured through the encrypted provider settings.
 
-演示 API 只监听 `127.0.0.1:3100`，使用内存 Session，重启后会恢复默认数据。登录页检测到演示 API 后会自动显示以下可点击填入的账号：
+演示 API 只监听 `127.0.0.1:3100`，素材原文件和任务自动保存到本机 SQLite（默认 `server/.data/local-demo.sqlite`），重启保留。Session、演示余额及后台临时配置仍恢复默认值，不是正式多人系统。登录页检测到演示 API 后会自动显示以下可点击填入的账号：
 
 | 身份 | 登录入口 | 账号 | 密码 |
 | --- | --- | --- | --- |
