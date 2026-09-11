@@ -8,7 +8,7 @@ import { canvasViewportContentStyle } from "@/lib/canvas/canvas-viewport-renderi
 import { shouldRefreshCanvasVirtualization } from "@/lib/canvas/canvas-viewport-virtualization";
 import { bindCanvasPointerInteractionEnd } from "@/lib/canvas/canvas-pointer-interaction";
 import { bindCanvasSpaceKey } from "@/lib/canvas/canvas-keyboard";
-import { canvasWheelZoomFactor } from "@/lib/canvas/canvas-wheel-zoom";
+import { CANVAS_WHEEL_EASE_MS, canvasWheelTargetScale, canvasWheelZoomFactor, easeCanvasWheelViewport } from "@/lib/canvas/canvas-wheel-zoom";
 import { shouldCanvasCaptureWheel } from "@/lib/canvas/canvas-wheel-target";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ViewportTransform } from "@/types/canvas";
@@ -58,6 +58,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
     const isCanvasInteractionRef = useRef(false);
     const frameRef = useRef<number | null>(null);
     const pendingViewportRef = useRef<ViewportTransform | null>(null);
+    const wheelEaseRef = useRef<{ from: ViewportTransform; startedAt: number } | null>(null);
     const wheelCommitTimerRef = useRef<number | null>(null);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
     const [isCanvasInteracting, setIsCanvasInteracting] = useState(false);
@@ -74,7 +75,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
     );
 
     useEffect(() => {
-        if (!panState.current.isPanning) {
+        if (!panState.current.isPanning && !isCanvasInteractionRef.current) {
             liveViewportRef.current = viewport;
             lastVirtualizationViewportRef.current = viewport;
         }
@@ -116,20 +117,6 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         [backgroundMode, onViewportPreview],
     );
 
-    const queueLiveViewport = useCallback(
-        (next: ViewportTransform) => {
-            pendingViewportRef.current = next;
-            if (frameRef.current) return;
-            frameRef.current = requestAnimationFrame(() => {
-                frameRef.current = null;
-                const pending = pendingViewportRef.current;
-                pendingViewportRef.current = null;
-                if (pending) applyLiveViewport(pending);
-            });
-        },
-        [applyLiveViewport],
-    );
-
     const commitLiveViewport = useCallback(() => {
         if (frameRef.current) {
             cancelAnimationFrame(frameRef.current);
@@ -137,6 +124,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         }
         const next = pendingViewportRef.current || liveViewportRef.current;
         pendingViewportRef.current = null;
+        wheelEaseRef.current = null;
         applyLiveViewport(next);
         lastVirtualizationViewportRef.current = next;
         onViewportChange(next);
@@ -155,6 +143,33 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         [onViewportChange],
     );
 
+    const queueLiveViewport = useCallback(
+        (next: ViewportTransform, smooth = false) => {
+            pendingViewportRef.current = next;
+            wheelEaseRef.current = smooth ? { from: liveViewportRef.current, startedAt: performance.now() } : null;
+            if (frameRef.current) return;
+            const renderFrame = (now: number) => {
+                frameRef.current = null;
+                const pending = pendingViewportRef.current;
+                if (!pending) return;
+                const ease = wheelEaseRef.current;
+                const elapsed = ease ? now - ease.startedAt : CANVAS_WHEEL_EASE_MS;
+                const rendered = ease ? easeCanvasWheelViewport(ease.from, pending, elapsed) : pending;
+                applyLiveViewport(rendered);
+                // Virtualization must follow the visible frame, not the future target.
+                if (ease) publishVirtualizedViewport(rendered);
+                if (ease && elapsed < CANVAS_WHEEL_EASE_MS) {
+                    frameRef.current = requestAnimationFrame(renderFrame);
+                } else {
+                    pendingViewportRef.current = null;
+                    wheelEaseRef.current = null;
+                }
+            };
+            frameRef.current = requestAnimationFrame(renderFrame);
+        },
+        [applyLiveViewport, publishVirtualizedViewport],
+    );
+
     const previewViewport = useCallback(
         (next: ViewportTransform) => {
             if (frameRef.current) {
@@ -162,9 +177,15 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
                 frameRef.current = null;
             }
             pendingViewportRef.current = null;
+            wheelEaseRef.current = null;
+            if (wheelCommitTimerRef.current) {
+                window.clearTimeout(wheelCommitTimerRef.current);
+                wheelCommitTimerRef.current = null;
+                reportCanvasInteraction(false);
+            }
             applyLiveViewport(next);
         },
-        [applyLiveViewport],
+        [applyLiveViewport, reportCanvasInteraction],
     );
 
     useImperativeHandle(ref, () => ({ previewViewport }), [previewViewport]);
@@ -173,18 +194,18 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         const target = event.target instanceof Element ? event.target : null;
         if (!shouldCanvasCaptureWheel(target)) return;
 
-        const current = pendingViewportRef.current || liveViewportRef.current;
-        const newScale = clampCanvasZoom(current.k * canvasWheelZoomFactor(event.deltaY));
         const rect = containerRef.current?.getBoundingClientRect();
-        if (!rect) return;
+        if (!rect || event.deltaY === 0 || panState.current.isPanning) return;
+        const current = liveViewportRef.current;
+        const factor = canvasWheelZoomFactor(event.deltaY, event.deltaMode, rect.height);
+        const newScale = clampCanvasZoom(canvasWheelTargetScale(current.k, pendingViewportRef.current?.k, factor));
 
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
         virtualizationRefreshDistanceRef.current = Math.max(160, Math.max(rect.width, rect.height) / 2);
         reportCanvasInteraction(true);
         const next = zoomViewportAtPoint(current, { x: mouseX, y: mouseY }, newScale);
-        queueLiveViewport(next);
-        publishVirtualizedViewport(next);
+        queueLiveViewport(next, !window.matchMedia("(prefers-reduced-motion: reduce)").matches);
         if (wheelCommitTimerRef.current) window.clearTimeout(wheelCommitTimerRef.current);
         wheelCommitTimerRef.current = window.setTimeout(() => {
             wheelCommitTimerRef.current = null;
@@ -197,6 +218,14 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         const target = event.target instanceof Element ? event.target : null;
         if (target?.closest("[data-canvas-no-zoom]")) return;
         if (target?.closest("[data-connection-create-menu]")) return;
+        // A grab/selection starts from what is on screen, never an unfinished zoom target.
+        if (wheelCommitTimerRef.current) {
+            window.clearTimeout(wheelCommitTimerRef.current);
+            wheelCommitTimerRef.current = null;
+            if (wheelEaseRef.current) pendingViewportRef.current = null;
+            commitLiveViewport();
+            reportCanvasInteraction(false);
+        }
         const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id]");
 
         const handActive = interactionMode === "hand" || (interactionMode !== undefined && isSpacePressed);

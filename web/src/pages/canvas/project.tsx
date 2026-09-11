@@ -1695,7 +1695,9 @@ function WirelessCanvasPage() {
     }, [getCanvasCenter]);
 
     const resetViewport = useCallback(() => {
-        setViewport({ x: size.width / 2, y: size.height / 2, k: 1 });
+        const next = { x: size.width / 2, y: size.height / 2, k: 1 };
+        wirelessCanvasRef.current?.previewViewport(next);
+        setViewport(next);
         setContextMenu(null);
     }, [size.height, size.width]);
 
@@ -1717,6 +1719,7 @@ function WirelessCanvasPage() {
         (scale: number) => {
             const nextScale = clampCanvasZoom(scale);
             const next = zoomViewportAtCanvasCenter(viewportRef.current, size, nextScale);
+            wirelessCanvasRef.current?.previewViewport(next);
             viewportRef.current = next;
             setViewport(next);
             setContextMenu(null);
