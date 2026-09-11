@@ -9,11 +9,48 @@
 - **素材复用**：管理图片、提示词和生成记录。
 - **团队管理**：公司版支持账号、分组、额度和模型配置。
 
-## 开始使用
+## 拉取与安装（Windows / 局域网）
 
-已部署好？打开管理员提供的地址即可使用。
+已部署好？直接打开管理员提供的地址，无需重复安装。
 
-- [操作手册](docs/manual/user-guide.md)：生成、改图、下载与备份。
+首次安装，先准备 [Git](https://git-scm.com/downloads) 和 [Bun](https://bun.sh/)，然后在 PowerShell 执行：
+
+```powershell
+git clone https://github.com/Jizhidemu52/Vincent-s-Canvas.git
+cd Vincent-s-Canvas
+cd web
+bun install
+bun run build
+cd ..\server
+bun install
+cd ..
+```
+
+配置与启动：
+
+1. 若没有 `server/.env`，复制 `server/.env.example` 为 `.env`，按 [模型配置说明](README-本地部署.md) 填入自己的模型 Key。
+2. 双击根目录的 `Start-LAN.bat`；首次若提示防火墙权限不足，右键以管理员身份运行一次。
+3. 打开启动窗口显示的网址。同事使用同一地址，且须在同一局域网；运行电脑保持开机。
+
+## 拉取最新版本
+
+先备份 `server/.env`、`server/.data` 和重要画布；在项目根目录执行：
+
+```powershell
+git pull --ff-only origin main
+cd web
+bun install
+bun run build
+cd ..\server
+bun install
+cd ..
+```
+
+更新后刷新网页；若更新了服务端或 Key，等待生成任务结束，停止旧的本项目服务后再运行 `Start-LAN.bat`。重复双击启动脚本只会复用已有服务，不会自动重启。若拉取提示本地改动冲突，先保留改动，不要强制覆盖。
+
+## 详细手册
+
+- [全板块操作手册](docs/manual/user-guide.md)：生成、改图、下载与备份。
 - [Windows / 局域网安装](README-本地部署.md)：在电脑上运行，供同事访问。
 - [Linux 服务器部署](docs/manual/linux-deployment.md)：公司服务器安装与维护。
 - [宝塔离线安装](docs/manual/baota-offline-installation.md)：服务器下载或编译较慢时使用。

@@ -78,7 +78,7 @@ http://192.168.1.115:5188/
 在项目根目录执行：
 
 ```powershell
-git pull origin main
+git pull --ff-only origin main
 
 cd web
 bun install
@@ -88,7 +88,7 @@ cd ..\server
 bun install
 ```
 
-然后重新双击 `Start-LAN.bat`。更新不会替换 `server/.env`，但更新前建议自行备份该文件。
+前端更新后刷新网页即可。若更新了服务端或 Key，等待生成任务结束，停止旧的本项目服务后，再双击 `Start-LAN.bat`；重复双击只会复用已有服务，不会自动重启。更新前备份 `server/.env`、`server/.data` 和重要画布；拉取遇到本地改动冲突时不要强制覆盖。
 
 ## 常见问题
 
