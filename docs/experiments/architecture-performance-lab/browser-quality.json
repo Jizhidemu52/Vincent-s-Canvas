@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-09-14T02:27:47.058Z",
+  "chrome": "152.0.7977.76",
+  "platform": "win32",
+  "node": "v25.2.1",
+  "cpu": "Intel(R) Core(TM) i7-14700KF",
+  "logicalCpuCount": 28,
+  "memoryBytes": 34138730496,
+  "mode": "quality-only",
+  "viewport": {
+    "width": 1440,
+    "height": 1000,
+    "dpr": 1
+  },
+  "trialOrder": [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline",
+    "candidate",
+    "baseline",
+    "baseline",
+    "candidate"
+  ],
+  "bundles": {
+    "baseline": {
+      "sha256": "75733cb0ee1ed2de3ad93a93ba85ce151462232ddbaf6b5bac9cad813a1ecaff",
+      "bytes": 64335
+    },
+    "candidate": {
+      "sha256": "07ba4d5f62e7bfcbbe44db114f9ffa26d8e2c6440c0249fe270bf3da3341bfa1",
+      "bytes": 66796
+    }
+  },
+  "fixtures": [],
+  "quality": [
+    {
+      "variant": "baseline",
+      "passed": true,
+      "checks": [
+        "full fixture strict round-trip",
+        "two independently hydrated stores preserve separate edits to same project",
+        "same-field conflict preserves complete recoverable previous graph",
+        "QuotaExceededError rolls back whole multi-project batch; retry retains newest edit",
+        "fresh-page hydration preserves every field and exact source image bytes",
+        "project deletion is durable and cannot resurrect after reload",
+        "clearStorage removes persisted projects and reloads empty"
+      ],
+      "imageSha256": "916f6c755bd07859a6f75a802f527a5a1d0d71df59d663dd091be7f948946b4b",
+      "pageErrors": []
+    },
+    {
+      "variant": "candidate",
+      "passed": true,
+      "checks": [
+        "full fixture strict round-trip",
+        "two independently hydrated stores preserve separate edits to same project",
+        "same-field conflict preserves complete recoverable previous graph",
+        "QuotaExceededError rolls back whole multi-project batch; retry retains newest edit",
+        "fresh-page hydration preserves every field and exact source image bytes",
+        "project deletion is durable and cannot resurrect after reload",
+        "clearStorage removes persisted projects and reloads empty"
+      ],
+      "imageSha256": "916f6c755bd07859a6f75a802f527a5a1d0d71df59d663dd091be7f948946b4b",
+      "pageErrors": []
+    },
+    {
+      "variant": "candidate-storage-boundaries",
+      "passed": true,
+      "checks": [
+        "missing-document: read/write reject; existing raw keys and bytes untouched",
+        "bad-manifest: read/write reject; existing raw keys and bytes untouched"
+      ]
+    }
+  ],
+  "samples": [],
+  "hydration": [],
+  "limitations": [
+    "Storage-only production-bundled store harness, not full React UI or GPU rendering.",
+    "Node-content and viewport samples use explicit flush; autosave-node samples include unchanged 400ms debounce and wait for IndexedDB transaction.complete without forcing flush.",
+    "Headless Chrome frame cadence is environmental; raw gaps are reported without stall filtering.",
+    "Image data URLs and metadata retained byte-for-byte; this does not measure image decoding, exports or provider quality.",
+    "Only JSON string put bytes counted; structured values are identified, not estimated inside timing.",
+    "Hydration uses fresh document/store reload with warm OS/browser disk cache, not cold-machine startup."
+  ],
+  "completedAt": "2026-09-14T02:27:48.778Z",
+  "passed": true,
+  "summary": []
+}

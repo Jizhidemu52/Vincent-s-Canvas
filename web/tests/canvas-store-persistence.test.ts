@@ -66,6 +66,16 @@ async function openTab(io: ReturnType<typeof database>) {
         create, persist, nanoid: () => `new-${++ids}`, collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, applyCanvasProjectPatch,
         localForageStorage: io.adapter,
         updateCanvasStorage: io.update,
+        readCanvasProjects: async (key: string) => JSON.parse(await io.adapter.getItem(key) || "null")?.state.projects || [],
+        writeCanvasProjects: async (key: string, changes: Parameters<typeof mergeProjectChanges<CanvasProject>>[1]) => {
+            let written: CanvasProject[] = [];
+            await io.update(key, stored => {
+                written = mergeProjectChanges(stored ? JSON.parse(stored).state.projects : [], changes);
+                return JSON.stringify({ version: 0, state: { projects: written } });
+            });
+            return written;
+        },
+        removeCanvasProjects: (key: string) => io.update(key, () => null),
         withCanvasStorageLock: async (_name: string, callback: () => unknown) => callback(),
         createDeferredPersistQueue: <T>(delay: number, flush: (value: T) => void) => createDeferredPersistQueue(delay, flush, { setTimeout: () => 1, clearTimeout() {} }),
         window: { addEventListener() {} },

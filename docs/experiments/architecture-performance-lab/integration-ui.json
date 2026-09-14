@@ -1,0 +1,16 @@
+{
+  "browser": "152.0.7977.76",
+  "status": "PASS",
+  "fixture": "10 projects × 500 nodes, normal production route",
+  "results": [
+    {
+      "variant": "candidate",
+      "dragUndoRedoReload": true,
+      "nodes": 500,
+      "connections": 499,
+      "imageBytesSha256": "2f0149689752ed2fc0609d9850330111e585027e899d456185ac162b452636d1",
+      "imageScreenshotSha256": "abda5a5843cfa081df2c952952be9e353287a08f26eb384026eccc8a522ff97d",
+      "errors": []
+    }
+  ]
+}

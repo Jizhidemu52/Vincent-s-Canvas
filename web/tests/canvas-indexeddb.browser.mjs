@@ -11,18 +11,23 @@ async function verifyCanvasIndexedDb(page, origin = "http://127.0.0.1:3301") {
             Object.defineProperty(navigator, "locks", { value: undefined, configurable: true });
             const { updateCanvasStorage } = await import("/src/lib/canvas/canvas-atomic-storage.ts");
             const { localForageStorage } = await import("/src/lib/localforage-storage.ts");
-            window.canvasFixture = { update: updateCanvasStorage, read: key => localForageStorage.getItem(key) };
+            const { readCanvasProjects, writeCanvasProjects } = await import("/src/lib/canvas/canvas-project-storage.ts");
+            window.canvasFixture = {
+                update: updateCanvasStorage,
+                read: key => key === "wireless-canvas:canvas_store" ? readCanvasProjects(key).then(projects => JSON.stringify({ state: { projects } })) : localForageStorage.getItem(key),
+                seed: projects => writeCanvasProjects("wireless-canvas:canvas_store", new Map(projects.map(project => [project.id, { base: null, value: project, conflictId: "seed", savedAt: "old" }]))),
+            };
         })));
         await tabs[0].evaluate(async () => {
             await window.canvasFixture.update("canvas-atomic-counter", () => "0");
-            await window.canvasFixture.update("wireless-canvas:canvas_store", () => JSON.stringify({ version: 0, state: { projects: [{
+            await window.canvasFixture.seed([{
                 id: "shared-fixture", title: "事务回归画布", createdAt: "old", updatedAt: "old", backgroundMode: "dots", showImageInfo: false,
                 viewport: { x: 0, y: 0, k: 1 }, activeChatId: null, chatSessions: [], connections: [],
                 nodes: [
                     { id: "a", type: "image", title: "A", width: 640, height: 320, position: { x: 0, y: 0 }, metadata: { content: "data:image/png;base64,b3JpZ2luYWw=", storageKey: "image:original" } },
                     { id: "b", type: "text", title: "B", width: 300, height: 200, position: { x: 800, y: 0 }, metadata: { content: "原始说明" } },
                 ],
-            }] } }));
+            }]);
         });
         await Promise.all(tabs.map(tab => tab.evaluate(async () => {
             const { useCanvasStore, flushCanvasPersistence } = await import("/src/stores/canvas/use-canvas-store.ts");

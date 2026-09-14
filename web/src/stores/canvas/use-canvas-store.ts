@@ -3,9 +3,8 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { nanoid } from "nanoid";
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
-import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, type CanvasPersistenceConflict, type ProjectChange } from "@/lib/canvas/canvas-persistence-merge";
-import { updateCanvasStorage } from "@/lib/canvas/canvas-atomic-storage";
-import { localForageStorage } from "@/lib/localforage-storage";
+import { collectProjectChanges, createProjectChangeBuffer, type CanvasPersistenceConflict, type ProjectChange } from "@/lib/canvas/canvas-persistence-merge";
+import { readCanvasProjects, writeCanvasProjects, removeCanvasProjects } from "@/lib/canvas/canvas-project-storage";
 import { applyCanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -46,19 +45,14 @@ const projectWriteBuffer = createProjectChangeBuffer<CanvasProject>();
 type PersistWrite = { name: string; value: StorageValue<CanvasStore>; changes: Map<string, ProjectChange<CanvasProject>> };
 let persistWriteChain: Promise<void> = Promise.resolve();
 let lastPersistError: unknown = null;
-const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, value, changes }) => {
+const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, changes }) => {
     pendingProjectChanges.clear();
     // IndexedDB writes are asynchronous. Keep their order stable so a slow
     // older snapshot can never finish after and overwrite a newer edit.
     persistWriteChain = persistWriteChain
         .catch(() => undefined)
         .then(() => projectWriteBuffer.write(changes, async retainedChanges => {
-            let writtenProjects: CanvasProject[] = [];
-            await updateCanvasStorage(name, stored => {
-                const current = stored ? JSON.parse(stored) as StorageValue<CanvasStore> : null;
-                writtenProjects = mergeProjectChanges(current?.state.projects || [], retainedChanges);
-                return JSON.stringify({ ...value, state: { ...value.state, projects: writtenProjects } });
-            });
+            const writtenProjects = await writeCanvasProjects(name, retainedChanges);
             // The editor owns a separate graph snapshot. Do not rebase its live
             // project behind its back: its next save would look like deletions.
             // Newly saved conflict copies can safely appear in the project list.
@@ -92,9 +86,7 @@ if (typeof window !== "undefined") {
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
-        const value = await localForageStorage.getItem(name);
-        if (!value) return null;
-        const parsed = JSON.parse(value) as StorageValue<CanvasStore>;
+        const parsed = { version: 0, state: { projects: await readCanvasProjects(name) } } as StorageValue<CanvasStore>;
         queuedPersistState = parsed.state as PersistedCanvasState;
         return parsed;
     },
@@ -111,7 +103,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         persistWriteChain = persistWriteChain
             .catch(() => undefined)
             .then(async () => {
-                await updateCanvasStorage(name, () => null);
+                await removeCanvasProjects(name);
                 projectWriteBuffer.clear();
             })
             .then(() => undefined);

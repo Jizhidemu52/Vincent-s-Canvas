@@ -13,3 +13,7 @@ data/
 .playwright-cli/
 .worktrees/
 *.tsbuildinfo
+
+# Isolated architecture benchmark build products and raw local browser output.
+output/architecture-lab/
+web/scripts/.architecture-lab-*/
