@@ -43,7 +43,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             );
             const row = result.rows[0];
             const valid = row?.password_hash ? await verifyPassword(row.password_hash, input.password) : false;
-            if (!row || !valid || row.status !== "active" || row.is_guest || (row.locked_until && row.locked_until > new Date()) || (features.rolePortalsEnabled && !canUsePortal(row.role, input.portal))) {
+            if (!row || !valid || row.status !== "active" || row.is_guest || (row.locked_until && row.locked_until > new Date()) || !canUsePortal(row.role, input.portal)) {
                 if (row) {
                     await db.query(`UPDATE users SET failed_login_count=failed_login_count+1,
                         locked_until=CASE WHEN failed_login_count+1>=5 THEN now()+interval '15 minutes' ELSE locked_until END WHERE id=$1`, [row.id]);
@@ -112,8 +112,12 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
 
     router.get("/wecom/start", async (request, response) => {
         try {
+            if (request.query.portal && request.query.portal !== "designer") {
+                response.status(403).json({ error: "FORBIDDEN", message: "企业微信仅用于设计师登录；后台请使用管理员账号密码" });
+                return;
+            }
             const state = randomBytes(24).toString("base64url");
-            const portal = request.query.portal === "admin" ? "admin" : "designer";
+            const portal = "designer";
             const authorizationUrl = createWeComAuthorizationUrl(config, state);
             await cache.set(`wecom-state:${state}`, portal, { EX: 300 });
             response.json({ authorizationUrl });
@@ -128,7 +132,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             const code = typeof request.query.code === "string" ? request.query.code : "";
             const state = typeof request.query.state === "string" ? request.query.state : "";
             const portal = state ? await cache.get(`wecom-state:${state}`) : null;
-            if (!code || !state || !portal) { response.status(400).send("企业微信登录请求已失效，请返回登录页重试"); return; }
+            if (!code || !state || portal !== "designer") { response.status(400).send("企业微信登录请求已失效，请返回设计师登录页重试"); return; }
             await cache.del(`wecom-state:${state}`);
             const { userId } = await exchangeWeComCode(config, code);
 
@@ -138,7 +142,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
                  WHERE e.subject=$1 OR u.employee_no=$1 ORDER BY (e.subject=$1) DESC LIMIT 1`, [userId],
             );
             const row = result.rows[0];
-            if (!row || row.status !== "active" || row.is_guest || (features.rolePortalsEnabled && !canUsePortal(row.role, portal as "designer" | "admin"))) {
+            if (!row || row.status !== "active" || row.is_guest || !canUsePortal(row.role, "designer")) {
                 response.status(403).send("该企业微信成员尚未开通对应平台权限"); return;
             }
             const session = createSessionToken();
@@ -166,7 +170,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             setSessionCookie(response, config, session.token);
             const user = mapUser(row);
             await writeAudit(db, { actor: user, action: "auth.wecom_login", targetType: "session", targetId: session.id, result: "success", ip: request.ip });
-            const destination = user.mustChangePassword ? "/change-password" : !features.rolePortalsEnabled || user.role === "designer" ? "/" : "/admin";
+            const destination = user.mustChangePassword ? "/change-password" : "/";
             response.redirect(302, destination);
         } catch (error) {
             if (error instanceof WeComError) {

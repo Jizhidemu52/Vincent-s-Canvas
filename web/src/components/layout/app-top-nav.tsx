@@ -57,7 +57,7 @@ function ToolGroup({ group, activeToolSlug, adminVisible, teamVisible, getToolBa
     const tools = navigationTools.filter((tool) => {
         if (tool.group !== group) return false;
         if (!deploymentFeatures.rolePortalsEnabled && tool.group === "admin") return false;
-        return (tool.slug === "admin" || flags[navigationModuleKey(tool.slug) as ModuleKey])
+        return (tool.slug === "creative" ? flags.image || flags["image-edit"] : tool.slug === "admin" || flags[navigationModuleKey(tool.slug) as ModuleKey])
             && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible));
     });
     if (!tools.length) return null;
@@ -133,6 +133,7 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
 }
 
 function getActiveToolSlug(pathname: string, search: string): NavigationToolSlug | undefined {
+    if (pathname.startsWith("/creative/")) return "creative";
     const currentParams = new URLSearchParams(search);
     const exact = navigationTools.find((tool) => {
         const [toolPathname, toolSearch = ""] = tool.path.split("?");

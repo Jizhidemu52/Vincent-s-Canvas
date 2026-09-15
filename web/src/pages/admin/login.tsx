@@ -1,10 +1,9 @@
-import { LockKeyhole, QrCode, ShieldCheck, UserRound } from "lucide-react";
+import { LockKeyhole, ShieldCheck, UserRound } from "lucide-react";
 import { App, Button, Input } from "antd";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
-import { getWeComLoginUrl } from "@/services/api/auth";
 import { DemoAccountList } from "@/components/demo-account-list";
 import { deploymentFeatures } from "@/lib/deployment-features";
 
@@ -26,11 +25,6 @@ export default function AdminLoginPage() {
             navigate(user.mustChangePassword ? "/change-password" : isAdminRole(user.role) ? "/admin" : "/", { replace: true });
         } catch (error) { message.error(error instanceof Error ? error.message : "登录失败"); }
         finally { setSubmitting(false); }
-    };
-
-    const loginWithWeCom = async () => {
-        try { window.location.assign((await getWeComLoginUrl("admin")).authorizationUrl); }
-        catch (error) { message.error(error instanceof Error ? error.message : "企业微信登录暂不可用"); }
     };
 
     return (
@@ -55,7 +49,6 @@ export default function AdminLoginPage() {
                     <Button type="primary" size="large" block loading={submitting} icon={<LockKeyhole className="size-4" />} onClick={submit}>
                         {showRoles ? "登录后台" : "登录"}
                     </Button>
-                    <Button size="large" block icon={<QrCode className="size-4" />} onClick={loginWithWeCom}>企业微信扫码登录</Button>
                     <Button size="large" block icon={<UserRound className="size-4" />} onClick={() => navigate(showRoles && deploymentFeatures.authenticationEnabled ? "/login" : "/")}>
                         {showRoles && deploymentFeatures.authenticationEnabled ? "返回设计师登录" : "返回工作台"}
                     </Button>

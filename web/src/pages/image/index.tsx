@@ -1,7 +1,7 @@
 import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 
@@ -35,6 +35,9 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import type { ImageReferenceItem, ImageReferenceOrigin, ReferenceImage } from "@/types/image";
 import { hydrateImageLogMedia } from "./image-log-media";
 import { ImageLogThumbnail } from "./image-log-thumbnail";
+import { GarmentRecipePanel } from "../creative/garment-recipe-panel";
+import { garmentReferencesMatch, type GarmentRecipe } from "@/lib/garment-recipe";
+import { CREATIVE_REQUIREMENT_PLACEHOLDER, type CreativePreset } from "@/lib/creative-presets";
 import "./image-workbench.css";
 const SeamlessStitchPage = lazy(() => import("@/pages/image/seamless-stitch").then(module => ({ default: module.SeamlessStitchPage })));
 const CanvasImageEditorDialog = lazy(() => import("@/components/canvas/canvas-image-editor-dialog").then(module => ({ default: module.CanvasImageEditorDialog })));
@@ -91,6 +94,7 @@ import { normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-m
 const LOG_STORE_KEY = "wireless-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
 const logStore = localforage.createInstance({ name: "wireless-canvas", storeName: "image_generation_logs" });
+const creativeLogStore = localforage.createInstance({ name: "wireless-canvas", storeName: "creative_generation_logs" });
 
 type GenerationToolMode = Exclude<AdminToolMode, "gpt-chat" | "batch-image-edit" | "seamless-stitch">;
 
@@ -139,7 +143,7 @@ export default function ImagePage() {
     return searchParams.get("tool") === "seamless-stitch" ? <Suspense fallback={<div className="wb-page wb-empty" role="status">正在打开无缝拼接…</div>}><SeamlessStitchPage /></Suspense> : <ImageGenerationPage />;
 }
 
-function ImageGenerationPage() {
+export function ImageGenerationPage({ creativePreset }: { creativePreset?: CreativePreset } = {}) {
     const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -147,6 +151,7 @@ function ImageGenerationPage() {
     const loadedReuseTokenRef = useRef(new Set<string>());
     const generateRef = useRef<() => Promise<void>>(async () => undefined);
     const restoredInitialResultRef = useRef(false);
+    const inputRevision = useRef(0);
     const previewRevision = useRef(0);
     const logRefreshRevision = useRef(0);
     const [previewLoading, setPreviewLoading] = useState(false);
@@ -159,7 +164,8 @@ function ImageGenerationPage() {
     const user = useUserStore((state) => state.user);
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const addAsset = useAssetStore((state) => state.addAsset);
-    const [prompt, setPrompt] = useWorkbenchField(`image:${resolveImageToolMode(searchParams.get("tool"))}:prompt`, "");
+    const [prompt, setPrompt] = useWorkbenchField(creativePreset ? `creative:${creativePreset.id}:prompt` : `image:${resolveImageToolMode(searchParams.get("tool"))}:prompt`, creativePreset?.prompt || "");
+    const historyStore = creativePreset ? creativeLogStore : logStore;
     const [references, setReferences] = useState<ImageReferenceItem[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const imageEditor = useImageCopyEditor((copy, image) => {
@@ -179,9 +185,32 @@ function ImageGenerationPage() {
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [garmentEpoch, setGarmentEpoch] = useState(0);
+    const [garmentDraft, setGarmentDraft] = useState<{ scope: string; dirty: boolean; appliedReferences: ReferenceImage[] | null } | null>(null);
 
-    const toolMode = resolveImageToolMode(searchParams.get("tool"));
-    const toolModeConfig = imageToolModes[toolMode];
+    const toolMode = creativePreset?.tool || resolveImageToolMode(searchParams.get("tool"));
+    const initialGarmentScenario = creativePreset?.garment;
+    const garmentScope = `${user?.id || ""}:${toolMode}:${initialGarmentScenario || ""}:${garmentEpoch}`;
+    const activeGarmentDraft = toolMode === "image-edit" && garmentDraft?.scope === garmentScope ? garmentDraft : null;
+    const garmentNeedsApply = Boolean(activeGarmentDraft && (activeGarmentDraft.dirty || (activeGarmentDraft.appliedReferences && !garmentReferencesMatch(activeGarmentDraft.appliedReferences, references))));
+    const incompleteCreativePrompt = Boolean(creativePreset && prompt.includes(CREATIVE_REQUIREMENT_PLACEHOLDER));
+    const resetGarment = useCallback(() => {
+        setGarmentEpoch(value => value + 1);
+        setGarmentDraft(null);
+    }, []);
+    const replacePrompt = (text: string) => { inputRevision.current += 1; resetGarment(); setPrompt(text); };
+    const handleGarmentDraftChange = useCallback((dirty: boolean) => {
+        if (dirty) inputRevision.current += 1;
+        setGarmentDraft(current => ({ scope: garmentScope, dirty, appliedReferences: current?.scope === garmentScope ? current.appliedReferences : null }));
+    }, [garmentScope]);
+    const applyGarmentRecipe = (recipe: GarmentRecipe) => {
+        inputRevision.current += 1;
+        setPrompt(recipe.prompt);
+        setReferences(recipe.references.map(item => references.find(reference => reference.id === item.id) || createImageReferenceItem(item, "template")));
+        setGarmentDraft({ scope: garmentScope, dirty: false, appliedReferences: recipe.references });
+        message.success("已套用到提示词；检查后点击开始编辑");
+    };
+    const toolModeConfig = creativePreset ? { ...imageToolModes[toolMode], title: creativePreset.title, description: creativePreset.description, projectId: `creative-${creativePreset.id}` } : imageToolModes[toolMode];
     const operationType = toolModeOperation(toolMode) as "image_generation" | "inpaint" | "upscale";
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const adminModelId = modelOptionName(model);
@@ -193,7 +222,7 @@ function ImageGenerationPage() {
     const missingReference = toolModeConfig.requiresReference && references.length === 0;
     const invalidBlendReferences = selectedModelProfile.kind === "midjourney-blend" && (references.length < 2 || references.length > 4);
     const requiresPrompt = selectedModelProfile.kind !== "midjourney-blend";
-    const canGenerate = (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid;
+    const canGenerate = (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
 
     const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))]));
     const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin))));
@@ -226,9 +255,24 @@ function ImageGenerationPage() {
     useEffect(() => () => { previewRevision.current += 1; }, []);
 
     useEffect(() => {
+        inputRevision.current += 1;
+        previewRevision.current += 1;
+        setPreviewLoading(false);
+        return () => { inputRevision.current += 1; previewRevision.current += 1; };
+    }, [searchParams, user?.id]);
+
+    useEffect(() => {
+        setReferences([]);
+        loadedRecreateAssetsRef.current.clear();
+        loadedReuseTokenRef.current.clear();
+    }, [user?.id]);
+
+    useEffect(() => { resetGarment(); }, [toolMode, user?.id, initialGarmentScenario, resetGarment]);
+
+    useEffect(() => {
         const presetPrompt = searchParams.get("prompt");
         const presetModel = searchParams.get("model");
-        if (presetPrompt) setPrompt(presetPrompt);
+        if (presetPrompt) replacePrompt(presetPrompt);
         if (presetModel) updateConfig("imageModel", presetModel);
     }, [searchParams, updateConfig]);
 
@@ -236,9 +280,14 @@ function ImageGenerationPage() {
         const sourceAssetId = searchParams.get("sourceAssetId");
         if (!sourceAssetId || loadedRecreateAssetsRef.current.has(sourceAssetId)) return;
         loadedRecreateAssetsRef.current.add(sourceAssetId);
+        const revision = inputRevision.current;
+        let restored = false;
         void fetchServerAssetContent(sourceAssetId)
             .then(async (blob) => {
+                if (revision !== inputRevision.current) return;
                 const image = await uploadImage(blob);
+                if (revision !== inputRevision.current) return;
+                restored = true;
                 appendReferences([{ id: nanoid(), name: "复刻来源.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId }], "asset");
                 const eventType = searchParams.get("sourceOwnerId") === user?.id ? "asset.edited" : "asset.reused";
                 await recordServerAssetEvent(sourceAssetId, eventType, { channel: "one-click-recreate", destination: toolMode });
@@ -246,16 +295,31 @@ function ImageGenerationPage() {
             })
             .catch((error) => {
                 loadedRecreateAssetsRef.current.delete(sourceAssetId);
+                if (revision !== inputRevision.current) return;
                 message.error(error instanceof Error ? error.message : "复刻来源加载失败");
             });
+        return () => { if (!restored) loadedRecreateAssetsRef.current.delete(sourceAssetId); };
     }, [message, searchParams, toolMode, user?.id]);
 
     useEffect(() => {
         const token = searchParams.get("reuseToken");
         if (!token || loadedReuseTokenRef.current.has(token)) return;
         loadedReuseTokenRef.current.add(token);
+        const revision = inputRevision.current;
+        let restored = false;
         void hydratePromptReuse(token).then(async (payload) => {
-            setPrompt(payload.template.prompt);
+            if (revision !== inputRevision.current) return;
+            const nextReferences = await Promise.all(payload.template.referenceAssetIds.map(async (assetId) => {
+                const blob = await fetchServerAssetContent(assetId);
+                if (revision !== inputRevision.current) return null;
+                const image = await uploadImage(blob);
+                return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
+            }));
+            if (revision !== inputRevision.current) return;
+            // Apply a complete prompt/reference set in the same render, never half a template.
+            restored = true;
+            replacePrompt(payload.template.prompt);
+            restoreReferences(nextReferences.filter((item): item is NonNullable<typeof item> => item !== null), "template");
             const parameters = payload.template.parameters;
             const selectedModel = payload.pricing.selectedModel?.modelId;
             if (selectedModel) updateConfig("imageModel", selectedModel);
@@ -263,19 +327,15 @@ function ImageGenerationPage() {
             if (typeof parameters.quality === "string") updateConfig("quality", parameters.quality);
             const quantity = typeof parameters.quantity === "number" ? parameters.quantity : typeof parameters.count === "number" ? parameters.count : null;
             if (quantity) updateConfig("count", String(Math.min(10, Math.max(1, quantity))));
-            const nextReferences = await Promise.all(payload.template.referenceAssetIds.map(async (assetId) => {
-                const blob = await fetchServerAssetContent(assetId); const image = await uploadImage(blob);
-                return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
-            }));
-            restoreReferences(nextReferences, "template");
             payload.warnings.forEach((warning) => message.warning(warning));
             if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请先选择管理员当前启用的模型");
             const cost = !deploymentFeatures.creditsEnabled ? "不计积分" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
             if (payload.mode === "fill_and_generate") {
                 modal.confirm({ title: "确认使用当前配置生成？", content: !deploymentFeatures.creditsEnabled ? "确认后将直接提交生成任务。" : `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
             } else message.success(`模板已填入，当前预计 ${cost}`);
-        }).catch((error) => { loadedReuseTokenRef.current.delete(token); message.error(error instanceof Error ? error.message : "模板复用失败"); });
-    }, [message, modal, searchParams, updateConfig]);
+        }).catch((error) => { loadedReuseTokenRef.current.delete(token); if (revision === inputRevision.current) message.error(error instanceof Error ? error.message : "模板复用失败"); });
+        return () => { if (!restored) loadedReuseTokenRef.current.delete(token); };
+    }, [message, modal, searchParams, updateConfig, user?.id]);
 
     const addReferences = async (files?: FileList | null) => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
@@ -440,7 +500,7 @@ function ImageGenerationPage() {
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
         if (payload.kind === "text") {
-            setPrompt(payload.content);
+            replacePrompt(payload.content);
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
             appendReferences([{ id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, imageName: payload.imageName, imageVersion: payload.imageVersion }], "asset");
@@ -453,7 +513,7 @@ function ImageGenerationPage() {
     const createSession = () => {
         previewRevision.current += 1;
         setPreviewLoading(false);
-        setPrompt("");
+        replacePrompt(creativePreset?.prompt || "");
         setReferences([]);
         setResults([]);
         setStartedAt(0);
@@ -463,7 +523,7 @@ function ImageGenerationPage() {
 
     const deleteSelectedLogs = () => {
         const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
-        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs).catch((error) => message.error(error instanceof Error ? error.message : "记录删除失败"));
+        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => historyStore.removeItem(id))]).then(refreshLogs).catch((error) => message.error(error instanceof Error ? error.message : "记录删除失败"));
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
@@ -473,7 +533,7 @@ function ImageGenerationPage() {
     };
 
     const saveLog = async (log: GenerationLog) => {
-        await logStore.setItem(log.id, serializeLog(log));
+        await historyStore.setItem(log.id, serializeLog(log));
         logRefreshRevision.current += 1;
         setLogs((current) => upsertGenerationLog(current, log));
     };
@@ -481,7 +541,7 @@ function ImageGenerationPage() {
     const refreshLogs = async () => {
         const revision = ++logRefreshRevision.current;
         try {
-            const next = await readStoredLogs();
+            const next = await readStoredLogs(historyStore);
             if (revision === logRefreshRevision.current) setLogs(next);
         } catch (error) {
             if (revision === logRefreshRevision.current) message.error(error instanceof Error ? error.message : "历史记录读取失败，请检查浏览器存储");
@@ -489,6 +549,7 @@ function ImageGenerationPage() {
     };
 
     const previewGenerationLog = async (log: GenerationLog) => {
+        inputRevision.current += 1;
         const revision = ++previewRevision.current;
         setPreviewLoading(true);
         try {
@@ -497,7 +558,7 @@ function ImageGenerationPage() {
         log = hydrated;
         setPreviewLog(log);
         setLogsOpen(false);
-        setPrompt(log.prompt);
+        replacePrompt(log.prompt);
         restoreReferences(log.references || [], "template");
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
@@ -512,6 +573,10 @@ function ImageGenerationPage() {
     const buildRequestSnapshot = () => {
         previewRevision.current += 1;
         setPreviewLoading(false);
+        if (garmentNeedsApply || incompleteCreativePrompt) {
+            message.warning(garmentNeedsApply ? "服装要求或参考图已改变，请重新套用到提示词" : "请先把提示词中的填写位置替换成你的设计要求");
+            return null;
+        }
         const text = prompt.trim();
         if (!text && selectedModelProfile.requiresPrompt) {
             message.error("请输入生图提示词");
@@ -585,7 +650,7 @@ function ImageGenerationPage() {
                         <div>
                             <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                    <p className="wb-eyebrow">图像工作室</p><h1 className="wb-title">{toolModeConfig.title}</h1>
+                                    {creativePreset ? <Link className="wb-eyebrow inline-flex items-center gap-1" to="/creative"><ArrowLeft className="size-3" />创意设计</Link> : <p className="wb-eyebrow">图像工作室</p>}<h1 className="wb-title">{toolModeConfig.title}</h1>
                                     <p className="wb-description">{toolModeConfig.description}</p>
                                 </div>
                                 <div className="flex shrink-0 gap-2 lg:hidden">
@@ -600,6 +665,7 @@ function ImageGenerationPage() {
                         </div>
 
                         <div className="mt-6 space-y-5">
+                            {initialGarmentScenario ? <GarmentRecipePanel key={garmentScope} references={references} disabled={running || !selectedModelProfile.requiresPrompt} initialScenario={initialGarmentScenario} onApply={applyGarmentRecipe} onDraftChange={handleGarmentDraftChange} /> : null}
                             <div>
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                                     <span className="text-base font-semibold">提示词</span>
@@ -612,13 +678,13 @@ function ImageGenerationPage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea aria-label="图像提示词" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={6} disabled={running || !selectedModelProfile.requiresPrompt} placeholder={selectedModelProfile.requiresPrompt ? toolModeConfig.placeholder : "这个模型直接合成参考图，不需要填写文字"} />
+                                <Input.TextArea aria-label="图像提示词" value={prompt} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} rows={6} disabled={running || !selectedModelProfile.requiresPrompt} placeholder={selectedModelProfile.requiresPrompt ? toolModeConfig.placeholder : "这个模型直接合成参考图，不需要填写文字"} />
                             </div>
 
                             <ReferenceImageTray
                                 references={references}
                                 validation={referenceValidation}
-                                onChange={(next) => setReferences(dedupeImageReferences(next))}
+                                onChange={(next) => { inputRevision.current += 1; setReferences(dedupeImageReferences(next)); }}
                                 onRequestUpload={() => fileInputRef.current?.click()}
                                 onRequestAssets={() => setReferenceAssetPickerOpen(true)}
                                 onRequestClipboard={() => void addReferencesFromClipboard()}
@@ -647,6 +713,8 @@ function ImageGenerationPage() {
                                 {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{toolModeConfig.title}需要先添加至少一张参考图。</div> : null}
                                 {!referenceValidation.valid ? <div className="mt-1 text-red-500">{referenceValidation.message}</div> : null}
                                 {quotaBlocked ? <div className="mt-1 text-red-500">额度不足，无法提交生成任务。</div> : null}
+                                {garmentNeedsApply ? <div className="mt-1" role="status">服装要求或参考图已改变，请重新套用。<Button size="small" type="link" className="!h-auto !p-0" onClick={resetGarment}>改用当前提示词</Button></div> : null}
+                                {incompleteCreativePrompt ? <div className="mt-1" role="status">请把「{CREATIVE_REQUIREMENT_PLACEHOLDER}」替换成你的设计要求。</div> : null}
                             </div>
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {running ? "正在生成，请稍候…" : toolModeConfig.button}
@@ -709,7 +777,7 @@ function ImageGenerationPage() {
                     <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
-            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
+            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={replacePrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <AssetPickerModal
                 open={referenceAssetPickerOpen}
@@ -961,11 +1029,11 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
     );
 }
 
-async function readStoredLogs() {
+async function readStoredLogs(store = logStore) {
     if (typeof window === "undefined") return [];
     try {
         const values: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
+        await store.iterate<GenerationLog, void>((value) => {
             values.push(value);
         });
         const logs = values.map(normalizeLog);

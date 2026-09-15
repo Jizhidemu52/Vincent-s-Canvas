@@ -561,6 +561,11 @@ async function createProviderVideoSources(_model: SupportedVideoModelId, sources
   return createDemoProviderVideoSources(verified, demoPublicAssetOrigin, demoPublicVideoAssetAccess);
 }
 
+function canManageDemoOwner(user: typeof demoAccounts[number]["user"], ownerUserId: string) {
+  const owner = demoAccounts.find((account) => account.user.id === ownerUserId)?.user;
+  return user.role === "super_admin" || (user.role === "department_admin" && Boolean(user.departmentId) && owner?.departmentId === user.departmentId);
+}
+
 async function callDemoClaude(modelId: string, input: { input: DemoResponseInput[]; tools: DemoResponseTool[]; toolChoice?: unknown; stream?: boolean; thinking?: boolean; maxTokens?: number }) {
   const endpoint = `${apiMartBaseUrl.replace(/\/v1$/, "")}/v1/messages`;
   const body = {
@@ -698,6 +703,8 @@ Bun.serve({
       return json(features, 200, { "cache-control": "no-store" });
     if (path === "/api/demo/accounts")
       return json({ accounts: publicAccounts() });
+    if (path.startsWith("/api/auth/wecom/"))
+      return json({ error: "WECOM_UNAVAILABLE_IN_DEMO", message: "本地测试服务不支持真实企业微信扫码，请使用已配置企业微信的正式部署。" }, 503);
     if (path === "/api/auth/login" && request.method === "POST") {
       const input = (await request.json()) as {
         identifier?: string;
@@ -708,7 +715,7 @@ Bun.serve({
         input.identifier || "",
         input.password || "",
         input.portal || "designer",
-      ) || (!features.rolePortalsEnabled ? authenticateDemoAccount(input.identifier || "", input.password || "", "admin") : null);
+      );
       if (!account)
         return json(
           {
@@ -951,7 +958,7 @@ Bun.serve({
       request.method === "GET"
     ) {
       const asset = demoAssets.get(path.split("/")[3]!);
-      if (!asset || asset.ownerUserId !== user.id || !asset.bytes.byteLength)
+      if (!asset || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) || !asset.bytes.byteLength)
         return json(
           { error: "NOT_FOUND", message: "素材不存在或无权访问" },
           404,
@@ -1432,11 +1439,14 @@ Bun.serve({
       return new Response(null, { status: 204 });
     }
 
-    if (path === "/api/assets" && request.method === "GET") {
-      return json({ assets: [...demoAssets.values()].filter((asset) => asset.ownerUserId === user.id && asset.bytes.byteLength).map((asset) => {
+    if ((path === "/api/assets" || path === "/api/admin/assets") && request.method === "GET") {
+      const adminView = path === "/api/admin/assets";
+      if (adminView && !user.role.includes("admin")) return json({ message: "无权访问管理素材" }, 403);
+      return json({ assets: [...demoAssets.values()].filter((asset) => (adminView ? canManageDemoOwner(user, asset.ownerUserId) : asset.ownerUserId === user.id) && asset.bytes.byteLength).map((asset) => {
         const task = asset.taskId ? demoTasks.get(asset.taskId) : undefined;
-        return { id: asset.id, ownerUserId: asset.ownerUserId, ownerName: user.displayName, departmentId: user.departmentId || null,
-          departmentName: user.departmentName || null, projectId: asset.projectId || null, projectName: null, taskId: asset.taskId || null,
+        const owner = demoAccounts.find((account) => account.user.id === asset.ownerUserId)?.user;
+        return { id: asset.id, ownerUserId: asset.ownerUserId, ownerName: owner?.displayName || asset.ownerUserId, departmentId: owner?.departmentId || null,
+          departmentName: owner?.departmentName || null, projectId: asset.projectId || null, projectName: null, taskId: asset.taskId || null,
           filename: asset.filename, mimeType: asset.mimeType, byteSize: asset.bytes.byteLength, kind: asset.mimeType.startsWith("image/") ? "image" : asset.mimeType.startsWith("video/") ? "video" : asset.mimeType.startsWith("text/") ? "text" : "other",
           source: task ? "generation" : "upload", operationType: task?.operationType || null, prompt: task?.prompt || null,
           modelName: demoModels.find((model) => model.id === task?.modelConfigId)?.name || null, status: "ready", visibilityScope: "private",
@@ -1804,8 +1814,20 @@ Bun.serve({
         tool: { toolKey: selectedTool, ...input, updatedAt: now() },
       });
     }
-    if (path === "/api/admin/assets") return json({ assets: [] });
-    if (path === "/api/admin/projects") return json({ projects: [] });
+    if (path === "/api/admin/projects" && request.method === "GET") {
+      const assets = [...demoAssets.values()].filter((asset) => asset.bytes.byteLength && canManageDemoOwner(user, asset.ownerUserId));
+      const tasks = [...demoTasks.values()].filter((task) => canManageDemoOwner(user, task.ownerUserId));
+      const identities = new Map([...assets, ...tasks].filter((item) => item.projectId).map((item) => [`${item.ownerUserId}:${item.projectId}`, item]));
+      return json({ projects: [...identities.values()].map((item) => {
+        const owner = demoAccounts.find((account) => account.user.id === item.ownerUserId)?.user;
+        const projectAssets = assets.filter((asset) => asset.projectId === item.projectId && asset.ownerUserId === item.ownerUserId);
+        const projectTasks = tasks.filter((task) => task.projectId === item.projectId && task.ownerUserId === item.ownerUserId);
+        return { id: `${item.ownerUserId}:${item.projectId}`, externalId: item.projectId, name: item.projectId,
+          ownerName: owner?.displayName || item.ownerUserId, departmentName: owner?.departmentName || null, status: "active",
+          taskCount: projectTasks.length, assetCount: projectAssets.length, credits: projectTasks.reduce((sum, task) => sum + (task.status === "success" ? task.credits : 0), 0),
+          updatedAt: [...projectAssets, ...projectTasks].map((record) => record.createdAt).sort().at(-1) };
+      }) });
+    }
     if (path === "/api/admin/modules" && request.method === "PATCH") {
       const input = (await request.json()) as {
         moduleKey: string;

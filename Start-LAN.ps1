@@ -7,6 +7,15 @@ $webRoot = Join-Path $root "web\\dist"
 $ruleName = "Wireless Canvas LAN Pilot TCP 5188 LocalSubnet"
 $port = 5188
 
+$editionManifest = Join-Path $webRoot "deployment-edition.json"
+if (!(Test-Path -LiteralPath $editionManifest)) {
+    throw "Build metadata is missing. Run Build-LAN.bat before starting."
+}
+$edition = Get-Content -LiteralPath $editionManifest -Raw | ConvertFrom-Json
+if ($edition.standalone -ne $false) {
+    throw "This is a simplified build without admin pages. Run Build-LAN.bat to build the full version."
+}
+
 if (!(Test-Path -LiteralPath (Join-Path $webRoot "index.html"))) {
     Write-Error "The web build is missing. Run the web production build before starting LAN mode."
     exit 1
@@ -49,7 +58,9 @@ if ($null -ne $listener) {
     Write-Output "Wireless Canvas is already listening on port $port."
 }
 else {
-    $env:LOCAL_STANDALONE = "true"
+    $env:LOCAL_STANDALONE = "false"
+    $env:AUTH_ENABLED = "true"
+    $env:ROLE_PORTALS_ENABLED = "true"
     $env:STANDALONE_WEB_DIR = $webRoot
     $env:DEMO_PORT = "$port"
     $env:DEMO_HOST = "0.0.0.0"
@@ -75,4 +86,15 @@ for ($attempt = 0; $attempt -lt 15; $attempt++) {
     Start-Sleep -Seconds 1
 }
 if (!$ready) { throw "LAN service health check failed. Check server/.data/lan-server.err.log and the process on port $port." }
+$deploymentRequest = [System.Net.WebRequest]::Create("http://${address}:$port/api/deployment")
+$deploymentRequest.Proxy = $null
+$deploymentRequest.Timeout = 5000
+$deploymentResponse = $deploymentRequest.GetResponse()
+try {
+    $deploymentReader = New-Object System.IO.StreamReader($deploymentResponse.GetResponseStream())
+    try { $deployment = $deploymentReader.ReadToEnd() | ConvertFrom-Json } finally { $deploymentReader.Dispose() }
+} finally { $deploymentResponse.Close() }
+if (!$deployment.authenticationEnabled -or !$deployment.rolePortalsEnabled) {
+    throw "The running service is still in simplified mode. After active tasks finish, stop the old service and run Start-LAN.bat again."
+}
 Write-Output "LAN trial is ready: http://${address}:$port/"

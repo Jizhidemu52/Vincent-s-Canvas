@@ -157,6 +157,32 @@ async function createHarness() {
   };
 }
 
+test("admin asset oversight shares durable designer assets and permits scoped content reads", async () => {
+  const demo = await createHarness();
+  try {
+    await demo.start();
+    const uploaded = await demo.json<UploadRequest>("/api/assets/upload-request", "POST", { filename: "oversight.txt", mimeType: "text/plain", byteSize: 3, projectId: "integration-project" }, 201);
+    expect((await demo.request(uploaded.uploadUrl!, { method: "PUT", body: "abc" })).status).toBe(204);
+    expect((await demo.request("/api/admin/assets")).status).toBe(403);
+    const login = async (identifier: string, portal: string) => {
+      const response = await demo.request("/api/auth/login", { method: "POST", body: JSON.stringify({ identifier, portal, password: "Canvas2026!#" }) });
+      expect(response.status).toBe(200);
+      return { cookie: response.headers.get("set-cookie")!.split(";")[0]! };
+    };
+    const admin = await login("admin", "admin");
+    const assets = await (await demo.request("/api/admin/assets", { headers: admin })).json();
+    expect(assets.assets.map((asset: ListedAsset) => asset.id)).toEqual([uploaded.assetId]);
+    expect(assets.assets[0].ownerName).toBe("设计师小陈");
+    expect(await (await demo.request(`/api/assets/${uploaded.assetId}/content`, { headers: admin })).text()).toBe("abc");
+    const projects = await (await demo.request("/api/admin/projects", { headers: admin })).json();
+    expect(projects.projects[0].assetCount).toBe(1);
+    const otherDesigner = await login("leader01", "designer");
+    expect((await demo.request(`/api/assets/${uploaded.assetId}/content`, { headers: otherDesigner })).status).toBe(404);
+    expect((await demo.request("/api/admin/assets", { headers: otherDesigner })).status).toBe(403);
+    expect(demo.providerRequests).toEqual([]);
+  } finally { await demo.close(); }
+}, 30000);
+
 test("real demo HTTP uploads, metadata and unfinished upload reservations survive abrupt restarts", async () => {
   const demo = await createHarness();
   const bytes = new TextEncoder().encode("原始说明\n第二行，UTF-8 字节必须保持不变。\n");

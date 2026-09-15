@@ -10,7 +10,14 @@ const localVersion = readFileSync(resolve(webDir, "../VERSION"), "utf8").trim() 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, webDir, "");
     return {
-        plugins: [react()],
+        plugins: [react(), {
+            name: "deployment-edition-manifest",
+            generateBundle() {
+                this.emitFile({ type: "asset", fileName: "deployment-edition.json", source: JSON.stringify({
+                    standalone: (process.env.VITE_STANDALONE_EDITION ?? env.VITE_STANDALONE_EDITION) === "true",
+                }) });
+            },
+        }],
         build: {
             // A deploy is a complete immutable asset set. Keeping old hashed files
             // here made local packages grow by hundreds of megabytes after rebuilds.

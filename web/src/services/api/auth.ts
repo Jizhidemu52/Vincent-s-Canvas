@@ -60,6 +60,6 @@ export async function changeOwnPassword(currentPassword: string, newPassword: st
     return apiRequest<void>("/api/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) });
 }
 
-export async function getWeComLoginUrl(portal: "designer" | "admin" = "designer") {
+export async function getWeComLoginUrl(portal: "designer" = "designer") {
     return apiRequest<{ authorizationUrl: string }>(`/api/auth/wecom/start?portal=${portal}`);
 }

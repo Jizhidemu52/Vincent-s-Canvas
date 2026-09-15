@@ -4,7 +4,7 @@ import type { AuthenticatedRequest, SessionUser, UserRole } from "./types";
 const roleRank: Record<UserRole, number> = { designer: 0, department_admin: 1, super_admin: 2 };
 
 export function canUsePortal(role: UserRole, portal: "designer" | "admin") {
-    return portal === "designer" || roleRank[role] >= roleRank.department_admin;
+    return portal === "designer" ? role === "designer" : roleRank[role] >= roleRank.department_admin;
 }
 
 export function canManageUser(actor: SessionUser, target: Pick<SessionUser, "role" | "departmentId" | "id">) {

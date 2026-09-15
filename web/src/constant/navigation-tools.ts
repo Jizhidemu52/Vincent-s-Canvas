@@ -1,8 +1,15 @@
-import { BookMarked, Box, FileText, Grid2x2, ImageIcon, ImagePlus, Images, MessageSquare, ShieldCheck, Sparkles, UserRoundCog, Video, Zap } from "lucide-react";
+import { BookMarked, Box, FileText, Grid2x2, ImageIcon, ImagePlus, Images, Lightbulb, MessageSquare, ShieldCheck, Sparkles, UserRoundCog, Video, Zap } from "lucide-react";
 
 import type { AdminOperationType } from "@/lib/admin-domain";
 
 export const navigationTools = [
+    {
+        slug: "creative",
+        path: "/creative",
+        label: "创意设计",
+        icon: Lightbulb,
+        group: "local",
+    },
     {
         slug: "detail-enhance",
         path: "/image?tool=detail-enhance",

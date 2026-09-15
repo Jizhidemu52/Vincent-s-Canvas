@@ -14,6 +14,8 @@ const AssetsPage = lazy(() => import("@/pages/assets"));
 const CanvasPage = lazy(() => import("@/pages/canvas"));
 const CanvasProjectPage = lazy(() => import("@/pages/canvas/project"));
 const ChatPage = lazy(() => import("@/pages/chat"));
+const CreativePage = lazy(() => import("@/pages/creative"));
+const CreativeScenePage = lazy(() => import("@/pages/creative/scene"));
 const ChangePasswordPage = lazy(() => import("@/pages/change-password"));
 const HomePage = lazy(() => import("@/pages/home"));
 const ImagePage = lazy(() => import("@/pages/image"));
@@ -68,6 +70,8 @@ export const router = createBrowserRouter([
         ),
         children: [
             { path: "/", element: protectedRoute(HomePage) },
+            { path: "/creative", element: protectedRoute(CreativePage) },
+            { path: "/creative/:presetId", element: protectedRoute(CreativeScenePage) },
             ...(deploymentFeatures.authenticationEnabled ? [
                 { path: "/login", element: routeElement(LoginPage) },
             ] : [{ path: "/login", element: <Navigate to="/" replace /> }]),

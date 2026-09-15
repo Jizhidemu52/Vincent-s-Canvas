@@ -20,10 +20,10 @@ git clone https://github.com/Jizhidemu52/Vincent-s-Canvas.git
 cd Vincent-s-Canvas
 cd web
 bun install
-bun run build
 cd ..\server
 bun install
 cd ..
+.\Build-LAN.ps1
 ```
 
 配置与启动：
@@ -40,10 +40,10 @@ cd ..
 git pull --ff-only origin main
 cd web
 bun install
-bun run build
 cd ..\server
 bun install
 cd ..
+.\Build-LAN.ps1
 ```
 
 更新后刷新网页；若更新了服务端或 Key，等待生成任务结束，停止旧的本项目服务后再运行 `Start-LAN.bat`。重复双击启动脚本只会复用已有服务，不会自动重启。若拉取提示本地改动冲突，先保留改动，不要强制覆盖。

@@ -15,6 +15,9 @@ describe("three-level permissions", () => {
         expect(canUsePortal("designer", "admin")).toBe(false);
         expect(canUsePortal("department_admin", "admin")).toBe(true);
         expect(canUsePortal("super_admin", "admin")).toBe(true);
+        expect(canUsePortal("designer", "designer")).toBe(true);
+        expect(canUsePortal("department_admin", "designer")).toBe(false);
+        expect(canUsePortal("super_admin", "designer")).toBe(false);
     });
     test("scopes department administrators to designers in their department", () => {
         const manager = user("manager", "department_admin", "dept-a");
