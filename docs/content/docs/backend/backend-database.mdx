@@ -13,7 +13,7 @@ description: 正式数据存储边界及任务恢复和访客身份字段
 | Redis | 会话、任务队列、限流和并发控制 |
 | S3 / MinIO | 上传文件及生成结果的文件内容 |
 | 浏览器 IndexedDB | 本地画布布局、节点、会话及相关媒体缓存，不是跨设备云同步 |
-| 单机演示 SQLite | 仅演示服务的素材原文件、元数据及任务记录，不替代上述正式存储 |
+| 单机演示 SQLite | 演示服务的素材原文件、元数据、任务与 OA 员工身份／会话，不替代上述正式存储 |
 
 ## 单机演示数据
 
@@ -24,8 +24,16 @@ description: 正式数据存储边界及任务恢复和访客身份字段
 | `demo_assets` | `id` 主键、`fields_json` 素材字段、`bytes` 原始 BLOB；空 BLOB 仅用于尚未上传的申请占位 |
 | `demo_tasks` | `id` 主键、唯一 `request_id`、`fields_json` 完整任务状态及上游任务 ID |
 | `demo_state_metadata` | `key` 主键、`value`；`initialized` 防止旧恢复文件重复覆盖新数据 |
+| `demo_oa_users` | `id` 内部用户主键、唯一 `subject` 对应 OA `userid`、`display_name` 对应姓名；同名不合并，Token 更新不改变内部 ID |
+| `demo_oa_sessions` | `token_hash` 平台会话 SHA-256 主键、`user_id`、`expires_at` 毫秒时间；有效期两小时，不保存 OA Token |
 
-启动时仅将遗留 `processing` 任务改为 `paused` 并记录 `LOCAL_PROCESS_INTERRUPTED`，不自动重新生成或退款；视频可沿用已有上游任务 ID 查询。演示登录会话、账号余额、后台临时配置仍在内存中，不能把这里的退款标记当作正式持久账本。现有 `DEMO_RECOVERY_FILE` 仅在新数据库首次初始化时导入；坏数据库或写入失败会报错，不会自动删除并重建为空库。
+启动时仅将遗留 `processing` 任务改为 `paused` 并记录 `LOCAL_PROCESS_INTERRUPTED`，不自动重新生成或退款；视频可沿用已有上游任务 ID 查询。旧演示账号登录会话、账号余额、后台临时配置仍在内存中；OA 身份和会话则持久化，不能把这里的退款标记当作正式持久账本。现有 `DEMO_RECOVERY_FILE` 仅在新数据库首次初始化时导入；坏数据库或写入失败会报错，不会自动删除并重建为空库。
+
+## OA 身份与会话
+
+`022_oa_login.sql` 允许 `external_identities.provider='oa'`，`subject` 保存上游已校验的 `userid`；沿用 `(provider,subject)` 和 `(user_id,provider)` 唯一约束。`sessions.auth_provider` 为 `local` 或 `oa`，默认 `local`，OA 模式拒绝旧会话及管理员身份。正式服务启动前须应用迁移；当前局域网 SQLite 服务不运行 PostgreSQL 迁移。
+
+OA 登录请求向固定 HTTPS 用户信息接口发送 Bearer Token，仅使用返回的 `userid`、`name` 建立普通账号；不接受客户端声明的归属或角色。不存储上游 Token，旧记录不按姓名或首次登录自动转移给员工。
 
 ## 任务执行与恢复字段
 

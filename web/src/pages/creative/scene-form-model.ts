@@ -66,13 +66,13 @@ export const sceneSummaries: Record<string, { input: string; output: string; exa
         input: "款式照片",
         output: "结构线稿",
         example: "将浅蓝色衬衫整理为白底线稿，保留领口、门襟、袖口和可见结构线。",
-        limit: "输出为栅格图片，不是可编辑 SVG；不推断不可见结构或尺寸。",
+        limit: "AI 输出为栅格线稿，可再本地描摹为 SVG 轮廓路径；不推断不可见结构或尺寸，不是纸样。",
     },
     "local-restyle": {
         input: "原款衬衫",
         output: "领口改款",
         example: "将衬衫普通翻领改为柔和的荷叶领，保留原有衣身、袖型、面料与配色。",
-        limit: "部位与保留要求通过文字约束，不是蒙版编辑，无法保证其余像素完全不变。",
+        limit: "涂选后只合入选区，区域外保留原图；未涂选时仅靠文字约束。选区内结构、接缝与光影仍需核对。",
     },
     "garment-colorway": {
         input: "原款风衣",
@@ -96,7 +96,7 @@ export const sceneSummaries: Record<string, { input: string; output: string; exa
         input: "蓝灰枝叶",
         output: "暖棕配色",
         example: "将蓝灰色枝叶图案调整为暖棕配色，保留所有枝叶形状、线条和排列关系。",
-        limit: "配色为近似效果，图案仍需人工核对，不能直接作为生产色稿。",
+        limit: "AI 配色为近似效果；本地精确换色按 RGB 替换并保留图案位置与透明度，不代表印染色差保证。",
     },
     "pattern-craft": {
         input: "平面花朵",

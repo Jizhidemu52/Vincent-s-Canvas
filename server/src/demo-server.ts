@@ -25,6 +25,8 @@ import { probeMediaBytes, type MediaMetadata } from "./media-probe";
 import { readDemoRecovery } from "./demo-state-recovery";
 import { DemoStateStore, DemoStorageError } from "./demo-state-store";
 import { fileURLToPath } from "node:url";
+import { DemoOaStore } from "./demo-oa-store";
+import { verifyOaToken, OaError, OA_SESSION_TTL_SECONDS } from "./oa";
 
 const sessions = new Map<string, string>();
 const modules = [
@@ -446,6 +448,7 @@ type DemoInternalAiConfig = {
 };
 const demoAssets = new Map<string, DemoAsset>();
 const features = deploymentFeatures({
+  OA_LOGIN_ENABLED: process.env.OA_LOGIN_ENABLED === "true" ? "true" : "false",
   AUTH_ENABLED: process.env.LOCAL_STANDALONE === "true" || process.env.AUTH_ENABLED === "false" ? "false" : "true",
   CREDITS_ENABLED: process.env.CREDITS_ENABLED === "false" ? "false" : "true",
   ROLE_PORTALS_ENABLED: process.env.LOCAL_STANDALONE === "true" || process.env.ROLE_PORTALS_ENABLED === "false" ? "false" : "true",
@@ -455,9 +458,10 @@ const standaloneMode = Boolean(standaloneDemoUser);
 const standaloneWebDirectory = process.env.STANDALONE_WEB_DIR?.trim() || "";
 const demoPublicVideoAssetAccess = new Map<string, { assetId: string; expiresAt: number }>();
 const demoTasks = new Map<string, DemoTask>();
-const demoState = new DemoStateStore<DemoAsset, DemoTask>(
-  process.env.DEMO_STATE_PATH?.trim() || fileURLToPath(new URL("../.data/local-demo.sqlite", import.meta.url)),
-);
+const demoStatePath = process.env.DEMO_STATE_PATH?.trim() || fileURLToPath(new URL("../.data/local-demo.sqlite", import.meta.url));
+const demoState = new DemoStateStore<DemoAsset, DemoTask>(demoStatePath);
+const oaStore = features.oaLoginEnabled ? new DemoOaStore(demoStatePath) : null;
+const oaLoginRates = new Map<string, { count: number; expiresAt: number }>();
 if (!demoState.isInitialized()) {
   const recovered = process.env.DEMO_RECOVERY_FILE
     ? readDemoRecovery(await Bun.file(process.env.DEMO_RECOVERY_FILE).json())
@@ -488,10 +492,19 @@ const json = (
 const empty = (status = 204, extra: Record<string, string> = {}) =>
   new Response(null, { status, headers: extra });
 
-function sessionUser(request: Request) {
-  const token = request.headers
+function sessionToken(request: Request) {
+  return request.headers
     .get("cookie")
-    ?.match(/(?:^|; )wireless_canvas_demo_session=([^;]+)/)?.[1];
+    ?.match(/(?:^|;\s*)wireless_canvas_demo_session=([^;]+)/)?.[1];
+}
+
+function demoOwner(id: string) {
+  return oaStore?.user(id) || demoAccounts.find((account) => account.id === id)?.user;
+}
+
+function sessionUser(request: Request) {
+  const token = sessionToken(request);
+  if (oaStore) return oaStore.session(token);
   const accountId = token ? sessions.get(token) : null;
   return accountId
     ? demoAccounts.find((account) => account.id === accountId)?.user || null
@@ -562,7 +575,7 @@ async function createProviderVideoSources(_model: SupportedVideoModelId, sources
 }
 
 function canManageDemoOwner(user: typeof demoAccounts[number]["user"], ownerUserId: string) {
-  const owner = demoAccounts.find((account) => account.user.id === ownerUserId)?.user;
+  const owner = demoOwner(ownerUserId);
   return user.role === "super_admin" || (user.role === "department_admin" && Boolean(user.departmentId) && owner?.departmentId === user.departmentId);
 }
 
@@ -685,22 +698,54 @@ Bun.serve({
     console.error("Local demo request failed", error);
     return json({ error: "INTERNAL_ERROR", message: "本地服务处理请求失败" }, 500);
   },
-  async fetch(request) {
+  async fetch(request, server) {
     const url = new URL(request.url);
     const path = url.pathname;
+    if (features.oaLoginEnabled && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+      const origin = request.headers.get("origin");
+      if (origin && origin !== url.origin) return json({ message: "拒绝跨站写请求" }, 403);
+    }
     if (standaloneWebDirectory && request.method === "GET" && !path.startsWith("/api/")) {
       const requestedPath = resolveStandaloneStaticPath(standaloneWebDirectory, path);
       if (requestedPath) {
         const requestedFile = Bun.file(requestedPath);
-        if (await requestedFile.exists()) return new Response(requestedFile);
+        if (await requestedFile.exists()) return new Response(requestedFile, { headers: { "referrer-policy": "no-referrer", ...(requestedPath.endsWith("index.html") ? { "cache-control": "no-store" } : {}) } });
       }
       const indexFile = Bun.file(resolveStandaloneStaticPath(standaloneWebDirectory, "/")!);
-      if (await indexFile.exists()) return new Response(indexFile);
+      if (await indexFile.exists()) return new Response(indexFile, { headers: { "referrer-policy": "no-referrer", "cache-control": "no-store" } });
     }
     if (path === "/api/health")
       return json({ status: "ok", mode: "local-demo" });
     if (path === "/api/deployment")
       return json(features, 200, { "cache-control": "no-store" });
+    if (features.oaLoginEnabled && (path === "/api/demo/accounts" || path.startsWith("/api/admin/") || path.startsWith("/api/auth/wecom/") || path === "/api/auth/login" || path === "/api/auth/change-password")) {
+      return json({ error: "LOGIN_METHOD_DISABLED", message: "当前仅支持从企业微信 OA 入口自动登录。" }, 403);
+    }
+    if (path === "/api/auth/oa/exchange" && request.method === "POST") {
+      if (!oaStore) return json({ message: "OA 登录未启用" }, 404);
+      oaStore.revoke(sessionToken(request));
+      const cookie = (token: string, ttl: number) => `wireless_canvas_demo_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${ttl}${url.protocol === "https:" ? "; Secure" : ""}`;
+      const failHeaders = { "set-cookie": cookie("", 0), "cache-control": "no-store" };
+      const ip = server.requestIP(request)?.address || "unknown";
+      const currentTime = Date.now();
+      for (const [key, value] of oaLoginRates) if (value.expiresAt <= currentTime) oaLoginRates.delete(key);
+      const rate = oaLoginRates.get(ip) || { count: 0, expiresAt: currentTime + 60000 };
+      rate.count++; oaLoginRates.set(ip, rate);
+      if (rate.count > 60) return json({ message: "登录请求过于频繁，请稍后重试。" }, 429, failHeaders);
+      try {
+        if (Number(request.headers.get("content-length") || 0) > 16384) throw new OaError("OA_TOKEN_INVALID", "登录请求过大。", 400);
+        const body = await request.text();
+        if (body.length > 16384) throw new OaError("OA_TOKEN_INVALID", "登录请求过大。", 400);
+        let input: { token?: unknown };
+        try { input = JSON.parse(body); } catch { throw new OaError("OA_TOKEN_INVALID", "登录请求格式无效。", 400); }
+        const identity = await verifyOaToken(input?.token, process.env.OA_USERINFO_URL);
+        const { user, token } = oaStore.login(identity);
+        return json({ user }, 200, { "set-cookie": cookie(token, OA_SESSION_TTL_SECONDS), "cache-control": "no-store" });
+      } catch (error) {
+        if (error instanceof OaError) return json({ error: error.code, message: error.message }, error.status, failHeaders);
+        return json({ error: "OA_LOGIN_FAILED", message: "登录未能完成，请稍后重试。" }, 503, failHeaders);
+      }
+    }
     if (path === "/api/demo/accounts")
       return json({ accounts: publicAccounts() });
     if (path.startsWith("/api/auth/wecom/"))
@@ -733,14 +778,18 @@ Bun.serve({
     if (path === "/api/auth/session") {
       const user = sessionUser(request);
       return user
-        ? json({ user })
+        ? json({ user }, 200, { "cache-control": "no-store" })
         : json({ error: "UNAUTHORIZED", message: "请先登录" }, 401);
     }
-    if (path === "/api/auth/logout" && request.method === "POST")
+    if (path === "/api/auth/logout" && request.method === "POST") {
+      oaStore?.revoke(sessionToken(request));
+      const token = sessionToken(request);
+      if (token) sessions.delete(token);
       return empty(204, {
         "set-cookie":
           "wireless_canvas_demo_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
       });
+    }
     if (path === "/api/auth/change-password" && request.method === "POST")
       return empty();
     if (
@@ -1444,7 +1493,7 @@ Bun.serve({
       if (adminView && !user.role.includes("admin")) return json({ message: "无权访问管理素材" }, 403);
       return json({ assets: [...demoAssets.values()].filter((asset) => (adminView ? canManageDemoOwner(user, asset.ownerUserId) : asset.ownerUserId === user.id) && asset.bytes.byteLength).map((asset) => {
         const task = asset.taskId ? demoTasks.get(asset.taskId) : undefined;
-        const owner = demoAccounts.find((account) => account.user.id === asset.ownerUserId)?.user;
+        const owner = demoOwner(asset.ownerUserId);
         return { id: asset.id, ownerUserId: asset.ownerUserId, ownerName: owner?.displayName || asset.ownerUserId, departmentId: owner?.departmentId || null,
           departmentName: owner?.departmentName || null, projectId: asset.projectId || null, projectName: null, taskId: asset.taskId || null,
           filename: asset.filename, mimeType: asset.mimeType, byteSize: asset.bytes.byteLength, kind: asset.mimeType.startsWith("image/") ? "image" : asset.mimeType.startsWith("video/") ? "video" : asset.mimeType.startsWith("text/") ? "text" : "other",
@@ -1819,7 +1868,7 @@ Bun.serve({
       const tasks = [...demoTasks.values()].filter((task) => canManageDemoOwner(user, task.ownerUserId));
       const identities = new Map([...assets, ...tasks].filter((item) => item.projectId).map((item) => [`${item.ownerUserId}:${item.projectId}`, item]));
       return json({ projects: [...identities.values()].map((item) => {
-        const owner = demoAccounts.find((account) => account.user.id === item.ownerUserId)?.user;
+        const owner = demoOwner(item.ownerUserId);
         const projectAssets = assets.filter((asset) => asset.projectId === item.projectId && asset.ownerUserId === item.ownerUserId);
         const projectTasks = tasks.filter((task) => task.projectId === item.projectId && task.ownerUserId === item.ownerUserId);
         return { id: `${item.ownerUserId}:${item.projectId}`, externalId: item.projectId, name: item.projectId,
@@ -1948,7 +1997,7 @@ async function recoverVideoTask(
     const asset = await downloadDemoVideoResult(task, outputUrl);
     updateDemoTask(task, { resultUrls: [`/api/assets/${asset.id}/content`], status: "success", stage: "succeeded", updatedAt: now() }, [asset]);
   } catch (error) {
-    const owner = demoAccounts.find((account) => account.user.id === task.ownerUserId)?.user;
+    const owner = demoOwner(task.ownerUserId);
     finishDemoTaskFailure(task, error, { status: error instanceof DemoVideoTerminalError ? "failed" : "paused",
       stage: "failed", errorCode: classifyVideoTaskError(error),
       failureReason: error instanceof Error ? error.message : "Video task status query failed" }, owner);

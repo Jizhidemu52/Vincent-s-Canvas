@@ -72,7 +72,7 @@ export const router = createBrowserRouter([
             { path: "/", element: protectedRoute(HomePage) },
             { path: "/creative", element: protectedRoute(CreativePage) },
             { path: "/creative/:presetId", element: protectedRoute(CreativeScenePage) },
-            ...(deploymentFeatures.authenticationEnabled ? [
+            ...(deploymentFeatures.authenticationEnabled && !deploymentFeatures.oaLoginEnabled ? [
                 { path: "/login", element: routeElement(LoginPage) },
             ] : [{ path: "/login", element: <Navigate to="/" replace /> }]),
             { path: "/image", element: moduleRoute(ImagePage, imageModule) },
@@ -81,11 +81,14 @@ export const router = createBrowserRouter([
             { path: "/team", element: moduleRoute(TeamPage, "team") },
             { path: "/prompts", element: moduleRoute(PromptsPage, "prompts") },
             { path: "/my-prompts", element: moduleRoute(MyPromptsPage, "prompts") },
-            ...(!standaloneEdition ? [
+            ...(!standaloneEdition && !deploymentFeatures.oaLoginEnabled ? [
                 { path: "/admin", element: protectedRoute(AdminPage, true) },
                 // Hiding role entrances must not lock operators out of maintenance.
                 { path: "/admin/login", element: routeElement(AdminLoginPage) },
                 { path: "/change-password", element: protectedRoute(ChangePasswordPage) },
+            ] : deploymentFeatures.oaLoginEnabled ? [
+                { path: "/admin/*", element: <Navigate to="/" replace /> },
+                { path: "/change-password", element: <Navigate to="/" replace /> },
             ] : []),
             { path: "/canvas", element: moduleRoute(CanvasPage, canvasModule) },
             { path: "/chat", element: moduleRoute(ChatPage, "gpt-chat") },

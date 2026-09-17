@@ -6,6 +6,8 @@ import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
 import { collectProjectChanges, createProjectChangeBuffer, type CanvasPersistenceConflict, type ProjectChange } from "@/lib/canvas/canvas-persistence-merge";
 import { readCanvasProjects, writeCanvasProjects, removeCanvasProjects } from "@/lib/canvas/canvas-project-storage";
 import { applyCanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
+import { deploymentFeatures } from "@/lib/deployment-features";
+import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
 
@@ -37,7 +39,11 @@ type CanvasStore = {
 };
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
-const CANVAS_STORE_KEY = "wireless-canvas:canvas_store";
+const oaCanvasOwnerId = deploymentFeatures.oaLoginEnabled ? useUserStore.getState().user?.id || null : null;
+const CANVAS_STORE_KEY = deploymentFeatures.oaLoginEnabled
+    ? `wireless-canvas:canvas_store:oa:user:${encodeURIComponent(oaCanvasOwnerId || "")}`
+    : "wireless-canvas:canvas_store";
+let canvasOwnerValid = !deploymentFeatures.oaLoginEnabled || Boolean(oaCanvasOwnerId);
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
 let queuedPersistState: PersistedCanvasState | null = null;
 const pendingProjectChanges = new Map<string, ProjectChange<CanvasProject>>();
@@ -59,7 +65,7 @@ const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, chan
             const localProjects = useCanvasStore.getState().projects;
             const localIds = new Set(localProjects.map(project => project.id));
             const copies = writtenProjects.filter(project => project.persistenceConflict && !localIds.has(project.id));
-            if (copies.length) {
+            if (canvasOwnerValid && copies.length) {
                 const projects = [...copies, ...localProjects];
                 queuedPersistState = { projects };
                 useCanvasStore.setState({ projects });
@@ -86,11 +92,13 @@ if (typeof window !== "undefined") {
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
-        const parsed = { version: 0, state: { projects: await readCanvasProjects(name) } } as StorageValue<CanvasStore>;
+        const projects = await readCanvasProjects(name);
+        const parsed = { version: 0, state: { projects: canvasOwnerValid ? projects : [] } } as StorageValue<CanvasStore>;
         queuedPersistState = parsed.state as PersistedCanvasState;
         return parsed;
     },
     setItem: (name, value) => {
+        if (!canvasOwnerValid) return;
         const nextState = value.state as PersistedCanvasState;
         if (queuedPersistState && queuedPersistState.projects === nextState.projects) return;
         collectProjectChanges(queuedPersistState?.projects || [], nextState.projects, pendingProjectChanges);
@@ -179,14 +187,31 @@ export const useCanvasStore = create<CanvasStore>()(
         }),
         {
             name: CANVAS_STORE_KEY,
+            skipHydration: !canvasOwnerValid,
             storage: canvasStorage,
             partialize: (state) =>
                 ({
                     projects: state.projects,
                 }) as StorageValue<CanvasStore>["state"],
             onRehydrateStorage: () => () => {
-                useCanvasStore.setState({ hydrated: true });
+                useCanvasStore.setState({ hydrated: canvasOwnerValid });
             },
         },
     ),
 );
+
+if (deploymentFeatures.oaLoginEnabled) {
+    let restartingForOwner = false;
+    useUserStore.subscribe((state) => {
+        if (restartingForOwner || (state.user?.id || null) === oaCanvasOwnerId) return;
+        // A cookie may change in another tab. Never reuse a live editor or its
+        // debounce/retry buffers for a different employee. Drain the old owner's
+        // immutable storage key, hide the workspace, then bootstrap a fresh one.
+        restartingForOwner = true;
+        canvasOwnerValid = false;
+        persistQueue.flush();
+        useCanvasStore.setState({ projects: [], hydrated: false });
+        useUserStore.setState({ user: null, status: "loading" });
+        void flushCanvasPersistence().catch(() => undefined).finally(() => window.location.reload());
+    });
+}

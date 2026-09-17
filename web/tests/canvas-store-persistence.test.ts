@@ -44,7 +44,7 @@ function database() {
         adapter, writes,
         failNextWrite() { writeFailures += 1; },
         pauseNextWrite(gate: Promise<void>) { nextWriteGate = gate; },
-        read: () => (JSON.parse(values.get(storageKey)!) as { state: { projects: CanvasProject[] } }).state.projects,
+        read: (key = storageKey) => (JSON.parse(values.get(key) || '{"state":{"projects":[]}}') as { state: { projects: CanvasProject[] } }).state.projects,
         // Only the IndexedDB boundary is substituted. Each store still executes
         // its real collector, debounce queue, retry buffer and three-way merge.
         update(key: string, mutate: (value: string | null) => string | null) {
@@ -59,11 +59,15 @@ function database() {
     };
 }
 
-async function openTab(io: ReturnType<typeof database>) {
+async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | null) {
     let ids = 0;
+    let reloads = 0;
+    const userStore = create<{ user: { id: string } | null; status: string }>(() => ({ user: oaOwnerId ? { id: oaOwnerId } : null, status: oaOwnerId ? "authenticated" : "guest" }));
     const errors: unknown[][] = [];
     const bindings = {
         create, persist, nanoid: () => `new-${++ids}`, collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, applyCanvasProjectPatch,
+        deploymentFeatures: { oaLoginEnabled: oaOwnerId !== undefined },
+        useUserStore: userStore,
         localForageStorage: io.adapter,
         updateCanvasStorage: io.update,
         readCanvasProjects: async (key: string) => JSON.parse(await io.adapter.getItem(key) || "null")?.state.projects || [],
@@ -78,15 +82,53 @@ async function openTab(io: ReturnType<typeof database>) {
         removeCanvasProjects: (key: string) => io.update(key, () => null),
         withCanvasStorageLock: async (_name: string, callback: () => unknown) => callback(),
         createDeferredPersistQueue: <T>(delay: number, flush: (value: T) => void) => createDeferredPersistQueue(delay, flush, { setTimeout: () => 1, clearTimeout() {} }),
-        window: { addEventListener() {} },
+        window: { addEventListener() {}, location: { reload() { reloads += 1; } } },
         console: { error: (...args: unknown[]) => errors.push(args) },
     };
     const exports = {} as { useCanvasStore: any; flushCanvasPersistence: () => Promise<void> };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
     const store = exports.useCanvasStore;
-    if (!store.persist.hasHydrated()) await new Promise<void>(resolve => { const unsubscribe = store.persist.onFinishHydration(() => { unsubscribe(); resolve(); }); });
-    return { store, flush: exports.flushCanvasPersistence, errors };
+    if (!store.persist.hasHydrated() && oaOwnerId !== null) await new Promise<void>(resolve => { const unsubscribe = store.persist.onFinishHydration(() => { unsubscribe(); resolve(); }); });
+    return { store, flush: exports.flushCanvasPersistence, errors, userStore, reloads: () => reloads };
 }
+
+test("OA canvas persistence isolates employee keys and leaves old unscoped projects intact", async () => {
+    const io = database();
+    const a = await openTab(io, "employee/A"), b = await openTab(io, "employee/B");
+    expect(a.store.getState().projects).toEqual([]);
+    expect(b.store.getState().projects).toEqual([]);
+    a.store.getState().createProject("员工 A 的画布");
+    b.store.getState().createProject("员工 B 的画布");
+    await Promise.all([a.flush(), b.flush()]);
+    expect((await openTab(io, "employee/A")).store.getState().projects.map((item: CanvasProject) => item.title)).toEqual(["员工 A 的画布"]);
+    expect((await openTab(io, "employee/B")).store.getState().projects.map((item: CanvasProject) => item.title)).toEqual(["员工 B 的画布"]);
+    expect(io.read()).toEqual([project()]);
+});
+
+test("OA owner changes flush the old immutable key, clear the live editor and restart authentication", async () => {
+    const io = database(), a = await openTab(io, "employee-A");
+    a.store.getState().createProject("旧员工未完成的自动保存");
+    a.userStore.setState({ user: { id: "employee-B" } });
+    expect(a.store.getState().projects).toEqual([]);
+    expect(a.store.getState().hydrated).toBe(false);
+    expect(a.userStore.getState()).toMatchObject({ user: null, status: "loading" });
+    await a.flush();
+    await Promise.resolve();
+    expect(a.reloads()).toBe(1);
+    expect(io.read(`${storageKey}:oa:user:employee-A`).map(item => item.title)).toEqual(["旧员工未完成的自动保存"]);
+    expect(io.read(`${storageKey}:oa:user:employee-B`)).toEqual([]);
+    expect(io.read()).toEqual([project()]);
+});
+
+test("OA guest bootstrap never hydrates or persists the legacy shared workspace", async () => {
+    const io = database(), guest = await openTab(io, null);
+    expect(guest.store.getState().projects).toEqual([]);
+    expect(guest.store.persist.hasHydrated()).toBe(false);
+    guest.store.getState().createProject("不应存储的访客草稿");
+    await guest.flush();
+    expect(io.writes).toEqual([]);
+    expect(io.read()).toEqual([project()]);
+});
 
 test("two actual store instances saving concurrently cannot overwrite separate moves or additions", async () => {
     const io = database(), a = await openTab(io), b = await openTab(io);

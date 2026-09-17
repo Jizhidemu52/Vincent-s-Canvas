@@ -9,6 +9,7 @@ import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
 import { standaloneEdition } from "@/lib/standalone-edition";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { OA_ENTRY_URL } from "@/lib/oa-login";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -109,14 +110,15 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
                 onClick={async () => {
                     if (user) {
                         await clearSession();
-                        navigate("/login");
+                        navigate(deploymentFeatures.oaLoginEnabled ? "/" : "/login");
                     } else {
-                        navigate("/login");
+                        if (deploymentFeatures.oaLoginEnabled) window.location.assign(OA_ENTRY_URL);
+                        else navigate("/login");
                     }
                 }}
             >
                 {user ? <LogOut className="size-4 text-stone-400" /> : <LogIn className="size-4 text-stone-400" />}
-                {user ? "退出登录" : "登录入口"}
+                {user ? "退出登录" : deploymentFeatures.oaLoginEnabled ? "返回企业微信 OA" : "登录入口"}
             </button> : null}
             <div className="wb-account mt-4 flex items-center gap-2 rounded-xl px-3 py-3">
                 <div className="flex size-7 items-center justify-center rounded-full bg-orange-500 text-xs font-bold text-white">{displayName.slice(0, 1).toUpperCase()}</div>

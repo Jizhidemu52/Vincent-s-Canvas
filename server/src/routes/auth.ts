@@ -14,6 +14,9 @@ import { rateLimit } from "../http-security";
 import { createWeComAuthorizationUrl, exchangeWeComCode, WeComError } from "../wecom";
 import { refreshMonthlyCreditPeriod } from "../billing";
 import { deploymentFeatures } from "../deployment-features";
+import { OA_SESSION_TTL_SECONDS, OaError, verifyOaToken } from "../oa";
+import { resolveOaUser } from "../oa-identity";
+import { withTransaction } from "../db-transaction";
 
 const loginSchema = z.object({
     identifier: z.string().trim().min(1).max(200),
@@ -26,6 +29,54 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
     const router = Router();
     const features = deploymentFeatures(config);
     const requireSession = sessionMiddleware(db, cache, config);
+
+    router.use((request, response, next) => {
+        const path = request.path.toLowerCase().replace(/\/+$/, "");
+        if (features.oaLoginEnabled && (path === "/login" || path === "/change-password" || path.startsWith("/wecom/"))) {
+            response.status(403).json({ error: "OA_LOGIN_REQUIRED", message: "请从 OA 系统进入创作端" });
+            return;
+        }
+        next();
+    });
+
+    router.post("/oa/exchange", async (request, response, next) => {
+        if (!features.oaLoginEnabled) {
+            response.status(404).json({ error: "NOT_FOUND", message: "未启用 OA 登录" });
+            return;
+        }
+        response.set("Cache-Control", "no-store");
+        // Clear the old identity before validating a replacement, including rate-limit failures.
+        response.clearCookie(config.SESSION_COOKIE_NAME, { path: "/" });
+        try {
+            const oldToken = request.cookies?.[config.SESSION_COOKIE_NAME];
+            if (typeof oldToken === "string" && oldToken) {
+                const oldHash = hashToken(oldToken);
+                await db.query("UPDATE sessions SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL", [oldHash]);
+                await cache.del(`session:${oldHash}`);
+            }
+            next();
+        } catch (error) { next(error); }
+    }, rateLimit(cache, { prefix: "oa-exchange", limit: 20, windowSeconds: 300 }), async (request, response, next) => {
+        try {
+            const identity = await verifyOaToken(request.body?.token, config.OA_USERINFO_URL);
+            const session = createSessionToken();
+            const row = await withTransaction(db, async (client) => {
+                const user = await resolveOaUser(client, identity);
+                await client.query(`INSERT INTO sessions(id,user_id,token_hash,ip_address,user_agent,expires_at,auth_provider)
+                    VALUES($1,$2,$3,$4,$5,now()+($6 * interval '1 second'),'oa')`,
+                    [session.id, user.id, hashToken(session.token), request.ip, request.get("user-agent"), OA_SESSION_TTL_SECONDS]);
+                return user;
+            });
+            await cache.set(`session:${hashToken(session.token)}`, session.id, { EX: OA_SESSION_TTL_SECONDS });
+            const user = mapUser(row);
+            await writeAudit(db, { actor: user, action: "auth.oa_login", targetType: "session", targetId: session.id, result: "success", ip: request.ip });
+            setSessionCookie(response, config, session.token, OA_SESSION_TTL_SECONDS);
+            response.json({ user });
+        } catch (error) {
+            if (error instanceof OaError) { response.status(error.status).json({ error: error.code, message: error.message }); return; }
+            next(error);
+        }
+    });
 
     router.post("/login", rateLimit(cache, {
         prefix: "login",

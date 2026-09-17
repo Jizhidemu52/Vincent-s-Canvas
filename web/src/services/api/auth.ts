@@ -48,6 +48,16 @@ export async function getCurrentSession() {
     return apiRequest<{ user: ApiUser }>("/api/auth/session");
 }
 
+export async function exchangeOaToken(token: string) {
+    return apiRequest<{ user: ApiUser }>("/api/auth/oa/exchange", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+        signal: AbortSignal.timeout(15_000),
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+    });
+}
+
 export async function getDemoAccounts() {
     return apiRequest<{ accounts: DemoLoginAccount[] }>("/api/demo/accounts");
 }

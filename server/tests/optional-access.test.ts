@@ -8,9 +8,10 @@ const config = (extra: Record<string, string> = {}) => loadConfig({ DATABASE_URL
 
 describe("optional access and billing", () => {
     test("preserves current defaults and disables credit enforcement without login", () => {
-        expect(deploymentFeatures(config())).toEqual({ authenticationEnabled: true, creditsEnabled: true, rolePortalsEnabled: true });
-        expect(deploymentFeatures(config({ CREDITS_ENABLED: "false" }))).toEqual({ authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: true });
-        expect(deploymentFeatures(config({ AUTH_ENABLED: "false", ROLE_PORTALS_ENABLED: "false" }))).toEqual({ authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false });
+        expect(deploymentFeatures(config())).toEqual({ oaLoginEnabled: false, authenticationEnabled: true, creditsEnabled: true, rolePortalsEnabled: true });
+        expect(deploymentFeatures(config({ CREDITS_ENABLED: "false" }))).toEqual({ oaLoginEnabled: false, authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: true });
+        expect(deploymentFeatures(config({ AUTH_ENABLED: "false", ROLE_PORTALS_ENABLED: "false" }))).toEqual({ oaLoginEnabled: false, authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false });
+        expect(deploymentFeatures(config({ OA_LOGIN_ENABLED: "true", AUTH_ENABLED: "false", CREDITS_ENABLED: "false" }))).toEqual({ oaLoginEnabled: true, authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: false });
         expect(() => config({ AUTH_ENABLED: "off" })).toThrow();
     });
 

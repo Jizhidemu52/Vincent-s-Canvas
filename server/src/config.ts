@@ -9,6 +9,8 @@ const schema = z.object({
     SESSION_TTL_SECONDS: z.coerce.number().int().min(900).max(604800).default(28800),
     TRUST_PROXY: z.enum(["true", "false"]).default("false"),
     AUTH_ENABLED: z.enum(["true", "false"]).default("true"),
+    OA_LOGIN_ENABLED: z.enum(["true", "false"]).default("false"),
+    OA_USERINFO_URL: z.string().url().default("https://oa.in-choice.com.cn:82/api/api/organization/user/info_login"),
     CREDITS_ENABLED: z.enum(["true", "false"]).default("true"),
     ROLE_PORTALS_ENABLED: z.enum(["true", "false"]).default("true"),
     BOOTSTRAP_ADMIN_USERNAME: z.string().min(1).optional(),

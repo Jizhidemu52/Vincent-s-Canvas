@@ -128,6 +128,35 @@
 .cs-history-icon { display: grid; place-items: center; width: 40px; height: 40px; background: var(--muted); border-radius: 7px; color: var(--muted-foreground); }
 .cs-page button:disabled, .cs-page fieldset:disabled { cursor: not-allowed; }
 .cs-page select option { color: var(--foreground); background: var(--card); }
+.cs-local-tool { margin-top: 13px; display: grid; gap: 7px; }
+.cs-tool-entry { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; font-size: 11px; color: var(--foreground); background: var(--muted); }
+.cs-tool-entry small { color: var(--muted-foreground); font-size: 9px; margin-left: auto; }
+.cs-tool-entry:disabled { opacity: .45; }
+.cs-tool-dialog { display: grid; gap: 16px; padding-top: 8px; color: var(--foreground); }
+.cs-tool-dialog .cs-help { font-size: 12px; }
+.cs-tool-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.cs-brush-control { flex: 1; min-width: 130px; font-size: 12px; }
+.cs-selection-stage { position: relative; width: 100%; margin: 0 auto; overflow: hidden; background: var(--muted); }
+.cs-selection-stage img, .cs-selection-stage canvas { display: block; width: 100%; height: 100%; position: absolute; inset: 0; }
+.cs-selection-stage canvas { touch-action: none; cursor: crosshair; }
+.cs-tool-fieldset { min-width: 0; border: 0; margin: 0; padding: 0; display: grid; gap: 15px; }
+.cs-tool-preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; align-items: start; }
+.cs-tool-preview-grid figure { margin: 0; min-width: 0; }
+.cs-tool-preview-grid figcaption { font-size: 12px; margin-bottom: 8px; color: var(--muted-foreground); }
+.cs-tool-preview-grid img, .cs-tool-preview-grid canvas { display: block; width: 100%; height: auto; background: var(--muted); }
+.cs-sample-image { cursor: crosshair; }
+.cs-recolor-rules { display: grid; gap: 10px; }
+.cs-recolor-rule { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; }
+.cs-recolor-rule label { display: flex; align-items: center; gap: 7px; }
+.cs-recolor-rule input[type=color] { width: 32px; height: 30px; padding: 2px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.cs-recolor-rule code { font-size: 11px; }
+.cs-recolor-rule .cs-hex-input { width: 83px; padding: 6px; font: 11px monospace; }
+.cs-swatch { width: 25px; height: 25px; border: 1px solid var(--border); border-radius: 50%; }
+.cs-swatch:focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
+.cs-trace-controls { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 20px; font-size: 12px; }
+.cs-operation-note { margin-bottom: 15px; overflow-wrap: anywhere; }
+.cs-result-meta { flex-wrap: wrap; gap: 10px; }
+@media (max-width: 560px) { .cs-tool-preview-grid, .cs-trace-controls { grid-template-columns: 1fr; } .cs-trace-controls { gap: 2px; } }
 @media (min-width: 1700px) { .cs-layout { grid-template-columns: 390px minmax(0,1fr); } .cs-form-panel { padding: 28px 30px 0; } }
 @media (max-width: 1150px) { .cs-layout { grid-template-columns: 326px minmax(0,1fr); } .cs-form-panel { padding: 23px 19px 0; } .cs-stage { padding: 0 22px 24px; } .cs-example-foot { flex-direction: column; gap: 4px; } .cs-example-foot p { max-width: none; text-align: left; } }
 @media (max-width: 800px) {

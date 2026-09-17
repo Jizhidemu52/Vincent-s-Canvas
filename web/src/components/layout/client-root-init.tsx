@@ -25,8 +25,10 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     .projects.map((project) => fetch("/api/projects/sync", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ externalId: project.id, name: project.title }) })),
             );
         };
-        const refresh = () => {
-            void hydrateSession();
+        const refresh = async () => {
+            const ownerId = useUserStore.getState().user?.id;
+            await hydrateSession();
+            if (!ownerId || useUserStore.getState().user?.id !== ownerId) return;
             void refreshBusinessConfig().catch(() => undefined);
             void refreshModules().catch(() => undefined);
             void syncProjects();

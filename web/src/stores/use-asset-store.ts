@@ -9,6 +9,7 @@ import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
 import { uploadServerAsset } from "@/services/api/server-assets";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useUserStore, type LocalUser } from "@/stores/use-user-store";
+import { deploymentFeatures } from "@/lib/deployment-features";
 
 export type AssetKind = "text" | "image" | "video";
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
@@ -78,6 +79,9 @@ export const useAssetStore = create<AssetStore>()(
         (set, get) => {
             const cleanupTask = createCoalescedAsyncTask(
                 async (extras: unknown[]) => {
+                    // Other OA employees and pre-OA canvases share this blob store.
+                    // An active owner's project list cannot prove a blob is unused.
+                    if (deploymentFeatures.oaLoginEnabled) return;
                     const shared = { assets: get().assets, projects: useCanvasStore.getState().projects, extra: extras };
                     await cleanupUnusedImages(shared);
                     await cleanupUnusedMedia(shared);

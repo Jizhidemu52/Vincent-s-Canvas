@@ -103,7 +103,7 @@ export function SceneFields({ sceneId, form, onChange, disabled = false }: Scene
             fields = <>
                 {choice("sketchStyle", "线条风格", [{ value: "technical", label: "技术感线稿" }, { value: "minimal", label: "极简线稿" }])}
                 {choice("sketchDetail", "细节程度", [{ value: "outline", label: "主要轮廓" }, { value: "standard", label: "关键结构" }, { value: "detailed", label: "可见细节" }])}
-                <p className="cs-help">保留原图视角与比例，只整理看得见的结构。输出为线稿图片，不是可编辑 SVG。</p>
+                <p className="cs-help">保留原图视角与比例，只整理看得见的结构。AI 先输出线稿图片，可在结果卡中继续描摹并导出 SVG。</p>
                 {extra("如：保留口袋缝线，省略面料印花。")}
             </>;
             break;
@@ -118,7 +118,7 @@ export function SceneFields({ sceneId, form, onChange, disabled = false }: Scene
                     <label className="cs-label" htmlFor={id("preserve")}>特别要保留的细节 <span className="cs-help">可选</span></label>
                     <input id={id("preserve")} className="cs-input" value={form.preserve} onChange={(event) => update("preserve", event.target.value)} maxLength={1000} disabled={disabled} placeholder="如：胸前图案、原色与罗纹组织" />
                 </div>
-                <p className="cs-help">通过文字限定改动范围，未使用局部蒙版；生成后请核对未改区域。</p>
+                <p className="cs-help">这些文字说明要改什么；上方涂选决定最终合入哪里。未涂选时仅靠 AI 理解修改范围。</p>
                 {extra("如：修改部位的纹理和光影要自然衔接。")}
             </>;
             break;

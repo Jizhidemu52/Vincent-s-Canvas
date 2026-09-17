@@ -16,6 +16,8 @@ import { modelOptionName, useEffectiveConfig, type AiConfig } from "@/stores/use
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import { buildScenePrompt, createSceneForm, getSceneSlots, validateSceneForm, type SceneForm, type SceneSlotId } from "./scene-form-model";
+import { compositeSelectedImage, createSelectionGuide } from "./image-processing-browser";
+import { preferredSelectionSize, selectionPrompt, selectionSizeMatches } from "./image-processing";
 
 export type SceneImage = ReferenceImage & {
     width: number; height: number; bytes: number; mimeType: string;
@@ -23,13 +25,15 @@ export type SceneImage = ReferenceImage & {
 };
 export type SceneImages = Partial<Record<SceneSlotId, SceneImage>>;
 export type SceneParameters = Pick<AiConfig, "model" | "imageModel" | "size" | "quality" | "count">;
-export type SceneResult = { id: string; status: "pending" | "success" | "failed"; image?: SceneImage; error?: string };
+export type SceneSelection = { sourceId: string; mask: SceneImage };
+export type SceneResult = { id: string; status: "pending" | "success" | "failed"; image?: SceneImage; uncompositedImage?: SceneImage; error?: string };
 export type SceneLog = {
     id: string; ownerId: string; sceneId: string; createdAt: number; prompt: string;
     form: SceneForm; referenceImages: SceneImages; config: SceneParameters;
     results: SceneResult[]; images: SceneImage[]; durationMs: number; successCount: number; failCount: number;
+    selection?: SceneSelection | null; operation?: "ai" | "recolor";
 };
-type SceneDraft = { form: SceneForm; images: SceneImages; config: SceneParameters };
+type SceneDraft = { form: SceneForm; images: SceneImages; config: SceneParameters; selection?: SceneSelection | null };
 
 const storage = localforage.createInstance({ name: "wireless-canvas", storeName: "creative_scene_workspaces" });
 const draftWrites = new Map<string, Promise<void>>();
@@ -50,7 +54,8 @@ function mapImages(images: SceneImages, map: (image: SceneImage) => SceneImage):
 }
 
 export function serializeSceneDraft(draft: SceneDraft): SceneDraft {
-    return { form: { ...draft.form }, images: mapImages(draft.images, storedImage), config: sceneParameters(draft.config) };
+    return { form: { ...draft.form }, images: mapImages(draft.images, storedImage), config: sceneParameters(draft.config),
+        selection: draft.selection ? { ...draft.selection, mask: storedImage(draft.selection.mask) } : null };
 }
 
 export function serializeSceneLog(log: SceneLog): SceneLog {
@@ -58,7 +63,9 @@ export function serializeSceneLog(log: SceneLog): SceneLog {
         ...log, form: { ...log.form }, config: sceneParameters(log.config),
         referenceImages: mapImages(log.referenceImages, storedImage),
         images: log.images.map(storedImage),
-        results: log.results.map(result => ({ ...result, image: result.image ? storedImage(result.image) : undefined })),
+        selection: log.selection ? { ...log.selection, mask: storedImage(log.selection.mask) } : null,
+        results: log.results.map(result => ({ ...result, image: result.image ? storedImage(result.image) : undefined,
+            uncompositedImage: result.uncompositedImage ? storedImage(result.uncompositedImage) : undefined })),
     };
 }
 
@@ -73,8 +80,19 @@ async function hydrateImages(images: SceneImages): Promise<SceneImages> {
 }
 
 async function hydrateLog(log: SceneLog): Promise<SceneLog> {
-    const results = await Promise.all(log.results.map(async result => ({ ...result, image: result.image ? await hydrateImage(result.image) : undefined })));
+    const results = await Promise.all(log.results.map(async result => ({ ...result, image: result.image ? await hydrateImage(result.image) : undefined,
+        uncompositedImage: result.uncompositedImage ? await hydrateImage(result.uncompositedImage) : undefined })));
     return { ...log, results, images: results.flatMap(result => result.image ? [result.image] : []) };
+}
+
+export function selectionMatchesSource(selection: SceneSelection | null | undefined, source: SceneImage | undefined) {
+    return Boolean(selection && source && selection.sourceId === source.id && selection.mask.width === source.width && selection.mask.height === source.height);
+}
+
+async function hydrateSelection(selection: SceneSelection | null | undefined, images: SceneImages) {
+    if (!selection) return null;
+    if (!selectionMatchesSource(selection, images.primary)) throw new Error("选区与原图不匹配，请重新涂选");
+    return { ...selection, mask: await hydrateImage(selection.mask) };
 }
 
 /** Dedicated scene state; never mutates the original image workbench's settings. */
@@ -97,6 +115,8 @@ export function useSceneWorkspace(sceneId: string) {
     const [draftReady, setDraftReady] = useState(false);
     const [form, setForm] = useState(() => createSceneForm(sceneId));
     const [images, setImages] = useState<SceneImages>({});
+    const imagesRef = useRef(images); imagesRef.current = images;
+    const [selection, setSelection] = useState<SceneSelection | null>(null);
     const [parameters, setParameters] = useState(() => sceneParameters(effectiveConfig));
     const [logs, setLogs] = useState<SceneLog[]>([]);
     const [activeLog, setActiveLog] = useState<SceneLog | null>(null);
@@ -132,6 +152,8 @@ export function useSceneWorkspace(sceneId: string) {
         : !editing && !selectedModel.capabilities.includes("generate") ? "当前模型不支持从文字生成图片"
         : !referenceValidation.valid ? referenceValidation.message || "参考图不符合模型要求"
         : references.some(image => !image.dataUrl) ? "部分参考图的本地文件已不可用，请重新上传"
+        : selection && (!selectionMatchesSource(selection, images.primary) || !selection.mask.dataUrl) ? "选区与原图不匹配或文件不可用，请清除后重新涂选"
+        : selection && images.primary && !selectionSizeMatches(config.size, images.primary) ? "选区合成需要保持原图比例，请在出图设置中选择相同比例或自适应"
         : deploymentFeatures.creditsEnabled && !estimateValue.configured ? "当前模型或操作的计费配置不可用"
         : quotaBlocked ? `额度不足，预计需要 ${estimateValue.credits} 积分`
         : validateSceneForm(sceneId, form, images);
@@ -142,7 +164,7 @@ export function useSceneWorkspace(sceneId: string) {
 
     useEffect(() => {
         const revision = ++epoch.current;
-        setForm(createSceneForm(sceneId)); setImages({}); setLogs([]); setResults([]); setActiveLog(null);
+        setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setLogs([]); setResults([]); setActiveLog(null);
         setParameters(sceneParameters(configRef.current)); setRunning(false); setRestoring(false); setUploadCount(0); setStartedAt(0); setError(null); setDraftReady(false);
         if (!scope) { setLoadedScope(null); return () => { epoch.current += 1; }; }
         void (async () => {
@@ -156,10 +178,12 @@ export function useSceneWorkspace(sceneId: string) {
                 if (revision !== epoch.current) return;
                 setLogs(restoredHistory);
                 if (draft) {
-                    setForm({ ...createSceneForm(sceneId), ...draft.form }); setParameters(sceneParameters(draft.config)); setImages(draft.images);
+                    setForm({ ...createSceneForm(sceneId), ...draft.form }); setParameters(sceneParameters(draft.config)); setImages(draft.images); setSelection(draft.selection || null);
                     try {
                         const restoredImages = await hydrateImages(draft.images);
                         if (revision === epoch.current) setImages(restoredImages);
+                        const restoredSelection = await hydrateSelection(draft.selection, restoredImages);
+                        if (revision === epoch.current) setSelection(restoredSelection);
                     } catch (caught) { if (revision === epoch.current) setError(errorText(caught)); }
                 }
                 if (revision === epoch.current) setDraftReady(true);
@@ -172,13 +196,13 @@ export function useSceneWorkspace(sceneId: string) {
 
     useEffect(() => {
         if (!scope || loadedScope !== scope || !draftReady) return;
-        const draft = serializeSceneDraft({ form, images, config });
+        const draft = serializeSceneDraft({ form, images, config, selection });
         const write = (draftWrites.get(scope) || Promise.resolve()).then(() => storage.setItem(`draft:${scope}`, draft)).then(() => undefined).catch(caught => {
             if (scopeRef.current === scope) setError(`草稿保存失败：${errorText(caught)}`);
         });
         draftWrites.set(scope, write);
         void write.then(() => { if (draftWrites.get(scope) === write) draftWrites.delete(scope); });
-    }, [scope, loadedScope, draftReady, form, images, config]);
+    }, [scope, loadedScope, draftReady, form, images, config, selection]);
 
     const updateConfig = (key: keyof SceneParameters, value: string) => setParameters(current =>
         key === "model" || key === "imageModel" ? { ...current, model: value, imageModel: value } : { ...current, [key]: value });
@@ -187,12 +211,13 @@ export function useSceneWorkspace(sceneId: string) {
         if (loading || running) return;
         const revision = epoch.current;
         const uploadRevision = ++inputEpoch.current[slot];
-        if (!file) { setImages(current => { const next = { ...current }; delete next[slot]; return next; }); return; }
+        if (!file) { if (slot === "primary") setSelection(null); setImages(current => { const next = { ...current }; delete next[slot]; return next; }); return; }
         if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { setError("请上传 PNG、JPG 或 WebP 图片"); return; }
         setError(null); setUploadCount(value => value + 1);
         try {
             const stored = await uploadImage(file);
             if (revision !== epoch.current || uploadRevision !== inputEpoch.current[slot]) return;
+            if (slot === "primary") setSelection(null);
             setImages(current => ({ ...current, [slot]: { id: nanoid(), name: file.name, originalFileName: file.name, type: stored.mimeType,
                 mimeType: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes } }));
         } catch (caught) { if (revision === epoch.current) setError(`图片保存失败：${errorText(caught)}`); }
@@ -203,7 +228,7 @@ export function useSceneWorkspace(sceneId: string) {
         if (running) return;
         viewEpoch.current += 1; setRestoring(false);
         inputEpoch.current.primary += 1; inputEpoch.current.secondary += 1;
-        setForm(createSceneForm(sceneId)); setImages({}); setResults([]); setActiveLog(null); setError(null); setStartedAt(0);
+        setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setResults([]); setActiveLog(null); setError(null); setStartedAt(0);
     };
 
     const restoreLog = async (log: SceneLog) => {
@@ -214,11 +239,43 @@ export function useSceneWorkspace(sceneId: string) {
         setRestoring(true); setError(null);
         try {
             const [restored, restoredImages] = await Promise.all([hydrateLog(log), hydrateImages(log.referenceImages)]);
+            const restoredSelection = await hydrateSelection(log.selection, restoredImages);
             if (revision !== epoch.current || viewRevision !== viewEpoch.current) return;
             setForm({ ...createSceneForm(sceneId), ...log.form }); setImages(restoredImages); setParameters(sceneParameters(log.config));
+            setSelection(restoredSelection);
             setActiveLog(restored); setResults(restored.results); setStartedAt(0);
         } catch (caught) { if (revision === epoch.current && viewRevision === viewEpoch.current) setError(`记录恢复失败：${errorText(caught)}`); }
         finally { if (revision === epoch.current && viewRevision === viewEpoch.current) setRestoring(false); }
+    };
+
+    const saveSelection = async (sourceId: string, blob: Blob) => {
+        if (loading || running || uploadCount || imagesRef.current.primary?.id !== sourceId) throw new Error("原图状态已变化，请重新涂选");
+        const revision = epoch.current;
+        const stored = await uploadImage(blob);
+        if (revision !== epoch.current || imagesRef.current.primary?.id !== sourceId) throw new Error("原图已切换，请在新原图上重新涂选");
+        const mask: SceneImage = { ...stored, id: nanoid(), name: "修改区域.png", type: stored.mimeType, dataUrl: stored.url };
+        if (!selectionMatchesSource({ sourceId, mask }, imagesRef.current.primary)) throw new Error("选区尺寸与原图不一致");
+        setParameters(current => ({ ...current, size: preferredSelectionSize(imagesRef.current.primary!, profile.sizes) }));
+        setSelection({ sourceId, mask }); setError(null);
+    };
+
+    const saveLocalResult = async (sourceId: string, blob: Blob, description: string) => {
+        if (!user || user.status !== "active" || !scope || loading || running || uploadCount || imagesRef.current.primary?.id !== sourceId) throw new Error("当前图片或账号状态已变化，请重新打开换色工具");
+        const revision = epoch.current, start = performance.now();
+        setRunning(true); setError(null); setStartedAt(start);
+        try {
+            const stored = await uploadImage(blob);
+            const image: SceneImage = { ...stored, id: nanoid(), name: "精确换色结果.png", dataUrl: stored.url, type: stored.mimeType, ...canvasImageReferenceIdentity(images.primary) };
+            const result: SceneResult = { id: nanoid(), status: "success", image };
+            const log: SceneLog = { id: nanoid(), ownerId: user.id, sceneId, createdAt: Date.now(), prompt: description,
+                form: { ...form }, referenceImages: { primary: images.primary }, config: sceneParameters(config), operation: "recolor",
+                results: [result], images: [image], durationMs: performance.now() - start, successCount: 1, failCount: 0 };
+            if (revision === epoch.current) { setResults([result]); setLogs(current => [log, ...current]); setActiveLog(log); }
+            try {
+                const previous = await storage.getItem<SceneLog[]>(`history:${scope}`) || [];
+                await storage.setItem(`history:${scope}`, [serializeSceneLog(log), ...previous]);
+            } catch (caught) { if (revision === epoch.current) setError(`换色结果仍保留在页面，但本地记录保存失败：${errorText(caught)}`); }
+        } finally { if (revision === epoch.current) setRunning(false); }
     };
 
     const generate = async () => {
@@ -230,7 +287,7 @@ export function useSceneWorkspace(sceneId: string) {
         if (!release) { setError("图片任务正在处理，请勿重复提交"); return; }
         const revision = epoch.current;
         const requestConfig = { ...config, count: "1" };
-        const snapshot: SceneDraft = { form: { ...form }, images: { ...images }, config: sceneParameters(config) };
+        const snapshot: SceneDraft = { form: { ...form }, images: { ...images }, config: sceneParameters(config), selection };
         const pending: SceneResult[] = Array.from({ length: count }, () => ({ id: nanoid(), status: "pending" }));
         const start = performance.now();
         const storageWarnings: string[] = [];
@@ -239,11 +296,23 @@ export function useSceneWorkspace(sceneId: string) {
             if (revision === epoch.current) setResults(current => current.map((item, itemIndex) => itemIndex === index ? result : item));
         };
         try {
+            let requestReferences: ReferenceImage[] = references;
+            if (sceneId === "local-restyle" && snapshot.selection && snapshot.images.primary) {
+                const guideBlob = await createSelectionGuide(snapshot.images.primary.dataUrl, snapshot.selection.mask.dataUrl);
+                const guide = await uploadImage(guideBlob);
+                requestReferences = [snapshot.images.primary, { id: nanoid(), name: "蓝色选区示意.png", dataUrl: guide.url, storageKey: guide.storageKey, type: guide.mimeType }];
+                prompt += `\n\n${selectionPrompt}`;
+            }
+            const preparedValidation = validateImageReferences(model, requestReferences);
+            if (!preparedValidation.valid) throw new Error(preparedValidation.message || "参考图数量不受当前模型支持");
+            // Preparing a guide is local and may outlive navigation or an account change.
+            // Do not start a paid request for a workspace that is no longer active.
+            if (revision !== epoch.current) return;
             const settled = await Promise.allSettled(pending.map(async (item, index) => {
                 const itemStart = performance.now();
                 try {
                     const options = { operationType, tool: `creative-${sceneId}` };
-                    const generated = references.length ? await requestEdit(requestConfig, prompt, references, undefined, options) : await requestGeneration(requestConfig, prompt, options);
+                    const generated = requestReferences.length ? await requestEdit(requestConfig, prompt, requestReferences, undefined, options) : await requestGeneration(requestConfig, prompt, options);
                     const source = generated[0];
                     if (!source) throw new Error("接口没有返回图片");
                     let image: SceneImage;
@@ -254,6 +323,17 @@ export function useSceneWorkspace(sceneId: string) {
                         const meta = await readImageMeta(source.dataUrl);
                         image = { ...source, ...meta, name: `设计结果-${index + 1}`, type: meta.mimeType, bytes: getDataUrlByteSize(source.dataUrl), ...canvasImageReferenceIdentity(references[0]) };
                         storageWarnings.push(`第 ${index + 1} 张原图未能保存到本地：${errorText(caught)}`);
+                    }
+                    if (sceneId === "local-restyle" && snapshot.selection && snapshot.images.primary) {
+                        const raw = image;
+                        try {
+                            const composited = await compositeSelectedImage(snapshot.images.primary.dataUrl, image.dataUrl, snapshot.selection.mask.dataUrl);
+                            const stored = await uploadImage(composited);
+                            image = { ...image, ...stored, dataUrl: stored.url, type: stored.mimeType, name: `选区合成-${index + 1}.png` };
+                        } catch (caught) {
+                            const result: SceneResult = { id: item.id, status: "failed", uncompositedImage: raw, error: `选区合成未完成：${errorText(caught)}。AI 原始结果已保留，可下载检查。` };
+                            updateResult(index, result); return result;
+                        }
                     }
                     image.durationMs = performance.now() - itemStart;
                     const result: SceneResult = { id: item.id, status: "success", image };
@@ -267,7 +347,7 @@ export function useSceneWorkspace(sceneId: string) {
             const completed: SceneResult[] = settled.map((result, index) => result.status === "fulfilled" ? result.value : { id: pending[index]!.id, status: "failed", error: errorText(result.reason) });
             const successes = completed.flatMap(result => result.image ? [result.image] : []);
             const log: SceneLog = { id: nanoid(), ownerId: user.id, sceneId, createdAt: Date.now(), prompt, form: snapshot.form, referenceImages: snapshot.images,
-                config: snapshot.config, results: completed, images: successes, durationMs: performance.now() - start, successCount: successes.length, failCount: count - successes.length };
+                config: snapshot.config, selection: snapshot.selection, operation: "ai", results: completed, images: successes, durationMs: performance.now() - start, successCount: successes.length, failCount: count - successes.length };
             if (revision === epoch.current) {
                 setResults(completed); setLogs(current => [log, ...current]); setActiveLog(log);
                 if (!successes.length) setError(completed[0]?.error || "生成失败");
@@ -277,7 +357,7 @@ export function useSceneWorkspace(sceneId: string) {
                 const previous = await storage.getItem<SceneLog[]>(`history:${scope}`) || [];
                 await storage.setItem(`history:${scope}`, [serializeSceneLog(log), ...previous.filter(item => item.id !== log.id)]);
             } catch (caught) { if (revision === epoch.current) setError(`生成结果仍保留在页面，但本地记录保存失败：${errorText(caught)}`); }
-        } catch (caught) { if (revision === epoch.current) setError(errorText(caught)); }
+        } catch (caught) { if (revision === epoch.current) { setError(errorText(caught)); setResults(pending.map(item => ({ ...item, status: "failed", error: errorText(caught) }))); } }
         finally { release(); if (revision === epoch.current) setRunning(false); }
     };
 
@@ -293,7 +373,7 @@ export function useSceneWorkspace(sceneId: string) {
         } catch (caught) { setError(errorText(caught)); }
     };
 
-    return { form, setForm, images, setImage, config, updateConfig, model, profile, count, running, loading,
+    return { form, setForm, images, setImage, selection, saveSelection, clearSelection: () => { if (!running) { setSelection(null); setError(null); } }, saveLocalResult, config, updateConfig, model, profile, count, running, loading,
         uploading: uploadCount > 0, logs, activeLog, results, generate, restoreLog, reset, error, validation,
         quotaBlocked, estimatedCredits: estimateValue.credits, download, startedAt };
 }

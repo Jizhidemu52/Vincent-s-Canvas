@@ -8,12 +8,13 @@ import { mapUser, userSelect, type UserRow } from "./user-mapper";
 import { refreshMonthlyCreditPeriod } from "./billing";
 import { withTransaction } from "./db-transaction";
 import { deploymentFeatures } from "./deployment-features";
+import { OA_SESSION_TTL_SECONDS } from "./oa";
 
 const GUEST_SESSION_TTL_SECONDS = 365 * 24 * 60 * 60;
 
 export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig, options: { allowGuest?: boolean } = {}) {
     const features = deploymentFeatures(config);
-    const allowGuest = !features.authenticationEnabled && options.allowGuest !== false;
+    const allowGuest = !features.oaLoginEnabled && !features.authenticationEnabled && options.allowGuest !== false;
     return async (request: Request, response: Response, next: NextFunction) => {
         const token = request.cookies?.[config.SESSION_COOKIE_NAME];
         if (!token || typeof token !== "string") {
@@ -30,17 +31,17 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
             const tokenHash = hashToken(token);
             const cacheKey = `session:${tokenHash}`;
             const cachedId = await cache.get(cacheKey);
-            const result = await db.query<UserRow & { session_id: string }>(
-                `SELECT ${userSelect}, s.id AS session_id
+            const result = await db.query<UserRow & { session_id: string; auth_provider: string }>(
+                `SELECT ${userSelect}, s.id AS session_id, s.auth_provider
                  FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN departments d ON d.id=u.department_id
                  WHERE s.token_hash=$1 AND ($2::uuid IS NULL OR s.id=$2::uuid) AND s.revoked_at IS NULL
                    AND s.expires_at>now() AND u.status='active'`,
                 [tokenHash, cachedId],
             );
             let row = result.rows[0];
-            if (!row || (row.is_guest && !allowGuest)) {
+            if (!row || (row.is_guest && !allowGuest) || (features.oaLoginEnabled && (row.auth_provider !== "oa" || row.role !== "designer"))) {
                 await cache.del(cacheKey);
-                if (!row) response.clearCookie(config.SESSION_COOKIE_NAME);
+                response.clearCookie(config.SESSION_COOKIE_NAME, { path: "/" });
                 if (!row && allowGuest) {
                     await createGuestSession(db, cache, config, request, response);
                     next();
@@ -50,13 +51,19 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
                 return;
             }
             if (features.creditsEnabled) await refreshMonthlyCreditPeriod(db, row.id);
-            const refreshed = await db.query<UserRow & { session_id: string }>(
-                `SELECT ${userSelect}, s.id AS session_id
+            const refreshed = await db.query<UserRow & { session_id: string; auth_provider: string }>(
+                `SELECT ${userSelect}, s.id AS session_id, s.auth_provider
                  FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN departments d ON d.id=u.department_id
-                 WHERE s.id=$1`, [row.session_id],
+                 WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'`, [row.session_id],
             );
-            row = refreshed.rows[0] ?? row;
-            await cache.set(cacheKey, row.session_id, { EX: config.SESSION_TTL_SECONDS });
+            row = refreshed.rows[0];
+            if (!row || (row.is_guest && !allowGuest) || (features.oaLoginEnabled && (row.auth_provider !== "oa" || row.role !== "designer"))) {
+                await cache.del(cacheKey);
+                response.clearCookie(config.SESSION_COOKIE_NAME, { path: "/" });
+                response.status(401).json({ error: "SESSION_EXPIRED", message: "登录已失效，请重新登录" });
+                return;
+            }
+            await cache.set(cacheKey, row.session_id, { EX: features.oaLoginEnabled ? OA_SESSION_TTL_SECONDS : config.SESSION_TTL_SECONDS });
             const authenticated = request as AuthenticatedRequest;
             authenticated.auth = mapUser(row);
             authenticated.sessionId = row.session_id;

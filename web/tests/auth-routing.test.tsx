@@ -11,7 +11,7 @@ const requireModule = createRequire(import.meta.url);
 const compiled = new Map<string, string>();
 const Navigate = () => null;
 const AuthBoundary = () => null;
-type Features = { authenticationEnabled: boolean; creditsEnabled: boolean; rolePortalsEnabled: boolean };
+type Features = { authenticationEnabled: boolean; creditsEnabled: boolean; rolePortalsEnabled: boolean; oaLoginEnabled?: boolean };
 type Route = { path?: string; element?: ReactElement<any>; children?: Route[] };
 
 // Execute the real TSX module with only its browser/session boundaries replaced.
@@ -64,6 +64,17 @@ const visitor: LocalUser = {
 };
 
 describe("optional authentication route wiring", () => {
+    test("OA redirects every legacy authentication and administrator route to the workspace", () => {
+        const routes = registeredRoutes({ authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: true });
+        for (const path of ["/login", "/admin/*", "/change-password"]) {
+            const route = routes.find((item) => item.path === path);
+            expect(route?.element?.type).toBe(Navigate);
+            expect(route?.element?.props.to).toBe("/");
+            expect(route?.element?.props.replace).toBe(true);
+        }
+        expect(routes.some((route) => route.path === "/admin" || route.path === "/admin/login")).toBe(false);
+    });
+
     for (const authenticationEnabled of [true, false]) {
         for (const creditsEnabled of [true, false]) {
             for (const rolePortalsEnabled of [true, false]) {

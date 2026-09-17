@@ -1,6 +1,7 @@
 import { useUserStore } from "@/stores/use-user-store";
+import { deploymentFeatures } from "@/lib/deployment-features";
 
 export function useCanManageConfig() {
     const user = useUserStore((state) => state.user);
-    return user?.role === "super_admin";
+    return !deploymentFeatures.oaLoginEnabled && user?.role === "super_admin";
 }
