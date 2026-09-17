@@ -25,6 +25,13 @@ export type ApiUser = {
 
 type ErrorPayload = { message?: string };
 
+export class AuthRequestError extends Error {
+    constructor(message: string, public readonly status: number | null) {
+        super(message);
+        this.name = "AuthRequestError";
+    }
+}
+
 export type DemoLoginAccount = { identifier: string; password: string; label: string; portal: "designer" | "admin" };
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -32,24 +39,32 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
         ...init,
         credentials: "include",
         headers: { "content-type": "application/json", ...init?.headers },
-    });
+    }).catch(() => { throw new AuthRequestError("暂时无法连接认证服务", null); });
     if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as ErrorPayload;
-        throw new Error(payload.message || `请求失败（${response.status}）`);
+        throw new AuthRequestError(payload.message || "认证请求失败", response.status);
     }
-    return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
+    return response.status === 204 ? (undefined as T) : ((await response.json().catch(() => { throw new AuthRequestError("认证服务返回了无效响应", response.status); })) as T);
+}
+
+async function requestIdentity(path: string, init?: RequestInit) {
+    const result = await apiRequest<{ user: ApiUser }>(path, init);
+    if (!result?.user || typeof result.user.id !== "string" || !result.user.id.trim()) {
+        throw new AuthRequestError("认证服务未返回有效身份", 200);
+    }
+    return result;
 }
 
 export async function loginWithPassword(identifier: string, password: string, portal: "designer" | "admin") {
-    return apiRequest<{ user: ApiUser }>("/api/auth/login", { method: "POST", body: JSON.stringify({ identifier, password, portal }) });
+    return requestIdentity("/api/auth/login", { method: "POST", body: JSON.stringify({ identifier, password, portal }) });
 }
 
 export async function getCurrentSession() {
-    return apiRequest<{ user: ApiUser }>("/api/auth/session");
+    return requestIdentity("/api/auth/session");
 }
 
 export async function exchangeOaToken(token: string) {
-    return apiRequest<{ user: ApiUser }>("/api/auth/oa/exchange", {
+    return requestIdentity("/api/auth/oa/exchange", {
         method: "POST",
         body: JSON.stringify({ token }),
         signal: AbortSignal.timeout(15_000),

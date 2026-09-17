@@ -52,6 +52,7 @@ import { useCanvasDesktopLayout } from "@/hooks/use-canvas-desktop-layout";
 import { shouldOpenCanvasCreationPanel } from "@/lib/canvas/canvas-layout-breakpoint";
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
 import { flushCanvasPersistence, useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { CanvasSaveStatus, canvasLinkCopiedMessage } from "@/components/canvas/canvas-save-status";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
@@ -169,7 +170,7 @@ type CanvasHistoryEntry = Pick<CanvasClipboard, "nodes" | "connections"> & {
 
 type CanvasProjectSaveSnapshot = {
     projectId: string;
-    patch: Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo">;
+    patch: Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "history">;
 };
 
 type CanvasGenerationRequest = {
@@ -619,7 +620,7 @@ function WirelessCanvasPage() {
     );
     const releaseStaleCanvasObjectUrls = useCallback((restoredNodes: CanvasNodeData[], restoredSessions: CanvasAssistantSession[]) => {
         const assets = useAssetStore.getState().assets;
-        const usedData = { assets, nodes: restoredNodes, chatSessions: restoredSessions };
+        const usedData = { assets, nodes: restoredNodes, chatSessions: restoredSessions, history: historyRef.current, lastHistory: lastHistoryRef.current };
         releaseUnusedImageObjectUrls(usedData);
         releaseUnusedMediaObjectUrls(usedData);
     }, []);
@@ -718,7 +719,7 @@ function WirelessCanvasPage() {
             return invalidateRestore;
         }
 
-        const commitRestoredProject = (restoredNodes: CanvasNodeData[], restoredSessions: CanvasAssistantSession[]) => {
+        const commitRestoredProject = (restoredNodes: CanvasNodeData[], restoredSessions: CanvasAssistantSession[], restoredHistory = boundedCanvasHistory(project.history)) => {
             if (!lifecycle.isCurrent(restoreToken)) return;
             setNodes(restoredNodes);
             setQuickGenerateOpen(shouldOpenCanvasCreationPanel(restoredNodes.length, window.innerWidth));
@@ -728,7 +729,7 @@ function WirelessCanvasPage() {
             setBackgroundMode(project.backgroundMode);
             setShowImageInfo(project.showImageInfo || false);
             setViewport(project.viewport);
-            historyRef.current = { past: [], future: [] };
+            historyRef.current = restoredHistory;
             if (historyCommitTimerRef.current) {
                 clearTimeout(historyCommitTimerRef.current);
                 historyCommitTimerRef.current = null;
@@ -741,7 +742,7 @@ function WirelessCanvasPage() {
                 backgroundMode: project.backgroundMode,
                 showImageInfo: project.showImageInfo || false,
             };
-            setHistoryState({ canUndo: false, canRedo: false });
+            setHistoryState({ canUndo: restoredHistory.past.length > 0, canRedo: restoredHistory.future.length > 0 });
             setProjectLoaded(true);
             requestAnimationFrame(() => {
                 if (lifecycle.isCurrent(restoreToken)) releaseStaleCanvasObjectUrls(restoredNodes, restoredSessions);
@@ -753,7 +754,8 @@ function WirelessCanvasPage() {
                 const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes));
                 if (!lifecycle.isCurrent(restoreToken)) return;
                 const restoredSessions = await hydrateAssistantImages(project.chatSessions || [], restoredNodes);
-                commitRestoredProject(restoredNodes, restoredSessions);
+                const restoredHistory = await hydrateCanvasHistory(project.history);
+                commitRestoredProject(restoredNodes, restoredSessions, restoredHistory);
             } catch (error) {
                 if (!lifecycle.isCurrent(restoreToken)) return;
                 const reason = error instanceof Error ? error.message : "素材恢复失败";
@@ -830,11 +832,14 @@ function WirelessCanvasPage() {
         projectSaveQueueRef.current?.schedule(
             {
                 projectId,
-                patch: { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo },
+                patch: {
+                    nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo,
+                    history: canvasHistoryForSave(historyRef.current, lastHistoryRef.current, { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo }, applyingHistoryRef.current),
+                },
             },
             batchEditRunning || runningNodeId ? 900 : 180,
         );
-    }, [activeChatId, backgroundMode, batchEditRunning, chatSessions, connections, nodes, projectId, projectLoaded, runningNodeId, showImageInfo, usePerformanceScenario]);
+    }, [activeChatId, backgroundMode, batchEditRunning, chatSessions, connections, historyState, nodes, projectId, projectLoaded, runningNodeId, showImageInfo, usePerformanceScenario]);
 
     useEffect(
         () => () => {
@@ -4427,7 +4432,7 @@ function WirelessCanvasPage() {
     const shareCurrentCanvas = useCallback(async () => {
         try {
             await navigator.clipboard.writeText(window.location.href);
-            message.success("已复制当前画布链接；本地画布需在同一浏览器打开，跨设备请从菜单导出画布文件。");
+            message.success(canvasLinkCopiedMessage[deploymentFeatures.oaLoginEnabled ? "cloud" : "local"]);
         } catch {
             message.warning("无法复制链接，请从地址栏复制");
         }
@@ -4583,6 +4588,7 @@ function WirelessCanvasPage() {
                 {isCanvasDesktopLayout ? quickGeneratePanel : null}
             </aside>
             <section className="relative min-w-0 flex-1 overflow-hidden">
+                <div className="absolute bottom-3 left-3 z-20"><CanvasSaveStatus /></div>
                 <CanvasTopBar
                     title={currentProject?.title || "未命名画布"}
                     titleDraft={titleDraft}
@@ -5336,6 +5342,27 @@ async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
         }),
     );
     return references.every(Boolean) ? (references as ReferenceImage[]) : null;
+}
+
+export function boundedCanvasHistory(history?: { past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }) {
+    return { past: (history?.past || []).slice(-50), future: (history?.future || []).slice(-50) };
+}
+
+/** Include a not-yet-committed edit when closing before the undo debounce fires. */
+export function canvasHistoryForSave(history: { past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }, previous: CanvasHistoryEntry | null, current: CanvasHistoryEntry, applyingHistory: boolean) {
+    const saved = boundedCanvasHistory(history);
+    const changed = previous && (["nodes", "connections", "chatSessions", "activeChatId", "backgroundMode", "showImageInfo"] as const).some(key => previous[key] !== current[key]);
+    if (!applyingHistory && changed) return { past: [...saved.past.slice(-49), previous!], future: [] };
+    return saved;
+}
+
+async function hydrateCanvasHistory(history?: { past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }) {
+    const bounded = boundedCanvasHistory(history);
+    const hydrate = async (entry: CanvasHistoryEntry): Promise<CanvasHistoryEntry> => {
+        const nodes = await hydrateCanvasImages(resetInterruptedGeneration(entry.nodes));
+        return { ...entry, nodes, chatSessions: await hydrateAssistantImages(entry.chatSessions || [], nodes) };
+    };
+    return { past: await Promise.all(bounded.past.map(hydrate)), future: await Promise.all(bounded.future.map(hydrate)) };
 }
 
 async function hydrateCanvasImages(nodes: CanvasNodeData[]) {

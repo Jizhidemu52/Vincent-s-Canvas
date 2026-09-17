@@ -1,4 +1,5 @@
 import localforage from "localforage";
+import { rememberMediaSource } from "./canvas-media-links";
 
 import { nanoid } from "nanoid";
 import { readImageMeta } from "@/lib/image-utils";
@@ -29,6 +30,7 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
+    if (typeof input === "string") await rememberMediaSource(storageKey, input);
     const url = URL.createObjectURL(blob);
     cacheObjectUrl(objectUrls, storageKey, url);
     const meta = await readImageMeta(url);

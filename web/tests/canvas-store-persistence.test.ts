@@ -68,6 +68,7 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
         create, persist, nanoid: () => `new-${++ids}`, collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, applyCanvasProjectPatch,
         deploymentFeatures: { oaLoginEnabled: oaOwnerId !== undefined },
         useUserStore: userStore,
+        createCloudCanvasPersistence: () => ({ hydrate: async (projects: CanvasProject[]) => projects, schedule() {}, async flush() {} }),
         localForageStorage: io.adapter,
         updateCanvasStorage: io.update,
         readCanvasProjects: async (key: string) => JSON.parse(await io.adapter.getItem(key) || "null")?.state.projects || [],
@@ -85,12 +86,23 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
         window: { addEventListener() {}, location: { reload() { reloads += 1; } } },
         console: { error: (...args: unknown[]) => errors.push(args) },
     };
-    const exports = {} as { useCanvasStore: any; flushCanvasPersistence: () => Promise<void> };
+    const exports = {} as { useCanvasStore: any; flushCanvasPersistence: () => Promise<void>; flushCanvasCloudPersistence: () => Promise<void> };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
     const store = exports.useCanvasStore;
     if (!store.persist.hasHydrated() && oaOwnerId !== null) await new Promise<void>(resolve => { const unsubscribe = store.persist.onFinishHydration(() => { unsubscribe(); resolve(); }); });
-    return { store, flush: exports.flushCanvasPersistence, errors, userStore, reloads: () => reloads };
+    return { store, flush: exports.flushCanvasPersistence, retry: exports.flushCanvasCloudPersistence, errors, userStore, reloads: () => reloads };
 }
+
+test("local write failures are visible and explicit retry saves retained edits without another edit", async () => {
+    const io = database(), tab = await openTab(io);
+    io.failNextWrite();
+    tab.store.getState().renameProject("shared", "等待恢复的作品");
+    await expect(tab.flush()).rejects.toThrow();
+    expect(tab.store.getState().cloudStatus).toBe("local-error");
+    await tab.retry();
+    expect(io.read()[0].title).toBe("等待恢复的作品");
+    expect(tab.store.getState().cloudStatus).toBe("local");
+});
 
 test("OA canvas persistence isolates employee keys and leaves old unscoped projects intact", async () => {
     const io = database();

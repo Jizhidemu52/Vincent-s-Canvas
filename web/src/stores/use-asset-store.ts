@@ -7,6 +7,8 @@ import { localForageStorage } from "@/lib/localforage-storage";
 import { cleanupUnusedImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
 import { uploadServerAsset } from "@/services/api/server-assets";
+import { ensureCloudMedia } from "@/services/canvas-cloud-media";
+import { serverMediaId } from "@/services/canvas-media-links";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useUserStore, type LocalUser } from "@/stores/use-user-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -122,6 +124,8 @@ export const useAssetStore = create<AssetStore>()(
                     const asset = get().assets.find((item) => item.id === id);
                     if (!asset) throw new Error("素材不存在，无法上传到公司数据库");
                     if (!canCurrentUserManageAsset(asset)) throw new Error("无权上传该素材到公司数据库");
+                    const owner = useUserStore.getState().user?.id;
+                    if (!owner) throw new Error("请先登录再同步素材");
                     const existingId = serverAssetIdFromAsset(asset);
                     if (existingId) {
                         setCompanyDatabaseState(set, id, { serverAssetId: existingId, companyDatabaseStatus: "synced", companyDatabaseSyncedAt: new Date().toISOString(), companyDatabaseError: undefined });
@@ -129,7 +133,8 @@ export const useAssetStore = create<AssetStore>()(
                     }
                     setCompanyDatabaseState(set, id, { companyDatabaseStatus: "syncing", companyDatabaseError: undefined });
                     try {
-                        const serverAssetId = await syncAssetToServerStorage(asset);
+                        const serverAssetId = await syncAssetToServerStorage(asset, owner);
+                        if (useUserStore.getState().user?.id !== owner) throw new Error("账号已切换，请重新登录后同步素材");
                         setCompanyDatabaseState(set, id, { serverAssetId, companyDatabaseStatus: "synced", companyDatabaseSyncedAt: new Date().toISOString(), companyDatabaseError: undefined });
                         return serverAssetId;
                     } catch (error) {
@@ -147,6 +152,7 @@ export const useAssetStore = create<AssetStore>()(
             partialize: (state) => ({ assets: state.assets }) as StorageValue<AssetStore>["state"],
             onRehydrateStorage: () => () => {
                 useAssetStore.setState({ hydrated: true });
+                retryPendingAssetUploads();
             },
         },
     ),
@@ -154,12 +160,15 @@ export const useAssetStore = create<AssetStore>()(
 
 export function assetOwnerId(asset: Pick<Asset, "ownerId" | "metadata">) {
     const metadataOwner = asset.metadata?.designerId;
-    return asset.ownerId || (typeof metadataOwner === "string" && metadataOwner.trim() ? metadataOwner : currentAssetOwnerId());
+    return asset.ownerId?.trim() || (typeof metadataOwner === "string" && metadataOwner.trim() ? metadataOwner : "unassigned");
 }
 
-export function canUserAccessAsset(asset: Asset, user: LocalUser | null) {
+export function canUserAccessAsset(asset: Asset, user: LocalUser | null, serverAuthorized = false) {
     if (!user) return false;
-    if (typeof asset.metadata?.serverAssetId === "string" && asset.metadata.serverAssetId) return true;
+    if (deploymentFeatures.oaLoginEnabled) return assetOwnerId(asset) === user.id;
+    // Only an active response for the current session can grant server-side sharing.
+    // Persisted serverAssetId identifies a file; it never proves access to its local copy.
+    if (serverAuthorized) return true;
     if (user.role === "super_admin") return true;
     if (user.role === "department_admin") return Boolean(user.departmentId) && asset.metadata?.departmentId === user.departmentId;
     return assetOwnerId(asset) === user.id;
@@ -192,20 +201,29 @@ function createStoredAsset(asset: AssetInput) {
     };
 }
 
-async function syncAssetToServerStorage(asset: Asset) {
+async function syncAssetToServerStorage(asset: Asset, owner: string) {
     const existingId = serverAssetIdFromAsset(asset);
     if (existingId) return existingId;
     const metadata = { ...asset.metadata, localAssetId: asset.id, title: asset.title, tags: asset.tags, source: asset.source || "local-cache", note: asset.note || "" };
     if (asset.kind === "text") {
-        return uploadServerAsset(new File([asset.data.content], `${safeFilename(asset.title)}.txt`, { type: "text/plain;charset=utf-8" }), metadata, { clientReferenceId: asset.id });
+        return uploadServerAsset(new File([asset.data.content], `${safeFilename(asset.title)}.txt`, { type: "text/plain;charset=utf-8" }), metadata, { clientReferenceId: asset.id, expectedOwnerId: owner });
     }
     const sourceUrl = asset.kind === "image" ? asset.data.dataUrl : asset.data.url;
-    const response = await fetch(sourceUrl, { credentials: "include" });
-    if (!response.ok) throw new Error(`素材读取失败（${response.status}）`);
-    const blob = await response.blob();
-    const extension = asset.kind === "video" ? "mp4" : blob.type.includes("jpeg") ? "jpg" : "png";
-    return uploadServerAsset(new File([blob], `${safeFilename(asset.title)}.${extension}`, { type: blob.type || asset.data.mimeType }), metadata, { clientReferenceId: asset.id });
+    const url = await ensureCloudMedia(owner, { url: sourceUrl, storageKey: asset.data.storageKey, mimeType: asset.data.mimeType }, metadata);
+    return serverMediaId(url);
 }
+
+function retryPendingAssetUploads() {
+    const state = useAssetStore.getState();
+    const owner = useUserStore.getState().user?.id;
+    if (!state.hydrated || !owner) return;
+    for (const asset of state.assets) {
+        if (assetOwnerId(asset) !== owner || serverAssetIdFromAsset(asset)) continue;
+        void state.syncAssetToCompanyDatabase(asset.id).catch(() => undefined);
+    }
+}
+if (typeof window !== "undefined") window.addEventListener("online", retryPendingAssetUploads);
+useUserStore.subscribe((state, previous) => { if (state.user?.id !== previous.user?.id) retryPendingAssetUploads(); });
 
 function setCompanyDatabaseState(set: (partial: Partial<AssetStore> | ((state: AssetStore) => Partial<AssetStore>), replace?: false) => void, id: string, patch: Record<string, unknown>) {
     set((state) => ({

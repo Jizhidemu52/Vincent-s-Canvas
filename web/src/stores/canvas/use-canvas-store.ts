@@ -7,6 +7,7 @@ import { collectProjectChanges, createProjectChangeBuffer, type CanvasPersistenc
 import { readCanvasProjects, writeCanvasProjects, removeCanvasProjects } from "@/lib/canvas/canvas-project-storage";
 import { applyCanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { createCloudCanvasPersistence, type CloudSaveState } from "@/services/canvas-cloud-persistence";
 import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -23,11 +24,15 @@ export type CanvasProject = {
     backgroundMode: CanvasBackgroundMode;
     showImageInfo: boolean;
     viewport: ViewportTransform;
+    history?: { past: CanvasHistorySnapshot[]; future: CanvasHistorySnapshot[] };
     persistenceConflict?: CanvasPersistenceConflict;
 };
+export type CanvasHistorySnapshot = Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo">;
 
 type CanvasStore = {
     hydrated: boolean;
+    cloudStatus: CloudSaveState;
+    cloudError: string;
     projects: CanvasProject[];
     createProject: (title?: string) => string;
     importProject: (project: Partial<CanvasProject>) => string;
@@ -35,7 +40,7 @@ type CanvasStore = {
     renameProject: (id: string, title: string) => void;
     deleteProjects: (ids: string[]) => void;
     replaceProjects: (projects: CanvasProject[]) => void;
-    updateProject: (id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport">>) => void;
+    updateProject: (id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport" | "history">>) => void;
 };
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
@@ -44,6 +49,11 @@ const CANVAS_STORE_KEY = deploymentFeatures.oaLoginEnabled
     ? `wireless-canvas:canvas_store:oa:user:${encodeURIComponent(oaCanvasOwnerId || "")}`
     : "wireless-canvas:canvas_store";
 let canvasOwnerValid = !deploymentFeatures.oaLoginEnabled || Boolean(oaCanvasOwnerId);
+const cloudPersistence = oaCanvasOwnerId ? createCloudCanvasPersistence(oaCanvasOwnerId, CANVAS_STORE_KEY, {
+    valid: () => canvasOwnerValid && useUserStore.getState().user?.id === oaCanvasOwnerId,
+    status: (cloudStatus, cloudError = "") => { if (!lastPersistError) useCanvasStore.setState({ cloudStatus, cloudError }); },
+    copy: (copy) => useCanvasStore.setState(state => ({ projects: [copy, ...state.projects.filter(project => project.id !== copy.id)] })),
+}) : null;
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
 let queuedPersistState: PersistedCanvasState | null = null;
 const pendingProjectChanges = new Map<string, ProjectChange<CanvasProject>>();
@@ -71,8 +81,12 @@ const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, chan
                 useCanvasStore.setState({ projects });
             }
         }))
-        .then(() => { lastPersistError = null; })
-        .catch(error => { lastPersistError = error; console.error("画布自动保存失败，改动将随下次编辑重试；请先导出重要作品。", error); });
+        .then(() => { lastPersistError = null; if (canvasOwnerValid) { if (cloudPersistence) cloudPersistence.schedule(); else useCanvasStore.setState({ cloudStatus: "local", cloudError: "" }); } })
+        .catch(error => {
+            lastPersistError = error;
+            if (canvasOwnerValid) useCanvasStore.setState({ cloudStatus: "local-error", cloudError: "画布写入本机失败，尚未同步本次改动；请重试保存或导出备份。" });
+            console.error("画布自动保存失败，改动将随下次编辑重试；请先导出重要作品。", error);
+        });
 });
 
 /** Explicit save actions wait for the same ordered queue used by autosave. */
@@ -80,6 +94,13 @@ export async function flushCanvasPersistence() {
     persistQueue.flush();
     await persistWriteChain;
     if (lastPersistError) throw new Error("画布写入本机失败，请保留编辑面板并重试保存");
+}
+
+export async function flushCanvasCloudPersistence() {
+    if (canvasOwnerValid && lastPersistError) persistQueue.schedule({ name: CANVAS_STORE_KEY, value: { state: useCanvasStore.getState(), version: 0 }, changes: new Map(pendingProjectChanges) });
+    await flushCanvasPersistence();
+    cloudPersistence?.schedule(0);
+    await cloudPersistence?.flush();
 }
 
 if (typeof window !== "undefined") {
@@ -92,13 +113,15 @@ if (typeof window !== "undefined") {
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
-        const projects = await readCanvasProjects(name);
+        const local = await readCanvasProjects(name);
+        const projects = canvasOwnerValid && cloudPersistence ? await cloudPersistence.hydrate(local) : local;
         const parsed = { version: 0, state: { projects: canvasOwnerValid ? projects : [] } } as StorageValue<CanvasStore>;
         queuedPersistState = parsed.state as PersistedCanvasState;
         return parsed;
     },
     setItem: (name, value) => {
         if (!canvasOwnerValid) return;
+        if (!useCanvasStore.getState().hydrated) return;
         const nextState = value.state as PersistedCanvasState;
         if (queuedPersistState && queuedPersistState.projects === nextState.projects) return;
         collectProjectChanges(queuedPersistState?.projects || [], nextState.projects, pendingProjectChanges);
@@ -120,9 +143,11 @@ const canvasStorage: PersistStorage<CanvasStore> = {
 };
 
 export const useCanvasStore = create<CanvasStore>()(
-    persist(
+    persist<CanvasStore>(
         (set, get) => ({
             hydrated: false,
+            cloudStatus: cloudPersistence ? "loading" : "local",
+            cloudError: "",
             projects: [],
             createProject: (title = "未命名画布") => {
                 const now = new Date().toISOString();
@@ -157,6 +182,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     backgroundMode: source.backgroundMode || "dots",
                     showImageInfo: source.showImageInfo || false,
                     viewport: source.viewport || initialViewport,
+                    ...(source.history ? { history: source.history } : {}),
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
                 return project.id;

@@ -11,6 +11,7 @@ import {
 } from "../asset-events";
 import { writeAudit } from "../audit";
 import { assetMetadataSchema } from "../asset-metadata";
+import { assertCanvasOwner, CanvasDocumentError } from "../canvas-document";
 import type { Database } from "../db";
 import { ObjectStorage } from "../object-storage";
 import { requireRole } from "../rbac";
@@ -44,7 +45,7 @@ const reverseSchema = z.object({ idempotencyKey: z.string().trim().min(8).max(16
 
 const assetSelect = `a.id,a.owner_user_id AS "ownerUserId",u.display_name AS "ownerName",a.department_id AS "departmentId",d.name AS "departmentName",a.project_id AS "projectId",p.name AS "projectName",a.task_id AS "taskId",a.filename,a.mime_type AS "mimeType",a.byte_size::int AS "byteSize",a.kind,a.source,a.operation_type AS "operationType",a.prompt,m.name AS "modelName",a.status,a.visibility_scope AS "visibilityScope",a.metadata,a.deleted_at AS "deletedAt",a.created_at AS "createdAt"`;
 
-function accessClause(actor: SessionUser, alias = "a") {
+export function accessClause(actor: SessionUser, alias = "a") {
   if (actor.role === "super_admin") return { sql: "TRUE", values: [] as unknown[] };
   const values: unknown[] = [actor.id, actor.departmentId];
   if (actor.groupRole === "leader") values.push(actor.groupId);
@@ -92,6 +93,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
     try {
       const input = createSchema.parse(request.body);
       const actor = (request as unknown as AuthenticatedRequest).auth;
+      if (request.get("X-Canvas-Owner-Id") !== undefined) assertCanvasOwner(request.get("X-Canvas-Owner-Id"), actor.id);
       if (!storage.configured) {
         response.status(503).json({ error: "STORAGE_NOT_CONFIGURED", message: "公司对象存储尚未配置" });
         return;
@@ -115,12 +117,16 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
         [id, actor.id, actor.departmentId, input.projectId ?? null, key, input.filename, input.mimeType, input.byteSize, input.kind, input.clientReferenceId ?? null, JSON.stringify(input.metadata)],
       );
       response.status(201).json({ assetId: id, uploadUrl: `/api/assets/${id}/upload` });
-    } catch (error) { next(error); }
+    } catch (error) {
+      if (error instanceof CanvasDocumentError) response.status(error.status).json({ error: error.code, message: error.message });
+      else next(error);
+    }
   });
 
   router.put("/:id/upload", express.raw({ type: "*/*", limit: "200mb" }), async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
+      if (request.get("X-Canvas-Owner-Id") !== undefined) assertCanvasOwner(request.get("X-Canvas-Owner-Id"), actor.id);
       const result = await db.query<{ object_key: string; mime_type: string; byte_size: number }>(
         "SELECT object_key,mime_type,byte_size FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='pending'",
         [request.params.id, actor.id],
@@ -138,7 +144,10 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       await storage.put(asset.object_key, body, asset.mime_type);
       await db.query("UPDATE assets SET status='ready',updated_at=now() WHERE id=$1", [request.params.id]);
       response.status(204).end();
-    } catch (error) { next(error); }
+    } catch (error) {
+      if (error instanceof CanvasDocumentError) response.status(error.status).json({ error: error.code, message: error.message });
+      else next(error);
+    }
   });
 
   router.get("/:id/content", async (request, response, next) => {

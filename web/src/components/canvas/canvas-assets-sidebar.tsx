@@ -2,8 +2,10 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { Empty, Input, Segmented } from "antd";
 import { Clock3, Heart, Image as ImageIcon, Search, Sparkles } from "lucide-react";
 
-import { canUserAccessAsset, useAssetStore, type Asset } from "@/stores/use-asset-store";
+import { canUserAccessAsset, serverAssetIdFromAsset, useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { serverAssetToLocal } from "@/lib/server-asset-local";
+import { listServerAssets, type ServerAsset } from "@/services/api/server-assets";
 import { canvasAssetsSidebarPropsEqual, type CanvasAssetsSidebarRenderState } from "@/lib/canvas/canvas-assets-sidebar-render-stability";
 import { createCanvasVirtualGridWindow } from "@/lib/canvas/canvas-virtual-grid";
 import { canvasAssetThumbnailRenderProps } from "@/lib/canvas/canvas-asset-thumbnail-render-quality";
@@ -26,6 +28,8 @@ export type CanvasSidebarAsset =
 export const CanvasAssetsSidebar = memo(function CanvasAssetsSidebar({ onInsert, testId }: CanvasAssetsSidebarRenderState) {
     const assets = useAssetStore((state) => state.assets);
     const user = useUserStore((state) => state.user);
+    const [serverResponse, setServerResponse] = useState<{ userId: string; assets: ServerAsset[]; status: "loading" | "ready" | "error"; error?: string } | null>(null);
+    const [reload, setReload] = useState(0);
     const [tab, setTab] = useState<AssetTab>("history");
     const [keyword, setKeyword] = useState("");
     const deferredKeyword = useDeferredValue(keyword);
@@ -35,15 +39,37 @@ export const CanvasAssetsSidebar = memo(function CanvasAssetsSidebar({ onInsert,
     const scrollFrameRef = useRef<number | null>(null);
     const pendingScrollTopRef = useRef(0);
 
+    useEffect(() => {
+        const userId = user?.id;
+        if (!userId) { setServerResponse(null); return; }
+        const controller = new AbortController();
+        setServerResponse({ userId, assets: [], status: "loading" });
+        void listServerAssets(controller.signal).then(({ assets }) => {
+            if (controller.signal.aborted || useUserStore.getState().user?.id !== userId) return;
+            setServerResponse({ userId, assets: assets.filter(asset => asset.kind === "image" || asset.kind === "video"), status: "ready" });
+        }).catch(error => {
+            if (controller.signal.aborted || useUserStore.getState().user?.id !== userId) return;
+            setServerResponse({ userId, assets: [], status: "error", error: error instanceof Error ? error.message : "请检查网络后重试" });
+        });
+        return () => controller.abort();
+    }, [user?.id, reload]);
+
+    const currentResponse = serverResponse?.userId === user?.id ? serverResponse : null;
+    const serverLoading = Boolean(user) && (!currentResponse || currentResponse.status === "loading");
+    const serverError = currentResponse?.status === "error" ? currentResponse.error || "请检查网络后重试" : "";
+
     const visibleAssets = useMemo(() => {
         const query = deferredKeyword.trim().toLowerCase();
-        return assets
-            .filter((asset) => canUserAccessAsset(asset, user))
+        const serverAssets = currentResponse?.assets || [];
+        const serverIds = new Set(serverAssets.map(asset => asset.id));
+        const merged = [...serverAssets.map(serverAssetToLocal), ...assets.filter(asset => !serverIds.has(asset.id) && !serverIds.has(serverAssetIdFromAsset(asset) || ""))];
+        return merged
+            .filter((asset) => canUserAccessAsset(asset, user, serverIds.has(asset.id)))
             .filter((asset) => asset.kind === "image" || asset.kind === "video")
             .filter((asset) => tab !== "favorites" || asset.tags.includes("收藏") || asset.tags.includes("favorite"))
             .filter((asset) => tab !== "community" || asset.metadata?.shared === true || asset.tags.includes("共享"))
             .filter((asset) => !query || [asset.title, asset.source || "", ...asset.tags].join(" ").toLowerCase().includes(query));
-    }, [assets, deferredKeyword, tab, user]);
+    }, [assets, currentResponse, deferredKeyword, tab, user]);
     const virtualGrid = useMemo(
         () => createCanvasVirtualGridWindow({
             itemCount: visibleAssets.length,
@@ -122,6 +148,11 @@ export const CanvasAssetsSidebar = memo(function CanvasAssetsSidebar({ onInsert,
                 className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3"
                 onScroll={(event) => scheduleScrollWindow(event.currentTarget.scrollTop)}
             >
+                {serverLoading ? <p role="status" className="mb-3 text-xs leading-5 text-muted-foreground">正在加载云端素材…</p> : null}
+                {serverError ? <div role="alert" className="mb-3 text-xs leading-5 text-muted-foreground">
+                    <p>云端素材加载失败，当前仅显示本机可用素材。{serverError}</p>
+                    <button type="button" className="mt-1 text-foreground underline underline-offset-2" onClick={() => setReload(value => value + 1)}>重新加载</button>
+                </div> : null}
                 {visibleAssets.length ? (
                     <div className="relative" style={{ height: virtualGrid.totalHeight }}>
                         <div className="absolute left-0 right-0 grid grid-cols-2 gap-1.5" style={{ transform: `translateY(${Math.floor(virtualGrid.startIndex / assetGridColumns) * (assetGridRowHeight + assetGridRowGap)}px)` }}>
@@ -130,9 +161,9 @@ export const CanvasAssetsSidebar = memo(function CanvasAssetsSidebar({ onInsert,
                             ))}
                         </div>
                     </div>
-                ) : (
+                ) : !serverLoading && !serverError ? (
                     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tab === "favorites" ? "暂无收藏素材" : "暂无可用素材"} className="pt-14" />
-                )}
+                ) : null}
             </div>
         </aside>
     );

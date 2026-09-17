@@ -6,7 +6,8 @@ export const CANVAS_PROJECT_BUDGET = {
     rawBytes: 250 * 1024,
     // The canvas owns placement, naming and export entry points. Image editing,
     // PDF generation and assistant processing remain separate on-demand chunks.
-    gzipBytes: 80 * 1024,
+    // Persisted undo/redo and offline-safe tool loading add a small entry cost.
+    gzipBytes: 81 * 1024,
 };
 
 export function bundleBudgetViolations(entries) {

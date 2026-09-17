@@ -1,4 +1,5 @@
 import localforage from "localforage";
+import { rememberMediaSource } from "./canvas-media-links";
 import { nanoid } from "nanoid";
 import { createDedupedAsyncResolver } from "@/lib/deduped-async-resolver";
 import { cacheObjectUrl, releaseObjectUrl, releaseUnusedObjectUrls } from "@/lib/object-url-cache";
@@ -19,6 +20,7 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file"): Pr
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `${prefix}:${nanoid()}`;
     await store.setItem(storageKey, blob);
+    if (typeof input === "string") await rememberMediaSource(storageKey, input);
     const url = URL.createObjectURL(blob);
     cacheObjectUrl(objectUrls, storageKey, url);
     const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : blob.type.startsWith("audio/") ? await readAudioMeta(url) : {};

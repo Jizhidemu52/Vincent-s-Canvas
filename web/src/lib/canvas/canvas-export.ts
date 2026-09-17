@@ -7,15 +7,26 @@ import type { CanvasExportAsset, CanvasExportFile } from "@/types/canvas-export"
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasNodeData } from "@/types/canvas";
 import { canvasImageDownloadFileName, imageMimeFromFileName } from "@/lib/canvas/canvas-image-filename";
+import { collectCanvasExportMedia } from "@/lib/canvas/canvas-export-media";
 
 export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无线画布") {
+    saveAs(await createCanvasProjectsArchive(projects), `${safeFileName(fileName)}.zip`);
+}
+
+export async function createCanvasProjectsArchive(projects: CanvasProject[], sources: {
+    getImageBlob?: typeof getImageBlob;
+    getMediaBlob?: typeof getMediaBlob;
+    fetchBlob?: (path: string) => Promise<Blob>;
+    origin?: string;
+} = {}) {
+    const prepared = await collectCanvasExportMedia(projects, sources);
     const zipFiles: { name: string; data: BlobPart }[] = [];
     const exportedProjects = await Promise.all(
-        projects.map(async (project) => {
+        prepared.document.map(async (project) => {
             const files: CanvasExportAsset[] = [];
             await Promise.all(
                 collectStorageKeys(project).map(async (storageKey) => {
-                    const blob = storageKey.startsWith("image:") ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
+                    const blob = prepared.blobs.get(storageKey) || (storageKey.startsWith("image:") ? await (sources.getImageBlob || getImageBlob)(storageKey) : await (sources.getMediaBlob || getMediaBlob)(storageKey));
                     if (!blob) return;
                     const path = `projects/${project.id}/files/${safeFileName(storageKey)}.${fileExtension(blob.type, storageKey)}`;
                     files.push({ storageKey, path, mimeType: blob.type || "application/octet-stream", bytes: blob.size });
@@ -27,8 +38,7 @@ export async function exportCanvasProjects(projects: CanvasProject[], fileName =
     );
 
     const data: CanvasExportFile = { app: "wireless-canvas", version: 3, exportedAt: new Date().toISOString(), projects: exportedProjects };
-    const zip = await createZip([{ name: "projects.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
-    saveAs(zip, `${safeFileName(fileName)}.zip`);
+    return createZip([{ name: "projects.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
 }
 
 export function downloadCanvasContent(content: string, fileName: string) {
@@ -75,10 +85,13 @@ async function encodeImageBlob(blob: Blob, mimeType: string) {
     } finally { URL.revokeObjectURL(url); }
 }
 
-function collectStorageKeys(value: unknown, keys = new Set<string>()) {
+function collectStorageKeys(value: unknown, keys = new Set<string>(), field = "") {
+    if (typeof value === "string" && value.startsWith("canvas-archive:")) keys.add(value.slice("canvas-archive:".length));
+    if (typeof value === "string" && ["references", "referenceUrls", "sourceUrls", "resultUrls"].includes(field) && /^(image|video|audio|file|media):/.test(value)) keys.add(value);
     if (!value || typeof value !== "object") return [...keys];
+    if (Array.isArray(value)) { value.forEach(item => collectStorageKeys(item, keys, field)); return [...keys]; }
     if ("storageKey" in value && typeof value.storageKey === "string" && value.storageKey.includes(":")) keys.add(value.storageKey);
-    Object.values(value).forEach((item) => (Array.isArray(item) ? item.forEach((child) => collectStorageKeys(child, keys)) : collectStorageKeys(item, keys)));
+    Object.entries(value).forEach(([name, item]) => collectStorageKeys(item, keys, name));
     return [...keys];
 }
 

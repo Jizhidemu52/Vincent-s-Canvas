@@ -15,6 +15,7 @@ import { createClientId } from "@/lib/client-id";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { cn } from "@/lib/utils";
+import { isSupportedServerAsset, serverAssetToLocal } from "@/lib/server-asset-local";
 import { canUserAccessAsset, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
@@ -70,14 +71,15 @@ export default function AssetsPage() {
     const refreshRevisionRef = useRef(0);
     const assetRequestRef = useRef<AbortController | null>(null);
     const localAssets = useAssetStore((state) => state.assets);
-    const [serverAssets, setServerAssets] = useState<ServerAsset[]>([]);
+    const [serverAssetResponse, setServerAssetResponse] = useState<{ userId: string; assets: ServerAsset[] } | null>(null);
     const [serverLoading, setServerLoading] = useState(true);
     const [serverError, setServerError] = useState("");
     const [assetAction, setAssetAction] = useState("");
     const assetActionRef = useRef(false);
     const [serverProjects, setServerProjects] = useState<UserProject[]>([]);
-    const [serverAssetIds, setServerAssetIds] = useState<Set<string>>(new Set());
     const user = useUserStore((state) => state.user);
+    const serverAssets = useMemo(() => serverAssetResponse?.userId === user?.id ? serverAssetResponse?.assets || [] : [], [serverAssetResponse, user?.id]);
+    const serverAssetIds = useMemo(() => new Set(serverAssets.map(asset => asset.id)), [serverAssets]);
     const addAsset = useAssetStore((state) => state.addAsset);
     const updateAsset = useAssetStore((state) => state.updateAsset);
     const removeAsset = useAssetStore((state) => state.removeAsset);
@@ -122,20 +124,22 @@ export default function AssetsPage() {
     const content = Form.useWatch("content", form) || "";
     const refreshServerAssets = async () => {
         const revision = ++refreshRevisionRef.current;
+        const requestUserId = user?.id;
         assetRequestRef.current?.abort();
+        if (!requestUserId) { setServerAssetResponse(null); setServerLoading(false); return; }
         const controller = new AbortController();
         assetRequestRef.current = controller;
         setServerLoading(true);
         setServerError("");
         try {
             const result = await listServerAssets(controller.signal);
-            if (revision !== refreshRevisionRef.current) return;
+            if (revision !== refreshRevisionRef.current || useUserStore.getState().user?.id !== requestUserId) return;
             // The library currently renders image/video/text. Audio references remain available to video tasks.
-            setServerAssets(result.assets.filter((asset) => asset.kind !== "other"));
-            setServerAssetIds(new Set(result.assets.map((asset) => asset.id)));
+            const supported = result.assets.filter(isSupportedServerAsset);
+            setServerAssetResponse({ userId: requestUserId, assets: supported });
             setPreviewAsset((current) => {
                 if (!current) return current;
-                const refreshed = result.assets.find((asset) => asset.id === current.id);
+                const refreshed = supported.find((asset) => asset.id === current.id);
                 return refreshed ? serverAssetToLocal(refreshed) : current;
             });
         }
@@ -143,8 +147,12 @@ export default function AssetsPage() {
         finally { if (revision === refreshRevisionRef.current) setServerLoading(false); }
     };
     useEffect(() => {
-        setServerAssets([]);
-        setServerAssetIds(new Set());
+        setServerAssetResponse(null);
+        setPreviewAsset(null);
+        setEditingAsset(null);
+        setDeletingAsset(null);
+        setProjectAsset(null);
+        setIsAssetOpen(false);
         void refreshServerAssets();
         return () => { refreshRevisionRef.current += 1; assetRequestRef.current?.abort(); };
     }, [user?.id]);
@@ -157,7 +165,7 @@ export default function AssetsPage() {
         return () => controller.abort();
     }, [user?.id]);
     const assets = useMemo(() => [...serverAssets.map(serverAssetToLocal), ...localAssets.filter((asset) => !serverAssetIds.has(asset.id) && !serverAssetIds.has(metadataString(asset, "serverAssetId")))], [localAssets, serverAssetIds, serverAssets]);
-    const validAssets = useMemo(() => assets.filter((asset) => canUserAccessAsset(asset, user) && (asset.kind === "text" || asset.kind === "image" || asset.kind === "video")), [assets, user]);
+    const validAssets = useMemo(() => assets.filter((asset) => canUserAccessAsset(asset, user, serverAssetIds.has(asset.id)) && (asset.kind === "text" || asset.kind === "image" || asset.kind === "video")), [assets, user, serverAssetIds]);
 
     const searchIndex = useMemo(() => buildAssetSearchIndex(validAssets), [validAssets]);
     const filteredAssets = useMemo(() => searchAssetIndex(searchIndex, deferredKeyword, kindFilter), [searchIndex, deferredKeyword, kindFilter]);
@@ -649,14 +657,6 @@ export default function AssetsPage() {
             </Modal>
         </div>
     );
-}
-
-function serverAssetToLocal(asset: ServerAsset): Asset {
-    const title = typeof asset.metadata.title === "string" ? asset.metadata.title : asset.filename;
-    const common = { id: asset.id, ownerId: asset.ownerUserId, title, coverUrl: `/api/assets/${asset.id}/content`, tags: Array.isArray(asset.metadata.tags) ? asset.metadata.tags.map(String) : [], source: typeof asset.metadata.source === "string" ? asset.metadata.source : asset.source, note: typeof asset.metadata.note === "string" ? asset.metadata.note : undefined, metadata: { ...asset.metadata, serverAssetId: asset.id, designerId: asset.ownerUserId, departmentId: asset.departmentId, projectId: asset.projectId, operationType: asset.operationType, module: typeof asset.metadata.module === "string" ? asset.metadata.module : asset.operationType, prompt: asset.prompt, model: typeof asset.metadata.model === "string" ? asset.metadata.model : asset.modelName, modelName: asset.modelName, resultStatus: asset.resultStatus, usabilityScore: asset.usabilityScore, downloadCount: asset.downloadCount, visibilityScope: asset.visibilityScope, firstDownloadedAt: asset.firstDownloadedAt }, createdAt: asset.createdAt, updatedAt: asset.createdAt };
-    if (asset.kind === "text") return { ...common, kind: "text", data: { content: typeof asset.metadata.content === "string" ? asset.metadata.content : "" } };
-    if (asset.kind === "video") return { ...common, kind: "video", data: { url: common.coverUrl, storageKey: asset.id, width: 0, height: 0, bytes: asset.byteSize, mimeType: asset.mimeType } };
-    return { ...common, kind: "image", data: { dataUrl: common.coverUrl, storageKey: asset.id, width: 0, height: 0, bytes: asset.byteSize, mimeType: asset.mimeType } };
 }
 
 function useResolvedAssetMedia(asset: Asset | null) {

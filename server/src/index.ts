@@ -45,6 +45,7 @@ import { createAdminPromptTemplatesRouter, createPromptTemplatesRouter } from ".
 import { PromptTemplateError } from "./prompt-templates";
 import { deploymentFeatures } from "./deployment-features";
 import { createGenerationCapabilitiesRouter } from "./routes/generation-capabilities";
+import { createCanvasDocumentsRouter } from "./routes/canvas-documents";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
@@ -57,6 +58,13 @@ if (config.TRUST_PROXY === "true") app.set("trust proxy", 1);
 app.disable("x-powered-by");
 app.use(helmet());
 app.use("/api/chat", express.json({ limit: "12mb" }));
+app.use("/api/canvas-documents", express.json({ limit: "20mb" }));
+const canvasBodyError: ErrorRequestHandler = (error, _request, response, next) => {
+  if (error?.type === "entity.too.large") { response.status(413).json({ error: "CANVAS_DOCUMENT_TOO_LARGE", message: "画布数据超过 20 MB 限制" }); return; }
+  if (error?.type === "entity.parse.failed") { response.status(400).json({ error: "CANVAS_DOCUMENT_INVALID", message: "画布必须是有效的 JSON 数据" }); return; }
+  next(error);
+};
+app.use("/api/canvas-documents", canvasBodyError);
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 app.use(requireSameOrigin);
@@ -75,6 +83,7 @@ app.get("/api/health", async (_request, response, next) => {
 app.use("/api/auth", createAuthRouter(db, cache, config));
 const requireSession = sessionMiddleware(db, cache, config);
 const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
+app.use("/api/canvas-documents", requireAdminSession, requireAccountReady, createCanvasDocumentsRouter(db));
 app.use(
   "/api/billing",
   requireSession,

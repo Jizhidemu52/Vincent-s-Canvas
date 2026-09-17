@@ -1,19 +1,19 @@
 ---
 title: 数据库结构与迁移
-description: 正式数据存储边界及任务恢复和访客身份字段
+description: 正式数据存储边界、员工画布文档、任务恢复和身份字段
 ---
 
 # 数据库结构与迁移
 
-正式 API 和 Worker 使用 `server/src/migrations/` 中的 PostgreSQL 迁移，完整表结构以这些 SQL 为准。`server/src/demo-server.ts` 单独使用本机 SQLite 保存素材和任务，不执行正式多人隔离、额度账本或生产持久化验收。
+正式 API 和 Worker 使用 `server/src/migrations/` 中的 PostgreSQL 迁移，完整表结构以这些 SQL 为准。`server/src/demo-server.ts` 单独使用本机 SQLite 保存素材、任务、OA 身份与员工画布文档；其员工隔离和持久化测试不替代正式 PostgreSQL、额度账本及对象存储的生产验收。
 
 | 存储 | 负责内容 |
 | --- | --- |
-| PostgreSQL | 用户、部门、项目、任务、额度账本、历史、审计、Provider 配置与素材元数据 |
+| PostgreSQL | 用户、部门、项目、员工画布文档、任务、额度账本、历史、审计、Provider 配置与素材元数据 |
 | Redis | 会话、任务队列、限流和并发控制 |
 | S3 / MinIO | 上传文件及生成结果的文件内容 |
-| 浏览器 IndexedDB | 本地画布布局、节点、会话及相关媒体缓存，不是跨设备云同步 |
-| 单机演示 SQLite | 演示服务的素材原文件、元数据、任务与 OA 员工身份／会话，不替代上述正式存储 |
+| 浏览器 IndexedDB | OA 画布的员工分区缓存、待同步改动及媒体缓存；非 OA／standalone 画布仍以本地保存为主 |
+| 单机演示 SQLite | 演示服务的素材原文件、元数据、任务、OA 员工身份／会话及整张画布文档，不替代上述正式存储 |
 
 ## 单机演示数据
 
@@ -26,6 +26,7 @@ description: 正式数据存储边界及任务恢复和访客身份字段
 | `demo_state_metadata` | `key` 主键、`value`；`initialized` 防止旧恢复文件重复覆盖新数据 |
 | `demo_oa_users` | `id` 内部用户主键、唯一 `subject` 对应 OA `userid`、`display_name` 对应姓名；同名不合并，Token 更新不改变内部 ID |
 | `demo_oa_sessions` | `token_hash` 平台会话 SHA-256 主键、`user_id`、`expires_at` 毫秒时间；有效期两小时，不保存 OA Token |
+| `demo_canvas_documents` | `(owner_user_id,external_id)` 联合主键、`revision` 正整数、`deleted`、`document_json`、`updated_at`；文档与删除墓碑按员工持久保存 |
 
 启动时仅将遗留 `processing` 任务改为 `paused` 并记录 `LOCAL_PROCESS_INTERRUPTED`，不自动重新生成或退款；视频可沿用已有上游任务 ID 查询。旧演示账号登录会话、账号余额、后台临时配置仍在内存中；OA 身份和会话则持久化，不能把这里的退款标记当作正式持久账本。现有 `DEMO_RECOVERY_FILE` 仅在新数据库首次初始化时导入；坏数据库或写入失败会报错，不会自动删除并重建为空库。
 
@@ -34,6 +35,16 @@ description: 正式数据存储边界及任务恢复和访客身份字段
 `022_oa_login.sql` 允许 `external_identities.provider='oa'`，`subject` 保存上游已校验的 `userid`；沿用 `(provider,subject)` 和 `(user_id,provider)` 唯一约束。`sessions.auth_provider` 为 `local` 或 `oa`，默认 `local`，OA 模式拒绝旧会话及管理员身份。正式服务启动前须应用迁移；当前局域网 SQLite 服务不运行 PostgreSQL 迁移。
 
 OA 登录请求向固定 HTTPS 用户信息接口发送 Bearer Token，仅使用返回的 `userid`、`name` 建立普通账号；不接受客户端声明的归属或角色。不存储上游 Token，旧记录不按姓名或首次登录自动转移给员工。
+
+## 员工画布文档
+
+`023_canvas_documents.sql` 新增正式 PostgreSQL 表 `canvas_documents`：`owner_user_id uuid` 引用 `users(id)`，与 `external_id text` 组成联合主键；`revision bigint` 是安全整数范围内的正版本号，`deleted boolean`、`document jsonb` 与 `updated_at timestamptz` 记录完整内容或删除墓碑，并按员工与更新时间建立索引。约束要求未删除记录包含 JSON 对象，墓碑的文档为 `NULL`。单机演示在上述同一 SQLite 文件中使用 `demo_canvas_documents`，以 `document_json` 保存对应 JSON。
+
+OA 员工模式的前端同步整张画布：节点位置与尺寸、连线、编辑内容、参考媒体、画布内聊天、最多 50 步撤销／重做历史和视口。文件沿用素材存储：正式环境为 S3／MinIO，演示环境为 `demo_assets.bytes`；同步上传保留文件原字节，不缩放或再次编码，文档只保存可访问的服务端素材引用，不持久化浏览器 `blob:`、媒体 data URL 或本地 `storageKey`。文档请求上限为 20 MiB。
+
+`GET /api/canvas-documents` 只列当前员工的文档和墓碑；`PUT /api/canvas-documents/:id` 使用 `baseRevision` 比较并交换版本，初次写入从 0 开始，`document:null` 表示删除。两者都要求 `X-Canvas-Owner-Id` 严格等于当前会话员工，并在保存时检查引用素材权限。SQLite 使用 `IMMEDIATE` 事务执行原子版本比较；冲突返回 409 和当前版本，前端保留完整冲突副本。真实删除墓碑不得以原 ID 复活，即使版本匹配；需要保留旧设备的改动时创建新 ID 的副本。
+
+本地提交先于云端提交；断网或同步失败保留缓存和待同步改动，恢复后重试并显示同步状态。旧匿名／共用本地画布不自动迁入员工账号，须由用户导出后导入。此机制不是实时协作或无限历史；非 OA／standalone 模式仍使用本地画布。新迁移在正式 PostgreSQL、S3／MinIO 联动及真实 OA 员工入口尚需目标部署环境验证。
 
 ## 任务执行与恢复字段
 

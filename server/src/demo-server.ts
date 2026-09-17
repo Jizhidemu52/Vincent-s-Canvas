@@ -24,6 +24,8 @@ import { preflightVideoSources, prepareVideoProviderSources } from "./video-sour
 import { probeMediaBytes, type MediaMetadata } from "./media-probe";
 import { readDemoRecovery } from "./demo-state-recovery";
 import { DemoStateStore, DemoStorageError } from "./demo-state-store";
+import { DemoCanvasDocumentStore } from "./demo-canvas-documents";
+import { assertCanvasOwner, CanvasDocumentError } from "./canvas-document";
 import { fileURLToPath } from "node:url";
 import { DemoOaStore } from "./demo-oa-store";
 import { verifyOaToken, OaError, OA_SESSION_TTL_SECONDS } from "./oa";
@@ -460,6 +462,7 @@ const demoPublicVideoAssetAccess = new Map<string, { assetId: string; expiresAt:
 const demoTasks = new Map<string, DemoTask>();
 const demoStatePath = process.env.DEMO_STATE_PATH?.trim() || fileURLToPath(new URL("../.data/local-demo.sqlite", import.meta.url));
 const demoState = new DemoStateStore<DemoAsset, DemoTask>(demoStatePath);
+const canvasDocuments = new DemoCanvasDocumentStore(demoStatePath);
 const oaStore = features.oaLoginEnabled ? new DemoOaStore(demoStatePath) : null;
 const oaLoginRates = new Map<string, { count: number; expiresAt: number }>();
 if (!demoState.isInitialized()) {
@@ -811,6 +814,37 @@ Bun.serve({
     }
     const user = sessionUser(request);
     if (!user) return json({ error: "UNAUTHORIZED", message: "请先登录" }, 401);
+
+    if ((path === "/api/assets/upload-request" || /^\/api\/assets\/[^/]+\/content-upload$/.test(path)) && request.headers.has("x-canvas-owner-id") && request.headers.get("x-canvas-owner-id") !== user.id) {
+      return json({ error: "CANVAS_OWNER_MISMATCH", message: "当前员工身份已变化，请重新打开画布后再试。" }, 403);
+    }
+
+    if (path === "/api/canvas-documents" || /^\/api\/canvas-documents\/[^/]+$/.test(path)) {
+      try {
+        assertCanvasOwner(request.headers.get("x-canvas-owner-id"), user.id);
+        const responseHeaders = { "cache-control": "no-store" };
+        if (path === "/api/canvas-documents" && request.method === "GET") return json({ documents: canvasDocuments.list(user.id) }, 200, responseHeaders);
+        if (path !== "/api/canvas-documents" && request.method === "PUT") {
+          let id: string;
+          try { id = decodeURIComponent(path.split("/")[3]!); }
+          catch { throw new CanvasDocumentError("INVALID_CANVAS_DOCUMENT", "画布 ID 无效"); }
+          let input: unknown;
+          try { input = await request.json(); }
+          catch { throw new CanvasDocumentError("INVALID_CANVAS_DOCUMENT", "画布请求格式无效"); }
+          const result = canvasDocuments.put(user.id, id, input, (assetId) => {
+            const asset = demoAssets.get(assetId);
+            return Boolean(asset?.bytes.byteLength && (asset.ownerUserId === user.id || canManageDemoOwner(user, asset.ownerUserId)));
+          });
+          return result.ok
+            ? json({ document: result.document }, 200, responseHeaders)
+            : json({ error: "CANVAS_REVISION_CONFLICT", message: "画布已在其他设备更新或删除，请保留本地副本后重新同步。", document: result.document }, 409, responseHeaders);
+        }
+        return json({ error: "METHOD_NOT_ALLOWED", message: "不支持此画布操作" }, 405);
+      } catch (error) {
+        if (error instanceof CanvasDocumentError) return json({ error: error.code, message: error.message }, error.status, { "cache-control": "no-store" });
+        throw error;
+      }
+    }
 
     if (path === "/api/modules")
       return json({

@@ -8,10 +8,12 @@ import { setMediaBlob } from "@/services/file-storage";
 import { setImageBlob } from "@/services/image-storage";
 import { CanvasDeleteProjectsDialog } from "@/components/canvas/canvas-delete-projects-dialog";
 import { CanvasProjectCard } from "@/components/canvas/canvas-project-card";
+import { CanvasSaveStatus } from "@/components/canvas/canvas-save-status";
 import type { CanvasExportFile } from "@/types/canvas-export";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
+import { restoreCanvasExportMedia } from "@/lib/canvas/canvas-export-media";
 
 export default function CanvasPage() {
     const { message } = App.useApp();
@@ -46,17 +48,19 @@ export default function CanvasPage() {
             const projectFile = zip.get("projects.json");
             if (!projectFile) throw new Error("missing projects.json");
             const data = JSON.parse(await projectFile.text()) as CanvasExportFile;
+            const importedMediaUrls = new Map<string, string>();
             await Promise.all(
                 data.projects.flatMap((project) =>
                     project.files.map(async (item) => {
                         const blob = zip.get(item.path);
                         if (!blob) return;
                         const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
-                        await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
+                        const url = await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
+                        importedMediaUrls.set(item.storageKey, url);
                     }),
                 ),
             );
-            data.projects.forEach((item) => importProject(item.project));
+            data.projects.forEach((item) => importProject(restoreCanvasExportMedia(item.project, importedMediaUrls)));
             message.success(`已导入 ${data.projects.length} 个画布`);
         } catch {
             message.error("导入失败，请选择有效的画布压缩包");
@@ -82,7 +86,7 @@ export default function CanvasPage() {
                     <div>
                         <p className="wb-eyebrow">{chatMode ? "在线功能" : "画布库"}</p>
                         <h1 className="wb-title">{chatMode ? "GPT 对话" : "无线画布"}</h1>
-                        {!chatMode ? <p className="wb-description">{projects.length} 个画布 · 保存在当前浏览器，重要项目记得导出备份。</p> : null}
+                        {!chatMode ? <p className="wb-description">{projects.length} 个画布 · <CanvasSaveStatus /></p> : null}
                         {chatMode ? <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-500 dark:text-stone-400">选择或新建一个画布后，助手会围绕当前项目内容进行对话、拆解提示词和生成建议，后台会把相关任务归入画布项目历史。</p> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
