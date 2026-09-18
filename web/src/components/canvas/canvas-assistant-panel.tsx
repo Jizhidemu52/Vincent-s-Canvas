@@ -5,6 +5,7 @@ import { Button, Dropdown, Modal, Popover, Segmented, Switch, Tooltip } from "an
 import { motion } from "motion/react";
 
 import { modelOptionName, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
 import { ModelPicker } from "@/components/model-picker";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
@@ -774,7 +775,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const progressId = nanoid();
         const prompt = plan.kind === "image" && !plan.requiresPrompt ? "" : text.trim();
         const strategy = plan.kind === "image" ? `${!plan.requiresPrompt ? "合成参考图并输出" : references.length ? "以参考图为依据编辑" : "按文字描述生成"} ${plan.count} 张图片` : `${activeReferences.length ? "以所选图片为参考生成" : "按文字描述生成"} ${plan.seconds === "-1" ? "智能时长" : `${plan.seconds} 秒`}视频`;
-        appendMessage(sessionId, { id: progressId, role: "assistant", text: `${strategy}，正在执行…${prompt ? `\n\n生成提示词：\n${prompt}` : ""}`, meta: modelOptionName(plan.model), detail: { kind: "agent_generation", status: "running", prompt, settings } });
+        appendMessage(sessionId, { id: progressId, role: "assistant", text: `${strategy}，正在执行…${prompt ? `\n\n生成提示词：\n${prompt}` : ""}`, meta: imageModelDisplayName(modelOptionName(plan.model)), detail: { kind: "agent_generation", status: "running", prompt, settings } });
         let submittedVideoTask: VideoGenerationTask | undefined;
         try {
             if (plan.kind === "image") {
@@ -797,7 +798,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                     metadata: { source: "canvas", module: "Agent", nodeId: attachments[index].id, projectId: snapshotRef.current.projectId, prompt, model: plan.model, serverAssetId: attachments[index].serverAssetId },
                 })));
                 const message = `${attachments.length} 张图片已生成并放入画布。`;
-                upsertMessage(sessionId, { id: progressId, role: "assistant", text: `${message}${prompt ? `\n\n使用提示词：\n${prompt}` : ""}`, attachments, meta: `${attachments.length} 张 · ${modelOptionName(plan.model)} · ${plan.quality}`, detail: { kind: "agent_generation", status: "completed", prompt, settings } });
+                upsertMessage(sessionId, { id: progressId, role: "assistant", text: `${message}${prompt ? `\n\n使用提示词：\n${prompt}` : ""}`, attachments, meta: `${attachments.length} 张 · ${imageModelDisplayName(modelOptionName(plan.model))} · ${plan.quality}`, detail: { kind: "agent_generation", status: "completed", prompt, settings } });
                 return { ok: true as const, message, data: { nodeIds: attachments.map((item) => item.id), mediaType: "image", prompt } };
             }
             const config = { ...baseConfig, model: plan.model, videoModel: plan.model, size: plan.size, videoSeconds: plan.seconds, vquality: plan.quality, videoGenerateAudio: settings.videoGenerateAudio ?? baseConfig.videoGenerateAudio };
@@ -1225,7 +1226,7 @@ function AgentQuickstart({ theme, onSelect }: { theme: (typeof canvasThemes)[key
 }
 
 function modelLabel(modelId: string, isImage: boolean, imageModels: ImageGenerationModel[], videoModels: GenerationCapabilityModel[]) {
-    if (isImage) return imageModels.find((model) => model.modelId === modelId)?.name || modelOptionName(modelId);
+    if (isImage) return imageModelDisplayName(modelId, imageModels);
     return videoModels.find((model) => model.modelId === modelId)?.name || modelOptionName(modelId);
 }
 
@@ -1296,7 +1297,7 @@ function AgentParameterSelect({ label, value, values, suffix = "", onChange }: {
     return <label className="flex min-h-9 items-center justify-between gap-3"><span className="opacity-60">{label}</span><select aria-label={label} value={value} disabled={!values.length} className="h-8 max-w-[165px] rounded-md border-0 bg-transparent px-2 text-right outline-none" onChange={(event) => onChange(event.target.value)}>{values.map((item) => <option key={item} value={item}>{item === "-1" ? "智能" : `${item === "auto" ? "自动" : item}${suffix}`}</option>)}</select></label>;
 }
 function AgentModelIcon({ model }: { model: string }) {
-    const icon = resolveModelIcon(modelOptionName(model));
+    const icon = imageModelIdentityHidden(model) ? "" : resolveModelIcon(modelOptionName(model));
     return icon ? <img src={icon} alt="" className="size-4 shrink-0 dark:invert" /> : <Cpu className="size-4 shrink-0 opacity-70" />;
 }
 

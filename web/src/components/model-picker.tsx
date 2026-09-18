@@ -6,6 +6,7 @@ import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
 import { standaloneEdition } from "@/lib/standalone-edition";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
 import { modelOptionLabel, modelOptionName, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { filterServerModelsByCapability, getModelPickerOptions, modelCapabilityLabel, resolveModelPickerSource, resolveModelPickerValue, type ModelPickerSource } from "@/lib/model-picker-options";
@@ -49,7 +50,9 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const emptyLabel = usesServerModels && businessConfigStatus !== "ready"
         ? businessConfigStatus === "error" ? "模型配置加载失败" : "正在加载模型…"
         : emptyModelLabel(config, capability, canManageConfig, source);
-    const currentLabel = current ? serverModels.find((model) => model.modelId === current)?.name || modelOptionLabel(config, current) : options.length ? placeholder : emptyLabel;
+    const labelFor = (model: string) => imageModelIdentityHidden(model, businessModels) ? imageModelDisplayName(model, businessModels)
+        : serverModels.find(item => item.modelId === model)?.name || modelOptionLabel(config, model);
+    const currentLabel = current ? labelFor(current) : options.length ? placeholder : emptyLabel;
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {
@@ -97,7 +100,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             >
                 {options.length ? (
                     options.map((model) => (
-                        <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)}>
+                        <SelectItem key={model} value={model} textValue={labelFor(model)}>
                             <ModelLabel config={config} model={model} serverModel={serverModels.find((item)=>item.modelId===model)} />
                         </SelectItem>
                     ))
@@ -120,16 +123,17 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability, canMana
 }
 
 function ModelLabel({ config, model, serverModel }: { config: AiConfig; model: string; serverModel?: {name:string;creditCost:number} }) {
+    const label = imageModelIdentityHidden(model) ? imageModelDisplayName(model) : serverModel?.name || modelOptionLabel(config, model);
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
-            <span className="truncate">{serverModel ? (!deploymentFeatures.creditsEnabled ? serverModel.name : `${serverModel.name} · 模型 ${serverModel.creditCost} 积分`) : modelOptionLabel(config, model)}</span>
+            <span className="truncate">{serverModel && deploymentFeatures.creditsEnabled ? `${label} · 模型 ${serverModel.creditCost} 积分` : label}</span>
         </span>
     );
 }
 
 function ModelIcon({ model }: { model: string }) {
-    const icon = resolveModelIcon(modelOptionName(model));
+    const icon = imageModelIdentityHidden(model) ? "" : resolveModelIcon(modelOptionName(model));
     return icon ? <img src={icon} alt="" className="size-4 shrink-0 dark:invert" /> : <Cpu className="size-4 shrink-0 opacity-70" />;
 }
 

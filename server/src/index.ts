@@ -46,6 +46,7 @@ import { PromptTemplateError } from "./prompt-templates";
 import { deploymentFeatures } from "./deployment-features";
 import { createGenerationCapabilitiesRouter } from "./routes/generation-capabilities";
 import { createCanvasDocumentsRouter } from "./routes/canvas-documents";
+import { designerModelPrivacy } from "./model-privacy";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
@@ -83,7 +84,8 @@ app.get("/api/health", async (_request, response, next) => {
 app.use("/api/auth", createAuthRouter(db, cache, config));
 const requireSession = sessionMiddleware(db, cache, config);
 const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
-app.use("/api/canvas-documents", requireAdminSession, requireAccountReady, createCanvasDocumentsRouter(db));
+const protectModelIdentity = designerModelPrivacy(db);
+app.use("/api/canvas-documents", requireAdminSession, requireAccountReady, protectModelIdentity, createCanvasDocumentsRouter(db));
 app.use(
   "/api/billing",
   requireSession,
@@ -119,6 +121,7 @@ app.use(
   "/api/tasks",
   requireSession,
   requireAccountReady,
+  protectModelIdentity,
   createTasksRouter(db, cache, features.creditsEnabled),
 );
 app.use(
@@ -131,6 +134,7 @@ app.use(
   "/api/history",
   requireSession,
   requireAccountReady,
+  protectModelIdentity,
   createHistoryRouter(db),
 );
 app.use(
@@ -143,6 +147,7 @@ app.use(
   "/api/assets",
   requireSession,
   requireAccountReady,
+  protectModelIdentity,
   createAssetsRouter(db, storage),
 );
 app.use(
@@ -155,6 +160,7 @@ app.use(
   "/api/projects",
   requireSession,
   requireAccountReady,
+  protectModelIdentity,
   createProjectsRouter(db),
 );
 app.use(
@@ -209,6 +215,7 @@ app.use(
   "/api/team",
   requireSession,
   requireAccountReady,
+  protectModelIdentity,
   createTeamRouter(db),
 );
 app.use(
@@ -221,12 +228,14 @@ app.use(
   "/api/performance",
   requireSession,
   requireAccountReady,
+  protectModelIdentity,
   createPerformanceRouter(db),
 );
 app.use(
   "/api/prompt-templates",
   requireSession,
   requireAccountReady,
+  protectModelIdentity,
   createPromptTemplatesRouter(db),
 );
 app.use(

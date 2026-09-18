@@ -317,7 +317,7 @@ async function resolvePublicModel(modelId: string) {
     const result = await request<{ models: PublicModel[] }>("/api/models");
     const normalized = modelOptionName(modelId);
     const model = result.models.find((item) => item.id === modelId || item.modelId === normalized || item.name === modelId);
-    if (!model) throw new Error(`管理员尚未启用模型：${modelId}`);
+    if (!model) throw new Error("所选模型暂不可用，请重新选择或联系管理员启用。");
     return model;
 }
 

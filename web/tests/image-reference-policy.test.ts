@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 
 import { createImageReferenceItem, dedupeImageReferences, moveImageReference, validateImageReferences } from "../src/lib/image-reference-policy";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { useUserStore, type LocalUser } from "@/stores/use-user-store";
 
 const ref = (id: string, origin: "upload" | "canvas" | "asset" = "upload") => ({
     id,
@@ -41,4 +43,24 @@ test("enforces documented GPT, Gemini and Midjourney reference limits", () => {
 test("validates legacy plain reference images used by the canvas generation pipeline", () => {
     const references = [{ id: "legacy", name: "legacy.png", type: "image/png", dataUrl: "data:image/png;base64,AA==" }];
     expect(validateImageReferences("gpt-image-2", references).valid).toBe(true);
+});
+
+test("opaque public profiles enforce the original reference limits without revealing brands", () => {
+    const models = useBusinessConfigStore.getState().models;
+    const user = useUserStore.getState().user;
+    try {
+        useUserStore.setState({ user: { role: "designer" } as LocalUser });
+        for (const [profile, minimum, maximum] of [["standard", 0, 16], ["pixel", 0, 15], ["resolution", 0, 14], ["speed", 0, 16], ["blend", 2, 4]] as const) {
+            useBusinessConfigStore.setState({ models: [{ id: "opaque-config-id", modelId: "opaque-config-id", name: "出图模型1", capabilities: ["generate"], creditCost: 0, rmbCost: 0, imageParameterProfile: profile }] });
+            const result = validateImageReferences("opaque-config-id", Array.from({ length: maximum + 1 }, (_, index) => ref(String(index))));
+            expect(result).toMatchObject({ valid: false, minimum, maximum });
+            expect(result.message).toStartWith("当前模型");
+            expect(result.message).not.toMatch(/GPT|Gemini|Midjourney|APIMart/i);
+        }
+        useUserStore.setState({ user: { role: "department_admin" } as LocalUser });
+        expect(validateImageReferences("midjourney-blend", []).message).toContain("Midjourney Blend");
+    } finally {
+        useBusinessConfigStore.setState({ models });
+        useUserStore.setState({ user });
+    }
 });

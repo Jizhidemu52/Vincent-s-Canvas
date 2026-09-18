@@ -8,6 +8,7 @@ import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasNodeData } from "@/types/canvas";
 import { canvasImageDownloadFileName, imageMimeFromFileName } from "@/lib/canvas/canvas-image-filename";
 import { collectCanvasExportMedia } from "@/lib/canvas/canvas-export-media";
+import { exportModelMetadata } from "@/lib/model-display";
 
 export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无线画布") {
     saveAs(await createCanvasProjectsArchive(projects), `${safeFileName(fileName)}.zip`);
@@ -38,7 +39,7 @@ export async function createCanvasProjectsArchive(projects: CanvasProject[], sou
     );
 
     const data: CanvasExportFile = { app: "wireless-canvas", version: 3, exportedAt: new Date().toISOString(), projects: exportedProjects };
-    return createZip([{ name: "projects.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
+    return createZip([{ name: "projects.json", data: JSON.stringify(exportModelMetadata(data), null, 2) }, ...zipFiles]);
 }
 
 export function downloadCanvasContent(content: string, fileName: string) {

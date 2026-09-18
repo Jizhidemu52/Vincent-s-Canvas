@@ -174,6 +174,7 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                 dataSource={models}
                 columns={[
                     { title: "模型名称", dataIndex: "name" },
+                    { title: "设计师端名称", dataIndex: "publicName", render: (value: string | undefined) => value || "—" },
                     { title: "模型 ID", dataIndex: "modelId" },
                     { title: "Provider", dataIndex: "providerName" },
                     { title: "工作流", dataIndex: "workflowName" },
@@ -212,7 +213,7 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                     <Form.Item name="replacementModelConfigId" label="停用后的替代模型">
                         <Select allowClear placeholder="不自动替代，由设计师选择" options={models.filter((item) => item.id !== editingModelId).map((item) => ({ label: `${item.name} · ${item.modelId}`, value: item.id }))} />
                     </Form.Item>
-                    <Form.Item name="name" label="显示名称" rules={[{ required: true }]}>
+                    <Form.Item name="name" label="管理员模型名称" extra="图片模型在设计师端使用固定编号名称；这里保留真实名称。" rules={[{ required: true }]}>
                         <Input />
                     </Form.Item>
                     <Form.Item name="modelId" label="模型 ID" rules={[{ required: true }]}>

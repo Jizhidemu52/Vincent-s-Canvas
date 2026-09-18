@@ -583,7 +583,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
             return null;
         }
         if (invalidBlendReferences) {
-            message.error("Midjourney Blend 需要 2–4 张参考图。");
+            message.error("当前合成模型需要 2–4 张参考图。");
             return null;
         }
         if (!referenceValidation.valid) {

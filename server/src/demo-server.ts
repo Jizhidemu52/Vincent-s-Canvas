@@ -1,6 +1,7 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
 import { assetMetadataSchema } from "./asset-metadata";
-import { imageParameterProfile } from "./image-parameter-profile";
+import { assignDemoPublicModelNumbers, presentAdminModel, presentPublicModel } from "./model-presentation";
+import { redactDesignerModelData } from "./model-privacy";
 import { openAiImageParameters } from "./openai-image-parameters";
 import { deploymentFeatures } from "./deployment-features";
 import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
@@ -381,6 +382,7 @@ for (const modelId of supportedVideoModelIds) {
     enabled: true,
   });
 }
+assignDemoPublicModelNumbers(demoModels);
 const demoPrices: Array<Record<string, unknown>> = Array.from(
   new Map(toolDefinitions.map((tool) => [tool.operationType, tool])).values(),
 ).map((tool, index) => ({
@@ -704,6 +706,10 @@ Bun.serve({
   async fetch(request, server) {
     const url = new URL(request.url);
     const path = url.pathname;
+    const json = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(
+      path.startsWith("/api/") && !path.startsWith("/api/admin/") && path !== "/api/models"
+        ? redactDesignerModelData(body, demoModels, sessionUser(request)?.role) : body,
+    ), { status, headers: { ...headers, ...extra } });
     if (features.oaLoginEnabled && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
       const origin = request.headers.get("origin");
       if (origin && origin !== url.origin) return json({ message: "拒绝跨站写请求" }, 403);
@@ -875,15 +881,11 @@ Bun.serve({
             const rightConfigured = demoProviders.find((provider) => provider.id === right.providerId)?.hasCredentials === true ? 1 : 0;
             return rightConfigured - leftConfigured;
           })
-          .map(({ id, name, modelId, capabilities, creditCost, rmbCost, providerId }) => ({
-            id,
-            name,
-            modelId,
-            capabilities,
-            imageParameterProfile: imageParameterProfile(demoProviders.find(provider => provider.id === providerId)?.protocol, modelId),
-            creditCost: billedDemoCredits(!features.creditsEnabled, Number(creditCost || 0)),
-            rmbCost,
-          })),
+          .map((model) => presentPublicModel({
+            ...model,
+            protocol: demoProviders.find(provider => provider.id === model.providerId)?.protocol,
+            creditCost: billedDemoCredits(!features.creditsEnabled, Number(model.creditCost || 0)),
+          }, user.role)),
         prices: demoPrices
           .filter((price) => price.status === "published")
           .map(({ operationType, label, credits, rmbCost, version }) => ({
@@ -1736,7 +1738,7 @@ Bun.serve({
       path === "/api/admin/model-configuration/models" &&
       request.method === "GET"
     )
-      return json({ models: demoModels });
+      return json({ models: demoModels.map(presentAdminModel) });
     if (
       path === "/api/admin/model-configuration/models" &&
       request.method === "POST"
@@ -1748,11 +1750,13 @@ Bun.serve({
       const model = {
         ...input,
         id: crypto.randomUUID(),
+        publicNumber: undefined,
         providerName: provider?.name || "未知 API",
         workflowName: null,
       };
       demoModels.push(model);
-      return json({ model }, 201);
+      assignDemoPublicModelNumbers(demoModels);
+      return json({ model: presentAdminModel(model) }, 201);
     }
     if (
       /^\/api\/admin\/model-configuration\/models\/[^/]+$/.test(path) &&
@@ -1763,6 +1767,10 @@ Bun.serve({
       );
       if (!model) return json({ message: "模型不存在" }, 404);
       const input = (await request.json()) as Record<string, unknown>;
+      // Public identity is server-owned and must survive configuration edits.
+      delete input.id;
+      delete input.publicNumber;
+      delete input.publicName;
       const provider = demoProviders.find(
         (item) => item.id === input.providerId,
       );
@@ -1771,7 +1779,8 @@ Bun.serve({
         input,
         provider ? { providerName: provider.name } : {},
       );
-      return json({ model });
+      assignDemoPublicModelNumbers(demoModels);
+      return json({ model: presentAdminModel(model) });
     }
     if (
       path === "/api/admin/model-configuration/prices" &&

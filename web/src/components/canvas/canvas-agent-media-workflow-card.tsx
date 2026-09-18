@@ -3,6 +3,7 @@ import { ImageIcon, LoaderCircle, RefreshCw, Video } from "lucide-react";
 import { Button } from "antd";
 
 import { canGenerateWorkflowVideo } from "@/lib/canvas/agent-media-workflow";
+import { imageModelDisplayName } from "@/lib/model-display";
 import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import type { CanvasAgentMediaWorkflow } from "@/types/canvas";
@@ -209,10 +210,10 @@ function ModelSelect({ ariaLabel, emptyLabel, models, value, disabled, onChange 
     return (
         <Select value={value} disabled={disabled} onValueChange={onChange}>
             <SelectTrigger aria-label={ariaLabel} className="h-9 w-full text-sm">
-                <span className="truncate">{value || ariaLabel}</span>
+                <span className="truncate">{value ? imageModelDisplayName(value) : ariaLabel}</span>
             </SelectTrigger>
             <SelectContent>
-                {models.length ? models.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>) : <SelectItem value="__empty_model__" disabled>{emptyLabel}</SelectItem>}
+                {models.length ? models.map((model) => <SelectItem key={model} value={model}>{imageModelDisplayName(model)}</SelectItem>) : <SelectItem value="__empty_model__" disabled>{emptyLabel}</SelectItem>}
             </SelectContent>
         </Select>
     );

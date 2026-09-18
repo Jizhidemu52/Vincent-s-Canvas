@@ -1,5 +1,6 @@
 import type { ImageReferenceItem, ImageReferenceOrigin, ReferenceImage } from "@/types/image";
 import { imageModelProfile } from "./image-model-settings";
+import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 
 export type ImageReferenceValidation = {
     valid: boolean;
@@ -12,11 +13,12 @@ export type ImageReferenceValidation = {
 export function referencePolicyForModel(modelId: string): Omit<ImageReferenceValidation, "valid" | "message"> & { label: string } {
     const normalized = modelId.trim().toLowerCase();
     const profile = imageModelProfile(modelId);
-    if (profile.kind === "midjourney-blend") return { label: "Midjourney Blend", minimum: 2, maximum: 4, supportsReferences: true };
-    if (profile.kind === "midjourney") return { label: "当前工作台的 Midjourney 参考图", minimum: 0, maximum: 16, supportsReferences: true };
-    if (profile.kind === "gpt") return { label: "APIMart GPT-Image-2", minimum: 0, maximum: 15, supportsReferences: true };
-    if (profile.kind === "gemini") return { label: "Gemini 3.1 Flash", minimum: 0, maximum: 14, supportsReferences: true };
-    if (normalized.includes("gpt-image-2")) return { label: "GPT-Image-2", minimum: 0, maximum: 16, supportsReferences: true };
+    const label = (name: string) => isAdminRole(useUserStore.getState().user?.role) ? name : "当前模型";
+    if (profile.kind === "midjourney-blend") return { label: label("Midjourney Blend"), minimum: 2, maximum: 4, supportsReferences: true };
+    if (profile.kind === "midjourney") return { label: label("当前工作台的 Midjourney 参考图"), minimum: 0, maximum: 16, supportsReferences: true };
+    if (profile.kind === "gpt") return { label: label("APIMart GPT-Image-2"), minimum: 0, maximum: 15, supportsReferences: true };
+    if (profile.kind === "gemini") return { label: label("Gemini 3.1 Flash"), minimum: 0, maximum: 14, supportsReferences: true };
+    if (normalized.includes("gpt-image-2")) return { label: label("GPT-Image-2"), minimum: 0, maximum: 16, supportsReferences: true };
     return { label: "当前模型", minimum: 0, maximum: 16, supportsReferences: true };
 }
 

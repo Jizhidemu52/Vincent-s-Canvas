@@ -19,7 +19,8 @@ describe("Agent tool confirmation details", () => {
         expect(markup).not.toContain(signature);
         expect(markup).not.toContain("thoughtSignature");
         expect(markup).toContain("将花瓶改成绿色，保留原图细节");
-        expect(markup).toContain("gpt-image-2");
+        expect(markup).toContain("出图模型");
+        expect(markup).not.toContain("gpt-image-2");
         expect(markup).toContain("原款图");
         expect(markup).toContain("2k");
         expect(JSON.stringify(detail)).toBe(original);

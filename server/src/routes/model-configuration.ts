@@ -8,6 +8,7 @@ import { requireRole } from "../rbac";
 import { encryptSecret } from "../security";
 import { assertValidModelReplacement } from "../prompt-templates";
 import type { AuthenticatedRequest } from "../types";
+import { presentAdminModel, presentPublicModel } from "../model-presentation";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
@@ -28,7 +29,7 @@ const toolKey = z.enum(toolDefinitions.map((item) => item.toolKey) as [typeof to
 const toolConfigurationInput = z.object({ modelConfigId: z.string().uuid(), enabled: z.boolean().default(true) });
 
 const providerSelect = `id,name,protocol,base_url AS "baseUrl",enabled,(encrypted_credentials IS NOT NULL) AS "hasCredentials",created_at AS "createdAt",updated_at AS "updatedAt"`;
-const modelSelect = `m.id,m.provider_id AS "providerId",p.name AS "providerName",m.workflow_config_id AS "workflowConfigId",w.name AS "workflowName",m.replacement_model_config_id AS "replacementModelConfigId",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",m.concurrency_limit AS "concurrencyLimit",m.enabled,m.created_at AS "createdAt",m.updated_at AS "updatedAt"`;
+const modelSelect = `m.id,m.public_number AS "publicNumber",m.provider_id AS "providerId",p.name AS "providerName",m.workflow_config_id AS "workflowConfigId",w.name AS "workflowName",m.replacement_model_config_id AS "replacementModelConfigId",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",m.concurrency_limit AS "concurrencyLimit",m.enabled,m.created_at AS "createdAt",m.updated_at AS "updatedAt"`;
 
 export function createModelConfigurationRouter(db: Database, config: AppConfig) {
     const router = Router();
@@ -66,7 +67,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     });
 
     router.get("/models", async (_request, response, next) => {
-        try { response.json({ models: (await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id ORDER BY m.name`)).rows }); }
+        try { response.json({ models: (await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id ORDER BY m.name`)).rows.map(presentAdminModel) }); }
         catch (error) { next(error); }
     });
     router.post("/models", async (request, response, next) => {
@@ -77,7 +78,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [input.providerId, input.workflowConfigId ?? null, input.replacementModelConfigId ?? null, input.name, input.modelId, input.capabilities, input.creditCost, input.rmbCost, input.concurrencyLimit, input.enabled, actor.id]);
             const model = (await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [result.rows[0].id])).rows[0];
             await writeAudit(db, { actor, action: "model.created", targetType: "model", targetId: model.id, result: "success", detail: { modelId: input.modelId }, ip: request.ip });
-            response.status(201).json({ model });
+            response.status(201).json({ model: presentAdminModel(model) });
         } catch (error) { next(error); }
     });
     router.patch("/models/:id", async (request, response, next) => {
@@ -91,7 +92,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
                 [value.providerId, value.workflowConfigId ?? null, value.replacementModelConfigId ?? null, value.name, value.modelId, value.capabilities, value.creditCost, value.rmbCost, value.concurrencyLimit, value.enabled, request.params.id]);
             const model = (await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [request.params.id])).rows[0];
             await writeAudit(db, { actor, action: "model.updated", targetType: "model", targetId: model.id, result: "success", detail: { fields: Object.keys(input) }, ip: request.ip });
-            response.json({ model });
+            response.json({ model: presentAdminModel(model) });
         } catch (error) { next(error); }
     });
 
@@ -175,14 +176,12 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     return router;
 }
 
-import { imageParameterProfile } from "../image-parameter-profile";
-
 export function createPublicModelRouter(db: Database) {
     const router = Router();
-    router.get("/", async (_request, response, next) => {
+    router.get("/", async (request, response, next) => {
         try {
             const [models, prices, tools] = await Promise.all([
-                db.query(`SELECT m.id,m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.protocol FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=true AND p.enabled=true ORDER BY m.name`),
+                db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.protocol FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=true AND p.enabled=true ORDER BY m.public_number NULLS LAST,m.name`),
                 db.query(`SELECT operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version FROM pricing_rule_versions WHERE status='published' ORDER BY operation_type`),
                 db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId"
                     FROM tool_api_configurations t JOIN model_configs m ON m.id=t.model_config_id
@@ -190,7 +189,8 @@ export function createPublicModelRouter(db: Database) {
                     WHERE t.enabled=true AND m.enabled=true AND p.enabled=true
                     AND (m.workflow_config_id IS NULL OR w.enabled=true)`),
             ]);
-            response.json({ models: models.rows.map(({ protocol, ...model }) => ({ ...model, imageParameterProfile: imageParameterProfile(protocol, model.modelId) })), prices: prices.rows, tools: tools.rows });
+            const role = (request as AuthenticatedRequest).auth?.role;
+            response.json({ models: models.rows.map((model) => presentPublicModel(model, role)), prices: prices.rows, tools: tools.rows });
         } catch (error) { next(error); }
     });
     return router;

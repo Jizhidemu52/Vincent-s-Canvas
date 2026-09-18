@@ -57,11 +57,11 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const profile = imageModelProfile(config.model || config.imageModel);
     if (profile.kind === "midjourney-blend") {
-        if (mask) throw new Error("Midjourney Blend 不支持蒙版编辑");
+        if (mask) throw new Error("当前合成模型不支持蒙版编辑");
         return requestGeneration(config, "", { ...options, operationType: "image_generation" }, references);
     }
     if (profile.kind === "midjourney") {
-        if (mask) throw new Error("当前 Midjourney Imagine 入口不支持蒙版，请使用图像编辑模型");
+        if (mask) throw new Error("当前模型不支持蒙版，请使用图像编辑模型");
         return requestGeneration(config, prompt, { ...options, operationType: "image_generation" }, references);
     }
     const validation = validateImageReferences(modelOptionName(config.model || config.imageModel), references);

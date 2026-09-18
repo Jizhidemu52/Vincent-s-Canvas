@@ -5,6 +5,7 @@ import { saveAs } from "file-saver";
 import { useNavigate } from "react-router-dom";
 
 import { useCopyText } from "@/hooks/use-copy-text";
+import { imageModelDisplayName } from "@/lib/model-display";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
 import { useImageCopyEditor } from "@/hooks/use-image-copy-editor";
@@ -953,7 +954,7 @@ function AssetTrace({ asset }: { asset: Asset }) {
             </Typography.Text>
             <div className="mt-2 grid gap-2">
                 <TraceLine label="来源板块" value={module} />
-                {model ? <TraceLine label="模型" value={model} /> : null}
+                {model ? <TraceLine label="模型" value={imageModelDisplayName(model)} /> : null}
                 {sourceFile ? <TraceLine label="原始文件" value={sourceFile} /> : null}
                 {prompt ? <TraceLine label="提示词" value={prompt} multiline /> : null}
             </div>

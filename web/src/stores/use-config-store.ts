@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
+import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
 
 export type ApiCallFormat = "openai" | "gemini";
 
@@ -328,6 +329,7 @@ export function modelOptionName(value: string) {
 }
 
 export function modelOptionLabel(config: AiConfig, value: string) {
+    if (imageModelIdentityHidden(value)) return imageModelDisplayName(value);
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);

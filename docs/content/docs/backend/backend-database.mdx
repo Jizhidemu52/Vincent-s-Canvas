@@ -30,6 +30,12 @@ description: 正式数据存储边界、员工画布文档、任务恢复和身�
 
 启动时仅将遗留 `processing` 任务改为 `paused` 并记录 `LOCAL_PROCESS_INTERRUPTED`，不自动重新生成或退款；视频可沿用已有上游任务 ID 查询。旧演示账号登录会话、账号余额、后台临时配置仍在内存中；OA 身份和会话则持久化，不能把这里的退款标记当作正式持久账本。现有 `DEMO_RECOVERY_FILE` 仅在新数据库首次初始化时导入；坏数据库或写入失败会报错，不会自动删除并重建为空库。
 
+## 图片模型展示编号
+
+`024_model_public_numbers.sql` 为 `model_configs` 新增 `public_number integer` 唯一正整数，以及 `model_public_number_seq` 和写入触发器。现有图片模型按 `created_at,id` 初始化编号；新图片模型从序列分配，停用、改名、重排或修改能力不改变已分配编号。真实 `name`、`model_id`、Provider 配置仍用于管理员维护和服务端调用。
+
+设计师的模型列表只返回“出图模型N”和配置 UUID，不返回图片模型真实名称、上游 ID、渠道或含品牌的参数类型；管理员仍能查看真实配置及对应的 `publicName`。聊天、视频、音频不在本次匿名范围。正式服务升级前须执行该迁移。单机演示服务在启动时按完整真实图片目录分配编号（包含未启用项，不包含模拟占位模型），之后在进程内保持编号；其后台配置仍为原有内存配置，不新增配置持久化承诺。
+
 ## OA 身份与会话
 
 `022_oa_login.sql` 允许 `external_identities.provider='oa'`，`subject` 保存上游已校验的 `userid`；沿用 `(provider,subject)` 和 `(user_id,provider)` 唯一约束。`sessions.auth_provider` 为 `local` 或 `oa`，默认 `local`，OA 模式拒绝旧会话及管理员身份。正式服务启动前须应用迁移；当前局域网 SQLite 服务不运行 PostgreSQL 迁移。

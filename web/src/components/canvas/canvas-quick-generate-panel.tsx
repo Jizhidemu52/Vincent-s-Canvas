@@ -10,6 +10,7 @@ import { validateImageReferences } from "@/lib/image-reference-policy";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { resolveCapabilityModel } from "@/lib/model-picker-options";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import type { ReferenceImage } from "@/types/image";
@@ -31,11 +32,12 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     const settingsId = useId();
     const models = useBusinessConfigStore((state) => state.models);
     const modelStatus = useBusinessConfigStore((state) => state.status);
+    const role = useUserStore((state) => state.user?.role);
     const availableModel = modelStatus === "ready" ? resolveCapabilityModel(config, "image", models, model) : "";
     useEffect(() => {
         if (!running && modelStatus === "ready" && model !== availableModel) onModelChange(availableModel);
     }, [availableModel, model, modelStatus, onModelChange, running]);
-    const profile = imageModelProfile(availableModel || model, models);
+    const profile = imageModelProfile(availableModel || model, models, role);
     const settings = normalizeImageModelSettings({ size, quality, count: String(count) }, profile);
     const sizeSummary = settings.size.includes("x") ? settings.size.replace("x", " × ") : imageSizeLabel(settings.size);
     const settingsSummary = `${profile.verified ? `${sizeSummary} · ${profile.qualityLabel}${imageQualityLabel(settings.quality)}` : "渠道默认参数"} · ${settings.count}${profile.maxCount > 1 ? " 张" : " 个任务"}`;

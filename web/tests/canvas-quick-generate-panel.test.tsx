@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CanvasQuickGeneratePanel } from "@/components/canvas/canvas-quick-generate-panel";
 import { defaultConfig } from "@/stores/use-config-store";
+import { useUserStore, type LocalUser } from "@/stores/use-user-store";
 
 const noop = () => undefined;
 function render(count: number, running = false) {
@@ -28,4 +29,17 @@ test("uploading and submitting locks reference changes and duplicate submission"
     expect(markup).toMatch(/aria-label="移除参考图 1" disabled=""/);
     expect(markup).toMatch(/class="cw-generate-button" disabled=""/);
     expect(markup).toContain("提交中…");
+});
+
+test("designer guidance omits provider documentation while administrator guidance retains it", () => {
+    const initialState = useUserStore.getInitialState();
+    const saved = initialState.user;
+    try {
+        initialState.user = { role: "designer" } as LocalUser;
+        expect(render(0)).not.toContain("查看当前模型接口文档");
+        expect(render(0)).not.toContain("https://docs.");
+        initialState.user = { role: "super_admin" } as LocalUser;
+        expect(render(0)).toContain("查看当前模型接口文档");
+        expect(render(0)).toContain("https://docs.opentoken.io/");
+    } finally { initialState.user = saved; }
 });

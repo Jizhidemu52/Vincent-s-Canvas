@@ -3,6 +3,7 @@ import { Button, Tooltip } from "antd";
 import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, UserRound, WandSparkles, Wrench, X, XCircle } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { displayModelMetadata, maskImageModelText } from "@/lib/model-display";
 import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import type { LocalUser } from "@/stores/use-user-store";
 
@@ -29,7 +30,7 @@ export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, us
             <div className="flex justify-center text-xs">
                 <div className="max-w-[88%] px-3 py-1.5 text-center" style={{ color: theme.node.muted }}>
                     {item.text}
-                    {item.meta ? <span className="ml-2 opacity-60">{item.meta}</span> : null}
+                    {item.meta ? <span className="ml-2 opacity-60">{maskImageModelText(item.meta)}</span> : null}
                 </div>
             </div>
         );
@@ -49,7 +50,7 @@ export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, us
             <div className={`min-w-0 max-w-[82%] text-sm leading-6 ${isUser ? "text-right" : "text-left"}`} style={{ color }}>
                 <div className="whitespace-pre-wrap break-words text-left">{item.text}</div>
                 {item.attachments?.length ? <AgentMessageAttachments attachments={item.attachments} onUseImageForVideo={onUseImageForVideo} /> : null}
-                {item.meta ? <div className="mt-1 text-[11px] opacity-45">{item.meta}</div> : null}
+                {item.meta ? <div className="mt-1 text-[11px] opacity-45">{maskImageModelText(item.meta)}</div> : null}
             </div>
             {isUser ? <AgentUserAvatar user={user} theme={theme} /> : null}
         </div>
@@ -268,7 +269,7 @@ export function AgentPanelTabs<T extends string>({ value, items, theme, right, o
 function AgentDetailBlock({ detail, theme }: { detail: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     return (
         <pre className="thin-scrollbar mt-3 max-h-64 overflow-auto rounded-lg border p-3 text-[11px] leading-4" style={{ borderColor: theme.node.stroke, background: theme.toolbar.panel, color: theme.node.muted }}>
-            {JSON.stringify(toolDetailPreview(detail), null, 2)}
+            {JSON.stringify(displayModelMetadata(toolDetailPreview(detail)), null, 2)}
         </pre>
     );
 }

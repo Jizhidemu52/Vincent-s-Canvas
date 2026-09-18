@@ -2,6 +2,7 @@ import { CanvasNodeType, type CanvasAssistantAttachment } from "@/types/canvas";
 import type { CanvasAgentOp, CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { imageModelDisplayName } from "@/lib/model-display";
 import { referencePolicyForModel } from "@/lib/image-reference-policy";
 import { getVideoModelParameterSpec } from "@/lib/video-model-parameters";
 
@@ -191,7 +192,7 @@ export function agentQuickstartPreset(kind: "video" | "lookbook" | "illustration
 export function buildAgentGenerationBrief(settings: AgentGenerationSettings, prompt: string, hasReference: boolean) {
     const imageSettings = normalizeAgentImageSettings(settings);
     const preset = settings.mode === "image"
-        ? `图片模型：${settings.imageModel}；数量：${imageSettings.imageCount}；${imageModelProfile(settings.imageModel).qualityLabel}：${imageSettings.quality}；尺寸：${imageSettings.size}`
+        ? `图片模型：${imageModelDisplayName(settings.imageModel)}；数量：${imageSettings.imageCount}；${imageModelProfile(settings.imageModel).qualityLabel}：${imageSettings.quality}；尺寸：${imageSettings.size}`
         : `视频模型：${settings.videoModel}；时长：${settings.videoSeconds} 秒；清晰度：${settings.videoQuality}；画幅：${settings.size}`;
     return `任务类型：${settings.mode === "image" ? "图片生成" : "视频生成"}\n${preset}\n已有参考图：${hasReference ? "是" : "否"}\n用户需求：${prompt.trim()}`;
 }

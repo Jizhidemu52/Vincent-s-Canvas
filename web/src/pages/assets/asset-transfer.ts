@@ -1,6 +1,7 @@
 import { saveAs } from "file-saver";
 
 import { createZip, readZip } from "@/lib/zip";
+import { exportModelMetadata } from "@/lib/model-display";
 import { getMediaBlob, setMediaBlob } from "@/services/file-storage";
 import { getImageBlob, setImageBlob } from "@/services/image-storage";
 import type { Asset } from "@/stores/use-asset-store";
@@ -38,7 +39,7 @@ export async function exportAssets(assets: Asset[]) {
     );
 
     const data: AssetExportFile = { app: "wireless-canvas", version: 1, exportedAt: new Date().toISOString(), assets, files };
-    const zip = await createZip([{ name: "assets.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
+    const zip = await createZip([{ name: "assets.json", data: JSON.stringify(exportModelMetadata(data), null, 2) }, ...zipFiles]);
     saveAs(zip, "我的素材.zip");
 }
 

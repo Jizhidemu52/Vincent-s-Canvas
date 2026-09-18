@@ -5,6 +5,7 @@ import { imageTaskParameters } from "@/services/api/image";
 import { defaultConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 
 test("configured image models expose only their adapter's supported options", () => {
     for (const model of ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
@@ -28,6 +29,42 @@ test("server capability metadata wins over name heuristics and aliases resolve c
     const model = { id: "configured-id", name: "设计专用", modelId: "gpt-image-2", capabilities: ["generate"], creditCost: 0, rmbCost: 0, imageParameterProfile: "gpt" as const };
     expect(imageModelProfile("设计专用", [model]).kind).toBe("gpt");
     expect(imageModelProfile("configured-id", [model]).kind).toBe("gpt");
+});
+
+test("opaque public profiles preserve every model parameter capability", () => {
+    const profiles = [
+        ["standard", "gpt-image-2"], ["pixel", "vcen-gpt2"], ["resolution", "gemini-3.1-flash-image-preview"],
+        ["speed", "midjourney"], ["blend", "midjourney-blend"], ["unverified", "gemini-3.1-flash-image"],
+    ] as const;
+    for (const [imageParameterProfile, original] of profiles) {
+        const model = { id: "opaque-config-id", modelId: "opaque-config-id", name: "出图模型1", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0, imageParameterProfile };
+        expect(imageModelProfile(model.id, [model], "designer")).toEqual(imageModelProfile(original, [], "designer"));
+    }
+});
+
+test("opaque configured models retain pixel resolution and speed request payloads", () => {
+    const saved = useBusinessConfigStore.getState().models;
+    try {
+        const cases = [
+            { profile: "pixel" as const, size: "1280x960", quality: "2k", expected: { size: "1280x960", resolution: "2k" } },
+            { profile: "resolution" as const, size: "4:3", quality: "0.5k", expected: { size: "4:3", resolution: "0.5k" } },
+            { profile: "speed" as const, size: "16:9", quality: "turbo", expected: { size: "16:9", midjourneySpeed: "turbo" } },
+        ];
+        for (const item of cases) {
+            useBusinessConfigStore.setState({ models: [{ id: "opaque-config-id", modelId: "opaque-config-id", name: "出图模型1", capabilities: ["generate"], creditCost: 0, rmbCost: 0, imageParameterProfile: item.profile }] });
+            expect(imageTaskParameters({ ...defaultConfig, model: "opaque-config-id", size: item.size, quality: item.quality })).toEqual(item.expected);
+        }
+    } finally { useBusinessConfigStore.setState({ models: saved }); }
+});
+
+test("only administrators receive branded guidance and model documentation", () => {
+    for (const model of ["gpt-image-2", "vcen-gpt2", "gemini-3.1-flash-image-preview", "midjourney", "midjourney-blend"]) {
+        const designer = imageModelProfile(model, [], "designer");
+        expect(designer.documentationUrl).toBe("");
+        expect(designer.tip).not.toMatch(/GPT|Gemini|Midjourney|\bMJ\b|APIMart|OpenAI/i);
+        for (const role of ["super_admin", "department_admin"] as const) expect(imageModelProfile(model, [], role).documentationUrl).toStartWith("https://docs.");
+    }
+    expect(imageModelProfile("midjourney", [], "super_admin").tip).toContain("MJ");
 });
 
 test("changing models resets unsupported quality, dimensions and output counts", () => {

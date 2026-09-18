@@ -51,7 +51,8 @@ test("generation settings start collapsed with a connected accessible toggle whi
     expect(html).toContain('aria-label="已选参考图"');
     expect(html).toContain('aria-label="添加参考图"');
     expect(html).toMatch(/class="cw-generate-button"(?! disabled)/);
-    expect(html).toContain("gpt-image-2");
+    expect(html).toContain("出图模型");
+    expect(html).not.toContain("gpt-image-2");
 });
 
 test("collapsed summary reflects normalized pixels, adapter quality labels and actual task count", () => {
@@ -106,6 +107,7 @@ function controls(patch: Partial<Props> = {}) {
             } },
         "@/stores/use-theme-store": { useThemeStore: (select: (state: object) => unknown) => select({ theme: "light" }) },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: (state: object) => unknown) => select({ models, status: "ready" }) },
+        "@/stores/use-user-store": { useUserStore: (select: (state: object) => unknown) => select({ user: { role: "designer" } }) },
     };
     const module = { exports: {} as { CanvasQuickGeneratePanel: (props: Props) => ReactElement } };
     new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
