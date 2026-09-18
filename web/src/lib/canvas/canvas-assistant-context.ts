@@ -10,9 +10,10 @@ export const CANVAS_CONTEXT_LIMITS = { nodes: 24, images: 6, videos: 2, text: 12
 export function selectCanvasContext(snapshot: CanvasAgentSnapshot) {
     const selected = new Set(snapshot.selectedNodeIds);
     const batchRoots = createCanvasBatchRootIndex(snapshot.nodes);
+    const hidden = new Set(snapshot.hiddenNodeIds);
     const { viewport: { x, y, k }, viewportSize } = snapshot;
     const visible = (node: CanvasNodeData) => {
-        if (isCanvasBatchChildHidden(node, batchRoots) || !viewportSize || k <= 0) return false;
+        if (hidden.has(node.id) || isCanvasBatchChildHidden(node, batchRoots) || !viewportSize || k <= 0) return false;
         const rect = { left: Math.max(0, node.position.x * k + x), top: Math.max(0, node.position.y * k + y),
             right: Math.min(viewportSize.width, (node.position.x + node.width) * k + x), bottom: Math.min(viewportSize.height, (node.position.y + node.height) * k + y) };
         let regions = [rect].filter((rect) => rect.right > rect.left && rect.bottom > rect.top);

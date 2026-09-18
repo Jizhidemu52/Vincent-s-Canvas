@@ -20,9 +20,16 @@ const nodeSchema = z.object({
 const messageSchema = z.object({
     id: idSchema, role: z.enum(["user", "assistant", "system", "tool", "error"]), text: z.string(),
 }).passthrough();
+const groupsSchema = z.array(z.object({
+    id: idSchema, title: z.string().max(1000), collapsed: z.boolean(),
+    // A member can outlive a deleted node in undo history or a concurrent save.
+    // Consumers filter absent nodes; grouping must never delete original media.
+    nodeIds: z.array(idSchema).refine(ids => new Set(ids).size === ids.length),
+}).passthrough()).refine(groups => new Set(groups.map(group => group.id)).size === groups.length);
 const documentSchema = z.object({
     id: idSchema, title: z.string().max(1000), createdAt: dateSchema, updatedAt: dateSchema,
     nodes: z.array(nodeSchema),
+    groups: groupsSchema.optional(),
     connections: z.array(z.object({ id: idSchema, fromNodeId: idSchema, toNodeId: idSchema }).passthrough()),
     chatSessions: z.array(z.object({ id: idSchema, title: z.string(), messages: z.array(messageSchema), createdAt: dateSchema, updatedAt: dateSchema }).passthrough()),
     activeChatId: idSchema.nullable(), backgroundMode: z.enum(["dots", "lines", "blank"]), showImageInfo: z.boolean(),

@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Dropdown, Tooltip } from "antd";
-import { Eraser, FolderOpen, Hand, Image as ImageIcon, MoreHorizontal, MousePointer2, Music2, Redo2, Settings2, Sparkles, Trash2, Type, Undo2, Upload, Video, WandSparkles } from "lucide-react";
+import { Eraser, FolderOpen, FolderPlus, Hand, Image as ImageIcon, MoreHorizontal, MousePointer2, Music2, Redo2, Settings2, Sparkles, Trash2, Type, Undo2, Upload, Video, WandSparkles } from "lucide-react";
 import { canvasToolbarPropsEqual, type CanvasToolbarRenderState } from "@/lib/canvas/canvas-toolbar-render-stability";
 
 export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRenderState) {
@@ -13,6 +13,7 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
                 <Tooltip title="上传素材"><button type="button" className="cw-icon" aria-label="上传素材" onClick={onUpload}><Upload className="size-4" /></button></Tooltip>
                 <Tooltip title="文本"><button type="button" className="cw-icon" aria-label="文本" onClick={onAddText}><Type className="size-4" /></button></Tooltip>
                 <Tooltip title="生成配置"><button type="button" className="cw-icon" aria-label="生成配置" onClick={onAddConfig}><Settings2 className="size-4" /></button></Tooltip>
+                {selectedCount >= 2 && props.onGroupSelection ? <Tooltip title="创建款式组（Ctrl / ⌘ G）"><button type="button" className="cw-icon" aria-label="创建款式组" onClick={props.onGroupSelection}><FolderPlus className="size-4" /></button></Tooltip> : null}
                 <Dropdown trigger={["click"]} placement="top" menu={{ items: [
                     { key: "generate", icon: <Sparkles className="size-4" />, label: "画布生图", onClick: onOpenQuickGenerate },
                     { key: "image", icon: <ImageIcon className="size-4" />, label: "图片节点", onClick: onAddImage },

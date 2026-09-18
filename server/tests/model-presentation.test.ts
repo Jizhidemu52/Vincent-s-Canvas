@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import express from "express";
 import type { Server } from "node:http";
 import type { Database } from "../src/db";
-import { assignDemoPublicModelNumbers, isImageModel, presentAdminModel, presentPublicModel } from "../src/model-presentation";
+import { assignDemoPublicModelNumbers, isImageModel, presentAdminModel, presentPublicModel, selectCreativeModels } from "../src/model-presentation";
 import { createModelConfigurationRouter, createPublicModelRouter } from "../src/routes/model-configuration";
 import type { AppConfig } from "../src/config";
 
@@ -13,6 +13,16 @@ const image = {
 };
 
 describe("image identity presentation", () => {
+  test.each([
+    ["gpt-image-2", "日常生图"], ["gpt-image-2.5-flare", "快速试稿"],
+    ["gpt-image-2.5-sunburst", "细节精修"], ["gemini-3.1-flash-image", "备用生图"],
+  ])("OpenToken %s uses its short feature label without changing admin or request identity", (modelId, label) => {
+    const model = { ...image, modelId, providerName: "OpenToken" };
+    expect(presentPublicModel(model, "designer")).toMatchObject({ name: label, publicName: label, modelId: image.id });
+    expect(presentPublicModel(model, "designer").publicDescription).toEqual(expect.any(String));
+    expect(presentAdminModel(model)).toMatchObject({ name: image.name, modelId, publicName: label });
+    expect(presentPublicModel({ ...model, publicNumber: 99, name: "Administrator renamed it" }, "designer").name).toBe(label);
+  });
   test("only image capabilities are anonymized and unknown fields are never copied", () => {
     const shown = presentPublicModel(image, "designer");
     expect(shown).toEqual({ id: image.id, modelId: image.id, name: "出图模型7", publicName: "出图模型7", modelIdentityHidden: true,
@@ -63,11 +73,12 @@ afterEach(async () => {
   })));
 });
 
-test("formal HTTP router selects stored aliases, keeps admin identity and rejects designer admin access", async () => {
+test("formal HTTP router curates OpenToken images, keeps admin identity and rejects designer admin access", async () => {
   const sqlCalls: string[] = [];
+  const configuredImage = { ...image, providerName: "OpenToken" };
   const db = { query: async (sql: string) => {
     sqlCalls.push(sql);
-    if (sql.includes("FROM model_configs m")) return { rows: [image] };
+    if (sql.includes("FROM model_configs m")) return { rows: [configuredImage, { ...image, id: "other-channel" }] };
     return { rows: [] };
   } } as unknown as Database;
   const app = express();
@@ -79,14 +90,34 @@ test("formal HTTP router selects stored aliases, keeps admin identity and reject
   const address = server.address() as { port: number };
   const url = `http://127.0.0.1:${address.port}`;
   const designer = await fetch(`${url}/models`).then((response) => response.json());
-  expect(designer.models[0]).toMatchObject({ name: "出图模型7", modelId: image.id, imageParameterProfile: "pixel" });
+  expect(designer.models).toHaveLength(1);
+  expect(designer.models[0]).toMatchObject({ name: "日常生图", modelId: image.id, imageParameterProfile: "pixel" });
   expect(JSON.stringify(designer)).not.toMatch(/gpt|Vendor|Secret|private|secret-key/);
   expect(sqlCalls[0]).toContain('m.public_number AS "publicNumber"');
   for (const role of ["super_admin", "department_admin"]) {
     const admin = await fetch(`${url}/models`, { headers: { "x-test-role": role } }).then((response) => response.json());
-    expect(admin.models[0]).toMatchObject({ name: image.name, modelId: image.modelId, publicName: "出图模型7" });
+    expect(admin.models[0]).toMatchObject({ name: image.name, modelId: image.modelId, publicName: "日常生图" });
   }
   expect((await fetch(`${url}/admin/models`)).status).toBe(403);
   const configured = await fetch(`${url}/admin/models`, { headers: { "x-test-role": "super_admin" } }).then((response) => response.json());
-  expect(configured.models[0]).toMatchObject({ modelId: image.modelId, name: image.name, publicName: "出图模型7" });
+  expect(configured.models).toHaveLength(2);
+  expect(configured.models[0]).toMatchObject({ modelId: image.modelId, name: image.name, publicName: "日常生图" });
+});
+
+test("image choices deduplicate OpenToken models without removing other media or retained configurations", () => {
+  const selected = { ...image, id: "selected", providerName: "Custom name", providerBaseUrl: "https://cn2.gw.opentoken.io/v1" };
+  const chat = { ...image, id: "chat", capabilities: ["chat"] };
+  const catalog = [image, selected, { ...selected, id: "duplicate" }, { ...selected, id: "unknown", modelId: "constructor" }, chat];
+  expect(selectCreativeModels(catalog).map(model => model.id)).toEqual(["selected", "chat"]);
+  expect(catalog).toHaveLength(5);
+});
+
+test("image choices have a fixed use-case order with Gemini last regardless of catalog order", () => {
+  const gemini = { ...image, providerName: "OpenToken", modelId: "gemini-3.1-flash-image" };
+  const chat = { ...image, id: "chat", capabilities: ["chat"] };
+  const models = [gemini, chat, { ...gemini, modelId: "gpt-image-2.5-sunburst" }, { ...gemini, modelId: "gpt-image-2.5-flare" }, { ...gemini, modelId: "gpt-image-2" }];
+  const result = selectCreativeModels(models);
+  expect(result.filter(isImageModel).map(model => model.modelId)).toEqual(["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-3.1-flash-image"]);
+  expect(result[1]).toBe(chat);
+  expect(models[0]).toBe(gemini);
 });

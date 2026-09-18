@@ -5,12 +5,12 @@ import { nanoid } from "nanoid";
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
 import { collectProjectChanges, createProjectChangeBuffer, type CanvasPersistenceConflict, type ProjectChange } from "@/lib/canvas/canvas-persistence-merge";
 import { readCanvasProjects, writeCanvasProjects, removeCanvasProjects } from "@/lib/canvas/canvas-project-storage";
-import { applyCanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
+import { applyCanvasProjectPatch, type CanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { createCloudCanvasPersistence, type CloudSaveState } from "@/services/canvas-cloud-persistence";
 import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
-import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
+import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, CanvasNodeGroup, ViewportTransform } from "@/types/canvas";
 
 export type CanvasProject = {
     id: string;
@@ -18,6 +18,7 @@ export type CanvasProject = {
     createdAt: string;
     updatedAt: string;
     nodes: CanvasNodeData[];
+    groups?: CanvasNodeGroup[];
     connections: CanvasConnection[];
     chatSessions: CanvasAssistantSession[];
     activeChatId: string | null;
@@ -27,7 +28,7 @@ export type CanvasProject = {
     history?: { past: CanvasHistorySnapshot[]; future: CanvasHistorySnapshot[] };
     persistenceConflict?: CanvasPersistenceConflict;
 };
-export type CanvasHistorySnapshot = Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo">;
+export type CanvasHistorySnapshot = Pick<CanvasProject, "nodes" | "groups" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo">;
 
 type CanvasStore = {
     hydrated: boolean;
@@ -40,7 +41,7 @@ type CanvasStore = {
     renameProject: (id: string, title: string) => void;
     deleteProjects: (ids: string[]) => void;
     replaceProjects: (projects: CanvasProject[]) => void;
-    updateProject: (id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport" | "history">>) => void;
+    updateProject: (id: string, patch: CanvasProjectPatch) => void;
 };
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
@@ -177,6 +178,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     createdAt: source.createdAt || now,
                     updatedAt: now,
                     nodes: source.nodes || [],
+                    ...(source.groups ? { groups: source.groups } : {}),
                     connections: source.connections || [],
                     chatSessions: source.chatSessions || [],
                     activeChatId: source.activeChatId || null,

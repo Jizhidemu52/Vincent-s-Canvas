@@ -1,3 +1,5 @@
+import { selectCreativeModels } from "./model-presentation";
+
 export const videoModelConfigIds = {
   "MiniMax-H3": "40000000-0000-4000-8000-000000000110",
   "doubao-seedance-2.5": "40000000-0000-4000-8000-000000000111",
@@ -15,9 +17,9 @@ export function listAvailableDemoModels<T extends Record<string, unknown>>(
       .map((provider) => String(provider.id)),
   );
 
-  return models.filter(
+  return selectCreativeModels(models.filter(
     (model) => model.enabled === true && !String(model.modelId).startsWith("demo-") && configuredProviderIds.has(String(model.providerId)),
-  );
+  ));
 }
 
 export function resolveDemoExternalProviders(input: {

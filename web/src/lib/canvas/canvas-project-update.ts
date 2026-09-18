@@ -1,6 +1,6 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 
-export type CanvasProjectPatch = Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport" | "history">>;
+export type CanvasProjectPatch = Partial<Pick<CanvasProject, "nodes" | "groups" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport" | "history">>;
 
 /** Keep large graph arrays by reference; never serialize them just to detect a no-op. */
 export function applyCanvasProjectPatch(project: CanvasProject, patch: CanvasProjectPatch): CanvasProject {

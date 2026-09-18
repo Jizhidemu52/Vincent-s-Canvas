@@ -41,7 +41,8 @@ afterEach(() => {
 test("whole documents retain nested graph, chat, dimensions and viewport across SQLite restart", () => {
   const path = databasePath();
   const first = open(path);
-  const source = document();
+  const source = { ...document(), groups: [{ id: "style-a", title: "款式 A", nodeIds: ["image-1", "text-1"], collapsed: true }],
+    history: { past: [{ ...document(), groups: [] }], future: [] } };
   const saved = first.put("employee-a", source.id, { baseRevision: 0, document: source }, id => id === assetId);
   expect(saved).toMatchObject({ ok: true, document: { id: source.id, revision: 1, deleted: false, document: source } });
   const database = Reflect.get(first, "db") as Database;

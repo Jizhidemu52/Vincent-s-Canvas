@@ -34,6 +34,8 @@ describe("cloud canvas offline ZIP backup", () => {
     });
     test("a fresh device exports every cloud media byte once and restores without network", async () => {
         const original = project();
+        original.groups = [{ id: "style-a", title: "款式 A", nodeIds: ["image"], collapsed: true }];
+        original.history!.past[0].groups = [{ ...original.groups[0], collapsed: false }];
         const originalJson = JSON.stringify(original);
         const calls: string[] = [];
         const zip = await createCanvasProjectsArchive([original], {
@@ -54,6 +56,8 @@ describe("cloud canvas offline ZIP backup", () => {
             urls.set(file.storageKey, `blob:offline/${file.storageKey}`);
         }
         const restored = restoreCanvasExportMedia(manifest.projects[0].project, urls);
+        expect(restored.groups).toEqual([{ id: "style-a", title: "款式 A", nodeIds: ["image"], collapsed: true }]);
+        expect(restored.history?.past[0].groups).toEqual([{ id: "style-a", title: "款式 A", nodeIds: ["image"], collapsed: false }]);
         const imageKey = restored.nodes[0].metadata.storageKey!;
         expect(new Uint8Array(await imported.get(imageKey)!.arrayBuffer())).toEqual(sourceBytes);
         expect(imported.get(imageKey)!.type).toBe("image/png");

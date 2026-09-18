@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { readImageMeta } from "@/lib/image-utils";
 import { createDedupedAsyncResolver } from "@/lib/deduped-async-resolver";
 import { cacheObjectUrl, releaseObjectUrl, releaseUnusedObjectUrls } from "@/lib/object-url-cache";
+import { invalidateImageThumbnails } from "./image-thumbnails";
 
 export type UploadedImage = {
     originalFileName?: string;
@@ -53,6 +54,7 @@ export async function getImageBlob(storageKey: string) {
 
 export async function setImageBlob(storageKey: string, blob: Blob) {
     await store.setItem(storageKey, blob);
+    await invalidateImageThumbnails(storageKey);
     const url = URL.createObjectURL(blob);
     cacheObjectUrl(objectUrls, storageKey, url);
     return url;
@@ -72,6 +74,7 @@ export async function deleteStoredImages(keys: Iterable<string>) {
         Array.from(new Set(keys)).map(async (key) => {
             releaseObjectUrl(objectUrls, key);
             await store.removeItem(key);
+            await invalidateImageThumbnails(key);
         }),
     );
 }

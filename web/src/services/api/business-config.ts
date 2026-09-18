@@ -5,6 +5,7 @@ export type PublicModel = {
     name: string;
     modelId: string;
     publicName?: string;
+    publicDescription?: string;
     modelIdentityHidden?: boolean;
     imageParameterProfile?: import("@/lib/image-model-settings").ImageParameterProfile;
     capabilities: string[];

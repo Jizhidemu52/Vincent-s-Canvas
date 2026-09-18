@@ -158,6 +158,14 @@ export type CanvasAssistantMessageDetail = {
     [key: string]: unknown;
 };
 
+/** A style collection references ordinary nodes; folding never removes media. */
+export type CanvasNodeGroup = {
+    id: string;
+    title: string;
+    nodeIds: string[];
+    collapsed: boolean;
+};
+
 export type CanvasAssistantAttachment = {
     id: string;
     name: string;

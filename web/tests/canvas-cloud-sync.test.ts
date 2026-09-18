@@ -54,6 +54,25 @@ function harness(initial: CanvasProject[] = [], cloud: CloudCanvasDocument[] = [
 }
 const known = (value: CanvasProject, revision = 1): CanvasCloudBaseline => ({ [value.id]: { revision, local: encoded(value) } });
 
+test("style groups and their undo state persist through cloud save, fresh-device restore and conflict copies", async () => {
+    const original = project();
+    original.groups = [{ id: "style-a", title: "款式 A", nodeIds: ["image-a"], collapsed: false }];
+    original.history = { past: [{ ...original, groups: [] }], future: [] };
+    const remote = clone(original), local = clone(original);
+    remote.groups![0].title = "另一设备名称";
+    local.groups![0].collapsed = true;
+    const h = harness([local], [envelope(remote, 2)], known(original));
+    await h.engine.save(h.state.local);
+    const restored = await createCanvasCloudSync({}, h.dependencies).hydrate([]);
+    expect(restored).toHaveLength(2);
+    const main = restored.find(item => item.id === original.id)!;
+    const copy = restored.find(item => item.id !== original.id)!;
+    expect(main.groups).toEqual([{ id: "style-a", title: "款式 A", nodeIds: ["image-a"], collapsed: true }]);
+    expect(main.history?.past[0].groups).toEqual([]);
+    expect(copy.groups).toEqual([{ id: "style-a", title: "另一设备名称", nodeIds: ["image-a"], collapsed: false }]);
+    for (const item of restored) expect(item.nodes).toEqual(original.nodes);
+});
+
 test("new device restores the full project while clean local media cache survives an unchanged cloud revision", async () => {
     const document = project();
     const fresh = harness([], [envelope(document), envelope(null, 3, "deleted")]);

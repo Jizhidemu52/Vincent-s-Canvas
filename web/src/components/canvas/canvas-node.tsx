@@ -23,6 +23,8 @@ import { resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeData, type Position } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import type { ImageThumbnailEdge } from "@/lib/canvas/canvas-image-thumbnail";
+import { useCanvasImageThumbnail } from "./use-canvas-image-thumbnail";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
@@ -31,6 +33,7 @@ const emptyConfigInputSummary: CanvasConfigInputSummary = { textCount: 0, imageC
 
 type CanvasNodeProps = {
     data: CanvasNodeData;
+    imagePreviewEdge?: ImageThumbnailEdge | 0;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     themeKey: string;
     renderQuality: CanvasRenderQuality;
@@ -74,6 +77,7 @@ type CanvasNodeProps = {
 
 type NodeContentRendererProps = {
     node: CanvasNodeData;
+    imagePreviewEdge?: ImageThumbnailEdge | 0;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     renderQuality: CanvasRenderQuality;
     isEditingContent: boolean;
@@ -98,6 +102,7 @@ type NodeContentRendererProps = {
 
 export const CanvasNode = React.memo(function CanvasNode({
     data,
+    imagePreviewEdge = 0,
     theme,
     themeKey,
     renderQuality,
@@ -423,6 +428,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     ) : (
                         <NodeContent
                             node={data}
+                            imagePreviewEdge={imagePreviewEdge}
                             theme={theme}
                             renderQuality={contentRenderQuality}
                             isEditingContent={isEditingContent}
@@ -467,7 +473,7 @@ function canvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProps) 
     if (!canvasNodeRenderStateEqual(toRenderState(previous), toRenderState(next))) return false;
     if (previous.previewPosition?.x !== next.previewPosition?.x || previous.previewPosition?.y !== next.previewPosition?.y) return false;
     if (previous.previewBounds?.position.x !== next.previewBounds?.position.x || previous.previewBounds?.position.y !== next.previewBounds?.position.y || previous.previewBounds?.width !== next.previewBounds?.width || previous.previewBounds?.height !== next.previewBounds?.height) return false;
-    if (previous.getCanvasScale !== next.getCanvasScale || previous.onMouseDown !== next.onMouseDown || previous.onHoverStart !== next.onHoverStart || previous.onHoverEnd !== next.onHoverEnd || previous.onConnectStart !== next.onConnectStart || previous.onResize !== next.onResize || previous.onResizeEnd !== next.onResizeEnd || previous.onContentChange !== next.onContentChange || previous.onToggleBatch !== next.onToggleBatch || previous.onSetBatchPrimary !== next.onSetBatchPrimary || previous.onRetry !== next.onRetry || previous.onGenerateImage !== next.onGenerateImage || previous.onViewImage !== next.onViewImage || previous.onContextMenu !== next.onContextMenu) return false;
+    if (previous.imagePreviewEdge !== next.imagePreviewEdge || previous.getCanvasScale !== next.getCanvasScale || previous.onMouseDown !== next.onMouseDown || previous.onHoverStart !== next.onHoverStart || previous.onHoverEnd !== next.onHoverEnd || previous.onConnectStart !== next.onConnectStart || previous.onResize !== next.onResize || previous.onResizeEnd !== next.onResizeEnd || previous.onContentChange !== next.onContentChange || previous.onToggleBatch !== next.onToggleBatch || previous.onSetBatchPrimary !== next.onSetBatchPrimary || previous.onRetry !== next.onRetry || previous.onGenerateImage !== next.onGenerateImage || previous.onViewImage !== next.onViewImage || previous.onContextMenu !== next.onContextMenu) return false;
     if (previous.showPanel || next.showPanel) return previous.renderPanel === next.renderPanel;
     if (previous.data.type === CanvasNodeType.Config || next.data.type === CanvasNodeType.Config) return previous.renderNodeContent === next.renderNodeContent;
     return true;
@@ -639,6 +645,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     return (
         <ImageContent
             node={props.node}
+            imagePreviewEdge={props.imagePreviewEdge}
             theme={props.theme}
             isBatchRoot={props.isBatchRoot}
             batchCount={props.batchCount}
@@ -717,6 +724,7 @@ function AudioNodeContent({ node, theme, renderQuality }: NodeContentRendererPro
 
 function ImageContent({
     node,
+    imagePreviewEdge = 0,
     theme,
     isBatchRoot,
     batchCount,
@@ -727,6 +735,7 @@ function ImageContent({
     onSetBatchPrimary,
 }: {
     node: CanvasNodeData;
+    imagePreviewEdge?: ImageThumbnailEdge | 0;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     isBatchRoot: boolean;
     batchCount: number;
@@ -737,7 +746,8 @@ function ImageContent({
     onSetBatchPrimary?: () => void;
 }) {
     const isBatchChild = Boolean(node.metadata?.batchRootId);
-    const previewUrl = useCanvasNodeMediaPreview(node);
+    const preview = useCanvasImageThumbnail(node, imagePreviewEdge);
+    const previewUrl = preview.url;
 
     return (
         <BatchFrame theme={theme} batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
@@ -745,6 +755,7 @@ function ImageContent({
                 {previewUrl ? (
                     <img
                         src={previewUrl}
+                        data-canvas-image-resolution={preview.thumbnail ? imagePreviewEdge : "original"}
                         alt={node.title}
                         draggable={false}
                         {...canvasImageRenderProps()}

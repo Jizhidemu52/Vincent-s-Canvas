@@ -1,6 +1,6 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
 import { assetMetadataSchema } from "./asset-metadata";
-import { assignDemoPublicModelNumbers, presentAdminModel, presentPublicModel } from "./model-presentation";
+import { assignDemoPublicModelNumbers, isSelectableCreativeModel, presentAdminModel, presentPublicModel } from "./model-presentation";
 import { redactDesignerModelData } from "./model-privacy";
 import { openAiImageParameters } from "./openai-image-parameters";
 import { deploymentFeatures } from "./deployment-features";
@@ -1290,6 +1290,7 @@ Bun.serve({
           (item) =>
             item.id === input.modelConfigId &&
             typeof item.modelId === "string" &&
+            isSelectableCreativeModel(item) &&
             ((Boolean(openTokenApiKey) &&
               item.providerId === openTokenProviderId &&
               isOpenTokenImageModel(item.modelId)) ||

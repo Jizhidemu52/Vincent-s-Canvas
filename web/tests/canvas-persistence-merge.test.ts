@@ -3,6 +3,37 @@ import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges }
 import type { CanvasConnection } from "@/types/canvas";
 
 const originalPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+
+test("different style-group fields merge while same-field edits preserve a complete conflict copy", () => {
+    const base = { ...project(), groups: [{ id: "style-a", title: "款式 A", nodeIds: ["image-a", "image-b"], collapsed: false }] };
+    const renamed = structuredClone(base), folded = structuredClone(base);
+    renamed.groups[0].title = "新款名";
+    folded.groups[0].collapsed = true;
+    const merged = mergeProjectChanges([renamed], collectProjectChanges([base], [folded]));
+    expect(merged).toHaveLength(1);
+    expect(merged[0].groups).toEqual([{ id: "style-a", title: "新款名", nodeIds: ["image-a", "image-b"], collapsed: true }]);
+    expect(merged[0].nodes).toEqual(base.nodes);
+
+    folded.groups[0].title = "另一名称";
+    const conflicted = mergeProjectChanges([renamed], collectProjectChanges([base], [folded]));
+    expect(conflicted).toHaveLength(2);
+    expect(conflicted.find(item => item.id === base.id)?.groups[0].title).toBe("另一名称");
+    const copy = conflicted.find(item => item.id !== base.id)!;
+    expect(copy.groups).toEqual(renamed.groups);
+    expect(copy.nodes).toEqual(base.nodes);
+    expect((copy as any).persistenceConflict.paths).toEqual(["groups[style-a].title"]);
+});
+
+test("removing a group never removes its original nodes and a concurrent group edit has a recovery copy", () => {
+    const base = { ...project(), groups: [{ id: "style-a", title: "款式 A", nodeIds: ["image-a", "image-b"], collapsed: false }] };
+    const remote = { ...base, groups: [{ ...base.groups[0], title: "新款名" }] };
+    const local = { ...base, groups: [] };
+    const result = mergeProjectChanges([remote], collectProjectChanges([base], [local]));
+    expect(result).toHaveLength(2);
+    expect(result.find(item => item.id === base.id)?.groups).toEqual([]);
+    for (const item of result) expect(item.nodes).toEqual(base.nodes);
+    expect(result.find(item => item.id !== base.id)?.groups).toEqual(remote.groups);
+});
 function project() {
     return {
         id: "shared", title: "原画布", createdAt: "2026-09-01", updatedAt: "2026-09-01",

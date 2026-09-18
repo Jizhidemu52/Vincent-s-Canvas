@@ -8,7 +8,7 @@ import { requireRole } from "../rbac";
 import { encryptSecret } from "../security";
 import { assertValidModelReplacement } from "../prompt-templates";
 import type { AuthenticatedRequest } from "../types";
-import { presentAdminModel, presentPublicModel } from "../model-presentation";
+import { presentAdminModel, presentPublicModel, selectCreativeModels } from "../model-presentation";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
@@ -181,7 +181,7 @@ export function createPublicModelRouter(db: Database) {
     router.get("/", async (request, response, next) => {
         try {
             const [models, prices, tools] = await Promise.all([
-                db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.protocol FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=true AND p.enabled=true ORDER BY m.public_number NULLS LAST,m.name`),
+                db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.protocol,p.name AS "providerName",p.base_url AS "providerBaseUrl" FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=true AND p.enabled=true ORDER BY m.public_number NULLS LAST,m.name`),
                 db.query(`SELECT operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version FROM pricing_rule_versions WHERE status='published' ORDER BY operation_type`),
                 db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId"
                     FROM tool_api_configurations t JOIN model_configs m ON m.id=t.model_config_id
@@ -190,7 +190,9 @@ export function createPublicModelRouter(db: Database) {
                     AND (m.workflow_config_id IS NULL OR w.enabled=true)`),
             ]);
             const role = (request as AuthenticatedRequest).auth?.role;
-            response.json({ models: models.rows.map((model) => presentPublicModel(model, role)), prices: prices.rows, tools: tools.rows });
+            const selectedModels = selectCreativeModels(models.rows);
+            const selectedIds = new Set(selectedModels.map(model => model.id));
+            response.json({ models: selectedModels.map((model) => presentPublicModel(model, role)), prices: prices.rows, tools: tools.rows.filter(tool => selectedIds.has(tool.modelConfigId)) });
         } catch (error) { next(error); }
     });
     return router;

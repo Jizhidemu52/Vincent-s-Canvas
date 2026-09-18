@@ -46,6 +46,7 @@ test("cloud canvas HTTP persists whole documents with employee, revision and byt
     const source = {
       id: "canvas-a", title: "完整设计稿", createdAt: "2026-09-17T00:00:00.000Z", updatedAt: "2026-09-17T01:00:00.000Z",
       nodes: [{ id: "image-1", type: "image", title: "原始图片", width: 1500, height: 2100, position: { x: -1.25, y: 78.5 }, metadata: { content: assetUrl, prompt: "保持原样", extensions: { editable: true } } }],
+      groups: [{ id: "style-a", title: "款式 A", nodeIds: ["image-1"], collapsed: true }],
       connections: [], chatSessions: [{ id: "chat-1", title: "讨论", createdAt: "2026-09-17T00:00:00.000Z", updatedAt: "2026-09-17T01:00:00.000Z", messages: [{ id: "message-1", role: "user", text: "保留图片尺寸" }] }],
       activeChatId: "chat-1", backgroundMode: "lines", showImageInfo: true, viewport: { x: 15.125, y: -24.25, k: 0.875 },
     };

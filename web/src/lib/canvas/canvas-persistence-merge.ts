@@ -74,6 +74,13 @@ function mergeArray(base: Array<JsonObject & { id: string }>, local: Array<JsonO
 }
 
 function mergeValue(base: unknown, local: unknown, remote: unknown, path: string, conflicts: string[]): unknown {
+    // Older documents omit this optional collection. Two windows creating their
+    // first independent groups still share an empty baseline, not a field clash.
+    if (path === "groups") {
+        if (base === undefined) base = [];
+        if (local === undefined) local = [];
+        if (remote === undefined) remote = [];
+    }
     if (sameValue(local, base)) return remote;
     if (sameValue(remote, base) || sameValue(local, remote)) return local;
     if (keyedArray(base) && keyedArray(local) && keyedArray(remote)) return mergeArray(base, local, remote, path, conflicts);

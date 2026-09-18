@@ -36,6 +36,13 @@ test("collapsed batch children and missing viewport dimensions do not count as v
     expect(selectCanvasContext(snapshot([node("image")], { viewportSize: undefined })).nodes).toEqual([]);
 });
 
+test("collapsed style-group members are not automatically read as visible, but explicit selection remains available", () => {
+    const value = snapshot([node("hidden"), node("visible")], { hiddenNodeIds: ["hidden"] });
+    expect(selectCanvasContext(value).nodes.map(item => item.node.id)).toEqual(["visible"]);
+    const explicit = selectCanvasContext({ ...value, selectedNodeIds: ["hidden"] });
+    expect(explicit.nodes[0]).toMatchObject({ node: { id: "hidden" }, visible: false, selected: true });
+});
+
 test("unselected logo pixels, timestamped video frames and text actually reach model content", async () => {
     const result = await buildCanvasAssistantContext(snapshot([node("logo"), node("clip", CanvasNodeType.Video), node("copy", CanvasNodeType.Text), node("audio", CanvasNodeType.Audio)]), new Set(), readers);
     expect(result.content.filter((part) => part.type === "image_url").map((part: any) => part.image_url.url)).toEqual(["data:image/png;base64,logo", "data:image/jpeg;base64,start", "data:image/jpeg;base64,end"]);

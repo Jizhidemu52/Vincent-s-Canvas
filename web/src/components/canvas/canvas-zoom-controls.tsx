@@ -97,6 +97,7 @@ export const CanvasZoomControls = memo(function CanvasZoomControls({ scale, onSc
                     <Shortcut label="Ctrl / Cmd + 拖动" value="框选多个节点" />
                     <Shortcut label="Shift / Ctrl / Cmd + 点击" value="追加选择节点" />
                     <Shortcut label="Ctrl / Cmd + C / V" value="复制 / 粘贴节点" />
+                    <Shortcut label="Ctrl / Cmd + G" value="将选中节点创建为款式组" />
                     <Shortcut label="Delete / Backspace" value="删除选中" />
                 </div>
             </Modal>

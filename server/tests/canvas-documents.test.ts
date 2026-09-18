@@ -41,6 +41,18 @@ test("document validation rejects missing structure, mismatched id and broken gr
     ]) expect(() => parseCanvasDocumentWrite("canvas-1", body)).toThrow(CanvasDocumentError);
 });
 
+test("style-group validation accepts old documents and dangling member IDs but rejects malformed groups", () => {
+    const group = { id: "style-a", title: "春季款 A", nodeIds: ["image-1", "deleted-node"], collapsed: true };
+    const source = { ...project(), groups: [group] };
+    const parsed = parseCanvasDocumentWrite(source.id, { baseRevision: 0, document: source });
+    expect(parsed.document).toEqual(source);
+    expect(parsed.assetIds).toEqual([assetId]);
+    expect(parseCanvasDocumentWrite("canvas-1", { baseRevision: 0, document: project() }).document).toEqual(project());
+    for (const groups of [null, {}, [group, group], [{ ...group, id: "" }], [{ ...group, collapsed: "false" }], [{ ...group, title: 7 }], [{ ...group, nodeIds: ["image-1", "image-1"] }], [{ ...group, nodeIds: [123] }]]) {
+        expect(() => parseCanvasDocumentWrite("canvas-1", { baseRevision: 0, document: { ...project(), groups } })).toThrow(CanvasDocumentError);
+    }
+});
+
 test("media validation rejects nested local resources but not textual prompts", () => {
     for (const extra of [
         { url: "blob:local" }, { dataUrl: "data:image/png;base64,AAA" }, { metadata: { storageKey: "image:file:local" } },

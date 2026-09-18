@@ -249,3 +249,30 @@ test("normal project import and intentional deletion preserve full image, graph 
     expect(io.read()[0]).toMatchObject({ id, nodes: imported.nodes, connections: imported.connections, chatSessions: imported.chatSessions });
     expect(io.read()[0]!.title).not.toContain("保存冲突副本");
 });
+
+test("imported style groups, folded state and undo stacks survive a store save and reopening without changing image bytes", async () => {
+    const io = database(), tab = await openTab(io);
+    const source = project();
+    const groups = [{ id: "style-a", title: "春季款 A", nodeIds: ["a", "b"], collapsed: true }];
+    const history = { past: [{ ...source, groups: [{ ...groups[0], collapsed: false }] }], future: [] };
+    const id = tab.store.getState().importProject({ ...source, groups, history });
+    await tab.flush();
+    const reopened = await openTab(io);
+    const imported = reopened.store.getState().openProject(id);
+    expect(imported.groups).toEqual(groups);
+    expect(imported.history.past[0].groups).toEqual([{ id: "style-a", title: "春季款 A", nodeIds: ["a", "b"], collapsed: false }]);
+    expect(imported.nodes).toEqual(source.nodes);
+    reopened.store.getState().updateProject(id, { groups: [{ ...groups[0], title: "改名后", collapsed: false }] });
+    await reopened.flush();
+    expect((await openTab(io)).store.getState().openProject(id)).toMatchObject({ groups: [{ id: "style-a", title: "改名后", collapsed: false }], nodes: source.nodes });
+});
+
+test("two old documents can independently gain their first style group without a false conflict", async () => {
+    const io = database(), a = await openTab(io), b = await openTab(io);
+    a.store.getState().updateProject("shared", { groups: [{ id: "style-a", title: "款 A", nodeIds: ["a"], collapsed: true }] });
+    b.store.getState().updateProject("shared", { groups: [{ id: "style-b", title: "款 B", nodeIds: ["b"], collapsed: false }] });
+    await a.flush(); await b.flush();
+    expect(io.read()).toHaveLength(1);
+    expect(io.read()[0].groups?.map(group => group.id).sort()).toEqual(["style-a", "style-b"]);
+    expect(io.read()[0].nodes).toEqual(project().nodes);
+});

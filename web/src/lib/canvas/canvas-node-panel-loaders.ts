@@ -1,3 +1,7 @@
+export function loadCanvasConfigNodePanel() {
+    return import("@/components/canvas/canvas-config-node-panel").then(({ CanvasConfigNodePanel }) => ({ default: CanvasConfigNodePanel }));
+}
+
 export function loadCanvasConfigComposer() {
     return import("@/components/canvas/canvas-config-composer").then(({ CanvasConfigComposer }) => ({ default: CanvasConfigComposer }));
 }

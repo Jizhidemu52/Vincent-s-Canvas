@@ -23,6 +23,7 @@ export type CanvasAgentSnapshot = {
     viewportSize?: { width: number; height: number };
     viewportOcclusions?: Array<{ x: number; y: number; width: number; height: number }>;
     previewNodeId?: string | null;
+    hiddenNodeIds?: string[];
 };
 
 export function summarizeCanvasAgentOps(ops?: CanvasAgentOp[]) {

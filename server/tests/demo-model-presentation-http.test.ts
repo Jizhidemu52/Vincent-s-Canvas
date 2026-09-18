@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 
-test("designer sees stable anonymous image names while UUID submission still calls the configured upstream model", async () => {
+test("designer sees four feature-named OpenToken images while UUID submission still calls the configured upstream model", async () => {
   const submissions: Array<Record<string, unknown>> = [];
   const provider = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     expect(request.headers.get("authorization")).toBe("Bearer fake-key-no-paid-network");
@@ -32,12 +32,19 @@ test("designer sees stable anonymous image names while UUID submission still cal
     const designerCookie = "";
     const models = (await request("/api/models", designerCookie).then((response) => response.json())).models as Array<Record<string, any>>;
     const images = models.filter((model) => model.modelIdentityHidden);
-    expect(images).toHaveLength(8);
-    expect(new Set(images.map((model) => model.name)).size).toBe(8);
+    expect(images.map(model => [model.id, model.name])).toEqual([
+      ["40000000-0000-4000-8000-000000000105", "日常生图"],
+      ["40000000-0000-4000-8000-000000000107", "快速试稿"],
+      ["40000000-0000-4000-8000-000000000108", "细节精修"],
+      ["40000000-0000-4000-8000-000000000106", "备用生图"],
+    ]);
+    expect(models.some(model => model.modelId === "happyhorse-1.1")).toBe(true);
+    expect(models.some(model => model.modelId === "claude-fable-5")).toBe(true);
     for (const model of images) {
-      expect(model.name).toMatch(/^出图模型[1-9]\d*$/);
+      expect(model.name.length).toBeLessThanOrEqual(8);
       expect(model.modelId).toBe(model.id);
       expect(model.publicName).toBe(model.name);
+      expect(model.publicDescription).toEqual(expect.any(String));
       expect(JSON.stringify(model)).not.toMatch(/gpt|gemini|midjourney|apimart|opentoken/i);
     }
     expect([403, 404]).toContain((await request("/api/admin/model-configuration/models", designerCookie)).status);
@@ -45,6 +52,11 @@ test("designer sees stable anonymous image names while UUID submission still cal
     expect(alias).toBeDefined();
     expect((await request("/api/auth/login", "", "POST", { identifier: "admin", password: "Canvas2026!#", portal: "admin" })).status).toBe(404);
     expect((await request(`/api/admin/model-configuration/models/${alias.id}`, "", "PATCH", { enabled: false })).status).toBe(403);
+
+    const removed = await request("/api/tasks", designerCookie, "POST", { requestId: crypto.randomUUID(), operationType: "image_generation", modelConfigId: "40000000-0000-4000-8000-000000000099", prompt: "must not call retired channel", parameters: {} });
+    expect(removed.status).toBe(400);
+    expect((await removed.json()).error).toBe("MODEL_DISABLED");
+    expect(submissions).toHaveLength(0);
 
     const generated = await request("/api/tasks", designerCookie, "POST", { requestId: crypto.randomUUID(), operationType: "image_generation", modelConfigId: alias.modelId, prompt: "anonymous model verification", parameters: {} });
     expect(generated.status).toBe(201);

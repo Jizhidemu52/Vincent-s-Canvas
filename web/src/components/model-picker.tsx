@@ -122,12 +122,15 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability, canMana
     return config.models.length ? `暂无匹配的${label}模型` : "请先到配置里添加渠道和模型";
 }
 
-function ModelLabel({ config, model, serverModel }: { config: AiConfig; model: string; serverModel?: {name:string;creditCost:number} }) {
+function ModelLabel({ config, model, serverModel }: { config: AiConfig; model: string; serverModel?: {name:string;creditCost:number;publicDescription?:string} }) {
     const label = imageModelIdentityHidden(model) ? imageModelDisplayName(model) : serverModel?.name || modelOptionLabel(config, model);
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
-            <span className="truncate">{serverModel && deploymentFeatures.creditsEnabled ? `${label} · 模型 ${serverModel.creditCost} 积分` : label}</span>
+            <span className="flex min-w-0 flex-col py-1">
+                <span className="truncate">{serverModel && deploymentFeatures.creditsEnabled ? `${label} · 模型 ${serverModel.creditCost} 积分` : label}</span>
+                {serverModel?.publicDescription && <span className="mt-0.5 whitespace-normal text-xs text-muted-foreground">{serverModel.publicDescription}</span>}
+            </span>
         </span>
     );
 }

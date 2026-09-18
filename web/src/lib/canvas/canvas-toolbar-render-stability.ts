@@ -26,6 +26,7 @@ export type CanvasToolbarRenderState = {
     onBackgroundModeChange: (mode: CanvasBackgroundMode) => void;
     onShowImageInfoChange: (show: boolean) => void;
     onOpenMyAssets: () => void;
+    onGroupSelection?: () => void;
 };
 
 /**
@@ -58,6 +59,7 @@ export function canvasToolbarPropsEqual(previous: CanvasToolbarRenderState, next
         previous.onDeselect === next.onDeselect &&
         previous.onBackgroundModeChange === next.onBackgroundModeChange &&
         previous.onShowImageInfoChange === next.onShowImageInfoChange &&
-        previous.onOpenMyAssets === next.onOpenMyAssets
+        previous.onOpenMyAssets === next.onOpenMyAssets &&
+        previous.onGroupSelection === next.onGroupSelection
     );
 }

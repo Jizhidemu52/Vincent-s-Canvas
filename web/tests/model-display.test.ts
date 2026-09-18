@@ -10,6 +10,15 @@ const video = { ...image, id: "video", modelId: "wan2.7", name: "Wan", capabilit
 const originalModels = useBusinessConfigStore.getState().models;
 const originalUser = useUserStore.getState().user;
 
+test("feature labels follow opaque model IDs across pickers, metadata and admin mappings", () => {
+    const named = { ...real, publicName: "细节精修" };
+    expect(imageModelDisplayName(named.id, [named], "designer")).toBe("细节精修");
+    expect(imageModelDisplayName(named.modelId, [named], "designer")).toBe("细节精修");
+    expect(imageModelDisplayName(named.id, [named], "super_admin")).toBe(named.name);
+    expect(displayModelMetadata({ modelName: named.modelId }, [named], "designer")).toEqual({ modelName: "细节精修" });
+    expect(modelOptionName(`default::${named.id}`)).toBe(named.id);
+});
+
 test("export retains opaque model references and user prompts without disclosing real names", () => {
     useBusinessConfigStore.setState({ models: [real] });
     useUserStore.setState({ user: null });

@@ -213,7 +213,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
             commitLiveViewport();
             reportCanvasInteraction(false);
         }
-        const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id]");
+        const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id],[data-canvas-group-id]");
 
         const handActive = interactionMode === "hand" || (interactionMode !== undefined && isSpacePressed);
         if (!handActive && event.button === 0 && isBackgroundClick && onOverviewNodePointerDown?.(event)) {

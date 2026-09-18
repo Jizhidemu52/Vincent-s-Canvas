@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeGroup } from "@/types/canvas";
 
-type Entry = { nodes: CanvasNodeData[]; connections: CanvasConnection[]; chatSessions: unknown[]; activeChatId: string | null; backgroundMode: string; showImageInfo: boolean };
+type Entry = { nodes: CanvasNodeData[]; connections: CanvasConnection[]; groups?: CanvasNodeGroup[]; chatSessions: unknown[]; activeChatId: string | null; backgroundMode: string; showImageInfo: boolean };
 type History = { past: Entry[]; future: Entry[] };
 
 // Run page-owned history transitions without mounting the full editor or browser storage.
@@ -26,6 +26,16 @@ function entry(label: string): Entry {
 }
 
 describe("canvas persisted undo/redo", () => {
+    test("group-only edits keep membership and collapse state through persisted undo and redo", () => {
+        const previous = { ...entry("image"), groups: [{ id: "style", title: "A 款", nodeIds: ["image"], collapsed: false }] };
+        const current = { ...previous, groups: [{ ...previous.groups[0], collapsed: true }] };
+        const saved = canvasHistoryForSave({ past: [], future: [] }, previous, current, false);
+        const restored = boundedCanvasHistory(JSON.parse(JSON.stringify(saved)));
+        expect(restored.past[0].groups).toEqual(previous.groups);
+        const undoSaved = canvasHistoryForSave({ past: [], future: [current] }, current, previous, true);
+        expect(boundedCanvasHistory(JSON.parse(JSON.stringify(undoSaved))).future[0].groups?.[0].collapsed).toBe(true);
+        expect(current.nodes).toBe(previous.nodes);
+    });
     test("restores both stacks and keeps only the latest fifty steps", () => {
         const history = { past: Array.from({ length: 65 }, (_, index) => entry(`past-${index}`)), future: [entry("redo")] };
         const restored = boundedCanvasHistory(JSON.parse(JSON.stringify(history)));
