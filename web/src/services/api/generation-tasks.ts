@@ -8,6 +8,7 @@ import { imageToDataUrl } from "@/services/image-storage";
 import { modelOptionName } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
+import { fingerprintImage, type ArchivedReference, type GenerationDraftInput, type GenerationInputArchive } from "./generation-history";
 
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
@@ -72,37 +73,53 @@ export function createImageTaskRequests(input: {
     }));
 }
 
-export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; onSubmissionStarted?: () => void; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
+export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; onSubmissionStarted?: () => void; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
+    input.signal?.throwIfAborted();
+    const ownerId = useUserStore.getState().user?.id;
+    if (!ownerId) throw new Error("当前账号不可用");
+    const assertOwner = () => { if (useUserStore.getState().user?.id !== ownerId) throw new Error("员工会话已变化，已取消生成提交"); };
     input.signal?.throwIfAborted();
     const model = await resolvePublicModel(input.modelId);
+    assertOwner();
     input.signal?.throwIfAborted();
     const sourceUrls: string[] = [];
+    const archivedReferences: ArchivedReference[] = [];
     for (const reference of input.references || []) {
         input.signal?.throwIfAborted();
         const dataUrl = await imageToDataUrl(reference);
         input.signal?.throwIfAborted();
         const file = dataUrlToFile({ ...reference, dataUrl });
         input.signal?.throwIfAborted();
-        const assetId = await uploadServerAsset(file, { title: reference.name, source: "task-reference" });
+        const hash = await fingerprintImage(file);
+        assertOwner();
+        const assetId = await uploadServerAsset(file, { title: reference.name, source: "task-reference" }, { expectedOwnerId: ownerId });
+        assertOwner();
         input.signal?.throwIfAborted();
         sourceUrls.push(`/api/assets/${assetId}/content`);
+        archivedReferences.push({ id: reference.id, name: reference.name, originalFileName: reference.originalFileName, type: file.type, bytes: file.size, sha256: hash, url: sourceUrls[sourceUrls.length - 1]!, sourceAssetId: reference.sourceAssetId });
     }
 
     const rootRequestId = input.requestId || createClientId();
     const projectId = currentProjectId("image-workbench");
+    const archive: GenerationInputArchive | undefined = input.draft ? {
+        version: 1, ownerId, modelConfigId: model.id, modelId: model.modelId,
+        prompt: input.draft.prompt, effectivePrompt: input.prompt, config: { ...input.draft.config, model: model.id, imageModel: model.id },
+        parameters: { ...input.parameters }, references: archivedReferences, maskReferenceIndex: input.draft.maskReferenceIndex,
+    } : undefined;
     const taskRequests = createImageTaskRequests({
         requestId: rootRequestId,
         projectId,
         operationType: input.operationType,
         modelConfigId: model.id,
         prompt: input.prompt,
-        parameters: { ...input.parameters, ...(input.tool ? { tool: input.tool } : {}) },
+        parameters: { ...input.parameters, ...(input.tool ? { tool: input.tool } : {}), ...(archive ? { inputArchive: archive } : {}) },
         sourceUrls,
         count: input.count,
     });
     input.signal?.throwIfAborted();
     const submitted = await Promise.allSettled(
         taskRequests.map(async (task) => {
+            assertOwner();
             input.signal?.throwIfAborted();
             input.onSubmissionStarted?.();
             return request<{ task: { id: string } }>("/api/tasks", {

@@ -467,6 +467,8 @@ export default function AssetsPage() {
                             </div>
                             <div className="wb-toolbar">
                                 <span className="text-sm text-muted-foreground">共 {filteredAssets.length} 个素材</span>
+                                <Button onClick={() => navigate("/reference-import")}>网页采集</Button>
+                                <Button type="link" onClick={() => navigate("/reference-import#install")}>扩展安装说明</Button>
                                 <Button icon={<Download className="size-4" />} disabled={Boolean(assetAction) || !validAssets.length} onClick={() => void runAssetAction("正在整理导出文件…", exportAllAssets)}>导出素材</Button>
                                 <Button icon={<Upload className="size-4" />} disabled={Boolean(assetAction)} onClick={() => assetInputRef.current?.click()}>导入素材包</Button>
                             </div>

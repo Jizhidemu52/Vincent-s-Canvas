@@ -139,6 +139,9 @@ import "./workspace.css";
 
 const CanvasAssistantPanel = lazy(loadCanvasAssistantPanel);
 const CanvasNodeContextMenu = lazy(() => import("@/components/canvas/canvas-context-menu").then(module => ({ default: module.CanvasNodeContextMenu })));
+const CanvasImageCompareDialog = lazy(() => import("@/components/canvas/canvas-image-compare-dialog").then(module => ({ default: module.CanvasImageCompareDialog })));
+const CanvasDesignTemplateDialog = lazy(() => import("@/components/canvas/canvas-design-template-dialog").then(module => ({ default: module.CanvasDesignTemplateDialog })));
+const CanvasDesignActions = lazy(() => import("@/components/canvas/canvas-design-actions").then(module => ({ default: module.CanvasDesignActions })));
 const CanvasGroupLayer = lazy(() => import("@/components/canvas/canvas-group-layer").then(module => ({ default: module.CanvasGroupLayer })));
 const CanvasGroupNameDialog = lazy(() => import("@/components/canvas/canvas-group-name-dialog").then(module => ({ default: module.CanvasGroupNameDialog })));
 const CanvasLocalAgentPanel = lazy(loadCanvasLocalAgentPanel);
@@ -463,6 +466,11 @@ function WirelessCanvasPage() {
     const canvasThemeKey = useThemeStore((state) => state.theme);
     const theme = canvasThemes[canvasThemeKey];
     const [nodes, setNodes] = useState<CanvasNodeData[]>([]);
+    const [compareImageIds, setCompareImageIds] = useState<string[] | null>(null);
+    const [templateSourceId, setTemplateSourceId] = useState<string | null | undefined>(undefined);
+    const designProjectIdRef = useRef(projectId);
+    designProjectIdRef.current = projectId;
+    const restoringGenerationRef = useRef(false);
     const [connections, setConnections] = useState<CanvasConnection[]>([]);
     const [groups, setGroups] = useState<CanvasNodeGroup[]>([]);
     const [chatSessions, setChatSessions] = useState<CanvasAssistantSession[]>([]);
@@ -690,6 +698,8 @@ function WirelessCanvasPage() {
         if (!hydrated) return;
         const lifecycle = projectAsyncLifecycleRef.current;
         const restoreToken = lifecycle.begin();
+        setCompareImageIds(null);
+        setTemplateSourceId(undefined);
         const invalidateRestore = () => lifecycle.invalidate(restoreToken);
         setProjectLoaded(false);
         setQuickGeneratePosition(null);
@@ -2588,6 +2598,62 @@ function WirelessCanvasPage() {
         [addAsset, message, projectId],
     );
 
+    const restoreNodeGenerationInput = async (node: CanvasNodeData) => {
+        if (!node.metadata?.sourceTaskId || restoringGenerationRef.current) return;
+        restoringGenerationRef.current = true;
+        const dismiss = message.loading("正在校验历史参数和参考原图…", 0);
+        try {
+            const [{ restoreGenerationDraft }, { createCanvasRestoredGenerationNode }] = await Promise.all([import("@/services/api/generation-history"), import("@/lib/canvas/canvas-generation-draft")]);
+            const draft = await restoreGenerationDraft(node.metadata.sourceTaskId);
+            if (designProjectIdRef.current !== projectId) return;
+            if (nodesRef.current.find(item => item.id === node.id) !== node) { message.warning("图片已变化，未应用历史输入，请重新打开"); return; }
+            const position = { x: Math.max(...nodesRef.current.map(item => item.position.x + item.width)) + 120, y: node.position.y };
+            const restored = createCanvasRestoredGenerationNode(draft, position);
+            setNodes(current => [...current, restored]);
+            setSelectedNodeIds(new Set([restored.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(restored.id);
+            focusCanvasArea(restored.position, restored.width, restored.height);
+            message.success("已新增恢复配置，原图和现有草稿保持不变；尚未生成");
+        } catch (error) { message.error(error instanceof Error ? error.message : "历史输入恢复失败，画布未改变"); }
+        finally { restoringGenerationRef.current = false; dismiss(); }
+    };
+
+    const openImageCompare = useCallback((node?: CanvasNodeData) => {
+        const selected = Array.from(selectedNodeIdsRef.current);
+        setCompareImageIds(node ? [node.id, ...selected.filter(id => id !== node.id)] : selected);
+        setContextMenu(null);
+    }, []);
+
+    const applyDesignTemplate = async (id: import("@/lib/canvas/canvas-design-templates").CanvasDesignTemplateId) => {
+        const sourceId = templateSourceId;
+        const { createCanvasDesignTemplate } = await import("@/lib/canvas/canvas-design-templates");
+        if (designProjectIdRef.current !== projectId) return;
+        const source = sourceId ? nodesRef.current.find(node => node.id === sourceId) : undefined;
+        if (sourceId && !source) { message.warning("参考图已移除，请重新选择"); return; }
+        const position = { x: nodesRef.current.length ? Math.max(...nodesRef.current.map(node => node.position.x + node.width)) + 120 : 0, y: source?.position.y || 0 };
+        const result = createCanvasDesignTemplate(id, source, position, effectiveConfig.imageModel || effectiveConfig.model);
+        setNodes(current => [...current, ...result.nodes]);
+        setConnections(current => [...current, ...result.connections]);
+        setGroups(current => [...current, result.group]);
+        const config = result.nodes.find(node => node.type === CanvasNodeType.Config)!;
+        setSelectedNodeIds(new Set([config.id]));
+        setSelectedConnectionId(null);
+        setDialogNodeId(config.id);
+        setTemplateSourceId(undefined);
+        focusCanvasArea(config.position, config.width, config.height);
+        message.success("已添加 3 个生成配置；编辑提示词后逐个点击生成，当前未调用模型");
+    };
+
+    const arrangeNodes = async (mode: import("@/lib/canvas/canvas-node-arrange").CanvasArrangeMode) => {
+        const { arrangeCanvasNodes } = await import("@/lib/canvas/canvas-node-arrange");
+        if (designProjectIdRef.current !== projectId) return;
+        const next = arrangeCanvasNodes(nodesRef.current, groupsRef.current, selectedNodeIdsRef.current, mode);
+        if (next === nodesRef.current) { message.info("至少需要两个可移动单元；同一款式组视为一个整体"); return; }
+        setNodes(next);
+        message.success("排版已更新，款式组内相对位置保留，可撤销");
+    };
+
     const createImageReversePromptNodes = useCallback(
         (node: CanvasNodeData) => {
             if (node.type !== CanvasNodeType.Image || !node.metadata?.content) {
@@ -2769,7 +2835,7 @@ function WirelessCanvasPage() {
                 const image = await requestEdit(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl }, { signal: controller.signal }).then((items) => items[0]);
                 const uploaded = await uploadImage(image.dataUrl);
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), sourceTaskId: image.sourceTaskId, prompt, ...generationMetadata } } : item)));
                 addAsset({
                     kind: "image",
                     title: userPrompt.slice(0, 24) || "局部编辑结果",
@@ -2872,7 +2938,7 @@ function WirelessCanvasPage() {
                 ).then((items) => items[0]);
                 const uploaded = await uploadImage(image.dataUrl);
                 const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), sourceTaskId: image.sourceTaskId, prompt, ...generationMetadata } } : item)));
                 addAsset({
                     kind: "image",
                     title: `${title}结果`,
@@ -3172,6 +3238,7 @@ function WirelessCanvasPage() {
                                       metadata: {
                                           ...node.metadata,
                                           ...imageMetadata(uploaded),
+                                          sourceTaskId: generated.sourceTaskId,
                                           prompt,
                                           ...buildImageGenerationMetadata(generationType, generationConfig, 1, references),
                                       },
@@ -3455,7 +3522,7 @@ function WirelessCanvasPage() {
 
             const completedBatchItems = new Map<string, { status: "failed" | "cancelled"; failureReason: string }>();
             const completedBatchResultNodes = new Map<string, string>();
-            const successfulBatchTasks: Array<{ entry: (typeof prepared)[number]; resultUrl: string }> = [];
+            const successfulBatchTasks: Array<{ entry: (typeof prepared)[number]; resultUrl: string; sourceTaskId: string }> = [];
 
             for (const failure of result.failures) {
                 const entry = prepared[failure.index];
@@ -3488,9 +3555,9 @@ function WirelessCanvasPage() {
                     settledResultIds.add(entry.resultId);
                     continue;
                 }
-                successfulBatchTasks.push({ entry, resultUrl });
+                successfulBatchTasks.push({ entry, resultUrl, sourceTaskId: task.id });
             }
-            await mapCanvasAsyncPool(successfulBatchTasks, 3, async ({ entry, resultUrl }) => {
+            await mapCanvasAsyncPool(successfulBatchTasks, 3, async ({ entry, resultUrl, sourceTaskId }) => {
                 try {
                     const uploadedResult = await uploadImage(resultUrl);
                     const resultSize = fitNodeSize(uploadedResult.width, uploadedResult.height, maxWidth, maxHeight);
@@ -3509,6 +3576,7 @@ function WirelessCanvasPage() {
                                       metadata: {
                                           ...node.metadata,
                                           ...imageMetadata(uploadedResult),
+                                          sourceTaskId,
                                           originalFileName: entry.item.file.name,
                                           imageName: entry.item.file.name.replace(/\.[^.]+$/, ""), imageVersion: 2,
                                           prompt,
@@ -3838,7 +3906,7 @@ function WirelessCanvasPage() {
                                                 position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
                                                 width: imageSize.width,
                                                 height: imageSize.height,
-                                                metadata: { ...node.metadata, ...imageMetadata(uploaded), primaryImageId: targetId },
+                                                metadata: { ...node.metadata, ...imageMetadata(uploaded), sourceTaskId: image.sourceTaskId, primaryImageId: targetId },
                                             };
                                         if (node.id === targetId)
                                             return {
@@ -3846,7 +3914,7 @@ function WirelessCanvasPage() {
                                                 position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
                                                 width: imageSize.width,
                                                 height: imageSize.height,
-                                                metadata: { ...node.metadata, ...imageMetadata(uploaded) },
+                                                metadata: { ...node.metadata, ...imageMetadata(uploaded), sourceTaskId: image.sourceTaskId },
                                             };
                                         return node;
                                     });
@@ -4353,7 +4421,7 @@ function WirelessCanvasPage() {
                                   type: CanvasNodeType.Image,
                                   width: imageSize.width,
                                   height: imageSize.height,
-                                  metadata: { ...item.metadata, ...imageMetadata(uploadedImage), prompt, ...generationMetadata },
+                                  metadata: { ...item.metadata, ...imageMetadata(uploadedImage), sourceTaskId: image.sourceTaskId, prompt, ...generationMetadata },
                               }
                             : item,
                     ),
@@ -4898,6 +4966,9 @@ function WirelessCanvasPage() {
                             onAngle={(node) => setAngleNodeId(node.id)}
                             onViewImage={(node) => setPreviewNodeId(node.id)}
                             onReversePrompt={createImageReversePromptNodes}
+                            onCompare={openImageCompare}
+                            onDesignTemplate={(node) => setTemplateSourceId(node.id)}
+                            onRestoreGeneration={toolbarNode.metadata?.sourceTaskId ? restoreNodeGenerationInput : undefined}
                             onRetry={(node) => void handleRetryNode(node)}
                             onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                             onDelete={(node) => deleteNodes(new Set([node.id]))}
@@ -4931,10 +5002,13 @@ function WirelessCanvasPage() {
                     onOpenMyAssets={openAssetsFromToolbar}
                     onGroupSelection={createSelectedGroup}
                 >
+                    <Suspense fallback={null}><CanvasDesignActions selectedCount={selectedNodeIds.size} selectedImages={Array.from(selectedNodeIds).filter(id => nodeById.get(id)?.type === CanvasNodeType.Image && Boolean(nodeById.get(id)?.metadata?.content)).length} onCompare={openImageCompare} onTemplate={() => setTemplateSourceId(null)} onArrange={arrangeNodes} /></Suspense>
                     <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onScalePreview={previewZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={toggleMiniMap} />
                 </CanvasToolbar>
 
                 {isMiniMapOpen ? <Minimap nodes={minimapNodes} viewport={viewport} viewportSize={size} onViewportPreview={previewMinimapViewport} onViewportChange={commitViewport} /> : null}
+                {compareImageIds ? <Suspense fallback={null}><CanvasImageCompareDialog nodes={nodes} initialIds={compareImageIds} onClose={() => setCompareImageIds(null)} /></Suspense> : null}
+                {templateSourceId !== undefined ? <Suspense fallback={null}><CanvasDesignTemplateDialog hasReference={Boolean(templateSourceId)} onApply={applyDesignTemplate} onClose={() => setTemplateSourceId(undefined)} /></Suspense> : null}
 
 
                 {contextMenu ? (
@@ -5580,6 +5654,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
     return {
         ...config,
+        systemPrompt: node?.metadata?.systemPrompt ?? config.systemPrompt,
         model: node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
         size: node?.metadata?.size || config.size || defaultConfig.size,

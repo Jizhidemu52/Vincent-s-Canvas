@@ -10,6 +10,7 @@ import type { ModuleKey } from "@/services/api/modules";
 const AdminPage = lazy(() => import("@/pages/admin"));
 const AdminLoginPage = lazy(() => import("@/pages/admin/login"));
 const AssetsPage = lazy(() => import("@/pages/assets"));
+const ReferenceImportPage = lazy(() => import("@/pages/reference-import"));
 const CanvasPage = lazy(() => import("@/pages/canvas"));
 const CanvasProjectPage = lazy(() => import("@/pages/canvas/project"));
 const ChatPage = lazy(() => import("@/pages/chat"));
@@ -74,6 +75,7 @@ export const router = createBrowserRouter([
             { path: "/image", element: moduleRoute(ImagePage, imageModule) },
             { path: "/video", element: moduleRoute(VideoPage, "video") },
             { path: "/assets", element: moduleRoute(AssetsPage, "assets") },
+            { path: "/reference-import", element: moduleRoute(ReferenceImportPage, "assets") },
             { path: "/team", element: moduleRoute(TeamPage, "team") },
             { path: "/prompts", element: moduleRoute(PromptsPage, "prompts") },
             { path: "/my-prompts", element: moduleRoute(MyPromptsPage, "prompts") },

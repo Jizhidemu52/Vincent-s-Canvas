@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "画布 · 网页参考图采集",
+  "version": "1.0.0",
+  "description": "主动扫描当前网页，勾选图片后送到自己的画布网站审核导入。",
+  "minimum_chrome_version": "102",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "action": { "default_title": "采集当前网页的参考图片" },
+  "background": { "service_worker": "background.js", "type": "module" }
+}

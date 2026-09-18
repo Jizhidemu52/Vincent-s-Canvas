@@ -34,6 +34,7 @@ import { fetchServerAssetContent, recordServerAssetEvent } from "@/services/api/
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ImageReferenceItem, ImageReferenceOrigin, ReferenceImage } from "@/types/image";
 import { hydrateImageLogMedia } from "./image-log-media";
+import { restoreGenerationDraft } from "@/services/api/generation-history";
 import { ImageLogThumbnail } from "./image-log-thumbnail";
 import { GarmentRecipePanel } from "../creative/garment-recipe-panel";
 import { garmentReferencesMatch, type GarmentRecipe } from "@/lib/garment-recipe";
@@ -155,9 +156,12 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
     const previewRevision = useRef(0);
     const logRefreshRevision = useRef(0);
     const [previewLoading, setPreviewLoading] = useState(false);
+    const restoreBusy = useRef(false);
+    const [restoringHistory, setRestoringHistory] = useState(false);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
+    const updateInputConfig: UpdateAiConfig = (key, value) => { inputRevision.current += 1; updateConfig(key, value); };
     const isAiConfigReady = (..._args: unknown[]) => true;
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const canManageConfig = useCanManageConfig();
@@ -224,8 +228,8 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
     const requiresPrompt = selectedModelProfile.kind !== "midjourney-blend";
     const canGenerate = (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
 
-    const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))]));
-    const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin))));
+    const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => { inputRevision.current += 1; setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))])); };
+    const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => { inputRevision.current += 1; setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin)))); };
 
     const handleMissingModelConfig = () => {
         if (canManageConfig) {
@@ -553,21 +557,38 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
         const revision = ++previewRevision.current;
         setPreviewLoading(true);
         try {
-        const hydrated = await hydrateImageLogMedia(log, resolveImageUrl);
+        const hydrated = await hydrateImageLogMedia(log, resolveImageUrl, false);
         if (revision !== previewRevision.current) return;
         log = hydrated;
         setPreviewLog(log);
         setLogsOpen(false);
-        replacePrompt(log.prompt);
-        restoreReferences(log.references || [], "template");
-        if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
-        if (log.config.quality) updateConfig("quality", log.config.quality);
-        if (log.config.size) updateConfig("size", log.config.size);
-        if (log.config.count) updateConfig("count", log.config.count);
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
         } catch (error) {
             if (revision === previewRevision.current) message.error(error instanceof Error ? error.message : "生成记录读取失败，请重试");
         } finally { if (revision === previewRevision.current) setPreviewLoading(false); }
+    };
+
+    const restoreHistoryDraft = async () => {
+        if (!previewLog || running || restoreBusy.current) return;
+        const taskId = previewLog.images.find(image => image.sourceTaskId)?.sourceTaskId;
+        if (!taskId) { message.warning("这条旧记录没有完整输入归档，无法完整恢复；可复制提示词后新建草稿"); return; }
+        const settingsBeforeRestore = useConfigStore.getState().config;
+        const revision = inputRevision.current;
+        const preview = previewRevision.current;
+        restoreBusy.current = true; setRestoringHistory(true);
+        try {
+            const draft = await restoreGenerationDraft(taskId);
+            if (draft.maskReferenceIndex !== undefined) throw new Error("历史包含蒙版，请在支持蒙版的原编辑入口恢复；未套用任何输入");
+            if (draft.tool && draft.tool !== toolMode) throw new Error(`请先切换到历史原工具“${imageToolModes[draft.tool as GenerationToolMode]?.title || draft.tool}”再恢复，当前草稿未改变`);
+            if (revision !== inputRevision.current || preview !== previewRevision.current || settingsBeforeRestore !== useConfigStore.getState().config) throw new Error("草稿或所选记录已改变，已取消恢复");
+            replacePrompt(draft.prompt);
+            setReferences(draft.references.map(item => createImageReferenceItem(item, "template")));
+            updateConfig("imageModel", draft.config.imageModel);
+            updateConfig("size", draft.config.size); updateConfig("quality", draft.config.quality);
+            updateConfig("count", previewLog.config.count); updateConfig("systemPrompt", draft.config.systemPrompt);
+            message.success("已完整恢复为草稿，可继续修改；尚未生成或扣费，AI 再次生成不保证结果相同");
+        } catch (error) { message.error(error instanceof Error ? error.message : "历史恢复失败，当前草稿未改变"); }
+        finally { restoreBusy.current = false; setRestoringHistory(false); }
     };
 
     const buildRequestSnapshot = () => {
@@ -700,7 +721,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
                             </div>
                         </div>
 
@@ -727,6 +748,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
                             <div>
                                 <h2 className="text-xl font-semibold">生成结果</h2>
                             </div>
+                            {previewLog ? <div className="flex gap-2"><Button size="small" disabled={running || previewLoading} loading={restoringHistory} onClick={() => void restoreHistoryDraft()}>恢复为草稿继续改</Button><Button size="small" disabled={running} onClick={() => { replacePrompt(previewLog.prompt); message.info("仅复制提示词，未恢复模型与参考图"); }}>仅复制提示词</Button></div> : null}
                             {previewLoading ? <span role="status" className="text-sm text-muted-foreground">正在读取记录…</span> : running ? <Tag className="m-0 px-2 py-1">等待 <GenerationElapsed startedAt={startedAt} /></Tag> : null}
                         </div>
                         {results.length ? (
@@ -774,7 +796,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
             </Drawer>
             <Drawer title="参数" placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={replacePrompt} />

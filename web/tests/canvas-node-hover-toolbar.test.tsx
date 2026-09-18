@@ -37,7 +37,7 @@ function toolbarHarness(theme: "light" | "dark" = "light") {
     };
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
-    const handlers = Object.fromEntries(["onKeep", "onLeave", "onInfo", "onEditText", "onDecreaseFont", "onIncreaseFont", "onToggleDialog", "onGenerateImage", "onUpload", "onDownload", "onSaveAsset", "onManualEdit", "onMaskEdit", "onCrop", "onSplit", "onUpscale", "onSuperResolve", "onAngle", "onViewImage", "onReversePrompt", "onRetry", "onToggleFreeResize", "onDelete"].map((name) => [name, (target?: CanvasNodeData) => calls.push({ name, node: target })]));
+    const handlers = Object.fromEntries(["onCompare", "onDesignTemplate", "onRestoreGeneration", "onKeep", "onLeave", "onInfo", "onEditText", "onDecreaseFont", "onIncreaseFont", "onToggleDialog", "onGenerateImage", "onUpload", "onDownload", "onSaveAsset", "onManualEdit", "onMaskEdit", "onCrop", "onSplit", "onUpscale", "onSuperResolve", "onAngle", "onViewImage", "onReversePrompt", "onRetry", "onToggleFreeResize", "onDelete"].map((name) => [name, (target?: CanvasNodeData) => calls.push({ name, node: target })]));
     const render = () => { index = 0; return module.exports.CanvasNodeHoverToolbar({ node, viewport: { x: 0, y: 0, k: 1 }, ...handlers }); };
     return { node, calls, render, exports: module.exports };
 }
@@ -71,7 +71,7 @@ describe("compact image toolbar", () => {
         const opened = elements(harness.render());
         expect(opened.find((element) => element.props.menu?.items)?.props.open).toBe(true);
         expect(opened.find((element) => Array.isArray(element.props.selectedIds))?.props.open).toBe(false);
-        const actions: Record<string, string> = { info: "onInfo", delete: "onDelete", retry: "onRetry", saveAsset: "onSaveAsset", maskEdit: "onMaskEdit", copyPrompt: "onCopyPrompt", reversePrompt: "onReversePrompt", replace: "onUpload", resize: "onToggleFreeResize", crop: "onCrop", split: "onSplit", upscale: "onUpscale", superResolve: "onSuperResolve", angle: "onAngle", view: "onViewImage" };
+        const actions: Record<string, string> = { compare: "onCompare", designTemplate: "onDesignTemplate", restoreGeneration: "onRestoreGeneration", info: "onInfo", delete: "onDelete", retry: "onRetry", saveAsset: "onSaveAsset", maskEdit: "onMaskEdit", copyPrompt: "onCopyPrompt", reversePrompt: "onReversePrompt", replace: "onUpload", resize: "onToggleFreeResize", crop: "onCrop", split: "onSplit", upscale: "onUpscale", superResolve: "onSuperResolve", angle: "onAngle", view: "onViewImage" };
         const items = dropdown.props.menu.items.flatMap((item: any) => item.children || [item]);
         for (const [id, handler] of Object.entries(actions)) {
             expect(items.some((item: any) => item.key === id)).toBe(true);

@@ -5,6 +5,7 @@ import { requestQueuedImageBatch, requestQueuedImages, type QueuedBatchItem } fr
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
+import { generationDraftInput } from "./generation-history";
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -47,6 +48,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         operationType: options?.operationType || "image_generation",
         tool: options?.tool,
         parameters: imageTaskParameters(config),
+        draft: generationDraftInput({ ...config, ...normalizeImageModelSettings(config, imageModelProfile(config.model || config.imageModel)) }, prompt),
         references,
         requestId: options?.requestId,
         signal: options?.signal,
@@ -78,6 +80,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         operationType: options?.operationType || "inpaint",
         tool: options?.tool,
         parameters: { ...imageTaskParameters(config), ...(transparent ? { background: "transparent", output_format: "png" } : {}) },
+        draft: { ...generationDraftInput({ ...config, ...normalizeImageModelSettings(config, profile) }, prompt), ...(mask ? { maskReferenceIndex: references.length } : {}) },
         references: [...references, ...(mask ? [mask] : [])],
         requestId: options?.requestId,
         signal: options?.signal,

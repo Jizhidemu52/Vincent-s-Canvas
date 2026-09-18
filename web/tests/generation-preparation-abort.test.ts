@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { requestQueuedImages } from "../src/services/api/generation-tasks";
 import { useUserStore } from "../src/stores/use-user-store";
@@ -9,6 +9,7 @@ const globals = globalThis as unknown as Record<string, unknown>;
 const originalWindow = globals.window;
 const originalFileReader = globals.FileReader;
 const originalUserState = useUserStore.getState();
+beforeEach(() => { useUserStore.setState({ user: { id: "employee-a", role: "designer", status: "active" } as never, status: "authenticated" }); });
 afterEach(() => {
     globalThis.fetch = originalFetch;
     globals.window = originalWindow;

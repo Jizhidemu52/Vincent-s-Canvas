@@ -36,6 +36,8 @@ export type CanvasStoredImageReference = {
 };
 
 export type CanvasNodeMetadata = {
+    sourceTaskId?: string;
+    systemPrompt?: string;
     originalFileName?: string;
     imageName?: string;
     imageVersion?: number;

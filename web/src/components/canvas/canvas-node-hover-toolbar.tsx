@@ -11,6 +11,9 @@ import { ImageToolSettingsModal, type ImageToolbarSettingsTool } from "./canvas-
 import { IMAGE_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, compactImageQuickToolIds, defaultImageQuickToolIds, readImageQuickToolsConfig, type ImageQuickToolId } from "./canvas-image-toolbar-tools";
 
 type CanvasNodeHoverToolbarProps = {
+    onCompare?: (node: CanvasNodeData) => void;
+    onDesignTemplate?: (node: CanvasNodeData) => void;
+    onRestoreGeneration?: (node: CanvasNodeData) => void;
     node: CanvasNodeData | null;
     viewport: ViewportTransform;
     onKeep: (nodeId: string) => void;
@@ -49,6 +52,9 @@ type ToolbarTool = {
 };
 
 export function CanvasNodeHoverToolbar({
+    onCompare,
+    onDesignTemplate,
+    onRestoreGeneration,
     node,
     viewport,
     onKeep,
@@ -150,7 +156,7 @@ export function CanvasNodeHoverToolbar({
         }
         copyText(prompt, "提示词已复制");
     };
-    const imageTools = buildImageToolbarTools(node, { onManualEdit, onUpload, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt });
+    const imageTools = buildImageToolbarTools(node, { onCompare, onDesignTemplate, onRestoreGeneration, onManualEdit, onUpload, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt });
 
     function openImageToolSettings() {
         onKeep(activeNode.id);

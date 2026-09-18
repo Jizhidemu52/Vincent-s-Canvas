@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>画布 · 网页参考图采集</title><link rel="stylesheet" href="collector.css"></head>
+<body><main><header><p class="eyebrow">CANVAS / REFERENCE COLLECTOR</p><h1>从灵感网页到素材库</h1><p>只扫描你打开的这一页，只发送你勾选的图片。到画布审核后再确认入库。</p></header>
+<section class="settings"><label for="origin">画布网站地址</label><input id="origin" type="url" placeholder="例如 http://192.168.1.115:5188" autocomplete="off"><p>本机与可信内网支持 HTTP，其他地址需要 HTTPS。地址不含账号、路径或凭据。</p><div class="toolbar"><button id="scan">扫描当前网页</button><button id="send" class="primary" disabled>授权并送到画布审核</button><button id="cancel" disabled>取消发送</button><button id="revoke">撤销已授予的站点权限</button></div></section>
+<p id="status" role="status" aria-live="polite">准备扫描。首次发送时 Chrome 会请求你勾选图片所在域名及画布域名的权限。</p><p class="hint">最多 20 张，单张 10 MiB，总计 30 MiB。只接受 PNG / JPEG / WebP / GIF 原字节；不采视频、内嵌 data/blob 图片、iframe 或隐藏接口。登录保护、防盗链、跳转链接可能无法读取，不会尝试绕过。</p><div id="images" class="grid"></div><p id="errors" role="alert"></p>
+</main><script type="module" src="collector.js"></script></body></html>

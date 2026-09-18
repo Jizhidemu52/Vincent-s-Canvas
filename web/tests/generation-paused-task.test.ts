@@ -14,6 +14,7 @@ afterEach(() => {
 });
 
 test.each([false, true])("an image task paused after interruption stops waiting without resubmission (initially processing: %s)", async (initiallyProcessing) => {
+    useUserStore.setState({ user: { id: "employee-a", role: "designer", status: "active" } as never, status: "authenticated" });
     const requests: Array<{ path: string; method: string }> = [];
     let polls = 0;
     let delays = 0;

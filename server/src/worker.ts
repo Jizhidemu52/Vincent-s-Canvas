@@ -386,10 +386,11 @@ async function executeWorkflow(
   const requestedResolution = String(
     task.parameters.resolution ?? "1k",
   ).toLowerCase();
+  const { inputArchive: _inputArchive, ...providerParameters } = task.parameters;
   const variables: Record<string, unknown> = {
     taskId: task.id,
     prompt: task.prompt,
-    ...task.parameters,
+    ...providerParameters,
     ...parsePromptVariables(task.prompt),
     count:
       Number.isInteger(requestedCount) &&
