@@ -2,6 +2,7 @@ import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { requestQueuedImageBatch, requestQueuedImages, type QueuedBatchItem } from "@/services/api/generation-tasks";
+import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 
@@ -139,7 +140,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
     const response = await fetch("/api/chat/responses", {
         method: "POST",
         credentials: "include",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...workspaceOwnerHeaders() },
         body: JSON.stringify({ modelId, input, tools, toolChoice, webSearch: options?.webSearch === true, ...(claude ? { claude } : {}) }),
         signal: options?.signal,
     });

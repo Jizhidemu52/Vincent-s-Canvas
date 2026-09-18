@@ -451,12 +451,7 @@ type DemoInternalAiConfig = {
   updatedAt: string | null;
 };
 const demoAssets = new Map<string, DemoAsset>();
-const features = deploymentFeatures({
-  OA_LOGIN_ENABLED: process.env.OA_LOGIN_ENABLED === "true" ? "true" : "false",
-  AUTH_ENABLED: process.env.LOCAL_STANDALONE === "true" || process.env.AUTH_ENABLED === "false" ? "false" : "true",
-  CREDITS_ENABLED: process.env.CREDITS_ENABLED === "false" ? "false" : "true",
-  ROLE_PORTALS_ENABLED: process.env.LOCAL_STANDALONE === "true" || process.env.ROLE_PORTALS_ENABLED === "false" ? "false" : "true",
-});
+const features = deploymentFeatures({ OA_LOGIN_ENABLED: process.env.OA_LOGIN_ENABLED === "true" ? "true" : "false" });
 const standaloneDemoUser = resolveStandaloneDemoUser(!features.authenticationEnabled);
 const standaloneMode = Boolean(standaloneDemoUser);
 const standaloneWebDirectory = process.env.STANDALONE_WEB_DIR?.trim() || "";
@@ -640,7 +635,7 @@ function publicDemoAssetResponse(asset: DemoAsset) {
   return new Response(Uint8Array.from(asset.bytes).buffer, {
     headers: {
       "content-type": asset.mimeType,
-      "cache-control": "private, max-age=60",
+      "cache-control": "private, no-store",
     },
   });
 }
@@ -710,7 +705,7 @@ Bun.serve({
       path.startsWith("/api/") && !path.startsWith("/api/admin/") && path !== "/api/models"
         ? redactDesignerModelData(body, demoModels, sessionUser(request)?.role) : body,
     ), { status, headers: { ...headers, ...extra } });
-    if (features.oaLoginEnabled && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+    if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
       const origin = request.headers.get("origin");
       if (origin && origin !== url.origin) return json({ message: "拒绝跨站写请求" }, 403);
     }
@@ -727,8 +722,13 @@ Bun.serve({
       return json({ status: "ok", mode: "local-demo" });
     if (path === "/api/deployment")
       return json(features, 200, { "cache-control": "no-store" });
-    if (features.oaLoginEnabled && (path === "/api/demo/accounts" || path.startsWith("/api/admin/") || path.startsWith("/api/auth/wecom/") || path === "/api/auth/login" || path === "/api/auth/change-password")) {
-      return json({ error: "LOGIN_METHOD_DISABLED", message: "当前仅支持从企业微信 OA 入口自动登录。" }, 403);
+    // The open demo has no administrator login: never expose built-in demo
+    // credentials or allow its shared designer identity to reach admin APIs.
+    if (path === "/api/demo/accounts" || path === "/api/auth/login" || path === "/api/auth/change-password" || path.startsWith("/api/auth/wecom/")) {
+      return json({ error: "LOGIN_METHOD_DISABLED", message: features.oaLoginEnabled ? "请从公司 OA 进入，无需另外扫码。" : "直接打开创作页面即可使用，无需登录。" }, 404);
+    }
+    if (path.startsWith("/api/admin/")) {
+      return json({ error: "FORBIDDEN", message: "本地演示服务不提供维护接口。" }, 403);
     }
     if (path === "/api/auth/oa/exchange" && request.method === "POST") {
       if (!oaStore) return json({ message: "OA 登录未启用" }, 404);
@@ -821,7 +821,7 @@ Bun.serve({
     const user = sessionUser(request);
     if (!user) return json({ error: "UNAUTHORIZED", message: "请先登录" }, 401);
 
-    if ((path === "/api/assets/upload-request" || /^\/api\/assets\/[^/]+\/content-upload$/.test(path)) && request.headers.has("x-canvas-owner-id") && request.headers.get("x-canvas-owner-id") !== user.id) {
+    if ((features.oaLoginEnabled || path === "/api/assets/upload-request" || /^\/api\/assets\/[^/]+\/content-upload$/.test(path)) && request.headers.has("x-canvas-owner-id") && request.headers.get("x-canvas-owner-id") !== user.id) {
       return json({ error: "CANVAS_OWNER_MISMATCH", message: "当前员工身份已变化，请重新打开画布后再试。" }, 403);
     }
 

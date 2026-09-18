@@ -1,8 +1,10 @@
 import { useMemo } from "react";
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
+import { deploymentFeatures } from "@/lib/deployment-features";
+import { createWorkspaceStorage } from "@/lib/workspace-storage";
 
 export type ApiCallFormat = "openai" | "gemini";
 
@@ -51,6 +53,7 @@ export type AiConfig = {
 };
 
 export const CONFIG_STORE_KEY = "wireless-canvas:ai_config_store";
+const employeeConfigStorage = deploymentFeatures.oaLoginEnabled ? createWorkspaceStorage("app_state") : null;
 export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
@@ -190,6 +193,14 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
+            ...(employeeConfigStorage ? {
+                skipHydration: !employeeConfigStorage.available,
+                storage: createJSONStorage(() => ({
+                    getItem: (key) => employeeConfigStorage.getItem<string>(key),
+                    setItem: async (key, value) => { if (employeeConfigStorage.isCurrent()) await employeeConfigStorage.setItem(key, value); },
+                    removeItem: async (key) => { if (employeeConfigStorage.isCurrent()) await employeeConfigStorage.removeItem(key); },
+                })),
+            } : {}),
             partialize: (state) => ({ config: stripClientProviderSecrets(state.config) }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;

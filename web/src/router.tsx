@@ -5,7 +5,6 @@ import UserLayout from "@/layouts/user-layout";
 import { AuthGate } from "@/components/auth/auth-gate";
 import { ModuleGate } from "@/components/auth/module-gate";
 import { standaloneEdition } from "@/lib/standalone-edition";
-import { deploymentFeatures } from "@/lib/deployment-features";
 import type { ModuleKey } from "@/services/api/modules";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
@@ -19,7 +18,6 @@ const CreativeScenePage = lazy(() => import("@/pages/creative/scene"));
 const ChangePasswordPage = lazy(() => import("@/pages/change-password"));
 const HomePage = lazy(() => import("@/pages/home"));
 const ImagePage = lazy(() => import("@/pages/image"));
-const LoginPage = lazy(() => import("@/pages/login"));
 const MyPromptsPage = lazy(() => import("@/pages/my-prompts"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const PromptsPage = lazy(() => import("@/pages/prompts"));
@@ -72,23 +70,18 @@ export const router = createBrowserRouter([
             { path: "/", element: protectedRoute(HomePage) },
             { path: "/creative", element: protectedRoute(CreativePage) },
             { path: "/creative/:presetId", element: protectedRoute(CreativeScenePage) },
-            ...(deploymentFeatures.authenticationEnabled && !deploymentFeatures.oaLoginEnabled ? [
-                { path: "/login", element: routeElement(LoginPage) },
-            ] : [{ path: "/login", element: <Navigate to="/" replace /> }]),
+            { path: "/login", element: <Navigate to="/" replace /> },
             { path: "/image", element: moduleRoute(ImagePage, imageModule) },
             { path: "/video", element: moduleRoute(VideoPage, "video") },
             { path: "/assets", element: moduleRoute(AssetsPage, "assets") },
             { path: "/team", element: moduleRoute(TeamPage, "team") },
             { path: "/prompts", element: moduleRoute(PromptsPage, "prompts") },
             { path: "/my-prompts", element: moduleRoute(MyPromptsPage, "prompts") },
-            ...(!standaloneEdition && !deploymentFeatures.oaLoginEnabled ? [
+            ...(!standaloneEdition ? [
                 { path: "/admin", element: protectedRoute(AdminPage, true) },
                 // Hiding role entrances must not lock operators out of maintenance.
                 { path: "/admin/login", element: routeElement(AdminLoginPage) },
-                { path: "/change-password", element: protectedRoute(ChangePasswordPage) },
-            ] : deploymentFeatures.oaLoginEnabled ? [
-                { path: "/admin/*", element: <Navigate to="/" replace /> },
-                { path: "/change-password", element: <Navigate to="/" replace /> },
+                { path: "/change-password", element: protectedRoute(ChangePasswordPage, true) },
             ] : []),
             { path: "/canvas", element: moduleRoute(CanvasPage, canvasModule) },
             { path: "/chat", element: moduleRoute(ChatPage, "gpt-chat") },

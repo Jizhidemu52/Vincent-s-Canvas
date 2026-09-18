@@ -23,7 +23,7 @@ function harness() {
   const deps = {
     demoState, demoAssets, demoTasks, DemoStorageError, decodeInlineImageResult,
     now: () => new Date().toISOString(), console: { error() {} },
-    demoAccounts: [{ user }], DemoVideoTerminalError,
+    demoAccounts: [{ user }], demoOwner: (id: string) => id === user.id ? user : undefined, DemoVideoTerminalError,
     internalAiConfig: { seamlessUrl: "http://seamless.invalid/generate", appKey: "test-only" },
     fetch: async (url: string) => {
       if (url === "http://seamless.invalid/generate") return Response.json({ data: { data: { list: ["https://result.invalid/temporary.png"] } } });

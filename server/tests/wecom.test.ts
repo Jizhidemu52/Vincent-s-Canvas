@@ -11,8 +11,8 @@ const config = {
 } as AppConfig;
 
 describe("WeCom identity integration", () => {
-    test("rejects partial configuration and non-HTTPS production callbacks", () => {
-        expect(() => loadConfig({ DATABASE_URL: "postgres://test", REDIS_URL: "redis://test", WECOM_CORP_ID: "ww-company" })).toThrow("must be configured together");
+    test("obsolete WeCom configuration does not block an open deployment", () => {
+        expect(() => loadConfig({ DATABASE_URL: "postgres://test", REDIS_URL: "redis://test", WECOM_CORP_ID: "ww-company" })).not.toThrow();
         expect(() => loadConfig({
             NODE_ENV: "production",
             DATABASE_URL: "postgres://test",
@@ -25,7 +25,7 @@ describe("WeCom identity integration", () => {
             WECOM_AGENT_ID: "1000002",
             WECOM_SECRET: "server-secret",
             WECOM_CALLBACK_URL: "http://canvas.company.test/api/auth/wecom/callback",
-        })).toThrow("must use HTTPS");
+        })).not.toThrow();
     });
 
     test("reports missing fields without exposing configured values", () => {

@@ -7,26 +7,30 @@ description: 使用 Docker Compose 部署完整业务平台
 
 根目录 Compose 会启动 Web、API、Worker、PostgreSQL、Redis、MinIO、初始化器和备份服务。
 
+根目录模板默认 `OA_LOGIN_ENABLED=true`，使用者从企业微信中的公司 OA 进入画布，不新增扫码。只有隔离本机试用才设为 false；公司服务器、正式 HTTPS、OA 凭证和公司网络白名单仍须 IT 联调验收。
+
 ## 启动
 
 ```bash
 cp .env.example .env
-# 编辑生产密码、加密密钥、对象存储和企业微信参数
-bun ops/preflight/production-preflight.ts --require-wecom
+# 编辑生产密码、加密密钥、对象存储和可信 OA 接口
+bun --env-file=.env ops/preflight/production-preflight.ts
 docker compose up -d --build
 docker compose ps
 ```
 
-只允许 HTTPS 网关访问 Web。不要把 `3100`、`5432`、`6379`、`9000` 或 `9001` 暴露到公网。
+只允许受控 HTTPS 网关访问 Web，公司网络限制同时覆盖网页、API 与媒体。不要把 `3100`、`5432`、`6379`、`9000` 或 `9001` 暴露到公网，也不要让外层 OA/网关日志保存带 token 的 URL 或 Referer。
 
 ## 数据归属
 
 | 服务 | 保存内容 |
 | --- | --- |
-| PostgreSQL | 用户、部门、权限、项目、账本、任务、历史、素材元数据、审计 |
+| PostgreSQL | 员工身份、员工画布文档、部门、权限、项目、账本、任务、历史、素材元数据、审计 |
 | Redis | Session、登录限流和任务队列 |
 | S3/MinIO | 原图、生成结果、视频、音频、文本和数据库备份 |
 | Worker | 从队列取任务，解密服务端 Provider 凭据并执行模型调用 |
+
+企业画布与原图确认云端同步后可由本人恢复，浏览器另保留员工缓存；独立聊天与创意草稿仍为员工分区的本地数据，不承诺全部云同步。旧账号和共用数据不自动迁移或公开。
 
 ## 健康检查与日志
 
@@ -37,4 +41,4 @@ docker compose logs --tail=200 api worker postgres redis minio backup
 
 ## 备份恢复
 
-备份容器定期把 PostgreSQL dump 写到对象存储。恢复前停止 API 和 Worker，再使用 `restore.sh` 恢复指定对象。完整命令、企业微信和 40 人验收步骤见 [生产部署与验收手册](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/production-deployment.md)。
+备份容器定期把 PostgreSQL dump 写到对象存储，原图对象也必须保留和备份。恢复前停止 API 和 Worker，再使用 `restore.sh` 恢复指定对象。完整命令、OA 和并发验收见 [生产部署与验收手册](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/production-deployment.md)。

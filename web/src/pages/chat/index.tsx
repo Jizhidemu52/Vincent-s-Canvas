@@ -166,7 +166,7 @@ export default function ChatPage() {
         setSessions([]);
         setDraft("");
         setAttachments([]);
-        void chatSessionStorage.load<ChatSession>(storageKey, () => localStorage.getItem(storageKey))
+        void chatSessionStorage.load<ChatSession>(storageKey, () => deploymentFeatures.oaLoginEnabled ? null : localStorage.getItem(storageKey))
             .then((stored) => {
                 if (cancelled) return;
                 const restored = stored.length ? stored : [createSession()];

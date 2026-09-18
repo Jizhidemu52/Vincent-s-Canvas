@@ -9,11 +9,10 @@ export type DeploymentFeatures = {
 
 export function normalizeDeploymentFeatures(value: Partial<DeploymentFeatures> = {}): DeploymentFeatures {
     const oaLoginEnabled = value.oaLoginEnabled === true;
-    const authenticationEnabled = oaLoginEnabled || value.authenticationEnabled !== false;
     return {
-        authenticationEnabled,
-        creditsEnabled: authenticationEnabled && value.creditsEnabled !== false,
-        rolePortalsEnabled: !oaLoginEnabled && value.rolePortalsEnabled !== false,
+        authenticationEnabled: oaLoginEnabled,
+        creditsEnabled: false,
+        rolePortalsEnabled: false,
         oaLoginEnabled,
     };
 }
@@ -22,16 +21,18 @@ export const deploymentFeatures = normalizeDeploymentFeatures(standaloneEdition
     ? { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false }
     : {});
 
-// The server is authoritative. No browser preference can turn off its authentication or billing.
+// The server selects OA employee access or local trial mode; billing and role portals stay hidden.
 export async function loadDeploymentFeatures() {
     if (standaloneEdition) return true;
     try {
         const response = await fetch("/api/deployment", { credentials: "include", cache: "no-store", referrerPolicy: "no-referrer", signal: AbortSignal.timeout(5000) });
         if (!response.ok) return false;
-        Object.assign(deploymentFeatures, normalizeDeploymentFeatures(await response.json()));
+        const value = await response.json();
+        if (!value || typeof value !== "object" || Object.keys(deploymentFeatures).some((key) => typeof value[key] !== "boolean")) return false;
+        Object.assign(deploymentFeatures, normalizeDeploymentFeatures(value));
         return true;
     } catch {
-        // Fail closed: preserve the authenticated defaults when the API is unavailable.
+        // The caller must stop startup when configuration cannot be verified.
         return false;
     }
 }

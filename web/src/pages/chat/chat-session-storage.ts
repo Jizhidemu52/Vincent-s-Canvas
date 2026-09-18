@@ -1,4 +1,5 @@
 import localforage from "localforage";
+import { createWorkspaceStorage } from "@/lib/workspace-storage";
 
 type ChatSessionStore = {
     getItem<T>(key: string): Promise<T | null>;
@@ -36,8 +37,6 @@ export function createChatSessionStorage(store: ChatSessionStore) {
     };
 }
 
-export const chatSessionStorage = createChatSessionStorage(localforage.createInstance({
-    name: "wireless-canvas",
-    storeName: "app_state",
+export const chatSessionStorage = createChatSessionStorage(createWorkspaceStorage("app_state", {
     driver: localforage.INDEXEDDB,
 }));

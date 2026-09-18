@@ -1,5 +1,3 @@
-export const OA_ENTRY_URL = "https://oa.in-choice.com.cn:82/";
-
 // Keep the credential only in the caller's memory, never router state or storage.
 // null means absent; an empty/duplicated token is still an explicit login attempt.
 export function consumeOaLoginToken(location: Pick<Location, "href">, history: Pick<History, "state" | "replaceState">): string | null {

@@ -85,7 +85,7 @@ app.use("/api/auth", createAuthRouter(db, cache, config));
 const requireSession = sessionMiddleware(db, cache, config);
 const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
 const protectModelIdentity = designerModelPrivacy(db);
-app.use("/api/canvas-documents", requireAdminSession, requireAccountReady, protectModelIdentity, createCanvasDocumentsRouter(db));
+app.use("/api/canvas-documents", requireSession, requireAccountReady, protectModelIdentity, createCanvasDocumentsRouter(db));
 app.use(
   "/api/billing",
   requireSession,

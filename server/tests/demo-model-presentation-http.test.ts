@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { demoAccounts } from "../src/demo-accounts";
 
 test("designer sees stable anonymous image names while UUID submission still calls the configured upstream model", async () => {
   const submissions: Array<Record<string, unknown>> = [];
@@ -22,12 +21,6 @@ test("designer sees stable anonymous image names while UUID submission still cal
   const request = (path: string, cookie = "", method = "GET", body?: unknown) => fetch(base + path, {
     method, headers: { cookie, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  const login = async (identifier: string) => {
-    const account = demoAccounts.find((item) => item.identifier === identifier)!;
-    const response = await request("/api/auth/login", "", "POST", { identifier, password: account.password, portal: account.portal });
-    expect(response.status).toBe(200);
-    return response.headers.get("set-cookie")!.split(";")[0]!;
-  };
   try {
     let ready = false;
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -36,8 +29,7 @@ test("designer sees stable anonymous image names while UUID submission still cal
       await Bun.sleep(50);
     }
     expect(ready).toBe(true);
-    const designerCookie = await login("designer01");
-    const adminCookie = await login("admin");
+    const designerCookie = "";
     const models = (await request("/api/models", designerCookie).then((response) => response.json())).models as Array<Record<string, any>>;
     const images = models.filter((model) => model.modelIdentityHidden);
     expect(images).toHaveLength(8);
@@ -49,23 +41,10 @@ test("designer sees stable anonymous image names while UUID submission still cal
       expect(JSON.stringify(model)).not.toMatch(/gpt|gemini|midjourney|apimart|opentoken/i);
     }
     expect([403, 404]).toContain((await request("/api/admin/model-configuration/models", designerCookie)).status);
-    const adminModels = (await request("/api/admin/model-configuration/models", adminCookie).then((response) => response.json())).models as Array<Record<string, any>>;
-    const original = adminModels.find((model) => model.modelId === "gpt-image-2.5-flare")!;
-    expect(original).toBeDefined();
-    const alias = images.find((model) => model.id === original.id)!;
-    expect(original.publicName).toBe(alias.name);
-    const configured = (await request("/api/models", adminCookie).then((response) => response.json())).models;
-    expect(configured.find((model: Record<string, unknown>) => model.id === original.id)).toMatchObject({ name: original.name, modelId: original.modelId, publicName: alias.name });
-
-    await request(`/api/admin/model-configuration/models/${original.id}`, adminCookie, "PATCH", { enabled: false, name: "Renamed secret model", publicNumber: 999, publicName: "spoof", id: "spoof" });
-    const disabled = (await request("/api/models", designerCookie).then((response) => response.json())).models;
-    expect(disabled.some((model: Record<string, unknown>) => model.id === original.id)).toBe(false);
-    for (const model of disabled.filter((model: Record<string, unknown>) => model.modelIdentityHidden)) {
-      expect(model.name).toBe(images.find((initial) => initial.id === model.id)!.name);
-    }
-    await request(`/api/admin/model-configuration/models/${original.id}`, adminCookie, "PATCH", { enabled: true });
-    const reenabled = (await request("/api/models", designerCookie).then((response) => response.json())).models;
-    expect(reenabled.find((model: Record<string, unknown>) => model.id === original.id)).toMatchObject({ name: alias.name, modelId: original.id });
+    const alias = images.find((model) => model.id === "40000000-0000-4000-8000-000000000107")!;
+    expect(alias).toBeDefined();
+    expect((await request("/api/auth/login", "", "POST", { identifier: "admin", password: "Canvas2026!#", portal: "admin" })).status).toBe(404);
+    expect((await request(`/api/admin/model-configuration/models/${alias.id}`, "", "PATCH", { enabled: false })).status).toBe(403);
 
     const generated = await request("/api/tasks", designerCookie, "POST", { requestId: crypto.randomUUID(), operationType: "image_generation", modelConfigId: alias.modelId, prompt: "anonymous model verification", parameters: {} });
     expect(generated.status).toBe(201);

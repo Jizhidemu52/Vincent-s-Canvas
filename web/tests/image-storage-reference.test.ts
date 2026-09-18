@@ -15,3 +15,8 @@ test("unpersisted reference data is kept as the resolver fallback", async () => 
     const original = "data:image/png;base64,b3JpZ2luYWw=";
     expect(await imageToDataUrl({ dataUrl: original }, async (_key, fallback = "") => fallback)).toBe(original);
 });
+
+test("URL-only references do not require a browser database", async () => {
+    const original = "data:image/png;base64,b3JpZ2luYWw=";
+    expect(await imageToDataUrl({ dataUrl: original })).toBe(original);
+});

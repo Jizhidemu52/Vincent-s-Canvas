@@ -44,7 +44,8 @@ type CanvasStore = {
 };
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
-const oaCanvasOwnerId = deploymentFeatures.oaLoginEnabled ? useUserStore.getState().user?.id || null : null;
+const initialUser = useUserStore.getState().user;
+const oaCanvasOwnerId = deploymentFeatures.oaLoginEnabled && initialUser?.role === "designer" ? initialUser.id : null;
 const CANVAS_STORE_KEY = deploymentFeatures.oaLoginEnabled
     ? `wireless-canvas:canvas_store:oa:user:${encodeURIComponent(oaCanvasOwnerId || "")}`
     : "wireless-canvas:canvas_store";
@@ -226,7 +227,7 @@ export const useCanvasStore = create<CanvasStore>()(
     ),
 );
 
-if (deploymentFeatures.oaLoginEnabled) {
+if (deploymentFeatures.oaLoginEnabled && oaCanvasOwnerId) {
     let restartingForOwner = false;
     useUserStore.subscribe((state) => {
         if (restartingForOwner || (state.user?.id || null) === oaCanvasOwnerId) return;

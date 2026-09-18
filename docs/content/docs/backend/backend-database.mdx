@@ -5,14 +5,14 @@ description: 正式数据存储边界、员工画布文档、任务恢复和身�
 
 # 数据库结构与迁移
 
-正式 API 和 Worker 使用 `server/src/migrations/` 中的 PostgreSQL 迁移，完整表结构以这些 SQL 为准。`server/src/demo-server.ts` 单独使用本机 SQLite 保存素材、任务、OA 身份与员工画布文档；其员工隔离和持久化测试不替代正式 PostgreSQL、额度账本及对象存储的生产验收。
+正式 API 和 Worker 使用 `server/src/migrations/` 中的 PostgreSQL 迁移，完整表结构以这些 SQL 为准。`server/src/demo-server.ts` 使用本机 SQLite 保存素材、任务，以及企业 OA 模式下的员工身份和云端画布。`OA_LOGIN_ENABLED=true` 复用 OA 员工身份，`false` 用于本机试用；两种模式关闭内部积分，不删除、合并或公开旧账号数据。
 
 | 存储 | 负责内容 |
 | --- | --- |
 | PostgreSQL | 用户、部门、项目、员工画布文档、任务、额度账本、历史、审计、Provider 配置与素材元数据 |
 | Redis | 会话、任务队列、限流和并发控制 |
 | S3 / MinIO | 上传文件及生成结果的文件内容 |
-| 浏览器 IndexedDB | OA 画布的员工分区缓存、待同步改动及媒体缓存；非 OA／standalone 画布仍以本地保存为主 |
+| 浏览器 IndexedDB | 企业画布的员工缓存、待同步改动和媒体；试用画布本地持久化；独立聊天与创意草稿仍为本地员工分区 |
 | 单机演示 SQLite | 演示服务的素材原文件、元数据、任务、OA 员工身份／会话及整张画布文档，不替代上述正式存储 |
 
 ## 单机演示数据
@@ -36,13 +36,15 @@ description: 正式数据存储边界、员工画布文档、任务恢复和身�
 
 设计师的模型列表只返回“出图模型N”和配置 UUID，不返回图片模型真实名称、上游 ID、渠道或含品牌的参数类型；管理员仍能查看真实配置及对应的 `publicName`。聊天、视频、音频不在本次匿名范围。正式服务升级前须执行该迁移。单机演示服务在启动时按完整真实图片目录分配编号（包含未启用项，不包含模拟占位模型），之后在进程内保持编号；其后台配置仍为原有内存配置，不新增配置持久化承诺。
 
-## OA 身份与会话
+## 企业 OA 身份与会话
 
-`022_oa_login.sql` 允许 `external_identities.provider='oa'`，`subject` 保存上游已校验的 `userid`；沿用 `(provider,subject)` 和 `(user_id,provider)` 唯一约束。`sessions.auth_provider` 为 `local` 或 `oa`，默认 `local`，OA 模式拒绝旧会话及管理员身份。正式服务启动前须应用迁移；当前局域网 SQLite 服务不运行 PostgreSQL 迁移。
+`022_oa_login.sql` 允许 `external_identities.provider='oa'`，`subject` 保存上游已校验的 `userid`；沿用 `(provider,subject)` 和 `(user_id,provider)` 唯一约束。`sessions.auth_provider` 为 `local` 或 `oa`，默认 `local`；企业普通创作拒绝旧非 OA 会话及管理员维护身份，生产管理员接口另保留独立密码认证与角色校验。正式服务启动前须应用迁移；当前局域网 SQLite 服务不运行 PostgreSQL 迁移。
 
 OA 登录请求向固定 HTTPS 用户信息接口发送 Bearer Token，仅使用返回的 `userid`、`name` 建立普通账号；不接受客户端声明的归属或角色。不存储上游 Token，旧记录不按姓名或首次登录自动转移给员工。
 
 ## 员工画布文档
+
+企业模式使用以下表与协议保存完整画布及原图引用；试用模式保持浏览器本地画布。只有已验证的当前员工能读取本人云端文档，独立聊天与创意草稿不在整张画布云同步范围。
 
 `023_canvas_documents.sql` 新增正式 PostgreSQL 表 `canvas_documents`：`owner_user_id uuid` 引用 `users(id)`，与 `external_id text` 组成联合主键；`revision bigint` 是安全整数范围内的正版本号，`deleted boolean`、`document jsonb` 与 `updated_at timestamptz` 记录完整内容或删除墓碑，并按员工与更新时间建立索引。约束要求未删除记录包含 JSON 对象，墓碑的文档为 `NULL`。单机演示在上述同一 SQLite 文件中使用 `demo_canvas_documents`，以 `document_json` 保存对应 JSON。
 
@@ -69,7 +71,7 @@ OA 员工模式的前端同步整张画布：节点位置与尺寸、连线、�
 
 `019_optional_access.sql` 为 `users` 新增 `is_guest boolean NOT NULL DEFAULT false`。数据库约束 `guest_is_unprivileged` 要求访客只能是 `designer`，不得有密码散列或首次改密要求。
 
-正式免登录模式仍为浏览器分配独立访客身份和会话，访客不是管理员，不能通过密码登录或企业微信绑定绕过限制。关闭免登录后，普通认证流程不接受访客会话。演示服务的固定身份不能用于验证这种隔离。
+完整后端在 `OA_LOGIN_ENABLED=false` 试用模式仍为浏览器分配独立访客身份和会话，访客不是管理员，不能通过密码登录或企业微信绑定绕过限制。开启企业 OA 模式后，普通创作不接受访客会话。演示服务的固定试用身份不能用于验证这种隔离。
 
 ## 更新和备份
 

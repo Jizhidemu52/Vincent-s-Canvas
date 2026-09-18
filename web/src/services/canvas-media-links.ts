@@ -1,6 +1,6 @@
-import localforage from "localforage";
+import { createWorkspaceStorage } from "@/lib/workspace-storage";
 
-const links = localforage.createInstance({ name: "wireless-canvas", storeName: "cloud_media_links" });
+const links = createWorkspaceStorage("cloud_media_links");
 export function serverMediaId(url: string) { return url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i)?.[1] || ""; }
 export async function rememberMediaSource(storageKey: string, url: string) {
     if (serverMediaId(url)) await links.setItem(`source:${storageKey}`, url);

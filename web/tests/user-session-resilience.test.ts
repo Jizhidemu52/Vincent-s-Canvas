@@ -21,7 +21,7 @@ function session() {
         return pending.promise;
     });
     const exports: any = {};
-    new Function("exports", "require", storeCode)(exports, (name: string) => name === "zustand" ? { create } : api);
+    new Function("exports", "require", storeCode)(exports, (name: string) => name === "zustand" ? { create } : name === "@/lib/workspace-session-events" ? { broadcastWorkspaceIdentity() {} } : api);
     const store = exports.useUserStore;
     return { requests, store, api, state: () => store.getState() };
 }

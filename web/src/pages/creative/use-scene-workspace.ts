@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import localforage from "localforage";
+import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 import { canvasImageDownloadFileName, canvasImageReferenceIdentity } from "@/lib/canvas/canvas-image-filename";
@@ -35,7 +35,7 @@ export type SceneLog = {
 };
 type SceneDraft = { form: SceneForm; images: SceneImages; config: SceneParameters; selection?: SceneSelection | null };
 
-const storage = localforage.createInstance({ name: "wireless-canvas", storeName: "creative_scene_workspaces" });
+const storage = createWorkspaceStorage("creative_scene_workspaces");
 const draftWrites = new Map<string, Promise<void>>();
 const slots: SceneSlotId[] = ["primary", "secondary"];
 const errorText = (error: unknown) => error instanceof Error ? error.message : "操作未完成，请重试";

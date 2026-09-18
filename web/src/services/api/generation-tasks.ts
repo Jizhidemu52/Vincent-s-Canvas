@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { createClientId } from "@/lib/client-id";
 import { uploadServerAsset } from "@/services/api/server-assets";
+import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { imageToDataUrl } from "@/services/image-storage";
 import { modelOptionName } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -40,7 +41,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(path, {
         ...init,
         credentials: "include",
-        headers: { "content-type": "application/json", ...init?.headers },
+        headers: { "content-type": "application/json", ...init?.headers, ...workspaceOwnerHeaders() },
     });
     if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { message?: string };
@@ -253,7 +254,7 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
 }
 
 export async function getQueuedTask(id: string, signal?: AbortSignal) {
-    const response = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { credentials: "include", signal });
+    const response = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { credentials: "include", signal, headers: workspaceOwnerHeaders() });
     if (response.status === 404) return null;
     if (!response.ok) {
         const body = await response.json().catch(() => ({})) as { message?: string };

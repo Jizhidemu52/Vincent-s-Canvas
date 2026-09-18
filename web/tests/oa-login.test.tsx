@@ -3,9 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 
 import { AuthGate } from "@/components/auth/auth-gate";
-import { OaEntryNotice } from "@/components/auth/oa-entry-notice";
 import { deploymentFeatures } from "@/lib/deployment-features";
-import { consumeOaLoginToken, OA_ENTRY_URL } from "@/lib/oa-login";
+import { consumeOaLoginToken } from "@/lib/oa-login";
 import { useUserStore } from "@/stores/use-user-store";
 
 const originalFetch = globalThis.fetch;
@@ -73,26 +72,21 @@ describe("OA token bootstrap", () => {
         expect(useUserStore.getState().user?.id).toBe("employee-17");
     });
 
-    test("missing or expired session presents OA guidance only", () => {
-        const html = renderToStaticMarkup(<OaEntryNotice />);
-        expect(html).toContain(OA_ENTRY_URL);
-        expect(html).toContain("请从企业微信 OA 入口打开");
-        expect(html).not.toMatch(/扫码|管理员登录|密码|token=/);
-    });
-
-    test("OA auth gate gives guests OA guidance instead of a legacy login redirect", () => {
+    test("enterprise sessions without identity request company OA re-entry without a QR or password page", () => {
         deploymentFeatures.oaLoginEnabled = true;
         useUserStore.setState({ user: null, status: "guest" });
         // React server rendering reads Zustand's initial snapshot, not current state.
         Object.assign(useUserStore.getInitialState(), useUserStore.getState());
         const html = renderToStaticMarkup(<MemoryRouter><AuthGate><p>工作区内容</p></AuthGate></MemoryRouter>);
-        expect(html).toContain("请从企业微信 OA 入口打开");
+        expect(html).toContain("请从公司 OA 重新进入");
+        expect(html).toContain("重新检查连接");
+        expect(html).not.toMatch(/扫码|密码|token=/);
         expect(html).not.toContain("工作区内容");
     });
 
-    test("OA users never get routed to password changes or allowed into admin content", () => {
+    test("OA employees can create without password changes but do not gain admin privileges", () => {
         deploymentFeatures.oaLoginEnabled = true;
-        useUserStore.setState({ user: { id: "oa-user", role: "super_admin", mustChangePassword: true } as never, status: "authenticated" });
+        useUserStore.setState({ user: { id: "visitor", role: "designer", mustChangePassword: true } as never, status: "authenticated" });
         Object.assign(useUserStore.getInitialState(), useUserStore.getState());
         const workspace = renderToStaticMarkup(<MemoryRouter><AuthGate><p>工作区内容</p></AuthGate></MemoryRouter>);
         expect(workspace).toContain("工作区内容");

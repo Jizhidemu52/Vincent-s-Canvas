@@ -196,7 +196,7 @@ openssl rand -base64 32
 
 对这台机器建议初始 `WORKER_CONCURRENCY=8`，后台单模型并发从 `2` 开始，依据真实供应商额度和实测逐步调整。不是因为有 12 核就必须开 12/40 并发；视频探测、上传和代理也需要资源。暂不添加未经压测的 PostgreSQL 内存参数或容器内存硬限制。
 
-保留：`NODE_ENV=production`、`TRUST_PROXY=true`、`TASK_MOCK_MODE=false`、`AUTH_ENABLED=true`。要关闭内部积分可设置 `CREDITS_ENABLED=false`，但真实 API 仍可能收费。不使用企业微信时将 `WECOM_CORP_ID`、`WECOM_AGENT_ID`、`WECOM_SECRET`、`WECOM_CALLBACK_URL` **全部清空**。
+保留：`NODE_ENV=production`、`TRUST_PROXY=true`、`TASK_MOCK_MODE=false`，企业部署设置 `OA_LOGIN_ENABLED=true`，复用“企业微信 → 公司 OA → 画布”的员工身份；内部积分和角色入口关闭。仅本机试用设 OA 为 false。画布不提供额外企业微信扫码，`WECOM_CORP_ID`、`WECOM_AGENT_ID`、`WECOM_SECRET`、`WECOM_CALLBACK_URL` **全部留空**。实际 OA 与公司网络限制见 [接入说明](oa-workspace-integration.md)，真实模型仍可能收费。
 
 创建本机 `docker-compose.override.yml`，不覆盖已有文件。默认采用同机 HTTPS 代理，并绑定不与常用 3000 冲突的 **127.0.0.1:3300**（仍应先查端口）：
 
@@ -273,7 +273,7 @@ sudo docker volume inspect wireless-canvas_postgres-data wireless-canvas_redis-d
 
 1. HTTPS 打开 `/admin/login`，用初始化账号登录并修改密码。
 2. 在「板块 API 配置」录入供应商协议、Base URL、API Key、模型能力和并发上限；密钥不进前端和仓库。
-3. 建立设计师账号及额度；上传一张测试图，再做一次有预算的真实生成、下载。
+3. 从公司 OA 以真实员工进入，不新增扫码或密码步骤；上传测试图，核验本人保存与员工隔离，再按授权预算做真实生成、下载。
 4. 提交任务 A 后继续提交 B，确认前端可以连续提交；模型达到并发上限时后端排队是正常的。
 5. 视频/音频引用素材需要外部可访问的受控 HTTPS 对象地址 `S3_PUBLIC_ENDPOINT`，不能让供应商访问 `http://minio:9000`，也不能把 Bucket 改成匿名公开。
 6. 旧 Windows 浏览器导出画布并下载素材，再在新环境导入；旧演示内存和浏览器数据不会因部署自动迁移。
@@ -291,7 +291,7 @@ sudo docker system df
 
 数据库备份默认每 15 分钟保存到 MinIO，保留 30 天。**14 TB 很大，但同一数据盘上的备份不能防整盘故障**：数据库备份、素材对象及必要版本、Provider 加密密钥必须有独立副本，浏览器画布另行导出。以上只查用量，不执行 `prune` 或 `down -v`。
 
-验收应覆盖：HTTPS 重新登录、上传/下载、真实任务、并发任务、账号隔离、备份可读，以及安排维护窗口验证机器重启后的挂载和服务恢复。所有卷落在预期数据盘、异机副本可恢复前，不算部署完成。
+验收应覆盖：真实 OA 员工身份、画布/原图与任务隔离、敏感管理保护、上传/下载、并发任务和联合备份；画布确认已同步后关闭重开、换设备与服务器重启可恢复。独立聊天与创意草稿仍是员工本地数据，不承诺全部云同步。IT 需确认服务器位置、公司出口 IP/网段并限制网页、API、媒体及后端端口，再从公司外验证拒绝访问。真实联调、所有卷和异机恢复未完成前，不算部署完成。
 
 升级先等待任务结束、导出画布、备份并记录 Git 提交，审阅本地 override/Nginx 改动，然后 `git pull --ff-only` 和 `dc up -d --build`。不自动升级 Docker/系统，不随意更换项目名，不覆盖密钥。更详尽的恢复和回滚约束见 [生产部署与验收](production-deployment.md#7-备份与恢复)。
 

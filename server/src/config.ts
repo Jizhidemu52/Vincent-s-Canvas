@@ -8,11 +8,11 @@ const schema = z.object({
     SESSION_COOKIE_NAME: z.string().min(1).default("wireless_canvas_session"),
     SESSION_TTL_SECONDS: z.coerce.number().int().min(900).max(604800).default(28800),
     TRUST_PROXY: z.enum(["true", "false"]).default("false"),
-    AUTH_ENABLED: z.enum(["true", "false"]).default("true"),
+    AUTH_ENABLED: z.enum(["true", "false"]).default("false"),
     OA_LOGIN_ENABLED: z.enum(["true", "false"]).default("false"),
     OA_USERINFO_URL: z.string().url().default("https://oa.in-choice.com.cn:82/api/api/organization/user/info_login"),
-    CREDITS_ENABLED: z.enum(["true", "false"]).default("true"),
-    ROLE_PORTALS_ENABLED: z.enum(["true", "false"]).default("true"),
+    CREDITS_ENABLED: z.enum(["true", "false"]).default("false"),
+    ROLE_PORTALS_ENABLED: z.enum(["true", "false"]).default("false"),
     BOOTSTRAP_ADMIN_USERNAME: z.string().min(1).optional(),
     BOOTSTRAP_ADMIN_DISPLAY_NAME: z.string().min(1).default("超级管理员"),
     BOOTSTRAP_ADMIN_PASSWORD: z.string().min(12).optional(),
@@ -36,12 +36,11 @@ export type AppConfig = z.infer<typeof schema>;
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
     const config = schema.parse(env);
-    const weComValues = [config.WECOM_CORP_ID, config.WECOM_AGENT_ID, config.WECOM_SECRET, config.WECOM_CALLBACK_URL].filter(Boolean);
-    if (weComValues.length > 0 && weComValues.length < 4) {
-        throw new Error("WECOM_CORP_ID, WECOM_AGENT_ID, WECOM_SECRET and WECOM_CALLBACK_URL must be configured together");
-    }
-    if (config.NODE_ENV === "production" && config.WECOM_CALLBACK_URL && new URL(config.WECOM_CALLBACK_URL).protocol !== "https:") {
-        throw new Error("WECOM_CALLBACK_URL must use HTTPS in production");
+    if (config.OA_LOGIN_ENABLED === "true") {
+        const endpoint = new URL(config.OA_USERINFO_URL);
+        if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) {
+            throw new Error("OA_USERINFO_URL must use HTTPS without embedded credentials");
+        }
     }
     if (config.NODE_ENV === "production" && (!config.PROVIDER_ENCRYPTION_KEY || Buffer.from(config.PROVIDER_ENCRYPTION_KEY, "base64").length !== 32)) {
         throw new Error("PROVIDER_ENCRYPTION_KEY must be a base64-encoded 32-byte key in production");

@@ -60,6 +60,83 @@ test("document size is capped and owner must exactly match the current session",
 });
 
 const actor = (id: string) => ({ id, role: "designer", departmentId: null, groupRole: null, groupId: null }) as SessionUser;
+
+test("upload project association requires ownership or explicit membership before any asset is created", async () => {
+    const foreignProject = "11111111-1111-4111-8111-111111111111";
+    const ownProject = "22222222-2222-4222-8222-222222222222";
+    const writes: unknown[][] = [];
+    const db = { query: async (sql: string, params: unknown[] = []) => {
+        if (sql.includes("FROM projects")) {
+            expect(sql).toContain("owner_user_id=$2");
+            expect(sql).toContain("project_members");
+            expect(params[1]).toBe("employee-a");
+            return { rows: params[0] === ownProject ? [{ id: ownProject }] : [] };
+        }
+        if (sql.startsWith("INSERT INTO assets")) writes.push(params);
+        return { rows: [] };
+    } } as unknown as Database;
+    const app = express().use(express.json());
+    app.use((req, _res, next) => { (req as AuthenticatedRequest).auth = actor("employee-a"); next(); });
+    app.use("/assets", createAssetsRouter(db, { configured: true } as ObjectStorage));
+    await serve(app, async origin => {
+        const upload = (projectId: string) => fetch(`${origin}/assets/upload-request`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filename: "original.png", mimeType: "image/png", byteSize: 4, projectId }) });
+        expect((await upload(foreignProject)).status).toBe(403);
+        expect(writes).toHaveLength(0);
+        expect((await upload(ownProject)).status).toBe(201);
+        expect(writes).toHaveLength(1);
+        expect(writes[0]?.[1]).toBe("employee-a");
+        expect(writes[0]?.[3]).toBe(ownProject);
+    });
+});
+
+test("formal original-media HTTP keeps bytes unchanged and rejects another employee before storage reads or writes", async () => {
+    const records = new Map<string, { owner: string; object_key: string; mime_type: string; byte_size: number; filename: string; ready: boolean }>();
+    const objects = new Map<string, Uint8Array>();
+    let storageReads = 0;
+    const db = { query: async (sql: string, values: any[] = []) => {
+        if (sql.startsWith("INSERT INTO assets")) {
+            records.set(values[0], { owner: values[1], object_key: values[4], filename: values[5], mime_type: values[6], byte_size: values[7], ready: false });
+            return { rows: [] };
+        }
+        const record = records.get(values[0]);
+        if (sql.startsWith("UPDATE assets SET status='ready'")) { if (record) record.ready = true; return { rows: [] }; }
+        if (sql.includes("status='pending'")) {
+            expect(sql).toContain("owner_user_id=$2");
+            return { rows: record && !record.ready && record.owner === values[1] ? [record] : [] };
+        }
+        if (sql.includes("FROM assets a")) {
+            expect(sql).toContain("a.owner_user_id=$2");
+            expect(sql).toContain("a.status='ready'");
+            return { rows: record?.ready && record.owner === values[1] ? [record] : [] };
+        }
+        throw new Error("Unexpected SQL in original-media test");
+    } } as unknown as Database;
+    const storage = {
+        configured: true,
+        put: async (key: string, bytes: Uint8Array) => { objects.set(key, new Uint8Array(bytes)); },
+        get: async (key: string) => { storageReads++; const bytes = objects.get(key)!; return { ContentLength: bytes.byteLength, Body: { transformToByteArray: async () => bytes } }; },
+    } as unknown as ObjectStorage;
+    const app = express().use(express.json());
+    app.use((req, _res, next) => { (req as AuthenticatedRequest).auth = actor(req.get("test-actor") || "employee-a"); next(); });
+    app.use("/assets", createAssetsRouter(db, storage));
+    await serve(app, async origin => {
+        const original = new Uint8Array([137, 80, 78, 71, 0, 255, 1, 2, 3]);
+        const reserved = await fetch(`${origin}/assets/upload-request`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filename: "原图.png", mimeType: "image/png", byteSize: original.byteLength }) });
+        const { assetId: id } = await reserved.json();
+        const upload = (employee: string) => fetch(`${origin}/assets/${id}/upload`, { method: "PUT", headers: { "content-type": "image/png", "test-actor": employee }, body: original });
+        expect((await upload("employee-b")).status).toBe(404);
+        expect(objects.size).toBe(0);
+        expect((await upload("employee-a")).status).toBe(204);
+        const foreign = await fetch(`${origin}/assets/${id}/content`, { headers: { "test-actor": "employee-b" } });
+        expect(foreign.status).toBe(404);
+        expect(storageReads).toBe(0);
+        const own = await fetch(`${origin}/assets/${id}/content`);
+        expect(own.status).toBe(200);
+        expect(own.headers.get("cache-control")).toContain("no-store");
+        expect(await own.bytes()).toEqual(original);
+        expect([...objects.keys()][0]).toStartWith("users/employee-a/");
+    });
+});
 async function serve(app: express.Express, run: (origin: string) => Promise<void>) {
     const server = app.listen(0, "127.0.0.1");
     await new Promise<void>(resolve => server.once("listening", resolve));

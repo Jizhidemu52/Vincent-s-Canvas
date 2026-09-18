@@ -1,3 +1,5 @@
+import { OA_USERINFO_URL } from "./oa";
+
 export type ReadinessCheck = { key: string; level: "pass" | "warning" | "error"; message: string };
 
 type Options = { requireWeCom?: boolean; allowMockMode?: boolean; bootstrapAdminVerified?: boolean };
@@ -8,7 +10,6 @@ const required = [
     "PROVIDER_ENCRYPTION_KEY", "WORKER_CONCURRENCY", "TASK_MOCK_MODE",
     "S3_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY",
 ] as const;
-const weComFields = ["WECOM_CORP_ID", "WECOM_AGENT_ID", "WECOM_SECRET", "WECOM_CALLBACK_URL"] as const;
 
 export function validateProductionEnvironment(env: Record<string, string | undefined>, options: Options = {}) {
     const checks: ReadinessCheck[] = [];
@@ -40,25 +41,20 @@ export function validateProductionEnvironment(env: Record<string, string | undef
     if (present("PROVIDER_ENCRYPTION_KEY")) validateBase64Key(env, "PROVIDER_ENCRYPTION_KEY", add);
     if (present("S3_ENDPOINT")) validateUrl(env, "S3_ENDPOINT", false, add);
 
-    const configuredWeCom = weComFields.filter((key) => Boolean(env[key]?.trim()));
-    if (configuredWeCom.length === 0 && options.requireWeCom) {
-        add("WECOM", "error", "要求企业微信登录，但四项企业微信配置均为空");
-    } else if (configuredWeCom.length > 0 && configuredWeCom.length < weComFields.length) {
-        add("WECOM", "error", `企业微信配置不完整，缺少 ${weComFields.filter((key) => !env[key]?.trim()).join("、")}；暂不启用时请把四项全部清空，包括 WECOM_CALLBACK_URL`);
-    } else if (configuredWeCom.length === weComFields.length) {
-        for (const key of weComFields) {
-            if (!present(key)) add(key, "error", `${key} 不能使用示例占位值`);
-        }
-        validateUrl(env, "WECOM_CALLBACK_URL", true, add);
+    if (env.OA_LOGIN_ENABLED === "true") {
+        let valid = false;
         try {
-            const callback = new URL(env.WECOM_CALLBACK_URL!);
-            if (callback.hostname === "example.com" || callback.hostname.endsWith(".example.com")) {
-                add("WECOM_CALLBACK_URL", "error", "企业微信回调仍使用 example.com 示例域名，必须替换为公司实际 HTTPS 域名");
-            }
-            add("WECOM_CALLBACK_PATH", callback.pathname === "/api/auth/wecom/callback" ? "pass" : "error", callback.pathname === "/api/auth/wecom/callback" ? "企业微信回调路径正确" : "企业微信回调路径必须为 /api/auth/wecom/callback");
-        } catch { /* URL check already reports the error. */ }
+            const endpoint = new URL(env.OA_USERINFO_URL ?? OA_USERINFO_URL);
+            valid = endpoint.protocol === "https:" && !endpoint.username && !endpoint.password;
+        } catch { /* Report a configuration error without echoing credentials. */ }
+        add("OA_USERINFO_URL", valid ? "pass" : "error", valid ? "OA 身份接口使用 HTTPS，仍须完成公司联调" : "OA_USERINFO_URL 必须是无内嵌凭据的可信 HTTPS 地址");
+        add("COMPANY_NETWORK", "warning", "公司外访问限制须由 IT 网关/防火墙覆盖网页、API、媒体及后端端口，并从公司外实际验收");
+    }
+
+    if (options.requireWeCom) {
+        add("WECOM", "error", "本版复用公司 OA，不提供独立扫码；请配置 OA_LOGIN_ENABLED");
     } else {
-        add("WECOM", "warning", "企业微信未启用，账号密码登录仍可使用");
+        add("WECOM", "pass", "画布不提供独立企业微信扫码，忽略旧扫码配置");
     }
 
     if (present("BOOTSTRAP_ADMIN_PASSWORD")) {

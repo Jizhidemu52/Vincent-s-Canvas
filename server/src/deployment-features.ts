@@ -1,13 +1,13 @@
 import type { AppConfig } from "./config";
 
-export function deploymentFeatures(config: Pick<AppConfig, "AUTH_ENABLED" | "CREDITS_ENABLED" | "ROLE_PORTALS_ENABLED"> & Partial<Pick<AppConfig, "OA_LOGIN_ENABLED">>) {
-    const oaLoginEnabled = config.OA_LOGIN_ENABLED === "true";
-    const authenticationEnabled = oaLoginEnabled || config.AUTH_ENABLED !== "false";
+export function deploymentFeatures(config?: Partial<Pick<AppConfig, "AUTH_ENABLED" | "CREDITS_ENABLED" | "ROLE_PORTALS_ENABLED" | "OA_LOGIN_ENABLED">>) {
+    // Employee workspaces opt in to trusted OA sessions. The separate local
+    // trial stays open; legacy password/billing flags never change either mode.
+    const oaLoginEnabled = config?.OA_LOGIN_ENABLED === "true";
     return {
         oaLoginEnabled,
-        authenticationEnabled,
-        // Anonymous identities cannot provide enforceable per-person quotas.
-        creditsEnabled: authenticationEnabled && config.CREDITS_ENABLED !== "false",
-        rolePortalsEnabled: !oaLoginEnabled && config.ROLE_PORTALS_ENABLED !== "false",
+        authenticationEnabled: oaLoginEnabled,
+        creditsEnabled: false,
+        rolePortalsEnabled: false,
     };
 }

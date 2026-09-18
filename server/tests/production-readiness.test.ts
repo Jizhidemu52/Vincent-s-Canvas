@@ -30,23 +30,34 @@ const ready = {
 };
 
 describe("production readiness", () => {
+    test("enterprise OA requires a trusted HTTPS identity endpoint without embedded credentials", () => {
+        for (const endpoint of ["http://oa.company.test/user", "https://name:password@oa.company.test/user", "invalid"]) {
+            const env = { ...ready, OA_LOGIN_ENABLED: "true", OA_USERINFO_URL: endpoint };
+            expect(validateProductionEnvironment(env).some(check => check.key === "OA_USERINFO_URL" && check.level === "error")).toBe(true);
+            expect(() => loadConfig({ ...env, DATABASE_URL: "postgres://localhost/test", REDIS_URL: "redis://localhost" })).toThrow();
+        }
+        const env = { ...ready, OA_LOGIN_ENABLED: "true", OA_USERINFO_URL: "https://oa.company.test/user" };
+        expect(validateProductionEnvironment(env).filter(check => check.level === "error")).toEqual([]);
+        expect(() => loadConfig({ ...env, DATABASE_URL: "postgres://localhost/test", REDIS_URL: "redis://localhost" })).not.toThrow();
+    });
     test("accepts a complete production environment without printing secret values", () => {
-        const checks = validateProductionEnvironment(ready, { requireWeCom: true });
+        const checks = validateProductionEnvironment(ready);
         expect(checks.filter((check) => check.level === "error")).toEqual([]);
         expect(JSON.stringify(checks)).not.toContain(ready.POSTGRES_PASSWORD);
         expect(JSON.stringify(checks)).not.toContain(ready.WECOM_SECRET);
     });
 
-    test("rejects placeholders, mock mode and partial WeCom configuration", () => {
+    test("rejects placeholders, mock mode and a request for retired standalone WeCom login", () => {
         const checks = validateProductionEnvironment({ ...ready, POSTGRES_PASSWORD: "replace-with-password", TASK_MOCK_MODE: "true", WECOM_SECRET: "" }, { requireWeCom: true });
         expect(checks.some((check) => check.level === "error" && check.key === "POSTGRES_PASSWORD")).toBe(true);
         expect(checks.some((check) => check.level === "error" && check.key === "TASK_MOCK_MODE")).toBe(true);
         expect(checks.some((check) => check.level === "error" && check.key === "WECOM")).toBe(true);
     });
 
-    test("requires the exact HTTPS WeCom callback path", () => {
-        const checks = validateProductionEnvironment({ ...ready, WECOM_CALLBACK_URL: "https://canvas.company.test/wrong" }, { requireWeCom: true });
-        expect(checks.some((check) => check.level === "error" && check.key === "WECOM_CALLBACK_PATH")).toBe(true);
+    test("rejects --require-wecom even with complete credentials because the QR routes are retired", () => {
+        const checks = validateProductionEnvironment(ready, { requireWeCom: true });
+        expect(checks.find((check) => check.key === "WECOM")).toEqual({ key: "WECOM", level: "error", message: "本版复用公司 OA，不提供独立扫码；请配置 OA_LOGIN_ENABLED" });
+        expect(checks.some((check) => check.key.startsWith("WECOM_"))).toBe(false);
     });
 
     test("still requires a strong initial password before the first administrator is verified", () => {
@@ -106,22 +117,22 @@ describe("production readiness", () => {
         }
     }, 15_000);
 
-    test("supports password-only deployment when all four WeCom fields are cleared", () => {
+    test("supports open deployment when all four retired WeCom fields are cleared", () => {
         const env = { ...ready, WECOM_CORP_ID: "", WECOM_AGENT_ID: "", WECOM_SECRET: "", WECOM_CALLBACK_URL: "" };
         expect(validateProductionEnvironment(env).filter((check) => check.level === "error")).toEqual([]);
         expect(validateProductionEnvironment(env, { requireWeCom: true }).some((check) => check.level === "error" && check.key === "WECOM")).toBe(true);
         expect(() => loadConfig({ ...env, DATABASE_URL: "postgres://localhost/test", REDIS_URL: "redis://localhost" })).not.toThrow();
     });
 
-    test("rejects the template callback when other WeCom fields remain empty", () => {
+    test("ignores the retired callback configuration in an open deployment", () => {
         const env = { ...ready, WECOM_CORP_ID: "", WECOM_AGENT_ID: "", WECOM_SECRET: "", WECOM_CALLBACK_URL: "https://canvas.example.com/api/auth/wecom/callback" };
-        expect(validateProductionEnvironment(env).some((check) => check.level === "error" && check.key === "WECOM")).toBe(true);
-        expect(() => loadConfig({ ...env, DATABASE_URL: "postgres://localhost/test", REDIS_URL: "redis://localhost" })).toThrow();
+        expect(validateProductionEnvironment(env).filter((check) => check.level === "error")).toEqual([]);
+        expect(() => loadConfig({ ...env, DATABASE_URL: "postgres://localhost/test", REDIS_URL: "redis://localhost" })).not.toThrow();
     });
 
-    test("does not mark the template WeCom domain or Secret placeholder as production-ready", () => {
-        const checks = validateProductionEnvironment({ ...ready, WECOM_SECRET: "replace-with-wecom-secret", WECOM_CALLBACK_URL: "https://canvas.example.com/api/auth/wecom/callback" });
-        expect(checks.some((check) => check.level === "error" && check.key === "WECOM_SECRET")).toBe(true);
-        expect(checks.some((check) => check.level === "error" && check.key === "WECOM_CALLBACK_URL")).toBe(true);
+    test("does not validate retired WeCom configuration as an available login method", () => {
+        const checks = validateProductionEnvironment({ ...ready, WECOM_SECRET: "replace-with-wecom-secret", WECOM_CALLBACK_URL: "https://canvas.example.com/api/auth/wecom/callback" }, { requireWeCom: true });
+        expect(checks.some((check) => check.level === "error" && check.key === "WECOM")).toBe(true);
+        expect(checks.some((check) => check.key.startsWith("WECOM_"))).toBe(false);
     });
 });

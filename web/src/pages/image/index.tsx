@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPa
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { Link, useSearchParams } from "react-router-dom";
-import localforage from "localforage";
+import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { saveAs } from "file-saver";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
@@ -93,8 +93,8 @@ import { normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-m
 
 const LOG_STORE_KEY = "wireless-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
-const logStore = localforage.createInstance({ name: "wireless-canvas", storeName: "image_generation_logs" });
-const creativeLogStore = localforage.createInstance({ name: "wireless-canvas", storeName: "creative_generation_logs" });
+const logStore = createWorkspaceStorage("image_generation_logs");
+const creativeLogStore = createWorkspaceStorage("creative_generation_logs");
 
 type GenerationToolMode = Exclude<AdminToolMode, "gpt-chat" | "batch-image-edit" | "seamless-stitch">;
 
@@ -708,7 +708,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
                             <div className="mb-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <span>{!deploymentFeatures.creditsEnabled ? "不计积分" : `预计消耗 ${estimatedUsage.credits} 积分`}</span>
-                                    <span>{!deploymentFeatures.authenticationEnabled ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
+                                    <span>{deploymentFeatures.oaLoginEnabled ? "公司工作区" : "本机试用"}</span>
                                 </div>
                                 {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{toolModeConfig.title}需要先添加至少一张参考图。</div> : null}
                                 {!referenceValidation.valid ? <div className="mt-1 text-red-500">{referenceValidation.message}</div> : null}

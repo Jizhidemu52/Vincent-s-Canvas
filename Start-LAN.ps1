@@ -1,3 +1,5 @@
+param([switch]$CompanyOa)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -59,9 +61,9 @@ if ($null -ne $listener) {
 }
 else {
     $env:LOCAL_STANDALONE = "false"
-    # OA verifies the employee before creation; password and QR entry points are disabled.
-    $env:OA_LOGIN_ENABLED = "true"
-    $env:AUTH_ENABLED = "true"
+    # The default remains a local trial. CompanyOa requires an existing trusted OA entry.
+    $env:OA_LOGIN_ENABLED = if ($CompanyOa) { "true" } else { "false" }
+    $env:AUTH_ENABLED = "false"
     $env:CREDITS_ENABLED = "false"
     $env:ROLE_PORTALS_ENABLED = "false"
     $env:STANDALONE_WEB_DIR = $webRoot
@@ -97,7 +99,11 @@ try {
     $deploymentReader = New-Object System.IO.StreamReader($deploymentResponse.GetResponseStream())
     try { $deployment = $deploymentReader.ReadToEnd() | ConvertFrom-Json } finally { $deploymentReader.Dispose() }
 } finally { $deploymentResponse.Close() }
-if (!(($deployment.PSObject.Properties.Name -contains 'oaLoginEnabled') -and $deployment.oaLoginEnabled) -or !$deployment.authenticationEnabled -or $deployment.creditsEnabled -or $deployment.rolePortalsEnabled) {
-    throw "LAN mode requires OA token login (OA_LOGIN_ENABLED=true, AUTH_ENABLED=true, CREDITS_ENABLED=false, ROLE_PORTALS_ENABLED=false). After active tasks finish, stop the old service and run Start-LAN.bat again."
+if (($deployment.oaLoginEnabled -ne [bool]$CompanyOa) -or ($deployment.authenticationEnabled -ne [bool]$CompanyOa) -or $deployment.creditsEnabled -or $deployment.rolePortalsEnabled) {
+    throw "The running service uses a different access mode. After active tasks finish, stop that service and start again with the intended CompanyOa option."
 }
-Write-Output "LAN trial is ready: http://${address}:$port/"
+if ($CompanyOa) {
+    Write-Output "Company OA pilot is ready at http://${address}:$port/. Enter through the company OA. IT must configure HTTPS and company-only network access before rollout."
+} else {
+    Write-Output "LAN trial is ready: http://${address}:$port/"
+}

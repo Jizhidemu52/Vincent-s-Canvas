@@ -849,9 +849,20 @@ function WirelessCanvasPage() {
     );
 
     useEffect(() => {
-        const flushProjectSave = () => projectSaveQueueRef.current?.flush();
+        const flushProjectSave = () => {
+            projectSaveQueueRef.current?.flush();
+            // The editor queue feeds the store queue. Flush both in this order so
+            // the final edit does not wait for a debounce after the page closes.
+            void flushCanvasPersistence().catch(() => undefined);
+        };
+        const onVisibility = () => { if (document.visibilityState === "hidden") flushProjectSave(); };
         window.addEventListener("pagehide", flushProjectSave);
-        return () => window.removeEventListener("pagehide", flushProjectSave);
+        document.addEventListener("visibilitychange", onVisibility);
+        return () => {
+            window.removeEventListener("pagehide", flushProjectSave);
+            document.removeEventListener("visibilitychange", onVisibility);
+            flushProjectSave();
+        };
     }, []);
 
     useEffect(() => {

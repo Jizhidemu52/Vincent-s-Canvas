@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DemoOaStore } from "../src/demo-oa-store";
 import { DemoStateStore } from "../src/demo-state-store";
 
-test("OA HTTP exchange isolates employees, denies legacy logins and invalid replacements, preserves ownership across restart", async () => {
+test("local trial preserves private employee data and completes anonymous generation across restart", async () => {
   const directory = mkdtempSync(join(tmpdir(), "canvas-oa-http-"));
   const statePath = join(directory, "state.sqlite");
   const seed = new DemoOaStore(statePath);
@@ -31,7 +31,7 @@ test("OA HTTP exchange isolates employees, denies legacy logins and invalid repl
   } });
   const start = () => Bun.spawn([process.execPath, "--preload", "./tests/fixtures/oa-preload.ts", "src/demo-server.ts"], {
     cwd: join(import.meta.dir, ".."), stdout: "ignore", stderr: "pipe",
-    env: { ...process.env, DEMO_STATE_PATH: statePath, DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1", OA_LOGIN_ENABLED: "true", OA_USERINFO_URL: "https://oa.test/user", AUTH_ENABLED: "false", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "false", STANDALONE_WEB_DIR: "", OPENTOKEN_BASE_URL: `http://127.0.0.1:${provider.port}/v1`, OPENTOKEN_API_KEY: "test-only", APIMART_API_KEY: "", GPT_IMAGE_2_API_KEY: "" },
+    env: { ...process.env, DEMO_STATE_PATH: statePath, DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1", OA_LOGIN_ENABLED: "false", OA_USERINFO_URL: "https://oa.test/user", AUTH_ENABLED: "false", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "false", STANDALONE_WEB_DIR: "", OPENTOKEN_BASE_URL: `http://127.0.0.1:${provider.port}/v1`, OPENTOKEN_API_KEY: "test-only", APIMART_API_KEY: "", GPT_IMAGE_2_API_KEY: "" },
   });
   let processHandle = start();
   const ready = async () => {
@@ -49,50 +49,36 @@ test("OA HTTP exchange isolates employees, denies legacy logins and invalid repl
   };
   try {
     await ready();
-    expect(await request("/api/deployment").then(r => r.json())).toMatchObject({ oaLoginEnabled: true, authenticationEnabled: true, rolePortalsEnabled: false });
-    expect((await request("/api/tasks")).status).toBe(401);
-    for (const path of ["/api/demo/accounts", "/api/auth/wecom/start", "/api/admin/accounts"]) expect((await request(path)).status).toBe(403);
-    expect((await request("/api/auth/login", "", { method: "POST", body: "{}" })).status).toBe(403);
-    const first = await exchange("test-a"); const second = await exchange("test-b");
-    expect(first.body.user.id).toBe(a.user.id); expect(second.body.user.id).toBe(b.user.id);
-    expect(first.body.user.role).toBe("designer");
-    expect(first.response.headers.get("set-cookie")).toContain("HttpOnly");
-    expect(await request("/api/tasks", first.cookie).then(r => r.json())).toMatchObject({ tasks: [{ id: taskA, ownerUserId: a.user.id }] });
-    expect(await request("/api/tasks", second.cookie).then(r => r.json())).toMatchObject({ tasks: [{ id: taskB, ownerUserId: b.user.id }] });
-    expect((await request(`/api/tasks/${taskA}`, second.cookie)).status).toBe(404);
-    const upload = await request("/api/assets/upload-request", first.cookie, { method: "POST", body: JSON.stringify({ filename: "owner-check.txt", mimeType: "text/plain", byteSize: 1, ownerUserId: b.user.id }) }).then(r => r.json()) as any;
-    expect((await request(upload.uploadUrl, first.cookie, { method: "PUT", body: "a" })).status).toBe(204);
-    expect(await request("/api/assets", first.cookie).then(r => r.json())).toMatchObject({ assets: [{ ownerUserId: a.user.id, ownerName: "甲" }] });
-    expect((await request(`/api/assets/${upload.assetId}/content`, second.cookie)).status).toBe(404);
-    for (const employee of [{ login: first, id: a.user.id }, { login: second, id: b.user.id }]) {
-      const generated = await request("/api/tasks", employee.login.cookie, { method: "POST", body: JSON.stringify({ requestId: crypto.randomUUID(), ownerUserId: "forged-owner", operationType: "image_generation", modelConfigId: "40000000-0000-4000-8000-000000000107", prompt: "isolated mock generation" }) }).then(r => r.json()) as any;
-      expect(generated.task.ownerUserId).toBe(employee.id);
-      let completed: any;
-      for (let i = 0; i < 50; i++) {
-        completed = await request(`/api/tasks/${generated.task.id}`, employee.login.cookie).then(r => r.json());
-        if (completed.task.status !== "processing") break;
-        await Bun.sleep(20);
-      }
-      expect(completed.task.status).toBe("success");
-      expect(completed.task.ownerUserId).toBe(employee.id);
-      const other = employee.id === a.user.id ? second.cookie : first.cookie;
-      expect((await request(completed.task.resultUrls[0], other)).status).toBe(404);
-      expect(await request("/api/history", employee.login.cookie).then(r => r.json())).toMatchObject({ history: expect.arrayContaining([expect.objectContaining({ taskId: generated.task.id, userId: employee.id })]) });
+    expect(await request("/api/deployment").then(r => r.json())).toEqual({ oaLoginEnabled: false, authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false });
+    expect((await request("/api/tasks")).status).toBe(200);
+    for (const path of ["/api/demo/accounts", "/api/auth/wecom/start"]) expect((await request(path)).status).toBe(404);
+    expect((await request("/api/admin/accounts")).status).toBe(403);
+    expect((await request("/api/auth/login", "", { method: "POST", body: "{}" })).status).toBe(404);
+    expect((await exchange("test-a")).response.status).toBe(404);
+    const user = (await request("/api/auth/session").then(r => r.json()) as any).user;
+    expect(user.role).toBe("designer");
+    expect(user.id).not.toBe(a.user.id);
+    expect(user.id).not.toBe(b.user.id);
+    // Old employee data is left in place, never reassigned to the open designer.
+    expect(await request("/api/tasks").then(r => r.json())).toMatchObject({ tasks: [] });
+    expect((await request(`/api/tasks/${taskA}`)).status).toBe(404);
+    const upload = await request("/api/assets/upload-request", "", { method: "POST", body: JSON.stringify({ filename: "open.txt", mimeType: "text/plain", byteSize: 1, ownerUserId: b.user.id }) }).then(r => r.json()) as any;
+    expect((await request(upload.uploadUrl, "", { method: "PUT", body: "a" })).status).toBe(204);
+    expect(await request("/api/assets").then(r => r.json())).toMatchObject({ assets: [{ ownerUserId: user.id }] });
+    const generated = await request("/api/tasks", "", { method: "POST", body: JSON.stringify({ requestId: crypto.randomUUID(), ownerUserId: "forged-owner", operationType: "image_generation", modelConfigId: "40000000-0000-4000-8000-000000000107", prompt: "open mock generation" }) }).then(r => r.json()) as any;
+    let completed: any;
+    for (let i = 0; i < 50; i++) {
+      completed = await request(`/api/tasks/${generated.task.id}`).then(r => r.json());
+      if (completed.task.status !== "processing") break;
+      await Bun.sleep(20);
     }
-    expect(submissions).toBe(2);
-    const invalid = await exchange("invalid", first.cookie);
-    expect(invalid.response.status).toBe(401);
-    expect(invalid.response.headers.get("set-cookie")).toContain("Max-Age=0");
-    expect((await request("/api/auth/session", first.cookie)).status).toBe(401);
-    const rotated = await exchange("test-a-rotated");
-    expect(rotated.body.user.id).toBe(a.user.id);
+    expect(completed.task).toMatchObject({ status: "success", ownerUserId: user.id, credits: 0 });
+    expect((await request(completed.task.resultUrls[0])).status).toBe(200);
+    expect(submissions).toBe(1);
     processHandle.kill(); await processHandle.exited; processHandle = start(); await ready();
-    expect(await request("/api/auth/session", rotated.cookie).then(r => r.json())).toMatchObject({ user: { id: a.user.id } });
-    const persistedAssets = await request("/api/assets", rotated.cookie).then(r => r.json()) as any;
-    expect(persistedAssets.assets).toHaveLength(2);
-    expect(persistedAssets.assets.every((asset: any) => asset.ownerUserId === a.user.id)).toBe(true);
-    expect((await request("/api/auth/logout", rotated.cookie, { method: "POST" })).status).toBe(204);
-    expect((await request("/api/auth/session", rotated.cookie)).status).toBe(401);
+    expect(await request("/api/auth/session", "wireless_canvas_demo_session=old-expired-oa-token").then(r => r.json())).toMatchObject({ user: { id: user.id } });
+    expect((await request("/api/assets").then(r => r.json()) as any).assets).toHaveLength(2);
+    expect((await request("/api/tasks").then(r => r.json()) as any).tasks).toHaveLength(1);
   } finally {
     processHandle.kill(); await processHandle.exited;
     await provider.stop(true);

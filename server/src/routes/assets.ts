@@ -76,6 +76,9 @@ function sendAssetEventError(response: Response, error: unknown) {
 
 export function createAssetsRouter(db: Database, storage: ObjectStorage) {
   const router = Router();
+  // Every response must be checked against the current employee, including
+  // original-media reads immediately after switching identities in a browser.
+  router.use((_request, response, next) => { response.set("Cache-Control", "private, no-store"); next(); });
 
   router.get("/", async (request, response, next) => {
     try {
@@ -97,6 +100,17 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       if (!storage.configured) {
         response.status(503).json({ error: "STORAGE_NOT_CONFIGURED", message: "公司对象存储尚未配置" });
         return;
+      }
+      if (input.projectId) {
+        const project = await db.query(
+          `SELECT p.id FROM projects p WHERE p.id=$1 AND (p.owner_user_id=$2
+           OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$2))`,
+          [input.projectId, actor.id],
+        );
+        if (!project.rows[0]) {
+          response.status(403).json({ error: "PROJECT_FORBIDDEN", message: "无权将素材加入此项目" });
+          return;
+        }
       }
       if (input.clientReferenceId) {
         const existing = await db.query<{ id: string; status: string }>(

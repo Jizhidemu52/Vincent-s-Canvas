@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { AuthRequestError, exchangeOaToken, getCurrentSession, loginWithPassword, logoutSession, type ApiUser, type ApiUserRole } from "@/services/api/auth";
+import { broadcastWorkspaceIdentity } from "@/lib/workspace-session-events";
 
 export type LocalUser = ApiUser & { avatarUrl: string };
 export type AuthStatus = "idle" | "loading" | "authenticated" | "guest";
@@ -12,6 +13,7 @@ type UserStore = {
     exchangeOaToken: (token: string) => Promise<void>;
     loginWithPassword: (identifier: string, password: string, portal: "designer" | "admin") => Promise<LocalUser>;
     clearSession: () => Promise<void>;
+    invalidateSession: () => void;
     updateUser: (user: ApiUser) => void;
 };
 
@@ -60,10 +62,12 @@ export const useUserStore = create<UserStore>((set, get) => ({
             if (epoch !== sessionEpoch) return;
             rejectedOaToken = false;
             set({ user: { ...user, avatarUrl: "" }, status: "authenticated" });
+            broadcastWorkspaceIdentity(user.role === "designer" ? user.id : null);
         } catch {
             if (epoch !== sessionEpoch) return;
             // Do not display server errors that might contain credential material.
             set({ user: null, status: "guest" });
+            broadcastWorkspaceIdentity(null);
         }
     },
     loginWithPassword: async (identifier, password, portal) => {
@@ -76,6 +80,7 @@ export const useUserStore = create<UserStore>((set, get) => ({
             const localUser = { ...user, avatarUrl: "" };
             rejectedOaToken = false;
             set({ user: localUser, status: "authenticated" });
+            broadcastWorkspaceIdentity(user.role === "designer" ? user.id : null);
             return localUser;
         } catch (error) {
             if (epoch === sessionEpoch) set({ user: null, status: "guest" });
@@ -87,6 +92,12 @@ export const useUserStore = create<UserStore>((set, get) => ({
         rejectedOaToken = true;
         set({ user: null, status: "guest" });
         await logoutSession();
+        broadcastWorkspaceIdentity(null);
+    },
+    invalidateSession: () => {
+        invalidateSessionRequests();
+        rejectedOaToken = true;
+        set({ user: null, status: "guest" });
     },
     updateUser: (user) => {
         invalidateSessionRequests();

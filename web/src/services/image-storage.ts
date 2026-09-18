@@ -1,4 +1,4 @@
-import localforage from "localforage";
+import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { rememberMediaSource } from "./canvas-media-links";
 
 import { nanoid } from "nanoid";
@@ -16,7 +16,7 @@ export type UploadedImage = {
     mimeType: string;
 };
 
-const store = localforage.createInstance({ name: "wireless-canvas", storeName: "image_files" });
+const store = createWorkspaceStorage("image_files");
 const objectUrls = new Map<string, string>();
 const loadObjectUrl = createDedupedAsyncResolver(async (storageKey: string) => {
     const blob = await store.getItem<Blob>(storageKey);
@@ -27,6 +27,7 @@ const loadObjectUrl = createDedupedAsyncResolver(async (storageKey: string) => {
 });
 
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
+    store.assertAccess();
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
@@ -38,7 +39,9 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
 }
 
 export async function resolveImageUrl(storageKey?: string, fallback = "") {
+    store.assertIdentity();
     if (!storageKey) return fallback;
+    store.assertAccess();
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
     return (await loadObjectUrl(storageKey)) || fallback;

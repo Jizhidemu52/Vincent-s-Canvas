@@ -5,6 +5,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useModuleStore } from "@/stores/use-module-store";
+import { deploymentFeatures } from "@/lib/deployment-features";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const authStatus = useUserStore((state) => state.status);
@@ -18,6 +19,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (authStatus !== "authenticated") return;
+        if (deploymentFeatures.oaLoginEnabled && useUserStore.getState().user?.role !== "designer") return;
         const syncProjects = async () => {
             await Promise.allSettled(
                 useCanvasStore

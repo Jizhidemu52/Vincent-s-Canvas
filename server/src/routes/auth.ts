@@ -28,12 +28,16 @@ const passwordSchema = z.object({ currentPassword: z.string().min(1), newPasswor
 export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) {
     const router = Router();
     const features = deploymentFeatures(config);
-    const requireSession = sessionMiddleware(db, cache, config);
+    const requireSession = sessionMiddleware(db, cache, config, { allowAdminSession: true });
 
     router.use((request, response, next) => {
         const path = request.path.toLowerCase().replace(/\/+$/, "");
-        if (features.oaLoginEnabled && (path === "/login" || path === "/change-password" || path.startsWith("/wecom/"))) {
-            response.status(403).json({ error: "OA_LOGIN_REQUIRED", message: "请从 OA 系统进入创作端" });
+        if (path.startsWith("/wecom/") || (!features.oaLoginEnabled && path.startsWith("/oa/"))) {
+            response.status(404).json({ error: "LOGIN_METHOD_DISABLED", message: "该登录方式未启用" });
+            return;
+        }
+        if (features.oaLoginEnabled && path === "/login" && request.body?.portal !== "admin") {
+            response.status(403).json({ error: "OA_LOGIN_REQUIRED", message: "请从公司 OA 进入创作端" });
             return;
         }
         next();

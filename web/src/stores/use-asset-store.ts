@@ -3,7 +3,7 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { nanoid } from "nanoid";
 import { createCoalescedAsyncTask } from "@/lib/coalesced-async-task";
-import { localForageStorage } from "@/lib/localforage-storage";
+import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { cleanupUnusedImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
 import { uploadServerAsset } from "@/services/api/server-assets";
@@ -52,10 +52,11 @@ type AssetStore = {
 };
 
 const ASSET_STORE_KEY = "wireless-canvas:asset_store";
+const localAssetStorage = createWorkspaceStorage("app_state");
 
 const assetStorage: PersistStorage<AssetStore> = {
     getItem: async (name) => {
-        const value = await localForageStorage.getItem(name);
+        const value = await localAssetStorage.getItem<string>(name);
         if (!value) return null;
         const parsed = JSON.parse(value) as StorageValue<AssetStore>;
         parsed.state.assets = await Promise.all(
@@ -72,8 +73,8 @@ const assetStorage: PersistStorage<AssetStore> = {
         );
         return parsed;
     },
-    setItem: (name, value) => localForageStorage.setItem(name, JSON.stringify(value)),
-    removeItem: (name) => localForageStorage.removeItem(name),
+    setItem: async (name, value) => { if (localAssetStorage.isCurrent()) await localAssetStorage.setItem(name, JSON.stringify(value)); },
+    removeItem: async (name) => { if (localAssetStorage.isCurrent()) await localAssetStorage.removeItem(name); },
 };
 
 export const useAssetStore = create<AssetStore>()(
@@ -95,7 +96,7 @@ export const useAssetStore = create<AssetStore>()(
                 hydrated: false,
                 assets: [],
                 addAssets: (assets) => {
-                    if (!assets.length) return [];
+                    if (!assets.length || !localAssetStorage.isCurrent()) return [];
                     const createdEntries = assets.map(createStoredAsset);
                     set((state) => ({ assets: [...createdEntries.map((entry) => entry.asset), ...state.assets] }));
                     const user = useUserStore.getState().user;
@@ -142,16 +143,17 @@ export const useAssetStore = create<AssetStore>()(
                         throw error;
                     }
                 },
-                replaceAssets: (assets) => set({ assets }),
+                replaceAssets: (assets) => { if (localAssetStorage.isCurrent()) set({ assets }); },
                 cleanupImages: (extra) => cleanupTask.schedule(extra),
             };
         },
         {
             name: ASSET_STORE_KEY,
+            skipHydration: !localAssetStorage.available,
             storage: assetStorage,
             partialize: (state) => ({ assets: state.assets }) as StorageValue<AssetStore>["state"],
             onRehydrateStorage: () => () => {
-                useAssetStore.setState({ hydrated: true });
+                useAssetStore.setState({ hydrated: localAssetStorage.isCurrent() });
                 retryPendingAssetUploads();
             },
         },
@@ -223,7 +225,11 @@ function retryPendingAssetUploads() {
     }
 }
 if (typeof window !== "undefined") window.addEventListener("online", retryPendingAssetUploads);
-useUserStore.subscribe((state, previous) => { if (state.user?.id !== previous.user?.id) retryPendingAssetUploads(); });
+useUserStore.subscribe((state, previous) => {
+    if (state.user?.id === previous.user?.id) return;
+    if (!localAssetStorage.isCurrent()) useAssetStore.setState({ assets: [], hydrated: false });
+    else retryPendingAssetUploads();
+});
 
 function setCompanyDatabaseState(set: (partial: Partial<AssetStore> | ((state: AssetStore) => Partial<AssetStore>), replace?: false) => void, id: string, patch: Record<string, unknown>) {
     set((state) => ({

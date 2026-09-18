@@ -5,13 +5,14 @@ description: 启动 Web、API、Worker、PostgreSQL、Redis 和对象存储
 
 # 本地开发
 
-业务功能依赖正式后端。只启动 `web/` 可以调整登录页和界面，但不能绕过 Session 使用生成、额度或素材接口。
+业务功能需要 API 服务。`OA_LOGIN_ENABLED=true` 时先验证公司 OA 员工身份，不新增扫码或密码步骤，失败不回退访客；`false` 用于本机免登录试用，正式后端自动建立访客会话、单机演示后端使用共用创作身份。两种模式都不启用内部积分和角色入口，敏感维护仍受保护；只启动 `web/` 不能调用生成或服务端素材接口。
 
 ## 推荐：Docker Compose
 
 ```bash
 cp .env.example .env
-# 替换 .env 中所有 replace-with 值
+# 替换 .env 中所有 replace-with 值；模板为企业 OA 模式
+# 仅隔离本机试用时改 OA_LOGIN_ENABLED=false
 docker compose up -d --build
 docker compose ps
 curl http://localhost:3000/api/health
@@ -20,11 +21,12 @@ curl http://localhost:3000/api/health
 访问：
 
 ```text
-设计师入口：http://localhost:3000/login
-管理员入口：http://localhost:3000/admin/login
+试用入口：http://localhost:3000/（OA_LOGIN_ENABLED=false）
+企业入口：企业微信 → 公司 OA → 已配置的 HTTPS 画布地址
+维护入口：通过配置的 HTTPS 域名访问 /admin/login
 ```
 
-首次管理员登录后必须修改初始密码。开发环境需要模拟生成时可暂时设置 `TASK_MOCK_MODE=true`，它仍会走 Redis 队列、额度冻结、Worker、对象存储、历史和结算，只是不调用外部模型。
+首次管理员登录后必须修改初始密码；这只用于维护，不是用户创作的前置步骤。开发环境需要模拟生成时可暂时设置 `TASK_MOCK_MODE=true`，它仍会走 Redis 队列、Worker、对象存储和历史，只是不调用外部模型。真实调用仍可能收费，入口应限制在受信网络。
 
 ## 模型 HTTPS 运行要求
 
@@ -40,9 +42,9 @@ API、Worker 和本机演示服务仍运行于 Bun；对话及已接入的图片
 
 `bun run dev:demo` 自动将上传原文件、素材名称/标签/备注和任务记录保存到 `server/.data/local-demo.sqlite`；默认路径以源码位置为基准，不随当前工作目录改变。`DEMO_STATE_PATH` 可覆盖路径，建议使用持久磁盘的绝对路径。该目录不提交 Git，请确保可写并定期备份。
 
-重启保留这些记录；中断中的任务暂停，不自动重复生成。磁盘满或不可写时返回保存失败，不伪称完成。OA 模式还持久化员工映射、平台会话与画布文档；非 OA 演示会话、后台临时 Provider 配置和演示余额仍在内存。长期凭据写服务端配置，正式后端使用 PostgreSQL/Redis/S3。
+重启保留这些记录；中断中的任务暂停，不自动重复生成。磁盘满或不可写时返回保存失败，不伪称完成。试用会话、后台临时 Provider 配置和演示余额仍在内存；企业 OA 员工映射、会话与云端画布则持久化。旧共用和其他员工数据不自动迁移或公开。长期凭据写服务端配置，正式后端使用 PostgreSQL/Redis/S3。
 
-备份时先停止演示服务，再复制整个 `server/.data` 目录（自定义路径则备份其数据库与日志文件）；不要在运行中只复制 `.sqlite` 文件。OA 画布在云端已同步后可由同一员工在另一设备恢复；非 OA 和未同步本地数据仍需导出。`DEMO_RECOVERY_FILE` 只用于数据库首次初始化，不会倒灌覆盖已有数据。
+备份时先停止演示服务，再复制整个 `server/.data` 目录（自定义路径则备份其数据库与日志文件）；不要在运行中只复制 `.sqlite` 文件。企业画布文档与原图按员工同步服务器，本地保留 localforage / IndexedDB 缓存；确认已同步后可由本人恢复。试用画布、独立聊天和创意草稿仍是浏览器数据，跨浏览器需另存/导出，服务器备份不替代本地内容备份。`DEMO_RECOVERY_FILE` 只用于数据库首次初始化，不会倒灌覆盖已有数据。
 
 WSL 的代理回归使用原生 Node HTTPS/CONNECT 测试服务并等待明确就绪事件，验证隧道不泄漏业务凭据、TLS 通过后才发送 POST。准备阶段与网络提交超时分开，避免冷启动或磁盘挂载停顿污染后续测试；这不代表 WSL 主机 I/O 或真实模型出口已经稳定。
 

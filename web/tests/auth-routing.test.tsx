@@ -64,15 +64,16 @@ const visitor: LocalUser = {
 };
 
 describe("optional authentication route wiring", () => {
-    test("OA redirects every legacy authentication and administrator route to the workspace", () => {
+    test("legacy OA switches no longer register ordinary login gates", () => {
         const routes = registeredRoutes({ authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: true });
-        for (const path of ["/login", "/admin/*", "/change-password"]) {
+        for (const path of ["/login"]) {
             const route = routes.find((item) => item.path === path);
             expect(route?.element?.type).toBe(Navigate);
             expect(route?.element?.props.to).toBe("/");
             expect(route?.element?.props.replace).toBe(true);
         }
-        expect(routes.some((route) => route.path === "/admin" || route.path === "/admin/login")).toBe(false);
+        expect(routes.find((route) => route.path === "/admin")?.element?.props.admin).toBe(true);
+        expect(routes.find((route) => route.path === "/change-password")?.element?.props.admin).toBe(true);
     });
 
     for (const authenticationEnabled of [true, false]) {
@@ -88,8 +89,8 @@ describe("optional authentication route wiring", () => {
                     expect(password?.element?.type).toBe(AuthBoundary);
                     expect(routes.find((route) => route.path === "/admin")?.element?.props.admin).toBe(true);
                     const publicLogin = routes.find((route) => route.path === "/login")?.element;
-                    if (authenticationEnabled) expect(publicLogin?.type).not.toBe(Navigate);
-                    else expect(publicLogin?.props.to).toBe("/");
+                    expect(publicLogin?.type).toBe(Navigate);
+                    expect(publicLogin?.props.to).toBe("/");
                 });
             }
         }
@@ -103,7 +104,7 @@ describe("optional authentication route wiring", () => {
     test("keeps anonymous workspaces usable without allowing guests into administration", () => {
         const features = { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false };
         expect(gateResult(features, visitor, false).props.children).toBe("protected content");
-        expect(gateResult(features, visitor, true).props.to).toBe("/");
+        expect(gateResult(features, visitor, true).props.to).toBe("/admin/login");
         const loginRedirect = gateResult(features, null, true);
         expect(loginRedirect.type).toBe(Navigate);
         expect(loginRedirect.props.to).toBe("/admin/login");
@@ -114,5 +115,18 @@ describe("optional authentication route wiring", () => {
         const administrator = { ...visitor, id: "administrator", role: "super_admin" as const };
         expect(gateResult(features, administrator, true).props.children).toBe("protected content");
         expect(gateResult(features, { ...administrator, mustChangePassword: true }, true).props.to).toBe("/change-password");
+        expect(gateResult(features, { ...administrator, mustChangePassword: true }, false).props.children).toBe("protected content");
+    });
+
+    test("ordinary visitors never enter the password-change workflow", () => {
+        const features = { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false };
+        expect(gateResult(features, { ...visitor, mustChangePassword: true }, false).props.children).toBe("protected content");
+    });
+
+    test("all creative entry points remain wired without ordinary login pages", () => {
+        const routes = registeredRoutes({ authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false });
+        for (const path of ["/", "/canvas", "/canvas/:id", "/image", "/creative", "/creative/:presetId", "/chat", "/video"]) {
+            expect(routes.find((route) => route.path === path)?.element?.type).toBe(AuthBoundary);
+        }
     });
 });

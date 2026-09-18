@@ -6,7 +6,7 @@ import { upsertGenerationLog } from "@/lib/generation-log-update";
 import { workbenchSubmissions } from "@/lib/submission-gate";
 import { createDedupedAsyncResolver } from "@/lib/deduped-async-resolver";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
-import localforage from "localforage";
+import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 import { useSearchParams } from "react-router-dom";
@@ -85,7 +85,7 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vqu
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
 const LOG_STORE_KEY = "wireless-canvas:video_generation_logs";
-const logStore = localforage.createInstance({ name: "wireless-canvas", storeName: "video_generation_logs" });
+const logStore = createWorkspaceStorage("video_generation_logs");
 
 const sharedVideoPoll = createDedupedAsyncResolver<GeneratedVideo, [() => Promise<GeneratedVideo>]>((_key, poll) => poll());
 class TerminalVideoTaskError extends Error {}
@@ -698,7 +698,7 @@ export default function VideoPage() {
                         <div className="mt-auto pt-6">
                             <div className="mb-3 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs dark:border-stone-800 dark:bg-stone-900">
                                 <span>{!deploymentFeatures.creditsEnabled ? "不计积分" : `预计消耗 ${estimatedUsage.configured ? estimatedUsage.credits : "待配置"} 积分`}</span>
-                                <span>{!deploymentFeatures.authenticationEnabled ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
+                                <span>{deploymentFeatures.oaLoginEnabled ? "公司工作区" : "本机试用"}</span>
                             </div>
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running || readingReferences || previewLoading} onClick={() => void generate()}>
                                 {running ? "正在生成视频" : "生成视频"}

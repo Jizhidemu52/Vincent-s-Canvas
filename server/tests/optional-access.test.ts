@@ -7,11 +7,13 @@ import { reserveCredits, settleReservation } from "../src/billing";
 const config = (extra: Record<string, string> = {}) => loadConfig({ DATABASE_URL: "postgres://test", REDIS_URL: "redis://test", ...extra });
 
 describe("optional access and billing", () => {
-    test("preserves current defaults and disables credit enforcement without login", () => {
-        expect(deploymentFeatures(config())).toEqual({ oaLoginEnabled: false, authenticationEnabled: true, creditsEnabled: true, rolePortalsEnabled: true });
-        expect(deploymentFeatures(config({ CREDITS_ENABLED: "false" }))).toEqual({ oaLoginEnabled: false, authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: true });
-        expect(deploymentFeatures(config({ AUTH_ENABLED: "false", ROLE_PORTALS_ENABLED: "false" }))).toEqual({ oaLoginEnabled: false, authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false });
-        expect(deploymentFeatures(config({ OA_LOGIN_ENABLED: "true", AUTH_ENABLED: "false", CREDITS_ENABLED: "false" }))).toEqual({ oaLoginEnabled: true, authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: false });
+    test("keeps local creation open and requires OA only in the explicit employee mode", () => {
+        const open = { oaLoginEnabled: false, authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false };
+        expect(deploymentFeatures(config())).toEqual(open);
+        expect(deploymentFeatures(config({ AUTH_ENABLED: "true", CREDITS_ENABLED: "true", ROLE_PORTALS_ENABLED: "true" }))).toEqual(open);
+        expect(deploymentFeatures(config({ OA_LOGIN_ENABLED: "true", AUTH_ENABLED: "false", CREDITS_ENABLED: "true", ROLE_PORTALS_ENABLED: "true" }))).toEqual({ ...open, oaLoginEnabled: true, authenticationEnabled: true });
+        expect(config()).toMatchObject({ OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "false", CREDITS_ENABLED: "false", ROLE_PORTALS_ENABLED: "false" });
+        expect(() => config({ WECOM_CORP_ID: "obsolete-partial-config" })).not.toThrow();
         expect(() => config({ AUTH_ENABLED: "off" })).toThrow();
     });
 
@@ -51,12 +53,12 @@ describe("optional access and billing", () => {
         expect(statements.some((sql) => sql.includes("'designer',true,false"))).toBe(true);
     });
 
-    test("guest sessions are rejected after authentication is enabled again", async () => {
+    test("guest sessions cannot cross the administrator session boundary", async () => {
         const database = databaseStub(() => [{ id: "visitor", session_id: "session", is_guest: true }]);
         const cache = { get: async () => null, del: async () => 1 };
         const { response, state } = responseStub();
         let next = false;
-        await sessionMiddleware(database as never, cache as never, config())(
+        await sessionMiddleware(database as never, cache as never, config(), { allowGuest: false })(
             { cookies: { wireless_canvas_session: "guest-token" } } as never, response as never, (() => { next = true; }) as never,
         );
         expect(state.status).toBe(401);

@@ -12,10 +12,16 @@ import { OA_SESSION_TTL_SECONDS } from "./oa";
 
 const GUEST_SESSION_TTL_SECONDS = 365 * 24 * 60 * 60;
 
-export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig, options: { allowGuest?: boolean } = {}) {
+export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig, options: { allowGuest?: boolean; allowAdminSession?: boolean } = {}) {
     const features = deploymentFeatures(config);
     const allowGuest = !features.oaLoginEnabled && !features.authenticationEnabled && options.allowGuest !== false;
+    const acceptsProvider = (row: UserRow & { auth_provider: string }) => !features.oaLoginEnabled
+        || (row.auth_provider === "oa" && row.role === "designer")
+        || (row.auth_provider === "local" && (options.allowGuest === false
+            || (options.allowAdminSession && (row.role === "super_admin" || row.role === "department_admin"))));
     return async (request: Request, response: Response, next: NextFunction) => {
+        // Internal route policy, never sourced from the request body or headers.
+        (request as AuthenticatedRequest).allowsAnonymousCreation = allowGuest;
         const token = request.cookies?.[config.SESSION_COOKIE_NAME];
         if (!token || typeof token !== "string") {
             if (allowGuest) {
@@ -39,7 +45,7 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
                 [tokenHash, cachedId],
             );
             let row = result.rows[0];
-            if (!row || (row.is_guest && !allowGuest) || (features.oaLoginEnabled && (row.auth_provider !== "oa" || row.role !== "designer"))) {
+            if (!row || (row.is_guest && !allowGuest) || !acceptsProvider(row)) {
                 await cache.del(cacheKey);
                 response.clearCookie(config.SESSION_COOKIE_NAME, { path: "/" });
                 if (!row && allowGuest) {
@@ -57,13 +63,18 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
                  WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'`, [row.session_id],
             );
             row = refreshed.rows[0];
-            if (!row || (row.is_guest && !allowGuest) || (features.oaLoginEnabled && (row.auth_provider !== "oa" || row.role !== "designer"))) {
+            if (!row || (row.is_guest && !allowGuest) || !acceptsProvider(row)) {
                 await cache.del(cacheKey);
                 response.clearCookie(config.SESSION_COOKIE_NAME, { path: "/" });
                 response.status(401).json({ error: "SESSION_EXPIRED", message: "登录已失效，请重新登录" });
                 return;
             }
-            await cache.set(cacheKey, row.session_id, { EX: features.oaLoginEnabled ? OA_SESSION_TTL_SECONDS : config.SESSION_TTL_SECONDS });
+            await cache.set(cacheKey, row.session_id, { EX: row.auth_provider === "oa" ? OA_SESSION_TTL_SECONDS : config.SESSION_TTL_SECONDS });
+            const expectedOwnerId = request.get("X-Canvas-Owner-Id");
+            if (features.oaLoginEnabled && row.role === "designer" && expectedOwnerId !== undefined && expectedOwnerId !== row.id) {
+                response.status(403).json({ error: "CANVAS_OWNER_MISMATCH", message: "当前员工身份已变化，请重新打开画布后再试。" });
+                return;
+            }
             const authenticated = request as AuthenticatedRequest;
             authenticated.auth = mapUser(row);
             authenticated.sessionId = row.session_id;
@@ -76,7 +87,7 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
 
 export function requireAccountReady(request: Request, response: Response, next: NextFunction) {
     const authenticated = request as unknown as AuthenticatedRequest;
-    if (authenticated.auth.mustChangePassword) {
+    if (authenticated.auth.mustChangePassword && !authenticated.allowsAnonymousCreation) {
         response.status(403).json({
             error: "PASSWORD_CHANGE_REQUIRED",
             message: "首次登录必须先修改密码",

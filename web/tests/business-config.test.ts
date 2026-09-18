@@ -10,16 +10,16 @@ const config: BusinessConfig = {
 };
 
 describe("server-synchronized usage estimates", () => {
-    test("matches server billing by combining operation and model prices", () => {
-        expect(estimateServerUsage(config, { operationType: "image_generation", modelId: "image-v1", quantity: 4 })).toEqual({ credits: 20, rmbCost: 1.4, configured: true });
+    test("keeps provider cost estimates without charging internal credits", () => {
+        expect(estimateServerUsage(config, { operationType: "image_generation", modelId: "image-v1", quantity: 4 })).toEqual({ credits: 0, rmbCost: 1.4, configured: true });
     });
 
     test("supports operations that do not require a model", () => {
-        expect(estimateServerUsage(config, { operationType: "image_generation", quantity: 1 })).toEqual({ credits: 2, rmbCost: 0.1, configured: true });
+        expect(estimateServerUsage(config, { operationType: "image_generation", quantity: 1 })).toEqual({ credits: 0, rmbCost: 0.1, configured: true });
     });
 
-    test("uses the administrator model binding for a tool badge", () => {
-        expect(estimateServerUsage(config, { operationType: "image_generation", toolKey: "image" })).toEqual({ credits: 5, rmbCost: 0.35, configured: true });
+    test("keeps the administrator model binding without a credit badge", () => {
+        expect(estimateServerUsage(config, { operationType: "image_generation", toolKey: "image" })).toEqual({ credits: 0, rmbCost: 0.35, configured: true });
         expect(estimateServerUsage(config, { operationType: "image_generation", toolKey: "video" }).configured).toBe(false);
     });
 
@@ -28,8 +28,13 @@ describe("server-synchronized usage estimates", () => {
         expect(resolveToolModel(config, "video")).toBeUndefined();
     });
 
-    test("marks missing published prices or models as unconfigured", () => {
+    test("still marks missing requested models as unconfigured", () => {
         expect(estimateServerUsage(config, { operationType: "upscale", modelId: "missing", quantity: 1 })).toEqual({ credits: 0, rmbCost: 0, configured: false });
+    });
+
+    test("missing credit prices do not block a configured model in the open workspace", () => {
+        expect(estimateServerUsage({ ...config, prices: [] }, { operationType: "image_generation", toolKey: "image", quantity: 2 })).toEqual({ credits: 0, rmbCost: 0.5, configured: true });
+        expect(estimateServerUsage({ ...config, prices: [] }, { operationType: "image_generation", modelId: "missing" }).configured).toBe(false);
     });
 });
 

@@ -32,7 +32,6 @@ export class AuthRequestError extends Error {
     }
 }
 
-export type DemoLoginAccount = { identifier: string; password: string; label: string; portal: "designer" | "admin" };
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(path, {
@@ -73,9 +72,6 @@ export async function exchangeOaToken(token: string) {
     });
 }
 
-export async function getDemoAccounts() {
-    return apiRequest<{ accounts: DemoLoginAccount[] }>("/api/demo/accounts");
-}
 
 export async function logoutSession() {
     return apiRequest<void>("/api/auth/logout", { method: "POST" });
@@ -83,8 +79,4 @@ export async function logoutSession() {
 
 export async function changeOwnPassword(currentPassword: string, newPassword: string) {
     return apiRequest<void>("/api/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) });
-}
-
-export async function getWeComLoginUrl(portal: "designer" = "designer") {
-    return apiRequest<{ authorizationUrl: string }>(`/api/auth/wecom/start?portal=${portal}`);
 }

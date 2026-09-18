@@ -332,7 +332,7 @@ export function SeamlessStitchPage() {
                         <div className="mb-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs dark:border-stone-800 dark:bg-stone-950">
                             <div className="flex items-center justify-between gap-3">
                                 <span>{!deploymentFeatures.creditsEnabled ? "不计积分" : `本次消耗 ${estimatedUsage.credits} 积分`}</span>
-                                <span>{!deploymentFeatures.authenticationEnabled ? "免登录" : (user ? `${user.displayName} 剩余 ${user.creditBalance}` : "未登录")}</span>
+                                <span>{deploymentFeatures.oaLoginEnabled ? "公司工作区" : "本机试用"}</span>
                             </div>
                             {quotaBlocked ? <div className="mt-1 text-red-500">额度不足，无法提交任务。</div> : null}
                         </div>

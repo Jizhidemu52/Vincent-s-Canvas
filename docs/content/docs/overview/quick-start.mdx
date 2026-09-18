@@ -5,7 +5,7 @@ description: 用完整后端启动无线画布
 
 # 快速开始
 
-本页适用于非 OA 的完整 Docker 部署。Windows 局域网 OA 入口见 [部署导航](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/installation-guide.md)，不要混用两种登录方式。
+本页适用于完整 Docker 部署。根目录模板采用 `OA_LOGIN_ENABLED=true`，使用者从企业微信中的公司 OA 进入画布，不新增扫码或密码步骤。Windows 默认免登录试用见 [部署导航](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/installation-guide.md)。正式域名、OA 入口及公司网络限制须由 IT 配置，真实模型调用仍可能收费。
 
 ## 1. 准备环境
 
@@ -17,7 +17,7 @@ cd Vincent-s-Canvas
 cp .env.example .env
 ```
 
-编辑 `.env`，至少替换数据库密码、首位管理员初始密码、Provider 加密密钥和对象存储密钥。
+编辑 `.env`，至少替换数据库密码、首位管理员初始密码、Provider 加密密钥和对象存储密钥；按 [公司 OA 接入](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/oa-workspace-integration.md) 确认可信身份接口与 HTTPS 入口。若只做隔离的本机试用，显式设 `OA_LOGIN_ENABLED=false`，不要将其开放为公司正式入口。
 
 ## 2. 启动完整服务
 
@@ -29,22 +29,22 @@ curl http://localhost:3000/api/health
 
 ## 3. 首次管理员登录
 
-1. 打开 `http://localhost:3000/admin/login`。
+1. 维护人员通过已配置的 HTTPS 地址打开 `/admin/login`（生产 Cookie 需要 HTTPS）。
 2. 使用 `.env` 中的超级管理员账号和初始密码。
 3. 按提示修改密码。
-4. 进入账号管理创建部门和设计师。
+4. 进入模型配置；无需为普通创作用户开通账号。
 
-## 4. 设计师登录
+## 4. 从公司 OA 进入创作
 
-1. 打开 `http://localhost:3000/login`。
-2. 输入管理员创建的中文账号、英文账号、邮箱或工号与密码。
-3. 首次登录修改密码。
-4. 设计师只能看到自己的项目、任务、素材、历史和剩余额度。
+1. 企业微信打开公司 OA，再点画布菜单，入口自动携带可验证的临时身份凭证。
+2. 画布验证 OA 身份后加载本人数据，不新增扫码、密码或内部积分；凭证失效时返回 OA，不回退访客。
+3. 企业画布与原图先保存员工本地缓存，再同步服务器；确认已同步后，关闭重开或换设备可由本人从 OA 恢复。
+4. 独立聊天、创意草稿和试用画布仍在浏览器，换环境前另存/导出；分享链接不授予他人访问权限。
 
 ## 5. 配置模型
 
-超级管理员在后台按顺序配置 Provider、工作流、模型和积分价格。API Key 加密保存在服务端，设计师只看到模型名称、能力、启用状态与积分预估。
+维护人员在受保护的后台配置 Provider、工作流和模型。API Key 加密保存在服务端，创作端只看到公开模型信息，不展示内部积分限制。
 
-需要先验证业务链路时，在测试环境设置 `TASK_MOCK_MODE=true`；确认任务、额度、素材和历史后必须在生产环境改回 `false`。
+需要先验证业务链路时，在测试环境设置 `TASK_MOCK_MODE=true`；确认任务、素材和历史后必须在真实生成环境改回 `false`。
 
 详细步骤和截图见 [操作手册](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/user-guide.md) 与 [生产部署手册](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/production-deployment.md)。

@@ -6,6 +6,7 @@ import { persist } from "zustand/middleware";
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
 import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges } from "@/lib/canvas/canvas-persistence-merge";
 import { applyCanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
+import { createCanvasProjectSaveQueue } from "@/lib/canvas/canvas-project-save-queue";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasNodeType } from "@/types/canvas";
 
@@ -62,7 +63,7 @@ function database() {
 async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | null, browser = true) {
     let ids = 0;
     let reloads = 0;
-    const userStore = create<{ user: { id: string } | null; status: string }>(() => ({ user: oaOwnerId ? { id: oaOwnerId } : null, status: oaOwnerId ? "authenticated" : "guest" }));
+    const userStore = create<{ user: { id: string; role?: string } | null; status: string }>(() => ({ user: oaOwnerId ? { id: oaOwnerId, role: "designer" } : null, status: oaOwnerId ? "authenticated" : "guest" }));
     const errors: unknown[][] = [];
     const bindings = {
         create, persist, nanoid: () => `new-${++ids}`, collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, applyCanvasProjectPatch,
@@ -110,6 +111,34 @@ test("local write failures are visible and explicit retry saves retained edits w
     await tab.retry();
     expect(io.read()[0].title).toBe("等待恢复的作品");
     expect(tab.store.getState().cloudStatus).toBe("local");
+});
+
+test("open workspaces retain image nodes and edits across session changes and reopening", async () => {
+    const io = database(), tab = await openTab(io);
+    tab.store.getState().renameProject("shared", "再次打开仍在的画布");
+    tab.userStore.setState({ user: { id: "visitor-before-restart" }, status: "authenticated" });
+    tab.userStore.setState({ user: null, status: "guest" });
+    await tab.flush();
+    expect(tab.reloads()).toBe(0);
+    expect(tab.store.getState().projects).toHaveLength(1);
+    const reopened = await openTab(io);
+    reopened.userStore.setState({ user: { id: "visitor-after-restart" }, status: "authenticated" });
+    expect(reopened.store.getState().projects[0]).toMatchObject({
+        title: "再次打开仍在的画布", nodes: project().nodes,
+    });
+    expect(reopened.store.getState().projects[0].nodes[0].metadata.storageKey).toBe("image:original");
+});
+
+test("closing flushes the editor snapshot through the store queue without waiting for timers", async () => {
+    const io = database(), tab = await openTab(io);
+    const editor = createCanvasProjectSaveQueue(180, (title: string) => tab.store.getState().renameProject("shared", title), { set: () => 1, clear() {} });
+    editor.schedule("关闭前的最后一次编辑");
+    // The store-level pagehide listener may run before the editor listener.
+    await tab.flush();
+    editor.flush();
+    await tab.flush();
+    const reopened = await openTab(io);
+    expect(reopened.store.getState().projects[0]).toMatchObject({ title: "关闭前的最后一次编辑", nodes: project().nodes });
 });
 
 test("OA canvas persistence isolates employee keys and leaves old unscoped projects intact", async () => {

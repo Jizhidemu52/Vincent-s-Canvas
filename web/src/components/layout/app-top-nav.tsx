@@ -1,4 +1,4 @@
-import { ChevronDown, CircleDollarSign, Globe2, Link2, LogIn, LogOut, Menu, Plus } from "lucide-react";
+import { ChevronDown, Globe2, Link2, Menu, Plus } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
 
@@ -9,7 +9,6 @@ import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
 import { standaloneEdition } from "@/lib/standalone-edition";
 import { deploymentFeatures } from "@/lib/deployment-features";
-import { OA_ENTRY_URL } from "@/lib/oa-login";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -82,12 +81,7 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
     const navigate = useNavigate();
     const theme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
-    const user = useUserStore((state) => state.user);
-    const clearSession = useUserStore((state) => state.clearSession);
     const buttonClass = "wb-nav-link flex h-10 w-full items-center gap-2 rounded-lg px-3";
-    const displayName = user?.displayName || (deploymentFeatures.authenticationEnabled ? "未登录" : "我的工作台");
-    const roleLabel = user?.role === "super_admin" ? "超级管理员" : user?.role === "department_admin" ? "部门管理员" : user?.role === "designer" ? "设计师" : "登录";
-    const credits = user ? `${user.creditBalance}积分 · 月额${user.monthlyCreditLimit}` : "请登录";
 
     return (
         <div className="space-y-1 border-t border-stone-200 pt-3">
@@ -103,32 +97,6 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
             <div className={`${buttonClass} cursor-default`}>
                 <Globe2 className="size-4 text-stone-400" />
                 中文
-            </div>
-            {deploymentFeatures.authenticationEnabled ? <button
-                type="button"
-                className={buttonClass}
-                onClick={async () => {
-                    if (user) {
-                        await clearSession();
-                        navigate(deploymentFeatures.oaLoginEnabled ? "/" : "/login");
-                    } else {
-                        if (deploymentFeatures.oaLoginEnabled) window.location.assign(OA_ENTRY_URL);
-                        else navigate("/login");
-                    }
-                }}
-            >
-                {user ? <LogOut className="size-4 text-stone-400" /> : <LogIn className="size-4 text-stone-400" />}
-                {user ? "退出登录" : deploymentFeatures.oaLoginEnabled ? "返回企业微信 OA" : "登录入口"}
-            </button> : null}
-            <div className="wb-account mt-4 flex items-center gap-2 rounded-xl px-3 py-3">
-                <div className="flex size-7 items-center justify-center rounded-full bg-orange-500 text-xs font-bold text-white">{displayName.slice(0, 1).toUpperCase()}</div>
-                <div className="min-w-0 flex-1">
-                    <p className="truncate text-[11px] font-semibold text-stone-700">{displayName}</p>
-                    {deploymentFeatures.creditsEnabled ? <p className="flex items-center gap-1 text-[11px] font-semibold text-orange-600">
-                        <CircleDollarSign className="size-3" />
-                        {deploymentFeatures.rolePortalsEnabled && isAdminRole(user?.role) ? roleLabel : credits}
-                    </p> : <p className="text-[11px] text-stone-500">{deploymentFeatures.authenticationEnabled ? "不计积分" : "免登录创作"}</p>}
-                </div>
             </div>
         </div>
     );

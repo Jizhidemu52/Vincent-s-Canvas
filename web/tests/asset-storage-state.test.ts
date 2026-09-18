@@ -18,7 +18,7 @@ const code = ts.transpileModule(ast.statements.filter(statement => !ts.isImportD
 const boundary = {
     create, persist, nanoid, createCoalescedAsyncTask, deploymentFeatures, useUserStore,
     useCanvasStore: { getState: () => ({ projects: [] }) },
-    localForageStorage: { async getItem() { return null; }, async setItem() {}, async removeItem() {} },
+    createWorkspaceStorage: () => ({ available: true, isCurrent: () => true, async getItem() { return null; }, async setItem() {}, async removeItem() {} }),
     cleanupUnusedImages: async () => {}, cleanupUnusedMedia: async () => {},
     window: { addEventListener() {}, setTimeout() {} },
 };

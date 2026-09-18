@@ -30,4 +30,5 @@ export type SessionUser = {
 export type AuthenticatedRequest = Request & {
     auth: SessionUser;
     sessionId: string;
+    allowsAnonymousCreation?: boolean;
 };
