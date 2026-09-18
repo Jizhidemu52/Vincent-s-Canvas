@@ -5,8 +5,6 @@
   "pages": [
     "quick-start",
     "features",
-    "render",
-    "docker",
-    "[在线体验](http://localhost:3000/)"
+    "docker"
   ]
 }

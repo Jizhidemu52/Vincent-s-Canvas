@@ -11,7 +11,13 @@ const title = '无线画布文档';
 const description = '功能说明、操作手册、部署方式、开发文档、内部管理与安全说明';
 
 async function readDocsIndex() {
-  return readFile(join(process.cwd(), 'index.md'), 'utf8');
+  const content = await readFile(join(process.cwd(), 'index.md'), 'utf8');
+  // Keep the source index usable on GitHub and resolve its links in the docs site.
+  return content.replace(/\]\(((?:content\/docs\/|manual\/|\.\.\/)[^)]+)\)/g, (_match, href: string) => {
+    if (href.startsWith('content/docs/')) return `](/docs/${href.slice('content/docs/'.length).replace(/\.mdx(?=#|$)/, '')})`;
+    const path = href.startsWith('../') ? href.slice(3) : `docs/${href}`;
+    return `](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/${path})`;
+  });
 }
 
 export default async function Page() {

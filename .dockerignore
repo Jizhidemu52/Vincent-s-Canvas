@@ -1,6 +1,5 @@
 .git
 .idea
-docs2
 data
 docs/.next
 docs/.source
@@ -16,3 +15,7 @@ web/out
 **/.env.*
 **/node_modules
 **/dist
+.worktrees
+.playwright-cli
+output
+server/.data

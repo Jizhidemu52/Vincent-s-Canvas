@@ -120,7 +120,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         return parsed;
     },
     setItem: (name, value) => {
-        if (!canvasOwnerValid) return;
+        if (typeof window === "undefined" || !canvasOwnerValid) return;
         if (!useCanvasStore.getState().hydrated) return;
         const nextState = value.state as PersistedCanvasState;
         if (queuedPersistState && queuedPersistState.projects === nextState.projects) return;

@@ -1,64 +1,55 @@
 # 无线画布
 
-面向设计团队的 AI 创作工作台，在一张画布里整理参考图、生成图片、反复改稿和保存成果。
+面向设计团队的 AI 创作工作台：用一张画布整理参考图、生成图片、反复改稿和保存成果。
 
-## 主要功能
+## 能做什么
 
-- **无线画布**：拖放素材、自由缩放、多图参考和导入导出。
-- **AI 创作**：图片生成与编辑、视频创作、对话助手。
-- **素材复用**：管理图片、提示词和生成记录。
-- **团队管理**：公司版支持账号、分组、额度和模型配置。
+- **画布创作**：多图参考、节点与连线、图片编辑、导入导出；OA 员工画布支持云端恢复。
+- **创意设计**：款生线稿、花型提取、改款、配色、辅料等九个工作台。
+- **图片 / 视频 / 对话**：共用服务端模型配置，保留生成记录与素材。
+- **团队管理**：账号、权限、额度、模型与审计。设计师图片模型使用匿名编号，管理员查看真实映射。
 
-## 拉取与安装（Windows / 局域网）
+## 选择运行方式
 
-已部署好？直接打开管理员提供的地址，无需重复安装。
+| 你的场景 | 从这里开始 |
+| --- | --- |
+| 已部署好的设计师 | 从公司 OA 或管理员提供的入口进入，无需安装 |
+| Windows 局域网 OA | [本地部署说明](README-本地部署.md) |
+| Linux 公司服务器 | [Linux 部署](docs/manual/linux-deployment.md) |
+| 宝塔离线安装 | [完整离线包](docs/manual/baota-offline-installation.md) |
+| 修改源码 / 调试 | [本地开发](docs/content/docs/backend/local-development.mdx) |
 
-首次安装，先准备 [Git](https://git-scm.com/downloads) 和 [Bun](https://bun.sh/)，然后在 PowerShell 执行：
+Windows OA 快速安装需要 Git、Bun、Node.js 和有效的公司 OA 接入：
 
 ```powershell
 git clone https://github.com/Jizhidemu52/Vincent-s-Canvas.git
 cd Vincent-s-Canvas
 cd web
-bun install
+bun install --frozen-lockfile
 cd ..\server
-bun install
+bun install --frozen-lockfile
 cd ..
 .\Build-LAN.ps1
 ```
 
-配置与启动：
+按 [本地部署说明](README-本地部署.md) 配置 `server/.env`，再运行 `Start-LAN.bat`。OA 模式不提供密码或管理员登录，不能用裸地址代替员工入口。完整服务器部署使用不同的后端与配置，见上表。
 
-1. 若没有 `server/.env`，复制 `server/.env.example` 为 `.env`，按 [模型配置说明](README-本地部署.md) 填入自己的模型 Key。
-2. 双击根目录的 `Start-LAN.bat`；首次若提示防火墙权限不足，右键以管理员身份运行一次。
-3. 打开启动窗口显示的网址。同事使用同一地址，且须在同一局域网；运行电脑保持开机。
+## 仓库结构
 
-## 拉取最新版本
-
-先备份 `server/.env`、`server/.data` 和重要画布；在项目根目录执行：
-
-```powershell
-git pull --ff-only origin main
-cd web
-bun install
-cd ..\server
-bun install
-cd ..
-.\Build-LAN.ps1
+```text
+web/                 React + TypeScript + Vite 前端与测试
+server/              Bun API、Worker、模型适配、数据库迁移与测试
+ops/                 部署预检、离线包、备份恢复和压测
+docs/                操作、部署、开发与验收文档
+Build-LAN.*          Windows 前端构建入口
+Start-LAN.*          Windows OA 服务启动入口
+docker-compose.yml   完整服务器服务编排
 ```
 
-更新后刷新网页；若更新了服务端或 Key，等待生成任务结束，停止旧的本项目服务后再运行 `Start-LAN.bat`。重复双击启动脚本只会复用已有服务，不会自动重启。若拉取提示本地改动冲突，先保留改动，不要强制覆盖。
+## 使用与维护
 
-## 详细手册
-
-- [全板块操作手册](docs/manual/user-guide.md)：生成、改图、下载与备份。
-- [Windows / 局域网安装](README-本地部署.md)：在电脑上运行，供同事访问。
-- [Linux 服务器部署](docs/manual/linux-deployment.md)：公司服务器安装与维护。
-- [宝塔离线安装](docs/manual/baota-offline-installation.md)：服务器下载或编译较慢时使用。
-
-## 使用须知
-
-- AI 生成需要配置模型服务，费用按服务商实际用量计算。
-- 画布保存在当前浏览器；分享链接不等于跨设备同步，重要成果请导出备份。
-- API Key 只保存在服务端，不要上传到 GitHub。
-
-[版本更新](CHANGELOG.md) · [完整安装指南](docs/manual/installation-guide.md)
+- [操作手册](docs/manual/user-guide.md) · [文档导航](docs/index.md) · [部署与更新](docs/manual/installation-guide.md)
+- [当前待验收项](docs/content/docs/progress/pending-test.mdx) · [版本记录](CHANGELOG.md)
+- 更新前备份配置和实际数据；按对应部署手册拉取、构建、迁移并重启，不强制覆盖本地改动。
+- OA 画布需确认“已同步”再换设备；非 OA 画布及独立聊天/创意草稿仍保存在浏览器，重要内容请导出。
+- 模型调用可能收费。Key 只放服务端；`.env`、数据库、素材、测试输出和构建产物不上传 GitHub。

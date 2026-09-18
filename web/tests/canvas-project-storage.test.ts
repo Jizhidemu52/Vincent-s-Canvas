@@ -3,8 +3,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { mergeProjectChanges } from "@/lib/canvas/canvas-persistence-merge";
 
-// Real adapter code with only browser boundaries substituted. Native IndexedDB
-// atomicity and corruption checks live in architecture-lab-browser.cjs.
+// Exercise the current adapter with substituted browser storage boundaries.
 const source = readFileSync(new URL("../src/lib/canvas/canvas-project-storage.ts", import.meta.url), "utf8");
 const ast = ts.createSourceFile("storage.ts", source, ts.ScriptTarget.Latest, true);
 const code = ts.transpileModule(ast.statements.filter(statement => !ts.isImportDeclaration(statement)).map(statement => statement.getText(ast)).join("\n"), {

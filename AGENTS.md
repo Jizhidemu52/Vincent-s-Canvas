@@ -68,12 +68,10 @@
 - README 保持简洁，只放项目介绍、核心功能、快速开始和文档入口。
 - `docs/index.md` 放给 AI 使用的文档索引，不要再放到 `docs/content/docs/` 内容目录里。
 - 详细功能介绍写到 `docs/content/docs/overview/features.mdx`。
-- 后续待办写到 `docs/content/docs/progress/todo.mdx`。
-- 已实现但还需要用户测试确认的事项写到 `docs/content/docs/progress/pending-test.mdx`。
-- `docs/content/docs/progress/pending-test.mdx` 用来记录这个版本实际做了哪些可测试变更；`CHANGELOG.md` 的 `Unreleased` 只保留对这些变更的版本级归纳，避免逐条照搬实现细节。
-- 已实现且相关验证通过的 todo 事项可以更新正式功能说明；仅将确实需要用户环境或人工判断的验收项移到 `docs/content/docs/progress/pending-test.mdx`，写明待验证内容。用户明确指定人工验收的事项遵循该要求。
+- `docs/content/docs/progress/pending-test.mdx` 只保留当前未完成的验收与明确限制；已完成能力更新功能说明，不累积历次测试流水账。
+- `CHANGELOG.md` 的 `Unreleased` 保留版本级变更归纳；旧计划和重复说明通过 Git 历史查阅，不另建多套当前文档。
 - 功能、待办或验收状态实际变化时，更新对应的进度文档；纯规则、文案或内部实现调整且不影响这些状态时，不制造无变化的文档更新或确认步骤。
-- 接口响应规则写到 `docs/content/docs/backend/api-response.mdx`。
+- 接口约定以 `server/src/routes/` 当前实现为准，开发说明放在 `docs/content/docs/backend/local-development.mdx`。
 - 数据库结构写到 `docs/content/docs/backend/backend-database.mdx`。
 - 文档不要写过期日期；除非用户明确要求记录具体时间。
 

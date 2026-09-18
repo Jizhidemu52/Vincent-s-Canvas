@@ -59,7 +59,7 @@ function database() {
     };
 }
 
-async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | null) {
+async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | null, browser = true) {
     let ids = 0;
     let reloads = 0;
     const userStore = create<{ user: { id: string } | null; status: string }>(() => ({ user: oaOwnerId ? { id: oaOwnerId } : null, status: oaOwnerId ? "authenticated" : "guest" }));
@@ -83,7 +83,7 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
         removeCanvasProjects: (key: string) => io.update(key, () => null),
         withCanvasStorageLock: async (_name: string, callback: () => unknown) => callback(),
         createDeferredPersistQueue: <T>(delay: number, flush: (value: T) => void) => createDeferredPersistQueue(delay, flush, { setTimeout: () => 1, clearTimeout() {} }),
-        window: { addEventListener() {}, location: { reload() { reloads += 1; } } },
+        window: browser ? { addEventListener() {}, location: { reload() { reloads += 1; } } } : undefined,
         console: { error: (...args: unknown[]) => errors.push(args) },
     };
     const exports = {} as { useCanvasStore: any; flushCanvasPersistence: () => Promise<void>; flushCanvasCloudPersistence: () => Promise<void> };
@@ -92,6 +92,14 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
     if (!store.persist.hasHydrated() && oaOwnerId !== null) await new Promise<void>(resolve => { const unsubscribe = store.persist.onFinishHydration(() => { unsubscribe(); resolve(); }); });
     return { store, flush: exports.flushCanvasPersistence, retry: exports.flushCanvasCloudPersistence, errors, userStore, reloads: () => reloads };
 }
+
+test("non-browser imports do not schedule browser persistence or rewrite stored projects", async () => {
+    const io = database(), tab = await openTab(io, undefined, false);
+    tab.store.getState().renameProject("shared", "SSR-only state");
+    await tab.flush();
+    expect(io.read()[0].title).toBe("原画布");
+    expect(tab.errors).toHaveLength(0);
+});
 
 test("local write failures are visible and explicit retry saves retained edits without another edit", async () => {
     const io = database(), tab = await openTab(io);
