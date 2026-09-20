@@ -5,14 +5,14 @@ description: 启动 Web、API、Worker、PostgreSQL、Redis 和对象存储
 
 # 本地开发
 
-业务功能需要 API 服务。`OA_LOGIN_ENABLED=true` 时先验证公司 OA 员工身份，不新增扫码或密码步骤，失败不回退访客；`false` 用于本机免登录试用，正式后端自动建立访客会话、单机演示后端使用共用创作身份。两种模式都不启用内部积分和角色入口，敏感维护仍受保护；只启动 `web/` 不能调用生成或服务端素材接口。
+业务功能需要 API 服务。当前部署关闭 OA Token 员工识别，直接打开创作页面：正式后端自动建立访客会话，单机演示后端使用共用创作身份；旧员工数据不迁移或公开。内部积分和角色入口继续关闭，敏感维护仍受保护；只启动 `web/` 不能调用生成或服务端素材接口。
 
 ## 推荐：Docker Compose
 
 ```bash
 cp .env.example .env
-# 替换 .env 中所有 replace-with 值；模板为企业 OA 模式
-# 仅隔离本机试用时改 OA_LOGIN_ENABLED=false
+# 替换 .env 中所有 replace-with 值；保持 OA_LOGIN_ENABLED=false
+# Compose 在 API / Worker 中明确关闭 OA，覆盖旧 .env 的开启值
 docker compose up -d --build
 docker compose ps
 curl http://localhost:3000/api/health
@@ -21,8 +21,7 @@ curl http://localhost:3000/api/health
 访问：
 
 ```text
-试用入口：http://localhost:3000/（OA_LOGIN_ENABLED=false）
-企业入口：企业微信 → 公司 OA → 已配置的 HTTPS 画布地址
+创作入口：http://localhost:3000/（无需 OA Token）
 维护入口：通过配置的 HTTPS 域名访问 /admin/login
 ```
 

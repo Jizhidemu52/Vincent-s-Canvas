@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { loadConfig } from "../src/config";
 import { deploymentFeatures } from "../src/deployment-features";
 import { sessionMiddleware } from "../src/session";
@@ -7,6 +8,19 @@ import { reserveCredits, settleReservation } from "../src/billing";
 const config = (extra: Record<string, string> = {}) => loadConfig({ DATABASE_URL: "postgres://test", REDIS_URL: "redis://test", ...extra });
 
 describe("optional access and billing", () => {
+    test("repository deployment templates disable OA employee identification", () => {
+        for (const path of ["../../.env.example", "../.env.example"]) {
+            const template = readFileSync(new URL(path, import.meta.url), "utf8");
+            const flags = template.match(/^OA_LOGIN_ENABLED=(.*)$/gm);
+            expect(flags).toEqual(["OA_LOGIN_ENABLED=false"]);
+        }
+        const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
+        for (const service of ["api", "worker"]) {
+            const block = compose.split(`\n  ${service}:`)[1]?.split(/\n  [a-z][a-z-]*:/)[0];
+            expect(block).toContain('OA_LOGIN_ENABLED: "false"');
+        }
+    });
+
     test("keeps local creation open and requires OA only in the explicit employee mode", () => {
         const open = { oaLoginEnabled: false, authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false };
         expect(deploymentFeatures(config())).toEqual(open);

@@ -17,6 +17,8 @@ services:
       dockerfile: server/Dockerfile
     env_file: .env
     environment:
+      # Override older .env files that still enable OA employee identification.
+      OA_LOGIN_ENABLED: "false"
       DATABASE_URL: postgres://wireless_canvas:${POSTGRES_PASSWORD}@postgres:5432/wireless_canvas
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT: http://minio:9000
@@ -41,6 +43,7 @@ services:
     command: ["bun", "src/worker.ts"]
     env_file: .env
     environment:
+      OA_LOGIN_ENABLED: "false"
       DATABASE_URL: postgres://wireless_canvas:${POSTGRES_PASSWORD}@postgres:5432/wireless_canvas
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT: http://minio:9000
