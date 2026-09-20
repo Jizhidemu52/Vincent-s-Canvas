@@ -187,6 +187,7 @@ export type CanvasAssistantMessage = {
     meta?: string;
     detail?: CanvasAssistantMessageDetail;
     references?: CanvasAssistantReference[];
+    contextReferences?: CanvasAssistantReference[];
     attachments?: CanvasAssistantAttachment[];
 };
 

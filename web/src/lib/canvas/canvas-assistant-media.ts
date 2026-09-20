@@ -1,6 +1,6 @@
 import { resolveImageUrl } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
-import type { CanvasNodeData } from "@/types/canvas";
+import type { CanvasAssistantReference, CanvasNodeData } from "@/types/canvas";
 import type { CanvasAgentSnapshot } from "./canvas-agent-ops";
 
 /** Read layout only on submission; moving the canvas must not re-render chat history. */
@@ -43,7 +43,11 @@ function capture(source: CanvasImageSource, width: number, height: number) {
 }
 
 export async function readCanvasContextImage(node: CanvasNodeData) {
-    const url = await resolveImageUrl(node.metadata?.storageKey, node.metadata?.content || "");
+    return readCanvasConversationImage({ storageKey: node.metadata?.storageKey, dataUrl: node.metadata?.content });
+}
+
+export async function readCanvasConversationImage(ref: Pick<CanvasAssistantReference, "storageKey" | "dataUrl">) {
+    const url = await resolveImageUrl(ref.storageKey, ref.dataUrl || "");
     if (!url) throw new Error("图片不存在");
     const image = new Image();
     image.crossOrigin = "anonymous";
