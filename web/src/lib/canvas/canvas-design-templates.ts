@@ -20,20 +20,23 @@ export const canvasDesignTemplates = [
     ] },
 ] as const;
 export type CanvasDesignTemplateId = typeof canvasDesignTemplates[number]["id"];
+export type CanvasDesignTemplateSteps = readonly (readonly [title: string, prompt: string])[];
 
 /** Creates idle, executable config branches; never changes the reference or schedules generation. */
-export function createCanvasDesignTemplate(templateId: CanvasDesignTemplateId, source: CanvasNodeData | undefined, position: Position, model?: string, makeId = nanoid) {
+export function createCanvasDesignTemplate(templateId: CanvasDesignTemplateId, source: CanvasNodeData | undefined, position: Position, model?: string, makeId = nanoid, editedSteps?: CanvasDesignTemplateSteps, editedTitle?: string) {
     const template = canvasDesignTemplates.find(item => item.id === templateId)!;
+    const steps = editedSteps ?? template.steps;
+    if (steps.length !== template.steps.length || steps.some(([title, prompt]) => !title.trim() || !prompt.trim())) throw new Error("请填写全部 3 个步骤的名称和提示词");
     const nodes: CanvasNodeData[] = [];
     const connections: CanvasConnection[] = [];
     const reference = source || { ...NODE_DEFAULT_SIZE[CanvasNodeType.Image], id: makeId(), type: CanvasNodeType.Image, title: "参考款 · 请上传图片", position, metadata: { status: "idle" as const } };
     if (!source) nodes.push(reference);
     const startX = position.x + (source ? 0 : reference.width + 96);
-    template.steps.forEach(([title, prompt], index) => {
+    steps.forEach(([title, prompt], index) => {
         const id = makeId();
         nodes.push({ ...NODE_DEFAULT_SIZE[CanvasNodeType.Config], id, type: CanvasNodeType.Config, title, position: { x: startX, y: position.y + index * (NODE_DEFAULT_SIZE[CanvasNodeType.Config].height + 80) }, metadata: { status: "idle", generationMode: "image", generationType: "edit", model, count: 1, prompt, composerContent: `参考款：@[node:${reference.id}]\n${prompt}` } });
         connections.push({ id: makeId(), fromNodeId: reference.id, toNodeId: id });
     });
-    const group: CanvasNodeGroup = { id: `group-${makeId()}`, title: template.title, nodeIds: nodes.map(node => node.id), collapsed: false };
+    const group: CanvasNodeGroup = { id: `group-${makeId()}`, title: editedTitle?.trim() || template.title, nodeIds: nodes.map(node => node.id), collapsed: false };
     return { nodes, connections, group };
 }

@@ -1,7 +1,7 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ChevronDown, Bot, Download, Home, ImageIcon, Images, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Share2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
+import { ChevronDown, Bot, Download, Globe, Home, ImageIcon, Images, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Share2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 
 import { requestBatchEdit, requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { controlQueuedBatch, QueuedTaskFailedError, QueuedTaskPausedError, type QueuedBatchAction } from "@/services/api/generation-tasks";
@@ -56,6 +56,7 @@ import { flushCanvasPersistence, useCanvasStore, type CanvasProject } from "@/st
 import { CanvasSaveStatus, canvasLinkCopiedMessage } from "@/components/canvas/canvas-save-status";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { useModuleEnabled } from "@/stores/use-module-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { buildWorkflowVideoStageDispatch, completeAgentMediaWorkflowStage, restoreAgentMediaWorkflow, selectWorkflowCandidate } from "@/lib/canvas/agent-media-workflow";
 import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workflow-stage";
@@ -2625,14 +2626,14 @@ function WirelessCanvasPage() {
         setContextMenu(null);
     }, []);
 
-    const applyDesignTemplate = async (id: import("@/lib/canvas/canvas-design-templates").CanvasDesignTemplateId) => {
+    const applyDesignTemplate = async (id: import("@/lib/canvas/canvas-design-templates").CanvasDesignTemplateId, steps: import("@/lib/canvas/canvas-design-templates").CanvasDesignTemplateSteps, title?: string) => {
         const sourceId = templateSourceId;
         const { createCanvasDesignTemplate } = await import("@/lib/canvas/canvas-design-templates");
         if (designProjectIdRef.current !== projectId) return;
         const source = sourceId ? nodesRef.current.find(node => node.id === sourceId) : undefined;
         if (sourceId && !source) { message.warning("参考图已移除，请重新选择"); return; }
         const position = { x: nodesRef.current.length ? Math.max(...nodesRef.current.map(node => node.position.x + node.width)) + 120 : 0, y: source?.position.y || 0 };
-        const result = createCanvasDesignTemplate(id, source, position, effectiveConfig.imageModel || effectiveConfig.model);
+        const result = createCanvasDesignTemplate(id, source, position, effectiveConfig.imageModel || effectiveConfig.model, undefined, steps, title);
         setNodes(current => [...current, ...result.nodes]);
         setConnections(current => [...current, ...result.connections]);
         setGroups(current => [...current, result.group]);
@@ -5317,6 +5318,9 @@ const CanvasTopBar = memo(function CanvasTopBar({
     compactAgentStatus,
     onToggleAgent,
 }: CanvasTopBarRenderState) {
+    const navigate = useNavigate();
+    const { id: canvasId } = useParams<{ id: string }>();
+    const canImportReferences = useModuleEnabled("assets");
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
     const titleRef = useRef<HTMLDivElement>(null);
@@ -5363,6 +5367,7 @@ const CanvasTopBar = memo(function CanvasTopBar({
                     <button type="button" className="cw-share" title="复制当前画布链接；跨设备请导出画布文件" onClick={onShare}>分享</button>
                 </div>
                 <div className="cw-account-card">
+                    {canImportReferences ? <button type="button" className="cw-share inline-flex shrink-0 items-center gap-1.5 !px-2" aria-label="网页参考图采集" title="粘贴网页链接采集参考图，无需安装扩展" onClick={() => navigate(`/reference-import${canvasId ? `?returnTo=${encodeURIComponent(`/canvas/${canvasId}`)}` : ""}`)}><Globe className="size-4" /><span className="hidden sm:inline">网页采集</span></button> : null}
                     {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} /> : null}
                     <UserStatusActions variant="canvas" />
                 </div>

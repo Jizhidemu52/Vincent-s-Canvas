@@ -30,6 +30,7 @@ import { assertCanvasOwner, CanvasDocumentError } from "./canvas-document";
 import { fileURLToPath } from "node:url";
 import { DemoOaStore } from "./demo-oa-store";
 import { verifyOaToken, OaError, OA_SESSION_TTL_SECONDS } from "./oa";
+import { readReferenceImportBody, referenceImportFailure, runReferenceImportAction } from "./routes/reference-import";
 
 const sessions = new Map<string, string>();
 const modules = [
@@ -820,6 +821,19 @@ Bun.serve({
     }
     const user = sessionUser(request);
     if (!user) return json({ error: "UNAUTHORIZED", message: "请先登录" }, 401);
+
+    if (path === "/api/reference-import/scan" || path === "/api/reference-import/image") {
+      if (request.method !== "POST") return json({ code: 405, data: null, msg: "请使用 POST 采集网页图片" }, 405, { "cache-control": "no-store" });
+      try {
+        assertCanvasOwner(request.headers.get("x-canvas-owner-id"), user.id);
+        const body = await readReferenceImportBody(request);
+        const data = await runReferenceImportAction(user.id, request.headers.get("x-canvas-owner-id"), path.endsWith("/scan") ? "scan" : "image", body, request.signal);
+        return json({ code: 0, data, msg: "" }, 200, { "cache-control": "no-store" });
+      } catch (error) {
+        const failure = referenceImportFailure(error);
+        return json(failure.body, failure.status, { "cache-control": "no-store" });
+      }
+    }
 
     if ((features.oaLoginEnabled || path === "/api/assets/upload-request" || /^\/api\/assets\/[^/]+\/content-upload$/.test(path)) && request.headers.has("x-canvas-owner-id") && request.headers.get("x-canvas-owner-id") !== user.id) {
       return json({ error: "CANVAS_OWNER_MISMATCH", message: "当前员工身份已变化，请重新打开画布后再试。" }, 403);

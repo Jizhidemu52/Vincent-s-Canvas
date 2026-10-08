@@ -47,6 +47,7 @@ import { deploymentFeatures } from "./deployment-features";
 import { createGenerationCapabilitiesRouter } from "./routes/generation-capabilities";
 import { createCanvasDocumentsRouter } from "./routes/canvas-documents";
 import { designerModelPrivacy } from "./model-privacy";
+import { createReferenceImportRouter, referenceImportBodyErrors } from "./routes/reference-import";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
@@ -58,6 +59,7 @@ const app = express();
 if (config.TRUST_PROXY === "true") app.set("trust proxy", 1);
 app.disable("x-powered-by");
 app.use(helmet());
+app.use("/api/reference-import", express.json({ limit: "16kb" }), referenceImportBodyErrors);
 app.use("/api/chat", express.json({ limit: "12mb" }));
 app.use("/api/canvas-documents", express.json({ limit: "20mb" }));
 const canvasBodyError: ErrorRequestHandler = (error, _request, response, next) => {
@@ -86,6 +88,7 @@ const requireSession = sessionMiddleware(db, cache, config);
 const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
 const protectModelIdentity = designerModelPrivacy(db);
 app.use("/api/canvas-documents", requireSession, requireAccountReady, protectModelIdentity, createCanvasDocumentsRouter(db));
+app.use("/api/reference-import", requireSession, requireAccountReady, createReferenceImportRouter(db));
 app.use(
   "/api/billing",
   requireSession,

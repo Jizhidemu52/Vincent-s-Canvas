@@ -27,6 +27,12 @@ curl http://localhost:3000/api/health
 
 首次管理员登录后必须修改初始密码；这只用于维护，不是用户创作的前置步骤。开发环境需要模拟生成时可暂时设置 `TASK_MOCK_MODE=true`，它仍会走 Redis 队列、Worker、对象存储和历史，只是不调用外部模型。真实调用仍可能收费，入口应限制在受信网络。
 
+## 网页参考图采集
+
+`POST /api/reference-import/scan` 接收 `{ url }`，`POST /api/reference-import/image` 仅接收扫描返回的 `{ scanId, imageId }`，均要求现有会话、同源请求和匹配的 `X-Canvas-Owner-Id`；正式服务受 `assets` 模块开关保护。预览不创建素材，确认入库复用既有素材上传接口。
+
+抓取在 PATH 中的原生 Node 子进程进行，检查全部 DNS 结果并固定公网地址，每次重定向重新校验，保留 TLS 证书校验；不继承代理、Cookie、Authorization 或网页 Referer。仅支持 HTTP／HTTPS 标准端口，HTML 上限 2 MiB，单图 10 MiB，解压前后均检查大小；单次传输限时，临时记录按员工隔离、5 分钟过期，全局缓存 64 MiB、并发 4，另有扫描频率和条数上限。此入口不支持登录页、浏览器脚本渲染或模型代理配置，不开放任意图片 URL 下载接口。
+
 ## 模型 HTTPS 运行要求
 
 API、Worker 和本机演示服务仍运行于 Bun；对话及已接入的图片 HTTPS 提交另外使用 PATH 中的原生 `node`。要求 Node.js 22.x（22.21.0 起）、24.x（24.5.0 起）或 25 及以上版本；不支持 Node.js 23.x 和 24.0–24.4。服务镜像安装 Node.js 和 CA 证书后会检查版本，不满足要求则构建失败，避免旧版静默忽略代理配置；非 Docker 启动前请用 `node --version` 确认版本。密钥只通过子进程标准输入传递，不写入命令参数或前端。
