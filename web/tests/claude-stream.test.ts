@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, test } from "bun:test";
 
-import { requestImageQuestion, isClaudeModel, readClaudeSseResponse } from "../src/services/api/image";
+import { requestImageQuestion, requestToolResponse, isClaudeModel, readClaudeSseResponse } from "../src/services/api/image";
 import { defaultConfig } from "../src/stores/use-config-store";
 
 const originalFetch = globalThis.fetch;
@@ -50,6 +50,33 @@ test("reads a compatible SSE text block that carries its text at block start", a
     const result = await readClaudeSseResponse(response);
 
     expect(result).toEqual({ content: "直接文本", toolCalls: [] });
+});
+
+test("reports tool activity before its arguments finish without exposing or executing partial JSON", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const response = new Response(new ReadableStream<Uint8Array>({ start(value) { controller = value; } }), { headers: { "content-type": "text/event-stream" } });
+    globalThis.fetch = mock(async () => response) as typeof fetch;
+    const deltas: string[] = [];
+    const names: string[] = [];
+    let settled = false;
+    let started!: () => void;
+    const startSeen = new Promise<void>((resolve) => { started = resolve; });
+    const resultPromise = requestToolResponse({ ...defaultConfig, model: "claude-opus-5" }, [{ role: "user", content: "改成绿色" }], [], "auto", (text) => deltas.push(text), {
+        onToolCallStart(name) { names.push(name); started(); },
+    }).then((result) => { settled = true; return result; });
+    const event = (value: unknown) => controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(value)}\n\n`));
+    event({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "create-one", name: "create_image", input: {} } });
+    event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"prompt":' } });
+    await startSeen;
+    expect(names).toEqual(["create_image"]);
+    expect(settled).toBe(false);
+    expect(deltas).toEqual([]);
+    event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '"绿色"}' } });
+    event({ type: "message_delta", delta: { stop_reason: "tool_use" } });
+    controller.close();
+    const result = await resultPromise;
+    expect(result.toolCalls[0]?.function.arguments).toBe('{"prompt":"绿色"}');
+    expect(names).toEqual(["create_image"]);
 });
 
 test("preserves Claude max_tokens termination when thinking consumes the visible response budget", async () => {

@@ -19,14 +19,14 @@ visit(ast);
 if (!effect) throw new Error("The actual chat image recovery effect was not found");
 const effectCode = ts.transpileModule(`exports.run = ${effect.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
 
-const pending: PendingChatImageTask = { requestId: "original-request", prompt: "保留中文，只改花瓣", modelId: "gpt-image-2.5-flare", action: "edit" };
+const pending: PendingChatImageTask = { requestId: "original-request", prompt: "保留中文，只改花瓣", modelId: "gpt-image-2.5-flare", quality: "high", action: "edit", parentMessageId: "user-turn", explanation: "只改花瓣，保留其余设计", lineage: { parentImageId: "old-task:0", sourceImageIds: ["old-task:0", "attachment-1"], preservedConstraints: ["保留中文", "保留版型"] } };
 const originalImage = "data:image/png;base64,cmVzdWx0LW9yaWdpbmFs";
 const task = { id: "original-task", requestId: "original-request:0", status: "success", resultUrls: ["/api/assets/original/content"], failureReason: null };
 
 async function recoveryPageHarness(options: { pending?: PendingChatImageTask; sourceGate?: Promise<void> } = {}) {
     const initial = [
         { id: "unrelated", messages: [{ id: "other", role: "user", content: "保留这段对话" }] },
-        { id: "original-session", messages: [
+        { id: "original-session", editTargetImageId: "old-task:0", messages: [
             { id: "user-turn", role: "user", content: "把刚才那版花瓣改细", attachments: [{ dataUrl: "data:image/png;base64,c291cmNl" }] },
             { id: "original-assistant", role: "assistant", content: "图片任务已提交", pendingImageTask: options.pending || pending },
         ] },
@@ -86,10 +86,12 @@ test.each([false, true])("the restored page writes the original task result into
     expect(saved[1].id).toBe("original-session");
     expect(saved[1].messages).toHaveLength(2);
     expect(saved[1].messages[0]).toEqual(page.initial[1]!.messages[0]);
-    expect(saved[1].messages[1]).toMatchObject({ id: "original-assistant", role: "assistant", generatedImages: [{ id: "original-task:0", dataUrl: originalImage, prompt: pending.prompt, modelId: pending.modelId }] });
+    expect(saved[1].messages[1]).toMatchObject({ id: "original-assistant", parentMessageId: "user-turn", role: "assistant", generatedImages: [{ id: "original-task:0", dataUrl: originalImage, prompt: pending.prompt, modelId: pending.modelId, quality: "high", lineage: pending.lineage }] });
+    expect(saved[1].editTargetImageId).toBe("original-task:0");
+    expect(saved[1].messages[1].content).toContain(pending.explanation);
     expect(saved[1].messages[1].pendingImageTask).toBeUndefined();
     expect(page.writes).toHaveLength(2);
-    expect((page.writes[0]!.value as any[])[1].messages[1].pendingImageTask.taskId).toBe(task.id);
+    expect((page.writes[0]!.value as any[])[1].messages[1].pendingImageTask).toEqual({ ...pending, taskId: task.id });
     expect(page.recovering).toEqual([true, false]);
     page.cleanup();
 });

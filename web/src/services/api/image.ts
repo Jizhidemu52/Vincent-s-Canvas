@@ -30,7 +30,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { requestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; webSearch?: boolean; onSubmissionStarted?: () => void; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
+type RequestOptions = { requestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; webSearch?: boolean; onToolCallStart?: (name: string) => void; onSubmissionStarted?: () => void; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -151,7 +151,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
         const payload = (await response.json().catch(() => ({}))) as { message?: string };
         throw new Error(payload.message || `对话请求失败：${response.status}`);
     }
-    if (response.headers.get("content-type")?.includes("text/event-stream")) return readClaudeSseResponse(response, onDelta);
+    if (response.headers.get("content-type")?.includes("text/event-stream")) return readClaudeSseResponse(response, onDelta, options?.onToolCallStart);
     return response.json() as Promise<ToolResponseResult>;
 }
 
@@ -171,7 +171,7 @@ export function toolResponseToInput(result: Pick<ToolResponseResult, "toolCalls"
 
 type ClaudeSseState = { buffer: string; content: string; stopReason?: string; blocks: Map<number, { block: Record<string, unknown>; inputJson: string }> };
 
-export async function readClaudeSseResponse(response: Response, onDelta?: (text: string) => void): Promise<ToolResponseResult> {
+export async function readClaudeSseResponse(response: Response, onDelta?: (text: string) => void, onToolCallStart?: (name: string) => void): Promise<ToolResponseResult> {
     if (!response.body) throw new Error("Claude 流式响应为空");
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -182,13 +182,13 @@ export async function readClaudeSseResponse(response: Response, onDelta?: (text:
         state.buffer = state.buffer.replace(/\r\n/g, "\n");
         let boundary = state.buffer.indexOf("\n\n");
         while (boundary >= 0) {
-            consumeClaudeSseEvent(state.buffer.slice(0, boundary), state, onDelta);
+            consumeClaudeSseEvent(state.buffer.slice(0, boundary), state, onDelta, onToolCallStart);
             state.buffer = state.buffer.slice(boundary + 2);
             boundary = state.buffer.indexOf("\n\n");
         }
         if (done) break;
     }
-    if (state.buffer.trim()) consumeClaudeSseEvent(state.buffer, state, onDelta);
+    if (state.buffer.trim()) consumeClaudeSseEvent(state.buffer, state, onDelta, onToolCallStart);
     const blocks: ClaudeAssistantContent = Array.from(state.blocks.entries()).sort(([left], [right]) => left - right).map(([, item]) => ({ ...item.block, ...(item.inputJson ? { input: JSON.parse(item.inputJson) as unknown } : {}) }));
     const toolCalls: ResponseToolCall[] = blocks.flatMap((block) => block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string" ? [{
         id: block.id,
@@ -203,7 +203,7 @@ export async function readClaudeSseResponse(response: Response, onDelta?: (text:
     };
 }
 
-function consumeClaudeSseEvent(event: string, state: ClaudeSseState, onDelta?: (text: string) => void) {
+function consumeClaudeSseEvent(event: string, state: ClaudeSseState, onDelta?: (text: string) => void, onToolCallStart?: (name: string) => void) {
     const raw = event.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
     if (!raw || raw === "[DONE]") return;
     let payload: { type?: string; index?: number; content_block?: Record<string, unknown>; delta?: { type?: string; text?: string; thinking?: string; signature?: string; partial_json?: string; stop_reason?: string | null }; error?: { message?: string } };
@@ -212,6 +212,8 @@ function consumeClaudeSseEvent(event: string, state: ClaudeSseState, onDelta?: (
     if (payload.type === "error") throw new Error(payload.error?.message || "Claude 流式响应失败");
     if (payload.type === "content_block_start") {
         state.blocks.set(index, { block: { ...payload.content_block }, inputJson: "" });
+        // This reports upstream activity only. Partial arguments are never executed.
+        if (payload.content_block?.type === "tool_use" && typeof payload.content_block.name === "string") onToolCallStart?.(payload.content_block.name);
         if (payload.content_block?.type === "text" && typeof payload.content_block.text === "string") {
             state.content += payload.content_block.text;
             onDelta?.(state.content);

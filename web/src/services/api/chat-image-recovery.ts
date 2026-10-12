@@ -1,11 +1,16 @@
 import { getQueuedTask, listQueuedTasks, type QueuedTask } from "@/services/api/generation-tasks";
+import type { CreativeImageLineage } from "@/lib/creative-chat";
 
 export type PendingChatImageTask = {
     requestId: string;
     prompt: string;
     modelId: string;
+    quality?: string;
     action: "generate" | "edit";
     taskId?: string;
+    parentMessageId?: string;
+    lineage?: CreativeImageLineage;
+    explanation?: string;
 };
 
 export type ChatImageRecoveryResult =

@@ -19,15 +19,12 @@ const visit = (node: ts.Node) => {
     ts.forEachChild(node, visit);
 };
 visit(ast);
-if (!initializers.has("addFiles") || !initializers.has("switchMode") || !byteCounter) throw new Error("The actual chat attachment handlers were not found");
+if (!initializers.has("addFiles") || !byteCounter) throw new Error("The actual chat attachment handler was not found");
 const handlerCode = ts.transpileModule(`${byteCounter.getText(ast)}
-exports.addFiles = ${initializers.get("addFiles")!.getText(ast)};
-exports.switchMode = ${initializers.get("switchMode")!.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+exports.addFiles = ${initializers.get("addFiles")!.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
 
 const originalBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 7, 42, 99, 18]);
-const compressedBytes = new Uint8Array([255, 216, 255, 42, 17, 11]);
 const originalDataUrl = `data:image/png;base64,${Buffer.from(originalBytes).toString("base64")}`;
-const compressedDataUrl = `data:image/jpeg;base64,${Buffer.from(compressedBytes).toString("base64")}`;
 const MiB = 1024 * 1024;
 
 function imageFile(name = "original.png", size?: number) {
@@ -38,11 +35,9 @@ function decodedBytes(dataUrl: string) {
     return new Uint8Array(Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64"));
 }
 
-function uploadHarness(initialMode: Mode, compressionResult = compressedDataUrl) {
-    let mode = initialMode;
+function uploadHarness(legacyMode: Mode) {
     let attachments: Attachment[] = [];
     let reading = false;
-    let selectedModel = "chat-model";
     let nextId = 0;
     const warnings: string[] = [];
     const errors: string[] = [];
@@ -50,7 +45,7 @@ function uploadHarness(initialMode: Mode, compressionResult = compressedDataUrl)
     const compressionReads: File[] = [];
     function renderHandlers() {
         const bindings = {
-            mode,
+            mode: legacyMode,
             sessionsReady: true,
             readingAttachments: reading,
             attachments,
@@ -59,8 +54,6 @@ function uploadHarness(initialMode: Mode, compressionResult = compressedDataUrl)
             imageModels: [{ modelId: "image-model" }],
             chatModels: [{ modelId: "chat-model" }],
             useCallback: <T>(callback: T) => callback,
-            setMode(value: Mode) { mode = value; },
-            setSelectedModel(update: (current: string) => string) { selectedModel = update(selectedModel); },
             setReadingAttachments(value: boolean) { reading = value; },
             setAttachments(update: (current: Attachment[]) => Attachment[]) { attachments = update(attachments); },
             createClientId: () => `attachment-${++nextId}`,
@@ -71,23 +64,21 @@ function uploadHarness(initialMode: Mode, compressionResult = compressedDataUrl)
             },
             async compressChatImage(file: File) {
                 compressionReads.push(file);
-                return compressionResult;
+                throw new Error("Uploaded originals must never be recompressed by the chat page");
             },
             message: {
                 warning(value: string) { warnings.push(value); },
                 error(value: string) { errors.push(value); },
             },
         };
-        const exports = {} as { addFiles: (files: FileList | null) => Promise<void>; switchMode: (mode: Mode) => void };
+        const exports = {} as { addFiles: (files: FileList | null) => Promise<void> };
         new Function(...Object.keys(bindings), "exports", handlerCode)(...Object.values(bindings), exports);
         return exports;
     }
     return {
         addFiles: (files: File[]) => renderHandlers().addFiles(files as unknown as FileList),
-        switchMode: (nextMode: Mode) => renderHandlers().switchMode(nextMode),
         attachments: () => attachments,
         reading: () => reading,
-        mode: () => mode,
         warnings,
         errors,
         originalReads,
@@ -95,8 +86,8 @@ function uploadHarness(initialMode: Mode, compressionResult = compressedDataUrl)
     };
 }
 
-describe("actual chat creation attachment upload", () => {
-    test("new PNG uploads in create mode retain their original bytes and data URL", async () => {
+describe("actual unified chat attachment upload", () => {
+    test("new PNG uploads retain their original bytes and data URL", async () => {
         const page = uploadHarness("create");
         const file = imageFile();
         await page.addFiles([file]);
@@ -111,16 +102,16 @@ describe("actual chat creation attachment upload", () => {
         expect(page.reading()).toBe(false);
     });
 
-    test.each(["chat", "agent"] as Mode[])("%s uploads still use the compressed image and its stored byte size", async (mode) => {
+    test.each(["chat", "agent"] as Mode[])("legacy %s session uploads also retain the original image and its byte size", async (mode) => {
         const page = uploadHarness(mode);
         const file = imageFile();
         await page.addFiles([file]);
 
         expect(page.attachments()).toHaveLength(1);
-        expect(page.attachments()[0]).toMatchObject({ dataUrl: compressedDataUrl, size: 6 });
-        expect(decodedBytes(page.attachments()[0]!.dataUrl!)).toEqual(compressedBytes);
-        expect(page.compressionReads).toEqual([file]);
-        expect(page.originalReads).toEqual([]);
+        expect(page.attachments()[0]).toMatchObject({ dataUrl: originalDataUrl, size: 12 });
+        expect(decodedBytes(page.attachments()[0]!.dataUrl!)).toEqual(originalBytes);
+        expect(page.compressionReads).toEqual([]);
+        expect(page.originalReads).toEqual([file]);
         expect(page.errors).toEqual([]);
     });
 
@@ -149,8 +140,7 @@ describe("actual chat creation attachment upload", () => {
     });
 
     test.each(["create", "chat"] as Mode[])("%s enforces the 8 MiB stored-attachment total across existing and new files", async (mode) => {
-        const largeCompressedDataUrl = `data:image/jpeg;base64,${Buffer.from(new Uint8Array(3 * MiB)).toString("base64")}`;
-        const page = uploadHarness(mode, largeCompressedDataUrl);
+        const page = uploadHarness(mode);
         await page.addFiles([imageFile("existing.png", 3 * MiB)]);
         await page.addFiles([imageFile("fits.png", 3 * MiB), imageFile("exceeds-total.png", 3 * MiB)]);
 
@@ -181,24 +171,31 @@ describe("actual chat creation attachment upload", () => {
         expect(page.errors).toEqual([]);
     });
 
-    test("switching a compressed chat attachment to create mode cannot pretend to restore its original bytes", async () => {
+    test("adding another image preserves the earlier original attachment without copying or recompressing it", async () => {
         const page = uploadHarness("chat");
         await page.addFiles([imageFile("chat-upload.png")]);
         const existing = page.attachments()[0]!;
 
-        page.switchMode("create");
-        expect(page.mode()).toBe("create");
         expect(page.attachments()).toEqual([existing]);
-        expect(page.attachments()[0]!.dataUrl).toBe(compressedDataUrl);
-        expect(page.originalReads).toEqual([]);
-        expect(page.compressionReads).toHaveLength(1);
+        expect(page.attachments()[0]!.dataUrl).toBe(originalDataUrl);
+        expect(page.originalReads).toHaveLength(1);
+        expect(page.compressionReads).toHaveLength(0);
 
         await page.addFiles([imageFile("fresh-create-upload.png")]);
         expect(page.attachments()[0]).toBe(existing);
-        expect(decodedBytes(page.attachments()[0]!.dataUrl!)).toEqual(compressedBytes);
+        expect(decodedBytes(page.attachments()[0]!.dataUrl!)).toEqual(originalBytes);
         expect(page.attachments()[1]!.dataUrl).toBe(originalDataUrl);
         expect(decodedBytes(page.attachments()[1]!.dataUrl!)).toEqual(originalBytes);
-        expect(page.compressionReads).toHaveLength(1);
-        expect(page.originalReads).toHaveLength(1);
+        expect(page.compressionReads).toHaveLength(0);
+        expect(page.originalReads).toHaveLength(2);
+    });
+
+    test("an unsupported file does not discard a following valid image or leave attachment reading locked", async () => {
+        const page = uploadHarness("chat");
+        await page.addFiles([new File(["bad"], "unsupported.exe", { type: "application/octet-stream" }), imageFile()]);
+        expect(page.errors).toHaveLength(1);
+        expect(page.attachments()).toHaveLength(1);
+        expect(page.attachments()[0]!.dataUrl).toBe(originalDataUrl);
+        expect(page.reading()).toBe(false);
     });
 });

@@ -1,6 +1,6 @@
-import { buildCreativeChatRequestMessages, buildCreativeChatTools, MAX_CREATIVE_CHAT_PREVIEW_BYTES, parseCreativeChatPlan, resolveCreativeChatReferences, type CreativeChatMessage, type CreativeChatPlan } from "@/lib/creative-chat";
+import { buildCreativeChatRequestMessages, buildCreativeChatTools, buildCreativeImageCatalog, MAX_CREATIVE_CHAT_PREVIEW_BYTES, MAX_CREATIVE_CHAT_REFERENCES, parseCreativeChatInspection, parseCreativeChatPlan, resolveCreativeChatReferences, type CreativeChatMessage, type CreativeChatPlan } from "@/lib/creative-chat";
 import { getDataUrlByteSize } from "@/lib/image-utils";
-import { requestToolResponse } from "@/services/api/image";
+import { requestToolResponse, toolResponseToInput } from "@/services/api/image";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
@@ -28,8 +28,12 @@ async function createPlanningPreview(reference: ReferenceImage, signal?: AbortSi
     if (!/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/]+={0,2}$/i.test(dataUrl)) throw new Error("参考图读取结果不是有效图片");
     const image = await new Promise<HTMLImageElement>((resolve, reject) => {
         const element = new Image();
-        element.onload = () => resolve(element);
-        element.onerror = () => reject(new Error(`无法读取参考图 ${reference.name}`));
+        const cleanup = () => { signal?.removeEventListener("abort", aborted); element.onload = null; element.onerror = null; };
+        const aborted = () => { cleanup(); reject(signal?.reason || new DOMException("Aborted", "AbortError")); };
+        element.onload = () => { cleanup(); resolve(element); };
+        element.onerror = () => { cleanup(); reject(new Error(`无法读取参考图 ${reference.name}`)); };
+        signal?.addEventListener("abort", aborted, { once: true });
+        if (signal?.aborted) { aborted(); return; }
         element.src = dataUrl;
     });
     signal?.throwIfAborted();
@@ -47,16 +51,73 @@ async function createPlanningPreview(reference: ReferenceImage, signal?: AbortSi
     return { ...reference, dataUrl: preview, type: "image/jpeg", storageKey: undefined, width: size.width, height: size.height };
 }
 
-/** One model decision only. This service never uploads, creates, or retries tasks. */
-export async function requestCreativeChatPlan(config: AiConfig, history: CreativeChatMessage[], current: CreativeChatMessage, options: { signal?: AbortSignal; onDelta?: (text: string) => void } = {}): Promise<CreativeChatPlan> {
+/** At most one read-only inspection then a final decision; never uploads, creates, or retries tasks. */
+export async function requestCreativeChatPlan(config: AiConfig, history: CreativeChatMessage[], current: CreativeChatMessage, options: { signal?: AbortSignal; onDelta?: (text: string) => void; onPhase?: (text: string) => void; selectedImageId?: string } = {}): Promise<CreativeChatPlan> {
     options.signal?.throwIfAborted();
-    const references = resolveCreativeChatReferences(history, current);
-    // Originals remain authoritative for editing; only these temporary copies go to the planner.
-    const previews: ReferenceImage[] = [];
-    for (const reference of references) previews.push(await createPlanningPreview(reference, options.signal));
-    if (previews.reduce((total, reference) => total + getDataUrlByteSize(reference.dataUrl), 0) > MAX_CREATIVE_CHAT_PREVIEW_BYTES) throw new Error("参考图预览总大小超过 8MB");
+    const catalog = buildCreativeImageCatalog(history, current);
+    const currentImageIds = new Set(buildCreativeImageCatalog([], current).map((item) => item.id));
+    const selectedImageId = options.selectedImageId || current.editTargetImageId;
+    // This is a structural permission boundary, not keyword-based intent classification.
+    // Textless uploads may be read and discussed, but their contents cannot authorize image execution.
+    const allowImageCreation = Boolean(current.content.trim());
+    let references = resolveCreativeChatReferences(history, current, selectedImageId, catalog);
+    const previewCache = new Map<string, ReferenceImage>();
+    // Originals remain authoritative for editing; temporary previews never enter lineage or storage.
+    const previewsFor = async (originals: ReferenceImage[]) => {
+        const previews: ReferenceImage[] = [];
+        // Bound simultaneous image decodes while preserving the original working-set order.
+        for (let offset = 0; offset < originals.length; offset += 2) {
+            options.signal?.throwIfAborted();
+            const batch = await Promise.all(originals.slice(offset, offset + 2).map(async (reference) => {
+                try {
+                    if (!previewCache.has(reference.id)) previewCache.set(reference.id, await createPlanningPreview(reference, options.signal));
+                    return previewCache.get(reference.id)!;
+                } catch (error) {
+                    options.signal?.throwIfAborted();
+                    if (currentImageIds.has(reference.id)) throw error;
+                    const entry = catalog.find((item) => item.id === reference.id);
+                    if (entry) entry.unavailableReason = "历史原图暂时无法读取；若本轮需要使用它，请重新发送图片";
+                    return undefined;
+                }
+            }));
+            previews.push(...batch.filter((preview): preview is ReferenceImage => Boolean(preview)));
+        }
+        if (previews.length > MAX_CREATIVE_CHAT_REFERENCES || previews.reduce((total, reference) => total + getDataUrlByteSize(reference.dataUrl), 0) > MAX_CREATIVE_CHAT_PREVIEW_BYTES) throw new Error("参考图预览超过 5 张或 8MB");
+        return previews;
+    };
+    options.onPhase?.("正在理解需求与图片上下文…");
+    let previews = await previewsFor(references);
+    references = references.filter((item) => previews.some((preview) => preview.id === item.id));
     options.signal?.throwIfAborted();
-    const result = await requestToolResponse(config, buildCreativeChatRequestMessages(history, current, previews), buildCreativeChatTools(), "auto", options.onDelta, { signal: options.signal });
+    const context = { catalog, selectedImageId };
+    const requestOptions = {
+        signal: options.signal,
+        onToolCallStart: (name: string) => {
+            if (name === "create_image") options.onPhase?.("正在整理图片修改要求…");
+            else if (name === "inspect_images") options.onPhase?.("正在查看相关图片…");
+        },
+    };
+    let result = await requestToolResponse(config, buildCreativeChatRequestMessages(history, current, previews, context), buildCreativeChatTools(true, allowImageCreation), "auto", options.onDelta, requestOptions);
     options.signal?.throwIfAborted();
-    return parseCreativeChatPlan(result, references);
+    const inspectionIds = parseCreativeChatInspection(result, catalog);
+    if (inspectionIds) {
+        // Requested images get the detail budget first, allowing text-directed return to an old branch.
+        const nextIds = [...new Set([...inspectionIds, ...references.map((item) => item.id)])].slice(0, MAX_CREATIVE_CHAT_REFERENCES);
+        references = nextIds.map((id) => {
+            const { name, type, dataUrl, storageKey } = catalog.find((item) => item.id === id)!;
+            return { id, name, type, dataUrl, ...(storageKey ? { storageKey } : {}) };
+        });
+        options.onPhase?.("正在查看指定图片，确认修改对象…");
+        previews = await previewsFor(references);
+        references = references.filter((item) => previews.some((preview) => preview.id === item.id));
+        options.signal?.throwIfAborted();
+        const inspectedResult = result;
+        result = await requestToolResponse(config, [
+            ...buildCreativeChatRequestMessages(history, current, previews, context),
+            ...toolResponseToInput(inspectedResult),
+            { role: "tool", tool_call_id: inspectedResult.toolCalls[0]!.id, content: JSON.stringify({ inspected_image_ids: inspectionIds, previewed_image_ids: previews.map((item) => item.id), unavailable_image_ids: nextIds.filter((id) => !previews.some((item) => item.id === id)), instruction: `可读取的预览已按image_id提供，不可用图片不得用其他图替代。查看步骤已结束，${allowImageCreation ? "现在只能回复文字或调用一次create_image" : "本轮没有文字处理要求，只能回复文字"}；不得再次调用inspect_images。` }) },
+        ], buildCreativeChatTools(false, allowImageCreation), "auto", options.onDelta, requestOptions);
+        options.signal?.throwIfAborted();
+    }
+    return parseCreativeChatPlan(result, references, { ...context, previewedImageIds: previews.map((item) => item.id), allowImageCreation });
 }
