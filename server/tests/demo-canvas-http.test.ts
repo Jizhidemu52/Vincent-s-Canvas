@@ -15,7 +15,7 @@ test("open canvas HTTP persists whole documents with owner headers, revisions an
   const probe = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() });
   const port = probe.port!; await probe.stop(true);
   const base = `http://127.0.0.1:${port}`;
-  const start = () => Bun.spawn([process.execPath, "src/demo-server.ts"], {
+  const start = () => Bun.spawn([process.execPath, "--no-env-file", "src/demo-server.ts"], {
     cwd: join(import.meta.dir, ".."), stdout: "ignore", stderr: "pipe",
     env: { ...process.env, DEMO_STATE_PATH: statePath, DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1", OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "true", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "false", STANDALONE_WEB_DIR: "", OPENTOKEN_API_KEY: "", APIMART_API_KEY: "", GPT_IMAGE_2_API_KEY: "" },
   });
@@ -54,6 +54,15 @@ test("open canvas HTTP persists whole documents with owner headers, revisions an
     expect(first.status).toBe(200);
     const firstBody = await first.json() as any;
     expect(firstBody.document).toMatchObject({ id: source.id, revision: 1, deleted: false, document: source });
+    const listed = await request("/api/canvas-documents", a);
+    expect(listed.headers.get("cache-control")).toBe("no-store");
+    expect(await listed.json()).toEqual({ documents: [{ id: source.id, revision: 1, deleted: false, updatedAt: firstBody.document.updatedAt,
+      summary: { id: source.id, title: source.title, createdAt: source.createdAt, updatedAt: source.updatedAt, nodeCount: 1, connectionCount: 0, cover: { content: assetUrl } } }] });
+    const detail = await request(`/api/canvas-documents/${source.id}`, a);
+    expect(detail.headers.get("cache-control")).toBe("no-store");
+    expect(await detail.json()).toEqual(firstBody);
+    expect((await request(`/api/canvas-documents/${source.id}`, a, {}, b.user.id)).status).toBe(403);
+    expect((await request(`/api/canvas-documents/${source.id}`, b)).status).toBe(403);
     expect((await request("/api/canvas-documents", b)).status).toBe(403);
     const denied = await put(b, source.id, 0, source);
     expect(denied.status).toBe(403);
@@ -69,7 +78,9 @@ test("open canvas HTTP persists whole documents with owner headers, revisions an
     const deleted = await deletedResponse.json() as any;
     expect(deleted.document).toMatchObject({ revision: 3, deleted: true, document: null });
     handle.kill(); await handle.exited; handle = start(); await ready();
-    expect(await request("/api/canvas-documents", a).then(r => r.json())).toEqual({ documents: [deleted.document] });
+    expect(await request("/api/canvas-documents", a).then(r => r.json())).toEqual({ documents: [{ id: source.id, revision: 3, deleted: true, summary: null, updatedAt: deleted.document.updatedAt }] });
+    expect(await request(`/api/canvas-documents/${source.id}`, a).then(r => r.json())).toEqual(deleted);
+    expect(await request("/api/canvas-documents/missing", a).then(r => r.json())).toEqual({ document: { id: "missing", revision: 0, deleted: true, document: null, updatedAt: "1970-01-01T00:00:00.000Z" } });
     for (const revision of [0, 2, 3]) expect((await put(a, source.id, revision, source)).status).toBe(409);
     const downloaded = await request(assetUrl, a);
     expect(await downloaded.bytes()).toEqual(bytes);

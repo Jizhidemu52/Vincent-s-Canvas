@@ -3,7 +3,8 @@ import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, Mous
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronDown, Bot, Download, Globe, Home, ImageIcon, Images, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Share2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 
-import { requestBatchEdit, requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { requestBatchEdit, requestImageQuestion } from "@/services/api/image";
+import { useCanvasImageTasks } from "./use-canvas-image-tasks";
 import { controlQueuedBatch, QueuedTaskFailedError, QueuedTaskPausedError, type QueuedBatchAction } from "@/services/api/generation-tasks";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { recoverVideoGenerationTask, requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
@@ -20,6 +21,8 @@ import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { useAssetStore, type AssetInput } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { loadCanvasImageTools } from "@/lib/canvas/canvas-image-tool-loader";
+import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
+import { readCanvasSystemClipboard } from "@/lib/canvas/canvas-system-clipboard";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { zoomViewportAtCanvasCenter } from "@/lib/canvas/canvas-viewport-interaction";
@@ -49,10 +52,11 @@ import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
 import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
+import { useCanvasExport } from "@/hooks/use-canvas-export";
 import { useCanvasDesktopLayout } from "@/hooks/use-canvas-desktop-layout";
 import { shouldOpenCanvasCreationPanel } from "@/lib/canvas/canvas-layout-breakpoint";
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
-import { flushCanvasPersistence, useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { flushCanvasPersistence, loadCanvasProject, useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasSaveStatus, canvasLinkCopiedMessage } from "@/components/canvas/canvas-save-status";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -66,6 +70,7 @@ import { syncCanvasSelectionReferences, type CanvasSelectionReference } from "@/
 import { createCanvasSelectionPromptSync } from "@/lib/canvas/canvas-selection-prompt";
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
 import { canvasImageBaseName, canvasImageExportStem, canvasImageVersion, canvasImageReferenceIdentity, originalCanvasImageFileName, originalReferenceFileName } from "@/lib/canvas/canvas-image-filename";
+import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createCanvasBatchRenderIndex } from "@/lib/canvas/canvas-batch-motion";
@@ -144,6 +149,7 @@ const CanvasNodeContextMenu = lazy(() => import("@/components/canvas/canvas-cont
 const CanvasImageCompareDialog = lazy(() => import("@/components/canvas/canvas-image-compare-dialog").then(module => ({ default: module.CanvasImageCompareDialog })));
 const CanvasDesignTemplateDialog = lazy(() => import("@/components/canvas/canvas-design-template-dialog").then(module => ({ default: module.CanvasDesignTemplateDialog })));
 const CanvasDesignActions = lazy(() => import("@/components/canvas/canvas-design-actions").then(module => ({ default: module.CanvasDesignActions })));
+const CanvasInlineImageCompare = lazy(() => import("@/components/canvas/canvas-inline-image-compare").then(module => ({ default: module.CanvasInlineImageCompare })));
 const CanvasGroupLayer = lazy(() => import("@/components/canvas/canvas-group-layer").then(module => ({ default: module.CanvasGroupLayer })));
 const CanvasGroupNameDialog = lazy(() => import("@/components/canvas/canvas-group-name-dialog").then(module => ({ default: module.CanvasGroupNameDialog })));
 const CanvasLocalAgentPanel = lazy(loadCanvasLocalAgentPanel);
@@ -222,6 +228,7 @@ const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
+const INTERRUPTED_IMAGE_TASK_ERROR = "本地查询已中断，可恢复原图片任务，不会重新生成。";
 const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用于 AI 生图的提示词。
 
 要求：
@@ -589,6 +596,7 @@ function WirelessCanvasPage() {
     const agentCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
+    const { createOptions, recoverPending } = useCanvasImageTasks({ projectId, nodes: nodesRef, setNodes, saveQueue: projectSaveQueueRef, generating: generationRequestsRef });
     const projectAsyncLifecycleRef = useRef(createCanvasProjectAsyncLifecycle());
     const loadedReuseTokenRef = useRef(new Set<string>());
     const quickGenerateRef = useRef<() => Promise<void>>(async () => undefined);
@@ -741,10 +749,20 @@ function WirelessCanvasPage() {
         }
 
         historyPausedRef.current = false;
-        const project = openProject(projectId);
+        const restore = async () => {
+        let project: CanvasProject | null;
+        try { project = openProject(projectId) || await loadCanvasProject(projectId); }
+        catch (error) {
+            if (lifecycle.isCurrent(restoreToken)) {
+                message.error(error instanceof Error ? error.message : "画布读取失败，请重试");
+                navigate("/canvas", { replace: true });
+            }
+            return;
+        }
+        if (!lifecycle.isCurrent(restoreToken)) return;
         if (!project) {
             navigate("/canvas", { replace: true });
-            return invalidateRestore;
+            return;
         }
 
         const restoredGroups = project.groups || [];
@@ -780,23 +798,28 @@ function WirelessCanvasPage() {
             });
         };
 
-        const restore = async () => {
+            const hydration = createCanvasHydrationContext();
             try {
-                const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes));
+                const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes, hydration), hydration);
                 if (!lifecycle.isCurrent(restoreToken)) return;
-                const restoredSessions = await hydrateAssistantImages(project.chatSessions || [], restoredNodes);
-                const restoredHistory = await hydrateCanvasHistory(project.history);
+                const restoredSessions = await hydrateAssistantImages(project.chatSessions || [], restoredNodes, hydration);
+                const restoredHistory = await hydrateCanvasHistory(project.history, hydration);
                 commitRestoredProject(restoredNodes, restoredSessions, restoredHistory);
             } catch (error) {
                 if (!lifecycle.isCurrent(restoreToken)) return;
                 const reason = error instanceof Error ? error.message : "素材恢复失败";
                 message.warning(`部分素材恢复失败，已保留原始项目内容：${reason}`);
-                commitRestoredProject(resetInterruptedGeneration(project.nodes), project.chatSessions || []);
+                commitRestoredProject(resetInterruptedGeneration(project.nodes, hydration), project.chatSessions || []);
             }
         };
         void restore();
         return invalidateRestore;
     }, [hydrated, message, navigate, openProject, performanceFixtureSize, performanceScenarioIncludesImages, projectId, releaseStaleCanvasObjectUrls, usePerformanceScenario]);
+
+    useEffect(() => {
+        // Only the live restored graph is observed; history hydration stays side-effect free.
+        if (projectLoaded && !usePerformanceScenario && nodesRef.current.some(node => node.metadata?.imageTask)) void recoverPending();
+    }, [projectLoaded, projectId, recoverPending, usePerformanceScenario]);
 
     useEffect(() => {
         if (!projectLoaded || !["new", "recent", "choose"].includes(searchParams.get("mode") || "")) return;
@@ -845,6 +868,7 @@ function WirelessCanvasPage() {
     useEffect(
         () => () => {
             if (agentCloseTimerRef.current) clearTimeout(agentCloseTimerRef.current);
+            abortPendingCanvasRequests(generationRequestsRef.current);
             textStreamBufferRef.current?.cancel();
             transientTimeoutsRef.current.clearAll();
             if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -1599,6 +1623,7 @@ function WirelessCanvasPage() {
                             batchChildIds: childIds,
                             primaryImageId,
                             content: primaryNode?.metadata?.content || node.metadata.content,
+                            ...(primaryNode ? { storageKey: primaryNode.metadata?.storageKey, compareSources: primaryNode.metadata?.compareSources, references: primaryNode.metadata?.references } : {}),
                             naturalWidth: primaryNode?.metadata?.naturalWidth || node.metadata.naturalWidth,
                             naturalHeight: primaryNode?.metadata?.naturalHeight || node.metadata.naturalHeight,
                         },
@@ -1860,13 +1885,17 @@ function WirelessCanvasPage() {
     );
 
     const applyHistory = useCallback((entry: CanvasHistoryEntry) => {
-        const restoredEntry = { ...entry, groups: entry.groups || [] };
+        const restoredNodes = entry.nodes.map(node => hasPendingImageTask(node, entry.nodes) && node.metadata?.status === NODE_STATUS_LOADING
+            && !generationRequestsRef.current.has(node.id)
+            ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: INTERRUPTED_IMAGE_TASK_ERROR } }
+            : node);
+        const restoredEntry = { ...entry, nodes: restoredNodes, groups: entry.groups || [] };
         if (historyCommitTimerRef.current) {
             clearTimeout(historyCommitTimerRef.current);
             historyCommitTimerRef.current = null;
         }
         applyingHistoryRef.current = true;
-        setNodes(entry.nodes);
+        setNodes(restoredNodes);
         setConnections(entry.connections);
         setGroups(restoredEntry.groups);
         setChatSessions(entry.chatSessions);
@@ -1985,8 +2014,9 @@ function WirelessCanvasPage() {
         commitSelectedNodeIds(nextSelected);
         const dragNodes = collectCanvasDragNodes(nextSelected, nodeById);
         const dragIds = dragNodes.ids;
-        const dragNodeElementCache = createCanvasDragNodeElementCache((draggedNodeId) =>
-            containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(draggedNodeId)}"]`) || null,
+        const dragNodeElementCache = createCanvasDragNodeElementCache(
+            (draggedNodeId) => containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(draggedNodeId)}"]`) || null,
+            () => new Map(Array.from(containerRef.current?.querySelectorAll<HTMLElement>("[data-node-id]") || [], element => [element.dataset.nodeId!, element] as const)),
         );
         dragNodeElementCache.warm(dragIds);
         dragNodeElementCacheRef.current = dragNodeElementCache;
@@ -2182,8 +2212,21 @@ function WirelessCanvasPage() {
         };
     }, [finishNodeDrag, flushSelectionPointer, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
 
-    const createImageFileNode = useCallback(async (file: File, position: Position) => {
+    const imageOperationRunner = useMemo(() => createCanvasImageOperationRunner(), [projectId]);
+    useEffect(() => () => imageOperationRunner.cancelAll(), [imageOperationRunner]);
+    const runLocalImageOperation = useCallback((key: string, label: string, task: (signal: AbortSignal) => Promise<void>) => {
+        const messageKey = `canvas-image:${projectId}:${key}`;
+        return imageOperationRunner.run(key, task, {
+            start: () => { void message.loading({ key: messageKey, content: `${label}中…`, duration: 0 }); },
+            error: (error) => { void message.error(`${label}失败：${error instanceof Error ? error.message : "请重试"}`); },
+            finish: () => message.destroy(messageKey),
+        });
+    }, [imageOperationRunner, message, projectId]);
+
+    const createImageFileNode = useCallback(async (file: File, position: Position, signal?: AbortSignal) => {
+        signal?.throwIfAborted();
         const image = await uploadImage(file);
+        signal?.throwIfAborted();
         const size = fitNodeSize(image.width, image.height);
         const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const newNode: CanvasNodeData = {
@@ -2264,23 +2307,18 @@ function WirelessCanvasPage() {
     );
 
     const pasteSystemClipboard = useCallback(async () => {
-        if (!navigator.clipboard) return;
-
-        const items = await navigator.clipboard.read();
-        const imageItem = items.find((item) => item.types.some((type) => type.startsWith("image/")));
-        if (imageItem) {
-            const imageType = imageItem.types.find((type) => type.startsWith("image/"));
-            if (!imageType) return;
-            const blob = await imageItem.getType(imageType);
-            const file = new File([blob], "clipboard-image.png", { type: imageType });
-            void createImageFileNode(file, getCanvasCenter());
-            message.success("已从剪切板添加图片");
-            return;
-        }
-
-        const text = await navigator.clipboard.readText();
-        if (createTextNodeFromClipboard(text)) message.success("已从剪切板添加文本");
-    }, [createImageFileNode, createTextNodeFromClipboard, getCanvasCenter, message]);
+        await runLocalImageOperation("clipboard-paste", "粘贴", async (signal) => {
+            const content = await readCanvasSystemClipboard(navigator.clipboard);
+            signal.throwIfAborted();
+            if (content.kind === "image") {
+                const file = new File([content.blob], "clipboard-image.png", { type: content.type });
+                await createImageFileNode(file, getCanvasCenter(), signal);
+                message.success("已从剪切板添加图片");
+                return;
+            }
+            if (createTextNodeFromClipboard(content.text)) message.success("已从剪切板添加文本");
+        });
+    }, [createImageFileNode, createTextNodeFromClipboard, getCanvasCenter, message, runLocalImageOperation]);
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -2497,6 +2535,9 @@ function WirelessCanvasPage() {
                           metadata: {
                               ...node.metadata,
                               content: child.metadata?.content,
+                              storageKey: child.metadata?.storageKey,
+                              compareSources: child.metadata?.compareSources,
+                              references: child.metadata?.references,
                               primaryImageId: child.id,
                               naturalWidth: child.metadata?.naturalWidth,
                               naturalHeight: child.metadata?.naturalHeight,
@@ -2725,71 +2766,85 @@ function WirelessCanvasPage() {
 
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
         if (!node.metadata?.content) return;
-        const { cropDataUrl } = await loadCanvasImageTools();
-        const cropped = await cropDataUrl(node.metadata.content, crop);
-        const image = await uploadImage(cropped);
-        const width = Math.min(node.width, Math.max(220, image.width));
-        const childId = nanoid();
-        const child: CanvasNodeData = {
-            id: childId,
-            type: CanvasNodeType.Image,
-            title: "Cropped Image",
-            position: { x: node.position.x + node.width + 96, y: node.position.y },
-            width,
-            height: width * (image.height / image.width),
-            metadata: {
-                ...imageMetadata(image),
-                originalFileName: originalCanvasImageFileName(node),
-                imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node) + 1,
-                prompt: node.metadata?.prompt,
-            },
-        };
-        setNodes((prev) => [...prev, child]);
-        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
-        setSelectedNodeIds(new Set([childId]));
-        setDialogNodeId(childId);
-        setCropNodeId(null);
-    }, []);
+        const source = node.metadata.content;
+        await runLocalImageOperation(`crop:${node.id}`, "裁剪图片", async (signal) => {
+            const { cropImageBlob } = await loadCanvasImageTools();
+            const cropped = await cropImageBlob(source, crop, { signal });
+            signal.throwIfAborted();
+            const image = await uploadImage(cropped);
+            signal.throwIfAborted();
+            const width = Math.min(node.width, Math.max(220, image.width));
+            const childId = nanoid();
+            const child: CanvasNodeData = {
+                id: childId,
+                type: CanvasNodeType.Image,
+                title: "Cropped Image",
+                position: { x: node.position.x + node.width + 96, y: node.position.y },
+                width,
+                height: width * (image.height / image.width),
+                metadata: {
+                    ...imageMetadata(image),
+                    compareSources: [canvasCompareSource(node.metadata || {})],
+                    originalFileName: originalCanvasImageFileName(node),
+                    imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node) + 1,
+                    prompt: node.metadata?.prompt,
+                },
+            };
+            setNodes((prev) => [...prev, child]);
+            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
+            setSelectedNodeIds(new Set([childId]));
+            setDialogNodeId(childId);
+            setCropNodeId(null);
+        });
+    }, [runLocalImageOperation]);
 
     const splitImageNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageSplitParams) => {
             if (!node.metadata?.content) return;
-            setSplitNodeId(null);
-            const { splitDataUrl } = await loadCanvasImageTools();
-            const pieces = await splitDataUrl(node.metadata.content, params);
-            const gap = 16;
-            const cellWidth = node.width / params.columns;
-            const cellHeight = node.height / params.rows;
-            const startX = node.position.x + node.width + 96;
-            const startY = node.position.y;
-            const childNodes = await Promise.all(
-                pieces.map(async (piece) => {
-                    const image = await uploadImage(piece.dataUrl);
-                    const id = nanoid();
-                    return {
-                        id,
-                        type: CanvasNodeType.Image,
-                        title: `${node.title || "图片"} ${piece.row + 1}-${piece.column + 1}`,
-                        position: { x: startX + piece.column * (cellWidth + gap), y: startY + piece.row * (cellHeight + gap) },
-                        width: cellWidth,
-                        height: cellHeight,
-                        metadata: {
-                            ...imageMetadata(image),
-                            originalFileName: originalCanvasImageFileName(node),
-                            imageName: `${canvasImageBaseName(node)} ${piece.row + 1}-${piece.column + 1}`, imageVersion: canvasImageVersion(node) + 1,
-                            prompt: node.metadata?.prompt,
-                        },
-                    } satisfies CanvasNodeData;
-                }),
-            );
-            setNodes((prev) => [...prev, ...childNodes]);
-            setConnections((prev) => [...prev, ...childNodes.map((child) => ({ id: nanoid(), fromNodeId: node.id, toNodeId: child.id }))]);
-            setSelectedNodeIds(new Set(childNodes.map((child) => child.id)));
-            setSelectedConnectionId(null);
-            setDialogNodeId(null);
-            message.success(`已切分为 ${childNodes.length} 个子节点`);
+            const source = node.metadata.content;
+            await runLocalImageOperation(`split:${node.id}`, "切分图片", async (signal) => {
+                setSplitNodeId(null);
+                const { splitImageBlobs } = await loadCanvasImageTools();
+                const pieces = await splitImageBlobs(source, params, { signal });
+                signal.throwIfAborted();
+                const gap = 16;
+                const cellWidth = node.width / params.columns;
+                const cellHeight = node.height / params.rows;
+                const startX = node.position.x + node.width + 96;
+                const startY = node.position.y;
+                const childNodes = await mapCanvasAsyncPool(
+                    pieces, 4, async (piece) => {
+                        signal.throwIfAborted();
+                        const image = await uploadImage(piece.blob);
+                        signal.throwIfAborted();
+                        const id = nanoid();
+                        return {
+                            id,
+                            type: CanvasNodeType.Image,
+                            title: `${node.title || "图片"} ${piece.row + 1}-${piece.column + 1}`,
+                            position: { x: startX + piece.column * (cellWidth + gap), y: startY + piece.row * (cellHeight + gap) },
+                            width: cellWidth,
+                            height: cellHeight,
+                            metadata: {
+                                ...imageMetadata(image),
+                                compareSources: [canvasCompareSource(node.metadata || {})],
+                                originalFileName: originalCanvasImageFileName(node),
+                                imageName: `${canvasImageBaseName(node)} ${piece.row + 1}-${piece.column + 1}`, imageVersion: canvasImageVersion(node) + 1,
+                                prompt: node.metadata?.prompt,
+                            },
+                        } satisfies CanvasNodeData;
+                    },
+                );
+                signal.throwIfAborted();
+                setNodes((prev) => [...prev, ...childNodes]);
+                setConnections((prev) => [...prev, ...childNodes.map((child) => ({ id: nanoid(), fromNodeId: node.id, toNodeId: child.id }))]);
+                setSelectedNodeIds(new Set(childNodes.map((child) => child.id)));
+                setSelectedConnectionId(null);
+                setDialogNodeId(null);
+                message.success(`已切分为 ${childNodes.length} 个子节点`);
+            });
         },
-        [message],
+        [message, runLocalImageOperation],
     );
 
     const maskEditImageNode = useCallback(
@@ -2839,10 +2894,10 @@ function WirelessCanvasPage() {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl }, { signal: controller.signal }).then((items) => items[0]);
-                const uploaded = await uploadImage(image.dataUrl);
+                const imageTask = await createOptions(childId, controller);
+                const { metadata, uploaded } = await imageTask.generate(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl });
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), sourceTaskId: image.sourceTaskId, prompt, ...generationMetadata } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...metadata, prompt, ...generationMetadata } } : item)));
                 addAsset({
                     kind: "image",
                     title: userPrompt.slice(0, 24) || "局部编辑结果",
@@ -2871,36 +2926,42 @@ function WirelessCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [addAsset, effectiveConfig, estimateUsage, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, projectId, startGenerationRequest, user],
+        [addAsset, createOptions, effectiveConfig, estimateUsage, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, projectId, startGenerationRequest, user],
     );
 
     const upscaleImageNode = useCallback(async (node: CanvasNodeData, params: CanvasImageUpscaleParams) => {
         if (!node.metadata?.content) return;
-        setUpscaleNodeId(null);
-        const { upscaleDataUrl } = await loadCanvasImageTools();
-        const upscaled = await upscaleDataUrl(node.metadata.content, params);
-        const image = await uploadImage(upscaled);
-        const size = fitNodeSize(image.width, image.height);
-        const childId = nanoid();
-        const child: CanvasNodeData = {
-            id: childId,
-            type: CanvasNodeType.Image,
-            title: "Upscaled Image",
-            position: { x: node.position.x + node.width + 96, y: node.position.y },
-            width: size.width,
-            height: size.height,
-            metadata: {
-                ...imageMetadata(image),
-                originalFileName: originalCanvasImageFileName(node),
-                imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node) + 1,
-                prompt: node.metadata?.prompt,
-            },
-        };
-        setNodes((prev) => [...prev, child]);
-        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
-        setSelectedNodeIds(new Set([childId]));
-        setDialogNodeId(childId);
-    }, []);
+        const source = node.metadata.content;
+        await runLocalImageOperation(`upscale:${node.id}`, "放大图片", async (signal) => {
+            setUpscaleNodeId(null);
+            const { upscaleImageBlob } = await loadCanvasImageTools();
+            const upscaled = await upscaleImageBlob(source, params, { signal });
+            signal.throwIfAborted();
+            const image = await uploadImage(upscaled);
+            signal.throwIfAborted();
+            const size = fitNodeSize(image.width, image.height);
+            const childId = nanoid();
+            const child: CanvasNodeData = {
+                id: childId,
+                type: CanvasNodeType.Image,
+                title: "Upscaled Image",
+                position: { x: node.position.x + node.width + 96, y: node.position.y },
+                width: size.width,
+                height: size.height,
+                metadata: {
+                    ...imageMetadata(image),
+                    compareSources: [canvasCompareSource(node.metadata || {})],
+                    originalFileName: originalCanvasImageFileName(node),
+                    imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node) + 1,
+                    prompt: node.metadata?.prompt,
+                },
+            };
+            setNodes((prev) => [...prev, child]);
+            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
+            setSelectedNodeIds(new Set([childId]));
+            setDialogNodeId(childId);
+        });
+    }, [runLocalImageOperation]);
 
     const generateAngleNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
@@ -2936,16 +2997,14 @@ function WirelessCanvasPage() {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(
+                const imageTask = await createOptions(childId, controller);
+                const { metadata, uploaded } = await imageTask.generate(
                     generationConfig,
                     prompt,
                     [{ id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey }],
-                    undefined,
-                    { signal: controller.signal },
-                ).then((items) => items[0]);
-                const uploaded = await uploadImage(image.dataUrl);
+                );
                 const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), sourceTaskId: image.sourceTaskId, prompt, ...generationMetadata } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...metadata, prompt, ...generationMetadata } } : item)));
                 addAsset({
                     kind: "image",
                     title: `${title}结果`,
@@ -2973,7 +3032,7 @@ function WirelessCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [addAsset, effectiveConfig, finishGenerationRequest, handleMissingModelConfig, projectId, startGenerationRequest],
+        [addAsset, createOptions, effectiveConfig, finishGenerationRequest, handleMissingModelConfig, projectId, startGenerationRequest],
     );
 
     const handleFontSizeChange = useCallback((nodeId: string, fontSize: number) => {
@@ -3067,6 +3126,7 @@ function WirelessCanvasPage() {
                                       quality: undefined,
                                       count: undefined,
                                       references: undefined,
+                                      compareSources: undefined,
                                       primaryImageId: undefined,
                                       imageBatchExpanded: undefined,
                                   },
@@ -3223,13 +3283,8 @@ function WirelessCanvasPage() {
         await Promise.all(
             targetIds.map(async (targetId, index) => {
                 try {
-                    const options = { signal: controller.signal, onSubmitted: () => finishSubmission(targetId) };
-                    const generated = operationType === "inpaint"
-                        ? await requestEdit(generationConfig, prompt, references, undefined, options).then((items) => items[0])
-                        : await requestGeneration(generationConfig, prompt, options, references).then((items) => items[0]);
-                    if (!generated) throw new Error("接口没有返回图片");
-
-                    const uploaded = await uploadImage(generated.dataUrl);
+                    const options = await createOptions(targetId, controller, () => finishSubmission(targetId));
+                    const { metadata, uploaded } = await options.generate(generationConfig, prompt, references, undefined, operationType === "inpaint");
                     const resultSize = fitNodeSize(uploaded.width, uploaded.height, nodeSize.width, nodeSize.height);
                     setNodes((current) =>
                         current.map((node) =>
@@ -3244,8 +3299,7 @@ function WirelessCanvasPage() {
                                       height: resultSize.height,
                                       metadata: {
                                           ...node.metadata,
-                                          ...imageMetadata(uploaded),
-                                          sourceTaskId: generated.sourceTaskId,
+                                          ...metadata,
                                           prompt,
                                           ...buildImageGenerationMetadata(generationType, generationConfig, 1, references),
                                       },
@@ -3297,6 +3351,7 @@ function WirelessCanvasPage() {
         }
     }, [
         addAsset,
+        createOptions,
         effectiveConfig,
         estimateUsage,
         finishGenerationRequest,
@@ -3706,10 +3761,12 @@ function WirelessCanvasPage() {
     const pasteAssistantImage = useCallback(
         (file: File) => {
             const position = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-            void createImageFileNode(file, position);
-            message.success("已从剪切板添加图片");
+            void runLocalImageOperation("assistant-clipboard-paste", "粘贴", async (signal) => {
+                await createImageFileNode(file, position, signal);
+                message.success("已从剪切板添加图片");
+            });
         },
-        [createImageFileNode, message, screenToCanvas, size.height, size.width],
+        [createImageFileNode, message, runLocalImageOperation, screenToCanvas, size.height, size.width],
     );
 
     const handleAssistantSessionsChange = useCallback((sessions: CanvasAssistantSession[], activeId: string | null) => {
@@ -3750,6 +3807,11 @@ function WirelessCanvasPage() {
                 reported = true;
                 onResult?.({ mode, outputs });
             };
+            const recovered = mode === "image" ? await recoverPending(nodeId) : null;
+            if (recovered) {
+                reportResult(recovered);
+                return;
+            }
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
@@ -3897,10 +3959,8 @@ function WirelessCanvasPage() {
                     await Promise.all(
                         targetIds.map(async (targetId) => {
                             try {
-                                const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, { signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { signal: controller.signal }).then((items) => items[0]);
-                                const uploaded = await uploadImage(image.dataUrl);
+                                const imageTask = await createOptions(targetId, controller);
+                                const { metadata, uploaded } = await imageTask.generate({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages.length ? referenceImages : undefined);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 setNodes((prev) => {
                                     const root = prev.find((node) => node.id === rootId);
@@ -3913,7 +3973,7 @@ function WirelessCanvasPage() {
                                                 position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
                                                 width: imageSize.width,
                                                 height: imageSize.height,
-                                                metadata: { ...node.metadata, ...imageMetadata(uploaded), sourceTaskId: image.sourceTaskId, primaryImageId: targetId },
+                                                metadata: { ...node.metadata, ...metadata, primaryImageId: targetId },
                                             };
                                         if (node.id === targetId)
                                             return {
@@ -3921,7 +3981,7 @@ function WirelessCanvasPage() {
                                                 position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
                                                 width: imageSize.width,
                                                 height: imageSize.height,
-                                                metadata: { ...node.metadata, ...imageMetadata(uploaded), sourceTaskId: image.sourceTaskId },
+                                                metadata: { ...node.metadata, ...metadata },
                                             };
                                         return node;
                                     });
@@ -4173,7 +4233,7 @@ function WirelessCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, startGenerationRequest],
+        [createOptions, effectiveConfig, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, recoverPending, startGenerationRequest],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
@@ -4295,6 +4355,7 @@ function WirelessCanvasPage() {
 
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData) => {
+            if (node.type === CanvasNodeType.Image && await recoverPending(node.id)) return;
             if (node.type === CanvasNodeType.Video && node.metadata?.videoTaskId && node.metadata.status !== NODE_STATUS_SUCCESS) {
                 if (node.metadata.videoTaskCanRecover === false) { message.warning("原视频任务提交状态待核查，请勿重复生成"); return; }
                 const controller = startGenerationRequest(node.id, node.id, node.id);
@@ -4411,14 +4472,12 @@ function WirelessCanvasPage() {
                     return;
                 }
 
-                const image = useReferenceImages
-                    ? await requestEdit(generationConfig, prompt, retryImages, undefined, { signal: controller.signal }).then((items) => items[0])
-                    : await requestGeneration(generationConfig, prompt, { signal: controller.signal }).then((items) => items[0]);
-                const uploadedImage = await uploadImage(image.dataUrl);
+                const imageTask = await createOptions(node.id, controller);
+                const { metadata, uploaded: uploadedImage } = await imageTask.generate(generationConfig, prompt, useReferenceImages ? retryImages : undefined, undefined, useReferenceImages);
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
                 const generationMetadata = savedImageMetadata?.generationType
-                    ? { generationType: savedImageMetadata.generationType, model: generationConfig.model, size: generationConfig.size, quality: generationConfig.quality, count: savedImageMetadata.count || 1, references: savedImageMetadata.references }
+                    ? { generationType: savedImageMetadata.generationType, model: generationConfig.model, size: generationConfig.size, quality: generationConfig.quality, count: savedImageMetadata.count || 1, references: savedImageMetadata.references, compareSources: retryImages.map(canvasCompareSource) }
                     : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, 1, retryImages);
                 setNodes((prev) =>
                     prev.map((item) =>
@@ -4428,7 +4487,7 @@ function WirelessCanvasPage() {
                                   type: CanvasNodeType.Image,
                                   width: imageSize.width,
                                   height: imageSize.height,
-                                  metadata: { ...item.metadata, ...imageMetadata(uploadedImage), sourceTaskId: image.sourceTaskId, prompt, ...generationMetadata },
+                                  metadata: { ...item.metadata, ...metadata, prompt, ...generationMetadata },
                               }
                             : item,
                     ),
@@ -4444,7 +4503,7 @@ function WirelessCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, startGenerationRequest],
+        [createOptions, effectiveConfig, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, recoverPending, startGenerationRequest],
     );
 
     const generateImageFromTextNode = useCallback(
@@ -4604,13 +4663,13 @@ function WirelessCanvasPage() {
         }, CANVAS_AGENT_PANEL_MOTION_MS);
     }, [assistantClosing, assistantMounted]);
 
+    const exportProjects = useCanvasExport();
     const exportCurrentCanvas = useCallback(async () => {
         if (!currentProject) return;
         projectSaveQueueRef.current?.flush();
         const latest = useCanvasStore.getState().projects.find(project => project.id === projectId) || currentProject;
-        const { exportCanvasProjects } = await loadCanvasExport();
-        await exportCanvasProjects([latest], latest.title || "无线画布");
-    }, [currentProject, projectId]);
+        await exportProjects([latest.id], latest.title || "无线画布", [latest]);
+    }, [currentProject, projectId, exportProjects]);
 
     const openImageExport = useCallback(() => {
         setImageExport({ nodes: nodesRef.current, ids: Array.from(selectedNodeIdsRef.current) });
@@ -4907,6 +4966,7 @@ function WirelessCanvasPage() {
                             previewBounds={resizePreviewById.get(node.id)}
                             getCanvasScale={getCanvasScale}
                             isSelected={selectedNodeIds.has(node.id)}
+                            isMultiSelected={hasMultipleSelectedNodes && selectedNodeIds.has(node.id)}
                             isRelated={relatedHighlight.nodeIds.has(node.id)}
                             isFocusRelated={activeNodeId === node.id}
                             isConnectionTarget={connectionTargetNodeId === node.id}
@@ -4943,6 +5003,7 @@ function WirelessCanvasPage() {
                         );
                     })}
 
+                    {!isNodeDragging && !isNodeResizing && !isSelecting && !connectingParams && singleSelectedNode?.type === CanvasNodeType.Image && renderedNodes.some(node => node.id === singleSelectedNode.id) ? <Suspense fallback={null}><CanvasInlineImageCompare key={singleSelectedNode.id} node={singleSelectedNode} scale={viewport.k} showImageInfo={showImageInfo} onAdvanced={() => openImageCompare(singleSelectedNode)} /></Suspense> : null}
                     <CanvasSelectionOverlay ref={selectionOverlayRef} borderColor={theme.canvas.selectionStroke} background={theme.canvas.selectionFill} />
                     {pendingConnectionCreate ? <ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /> : null}
                 </WirelessCanvas>
@@ -5370,7 +5431,7 @@ const CanvasTopBar = memo(function CanvasTopBar({
                             <button type="button" onDoubleClick={onStartTitleEditing} title="双击修改画布名称">{title}</button>
                         )}
                     </div>
-                    <button type="button" className="cw-share" title="复制当前画布链接；跨设备请导出画布文件" onClick={onShare}>分享</button>
+                    <button type="button" className="cw-share" title="链接不会公开画布；本机试用跨设备请导出" onClick={onShare}>复制链接</button>
                 </div>
                 <div className="cw-account-card">
                     {canImportReferences ? <button type="button" className="cw-share inline-flex shrink-0 items-center gap-1.5 !px-2" aria-label="网页参考图采集" title="粘贴网页链接采集参考图，无需安装扩展" onClick={() => navigate(`/reference-import${canvasId ? `?returnTo=${encodeURIComponent(`/canvas/${canvasId}`)}` : ""}`)}><Globe className="size-4" /><span className="hidden sm:inline">网页采集</span></button> : null}
@@ -5495,7 +5556,7 @@ function serverAssetIdFromContentUrl(url: string) {
 }
 
 function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
-    return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType, ...(image.originalFileName ? { originalFileName: image.originalFileName, imageName: image.originalFileName.replace(/\.[^.]+$/, ""), imageVersion: 1 } : {}) };
+    return { imageTask: undefined, errorDetails: undefined, content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType, ...(image.originalFileName ? { originalFileName: image.originalFileName, imageName: image.originalFileName.replace(/\.[^.]+$/, ""), imageVersion: 1 } : {}) };
 }
 
 function workflowImageCandidatesFromResult(result: CanvasGenerationResult | undefined): CanvasAgentMediaWorkflow["candidates"] {
@@ -5525,6 +5586,7 @@ function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: A
         quality: config.quality,
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
+        compareSources: references.map(canvasCompareSource),
     };
 }
 
@@ -5574,18 +5636,70 @@ export function canvasHistoryForSave(history: { past: CanvasHistoryEntry[]; futu
     return saved;
 }
 
-async function hydrateCanvasHistory(history?: { past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }) {
+function createCanvasHydrationContext() {
+    return {
+        restored: new WeakMap<object, Promise<object>>(),
+        interrupted: new WeakMap<object, object>(),
+        uploads: new Map<string, Promise<UploadedImage>>(),
+        workflowSessions: new WeakMap<CanvasNodeData[], WeakMap<CanvasAssistantSession[], Promise<CanvasAssistantSession[]>>>(),
+    };
+}
+
+type CanvasHydrationContext = ReturnType<typeof createCanvasHydrationContext>;
+
+function memoCanvasHydration<T extends object>(context: CanvasHydrationContext, source: T, restore: () => Promise<T>): Promise<T> {
+    const previous = context.restored.get(source);
+    if (previous) return previous as Promise<T>;
+    const pending = restore();
+    context.restored.set(source, pending);
+    return pending;
+}
+
+async function mapCanvasHydration<T>(items: T[], restore: (item: T) => T | Promise<T>): Promise<T[]> {
+    let result: Array<T | Promise<T>> | undefined;
+    for (let index = 0; index < items.length; index += 1) {
+        const restored = restore(items[index]);
+        if (restored !== items[index]) {
+            result ||= items.slice();
+            result[index] = restored;
+        }
+    }
+    if (!result) return items;
+    const resolved = await Promise.all(result);
+    return resolved.every((item, index) => item === items[index]) ? items : resolved;
+}
+
+function uploadCanvasHydrationImage(content: string, context: CanvasHydrationContext) {
+    let pending = context.uploads.get(content);
+    if (!pending) {
+        pending = uploadImage(content);
+        context.uploads.set(content, pending);
+    }
+    return pending;
+}
+
+function sameCanvasHydrationValue(left: unknown, right: unknown): boolean {
+    if (Object.is(left, right)) return true;
+    if (Array.isArray(left) && Array.isArray(right)) return left.length === right.length && left.every((value, index) => sameCanvasHydrationValue(value, right[index]));
+    if (!left || !right || typeof left !== "object" || typeof right !== "object" || Array.isArray(left) || Array.isArray(right)) return false;
+    const a = left as Record<string, unknown>;
+    const b = right as Record<string, unknown>;
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && sameCanvasHydrationValue(a[key], b[key]));
+}
+
+async function hydrateCanvasHistory(history?: { past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }, context = createCanvasHydrationContext()) {
     const bounded = boundedCanvasHistory(history);
     const hydrate = async (entry: CanvasHistoryEntry): Promise<CanvasHistoryEntry> => {
-        const nodes = await hydrateCanvasImages(resetInterruptedGeneration(entry.nodes));
-        return { ...entry, nodes, chatSessions: await hydrateAssistantImages(entry.chatSessions || [], nodes) };
+        const nodes = await hydrateCanvasImages(resetInterruptedGeneration(entry.nodes, context), context);
+        const chatSessions = await hydrateAssistantImages(entry.chatSessions || [], nodes, context);
+        return nodes === entry.nodes && chatSessions === entry.chatSessions ? entry : { ...entry, nodes, chatSessions };
     };
     return { past: await Promise.all(bounded.past.map(hydrate)), future: await Promise.all(bounded.future.map(hydrate)) };
 }
 
-async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
-    return Promise.all(
-        nodes.map(async (node) => {
+async function hydrateCanvasImages(nodes: CanvasNodeData[], context = createCanvasHydrationContext()) {
+    return memoCanvasHydration(context, nodes, () => mapCanvasHydration(nodes, (node) => {
             const content = node.metadata?.content;
             // Keep persisted media lazy. CanvasNode resolves its Blob URL only after
             // virtualization mounts the node, instead of opening every file on load.
@@ -5593,40 +5707,54 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
             if (node.type !== CanvasNodeType.Image || !content) return node;
             if (node.metadata?.storageKey) return node;
             if (!content.startsWith("data:image/")) return node;
-            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
-        }),
-    );
+            return memoCanvasHydration(context, node, async () => ({ ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadCanvasHydrationImage(content, context)) } }));
+        }));
 }
 
-async function hydrateAssistantImages(sessions: CanvasAssistantSession[], nodes: CanvasNodeData[]) {
-    const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T) => {
+async function hydrateAssistantImages(sessions: CanvasAssistantSession[], nodes: CanvasNodeData[], context = createCanvasHydrationContext()) {
+    const hydrateItem = <T extends { dataUrl?: string; storageKey?: string }>(item: T): T | Promise<T> => {
         // Agent chat previews resolve storage-backed media only when their
         // message card mounts. Do not open every historical Blob on project load.
         if (item.storageKey) return item;
         if (item.dataUrl?.startsWith("data:image/")) {
-            const image = await uploadImage(item.dataUrl);
-            return { ...item, dataUrl: image.url, storageKey: image.storageKey };
+            return memoCanvasHydration(context, item, async () => {
+                const image = await uploadCanvasHydrationImage(item.dataUrl!, context);
+                return { ...item, dataUrl: image.url, storageKey: image.storageKey };
+            });
         }
         return item;
     };
-    return Promise.all(
-        sessions.map(async (session) => ({
-            ...session,
-            messages: await Promise.all(
-                session.messages.map(async (message) => {
-                    const workflow = message.detail?.mediaWorkflow ? restoreAgentMediaWorkflow(message.detail.mediaWorkflow, nodes) : undefined;
-                    const hydratedWorkflow = workflow;
-                    const hydratedAttachments = message.attachments;
-                    return {
-                        ...message,
-                        references: await Promise.all((message.references || []).map(hydrateItem)),
-                        ...(message.attachments ? { attachments: hydratedAttachments } : {}),
-                        ...(hydratedWorkflow ? { detail: { ...message.detail, mediaWorkflow: hydratedWorkflow } } : {}),
-                    };
-                }),
-            ),
-        })),
-    );
+    // Reference imports are independent of a historical graph, and shared
+    // messages must not be cloned/uploaded once per undo frame.
+    const restored = await memoCanvasHydration(context, sessions, () => mapCanvasHydration(sessions, session => memoCanvasHydration(context, session, async () => {
+        const messages = await mapCanvasHydration(session.messages, message => {
+            if (!message.references?.length) return message;
+            return memoCanvasHydration(context, message, async () => {
+                const references = await mapCanvasHydration(message.references!, hydrateItem);
+                return references === message.references ? message : { ...message, references };
+            });
+        });
+        return messages === session.messages ? session : { ...session, messages };
+    })));
+    if (!restored.some(session => session.messages.some(message => message.detail?.mediaWorkflow))) return restored;
+    // Workflow URLs/status do depend on each frame's nodes; do not reuse the
+    // current graph's workflow result when hydrating an earlier undo state.
+    let cache = context.workflowSessions.get(nodes);
+    if (!cache) { cache = new WeakMap(); context.workflowSessions.set(nodes, cache); }
+    let pending = cache.get(restored);
+    if (!pending) {
+        pending = mapCanvasHydration(restored, async session => {
+            const messages = await mapCanvasHydration(session.messages, message => {
+                const workflow = message.detail?.mediaWorkflow;
+                if (!workflow) return message;
+                const next = restoreAgentMediaWorkflow(workflow, nodes);
+                return sameCanvasHydrationValue(workflow, next) ? message : { ...message, detail: { ...message.detail, mediaWorkflow: next } };
+            });
+            return messages === session.messages ? session : { ...session, messages };
+        });
+        cache.set(restored, pending);
+    }
+    return pending;
 }
 
 function getGenerationCount(count: string) {
@@ -5682,8 +5810,27 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
     };
 }
 
-function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
-    return nodes.map((node) => (node.metadata?.status === "loading" ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: node.type === CanvasNodeType.Video && node.metadata.videoTaskId ? "页面刷新中断了本地查询，可恢复原视频任务，不会重新生成。" : "页面刷新后生成已中断，请重新生成。" } } : node));
+function hasPendingImageTask(node: CanvasNodeData, nodes: CanvasNodeData[]) {
+    return node.type === CanvasNodeType.Image && (node.metadata?.imageTask || (node.metadata?.isBatchRoot && nodes.some(child => child.metadata?.batchRootId === node.id && child.metadata.imageTask)));
+}
+
+function resetInterruptedGeneration(nodes: CanvasNodeData[], context = createCanvasHydrationContext()) {
+    const cached = context.interrupted.get(nodes);
+    if (cached) return cached as CanvasNodeData[];
+    let result: CanvasNodeData[] | undefined;
+    for (let index = 0; index < nodes.length; index += 1) {
+        const node = nodes[index];
+        if (node.metadata?.status !== "loading") continue;
+        let restored = context.interrupted.get(node) as CanvasNodeData | undefined;
+        if (!restored) {
+            restored = { ...node, metadata: { ...node.metadata, status: "error", errorDetails: node.type === CanvasNodeType.Video && node.metadata.videoTaskId ? "页面刷新中断了本地查询，可恢复原视频任务，不会重新生成。" : hasPendingImageTask(node, nodes) ? INTERRUPTED_IMAGE_TASK_ERROR : "页面刷新后生成已中断，请重新生成。" } };
+            context.interrupted.set(node, restored);
+        }
+        result ||= nodes.slice();
+        result[index] = restored;
+    }
+    context.interrupted.set(nodes, result || nodes);
+    return result || nodes;
 }
 
 function videoTaskErrorMetadata(error: unknown): Partial<CanvasNodeMetadata> {

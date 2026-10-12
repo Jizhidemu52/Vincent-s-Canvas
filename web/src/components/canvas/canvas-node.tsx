@@ -8,7 +8,7 @@ import { canvasNodeRenderStateEqual, type CanvasNodeRenderState } from "@/lib/ca
 import { canvasMediaPlaybackProps } from "@/lib/canvas/canvas-media-render-quality";
 import { canvasImageRenderProps } from "@/lib/canvas/canvas-image-render-quality";
 import { needsCanvasNodeMediaPreviewResolution, resolveCanvasNodeMediaPreview } from "@/lib/canvas/canvas-node-media-preview";
-import { canvasNodeRenderingStyle } from "@/lib/canvas/canvas-node-rendering";
+import { canvasNodeRenderingStyle, shouldUseCanvasNodeOverview } from "@/lib/canvas/canvas-node-rendering";
 import { canvasNodeResizePointerDelta } from "@/lib/canvas/canvas-node-resize";
 import { shouldRenderCanvasNodeControls } from "@/lib/canvas/canvas-node-controls-visibility";
 import { canvasNodeEffectiveHover } from "@/lib/canvas/canvas-node-hover-state";
@@ -41,6 +41,7 @@ type CanvasNodeProps = {
     previewBounds?: CanvasResizeBounds;
     getCanvasScale: () => number;
     isSelected: boolean;
+    isMultiSelected?: boolean;
     isRelated: boolean;
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
@@ -110,6 +111,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     previewBounds,
     getCanvasScale,
     isSelected,
+    isMultiSelected = false,
     isRelated,
     isFocusRelated,
     isConnectionTarget,
@@ -155,9 +157,9 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const isMoving = renderQuality === "moving";
     const effectiveHovered = canvasNodeEffectiveHover(hovered, renderQuality);
-    const useOverview = renderQuality === "overview" && !isActive && !showPanel && !effectiveHovered;
+    const useOverview = shouldUseCanvasNodeOverview({ renderQuality, selected: isSelected, multiSelected: isMultiSelected, focused: isFocusRelated, connectionTarget: isConnectionTarget, showPanel, editing: isEditingContent, hovered: effectiveHovered });
     const useMovingPlaceholder = shouldUseCanvasNodeMovingPlaceholder({ type: data.type, renderQuality, active: isActive, hovered: effectiveHovered, showPanel });
-    const controlState = { renderQuality, hovered: effectiveHovered, selected: isSelected, connecting: isConnecting, isImage: hasImageContent };
+    const controlState = { renderQuality, hovered: effectiveHovered, selected: isSelected, multiSelected: isMultiSelected && useOverview, connecting: isConnecting, isImage: hasImageContent };
     const showResizeControls = shouldRenderCanvasNodeControls({ ...controlState, kind: "resize" });
     const showConnectionControls = shouldRenderCanvasNodeControls({ ...controlState, kind: "connection" });
     const contentRenderQuality: CanvasRenderQuality = useOverview ? "overview" : renderQuality === "overview" ? "full" : renderQuality;
@@ -368,6 +370,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 height,
                 transition: isMoving ? "none" : "box-shadow 200ms ease",
                 ...canvasNodeRenderingStyle,
+                // Lightweight bulk overviews reuse their paint while moving; auto invalidates each root.
+                contentVisibility: useOverview && isMultiSelected ? "visible" : canvasNodeRenderingStyle.contentVisibility,
             }}
             onMouseEnter={() => {
                 if (isMoving) return;
@@ -386,7 +390,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 style={{
                     background: hasImageContent || hasVideoContent ? "transparent" : theme.node.fill,
                     borderColor: isActive ? theme.canvas.selectionStroke : isRelated ? theme.node.muted : theme.node.stroke,
-                    boxShadow: hasImageContent ? imageFrameRing : isMoving ? undefined : isActive ? `0 0 0 1px ${theme.canvas.selectionStroke}55, 0 16px 40px rgba(15,23,42,.10)` : isRelated && !isBatchChild ? `0 0 0 1px ${theme.node.muted}55, 0 18px 48px rgba(0,0,0,.14)` : undefined,
+                    boxShadow: useOverview || hasImageContent ? imageFrameRing : isMoving ? undefined : isActive ? `0 0 0 1px ${theme.canvas.selectionStroke}55, 0 16px 40px rgba(15,23,42,.10)` : isRelated && !isBatchChild ? `0 0 0 1px ${theme.node.muted}55, 0 18px 48px rgba(0,0,0,.14)` : undefined,
                 }}
                 onMouseDown={(event) => {
                     if (event.target instanceof Element && event.target.closest("[data-canvas-no-zoom]")) return;
@@ -485,6 +489,7 @@ function toRenderState(props: CanvasNodeProps): CanvasNodeRenderState {
         themeKey: props.themeKey,
         renderQuality: props.renderQuality,
         isSelected: props.isSelected,
+        isMultiSelected: props.isMultiSelected ?? false,
         isRelated: props.isRelated,
         isFocusRelated: props.isFocusRelated,
         isConnectionTarget: props.isConnectionTarget,
@@ -549,7 +554,7 @@ function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 <RefreshCw className="size-3.5" />
-                {videoRecovery ? node.metadata?.videoTaskCanRecover === false ? "提交状态待核查" : "恢复查询" : "重试"}
+                {videoRecovery ? node.metadata?.videoTaskCanRecover === false ? "提交状态待核查" : "恢复查询" : node.metadata?.imageTask ? "恢复查询" : "重试"}
             </button>
         </div>
     );

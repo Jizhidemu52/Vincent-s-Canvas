@@ -15,9 +15,11 @@ test("OA HTTP exchange isolates employees, denies legacy logins and invalid repl
   const state = new DemoStateStore(statePath);
   const taskA = crypto.randomUUID();
   const taskB = crypto.randomUUID();
+  const requestIdA = "original-request:/图片%:0";
+  const requestIdB = "another-employee-request:0";
   state.initialize({ assets: [], tasks: [
-    { id: taskA, requestId: taskA, ownerUserId: a.user.id, status: "success", resultUrls: [], credits: 0, createdAt: new Date().toISOString() },
-    { id: taskB, requestId: taskB, ownerUserId: b.user.id, status: "success", resultUrls: [], credits: 0, createdAt: new Date().toISOString() },
+    { id: taskA, requestId: requestIdA, ownerUserId: a.user.id, status: "success", resultUrls: [], credits: 0, createdAt: new Date().toISOString() },
+    { id: taskB, requestId: requestIdB, ownerUserId: b.user.id, status: "success", resultUrls: [], credits: 0, createdAt: new Date().toISOString() },
   ] as never });
   state.close();
   const portProbe = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() });
@@ -51,6 +53,7 @@ test("OA HTTP exchange isolates employees, denies legacy logins and invalid repl
     await ready();
     expect(await request("/api/deployment").then(r => r.json())).toMatchObject({ oaLoginEnabled: true, authenticationEnabled: true, rolePortalsEnabled: false });
     expect((await request("/api/tasks")).status).toBe(401);
+    expect((await request(`/api/tasks/by-request/${encodeURIComponent(requestIdA)}`)).status).toBe(401);
     for (const path of ["/api/demo/accounts", "/api/auth/wecom/start"]) expect((await request(path)).status).toBe(404);
     expect((await request("/api/admin/accounts")).status).toBe(403);
     expect((await request("/api/auth/login", "", { method: "POST", body: "{}" })).status).toBe(404);
@@ -70,6 +73,21 @@ test("OA HTTP exchange isolates employees, denies legacy logins and invalid repl
     expect(await request("/api/tasks", first.cookie).then(r => r.json())).toMatchObject({ tasks: [{ id: taskA, ownerUserId: a.user.id }] });
     expect(await request("/api/tasks", second.cookie).then(r => r.json())).toMatchObject({ tasks: [{ id: taskB, ownerUserId: b.user.id }] });
     expect((await request(`/api/tasks/${taskA}`, second.cookie)).status).toBe(404);
+    const requestLookupPath = `/api/tasks/by-request/${encodeURIComponent(requestIdA)}`;
+    const original = await request(requestLookupPath, first.cookie);
+    expect(original.status).toBe(200);
+    expect(original.headers.get("cache-control")).toBe("private, no-store");
+    expect(await original.json()).toMatchObject({ task: { id: taskA, requestId: requestIdA, ownerUserId: a.user.id, status: "success", credits: 0 } });
+    for (const [path, cookie] of [[requestLookupPath, second.cookie], [`/api/tasks/by-request/${encodeURIComponent(requestIdA.slice(0, -2))}`, first.cookie], ["/api/tasks/by-request/missing-request:0", first.cookie]]) {
+      const hidden = await request(path!, cookie!);
+      expect(hidden.status).toBe(404);
+      expect(await hidden.json()).toEqual({ error: "NOT_FOUND", message: "任务不存在或无权访问" });
+    }
+    for (const id of ["short", "x".repeat(201), "%ZZ"]) {
+      expect((await request(`/api/tasks/by-request/${id}`, first.cookie)).status).toBe(400);
+    }
+    expect((await request(requestLookupPath, second.cookie, { headers: { "X-Canvas-Owner-Id": a.user.id } })).status).toBe(403);
+    expect(submissions).toBe(0);
     const upload = await request("/api/assets/upload-request", first.cookie, { method: "POST", body: JSON.stringify({ filename: "owner-check.txt", mimeType: "text/plain", byteSize: 1, ownerUserId: b.user.id }) }).then(r => r.json()) as any;
     expect((await request(upload.uploadUrl, first.cookie, { method: "PUT", body: "a" })).status).toBe(204);
     expect(await request("/api/assets", first.cookie).then(r => r.json())).toMatchObject({ assets: [{ ownerUserId: a.user.id, ownerName: "甲" }] });
@@ -98,6 +116,8 @@ test("OA HTTP exchange isolates employees, denies legacy logins and invalid repl
     expect(rotated.body.user.id).toBe(a.user.id);
     processHandle.kill(); await processHandle.exited; processHandle = start(); await ready();
     expect(await request("/api/auth/session", rotated.cookie).then(r => r.json())).toMatchObject({ user: { id: a.user.id } });
+    expect(await request(requestLookupPath, rotated.cookie).then(r => r.json())).toMatchObject({ task: { id: taskA, requestId: requestIdA, status: "success", credits: 0 } });
+    expect(submissions).toBe(2);
     const persistedAssets = await request("/api/assets", rotated.cookie).then(r => r.json()) as any;
     expect(persistedAssets.assets).toHaveLength(2);
     expect(persistedAssets.assets.every((asset: any) => asset.ownerUserId === a.user.id)).toBe(true);

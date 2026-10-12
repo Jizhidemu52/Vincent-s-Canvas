@@ -45,14 +45,22 @@ export function createProjectsRouter(db: Database) {
                  VALUES($1,$2,$3,$4)
                  ON CONFLICT(owner_user_id,external_id)
                  DO UPDATE SET name=EXCLUDED.name,updated_at=now()
+                 WHERE projects.name IS DISTINCT FROM EXCLUDED.name
                  RETURNING id,external_id AS "externalId",name,status`,
                 [input.externalId, input.name, actor.id, actor.departmentId],
             );
+            // A no-op conflict returns no row; read it without changing its recency.
+            const project = result.rows[0] ?? (await db.query(
+                `SELECT id,external_id AS "externalId",name,status FROM projects
+                 WHERE owner_user_id=$1 AND external_id=$2`,
+                [actor.id, input.externalId],
+            )).rows[0];
+            if (!project) throw new Error("项目在同步期间已不存在");
             await db.query(
                 "INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'owner') ON CONFLICT DO NOTHING",
-                [result.rows[0].id, actor.id],
+                [project.id, actor.id],
             );
-            response.json({ project: result.rows[0] });
+            response.json({ project });
         } catch (error) {
             next(error);
         }

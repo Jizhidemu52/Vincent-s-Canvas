@@ -73,7 +73,7 @@ export function createImageTaskRequests(input: {
     }));
 }
 
-export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; onSubmissionStarted?: () => void; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
+export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
     input.signal?.throwIfAborted();
     const ownerId = useUserStore.getState().user?.id;
     if (!ownerId) throw new Error("当前账号不可用");
@@ -121,7 +121,9 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
         taskRequests.map(async (task) => {
             assertOwner();
             input.signal?.throwIfAborted();
-            input.onSubmissionStarted?.();
+            await input.onSubmissionStarted?.();
+            assertOwner();
+            input.signal?.throwIfAborted();
             return request<{ task: { id: string } }>("/api/tasks", {
                 method: "POST",
                 body: JSON.stringify(task),
@@ -132,16 +134,15 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
     const rejected = submitted.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (rejected) throw rejected.reason instanceof Error ? rejected.reason : new Error("任务提交失败");
     const ids = submitted.map((result) => (result as PromiseFulfilledResult<{ task: { id: string } }>).value.task.id);
-    await input.onSubmitted?.(ids);
-
-    void refreshSessionBalance();
     try {
+        await input.onSubmitted?.(ids);
+        void refreshSessionBalance();
         const tasks = await waitForTasks(ids, input.signal, undefined, true);
         const failed = tasks.find((task) => task.status === "failed" || task.status === "cancelled");
-        if (failed) throw new Error(failed.failureReason || "生成任务失败");
+        if (failed) throw new QueuedTaskFailedError(failed);
         return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id })));
     } catch (error) {
-        if (input.signal?.aborted) await cancelTasks(ids);
+        if (input.signal?.aborted && (input.cancelOnAbort?.() ?? true)) await cancelTasks(ids);
         throw error;
     } finally {
         await refreshSessionBalance();
@@ -271,7 +272,15 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
 }
 
 export async function getQueuedTask(id: string, signal?: AbortSignal) {
-    const response = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { credentials: "include", signal, headers: workspaceOwnerHeaders() });
+    return queryQueuedTask(`/api/tasks/${encodeURIComponent(id)}`, signal);
+}
+
+export async function getQueuedTaskByRequestId(requestId: string, signal?: AbortSignal) {
+    return queryQueuedTask(`/api/tasks/by-request/${encodeURIComponent(requestId)}`, signal);
+}
+
+async function queryQueuedTask(path: string, signal?: AbortSignal) {
+    const response = await fetch(path, { credentials: "include", signal, headers: workspaceOwnerHeaders() });
     if (response.status === 404) return null;
     if (!response.ok) {
         const body = await response.json().catch(() => ({})) as { message?: string };

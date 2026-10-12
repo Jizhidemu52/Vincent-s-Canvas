@@ -1,6 +1,7 @@
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import type { UploadedImage } from "@/services/image-storage";
 import { canvasImageBaseName, canvasImageVersion, originalCanvasImageFileName } from "./canvas-image-filename";
+import { canvasCompareSource } from "./canvas-image-compare-source";
 
 /** Keep node IDs/connections stable and synchronize the primary image of a collapsed batch. */
 export function applyCanvasImageEdit(nodes: CanvasNodeData[], original: CanvasNodeData, image: UploadedImage) {
@@ -14,6 +15,7 @@ export function applyCanvasImageEdit(nodes: CanvasNodeData[], original: CanvasNo
     if (current.metadata?.isBatchRoot && current.metadata.primaryImageId) affected.add(current.metadata.primaryImageId);
     const root = current.metadata?.batchRootId ? nodes.find(node => node.id === current.metadata?.batchRootId) : undefined;
     if (root?.metadata?.primaryImageId === current.id) affected.add(root.id);
+    const compareSource = canvasCompareSource({ ...current.metadata, title: current.title });
     return nodes.map(node => {
         if (!affected.has(node.id)) return node;
         const originalName = originalCanvasImageFileName(node) || "edited-image";
@@ -22,6 +24,7 @@ export function applyCanvasImageEdit(nodes: CanvasNodeData[], original: CanvasNo
             mimeType: image.mimeType, bytes: image.bytes, status: "success" as const, errorDetails: undefined, freeResize: false,
             originalFileName: originalName.replace(/\.[^.]+$/, "") + ".png",
             imageName: canvasImageBaseName(current), imageVersion: canvasImageVersion(current) + 1,
+            compareSources: [compareSource],
         } };
     });
 }

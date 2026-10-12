@@ -1,4 +1,4 @@
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { AppConfig } from "./config";
 import { isPublicHttpsUrl } from "./apimart-upload";
@@ -14,6 +14,8 @@ export class ObjectStorage {
     async put(key: string, body: Uint8Array, contentType: string) { if (!this.configured) throw new Error("公司对象存储尚未配置"); await this.client.send(new PutObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key, Body: body, ContentType: contentType })); }
     async head(key: string) { return this.client.send(new HeadObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key })); }
     async get(key: string) { return this.client.send(new GetObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key })); }
+    /** Used only for newly-created snapshot objects when their database transaction failed. */
+    async remove(key: string) { await this.client.send(new DeleteObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key })); }
     async signedDownloadUrl(key: string, expiresIn = 3600) {
         if (!this.configured) throw new Error("公司对象存储尚未配置");
         if (!isPublicHttpsUrl(this.config.S3_PUBLIC_ENDPOINT || this.config.S3_ENDPOINT || "")) throw new Error("视频/音频素材需要配置上游可访问的 S3_PUBLIC_ENDPOINT（公开 HTTPS）；内部存储端口无需公开");

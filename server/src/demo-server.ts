@@ -25,6 +25,8 @@ import { preflightVideoSources, prepareVideoProviderSources } from "./video-sour
 import { probeMediaBytes, type MediaMetadata } from "./media-probe";
 import { readDemoRecovery } from "./demo-state-recovery";
 import { DemoStateStore, DemoStorageError } from "./demo-state-store";
+import { DemoDesignLibraryStore, handleDemoDesignLibrary } from "./demo-design-library";
+import { DesignLibraryService } from "./design-library";
 import { DemoCanvasDocumentStore } from "./demo-canvas-documents";
 import { assertCanvasOwner, CanvasDocumentError } from "./canvas-document";
 import { fileURLToPath } from "node:url";
@@ -462,6 +464,8 @@ const demoStatePath = process.env.DEMO_STATE_PATH?.trim() || fileURLToPath(new U
 const demoState = new DemoStateStore<DemoAsset, DemoTask>(demoStatePath);
 const canvasDocuments = new DemoCanvasDocumentStore(demoStatePath);
 const oaStore = features.oaLoginEnabled ? new DemoOaStore(demoStatePath) : null;
+const demoDesignLibrary = oaStore ? new DemoDesignLibraryStore(demoStatePath, (asset) => demoAssets.set(asset.id, asset)) : null;
+const designLibraryService = demoDesignLibrary ? new DesignLibraryService(demoDesignLibrary, demoDesignLibrary) : null;
 const oaLoginRates = new Map<string, { count: number; expiresAt: number }>();
 if (!demoState.isInitialized()) {
   const recovered = process.env.DEMO_RECOVERY_FILE
@@ -731,6 +735,13 @@ Bun.serve({
     if (path.startsWith("/api/admin/")) {
       return json({ error: "FORBIDDEN", message: "本地演示服务不提供维护接口。" }, 403);
     }
+    if (path === "/api/design-library" || path.startsWith("/api/design-library/")) {
+      const employee = oaStore?.session(sessionToken(request));
+      return (await handleDemoDesignLibrary(request, designLibraryService, employee ? {
+        id: employee.id, name: employee.displayName, departmentId: employee.departmentId,
+        departmentName: employee.departmentName, role: "designer", kind: "employee",
+      } : null))!;
+    }
     if (path === "/api/auth/oa/exchange" && request.method === "POST") {
       if (!oaStore) return json({ message: "OA 登录未启用" }, 404);
       oaStore.revoke(sessionToken(request));
@@ -843,7 +854,13 @@ Bun.serve({
       try {
         assertCanvasOwner(request.headers.get("x-canvas-owner-id"), user.id);
         const responseHeaders = { "cache-control": "no-store" };
-        if (path === "/api/canvas-documents" && request.method === "GET") return json({ documents: canvasDocuments.list(user.id) }, 200, responseHeaders);
+        if (path === "/api/canvas-documents" && request.method === "GET") return json({ documents: canvasDocuments.summaries(user.id) }, 200, responseHeaders);
+        if (path !== "/api/canvas-documents" && request.method === "GET") {
+          let id: string;
+          try { id = decodeURIComponent(path.split("/")[3]!); }
+          catch { throw new CanvasDocumentError("INVALID_CANVAS_DOCUMENT", "画布 ID 无效"); }
+          return json({ document: canvasDocuments.get(user.id, id) }, 200, responseHeaders);
+        }
         if (path !== "/api/canvas-documents" && request.method === "PUT") {
           let id: string;
           try { id = decodeURIComponent(path.split("/")[3]!); }
@@ -1502,6 +1519,19 @@ Bun.serve({
           .filter((task) => task.ownerUserId === user.id)
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       });
+    const encodedTaskRequestId = path.match(/^\/api\/tasks\/by-request\/([^/]+)$/)?.[1];
+    if (encodedTaskRequestId && request.method === "GET") {
+      const responseHeaders = { "cache-control": "private, no-store" };
+      let requestId: string;
+      try { requestId = decodeURIComponent(encodedTaskRequestId); }
+      catch { return json({ error: "VALIDATION_ERROR", message: "请求编号格式不正确" }, 400, responseHeaders); }
+      if (requestId.length < 8 || requestId.length > 200)
+        return json({ error: "VALIDATION_ERROR", message: "请求编号长度必须为 8 至 200 个字符" }, 400, responseHeaders);
+      const task = [...demoTasks.values()].find((task) => task.requestId === requestId && task.ownerUserId === user.id);
+      return task
+        ? json({ task }, 200, responseHeaders)
+        : json({ error: "NOT_FOUND", message: "任务不存在或无权访问" }, 404, responseHeaders);
+    }
     const taskId = path.match(/^\/api\/tasks\/([0-9a-f-]+)$/i)?.[1];
     if (taskId && request.method === "GET") {
       const task = demoTasks.get(taskId);

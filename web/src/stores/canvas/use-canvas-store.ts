@@ -11,6 +11,7 @@ import { createCloudCanvasPersistence, type CloudSaveState } from "@/services/ca
 import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, CanvasNodeGroup, ViewportTransform } from "@/types/canvas";
+import type { CanvasProjectSummary } from "@/lib/canvas/canvas-project-summary";
 
 export type CanvasProject = {
     id: string;
@@ -35,6 +36,7 @@ type CanvasStore = {
     cloudStatus: CloudSaveState;
     cloudError: string;
     projects: CanvasProject[];
+    unloadedProjects: CanvasProjectSummary[];
     createProject: (title?: string) => string;
     importProject: (project: Partial<CanvasProject>) => string;
     openProject: (id: string) => CanvasProject | null;
@@ -51,10 +53,12 @@ const CANVAS_STORE_KEY = deploymentFeatures.oaLoginEnabled
     ? `wireless-canvas:canvas_store:oa:user:${encodeURIComponent(oaCanvasOwnerId || "")}`
     : "wireless-canvas:canvas_store";
 let canvasOwnerValid = !deploymentFeatures.oaLoginEnabled || Boolean(oaCanvasOwnerId);
+const isCanvasOwnerValid = () => canvasOwnerValid && (!oaCanvasOwnerId || useUserStore.getState().user?.id === oaCanvasOwnerId);
 const cloudPersistence = oaCanvasOwnerId ? createCloudCanvasPersistence(oaCanvasOwnerId, CANVAS_STORE_KEY, {
-    valid: () => canvasOwnerValid && useUserStore.getState().user?.id === oaCanvasOwnerId,
-    status: (cloudStatus, cloudError = "") => { if (!lastPersistError) useCanvasStore.setState({ cloudStatus, cloudError }); },
-    copy: (copy) => useCanvasStore.setState(state => ({ projects: [copy, ...state.projects.filter(project => project.id !== copy.id)] })),
+    valid: isCanvasOwnerValid,
+    status: (cloudStatus, cloudError = "") => { if (isCanvasOwnerValid() && !lastPersistError) useCanvasStore.setState({ cloudStatus, cloudError }); },
+    copy: (copy) => { if (isCanvasOwnerValid()) useCanvasStore.setState(state => ({ projects: [copy, ...state.projects.filter(project => project.id !== copy.id)], unloadedProjects: state.unloadedProjects.filter(project => project.id !== copy.id) })); },
+    unloaded: (unloadedProjects) => { if (isCanvasOwnerValid()) useCanvasStore.setState({ unloadedProjects }); },
 }) : null;
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
 let queuedPersistState: PersistedCanvasState | null = null;
@@ -105,6 +109,31 @@ export async function flushCanvasCloudPersistence() {
     await cloudPersistence?.flush();
 }
 
+const loadingProjects = new Map<string, Promise<CanvasProject | null>>();
+export function loadCanvasProject(id: string): Promise<CanvasProject | null> {
+    if (!isCanvasOwnerValid()) return Promise.reject(new Error("账号已切换，请重新打开画布"));
+    const state = useCanvasStore.getState();
+    const current = state.openProject(id);
+    if (current && !state.unloadedProjects.some(project => project.id === id)) return Promise.resolve(current);
+    if (!cloudPersistence) return Promise.resolve(current);
+    const loading = loadingProjects.get(id);
+    if (loading) return loading;
+    const pending = cloudPersistence.load(id).then(project => {
+        if (!isCanvasOwnerValid()) throw new Error("账号已切换，请重新打开画布");
+        const latest = useCanvasStore.getState();
+        const existing = latest.openProject(id);
+        // A concurrent local/import action may have made this project editable
+        // while its remote request was pending. Never replace those live edits.
+        const projects = existing || !project ? latest.projects : [project, ...latest.projects];
+        // The cloud loader has already committed these bytes and its revision.
+        if (projects !== latest.projects) queuedPersistState = { projects };
+        useCanvasStore.setState({ projects, unloadedProjects: latest.unloadedProjects.filter(item => item.id !== id) });
+        return existing || project;
+    }).finally(() => loadingProjects.delete(id));
+    loadingProjects.set(id, pending);
+    return pending;
+}
+
 if (typeof window !== "undefined") {
     const flushCanvasPersistence = () => persistQueue.flush();
     window.addEventListener("pagehide", flushCanvasPersistence);
@@ -151,6 +180,7 @@ export const useCanvasStore = create<CanvasStore>()(
             cloudStatus: cloudPersistence ? "loading" : "local",
             cloudError: "",
             projects: [],
+            unloadedProjects: [],
             createProject: (title = "未命名画布") => {
                 const now = new Date().toISOString();
                 const id = nanoid();
@@ -239,7 +269,7 @@ if (deploymentFeatures.oaLoginEnabled && oaCanvasOwnerId) {
         restartingForOwner = true;
         canvasOwnerValid = false;
         persistQueue.flush();
-        useCanvasStore.setState({ projects: [], hydrated: false });
+        useCanvasStore.setState({ projects: [], unloadedProjects: [], hydrated: false });
         useUserStore.setState({ user: null, status: "loading" });
         void flushCanvasPersistence().catch(() => undefined).finally(() => window.location.reload());
     });

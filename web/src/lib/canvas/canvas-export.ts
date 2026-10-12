@@ -1,6 +1,6 @@
 import { saveAs } from "file-saver";
 
-import { createZip } from "@/lib/zip";
+import { createZip, type ZipOptions } from "@/lib/zip";
 import { getMediaBlob } from "@/services/file-storage";
 import { getImageBlob } from "@/services/image-storage";
 import type { CanvasExportAsset, CanvasExportFile } from "@/types/canvas-export";
@@ -9,9 +9,11 @@ import type { CanvasNodeData } from "@/types/canvas";
 import { canvasImageDownloadFileName, imageMimeFromFileName } from "@/lib/canvas/canvas-image-filename";
 import { collectCanvasExportMedia } from "@/lib/canvas/canvas-export-media";
 import { exportModelMetadata } from "@/lib/model-display";
+import { encodeCanvasProject } from "./canvas-project-codec";
+import { mapCanvasAsyncPool } from "./canvas-async-pool";
 
-export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无线画布") {
-    saveAs(await createCanvasProjectsArchive(projects), `${safeFileName(fileName)}.zip`);
+export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无线画布", options: ZipOptions = {}) {
+    saveAs(await createCanvasProjectsArchive(projects, {}, options), `${safeFileName(fileName)}.zip`);
 }
 
 export async function createCanvasProjectsArchive(projects: CanvasProject[], sources: {
@@ -19,27 +21,24 @@ export async function createCanvasProjectsArchive(projects: CanvasProject[], sou
     getMediaBlob?: typeof getMediaBlob;
     fetchBlob?: (path: string) => Promise<Blob>;
     origin?: string;
-} = {}) {
-    const prepared = await collectCanvasExportMedia(projects, sources);
+} = {}, options: ZipOptions = {}) {
+    options.onProgress?.({ phase: "preparing", completed: 0, total: projects.length, label: "正在收集画布与原始媒体…" });
+    const prepared = await collectCanvasExportMedia(projects.map(encodeCanvasProject), sources);
     const zipFiles: { name: string; data: BlobPart }[] = [];
-    const exportedProjects = await Promise.all(
-        prepared.document.map(async (project) => {
+    const exportedProjects = await mapCanvasAsyncPool(prepared.document, 4, async (project) => {
             const files: CanvasExportAsset[] = [];
-            await Promise.all(
-                collectStorageKeys(project).map(async (storageKey) => {
+            await mapCanvasAsyncPool(collectStorageKeys(project), 4, async (storageKey) => {
                     const blob = prepared.blobs.get(storageKey) || (storageKey.startsWith("image:") ? await (sources.getImageBlob || getImageBlob)(storageKey) : await (sources.getMediaBlob || getMediaBlob)(storageKey));
-                    if (!blob) return;
+                    if (!blob) throw new Error("画布原始媒体缺失，未生成不完整的备份");
                     const path = `projects/${project.id}/files/${safeFileName(storageKey)}.${fileExtension(blob.type, storageKey)}`;
                     files.push({ storageKey, path, mimeType: blob.type || "application/octet-stream", bytes: blob.size });
                     zipFiles.push({ name: path, data: blob });
-                }),
-            );
+                });
             return { project, files };
-        }),
-    );
+        });
 
     const data: CanvasExportFile = { app: "wireless-canvas", version: 3, exportedAt: new Date().toISOString(), projects: exportedProjects };
-    return createZip([{ name: "projects.json", data: JSON.stringify(exportModelMetadata(data), null, 2) }, ...zipFiles]);
+    return createZip([{ name: "projects.json", data: JSON.stringify(exportModelMetadata(data)) }, ...zipFiles], options);
 }
 
 export function downloadCanvasContent(content: string, fileName: string) {

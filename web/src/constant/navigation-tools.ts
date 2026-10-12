@@ -88,6 +88,13 @@ export const navigationTools = [
         group: "online",
     },
     {
+        slug: "design-library",
+        path: "/design-library",
+        label: "设计灵感库",
+        icon: BookMarked,
+        group: "online",
+    },
+    {
         slug: "team",
         path: "/team",
         label: "我的小组",
@@ -107,7 +114,7 @@ export type NavigationGroup = (typeof navigationTools)[number]["group"];
 export type NavigationToolSlug = (typeof navigationTools)[number]["slug"];
 
 export function navigationModuleKey(slug: NavigationToolSlug) {
-    return slug === "my-prompts" ? "prompts" : slug;
+    return slug === "my-prompts" ? "prompts" : slug === "design-library" ? "canvas" : slug;
 }
 
 export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operationType: AdminOperationType; toolKey: string }>> = {

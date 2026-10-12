@@ -143,10 +143,11 @@ describe("queued image preparation cancellation", () => {
             requests.push(`${init?.method || "GET"} ${path}`);
             if (path === "/api/models") return Response.json({ models: [model] });
             if (path === "/api/tasks" && init?.method === "POST") return Response.json({ task: { id: "accepted-task" } });
+            if (path === "/api/auth/session") return Response.json({}, { status: 401 });
             throw new Error(`Unexpected request ${path}`);
         }) as typeof fetch;
         await expect(requestQueuedImages({ ...baseInput, requestId: "saved-root", onSubmissionStarted: () => { submissionStarted = true; }, onSubmitted: async (ids) => { expect(ids).toEqual(["accepted-task"]); throw new Error("local save failed"); } })).rejects.toThrow("local save failed");
         expect(submissionStarted).toBe(true);
-        expect(requests).toEqual(["GET /api/models", "POST /api/tasks"]);
+        expect(requests).toEqual(["GET /api/models", "POST /api/tasks", "GET /api/auth/session"]);
     });
 });

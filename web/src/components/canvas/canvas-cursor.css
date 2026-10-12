@@ -1,0 +1,18 @@
+/* SVG palettes mirror canvasThemes; fixed CSS pixels keep the pointer crisp at every canvas zoom. */
+[data-canvas-viewport] {
+    --canvas-cursor-select: url("./cursors/select-light.svg") 4 4, default;
+    --canvas-cursor-grab: url("./cursors/grab-light.svg") 16 15, grab;
+    --canvas-cursor-grabbing: url("./cursors/grabbing-light.svg") 16 17, grabbing;
+    cursor: var(--canvas-cursor-select);
+}
+[data-canvas-viewport][data-cursor-theme="dark"] {
+    --canvas-cursor-select: url("./cursors/select-dark.svg") 4 4, default;
+    --canvas-cursor-grab: url("./cursors/grab-dark.svg") 16 15, grab;
+    --canvas-cursor-grabbing: url("./cursors/grabbing-dark.svg") 16 17, grabbing;
+}
+[data-canvas-viewport][data-cursor-mode="grab"] { cursor: var(--canvas-cursor-grab); }
+[data-canvas-viewport][data-cursor-panning="true"] { cursor: var(--canvas-cursor-grabbing); }
+/* No descendant override: inputs, links, resize handles and comparison sliders keep their own cursors. */
+@media (forced-colors: active) {
+    [data-canvas-viewport] { --canvas-cursor-select: default; --canvas-cursor-grab: grab; --canvas-cursor-grabbing: grabbing; }
+}

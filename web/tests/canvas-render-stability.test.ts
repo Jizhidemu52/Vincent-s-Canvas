@@ -52,6 +52,12 @@ describe("canvas node render stability", () => {
         expect(canvasNodeRenderStateEqual(state(), state({ configInputSummaryKey: "0:2:0:0" }))).toBe(false);
     });
 
+    test("refreshes the previously selected node when selection becomes plural or singular", () => {
+        expect(canvasNodeRenderStateEqual(state({ isSelected: true }), state({ isSelected: true, isMultiSelected: true }))).toBe(false);
+        expect(canvasNodeRenderStateEqual(state({ isSelected: true, isMultiSelected: true }), state({ isSelected: true, isMultiSelected: false }))).toBe(false);
+        expect(canvasNodeRenderStateEqual(state(), state({ isMultiSelected: false }))).toBe(true);
+    });
+
     test("refreshes a node when the parent canvas theme changes", () => {
         expect(canvasNodeRenderStateEqual(state(), { ...state(), themeKey: "dark" } as CanvasNodeRenderState)).toBe(false);
     });

@@ -48,4 +48,35 @@ describe("canvas drag node element cache", () => {
 
         expect(lookups).toBe(2);
     });
+
+    test("warms thousands of selected and offscreen nodes with one mounted-element scan", () => {
+        const first = { style: { transform: "" } };
+        const second = { style: { transform: "" } };
+        let lookups = 0;
+        let scans = 0;
+        const cache = createCanvasDragNodeElementCache(() => { lookups++; return null; }, () => {
+            scans++;
+            return new Map([["node-0", first], ["node-1", second]]);
+        });
+        const ids = Array.from({ length: 5000 }, (_, i) => `node-${i}`);
+        cache.warm(ids);
+        cache.apply(new Map(ids.map((id, i) => [id, { x: i + 10, y: i + 20 }])));
+        cache.apply(new Map([["node-4999", { x: 60, y: 80 }]]));
+        expect(scans).toBe(1);
+        expect(lookups).toBe(0);
+        expect(first.style.transform).toBe("translate(10px, 20px)");
+        expect(second.style.transform).toBe("translate(11px, 21px)");
+    });
+
+    test("a single-node drag keeps its one direct lookup instead of scanning the DOM", () => {
+        let lookups = 0;
+        let scans = 0;
+        const node = { style: { transform: "" } };
+        const cache = createCanvasDragNodeElementCache(() => { lookups++; return node; }, () => { scans++; return new Map(); });
+        cache.warm(["node"]);
+        cache.apply(new Map([["node", { x: 1, y: 2 }]]));
+        expect(lookups).toBe(1);
+        expect(scans).toBe(0);
+        expect(node.style.transform).toBe("translate(1px, 2px)");
+    });
 });

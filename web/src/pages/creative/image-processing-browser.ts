@@ -1,12 +1,17 @@
-import { editorPngBlob, editorSizeError } from "@/lib/canvas/image-editor-document";
-import { compositeSelectedPixels, requireMatchingAspect, selectionHasPixels, type PixelImage } from "./image-processing";
+import { editorSizeError } from "@/lib/canvas/image-editor-document";
+import type { PixelImage } from "./image-processing";
+import { processImageInWorker } from "./image-processing-client";
 
-export async function loadProcessingImage(url: string, maxSide?: number): Promise<HTMLCanvasElement> {
+async function processingImage(url: string): Promise<HTMLImageElement> {
     if (!url) throw new Error("图片不可用，请重新上传");
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
         const value = new Image(); value.crossOrigin = "anonymous";
         value.onload = () => resolve(value); value.onerror = () => reject(new Error("无法读取图片，请检查文件或跨域权限")); value.src = url;
     });
+}
+
+export async function loadProcessingImage(url: string, maxSide?: number): Promise<HTMLCanvasElement> {
+    const image = await processingImage(url);
     const ratio = maxSide ? Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight)) : 1;
     const width = Math.max(1, Math.round(image.naturalWidth * ratio)), height = Math.max(1, Math.round(image.naturalHeight * ratio));
     const sizeError = editorSizeError({ width, height });
@@ -33,22 +38,41 @@ export function pixelsCanvas(image: PixelImage) {
 }
 
 export async function createSelectionGuide(sourceUrl: string, maskUrl: string) {
-    const [source, mask] = await Promise.all([loadProcessingImage(sourceUrl), loadProcessingImage(maskUrl)]);
-    if (source.width !== mask.width || source.height !== mask.height) throw new Error("选区与当前原图不匹配，请重新涂选");
-    const pixels = canvasPixels(mask);
-    if (!selectionHasPixels(pixels)) throw new Error("选区为空，请先涂选修改区域");
-    for (let offset = 0; offset < pixels.data.length; offset += 4) pixels.data.set([42, 119, 246, Math.round(pixels.data[offset + 3]! * .55)], offset);
-    source.getContext("2d")!.drawImage(pixelsCanvas(pixels), 0, 0);
-    return editorPngBlob(source);
+    try { return await processImageInWorker({ kind: "selection-guide-url", source: absoluteProcessingUrl(sourceUrl), selection: absoluteProcessingUrl(maskUrl) }); }
+    catch (error) { if (!(error instanceof Error) || error.name !== "ImageDecodeFallback") throw error; }
+    const [source, selection] = await processingBitmaps([sourceUrl, maskUrl]);
+    try { return await processImageInWorker({ kind: "selection-guide-image", source, selection }); }
+    finally { source.close(); selection.close(); }
 }
 
 export async function compositeSelectedImage(sourceUrl: string, generatedUrl: string, maskUrl: string) {
-    const [original, generated, selection] = await Promise.all([loadProcessingImage(sourceUrl), loadProcessingImage(generatedUrl), loadProcessingImage(maskUrl)]);
-    requireMatchingAspect(original, generated);
-    const aligned = document.createElement("canvas"); aligned.width = original.width; aligned.height = original.height;
-    const context = aligned.getContext("2d");
-    if (!context) throw new Error("无法创建合成画布");
-    context.imageSmoothingEnabled = true; context.imageSmoothingQuality = "high";
-    context.drawImage(generated, 0, 0, aligned.width, aligned.height);
-    return editorPngBlob(pixelsCanvas(compositeSelectedPixels(canvasPixels(original), canvasPixels(aligned), canvasPixels(selection))));
+    try { return await processImageInWorker({ kind: "composite-url", source: absoluteProcessingUrl(sourceUrl), generated: absoluteProcessingUrl(generatedUrl), selection: absoluteProcessingUrl(maskUrl) }); }
+    catch (error) { if (!(error instanceof Error) || error.name !== "ImageDecodeFallback") throw error; }
+    const [source, generated, selection] = await processingBitmaps([sourceUrl, generatedUrl, maskUrl]);
+    try { return await processImageInWorker({ kind: "composite-image", source, generated, selection }); }
+    finally { source.close(); generated.close(); selection.close(); }
+}
+
+function absoluteProcessingUrl(url: string) {
+    if (!url) throw new Error("图片不可用，请重新上传");
+    return new URL(url, document.baseURI).href;
+}
+
+async function processingBitmaps(urls: string[]): Promise<ImageBitmap[]> {
+    // Decode through the same HTML image path (including SVG/CORS/EXIF handling),
+    // then transfer ownership; full-size canvas reads and PNG encoding stay off the UI thread.
+    const loaded = await Promise.allSettled(urls.map(async url => {
+        const image = await processingImage(url);
+        const error = editorSizeError({ width: image.naturalWidth, height: image.naturalHeight });
+        if (error) throw new Error(error);
+        // HTML images can render viewBox-only SVGs using their resolved size;
+        // ImageBitmap needs that size explicitly when intrinsic dimensions are absent.
+        return createImageBitmap(image, { resizeWidth: image.naturalWidth, resizeHeight: image.naturalHeight });
+    }));
+    const failure = loaded.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failure) {
+        for (const result of loaded) if (result.status === "fulfilled") result.value.close();
+        throw failure.reason;
+    }
+    return loaded.map(result => (result as PromiseFulfilledResult<ImageBitmap>).value);
 }

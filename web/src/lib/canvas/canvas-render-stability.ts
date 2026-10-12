@@ -7,6 +7,7 @@ export type CanvasNodeRenderState = {
     themeKey: string;
     renderQuality: CanvasRenderQuality;
     isSelected: boolean;
+    isMultiSelected?: boolean;
     isRelated: boolean;
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
@@ -32,6 +33,7 @@ export function canvasNodeRenderStateEqual(previous: CanvasNodeRenderState, next
         previous.themeKey === next.themeKey &&
         previous.renderQuality === next.renderQuality &&
         previous.isSelected === next.isSelected &&
+        Boolean(previous.isMultiSelected) === Boolean(next.isMultiSelected) &&
         previous.isRelated === next.isRelated &&
         previous.isFocusRelated === next.isFocusRelated &&
         previous.isConnectionTarget === next.isConnectionTarget &&

@@ -8,6 +8,9 @@ export class CanvasDocumentError extends Error {
 export type CanvasDocumentEnvelope = {
     id: string; revision: number; deleted: boolean; document: Record<string, unknown> | null; updatedAt: string;
 };
+export type CanvasDocumentSummary = Omit<CanvasDocumentEnvelope, "document"> & {
+    summary: { id: string; title: string; createdAt: string; updatedAt: string; nodeCount: number; connectionCount: number; cover: { content?: string; storageKey?: string } | null } | null;
+};
 
 const idSchema = z.string().min(1).max(200).refine(value => value.trim().length > 0);
 const dateSchema = z.string().min(1).refine(value => Number.isFinite(Date.parse(value)));

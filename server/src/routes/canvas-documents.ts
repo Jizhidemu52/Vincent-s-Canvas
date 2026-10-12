@@ -5,6 +5,15 @@ import type { AuthenticatedRequest } from "../types";
 import { accessClause } from "./assets";
 
 const columns = `external_id AS id,revision::double precision AS revision,deleted,document,updated_at AS "updatedAt"`;
+// Project listing never sends graph/history JSON to the API process or browser.
+const summaryColumns = `external_id AS id,revision::double precision AS revision,deleted,updated_at AS "updatedAt",
+    CASE WHEN deleted THEN NULL ELSE jsonb_build_object(
+        'id',external_id,'title',document->>'title','createdAt',document->>'createdAt','updatedAt',document->>'updatedAt',
+        'nodeCount',jsonb_array_length(document->'nodes'),'connectionCount',jsonb_array_length(document->'connections'),
+        'cover',(SELECT jsonb_build_object('content',node->'metadata'->>'content')
+            FROM jsonb_array_elements(document->'nodes') AS node
+            WHERE node->>'type'='image' AND coalesce(node->'metadata'->>'content','')<>'' LIMIT 1)
+    ) END AS summary`;
 
 export function createCanvasDocumentsRouter(db: Database) {
     const router = Router();
@@ -21,8 +30,16 @@ export function createCanvasDocumentsRouter(db: Database) {
     router.get("/", async (request, response, next) => {
         try {
             const actor = (request as unknown as AuthenticatedRequest).auth;
-            const result = await db.query(`SELECT ${columns} FROM canvas_documents WHERE owner_user_id=$1 ORDER BY updated_at DESC,external_id`, [actor.id]);
+            const result = await db.query(`SELECT ${summaryColumns} FROM canvas_documents WHERE owner_user_id=$1 ORDER BY updated_at DESC,external_id`, [actor.id]);
             response.json({ documents: result.rows });
+        } catch (error) { next(error); }
+    });
+    router.get("/:id", async (request, response, next) => {
+        try {
+            const actor = (request as unknown as AuthenticatedRequest).auth;
+            const id = String(request.params.id);
+            const result = await db.query(`SELECT ${columns} FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2`, [actor.id, id]);
+            response.json({ document: result.rows[0] ?? missingCanvasDocument(id) });
         } catch (error) { next(error); }
     });
     router.put("/:id", async (request, response, next) => {

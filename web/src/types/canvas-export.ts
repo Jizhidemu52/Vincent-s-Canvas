@@ -1,4 +1,5 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
+import type { EncodedCanvasProject } from "@/lib/canvas/canvas-project-codec";
 
 export type CanvasExportFile = {
     app: "wireless-canvas";
@@ -8,7 +9,7 @@ export type CanvasExportFile = {
 };
 
 export type CanvasProjectExportItem = {
-    project: CanvasProject;
+    project: CanvasProject | EncodedCanvasProject;
     files: CanvasExportAsset[];
 };
 

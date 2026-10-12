@@ -6,6 +6,7 @@ import { readZip } from "@/lib/zip";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasExportFile } from "@/types/canvas-export";
 import { CanvasNodeType } from "@/types/canvas";
+import { decodeCanvasProject } from "@/lib/canvas/canvas-project-codec";
 
 const imageUrl = "/api/assets/11111111-1111-4111-8111-111111111111/content";
 const videoUrl = "/api/assets/22222222-2222-4222-8222-222222222222/content";
@@ -55,7 +56,7 @@ describe("cloud canvas offline ZIP backup", () => {
             imported.set(file.storageKey, bytes.slice(0, bytes.size, file.mimeType));
             urls.set(file.storageKey, `blob:offline/${file.storageKey}`);
         }
-        const restored = restoreCanvasExportMedia(manifest.projects[0].project, urls);
+        const restored = decodeCanvasProject(restoreCanvasExportMedia(manifest.projects[0].project, urls));
         expect(restored.groups).toEqual([{ id: "style-a", title: "款式 A", nodeIds: ["image"], collapsed: true }]);
         expect(restored.history?.past[0].groups).toEqual([{ id: "style-a", title: "款式 A", nodeIds: ["image"], collapsed: false }]);
         const imageKey = restored.nodes[0].metadata.storageKey!;

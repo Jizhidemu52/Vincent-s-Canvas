@@ -1,6 +1,6 @@
 ---
 title: 数据库结构与迁移
-description: 正式数据存储边界、员工画布文档、任务恢复和身份字段
+description: 正式数据存储边界、员工画布文档、公司设计灵感库、任务恢复和身份字段
 ---
 
 # 数据库结构与迁移
@@ -9,11 +9,11 @@ description: 正式数据存储边界、员工画布文档、任务恢复和身�
 
 | 存储 | 负责内容 |
 | --- | --- |
-| PostgreSQL | 用户、部门、项目、员工画布文档、任务、额度账本、历史、审计、Provider 配置与素材元数据 |
+| PostgreSQL | 用户、部门、项目、员工画布文档、公司设计灵感库及使用收据、任务、额度账本、历史、审计、Provider 配置与素材元数据 |
 | Redis | 会话、任务队列、限流和并发控制 |
-| S3 / MinIO | 上传文件及生成结果的文件内容 |
+| S3 / MinIO | 上传文件及生成结果的文件内容、灵感库独立原图快照及复用后的私有原件 |
 | 浏览器 IndexedDB | 企业画布的员工缓存、待同步改动和媒体；试用画布本地持久化；独立聊天与创意草稿仍为本地员工分区 |
-| 单机演示 SQLite | 演示服务的素材原文件、元数据、任务、OA 员工身份／会话及整张画布文档，不替代上述正式存储 |
+| 单机演示 SQLite | 演示服务的素材原文件、元数据、任务、OA 员工身份／会话、整张画布文档及灵感库快照与使用收据，不替代上述正式存储 |
 
 ## 单机演示数据
 
@@ -27,6 +27,10 @@ description: 正式数据存储边界、员工画布文档、任务恢复和身�
 | `demo_oa_users` | `id` 内部用户主键、唯一 `subject` 对应 OA `userid`、`display_name` 对应姓名；同名不合并，Token 更新不改变内部 ID |
 | `demo_oa_sessions` | `token_hash` 平台会话 SHA-256 主键、`user_id`、`expires_at` 毫秒时间；有效期两小时，不保存 OA Token |
 | `demo_canvas_documents` | `(owner_user_id,external_id)` 联合主键、`revision` 正整数、`deleted`、`document_json`、`updated_at`；文档与删除墓碑按员工持久保存 |
+| `demo_library_publications` | `id` 主键、`author_id`、`department_id`、`request_id`、`status`、`created_at`、`fields_json`；`(author_id,request_id)` 唯一，JSON 保存显式发布内容与图片快照元数据 |
+| `demo_library_media` | `object_key` 主键、`mime_type`、`bytes` 原始 BLOB；共享原图独立于作者的 `demo_assets` |
+| `demo_library_deliveries` | `operation_key` 主键、`fields_json`；保存已签发的下载与私有素材复制操作，不等于已收到成功收据 |
+| `demo_library_receipts` | `id` 主键、唯一 `operation_key`、`entry_id`、`image_id`、`action`、`actor_id`、`created_at`、`fields_json`；按作品、操作、图片、员工及时间建立统计和活动索引 |
 
 启动时仅将遗留 `processing` 任务改为 `paused` 并记录 `LOCAL_PROCESS_INTERRUPTED`，不自动重新生成或退款；视频可沿用已有上游任务 ID 查询。旧演示账号登录会话、账号余额、后台临时配置仍在内存中；OA 身份和会话则持久化，不能把这里的退款标记当作正式持久账本。现有 `DEMO_RECOVERY_FILE` 仅在新数据库首次初始化时导入；坏数据库或写入失败会报错，不会自动删除并重建为空库。
 
@@ -53,6 +57,23 @@ OA 员工模式的前端同步整张画布：节点位置与尺寸、连线、�
 `GET /api/canvas-documents` 只列当前员工的文档和墓碑；`PUT /api/canvas-documents/:id` 使用 `baseRevision` 比较并交换版本，初次写入从 0 开始，`document:null` 表示删除。两者都要求 `X-Canvas-Owner-Id` 严格等于当前会话员工，并在保存时检查引用素材权限。SQLite 使用 `IMMEDIATE` 事务执行原子版本比较；冲突返回 409 和当前版本，前端保留完整冲突副本。真实删除墓碑不得以原 ID 复活，即使版本匹配；需要保留旧设备的改动时创建新 ID 的副本。
 
 本地提交先于云端提交；断网或同步失败保留缓存和待同步改动，恢复后重试并显示同步状态。旧匿名／共用本地画布不自动迁入员工账号，须由用户导出后导入。此机制不是实时协作或无限历史；非 OA／standalone 模式仍使用本地画布。新迁移在正式 PostgreSQL、S3／MinIO 联动及真实 OA 员工入口尚需目标部署环境验证。
+
+## 公司设计灵感库
+
+`025_design_library.sql` 新增以下四张正式 PostgreSQL 表。仅 `OA_LOGIN_ENABLED=true` 的已认证员工可以发布和使用公司分享，试用模式明确拒绝；真实作者、操作员工及部门来自服务端身份，不接受客户端声明。正式维护入口另用严格管理员认证，部门管理员仅管理所属部门的非公开分享及统计；单机演示不提供真实管理员登录。
+
+| 表 | 字段与约束 |
+| --- | --- |
+| `design_library_publications` | `id` 主键、`author_id` 与作者／部门名称快照、`title`、`thought`、`prompt`、`tags`、`status`、`request_id`、`payload_hash`、下架原因／操作人及时间；`(author_id,request_id)` 唯一，状态限 `published`／`withdrawn`／`taken_down`，按公开状态、作者和部门建立时间索引 |
+| `design_library_images` | `id` 主键、`entry_id`、`position`、唯一 `object_key`、文件名、MIME、原始字节数与尺寸；作品内位置唯一，支持 PNG／JPEG／WebP／GIF，单图不超过 20 MiB；不关联作者私有源素材外键 |
+| `design_library_deliveries` | `operation_key` 主键、操作员工、作品／图片、`download`／`reuse`、`request_id`、`asset_id` 与时间；复用必须关联接收人的新私有素材，下载不关联私有素材 |
+| `design_library_receipts` | `id` 主键、唯一 `receipt_key`、作品／图片、操作、员工 ID／姓名／部门名称、请求标识与时间；操作限浏览、下载、画布复用和提示词复制，图片外键绑定所属作品；提供统计和下载／复用活动分页索引 |
+
+发布时只快照员工显式选择的内容和本人已保存的有效图片，不修改源素材权限，也不自动公开源素材元数据、私人画布或聊天。每次最多 12 张图片、总量不超过 100 MiB；校验真实图片格式后按原字节复制，不重编码。S3／MinIO 中的共享对象独立于原私有文件，复用再创建接收人拥有的私有 `assets` 与独立原件，并保留 `metadata.designLibrarySource` 来源归因。列表在数据库分页，不加载原图字节；SQLite 列表将设计思路与提示词留空作为摘要，详情返回完整显式发布内容。
+
+发布按员工与 `requestId` 幂等，相同标识更换内容返回冲突；复制、下载签发及成功收据分别持久化。统计排除作者自己的操作，作品浏览只计详情打开，不把列表预取或图片请求算作浏览；逐图浏览另计。跨图片汇总人数按员工去重，下载／复用活动只包含姓名、部门、图片与时间，不保存接收人的私人画布 ID 或内容。下载计数是浏览器交付流程的成功收据，不证明外部落盘或实际采用；复制到画布需原件复制和本地画布保存成功后才提交收据。
+
+SQLite 适配器在同一事务保存快照、分享、收据及接收人的 `demo_assets.bytes`，提交后才更新内存素材；外部读取不观察未提交状态。作者撤回或管理员下架后阻止新的共享读取、下载和复用，允许已签发操作完成收据；已有私有副本及下载文件不能收回，原作者仍可查看自己的分享和统计。正式迁移、对象存储权限与联合备份恢复仍须在目标 PostgreSQL／S3 环境验收。
 
 ## 任务执行与恢复字段
 

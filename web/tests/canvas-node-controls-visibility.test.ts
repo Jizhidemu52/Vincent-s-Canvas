@@ -37,3 +37,17 @@ test("omits controls only for passive far-canvas overview nodes", () => {
     expect(shouldRenderCanvasNodeControls({ renderQuality: "overview", hovered: false, selected: false, connecting: false })).toBe(false);
     expect(shouldRenderCanvasNodeControls({ renderQuality: "overview", hovered: false, selected: true, connecting: false })).toBe(true);
 });
+
+test("bulk overview selection does not mount resize handles or idle ports on every node", () => {
+    const state = { renderQuality: "overview" as const, selected: true, multiSelected: true, hovered: false, connecting: false };
+    expect(shouldRenderCanvasNodeControls({ ...state, kind: "resize" })).toBe(false);
+    expect(shouldRenderCanvasNodeControls({ ...state, kind: "connection" })).toBe(false);
+    expect(shouldRenderCanvasNodeControls({ ...state, hovered: true, kind: "resize" })).toBe(false);
+});
+
+test("hover and a live connection still expose ports within a bulk overview selection", () => {
+    const state = { renderQuality: "overview" as const, selected: true, multiSelected: true, hovered: false, connecting: false, isImage: true };
+    expect(shouldRenderCanvasNodeControls({ ...state, hovered: true, kind: "connection" })).toBe(true);
+    expect(shouldRenderCanvasNodeControls({ ...state, connecting: true, kind: "connection" })).toBe(true);
+    expect(shouldRenderCanvasNodeControls({ ...state, connecting: true, kind: "resize" })).toBe(false);
+});

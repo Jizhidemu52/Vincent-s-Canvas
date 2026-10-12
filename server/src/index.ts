@@ -48,6 +48,9 @@ import { createGenerationCapabilitiesRouter } from "./routes/generation-capabili
 import { createCanvasDocumentsRouter } from "./routes/canvas-documents";
 import { designerModelPrivacy } from "./model-privacy";
 import { createReferenceImportRouter, referenceImportBodyErrors } from "./routes/reference-import";
+import { DesignLibraryService } from "./design-library";
+import { PostgresDesignLibraryRepository, designLibraryObjectStorage } from "./design-library-postgres";
+import { createDesignLibraryRouter, designLibraryBodyErrors, designLibraryBoundary } from "./routes/design-library";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
@@ -59,6 +62,7 @@ const app = express();
 if (config.TRUST_PROXY === "true") app.set("trust proxy", 1);
 app.disable("x-powered-by");
 app.use(helmet());
+app.use(["/api/design-library", "/api/admin/design-library"], designLibraryBoundary(features.oaLoginEnabled), express.json({ limit: "128kb" }), designLibraryBodyErrors);
 app.use("/api/reference-import", express.json({ limit: "16kb" }), referenceImportBodyErrors);
 app.use("/api/chat", express.json({ limit: "12mb" }));
 app.use("/api/canvas-documents", express.json({ limit: "20mb" }));
@@ -86,6 +90,9 @@ app.get("/api/health", async (_request, response, next) => {
 app.use("/api/auth", createAuthRouter(db, cache, config));
 const requireSession = sessionMiddleware(db, cache, config);
 const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
+const designLibrary = new DesignLibraryService(new PostgresDesignLibraryRepository(db), designLibraryObjectStorage(storage));
+app.use("/api/design-library", requireSession, requireAccountReady, createDesignLibraryRouter(designLibrary));
+app.use("/api/admin/design-library", requireAdminSession, requireAccountReady, createDesignLibraryRouter(designLibrary, { admin: true }));
 const protectModelIdentity = designerModelPrivacy(db);
 app.use("/api/canvas-documents", requireSession, requireAccountReady, protectModelIdentity, createCanvasDocumentsRouter(db));
 app.use("/api/reference-import", requireSession, requireAccountReady, createReferenceImportRouter(db));

@@ -45,7 +45,7 @@ export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v6";
 const allBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download", "edit"];
 
 export const imageToolDefinitions: ImageToolDefinition[] = [
-    { id: "compare", defaultVisible: false, panelLabel: "改款前后对比", label: "改款前后对比 · 得到对比图", title: "得到滑块、并排、叠加预览和 PNG 对比图，不改原图", icon: () => <Columns2 className="size-[18px]" />, run: (node, handlers) => handlers.onCompare?.(node) },
+    { id: "compare", defaultVisible: false, panelLabel: "高级对比", label: "高级对比 · 差异图与导出", title: "原位滑块位于结果图下方；此处打开差异图、并排、叠加和 PNG 导出工具", icon: () => <Columns2 className="size-[18px]" />, run: (node, handlers) => handlers.onCompare?.(node) },
     { id: "designTemplate", defaultVisible: false, panelLabel: "服装画布模板", label: "服装画布模板 · 得到整套生成流程", title: "以当前图为参考，新增线稿、改色、效果图等可编辑生成配置", icon: () => <PanelsTopLeft className="size-[18px]" />, run: (node, handlers) => handlers.onDesignTemplate?.(node) },
     { id: "restoreGeneration", defaultVisible: false, panelLabel: "恢复生成输入", label: "恢复生成输入 · 找回参考图和参数", title: "恢复当时的提示词、参考原图和参数，不自动生成", icon: () => <History className="size-[18px]" />, run: (node, handlers) => handlers.onRestoreGeneration?.(node) },
     {

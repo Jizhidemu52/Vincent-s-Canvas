@@ -4,10 +4,11 @@ import type { AddressInfo } from "node:net";
 import { Database as Sqlite } from "bun:sqlite";
 import type { Database } from "../src/db";
 import type { AuthenticatedRequest, SessionUser } from "../src/types";
-import { assertCanvasOwner, CanvasDocumentError, parseCanvasDocumentWrite } from "../src/canvas-document";
+import { assertCanvasOwner, CanvasDocumentError, parseCanvasDocumentWrite, type CanvasDocumentEnvelope } from "../src/canvas-document";
 import { createCanvasDocumentsRouter } from "../src/routes/canvas-documents";
 import { createAssetsRouter } from "../src/routes/assets";
 import type { ObjectStorage } from "../src/object-storage";
+import { compactHistoryAssetId, expectedCanvasSummary, largeCanvasDocument } from "./canvas-document-fixtures";
 
 const assetId = "11111111-2222-4333-8444-555555555555";
 function project() {
@@ -63,6 +64,26 @@ test("media validation rejects nested local resources but not textual prompts", 
     const localNode = project();
     localNode.nodes[0]!.metadata.content = "blob:local-node";
     expect(() => parseCanvasDocumentWrite("canvas-1", { baseRevision: 0, document: localNode })).toThrow(CanvasDocumentError);
+});
+
+test("compact history retains complete media elements and validates media inside sparse, splice and set deltas", () => {
+    const source = largeCanvasDocument("compact-history", assetId, 12);
+    const parsed = parseCanvasDocumentWrite(source.id, { baseRevision: 0, document: source });
+    expect(parsed.document).toEqual(source);
+    expect(parsed.assetIds).toEqual([assetId, compactHistoryAssetId]);
+    for (const media of ["blob:local-history", "data:image/png;base64,AAA", "/api/assets/not-a-uuid/content"]) {
+        const historicalImage = { ...source.nodes[3]!, type: "image", metadata: { content: media } };
+        const deltas = [
+            { arrays: { nodes: { kind: "items", length: 12, changes: [[3, historicalImage]] } } },
+            { arrays: { nodes: { kind: "splice", start: 3, deleteCount: 1, items: [historicalImage] } } },
+            { set: { chatSessions: [{ ...source.chatSessions[0], messages: [{ id: "media", role: "assistant", text: "历史图片", attachments: [{ mediaType: "image", url: media }] }] }] } },
+        ];
+        for (const delta of deltas) {
+            expect(() => parseCanvasDocumentWrite(source.id, { baseRevision: 0, document: { ...source, history: { format: source.history.format, past: [delta], future: [] } } })).toThrow(CanvasDocumentError);
+        }
+    }
+    const historyOnlyLocalKey = { set: { nodes: [{ ...source.nodes[0]!, metadata: { content: source.nodes[0]!.metadata.content, storageKey: "image:local-history" } }] } };
+    expect(() => parseCanvasDocumentWrite(source.id, { baseRevision: 0, document: { ...source, history: { format: source.history.format, past: [], future: [historyOnlyLocalKey] } } })).toThrow(CanvasDocumentError);
 });
 
 test("document size is capped and owner must exactly match the current session", () => {
@@ -156,26 +177,36 @@ async function serve(app: express.Express, run: (origin: string) => Promise<void
     finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 }
 
-// Execute the real CAS statements against SQLite after removing PG-only casts.
-// This verifies write predicates and owner scoping; it is not a PostgreSQL migration test.
+// Execute real CAS predicates and the list projection using SQLite's JSON
+// equivalents. Do not substitute a fixture response for the route's SELECT.
+// This remains an isolated SQL-contract test, not a PostgreSQL migration test.
 function databaseFixture() {
     const sqlite = new Sqlite(":memory:");
     sqlite.run("CREATE TABLE canvas_documents(owner_user_id TEXT,external_id TEXT,revision INTEGER,deleted INTEGER,document TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner_user_id,external_id))");
-    let assetsAllowed = true;
+    const allowedAssets = new Set([assetId]);
     const db = { query: async (sql: string, parameters: unknown[] = []) => {
         if (sql.includes("FROM assets a")) {
             expect(sql).toContain("a.owner_user_id=$2");
             expect(sql).toContain("a.status='ready'");
             expect(sql).toContain("a.deleted_at IS NULL");
             expect(parameters[1]).toBe("employee-a");
-            return { rows: assetsAllowed ? [{ id: assetId }] : [] };
+            return { rows: (parameters[0] as string[]).filter(id => allowedAssets.has(id)).map(id => ({ id })) };
         }
-        const statement = sql.replace(/::double precision|::jsonb/g, "").replace(/now\(\)/g, "CURRENT_TIMESTAMP").replace(/\$(\d+)/g, "?$1");
+        const statement = sql.replace(/::double precision|::jsonb/g, "")
+            .replace(/jsonb_build_object\(/g, "json_object(")
+            .replace(/jsonb_array_length\(/g, "json_array_length(")
+            .replace(/jsonb_array_elements\(document->'nodes'\) AS node/g, "json_each(document,'$.nodes') AS node")
+            .replace(/\bnode->/g, "node.value->")
+            .replace(/now\(\)/g, "CURRENT_TIMESTAMP").replace(/\$(\d+)/g, "?$1");
         const values = parameters.map(value => typeof value === "boolean" ? Number(value) : value) as any[];
         const rows = sqlite.query(statement).all(...values) as Array<Record<string, any>>;
-        return { rows: rows.map(row => ({ ...row, deleted: Boolean(row.deleted), document: row.document === null ? null : JSON.parse(row.document) })) };
+        return { rows: rows.map(row => ({
+            ...row, deleted: Boolean(row.deleted),
+            ...(Object.hasOwn(row, "document") ? { document: row.document === null ? null : JSON.parse(row.document) } : {}),
+            ...(Object.hasOwn(row, "summary") ? { summary: row.summary === null ? null : JSON.parse(row.summary) } : {}),
+        })) };
     } } as unknown as Database;
-    return { db, sqlite, denyAssets: () => { assetsAllowed = false; } };
+    return { db, sqlite, allowAsset: (id: string) => allowedAssets.add(id), denyAssets: () => allowedAssets.clear() };
 }
 
 test("canvas API isolates employees, CAS-conflicts concurrent stale writes and never resurrects tombstones", async () => {
@@ -186,7 +217,7 @@ test("canvas API isolates employees, CAS-conflicts concurrent stale writes and n
     try { await serve(app, async origin => {
         const api = async (method: string, id = "", body?: unknown, employee = "employee-a", owner = employee) => {
             const response = await fetch(`${origin}/api/canvas-documents${id ? `/${id}` : ""}`, { method, headers: { "content-type": "application/json", "X-Canvas-Owner-Id": owner, "test-actor": employee }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-            return { status: response.status, body: await response.json() };
+            return { status: response.status, headers: response.headers, body: await response.json() };
         };
         const document = project();
         expect((await api("GET", "", undefined, "employee-a", "employee-b")).status).toBe(403);
@@ -194,12 +225,23 @@ test("canvas API isolates employees, CAS-conflicts concurrent stale writes and n
         const first = await api("PUT", "canvas-1", { baseRevision: 0, document });
         expect(first.status).toBe(200);
         expect(first.body.document).toMatchObject({ id: "canvas-1", revision: 1, deleted: false, document });
-        expect((await api("GET")).body.documents[0].document).toEqual(document);
+        const listed = await api("GET");
+        expect(listed.headers.get("cache-control")).toBe("no-store");
+        expect(listed.body.documents).toEqual([{ id: document.id, revision: 1, deleted: false, updatedAt: first.body.document.updatedAt,
+            summary: { id: document.id, title: document.title, createdAt: document.createdAt, updatedAt: document.updatedAt,
+                nodeCount: 2, connectionCount: 1, cover: { content: document.nodes[0]!.metadata.content } } }]);
+        const detail = await api("GET", document.id);
+        expect(detail.headers.get("cache-control")).toBe("no-store");
+        expect(detail.body).toEqual(first.body);
+        expect((await api("GET", document.id, undefined, "employee-a", "employee-b")).status).toBe(403);
+        expect((await api("GET", document.id, undefined, "employee-b")).body.document).toEqual({ id: document.id, revision: 0, deleted: true, document: null, updatedAt: "1970-01-01T00:00:00.000Z" });
         expect((await api("GET", "", undefined, "employee-b")).body.documents).toEqual([]);
         const concurrent = await Promise.all([api("PUT", "canvas-1", { baseRevision: 1, document: { ...document, title: "device-a" } }), api("PUT", "canvas-1", { baseRevision: 1, document: { ...document, title: "device-b" } })]);
         expect(concurrent.map(result => result.status).sort()).toEqual([200, 409]);
         expect(concurrent.find(result => result.status === 409)?.body.document.revision).toBe(2);
-        expect((await api("PUT", "canvas-1", { baseRevision: 2, document: null })).body.document).toMatchObject({ revision: 3, deleted: true, document: null });
+        const deleted = await api("PUT", "canvas-1", { baseRevision: 2, document: null });
+        expect(deleted.body.document).toMatchObject({ revision: 3, deleted: true, document: null });
+        expect((await api("GET", "canvas-1")).body).toEqual(deleted.body);
         for (const revision of [0, 1, 3]) expect((await api("PUT", "canvas-1", { baseRevision: revision, document })).status).toBe(409);
         const missing = await api("PUT", "missing", { baseRevision: 9, document: null });
         expect(missing.status).toBe(409);
@@ -207,7 +249,7 @@ test("canvas API isolates employees, CAS-conflicts concurrent stale writes and n
         const other = await api("PUT", "canvas-1", { baseRevision: 0, document: { ...document, nodes: [], connections: [] } }, "employee-b");
         expect(other.status).toBe(200);
         expect(other.body.document.revision).toBe(1);
-        expect((await api("GET")).body.documents[0].deleted).toBe(true);
+        expect((await api("GET")).body.documents).toEqual([{ id: document.id, revision: 3, deleted: true, summary: null, updatedAt: deleted.body.document.updatedAt }]);
     }); } finally { fixture.sqlite.close(); }
 });
 
@@ -221,6 +263,72 @@ test("canvas API refuses guessed or unreadable server asset ids before writing",
         expect(response.status).toBe(403);
         expect((await response.json()).error).toBe("CANVAS_ASSET_FORBIDDEN");
         expect(fixture.sqlite.query("SELECT count(*) AS n FROM canvas_documents").get()).toEqual({ n: 0 });
+    }); } finally { fixture.sqlite.close(); }
+});
+
+test("formal summaries keep sixty 5000-node projects small while detail returns one exact compact document", async () => {
+    const fixture = databaseFixture();
+    fixture.allowAsset(compactHistoryAssetId);
+    const app = express().use(express.json({ limit: "20mb" }));
+    app.use((req, _res, next) => { (req as AuthenticatedRequest).auth = actor(req.get("test-actor") || "employee-a"); next(); });
+    app.use("/api/canvas-documents", createCanvasDocumentsRouter(fixture.db));
+    try { await serve(app, async origin => {
+        const headers = { "content-type": "application/json", "X-Canvas-Owner-Id": "employee-a" };
+        let fullListBytes = Buffer.byteLength('{"documents":[]}');
+        let selectedEnvelope: CanvasDocumentEnvelope | undefined;
+        const expectedSummaries = new Map<string, ReturnType<typeof expectedCanvasSummary>>();
+        for (let index = 0; index < 60; index++) {
+            const document = largeCanvasDocument(`large-${String(index).padStart(2, "0")}`, assetId);
+            const response = await fetch(`${origin}/api/canvas-documents/${document.id}`, { method: "PUT", headers, body: JSON.stringify({ baseRevision: 0, document }) });
+            expect(response.status).toBe(200);
+            const saved = await response.json() as { document: CanvasDocumentEnvelope };
+            expectedSummaries.set(document.id, expectedCanvasSummary(document));
+            fullListBytes += Buffer.byteLength(JSON.stringify(saved.document)) + (index ? 1 : 0);
+            if (index === 37) selectedEnvelope = saved.document;
+        }
+        const response = await fetch(`${origin}/api/canvas-documents`, { headers });
+        expect(response.status).toBe(200);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        const text = await response.text();
+        const listed = JSON.parse(text) as { documents: Array<Record<string, any>> };
+        expect(listed.documents).toHaveLength(60);
+        expect(Buffer.byteLength(text)).toBeLessThan(64 * 1024);
+        expect(Buffer.byteLength(text)).toBeLessThan(fullListBytes / 100);
+        for (const item of listed.documents) {
+            expect(Object.keys(item).sort()).toEqual(["deleted", "id", "revision", "summary", "updatedAt"]);
+            expect(item.summary).toEqual(expectedSummaries.get(item.id));
+        }
+        expect(text).not.toContain("PRIVATE-");
+        expect(text).not.toContain("canvas-history-delta-v1");
+        const detailResponse = await fetch(`${origin}/api/canvas-documents/large-37`, { headers });
+        expect(detailResponse.status).toBe(200);
+        expect(detailResponse.headers.get("cache-control")).toBe("no-store");
+        const detail = await detailResponse.json() as { document: CanvasDocumentEnvelope };
+        if (!selectedEnvelope) throw new Error("Selected fixture document was not saved");
+        expect(detail.document).toEqual(selectedEnvelope);
+        expect(detail.document.document).toEqual(largeCanvasDocument("large-37", assetId));
+        const foreign = await fetch(`${origin}/api/canvas-documents/large-37`, { headers: { "X-Canvas-Owner-Id": "employee-b", "test-actor": "employee-b" } }).then(result => result.json());
+        expect(foreign.document).toMatchObject({ id: "large-37", revision: 0, deleted: true, document: null });
+        console.log(JSON.stringify({ contract: "formal-canvas-summary", projects: 60, nodesPerProject: 5000, fullListBytes, summaryBytes: Buffer.byteLength(text), detailEqual: true }));
+    }); } finally { fixture.sqlite.close(); }
+}, 30000);
+
+test("formal writes enforce permission for assets present only in compact history", async () => {
+    const fixture = databaseFixture();
+    const app = express().use(express.json());
+    app.use((req, _res, next) => { (req as AuthenticatedRequest).auth = actor("employee-a"); next(); });
+    app.use("/api/canvas-documents", createCanvasDocumentsRouter(fixture.db));
+    try { await serve(app, async origin => {
+        const document = largeCanvasDocument("history-permission", assetId, 12);
+        const put = () => fetch(`${origin}/api/canvas-documents/${document.id}`, { method: "PUT", headers: { "content-type": "application/json", "X-Canvas-Owner-Id": "employee-a" }, body: JSON.stringify({ baseRevision: 0, document }) });
+        const denied = await put();
+        expect(denied.status).toBe(403);
+        expect(await denied.json()).toMatchObject({ error: "CANVAS_ASSET_FORBIDDEN" });
+        expect(fixture.sqlite.query("SELECT count(*) AS n FROM canvas_documents").get()).toEqual({ n: 0 });
+        fixture.allowAsset(compactHistoryAssetId);
+        const saved = await put();
+        expect(saved.status).toBe(200);
+        expect((await saved.json()).document.document).toEqual(document);
     }); } finally { fixture.sqlite.close(); }
 });
 

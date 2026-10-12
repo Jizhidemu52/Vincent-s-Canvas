@@ -30,7 +30,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { requestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; webSearch?: boolean; onToolCallStart?: (name: string) => void; onSubmissionStarted?: () => void; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
+type RequestOptions = { requestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; webSearch?: boolean; onToolCallStart?: (name: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -52,6 +52,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         references,
         requestId: options?.requestId,
         signal: options?.signal,
+        cancelOnAbort: options?.cancelOnAbort,
         onSubmissionStarted: options?.onSubmissionStarted,
         onSubmitted: options?.onSubmitted,
     });
@@ -84,6 +85,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         references: [...references, ...(mask ? [mask] : [])],
         requestId: options?.requestId,
         signal: options?.signal,
+        cancelOnAbort: options?.cancelOnAbort,
         onSubmissionStarted: options?.onSubmissionStarted,
         onSubmitted: options?.onSubmitted,
     });

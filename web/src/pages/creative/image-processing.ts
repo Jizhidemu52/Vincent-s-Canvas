@@ -34,24 +34,29 @@ export function recolorPixels(original: PixelImage, rules: readonly RecolorRule[
     requirePixelImage(original);
     if (!Number.isFinite(tolerance) || tolerance < 0 || tolerance > 100) throw new Error("颜色容差应为 0–100");
     if (!rules.length || rules.length > 6) throw new Error("请设置 1–6 组颜色映射");
-    const mappings = rules.map(rule => ({ from: hexRgb(rule.from), to: hexRgb(rule.to) }));
+    const mappings = rules.map(rule => {
+        const from = hexRgb(rule.from), to = hexRgb(rule.to);
+        return { from, to, unchanged: from.every((value, at) => value === to[at]) };
+    });
     const distanceLimit = 3 * (255 * tolerance / 100) ** 2;
     const data = new Uint8ClampedArray(original.data);
     let changedPixels = 0, matchedPixels = 0;
     for (let offset = 0; offset < data.length; offset += 4) {
         if (!data[offset + 3]) continue;
         let nearest = -1, nearestDistance = Infinity;
-        mappings.forEach((mapping, index) => {
-            const distance = mapping.from.reduce((sum, channel, at) => sum + (channel - original.data[offset + at]!) ** 2, 0);
+        for (let index = 0; index < mappings.length; index++) {
+            const from = mappings[index]!.from;
+            const red = from[0] - original.data[offset]!, green = from[1] - original.data[offset + 1]!, blue = from[2] - original.data[offset + 2]!;
+            const distance = red * red + green * green + blue * blue;
             if (distance <= distanceLimit && distance < nearestDistance) { nearest = index; nearestDistance = distance; }
-        });
+        }
         if (nearest < 0) continue;
         matchedPixels++;
         const mapping = mappings[nearest]!;
-        if (mapping.from.every((value, at) => value === mapping.to[at])) continue;
+        if (mapping.unchanged) continue;
         const target = mapping.to;
-        if (target.some((value, at) => value !== original.data[offset + at])) changedPixels++;
-        data.set(target, offset);
+        if (target[0] !== original.data[offset] || target[1] !== original.data[offset + 1] || target[2] !== original.data[offset + 2]) changedPixels++;
+        data[offset] = target[0]; data[offset + 1] = target[1]; data[offset + 2] = target[2];
     }
     return { width: original.width, height: original.height, data, changedPixels, matchedPixels };
 }

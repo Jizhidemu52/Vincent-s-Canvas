@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { createStorageAccess } from "@/lib/storage-access";
 
 const code = ts.transpileModule(readFileSync(new URL("../src/lib/workspace-storage.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
 
@@ -13,11 +14,13 @@ function workspace(browser = true) {
     const dependencies: Record<string, unknown> = {
         "@/lib/deployment-features": { deploymentFeatures: features },
         "@/stores/use-user-store": { useUserStore: { getState: () => state } },
+        "./storage-access": { createStorageAccess },
         localforage: { createInstance({ name, storeName }: { name: string; storeName: string }) {
             const databaseKey = `${name}/${storeName}`;
             opened.push(databaseKey);
             const data = databases.get(databaseKey) || new Map(); databases.set(databaseKey, data);
             return {
+                async ready() {},
                 async getItem(key: string) { const value = data.get(key) ?? null; await delay; return value; },
                 async setItem(key: string, value: unknown) { data.set(key, value); return value; },
                 async removeItem(key: string) { data.delete(key); },
@@ -81,4 +84,13 @@ test("an in-flight read cannot publish old employee bytes after the identity cha
     const gate = Promise.withResolvers<void>(); w.delay(gate.promise);
     const reading = a.getItem("image"); w.state.user = { id: "b", role: "designer" };
     gate.resolve(); await expect(reading).rejects.toThrow("员工会话已变化");
+});
+
+test("a write waiting for initialization rechecks identity before touching the employee store", async () => {
+    const w = workspace(); w.features.oaLoginEnabled = true; w.state.user = { id: "a", role: "designer" };
+    const a = w.create("image_files");
+    const writing = a.setItem("image", "must not be written after switch");
+    w.state.user = { id: "b", role: "designer" };
+    await expect(writing).rejects.toThrow("员工会话已变化");
+    expect(w.databases.get("wireless-canvas:oa:user:a/image_files")?.has("image")).toBe(false);
 });

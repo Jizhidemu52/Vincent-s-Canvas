@@ -279,6 +279,23 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
     }
   });
 
+  router.get("/by-request/:requestId", async (request, response, next) => {
+    response.set("Cache-Control", "private, no-store");
+    try {
+      const requestId = singleSchema.shape.requestId.parse(request.params.requestId);
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const result = await db.query(
+        `SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.request_id=$1 AND t.user_id=$2`,
+        [requestId, actor.id],
+      );
+      if (!result.rows[0]) {
+        response.status(404).json({ error: "NOT_FOUND", message: "任务不存在或无权访问" });
+        return;
+      }
+      response.json({ task: result.rows[0] });
+    } catch (error) { next(error); }
+  });
+
   router.get("/:id", async (request, response, next) => {
     try {
       const id = z.string().uuid().parse(request.params.id);

@@ -1,13 +1,15 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { gzipSync } from "node:zlib";
+import { fileURLToPath } from "node:url";
+import { gzipSync } from "fflate";
 
 export const CANVAS_PROJECT_BUDGET = {
     rawBytes: 250 * 1024,
     // The canvas owns placement, naming and export entry points. Image editing,
     // PDF generation and assistant processing remain separate on-demand chunks.
-    // Persisted undo/redo and offline-safe tool loading add a small entry cost.
-    gzipBytes: 81 * 1024,
+    // Persisted undo/redo, offline-safe tool loading, and inline comparison's
+    // source snapshots/entry point add a small entry cost; comparison UI stays lazy.
+    gzipBytes: 82 * 1024,
 };
 
 export function bundleBudgetViolations(entries) {
@@ -30,11 +32,13 @@ function projectEntries() {
         .map((name) => {
             const path = resolve(assetsDir, name);
             const content = readFileSync(path);
-            return { name, bytes: statSync(path).size, gzipBytes: gzipSync(content).length };
+            // Bun and Node use different native zlib implementations. A fixed JS
+            // compressor keeps this build gate identical locally and in Docker.
+            return { name, bytes: statSync(path).size, gzipBytes: gzipSync(content, { level: 6, mtime: 0 }).length };
         });
 }
 
-if (import.meta.main) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     const entries = projectEntries();
     if (entries.length !== 1) throw new Error(`Expected exactly one canvas project bundle, found ${entries.length}.`);
 

@@ -1,33 +1,34 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { App, Button } from "antd";
 import { Download, FileUp, MessageSquareText, Plus } from "lucide-react";
 
-import { readZip } from "@/lib/zip";
-import { setMediaBlob } from "@/services/file-storage";
-import { setImageBlob } from "@/services/image-storage";
 import { CanvasDeleteProjectsDialog } from "@/components/canvas/canvas-delete-projects-dialog";
-import { CanvasProjectCard } from "@/components/canvas/canvas-project-card";
+import { CanvasProjectGrid } from "./canvas-project-grid";
 import { CanvasSaveStatus } from "@/components/canvas/canvas-save-status";
-import type { CanvasExportFile } from "@/types/canvas-export";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
-import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
-import { restoreCanvasExportMedia } from "@/lib/canvas/canvas-export-media";
+import { useCanvasExport } from "@/hooks/use-canvas-export";
+import { canvasLibrarySummaries } from "@/lib/canvas/canvas-project-summary";
+import { importCanvasArchive } from "./import-canvas";
 
 export default function CanvasPage() {
     const { message } = App.useApp();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const inputRef = useRef<HTMLInputElement>(null);
+    const scrollRef = useRef<HTMLElement>(null);
+    const exportProjects = useCanvasExport();
     const autoOpenRef = useRef(false);
     const importLockRef = useRef(false);
     const [importing, setImporting] = useState(false);
     const hydrated = useCanvasStore((state) => state.hydrated);
-    const projects = useCanvasStore((state) => state.projects);
+    const localProjects = useCanvasStore((state) => state.projects);
+    const unloadedProjects = useCanvasStore((state) => state.unloadedProjects);
+    const projects = useMemo(() => canvasLibrarySummaries(localProjects, unloadedProjects), [localProjects, unloadedProjects]);
     const createProject = useCanvasStore((state) => state.createProject);
-    const importProject = useCanvasStore((state) => state.importProject);
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
+    const exporting = useCanvasUiStore((state) => state.exportingProjectIds.length > 0);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
 
     const mode = searchParams.get("mode");
@@ -43,27 +44,15 @@ export default function CanvasPage() {
         if (!file || importLockRef.current) return;
         importLockRef.current = true;
         setImporting(true);
+        const key = "canvas-archive-import";
         try {
-            const zip = await readZip(file);
-            const projectFile = zip.get("projects.json");
-            if (!projectFile) throw new Error("missing projects.json");
-            const data = JSON.parse(await projectFile.text()) as CanvasExportFile;
-            const importedMediaUrls = new Map<string, string>();
-            await Promise.all(
-                data.projects.flatMap((project) =>
-                    project.files.map(async (item) => {
-                        const blob = zip.get(item.path);
-                        if (!blob) return;
-                        const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
-                        const url = await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
-                        importedMediaUrls.set(item.storageKey, url);
-                    }),
-                ),
-            );
-            data.projects.forEach((item) => importProject(restoreCanvasExportMedia(item.project, importedMediaUrls)));
-            message.success(`已导入 ${data.projects.length} 个画布`);
-        } catch {
-            message.error("导入失败，请选择有效的画布压缩包");
+            const count = await importCanvasArchive(file, { onProgress: value => {
+                if (value.phase !== "complete") void message.open({ key, type: "loading", content: `${value.label}${value.total ? ` (${value.completed}/${value.total})` : ""}`, duration: 0 });
+            } });
+            message.success({ key, content: `已导入 ${count} 个画布`, duration: 3 });
+        } catch (error) {
+            console.error("画布导入失败", error);
+            message.error({ key, content: error instanceof Error ? error.message : "导入失败，请重试。", duration: 5 });
         } finally {
             importLockRef.current = false;
             setImporting(false);
@@ -80,7 +69,7 @@ export default function CanvasPage() {
     if (hydrated && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500">正在打开画布...</main>;
 
     return (
-        <main className="wb-page h-full overflow-auto">
+        <main ref={scrollRef} className="wb-page h-full overflow-auto">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-5 sm:p-8">
                 <header className="wb-page-header">
                     <div>
@@ -92,7 +81,7 @@ export default function CanvasPage() {
                     <div className="flex flex-wrap items-center gap-2">
                         {selectedIds.length ? (
                             <>
-                                <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `无线画布-${selectedIds.length}个项目`)}>
+                                <Button disabled={!hydrated} loading={exporting} icon={<Download className="size-4" />} onClick={() => void exportProjects(selectedIds, `无线画布-${selectedIds.length}个项目`)}>
                                     导出选中
                                 </Button>
                                 <Button danger disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>
@@ -129,11 +118,7 @@ export default function CanvasPage() {
                 {!hydrated ? (
                     <section className="flex min-h-[360px] items-center justify-center border-y border-stone-200 text-sm text-stone-500 dark:border-stone-800">正在加载画布...</section>
                 ) : projects.length ? (
-                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                        {projects.map((project) => (
-                            <CanvasProjectCard key={project.id} project={project} />
-                        ))}
-                    </div>
+                    <CanvasProjectGrid projects={projects} scrollElement={scrollRef} />
                 ) : (
                     <section className="wb-surface wb-empty min-h-[360px]">
                         <h2 className="text-xl font-medium">还没有画布</h2>

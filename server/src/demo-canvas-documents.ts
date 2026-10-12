@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { CanvasDocumentError, missingCanvasDocument, parseCanvasDocumentWrite, type CanvasDocumentEnvelope } from "./canvas-document";
+import { CanvasDocumentError, missingCanvasDocument, parseCanvasDocumentWrite, type CanvasDocumentEnvelope, type CanvasDocumentSummary } from "./canvas-document";
 import { DemoStorageError } from "./demo-state-store";
 
 export type DemoCanvasDocumentEnvelope = CanvasDocumentEnvelope;
@@ -43,6 +43,32 @@ export class DemoCanvasDocumentStore {
     return this.access("读取云端画布", () => this.db.query<DocumentRow, [string]>(
       "SELECT external_id,revision,deleted,document_json,updated_at FROM demo_canvas_documents WHERE owner_user_id=? ORDER BY updated_at,external_id",
     ).all(ownerId).map(envelope));
+  }
+
+  summaries(ownerId: string): CanvasDocumentSummary[] {
+    return this.access("读取画布列表", () => this.db.query<{
+      external_id: string; revision: number; deleted: number; updated_at: string; title: string;
+      created: string; updated: string; node_count: number; connection_count: number; cover: string | null;
+    }, [string]>(`SELECT external_id,revision,deleted,updated_at,
+      json_extract(document_json,'$.title') AS title,json_extract(document_json,'$.createdAt') AS created,
+      json_extract(document_json,'$.updatedAt') AS updated,json_array_length(document_json,'$.nodes') AS node_count,
+      json_array_length(document_json,'$.connections') AS connection_count,
+      (SELECT json_extract(value,'$.metadata.content') FROM json_each(document_json,'$.nodes')
+        WHERE json_extract(value,'$.type')='image' AND coalesce(json_extract(value,'$.metadata.content'),'')<>'' LIMIT 1) AS cover
+      FROM demo_canvas_documents WHERE owner_user_id=? ORDER BY updated_at DESC,external_id`).all(ownerId).map(row => ({
+        id: row.external_id, revision: row.revision, deleted: Boolean(row.deleted), updatedAt: row.updated_at,
+        summary: row.deleted ? null : { id: row.external_id, title: row.title, createdAt: row.created, updatedAt: row.updated,
+          nodeCount: row.node_count, connectionCount: row.connection_count, cover: row.cover ? { content: row.cover } : null },
+      })));
+  }
+
+  get(ownerId: string, id: string): DemoCanvasDocumentEnvelope {
+    return this.access("读取画布内容", () => {
+      const row = this.db.query<DocumentRow, [string, string]>(
+        "SELECT external_id,revision,deleted,document_json,updated_at FROM demo_canvas_documents WHERE owner_user_id=? AND external_id=?",
+      ).get(ownerId, id);
+      return row ? envelope(row) : missingCanvasDocument(id);
+    });
   }
 
   put(ownerId: string, id: string, body: unknown, canReadAsset: (assetId: string) => boolean): WriteResult {

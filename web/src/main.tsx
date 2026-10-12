@@ -15,6 +15,7 @@ import { useUserStore } from "@/stores/use-user-store";
 // Remove credentials before any network request, dynamic import or navigation.
 let oaToken = consumeOaLoginToken(window.location, window.history);
 const root = createRoot(document.getElementById("root")!);
+root.render(<main role="status" className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">正在准备工作区…</main>);
 
 document.body.style.fontFamily = '"SF Pro Display","SF Pro Text","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif';
 
@@ -49,9 +50,11 @@ void loadDeploymentFeatures().then(async (loaded) => {
             if (!workspaceLoaded) window.location.reload();
         });
     }
-    const { AppProviders } = await import("@/components/layout/app-providers");
+    const [{ AppProviders }, { router }] = await Promise.all([
+        import("@/components/layout/app-providers"),
+        import("@/router"),
+    ]);
     workspaceLoaded = true;
-    const { router } = await import("@/router");
     if (owner && useUserStore.getState().user?.id !== owner) { root.render(<CompanyOaEntry />); return; }
     root.render(
         <React.StrictMode>

@@ -12,6 +12,7 @@ import { canvasWheelZoomFactor } from "@/lib/canvas/canvas-wheel-zoom";
 import { shouldCanvasCaptureWheel } from "@/lib/canvas/canvas-wheel-target";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ViewportTransform } from "@/types/canvas";
+import "./canvas-cursor.css";
 
 type WirelessCanvasProps = {
     containerRef: React.RefObject<HTMLDivElement | null>;
@@ -39,7 +40,8 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
     { containerRef, viewport, backgroundMode = "lines", interactionMode, onViewportChange, onViewportPreview, onInteractionChange, onCanvasMouseDown, onOverviewNodePointerDown, onConnectionPointerDown, onCanvasDeselect, onContextMenu, onDrop, underlay, children },
     ref,
 ) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const themeName = useThemeStore((state) => state.theme);
+    const theme = canvasThemes[themeName];
     const panState = useRef({
         isPanning: false,
         startX: 0,
@@ -60,6 +62,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
     const pendingViewportRef = useRef<ViewportTransform | null>(null);
     const wheelCommitTimerRef = useRef<number | null>(null);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
+    const [isPanning, setIsPanning] = useState(false);
     const [isCanvasInteracting, setIsCanvasInteracting] = useState(false);
 
     const reportCanvasInteraction = useCallback(
@@ -248,7 +251,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
             };
             virtualizationRefreshDistanceRef.current = Math.max(160, Math.max(event.currentTarget.clientWidth, event.currentTarget.clientHeight) / 2);
             reportCanvasInteraction(true);
-            document.body.style.cursor = "grabbing";
+            setIsPanning(true);
             return;
         }
 
@@ -285,7 +288,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
             }
             panState.current.isPanning = false;
             reportCanvasInteraction(false);
-            document.body.style.cursor = "default";
+            setIsPanning(false);
         };
 
         window.addEventListener("pointermove", handlePointerMove);
@@ -312,7 +315,10 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         <div
             ref={containerRef}
             data-canvas-viewport
-            className={`relative h-full w-full select-none overflow-hidden ${interactionMode === "select" && !isSpacePressed ? "cursor-default" : "cursor-grab"}`}
+            data-cursor-theme={themeName}
+            data-cursor-mode={interactionMode === "select" && !isSpacePressed ? "select" : "grab"}
+            data-cursor-panning={isPanning}
+            className="relative h-full w-full select-none overflow-hidden"
             style={{ background: theme.canvas.background }}
             onPointerDown={handlePointerDown}
             onPointerDownCapture={(event) => {

@@ -96,6 +96,43 @@ describe("production generation routes", () => {
     expect(deps.reads).toHaveLength(readCount);
   });
 
+  test("looks up the exact owned request ID without a recent-history limit or task side effects", async () => {
+    const requestId = "original-request:/图片%:0";
+    for (const status of ["processing", "success", "paused"]) {
+      const task = { id: taskId, requestId, userId: actorId, status, credits: 7, resultUrls: status === "success" ? ["/api/assets/result/content"] : [] };
+      const deps = dependencies({ task });
+      const url = await serve(createTasksRouter(deps.database as never, deps.cache as never));
+      const response = await fetch(`${url}/by-request/${encodeURIComponent(requestId)}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(await response.json()).toEqual({ task });
+      expect(deps.reads).toHaveLength(1);
+      expect(deps.reads[0]?.params).toEqual([requestId, actorId]);
+      expect(deps.reads[0]?.sql).toContain("WHERE t.request_id=$1 AND t.user_id=$2");
+      expect(deps.reads[0]?.sql).not.toContain("LIMIT");
+      expect(deps.writes).toEqual([]);
+      expect(deps.queued).toEqual([]);
+    }
+  });
+
+  test("request-ID lookup hides missing or inaccessible tasks and validates before querying", async () => {
+    const deps = dependencies();
+    const url = await serve(createTasksRouter(deps.database as never, deps.cache as never));
+    const response = await fetch(`${url}/by-request/another-employees-request:0`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "NOT_FOUND", message: "任务不存在或无权访问" });
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(deps.reads[0]?.params).toEqual(["another-employees-request:0", actorId]);
+    expect(deps.reads[0]?.sql).toContain("t.user_id=$2");
+    const readCount = deps.reads.length;
+    for (const id of ["short", "x".repeat(201)]) {
+      expect((await fetch(`${url}/by-request/${id}`)).status).toBe(400);
+    }
+    expect(deps.reads).toHaveLength(readCount);
+    expect(deps.writes).toEqual([]);
+    expect(deps.queued).toEqual([]);
+  });
+
   test("preflight normalizes video settings without creating or charging a task", async () => {
     const deps = dependencies();
     const url = await serve(createTasksRouter(deps.database as never, deps.cache as never));

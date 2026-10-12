@@ -210,7 +210,7 @@ type OnlineAgentTab = "setup" | "chat" | "history" | "log";
 type OnlineAgentLog = { id: string; time: string; title: string; data?: unknown };
 type OnlineAgentLogContext = { model: string; running: boolean; confirmTools: boolean; messages: number; nodes: number; connections: number };
 type OnlineLoopContext = { step: number };
-type OnlineTurnContext = { userPrompt: string; references: CanvasAssistantReference[]; historyReferences?: CanvasAssistantReference[]; imageEditContext?: CanvasImageEditContext; settings: AgentGenerationSettings; config: AiConfig; canvasSnapshot: CanvasAgentSnapshot; autoContext: boolean };
+type OnlineTurnContext = { userPrompt: string; references: CanvasAssistantReference[]; historyReferences?: CanvasAssistantReference[]; imageEditContext?: CanvasImageEditContext; settings: AgentGenerationSettings; videoSize: string; config: AiConfig; canvasSnapshot: CanvasAgentSnapshot; autoContext: boolean };
 type OnlineToolResult = { ok: true; message: string; data?: unknown; mediaWorkflow?: CanvasAgentMediaWorkflow } | { ok: false; message: string; data?: unknown };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
 type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; claudeAssistantContent?: ClaudeAssistantContent; assistantId: string; step: number; turn: OnlineTurnContext };
@@ -288,6 +288,9 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         afterImage: "select_then_video",
         };
     });
+    // Image adapters may replace ratios with pixel sizes. Keep the user's video
+    // ratio independently so image normalization or a mode switch cannot erase it.
+    const videoSizeRef = useRef(effectiveConfig.size || "16:9");
     const [deleteChatIds, setDeleteChatIds] = useState<string[]>([]);
     const [onlineLogs, setOnlineLogs] = useState<OnlineAgentLog[]>([]);
     const [resizing, setResizing] = useState(false);
@@ -356,7 +359,8 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             setGenerationSettings((current) => {
                 const selected = videos.value.models.find((model) => model.modelId === current.videoModel) || videos.value.models[0];
                 if (!selected) return current;
-                const normalized = normalizeAgentVideoSettings({ ...current, videoModel: selected.modelId }, selected.capability);
+                const normalized = normalizeAgentVideoSettings({ ...current, videoModel: selected.modelId, size: current.mode === "video" ? current.size : videoSizeRef.current }, selected.capability);
+                videoSizeRef.current = normalized.size;
                 return current.mode === "video" ? normalized : { ...normalized, size: current.size };
             });
         } else {
@@ -478,7 +482,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 
         const refs = savedReferences || [...selectedReferences, ...uploadedReferences];
         const settings = { ...generationSettings };
-        const turn: OnlineTurnContext = { userPrompt: text, references: refs, settings, config: onlineAgentConfig(effectiveConfig, settings), canvasSnapshot: captureCanvasContextSnapshot(snapshotRef.current), autoContext };
+        const turn: OnlineTurnContext = { userPrompt: text, references: refs, settings, videoSize: videoSizeRef.current, config: onlineAgentConfig(effectiveConfig, settings), canvasSnapshot: captureCanvasContextSnapshot(snapshotRef.current), autoContext };
         const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references: refs, detail: { generationSettings: settings } };
         const assistantId = nanoid();
         appendMessage(session.id, userMessage);
@@ -640,7 +644,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const mode = op.mode || metadata.generationMode || (node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image");
         const config: AiConfig = {
             ...turn.config, model: metadata.model || defaultGenerationModel(turn.config, mode),
-            size: metadata.size || turn.config.size, quality: metadata.quality || turn.config.quality,
+            size: metadata.size || (mode === "video" ? turn.videoSize : turn.config.size), quality: metadata.quality || turn.config.quality,
             count: String(metadata.count ?? turn.config.count), canvasImageCount: String(metadata.count ?? turn.config.canvasImageCount),
             videoSeconds: metadata.seconds || turn.config.videoSeconds, vquality: metadata.vquality || turn.config.vquality,
             videoGenerateAudio: metadata.generateAudio ?? turn.config.videoGenerateAudio,
@@ -686,7 +690,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             if (name === "canvas_generate_image" || name === "canvas_generate_video") {
                 const mode = name === "canvas_generate_image" ? "image" : "video";
                 // Image tools use the user's configured model; the planner cannot switch providers.
-                const settings = onlineAgentMediaSettings(turn.settings, mode, mode === "image" ? { ...args, model: turn.settings.imageModel } : args);
+                const settings = onlineAgentMediaSettings(mode === "video" ? { ...turn.settings, size: turn.videoSize } : turn.settings, mode, mode === "image" ? { ...args, model: turn.settings.imageModel } : args);
                 const generationPrompt = mode === "image" && !imageModelProfile(settings.imageModel).requiresPrompt ? "" : requireString(args.prompt, "prompt");
                 if (mode === "image") {
                     const edit = resolveCanvasImageEdit({ ...args, prompt: generationPrompt }, turn.imageEditContext || canvasImageEditContext([]), () => mediaReferencesForTool(args, turn), turn.userPrompt);
@@ -794,6 +798,12 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     };
 
     const updateGenerationSettings = (patch: Partial<AgentGenerationSettings>) => {
+        if ((patch.mode || generationSettings.mode) === "video") {
+            const size = generationSettings.mode === "video" ? patch.size || generationSettings.size : videoSizeRef.current;
+            const capability = videoCapabilities.find((model) => model.modelId === (patch.videoModel || generationSettings.videoModel))?.capability;
+            videoSizeRef.current = capability ? normalizeAgentVideoSettings({ ...generationSettings, ...patch, size }, capability).size : size;
+            patch = { ...patch, size: videoSizeRef.current };
+        }
         setGenerationSettings((current) => ({ ...current, ...patch }));
         if (patch.imageModel) updateConfig("imageModel", patch.imageModel);
         if (patch.videoModel) updateConfig("videoModel", patch.videoModel);
@@ -896,7 +906,8 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         if (attachment.mediaType === "video") return;
         const selectedImage: CanvasAssistantAttachment = { id: attachment.id, name: attachment.name, url: attachment.url, storageKey: attachment.storageKey, mediaType: "image" };
         const videoModel = videoCapabilities.find((model) => model.modelId === generationSettings.videoModel);
-        const settings: AgentGenerationSettings = videoModel ? normalizeAgentVideoSettings({ ...generationSettings, mode: "video" }, videoModel.capability) : { ...generationSettings, mode: "video" };
+        const videoSettings: AgentGenerationSettings = { ...generationSettings, mode: "video", size: videoSizeRef.current };
+        const settings = videoModel ? normalizeAgentVideoSettings(videoSettings, videoModel.capability) : videoSettings;
         const confirmation = createAgentVideoConfirmation(selectedImage, settings, prompt || "保持参考图中服装与人物一致，模特自然展示服装并缓慢向前走。");
         setUploadedReferences([{ id: attachment.id, type: CanvasNodeType.Image, title: attachment.name, dataUrl: attachment.url, storageKey: attachment.storageKey }]);
         updateGenerationSettings(settings);

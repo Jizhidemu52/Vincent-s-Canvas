@@ -2,7 +2,8 @@ import { Alert, Button, Modal, Slider } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { editorPngBlob } from "@/lib/canvas/image-editor-document";
 import { canvasPixels, loadProcessingImage, pixelsCanvas } from "./image-processing-browser";
-import { recolorPixels, rgbHex, suggestPalette, type PixelImage, type RecolorRule } from "./image-processing";
+import { rgbHex, suggestPalette, type PixelImage, type RecolorRule } from "./image-processing";
+import { processImageInWorker } from "./image-processing-client";
 import type { SceneImage } from "./use-scene-workspace";
 
 export function RecolorDialog({ source, onClose, onSave }: {
@@ -10,6 +11,8 @@ export function RecolorDialog({ source, onClose, onSave }: {
 }) {
     const original = useRef<PixelImage | null>(null);
     const preview = useRef<HTMLCanvasElement>(null);
+    const previewController = useRef<AbortController | null>(null);
+    const saveController = useRef<AbortController | null>(null);
     const [small, setSmall] = useState<PixelImage | null>(null);
     const [palette, setPalette] = useState<string[]>([]);
     const [rules, setRules] = useState<RecolorRule[]>([]);
@@ -18,9 +21,12 @@ export function RecolorDialog({ source, onClose, onSave }: {
     const [changed, setChanged] = useState(0);
     const [matched, setMatched] = useState(0);
     const [busy, setBusy] = useState(false);
+    const [previewBusy, setPreviewBusy] = useState(false);
     const [error, setError] = useState("");
+    const [saveError, setSaveError] = useState("");
     useEffect(() => {
         let cancelled = false;
+        original.current = null; setSmall(null); setBusy(false); setError(""); setSaveError(""); setPreviewBusy(false);
         void loadProcessingImage(source.dataUrl).then(canvas => {
             if (cancelled) return;
             const pixels = canvasPixels(canvas); original.current = pixels;
@@ -31,28 +37,45 @@ export function RecolorDialog({ source, onClose, onSave }: {
             const context = reduced.getContext("2d")!; context.imageSmoothingEnabled = false; context.drawImage(canvas, 0, 0, reduced.width, reduced.height);
             setSmall(canvasPixels(reduced));
         }).catch(caught => { if (!cancelled) setError(caught instanceof Error ? caught.message : "图片读取失败"); });
-        return () => { cancelled = true; original.current = null; };
+        return () => { cancelled = true; original.current = null; saveController.current?.abort(); };
     }, [source.dataUrl]);
+    useEffect(() => { setSaveError(""); }, [rules, tolerance]);
     useEffect(() => {
-        if (!small || !rules.length || !preview.current) return;
-        try {
-            const result = recolorPixels(small, rules, tolerance);
-            preview.current.width = result.width; preview.current.height = result.height;
-            preview.current.getContext("2d")!.drawImage(pixelsCanvas(result), 0, 0);
-            setChanged(result.changedPixels); setMatched(result.matchedPixels); setError("");
-        } catch (caught) { setChanged(0); setMatched(0); setError(caught instanceof Error ? caught.message : "颜色参数无效"); }
-    }, [small, rules, tolerance]);
-    const changeRule = (index: number, key: keyof RecolorRule, value: string) => setRules(current => current.map((rule, at) => at === index ? { ...rule, [key]: value.toUpperCase() } : rule));
+        if (busy || !small || !rules.length || !preview.current) return;
+        const controller = new AbortController();
+        previewController.current = controller;
+        setPreviewBusy(true);
+        const timer = window.setTimeout(() => {
+            void processImageInWorker({ kind: "recolor", image: small, rules, tolerance }, controller.signal).then(result => {
+                if (controller.signal.aborted || !preview.current) return;
+                preview.current.width = result.width; preview.current.height = result.height;
+                preview.current.getContext("2d")!.drawImage(pixelsCanvas(result), 0, 0);
+                setChanged(result.changedPixels); setMatched(result.matchedPixels); setError("");
+            }).catch(caught => {
+                if (!controller.signal.aborted) { setChanged(0); setMatched(0); setError(caught instanceof Error ? caught.message : "颜色参数无效"); }
+            }).finally(() => { if (!controller.signal.aborted) setPreviewBusy(false); });
+        }, 100);
+        return () => { clearTimeout(timer); controller.abort(); if (previewController.current === controller) previewController.current = null; };
+    }, [small, rules, tolerance, busy]);
+    const changeRule = (index: number, key: keyof RecolorRule, value: string) => setRules(current => {
+        const normalized = value.toUpperCase();
+        if (!current[index] || current[index][key] === normalized) return current;
+        return current.map((rule, at) => at === index ? { ...rule, [key]: normalized } : rule);
+    });
     const save = async () => {
-        if (!original.current || busy) return;
-        setBusy(true); setError("");
+        if (!original.current || busy || saveController.current) return;
+        const controller = new AbortController(); saveController.current = controller;
+        previewController.current?.abort(); setPreviewBusy(false);
+        setBusy(true); setError(""); setSaveError("");
         try {
-            const result = recolorPixels(original.current, rules, tolerance);
+            const result = await processImageInWorker({ kind: "recolor", image: original.current, rules, tolerance }, controller.signal);
             if (!result.changedPixels) throw new Error("没有发生颜色变化，请调整原色、目标色或容差");
             const description = `本地精确换色；${rules.map(rule => `${rule.from} → ${rule.to}`).join("，")}；RGB 容差 ${tolerance}%；改变 ${result.changedPixels} 个像素；保持尺寸与透明度。`;
-            await onSave(await editorPngBlob(pixelsCanvas(result)), description); onClose();
-        } catch (caught) { setError(caught instanceof Error ? caught.message : "换色保存失败"); }
-        finally { setBusy(false); }
+            const blob = await editorPngBlob(pixelsCanvas(result));
+            if (controller.signal.aborted) return;
+            await onSave(blob, description); if (!controller.signal.aborted) onClose();
+        } catch (caught) { if (!controller.signal.aborted) setSaveError(caught instanceof Error ? caught.message : "换色保存失败"); }
+        finally { if (!controller.signal.aborted) setBusy(false); if (saveController.current === controller) saveController.current = null; }
     };
     return <Modal open title="精确换色 · 本地处理" width={940} onCancel={onClose} closable={!busy} mask={{ closable: !busy }} keyboard={!busy}
         footer={<><Button onClick={onClose} disabled={busy}>取消</Button><Button type="primary" loading={busy} disabled={!small} onClick={() => void save()}>保存换色结果</Button></>}>
@@ -69,7 +92,7 @@ export function RecolorDialog({ source, onClose, onSave }: {
                     <span className="cs-help">参考色板：</span>{palette.map(color => <button key={color} aria-label={`选用原色 ${color}`} title={color} className="cs-swatch" style={{ background: color }} onClick={() => changeRule(active, "from", color)} />)}</div>
                 <label className="cs-label">颜色容差 {tolerance}%<Slider min={0} max={100} value={tolerance} onChange={setTolerance} disabled={busy} /></label>
             </fieldset>
-            {error && <Alert type="error" title={error} showIcon />}
+            {(saveError || error) && <Alert type="error" title={saveError || error} showIcon />}
             <div className="cs-tool-preview-grid"><figure><figcaption>原图 · 点击为第 {active + 1} 组取色</figcaption><img src={source.dataUrl} alt="换色原图（点击取色）" className="cs-sample-image" onClick={event => {
                 if (!original.current || busy) return;
                 const rect = event.currentTarget.getBoundingClientRect(), pixels = original.current;
@@ -78,7 +101,7 @@ export function RecolorDialog({ source, onClose, onSave }: {
                 const offset = (y * pixels.width + x) * 4;
                 if (!pixels.data[offset + 3]) { setError("当前点是完全透明像素，请选择有颜色的区域"); return; }
                 changeRule(active, "from", rgbHex(Array.from(pixels.data.slice(offset, offset + 3)))); setError("");
-            }} /></figure><figure><figcaption>换色预览</figcaption><canvas ref={preview} aria-label="换色预览" /></figure></div>
+            }} /></figure><figure><figcaption>{previewBusy ? "正在更新换色预览…" : "换色预览"}</figcaption><canvas ref={preview} aria-label="换色预览" /></figure></div>
             <p className="cs-help">{small ? `缩略预览：匹配 ${matched.toLocaleString()} 个像素，改变 ${changed.toLocaleString()} 个像素。保存时在 ${source.width} × ${source.height} 原图上处理。` : "正在读取原图…"}</p>
         </div>
     </Modal>;

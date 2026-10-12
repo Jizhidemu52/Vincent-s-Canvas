@@ -1,7 +1,8 @@
 import localforage from "localforage";
-import { localForageStorage } from "@/lib/localforage-storage";
+import { localForageStorage, readyLocalForageStorage } from "@/lib/localforage-storage";
 import { updateCanvasStorage } from "./canvas-atomic-storage";
 import { mergeProjectChanges, type ProjectChange } from "./canvas-persistence-merge";
+import { decodeCanvasProject, encodeCanvasProject, parseCanvasProject, serializeCanvasProject } from "./canvas-project-codec";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 
 // One ordered manifest and one lossless JSON per project. Separate keys leave
@@ -11,7 +12,7 @@ const manifestKey = (name: string) => `${name}:project-documents:v1`;
 const documentKey = (name: string, id: string) => JSON.stringify([manifestKey(name), id]);
 
 async function hasIndexedDb() {
-    await localforage.ready();
+    await readyLocalForageStorage();
     return localforage.driver() === localforage.INDEXEDDB;
 }
 
@@ -60,7 +61,7 @@ function readDocuments(store: IDBObjectStore, name: string, ids: string[], done:
         reading.onsuccess = () => {
             try {
                 if (typeof reading.result !== "string") throw new Error(`画布项目 ${id} 内容缺失，未覆盖原数据`);
-                const project = JSON.parse(reading.result) as CanvasProject;
+                const project = parseCanvasProject(reading.result);
                 if (!project || project.id !== id) throw new Error("画布项目 ID 与索引不一致");
                 projects[index] = project;
                 if (--remaining === 0) done(projects);
@@ -72,7 +73,7 @@ function readDocuments(store: IDBObjectStore, name: string, ids: string[], done:
 export async function readCanvasProjects(name: string): Promise<CanvasProject[]> {
     if (!await hasIndexedDb()) {
         const stored = await localForageStorage.getItem(name);
-        return stored ? JSON.parse(stored).state.projects : [];
+        return stored ? JSON.parse(stored).state.projects.map(decodeCanvasProject) : [];
     }
     return transaction("readonly", (store, result, fail) => {
         const reading = store.get(manifestKey(name));
@@ -88,8 +89,8 @@ export async function writeCanvasProjects(name: string, changes: ReadonlyMap<str
         let written: CanvasProject[] = [];
         await updateCanvasStorage(name, stored => {
             const previous = stored ? JSON.parse(stored) : { version: 0 };
-            written = mergeProjectChanges(previous.state?.projects || [], changes);
-            return JSON.stringify({ ...previous, state: { projects: written } });
+            written = mergeProjectChanges((previous.state?.projects || []).map(decodeCanvasProject), changes);
+            return JSON.stringify({ ...previous, state: { projects: written.map(encodeCanvasProject) } });
         });
         return written;
     }
@@ -109,7 +110,7 @@ export async function writeCanvasProjects(name: string, changes: ReadonlyMap<str
                     const previous = new Map(projects.map(project => [project.id, project]));
                     for (const id of affected) if (!mergedIds.has(id)) store.delete(documentKey(name, id));
                     for (const project of merged) {
-                        if (project !== previous.get(project.id)) store.put(JSON.stringify(project), documentKey(name, project.id));
+                        if (project !== previous.get(project.id)) store.put(serializeCanvasProject(project), documentKey(name, project.id));
                     }
                     const affectedIds = new Set(affected);
                     const nextIds = [...merged.filter(project => !existingIds.has(project.id)).map(project => project.id), ...ids.filter(id => !affectedIds.has(id) || mergedIds.has(id))];

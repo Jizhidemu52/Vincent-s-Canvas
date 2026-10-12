@@ -21,6 +21,13 @@ export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 
+export type CanvasCompareSource = {
+    type: "image";
+    content: string;
+    storageKey?: string;
+    label?: string;
+};
+
 export type CanvasStoredImageReference = {
     originalFileName?: string;
     imageName?: string;
@@ -36,6 +43,8 @@ export type CanvasStoredImageReference = {
 };
 
 export type CanvasNodeMetadata = {
+    imageTask?: import("@/lib/canvas/canvas-image-task-recovery").CanvasImageTaskBinding;
+    designLibrarySource?: { entryId: string; imageId: string; title: string; authorName: string; assetId: string };
     sourceTaskId?: string;
     systemPrompt?: string;
     originalFileName?: string;
@@ -66,6 +75,7 @@ export type CanvasNodeMetadata = {
     audioSpeed?: string;
     audioInstructions?: string;
     references?: string[];
+    compareSources?: CanvasCompareSource[];
     manualImageReferences?: CanvasStoredImageReference[];
     excludedConnectedImageReferenceKeys?: string[];
     imageReferenceOrder?: string[];

@@ -43,6 +43,26 @@ test("a failed write restores only this edit, retaining unrelated changes", () =
     expect(rollbackCanvasImageEdit([...updated, unrelated], [node], image.storageKey)).toEqual([node, unrelated]);
 });
 
+test("manual edits snapshot the immediately previous image rather than its older generation input", () => {
+    const original = { ...node, metadata: { ...node.metadata, references: ["image:older-input"], compareSources: [{ type: "image" as const, content: "blob:older-input", storageKey: "image:older-input" }] } };
+    const edited = applyCanvasImageEdit([original], original, image);
+    expect(edited[0].metadata?.compareSources).toEqual([{ type: "image", content: "blob:original", storageKey: "image:original", label: "shirt.jpg" }]);
+    const third = applyCanvasImageEdit(edited, edited[0], { ...image, storageKey: "image:third", url: "blob:third" });
+    expect(third[0].metadata?.compareSources?.[0]).toMatchObject({ content: "blob:edited", storageKey: "image:edited" });
+    expect(applyCanvasImageEdit(edited, original, image)).toBe(edited);
+    expect(rollbackCanvasImageEdit(edited, [original], image.storageKey)[0].metadata?.compareSources).toEqual([{ type: "image", content: "blob:older-input", storageKey: "image:older-input" }]);
+    expect(original.metadata.compareSources[0].storageKey).toBe("image:older-input");
+});
+
+test("batch cover and primary child share the edited target's original-image snapshot", () => {
+    const primary = { ...node, id: "primary", metadata: { ...node.metadata, batchRootId: "original" } };
+    const root = { ...node, metadata: { ...node.metadata, isBatchRoot: true, primaryImageId: "primary" } };
+    for (const target of [root, primary]) {
+        const edited = applyCanvasImageEdit([root, primary], target, image);
+        expect(edited.map(item => item.metadata?.compareSources?.[0]?.storageKey)).toEqual(["image:original", "image:original"]);
+    }
+});
+
 test("selection coordinates account for zoom, reverse dragging and image edges", () => {
     expect(editorPoint({ x: 60, y: 45 }, { x: 10, y: 20, width: 100, height: 50 }, { width: 800, height: 400 })).toEqual({ x: 400, y: 200 });
     expect(editorRect({ x: 790, y: 390 }, { x: -20, y: -10 }, { width: 800, height: 400 })).toEqual({ x: 0, y: 0, width: 790, height: 390 });

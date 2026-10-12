@@ -13,6 +13,7 @@ const AssetsPage = lazy(() => import("@/pages/assets"));
 const ReferenceImportPage = lazy(() => import("@/pages/reference-import"));
 const CanvasPage = lazy(() => import("@/pages/canvas"));
 const CanvasProjectPage = lazy(() => import("@/pages/canvas/project"));
+const DesignLibraryPage = lazy(() => import("@/pages/design-library"));
 const ChatPage = lazy(() => import("@/pages/chat"));
 const CreativePage = lazy(() => import("@/pages/creative"));
 const CreativeScenePage = lazy(() => import("@/pages/creative/scene"));
@@ -79,8 +80,10 @@ export const router = createBrowserRouter([
             { path: "/team", element: moduleRoute(TeamPage, "team") },
             { path: "/prompts", element: moduleRoute(PromptsPage, "prompts") },
             { path: "/my-prompts", element: moduleRoute(MyPromptsPage, "prompts") },
+            { path: "/design-library", element: moduleRoute(DesignLibraryPage, "canvas") },
             ...(!standaloneEdition ? [
                 { path: "/admin", element: protectedRoute(AdminPage, true) },
+                { path: "/admin/design-library", element: protectedRoute(DesignLibraryPage, true) },
                 // Hiding role entrances must not lock operators out of maintenance.
                 { path: "/admin/login", element: routeElement(AdminLoginPage) },
                 { path: "/change-password", element: protectedRoute(ChangePasswordPage, true) },

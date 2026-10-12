@@ -1,37 +1,49 @@
+import { memo, useRef, useState } from "react";
 import { Check, Download, Pencil, Trash2, X, LayoutGrid } from "lucide-react";
 import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Input } from "antd";
+import { App, Button, Input } from "antd";
 
-import { useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { loadCanvasProject, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
-import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
+import { useCanvasExport } from "@/hooks/use-canvas-export";
+import type { CanvasProjectSummary } from "@/lib/canvas/canvas-project-summary";
 
-export function CanvasProjectCard({ project }: { project: CanvasProject }) {
+export const CanvasProjectCard = memo(function CanvasProjectCard({ project }: { project: CanvasProjectSummary }) {
+    const { message } = App.useApp();
+    const exportProjects = useCanvasExport();
+    const [renaming, setRenaming] = useState(false);
+    const renameLock = useRef(false);
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const renameProject = useCanvasStore((state) => state.renameProject);
-    const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
-    const editingId = useCanvasUiStore((state) => state.editingProjectId);
-    const editingTitle = useCanvasUiStore((state) => state.editingProjectTitle);
+    const selected = useCanvasUiStore((state) => state.selectedProjectIds.includes(project.id));
+    const editing = useCanvasUiStore((state) => state.editingProjectId === project.id);
+    const editingTitle = useCanvasUiStore((state) => state.editingProjectId === project.id ? state.editingProjectTitle : "");
+    const exporting = useCanvasUiStore((state) => state.exportingProjectIds.includes(project.id));
     const startEditing = useCanvasUiStore((state) => state.startEditingProject);
     const setEditingTitle = useCanvasUiStore((state) => state.setEditingProjectTitle);
     const stopEditing = useCanvasUiStore((state) => state.stopEditingProject);
     const toggleSelected = useCanvasUiStore((state) => state.toggleSelectedProjectId);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
-    const editing = editingId === project.id;
-    const selected = selectedIds.includes(project.id);
-    const cover = project.nodes.find(node => node.type === "image" && (node.metadata?.storageKey || node.metadata?.content));
+    const cover = project.cover;
     const open = () => navigate(`/canvas/${project.id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`);
-    const saveTitle = () => {
-        renameProject(project.id, editingTitle);
-        stopEditing();
+    const saveTitle = async () => {
+        if (renameLock.current) return;
+        renameLock.current = true;
+        setRenaming(true);
+        try {
+            if (!await loadCanvasProject(project.id)) throw new Error("画布已不存在，请刷新后重试。");
+            renameProject(project.id, editingTitle);
+            if (useCanvasUiStore.getState().editingProjectId === project.id) stopEditing();
+        } catch (error) { void message.error(error instanceof Error ? error.message : "重命名失败，请重试。"); }
+        finally { renameLock.current = false; setRenaming(false); }
     };
 
     return (
-        <article className="wb-surface group flex cursor-pointer flex-col overflow-hidden transition hover:shadow-sm" onClick={() => !editing && open()}>
+        <article data-canvas-project-id={project.id} className="wb-surface group flex cursor-pointer flex-col overflow-hidden transition hover:shadow-sm" onClick={() => !editing && open()}>
             <div className="flex h-36 items-center justify-center overflow-hidden border-b border-stone-200/60 bg-stone-100 dark:border-stone-800 dark:bg-stone-800">
-                {cover ? <CanvasPersistedMediaPreview kind="image" storageKey={cover.metadata?.storageKey} url={cover.metadata?.content} alt={project.title} className="h-full w-full object-cover" /> : <LayoutGrid size={28} className="text-stone-400" />}
+                {cover ? <CanvasPersistedMediaPreview kind="image" storageKey={cover.storageKey} url={cover.content} alt={project.title} className="h-full w-full object-cover" /> : <LayoutGrid size={28} className="text-stone-400" />}
             </div>
             <div className="p-4">
             <div className="flex items-start gap-3">
@@ -44,7 +56,7 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                     aria-label={`选择 ${project.title}`}
                 />
                 {editing ? (
-                    <Input className="min-w-0" value={editingTitle} onClick={(event) => event.stopPropagation()} onChange={(event) => setEditingTitle(event.target.value)} onKeyDown={(event) => event.key === "Enter" && saveTitle()} autoFocus />
+                    <Input className="min-w-0" disabled={renaming} value={editingTitle} onClick={(event) => event.stopPropagation()} onChange={(event) => setEditingTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTitle(); }} autoFocus />
                 ) : (
                     <button
                         type="button"
@@ -56,7 +68,7 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                     >
                         <h2 className="truncate text-base font-semibold">{project.title}</h2>
                         <p className="mt-1 text-xs leading-6 text-stone-500 dark:text-stone-400">
-                            {project.nodes.length} 个节点 · {project.connections.length} 条连线
+                            {project.nodeCount} 个节点 · {project.connectionCount} 条连线
                         </p>
                     </button>
                 )}
@@ -66,12 +78,12 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                 <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
                     {editing ? (
                         <>
-                            <Button type="text" size="small" shape="circle" icon={<Check className="size-4" />} onClick={saveTitle} aria-label="保存名称" />
-                            <Button type="text" size="small" shape="circle" icon={<X className="size-4" />} onClick={stopEditing} aria-label="取消重命名" />
+                            <Button type="text" size="small" shape="circle" loading={renaming} icon={<Check className="size-4" />} onClick={() => void saveTitle()} aria-label="保存名称" />
+                            <Button type="text" size="small" shape="circle" disabled={renaming} icon={<X className="size-4" />} onClick={stopEditing} aria-label="取消重命名" />
                         </>
                     ) : (
                         <>
-                            <Button type="text" size="small" shape="circle" icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects([project], project.title || "无线画布")} aria-label="导出" />
+                            <Button type="text" size="small" shape="circle" loading={exporting} icon={<Download className="size-4" />} onClick={() => void exportProjects([project.id], project.title || "无线画布")} aria-label="导出" />
                             <Button type="text" size="small" shape="circle" icon={<Pencil className="size-4" />} onClick={() => startEditing(project.id, project.title)} aria-label="重命名" />
                             <Button type="text" size="small" shape="circle" icon={<Trash2 className="size-4" />} onClick={() => setDeleteIds([project.id])} aria-label="删除" />
                         </>
@@ -81,4 +93,4 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
             </div>
         </article>
     );
-}
+});

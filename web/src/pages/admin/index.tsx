@@ -11,6 +11,7 @@ import { loadAdminOverview, resolveAdminTab } from "./admin-overview";
 import type { ApiUser, ApiUserRole } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import { useModuleStore } from "@/stores/use-module-store";
+import { deploymentFeatures } from "@/lib/deployment-features";
 
 const ApiConfigurationHub = lazy(() => import("./components/api-configuration-hub").then((module) => ({ default: module.ApiConfigurationHub })));
 const ModelPricingPanel = lazy(() => import("./components/model-pricing-panel").then((module) => ({ default: module.ModelPricingPanel })));
@@ -244,6 +245,7 @@ export default function AdminPage() {
                         <p className="wb-description">统一管理成员、生成服务与使用记录。只显示当前账号可管理的范围。</p>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        {deploymentFeatures.oaLoginEnabled && <Link to="/admin/design-library"><Button className="!h-10">设计灵感库管理</Button></Link>}
                         <div className="text-sm text-[var(--muted-foreground)]">
                             当前管理员：<span className="font-medium">{currentOperator?.displayName}</span>
                         </div>

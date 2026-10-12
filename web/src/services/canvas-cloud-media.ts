@@ -4,6 +4,7 @@ import { uploadServerAsset } from "./api/server-assets";
 import { readMediaSource, readUploadedMedia, rememberUploadedMedia, serverMediaId } from "./canvas-media-links";
 import { portableCanvasMedia, type PortableMediaResolver } from "@/lib/canvas/canvas-portable-media";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { decodeCanvasProject, encodeCanvasProject } from "@/lib/canvas/canvas-project-codec";
 
 const inFlight = new Map<string, Promise<string>>();
 export function ensureCloudMedia(owner: string, input: Parameters<PortableMediaResolver>[0], metadata: Record<string, unknown> = {}) {
@@ -35,6 +36,7 @@ export function ensureCloudMedia(owner: string, input: Parameters<PortableMediaR
     inFlight.set(flightKey, pending);
     return pending;
 }
-export function makeCloudCanvas(owner: string, project: CanvasProject) {
-    return portableCanvasMedia(project, input => ensureCloudMedia(owner, input, { projectId: project.id, projectName: project.title, source: "canvas" }));
+export async function makeCloudCanvas(owner: string, project: CanvasProject) {
+    // Traverse each current/historical change once, not fifty expanded graphs.
+    return decodeCanvasProject(await portableCanvasMedia(encodeCanvasProject(project), input => ensureCloudMedia(owner, input, { projectId: project.id, projectName: project.title, source: "canvas" })));
 }

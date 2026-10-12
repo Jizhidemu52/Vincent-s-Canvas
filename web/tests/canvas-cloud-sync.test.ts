@@ -2,9 +2,11 @@ import { expect, test } from "bun:test";
 import { createCanvasCloudSync, type CanvasCloudBaseline } from "@/lib/canvas/canvas-cloud-sync";
 import { CanvasRevisionConflict, type CloudCanvasDocument } from "@/services/api/canvas-documents";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { canvasProjectSummary } from "@/lib/canvas/canvas-project-summary";
+import { serializeCanvasProject } from "@/lib/canvas/canvas-project-codec";
 
 const clone = <T>(value: T): T => structuredClone(value);
-const encoded = (project: CanvasProject | null) => project === null ? null : JSON.stringify(project);
+const encoded = (project: CanvasProject | null) => project === null ? null : serializeCanvasProject(project);
 function project(id = "original", title = "完整画布"): CanvasProject {
     return {
         id, title, createdAt: "2026-09-17T00:00:00Z", updatedAt: "2026-09-17T00:00:00Z",
@@ -18,14 +20,15 @@ const envelope = (document: CanvasProject | null, revision = 1, id = document?.i
 function harness(initial: CanvasProject[] = [], cloud: CloudCanvasDocument[] = [], baseline: CanvasCloudBaseline = {}) {
     const remote = new Map(cloud.map(item => [item.id, clone(item)]));
     const state = {
-        local: clone(initial), persisted: clone(baseline), putCalls: [] as Array<{ id: string; revision: number; document: CanvasProject | null }>, copies: [] as string[], nextId: 1,
+        local: clone(initial), persisted: clone(baseline), putCalls: [] as Array<{ id: string; revision: number; document: CanvasProject | null }>, getCalls: [] as string[], copies: [] as string[], nextId: 1,
         beforePut: undefined as undefined | ((id: string, revision: number, document: CanvasProject | null) => void),
         afterCommit: undefined as undefined | ((id: string, document: CanvasProject | null) => void),
         afterCopy: undefined as undefined | ((document: CanvasProject) => void),
         persistFailure: false,
     };
     const dependencies = {
-        list: async () => clone([...remote.values()]),
+        list: async () => clone([...remote.values()].map(({ document, ...item }) => ({ ...item, summary: document ? canvasProjectSummary(document) : null }))),
+        get: async (id: string) => { state.getCalls.push(id); return clone(remote.get(id) || envelope(null, 0, id)); },
         put: async (id: string, revision: number, document: CanvasProject | null) => {
             state.putCalls.push({ id, revision, document: clone(document) });
             state.beforePut?.(id, revision, document);
@@ -53,6 +56,41 @@ function harness(initial: CanvasProject[] = [], cloud: CloudCanvasDocument[] = [
     return { state, remote, dependencies, restart, engine: restart() };
 }
 const known = (value: CanvasProject, revision = 1): CanvasCloudBaseline => ({ [value.id]: { revision, local: encoded(value) } });
+
+test("fresh library uses summaries without loading or deleting unopened cloud documents", async () => {
+    const documents = Array.from({ length: 60 }, (_, index) => envelope(project(`cloud-${index}`), 3));
+    const h = harness([], documents);
+    expect(await h.engine.hydrate([], { deferUncached: true })).toEqual([]);
+    expect(h.state.getCalls).toEqual([]);
+    expect(h.engine.deferredProjects()).toHaveLength(60);
+    await h.engine.confirmHydrated([]);
+    await h.engine.save([]);
+    expect(h.state.putCalls).toEqual([]);
+    expect(h.remote.size).toBe(60);
+    const opened = await h.engine.load("cloud-12");
+    expect(h.state.getCalls).toEqual(["cloud-12"]);
+    await h.engine.confirmHydrated([opened!]);
+    expect(h.engine.deferredProjects()).toHaveLength(59);
+    await h.engine.save([{ ...opened!, title: "只改打开的画布" }]);
+    expect(h.state.putCalls).toHaveLength(1);
+    expect(h.state.putCalls[0].revision).toBe(3);
+    expect([...h.remote.values()].filter(item => !item.deleted)).toHaveLength(60);
+});
+
+test("unchanged revisions do not fetch details and failed on-demand storage never creates a tombstone", async () => {
+    const local = project(); const h = harness([local], [envelope(local, 5)], known(local, 5));
+    expect(await h.engine.hydrate([local], { deferUncached: true })).toEqual([local]);
+    expect(h.state.getCalls).toEqual([]);
+    const fresh = harness([], [envelope(local, 5)]);
+    await fresh.engine.hydrate([], { deferUncached: true });
+    await fresh.engine.load(local.id);
+    // Simulate failure before the caller can durably store the downloaded bytes.
+    await fresh.engine.confirmHydrated([]);
+    await fresh.engine.save([]);
+    expect(fresh.state.putCalls).toEqual([]);
+    expect(fresh.engine.deferredProjects()).toHaveLength(1);
+    expect(fresh.remote.get(local.id)?.deleted).toBe(false);
+});
 
 test("style groups and their undo state persist through cloud save, fresh-device restore and conflict copies", async () => {
     const original = project();

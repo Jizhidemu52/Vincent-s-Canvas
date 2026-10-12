@@ -14,6 +14,7 @@ function storageHarness(options: { locks?: boolean; readyError?: Error } = {}) {
     const bindings = {
         window: {}, navigator: { locks: options.locks ? {} : undefined },
         localforage: { INDEXEDDB: "asyncStorage", driver: () => "localStorageWrapper", async ready() { if (options.readyError) throw options.readyError; } },
+        readyLocalForageStorage: async () => { if (options.readyError) throw options.readyError; },
         localForageStorage: {
             async getItem(name: string) { return values.get(name) ?? null; },
             async setItem(name: string, value: string) { values.set(name, value); },

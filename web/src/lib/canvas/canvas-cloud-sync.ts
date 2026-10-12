@@ -1,5 +1,7 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
-import { CanvasRevisionConflict, type CloudCanvasDocument } from "@/services/api/canvas-documents";
+import { CanvasRevisionConflict, type CloudCanvasDocument, type CloudCanvasSummary } from "@/services/api/canvas-documents";
+import { encodeCanvasProject, parseCanvasProject, serializeCanvasProject } from "./canvas-project-codec";
+import { mapCanvasAsyncPool } from "./canvas-async-pool";
 
 type CopyPlan = { key: string; id: string; savedAt: string };
 type BaselineEntry = {
@@ -9,62 +11,103 @@ type BaselineEntry = {
 };
 export type CanvasCloudBaseline = Record<string, BaselineEntry>;
 type Dependencies = {
-    list: () => Promise<CloudCanvasDocument[]>;
+    list: () => Promise<CloudCanvasSummary[]>;
+    get: (id: string) => Promise<CloudCanvasDocument>;
     put: (id: string, revision: number, document: CanvasProject | null) => Promise<CloudCanvasDocument>;
     portable: (project: CanvasProject) => Promise<CanvasProject>;
     saveBaseline: (value: CanvasCloudBaseline) => Promise<void>;
     newId: () => string;
     onCopy: (copy: CanvasProject) => Promise<void>;
 };
-const snapshot = (project: CanvasProject | null) => project ? JSON.stringify(project) : null;
+const snapshot = (project: CanvasProject | null) => project ? serializeCanvasProject(project) : null;
 // PostgreSQL jsonb does not retain object-key order. Equality must not create
 // conflict copies merely because a successful response was lost or reordered.
 const canonical = (value: unknown) => JSON.stringify(value, (_key, child) => child && typeof child === "object" && !Array.isArray(child)
     ? Object.fromEntries(Object.entries(child).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : child);
-const sameDocument = (a: CanvasProject | null, b: CanvasProject | null) => canonical(a) === canonical(b);
+const sameDocument = (a: CanvasProject | null, b: CanvasProject | null) => snapshot(a) === snapshot(b);
 
 /** A per-owner CAS synchronizer. Callers serialize saves and durably store hydrate's result before saving. */
 export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Dependencies) {
     Object.setPrototypeOf(baseline, null);
     const hydrated = new Map<string, BaselineEntry>();
-    const checkpoint = () => io.saveBaseline(structuredClone(baseline));
+    const deferred = new Map<string, CloudCanvasSummary>();
+    let hydrationCheckpointPending = false;
+    const checkpoint = async () => { await io.saveBaseline(structuredClone(baseline)); hydrationCheckpointPending = false; };
     function acceptHydrated(current: ReadonlyMap<string, CanvasProject>) {
         let accepted = false;
         for (const [id, entry] of hydrated) {
             if (snapshot(current.get(id) || null) === entry.local) {
                 baseline[id] = entry;
                 hydrated.delete(id);
+                deferred.delete(id);
                 accepted = true;
             }
         }
+        if (accepted) hydrationCheckpointPending = true;
         return accepted;
+    }
+    async function stageCachedDocument(local: CanvasProject, remote: CloudCanvasDocument) {
+        if (baseline[local.id] || !remote.document) return;
+        // Another tab can make a deferred document durable before this tab opens
+        // it. Adopt its revision only after proving the complete content matches;
+        // local Blob/cache fields alone are not a competing edit.
+        if (sameDocument(local, remote.document) || sameDocument(await io.portable(structuredClone(local)), remote.document)) {
+            hydrated.set(local.id, { revision: remote.revision, local: snapshot(local) });
+        }
     }
     function copyOf(project: CanvasProject, plan: CopyPlan) {
         return { ...project, id: plan.id, title: `${project.title}（云端冲突副本）`, persistenceConflict: { projectId: project.id, paths: ["$cloudRevision"], savedAt: plan.savedAt } };
     }
     return {
-        async hydrate(local: CanvasProject[], options: { live?: boolean } = {}) {
+        async hydrate(local: CanvasProject[], options: { live?: boolean; deferUncached?: boolean } = {}) {
             const documents = await io.list();
             const projects = new Map(local.map(project => [project.id, project]));
-            for (const remote of documents) {
+            deferred.clear();
+            await mapCanvasAsyncPool(documents, 4, async remote => {
                 const ours = projects.get(remote.id);
                 const known = baseline[remote.id];
                 const clean = known && snapshot(ours || null) === known.local;
+                if (ours && !known && !remote.deleted) {
+                    await stageCachedDocument(ours, await io.get(remote.id));
+                    return;
+                }
+                if (!ours && !known && !remote.deleted && options.deferUncached) {
+                    deferred.set(remote.id, remote);
+                    return;
+                }
                 if ((!ours && !known) || (!options.live && clean)) {
                     // An unchanged server revision must not discard IndexedDB media caches.
-                    if (clean && remote.revision === known.revision && remote.document) continue;
-                    if (remote.document) projects.set(remote.id, remote.document);
+                    if (clean && remote.revision === known.revision && !remote.deleted) return;
+                    const full = remote.deleted ? { ...remote, document: null } : await io.get(remote.id);
+                    if (full.document) projects.set(remote.id, full.document);
                     else projects.delete(remote.id);
-                    hydrated.set(remote.id, { revision: remote.revision, local: snapshot(remote.document) });
+                    hydrated.set(remote.id, { revision: full.revision, local: snapshot(full.document) });
                 }
-            }
+            });
             // Do not persist the new baseline before the caller has stored these documents.
             return [...projects.values()];
+        },
+        deferredProjects: () => [...deferred.values()].flatMap(item => item.summary ? [item.summary] : []),
+        async load(id: string, cached?: CanvasProject): Promise<CanvasProject | null> {
+            const remote = await io.get(id);
+            if (cached) {
+                await stageCachedDocument(cached, remote);
+                // Unconfirmed local edits must never be replaced merely by
+                // opening their summary. CAS will preserve a real conflict.
+                return cached;
+            }
+            hydrated.set(id, { revision: remote.revision, local: snapshot(remote.document) });
+            return remote.document;
         },
         async confirmHydrated(projects: CanvasProject[]): Promise<void> {
             // Call after durable local storage, before exposing hydrated projects to
             // editors that can immediately change updatedAt, history or media caches.
-            if (acceptHydrated(new Map(projects.map(project => [project.id, project])))) await checkpoint();
+            const current = new Map(projects.map(project => [project.id, project]));
+            acceptHydrated(current);
+            for (const id of current.keys()) deferred.delete(id);
+            // A failed checkpoint after the document itself was committed must
+            // be retried even when the next load finds that local document.
+            if (hydrationCheckpointPending) await checkpoint();
         },
         async save(projects: CanvasProject[]) {
             // All dirty decisions use the batch's initial baseline, not changes made
@@ -79,7 +122,7 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
 
             async function preserveCopy(ownerId: string, source: CanvasProject, cloudSource: CanvasProject, revision: number, kind: "remote" | "recovery") {
                 // HTTP LAN origins may not expose WebCrypto. Keep an exact canonical key.
-                const key = canonical([kind, revision, cloudSource]);
+                const key = canonical([kind, revision, encodeCanvasProject(cloudSource)]);
                 let plan = baseline[ownerId]?.pendingCopy;
                 if (plan?.key !== key) {
                     plan = { key, id: io.newId(), savedAt: new Date().toISOString() };
@@ -143,7 +186,7 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
                 if (entry?.redirect && local) {
                     const targetId = entry.redirect;
                     const previous = initial[targetId]?.local;
-                    const previousCopy = previous ? JSON.parse(previous) as CanvasProject : undefined;
+                    const previousCopy = previous ? parseCanvasProject(previous) : undefined;
                     const copy = { ...local, id: targetId, title: `${local.title}（云端冲突副本）`, persistenceConflict: previousCopy?.persistenceConflict || local.persistenceConflict };
                     const saved = await write(targetId, copy, entry.redirectRevision ?? initial[targetId]?.revision ?? 0);
                     const targetWasEdited = snapshot(current.get(targetId) || null) !== (initial[targetId]?.local ?? null);

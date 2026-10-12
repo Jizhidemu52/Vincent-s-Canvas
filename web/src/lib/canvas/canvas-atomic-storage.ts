@@ -1,11 +1,11 @@
 import localforage from "localforage";
-import { localForageStorage } from "@/lib/localforage-storage";
+import { localForageStorage, readyLocalForageStorage } from "@/lib/localforage-storage";
 import { withCanvasStorageLock } from "./canvas-persistence-merge";
 
 /** Canvas alone needs a read/merge/write transaction, not independent storage calls. */
 export async function updateCanvasStorage(name: string, update: (stored: string | null) => string | null): Promise<void> {
     if (typeof window === "undefined") return;
-    await localforage.ready();
+    await readyLocalForageStorage();
     if (localforage.driver() === localforage.INDEXEDDB) {
         // Only public settings are used. ready() has already initialized the
         // configured database/store; opening without a version never upgrades it.
