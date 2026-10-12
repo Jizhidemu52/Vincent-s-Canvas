@@ -125,6 +125,8 @@ export function useSceneWorkspace(sceneId: string) {
     const [systemPromptOverride, setSystemPromptOverride] = useState<string | undefined>();
     const [logs, setLogs] = useState<SceneLog[]>([]);
     const [activeLog, setActiveLog] = useState<SceneLog | null>(null);
+    const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null);
+    const [previewing, setPreviewing] = useState(false);
     const [results, setResults] = useState<SceneResult[]>([]);
     const [running, setRunning] = useState(false);
     const [restoring, setRestoring] = useState(false);
@@ -169,7 +171,7 @@ export function useSceneWorkspace(sceneId: string) {
 
     useEffect(() => {
         const revision = ++epoch.current;
-        setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setLogs([]); setResults([]); setActiveLog(null);
+        setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setLogs([]); setResults([]); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false);
         setSystemPromptOverride(undefined);
         setParameters(sceneParameters(configRef.current)); setRunning(false); setRestoring(false); setUploadCount(0); setStartedAt(0); setError(null); setDraftReady(false);
         if (!scope) { setLoadedScope(null); return () => { epoch.current += 1; }; }
@@ -212,7 +214,7 @@ export function useSceneWorkspace(sceneId: string) {
     }, [scope, loadedScope, draftReady, form, images, config, selection, systemPromptOverride]);
 
     const updateConfig = (key: keyof SceneParameters, value: string) => {
-        viewEpoch.current += 1; setRestoring(false);
+        viewEpoch.current += 1; setRestoring(false); setPreviewing(false);
         setParameters(current => key === "model" || key === "imageModel" ? { ...current, model: value, imageModel: value } : { ...current, [key]: value });
     };
 
@@ -237,7 +239,28 @@ export function useSceneWorkspace(sceneId: string) {
         if (running) return;
         viewEpoch.current += 1; setRestoring(false);
         inputEpoch.current.primary += 1; inputEpoch.current.secondary += 1;
-        setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setResults([]); setActiveLog(null); setError(null); setStartedAt(0);
+        setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setResults([]); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false); setError(null); setStartedAt(0);
+    };
+
+    const previewLog = async (log: SceneLog) => {
+        if (running || restoring || log.ownerId !== user?.id || log.sceneId !== sceneId) return;
+        const revision = epoch.current;
+        const viewRevision = ++viewEpoch.current;
+        setActiveLog(log); setSelectedPrompt(typeof log.prompt === "string" ? log.prompt : null);
+        setResults([]); setPreviewing(true); setError(null);
+        try {
+            const restored = await hydrateLog(log);
+            if (revision !== epoch.current || viewRevision !== viewEpoch.current) return;
+            setActiveLog(restored); setResults(restored.results); setStartedAt(0);
+        } catch (caught) { if (revision === epoch.current && viewRevision === viewEpoch.current) setError(`结果读取失败：${errorText(caught)}；当前草稿未改变`); }
+        finally { if (revision === epoch.current && viewRevision === viewEpoch.current) setPreviewing(false); }
+    };
+
+    const selectResultPrompt = (result: SceneResult) => {
+        if (!result.image) return;
+        const log = logs.find(item => item.ownerId === user?.id && item.sceneId === sceneId
+            && item.results.some(stored => stored.id === result.id && stored.image?.id === result.image?.id));
+        if (log && typeof log.prompt === "string") setSelectedPrompt(log.prompt);
     };
 
     const restoreLog = async (log: SceneLog) => {
@@ -245,7 +268,7 @@ export function useSceneWorkspace(sceneId: string) {
         const revision = epoch.current;
         const viewRevision = ++viewEpoch.current;
         inputEpoch.current.primary += 1; inputEpoch.current.secondary += 1;
-        setRestoring(true); setError(null);
+        setRestoring(true); setPreviewing(false); setError(null);
         try {
             if (log.inputArchiveVersion !== 1) throw new Error("旧记录未保存完整输入归档，无法安全恢复参考图与选区");
             if (log.operation !== "recolor" && !models.some(model => model.id === log.config.imageModel)) throw new Error("历史模型已停用，未恢复任何输入");
@@ -260,7 +283,7 @@ export function useSceneWorkspace(sceneId: string) {
             setForm({ ...createSceneForm(sceneId), ...log.form }); setImages(restoredImages); setParameters(sceneParameters(draft ? { ...draft.config, count: log.config.count } : log.config));
             setSystemPromptOverride(draft?.config.systemPrompt);
             setSelection(restoredSelection);
-            setActiveLog(restored); setResults(restored.results); setStartedAt(0);
+            setActiveLog(restored); setSelectedPrompt(log.prompt); setResults(restored.results); setStartedAt(0);
         } catch (caught) { if (revision === epoch.current && viewRevision === viewEpoch.current) setError(`记录恢复失败：${errorText(caught)}`); }
         finally { if (revision === epoch.current && viewRevision === viewEpoch.current) setRestoring(false); }
     };
@@ -279,7 +302,8 @@ export function useSceneWorkspace(sceneId: string) {
     const saveLocalResult = async (sourceId: string, blob: Blob, description: string) => {
         if (!user || user.status !== "active" || !scope || loading || running || uploadCount || imagesRef.current.primary?.id !== sourceId) throw new Error("当前图片或账号状态已变化，请重新打开换色工具");
         const revision = epoch.current, start = performance.now();
-        setRunning(true); setError(null); setStartedAt(start);
+        viewEpoch.current += 1;
+        setRunning(true); setSelectedPrompt(null); setPreviewing(false); setError(null); setStartedAt(start);
         try {
             const original = images.primary ? await freezeLocalInput(images.primary) : undefined;
             const stored = await uploadImage(blob);
@@ -309,7 +333,8 @@ export function useSceneWorkspace(sceneId: string) {
         const pending: SceneResult[] = Array.from({ length: count }, () => ({ id: nanoid(), status: "pending" }));
         const start = performance.now();
         const storageWarnings: string[] = [];
-        setRunning(true); setError(null); setActiveLog(null); setResults(pending); setStartedAt(start);
+        viewEpoch.current += 1;
+        setRunning(true); setError(null); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false); setResults(pending); setStartedAt(start);
         const updateResult = (index: number, result: SceneResult) => {
             if (revision === epoch.current) setResults(current => current.map((item, itemIndex) => itemIndex === index ? result : item));
         };
@@ -394,8 +419,8 @@ export function useSceneWorkspace(sceneId: string) {
         } catch (caught) { setError(errorText(caught)); }
     };
 
-    const updateForm: typeof setForm = (value) => { viewEpoch.current += 1; setRestoring(false); setForm(value); };
-    return { form, setForm: updateForm, images, setImage, selection, saveSelection, clearSelection: () => { if (!running) { viewEpoch.current += 1; setRestoring(false); setSelection(null); setError(null); } }, saveLocalResult, config, updateConfig, model, profile, count, running, loading,
-        uploading: uploadCount > 0, logs, activeLog, results, generate, restoreLog, reset, error, validation,
+    const updateForm: typeof setForm = (value) => { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setForm(value); };
+    return { form, setForm: updateForm, images, setImage, selection, saveSelection, clearSelection: () => { if (!running) { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setSelection(null); setError(null); } }, saveLocalResult, config, updateConfig, model, profile, count, running, loading,
+        uploading: uploadCount > 0, logs, activeLog, selectedPrompt, previewing, previewLog, selectResultPrompt, results, generate, restoreLog, reset, error, validation,
         quotaBlocked, estimatedCredits: estimateValue.credits, download, startedAt };
 }

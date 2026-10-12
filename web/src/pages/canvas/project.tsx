@@ -63,6 +63,7 @@ import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workfl
 import { createCanvasMentionReferenceIndex, createCanvasResourceReferenceIndex } from "@/lib/canvas/canvas-resource-references";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { syncCanvasSelectionReferences, type CanvasSelectionReference } from "@/lib/canvas/canvas-selection-references";
+import { createCanvasSelectionPromptSync } from "@/lib/canvas/canvas-selection-prompt";
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
 import { canvasImageBaseName, canvasImageExportStem, canvasImageVersion, canvasImageReferenceIdentity, originalCanvasImageFileName, originalReferenceFileName } from "@/lib/canvas/canvas-image-filename";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
@@ -1503,6 +1504,11 @@ function WirelessCanvasPage() {
     const agentSnapshotRef = useRef(agentSnapshot);
     agentSnapshotRef.current = agentSnapshot;
     const assistantSelectedNodes = agentSelectedNodeCacheRef.current.select(nodes, selectedNodeIds, nodeById, canvasSpatialIndex.nodeOrderById);
+    const syncSelectedPromptRef = useRef(createCanvasSelectionPromptSync());
+    useEffect(() => {
+        const selectedPrompt = syncSelectedPromptRef.current(selectedNodeIds, assistantSelectedNodes, projectId);
+        if (selectedPrompt !== undefined) setQuickGeneratePrompt(selectedPrompt);
+    }, [assistantSelectedNodes, projectId, selectedNodeIds]);
     const applyAgentOps = useCallback(
         (ops?: CanvasAgentOp[]) => {
             const safeOps = Array.isArray(ops) ? ops.filter((op) => op?.type) : [];

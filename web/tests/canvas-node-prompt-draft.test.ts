@@ -15,13 +15,18 @@ test("keeps an image-edit prompt as node draft after its panel unmounts", () => 
     expect(canvasNodePromptDraftPatch("保留服装不变，模特自然行走")).toEqual({ draftPrompt: "保留服装不变，模特自然行走" });
 });
 
-test("starts image editing with a blank draft instead of the original generation prompt", () => {
+test("shows an existing image's original generation prompt when it has no saved edit draft", () => {
     expect(canvasNodePromptDraft({
         metadata: {
             content: "data:image/png;base64,existing-image",
             prompt: "original image generation prompt",
         },
-    })).toBe("");
+    })).toBe("original image generation prompt");
+});
+
+test("keeps an intentionally cleared edit draft and does not invent a prompt for uploads", () => {
+    expect(canvasNodePromptDraft({ metadata: { content: "uploaded-image" } })).toBe("");
+    expect(canvasNodePromptDraft({ metadata: { content: "generated-image", prompt: "original prompt", draftPrompt: "" } })).toBe("");
 });
 
 test("uses the generation prompt only when a new node has no saved draft", () => {

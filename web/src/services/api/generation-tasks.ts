@@ -13,7 +13,7 @@ import { fingerprintImage, type ArchivedReference, type GenerationDraftInput, ty
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
 export type ImageGenerationModel = PublicModel;
-export type QueuedTask = { id: string; requestId: string; operationType?: string; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string };
+export type QueuedTask = { id: string; requestId: string; operationType?: string; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
 export class QueuedTaskPausedError extends Error {
     readonly taskId: string;
     readonly canRecover: boolean;

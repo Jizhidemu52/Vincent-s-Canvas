@@ -44,6 +44,7 @@ import { buildCanvasAssistantContext } from "@/lib/canvas/canvas-assistant-conte
 import { captureCanvasContextSnapshot, readCanvasContextImage, readCanvasContextVideo, readCanvasConversationImage } from "@/lib/canvas/canvas-assistant-media";
 import { buildCanvasConversationHistory } from "@/lib/canvas/canvas-assistant-history";
 import { CANVAS_ASSISTANT_SYSTEM_PROMPT } from "@/lib/canvas/canvas-assistant-prompt";
+import { createCanvasSelectionPromptSync } from "@/lib/canvas/canvas-selection-prompt";
 import { canvasImageEditContext, imageEditContextDescription, IMAGE_EDIT_TOOL_PROPERTIES, resolveCanvasImageEdit, type CanvasImageEditContext, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
 
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -381,6 +382,11 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const mediaWorkflowImageModels = useMemo(() => selectableModelsByCapability(effectiveConfig, "image"), [effectiveConfig]);
     const mediaWorkflowVideoModels = useMemo(() => selectableModelsByCapability(effectiveConfig, "video"), [effectiveConfig]);
     const selectedNodeKey = useMemo(() => Array.from(selectedNodeIds).sort().join(","), [selectedNodeIds]);
+    const syncSelectedPromptRef = useRef(createCanvasSelectionPromptSync());
+    useEffect(() => {
+        const selectedPrompt = syncSelectedPromptRef.current(selectedNodeIds, selectedNodes, snapshotRef.current.projectId);
+        if (selectedPrompt !== undefined) setPrompt(selectedPrompt);
+    }, [selectedNodeIds, selectedNodes, snapshotRef]);
     const allSelectedReferences = useMemo(() => buildAssistantReferences(selectedNodes), [selectedNodes]);
     const selectedReferences = useMemo(() => allSelectedReferences.filter((item) => !removedReferenceIds.has(item.id)), [allSelectedReferences, removedReferenceIds]);
     const generationReferences = useMemo(() => [...selectedReferences, ...uploadedReferences].filter((item): item is CanvasAssistantReference & { dataUrl: string } => Boolean(item.dataUrl)), [selectedReferences, uploadedReferences]);

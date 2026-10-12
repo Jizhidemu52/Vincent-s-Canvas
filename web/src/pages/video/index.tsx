@@ -502,31 +502,42 @@ export default function VideoPage() {
         }
     };
 
-    const previewGenerationLog = (log: GenerationLog) => {
+    const selectResultPrompt = (video: GeneratedVideo) => {
+        const sourceLog = logs.find(log => log.video?.id === video.id);
+        if (!sourceLog || typeof sourceLog.prompt !== "string") return;
+        setPrompt(sourceLog.prompt);
+        setPreviewLog(sourceLog);
+    };
+
+    const previewGenerationLog = (log: GenerationLog, restoreDraft = false) => {
         restoredInitialResultRef.current = true;
         setPreviewLog(log);
         setLogsOpen(false);
         setPrompt(log.prompt);
-        updateConfig("videoMode", log.config.videoMode || log.happyHorseMode || "auto");
-        setReferences([]);
-        setVideoReferences([]);
-        setAudioReferences([]);
         setResults([]);
         setPreviewLoading(true);
         setPreviewError("");
-        if (log.config.videoModel || log.model) updateConfig("videoModel", log.config.videoModel || log.model);
-        if (log.config.size) updateConfig("size", log.config.size);
-        if (log.config.vquality) updateConfig("vquality", log.config.vquality);
-        if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
-        if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
-        if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
+        if (restoreDraft) {
+            updateConfig("videoMode", log.config.videoMode || log.happyHorseMode || "auto");
+            setReferences([]);
+            setVideoReferences([]);
+            setAudioReferences([]);
+            if (log.config.videoModel || log.model) updateConfig("videoModel", log.config.videoModel || log.model);
+            if (log.config.size) updateConfig("size", log.config.size);
+            if (log.config.vquality) updateConfig("vquality", log.config.vquality);
+            if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
+            if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
+            if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
+        }
         void previewLoader.load(
-            () => hydrateVideoLogMedia(log, { image: resolveImageUrl, media: resolveMediaUrl }),
+            () => hydrateVideoLogMedia(log, { image: resolveImageUrl, media: resolveMediaUrl }, restoreDraft),
             (resolved) => {
                 setPreviewLoading(false);
-                setReferences(resolved.references);
-                setVideoReferences(resolved.videoReferences);
-                setAudioReferences(resolved.audioReferences);
+                if (restoreDraft) {
+                    setReferences(resolved.references);
+                    setVideoReferences(resolved.videoReferences);
+                    setAudioReferences(resolved.audioReferences);
+                }
                 setResults(resolved.status === "生成中" ? [{ id: resolved.id, status: "pending" }] : resolved.video ? [{ id: resolved.video.id, status: "success", video: resolved.video }] : [{ id: resolved.id, status: "failed", error: resolved.error || "生成失败", ...(resolved.task && resolved.canRecover !== undefined ? { recovery: { task: resolved.task, canRecover: resolved.canRecover } } : {}) }]);
             },
             (error) => { setPreviewLoading(false); setPreviewError(error instanceof Error ? error.message : "记录中的媒体暂时无法读取"); },
@@ -709,6 +720,7 @@ export default function VideoPage() {
                     <div className="wb-surface thin-scrollbar min-w-0 p-5 lg:min-h-0 lg:overflow-y-auto">
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <h2 className="text-xl font-semibold">生成结果</h2>
+                            {previewLog ? <Button size="small" disabled={running || previewLoading} onClick={() => previewGenerationLog(previewLog, true)}>恢复为草稿继续改</Button> : null}
                             {running ? <Tag className="m-0 px-2 py-1">用时 <GenerationElapsed startedAt={startedAt} /></Tag> : null}
                         </div>
                         {previewError ? <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><p>{previewError}</p>{previewLog ? <Button className="mt-3" onClick={() => previewGenerationLog(previewLog)}>重新读取记录</Button> : null}</div> : null}
@@ -716,7 +728,7 @@ export default function VideoPage() {
                             <div className="grid gap-4">
                                 {results.map((result) =>
                                     result.status === "success" && result.video ? (
-                                        <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} />
+                                        <ResultVideoCard key={result.id} video={result.video} onSelect={selectResultPrompt} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
                                         <FailedVideoCard key={result.id} error={result.error || "生成失败"} recovery={result.recovery} onRetry={() => retryResult(result)} />
                                     ) : (
@@ -791,10 +803,10 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog, ref
     );
 }
 
-function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedVideo; onDownload: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void }) {
+function ResultVideoCard({ video, onSelect, onDownload, onSaveAsset }: { video: GeneratedVideo; onSelect: (video: GeneratedVideo) => void; onDownload: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void }) {
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <video src={video.url} controls preload="metadata" className="aspect-video w-full bg-black object-contain" />
+            <video src={video.url} controls preload="metadata" onClick={() => onSelect(video)} onPlay={() => onSelect(video)} className="aspect-video w-full bg-black object-contain" />
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
                     <span>

@@ -7,9 +7,9 @@ export function canvasNodePromptDraft(node: CanvasNodePromptDraftSource) {
         return node.metadata.draftPrompt;
     }
 
-    // Existing media keeps its original generation prompt as provenance. An edit
-    // starts from an intentionally blank draft, then survives panel unmounts.
-    return node.metadata?.content ? "" : node.metadata?.prompt ?? "";
+    // Show the original generation prompt until the user saves an edit draft.
+    // Editing remains separate from provenance, including intentionally empty drafts.
+    return node.metadata?.prompt ?? "";
 }
 
 export function canvasNodePromptDraftPatch(draftPrompt: string) {

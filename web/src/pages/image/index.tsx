@@ -34,6 +34,8 @@ import { fetchServerAssetContent, recordServerAssetEvent } from "@/services/api/
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ImageReferenceItem, ImageReferenceOrigin, ReferenceImage } from "@/types/image";
 import { hydrateImageLogMedia } from "./image-log-media";
+import { partitionImageLogs } from "./image-log-scope";
+import { getQueuedTask } from "@/services/api/generation-tasks";
 import { restoreGenerationDraft } from "@/services/api/generation-history";
 import { ImageLogThumbnail } from "./image-log-thumbnail";
 import { GarmentRecipePanel } from "../creative/garment-recipe-panel";
@@ -57,6 +59,7 @@ type GeneratedImage = {
     imageName?: string;
     imageVersion?: number;
     imageOriginId?: string;
+    prompt?: string;
 };
 
 type GenerationResult = {
@@ -68,6 +71,8 @@ type GenerationResult = {
 
 type GenerationLog = {
     id: string;
+    ownerId?: string;
+    tool?: string;
     createdAt: number;
     title: string;
     prompt: string;
@@ -96,6 +101,8 @@ const LOG_STORE_KEY = "wireless-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
 const logStore = createWorkspaceStorage("image_generation_logs");
 const creativeLogStore = createWorkspaceStorage("creative_generation_logs");
+// A task can finish after its page unmounts. Only its own workspace receives the saved log.
+const imageLogListeners = new Set<(log: GenerationLog) => void>();
 
 type GenerationToolMode = Exclude<AdminToolMode, "gpt-chat" | "batch-image-edit" | "seamless-stitch">;
 
@@ -145,6 +152,13 @@ export default function ImagePage() {
 }
 
 export function ImageGenerationPage({ creativePreset }: { creativePreset?: CreativePreset } = {}) {
+    const [searchParams] = useSearchParams();
+    const ownerId = useUserStore(state => state.user?.id);
+    const historyTool = creativePreset ? `creative-${creativePreset.id}` : resolveImageToolMode(searchParams.get("tool"));
+    return <ImageGenerationWorkspace key={JSON.stringify([ownerId, historyTool])} creativePreset={creativePreset} historyTool={historyTool} />;
+}
+
+function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePreset?: CreativePreset; historyTool: string }) {
     const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -152,6 +166,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
     const loadedReuseTokenRef = useRef(new Set<string>());
     const generateRef = useRef<() => Promise<void>>(async () => undefined);
     const restoredInitialResultRef = useRef(false);
+    const resultViewPinnedRef = useRef(false);
     const inputRevision = useRef(0);
     const previewRevision = useRef(0);
     const logRefreshRevision = useRef(0);
@@ -176,10 +191,14 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
         setResults(current => current.some(result => result.id === copy.assetId) ? current : [...current, { id: copy.assetId, status: "success", image: {
             id: copy.assetId, dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType, durationMs: 0,
             imageName: copy.node.metadata?.imageName, imageVersion: copy.node.metadata?.imageVersion, imageOriginId: copy.originId,
+            prompt: copy.node.metadata?.prompt,
         } }]);
     });
     const [logs, setLogs] = useState<GenerationLog[]>([]);
+    const [unclassifiedLogs, setUnclassifiedLogs] = useState<GenerationLog[]>([]);
+    const mountedRef = useRef(false);
     const [running, setRunning] = useState(false);
+    const activeSubmissionRef = useRef(false);
     const [logsOpen, setLogsOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
@@ -241,8 +260,20 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
     };
 
     useEffect(() => {
+        mountedRef.current = true;
+        const onSaved = (log: GenerationLog) => {
+            if (log.ownerId !== user?.id || log.tool !== historyTool) return;
+            logRefreshRevision.current += 1;
+            setLogs(current => upsertGenerationLog(current, log));
+            if (!activeSubmissionRef.current && !resultViewPinnedRef.current && log.images.length) {
+                previewRevision.current += 1;
+                restoredInitialResultRef.current = true;
+                setResults(log.images.map(image => ({ id: image.id, status: "success", image })));
+            }
+        };
+        imageLogListeners.add(onSaved);
         void refreshLogs();
-        return () => { logRefreshRevision.current += 1; };
+        return () => { mountedRef.current = false; imageLogListeners.delete(onSaved); logRefreshRevision.current += 1; };
     }, []);
 
     useEffect(() => {
@@ -403,6 +434,8 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
         if (!release) { message.info("图片任务正在处理，请勿重复提交"); return; }
 
         setRunning(true);
+        activeSubmissionRef.current = true;
+        resultViewPinnedRef.current = false;
         setPreviewLog(null);
         setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" })));
         const batchStartedAt = performance.now();
@@ -435,11 +468,12 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
                 images: logImages,
             });
             await saveLog(log);
-            successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
+            if (mountedRef.current) successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
         } catch (error) {
-            message.error(`结果仍保留在页面，但本地记录保存失败：${error instanceof Error ? error.message : "请检查浏览器存储空间"}`);
+            if (mountedRef.current) message.error(`结果仍保留在页面，但本地记录保存失败：${error instanceof Error ? error.message : "请检查浏览器存储空间"}`);
         } finally {
             release();
+            activeSubmissionRef.current = false;
             setRunning(false);
         }
     };
@@ -449,7 +483,12 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
 
     const openResultEditor = (image: GeneratedImage, index: number) => {
         const sourceLog = logs.find(log => log.images.some(item => item.id === image.id));
-        imageEditor.open({ node: resultEditorNode(image, index), originId: image.imageOriginId, sourceTaskId: image.sourceTaskId, prompt: sourceLog?.prompt || prompt, model: sourceLog?.model || model });
+        imageEditor.open({ node: resultEditorNode(image, index), originId: image.imageOriginId, sourceTaskId: image.sourceTaskId, prompt: image.prompt ?? sourceLog?.prompt ?? prompt, model: sourceLog?.model || model });
+    };
+
+    const selectResultPrompt = (image: GeneratedImage) => {
+        const sourceLog = [...logs, ...unclassifiedLogs].find(log => log.images.some(item => item.id === image.id));
+        replacePrompt(image.prompt ?? sourceLog?.prompt ?? "");
     };
 
     const downloadImage = async (image: GeneratedImage, index: number) => {
@@ -515,6 +554,8 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
     };
 
     const createSession = () => {
+        resultViewPinnedRef.current = true;
+        restoredInitialResultRef.current = true;
         previewRevision.current += 1;
         setPreviewLoading(false);
         replacePrompt(creativePreset?.prompt || "");
@@ -537,23 +578,26 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
     };
 
     const saveLog = async (log: GenerationLog) => {
-        await historyStore.setItem(log.id, serializeLog(log));
-        logRefreshRevision.current += 1;
-        setLogs((current) => upsertGenerationLog(current, log));
+        if (!user || useUserStore.getState().user?.id !== user.id) throw new Error("员工会话已变化，未写入其他账号的记录");
+        const scopedLog = { ...log, ownerId: user.id, tool: historyTool };
+        await historyStore.setItem(log.id, serializeLog(scopedLog));
+        for (const onSaved of imageLogListeners) onSaved(scopedLog);
     };
 
     const refreshLogs = async () => {
         const revision = ++logRefreshRevision.current;
         try {
-            const next = await readStoredLogs(historyStore);
-            if (revision === logRefreshRevision.current) setLogs(next);
+            const next = await readStoredLogs(historyStore, { ownerId: user?.id || "", tool: historyTool });
+            if (revision === logRefreshRevision.current) { setLogs(next.logs); setUnclassifiedLogs(next.unclassified); }
         } catch (error) {
             if (revision === logRefreshRevision.current) message.error(error instanceof Error ? error.message : "历史记录读取失败，请检查浏览器存储");
         }
     };
 
     const previewGenerationLog = async (log: GenerationLog) => {
-        inputRevision.current += 1;
+        if (running) return;
+        resultViewPinnedRef.current = true;
+        replacePrompt(log.prompt);
         const revision = ++previewRevision.current;
         setPreviewLoading(true);
         try {
@@ -579,7 +623,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
         try {
             const draft = await restoreGenerationDraft(taskId);
             if (draft.maskReferenceIndex !== undefined) throw new Error("历史包含蒙版，请在支持蒙版的原编辑入口恢复；未套用任何输入");
-            if (draft.tool && draft.tool !== toolMode) throw new Error(`请先切换到历史原工具“${imageToolModes[draft.tool as GenerationToolMode]?.title || draft.tool}”再恢复，当前草稿未改变`);
+            if (draft.tool && draft.tool !== historyTool) throw new Error(`请先切换到历史原工具“${imageToolModes[draft.tool as GenerationToolMode]?.title || draft.tool}”再恢复，当前草稿未改变`);
             if (revision !== inputRevision.current || preview !== previewRevision.current || settingsBeforeRestore !== useConfigStore.getState().config) throw new Error("草稿或所选记录已改变，已取消恢复");
             replacePrompt(draft.prompt);
             setReferences(draft.references.map(item => createImageReferenceItem(item, "template")));
@@ -617,14 +661,14 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
     const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
-            const requestOptions = { operationType: selectedModelProfile.kind === "midjourney-blend" ? "image_generation" as const : operationType, tool: toolMode };
+            const requestOptions = { operationType: selectedModelProfile.kind === "midjourney-blend" ? "image_generation" as const : operationType, tool: historyTool };
             const result = selectedModelProfile.kind === "midjourney-blend"
                 ? await requestGeneration(snapshot.config, snapshot.text, requestOptions, snapshot.references)
                 : snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, sourceTaskId: image.sourceTaskId, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl), mimeType: meta.mimeType, ...canvasImageReferenceIdentity(snapshot.references[0]) };
+            const nextImage = { id: image.id, dataUrl: image.dataUrl, sourceTaskId: image.sourceTaskId, prompt: snapshot.text, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl), mimeType: meta.mimeType, ...canvasImageReferenceIdentity(snapshot.references[0]) };
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
@@ -639,6 +683,8 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
         const release = workbenchSubmissions.acquire(`image:${user?.id}`);
         if (!release) { message.info("图片任务正在处理，请勿重复提交"); return; }
         setRunning(true);
+        activeSubmissionRef.current = true;
+        resultViewPinnedRef.current = false;
         setStartedAt(performance.now());
         setPreviewLog(null);
         setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined }));
@@ -648,7 +694,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
             await saveLog(buildLog({ prompt: snapshot.text, model, config: { ...snapshot.config, count: "1" }, references: snapshot.references, durationMs: image.durationMs, successCount: 1, failCount: 0, status: "成功", images: [{ ...image, dataUrl: stored.url, storageKey: stored.storageKey }] }));
         } catch (error) {
             message.error(error instanceof Error ? error.message : "重试未完成");
-        } finally { release(); setRunning(false); }
+        } finally { release(); activeSubmissionRef.current = false; setRunning(false); }
     };
 
     return (
@@ -657,6 +703,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
                 <aside className="wb-surface thin-scrollbar hidden min-h-0 overflow-y-auto p-4 lg:block">
                     <LogPanel
                         logs={logs}
+                        unclassifiedLogs={unclassifiedLogs}
                         selectedLogIds={selectedLogIds}
                         activeLogId={previewLog?.id}
                         onSelectedLogIdsChange={setSelectedLogIds}
@@ -755,7 +802,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
                             <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} />
+                                        <ResultImageCard key={result.id} image={result.image} index={index} onSelect={selectResultPrompt} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} />
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => retryResult(index)} />
                                     ) : (
@@ -786,6 +833,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
             <Drawer title="生成记录" placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
                 <LogPanel
                     logs={logs}
+                    unclassifiedLogs={unclassifiedLogs}
                     selectedLogIds={selectedLogIds}
                     activeLogId={previewLog?.id}
                     onSelectedLogIdsChange={setSelectedLogIds}
@@ -848,6 +896,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
 function ResultImageCard({
     image,
     index,
+    onSelect,
     onEdit,
     onEditOriginal,
     onDownload,
@@ -856,6 +905,7 @@ function ResultImageCard({
 }: {
     image: GeneratedImage;
     index: number;
+    onSelect: (image: GeneratedImage) => void;
     onEdit: (image: GeneratedImage, index: number) => void;
     onEditOriginal: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
@@ -864,7 +914,7 @@ function ResultImageCard({
 }) {
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <Image src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="aspect-square object-cover" />
+            <Image src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="aspect-square object-cover" onClick={() => onSelect(image)} />
             <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 {image.imageName ? <div className="truncate text-xs font-medium" title={`${image.imageName}_v${image.imageVersion || 1}`}>{image.imageName}_v{image.imageVersion || 1}</div> : null}
                 <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
@@ -948,6 +998,7 @@ function updateResultAt(results: GenerationResult[], index: number, next: Partia
 
 function LogPanel({
     logs,
+    unclassifiedLogs,
     selectedLogIds,
     activeLogId,
     onSelectedLogIdsChange,
@@ -956,6 +1007,7 @@ function LogPanel({
     onPreviewLog,
 }: {
     logs: GenerationLog[];
+    unclassifiedLogs: GenerationLog[];
     selectedLogIds: string[];
     activeLogId?: string;
     onSelectedLogIdsChange: (ids: string[]) => void;
@@ -997,12 +1049,17 @@ function LogPanel({
                     />
                 ))}
                 {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-stone-300 text-center text-sm text-stone-500 dark:border-stone-700">暂无生成记录</div> : null}
+                {!!unclassifiedLogs.length && <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer py-2">未分类记录（{unclassifiedLogs.length}）</summary>
+                    <p className="mb-2">以下记录的原任务来源无法确认，保留查看，不自动归入当前板块。</p>
+                    <div className="space-y-3">{unclassifiedLogs.map(log => <LogCard key={log.id} log={log} active={activeLogId === log.id} onClick={() => onPreviewLog(log)} />)}</div>
+                </details>}
             </div>
         </>
     );
 }
 
-function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: GenerationLog; selected: boolean; active: boolean; onSelectedChange: (checked: boolean) => void; onClick: () => void }) {
+function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: GenerationLog; selected?: boolean; active: boolean; onSelectedChange?: (checked: boolean) => void; onClick: () => void }) {
     const thumbnails = log.images.slice(0, 4);
 
     return (
@@ -1013,7 +1070,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
         >
             <div className="grid grid-cols-[minmax(128px,1fr)_auto] gap-2">
                 <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
-                    <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
+                    {onSelectedChange && <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />}
                     <div className="min-w-0">
                         <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
                         {thumbnails.length ? (
@@ -1051,15 +1108,15 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
     );
 }
 
-async function readStoredLogs(store = logStore) {
-    if (typeof window === "undefined") return [];
+async function readStoredLogs(store: typeof logStore, scope: { ownerId: string; tool: string }) {
+    if (typeof window === "undefined" || !scope.ownerId) return { logs: [], unclassified: [] };
     try {
         const values: GenerationLog[] = [];
         await store.iterate<GenerationLog, void>((value) => {
             values.push(value);
         });
         const logs = values.map(normalizeLog);
-        return logs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        return partitionImageLogs(logs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)), scope, getQueuedTask);
     } catch (error) {
         throw new Error(`图片历史读取失败：${error instanceof Error ? error.message : "浏览器存储不可用"}`);
     }
@@ -1071,6 +1128,8 @@ function normalizeLog(log: Partial<GenerationLog>): GenerationLog {
     const config = normalizeLogConfig(log);
     return {
         id: log.id || nanoid(),
+        ownerId: log.ownerId,
+        tool: log.tool,
         createdAt: log.createdAt || Date.now(),
         title: log.title || log.model || "未命名",
         prompt: log.prompt || log.title || "",

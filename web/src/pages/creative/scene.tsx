@@ -43,6 +43,7 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
     const [view, setView] = useState<"example" | "results" | "history">("example");
     const [tool, setTool] = useState<"selection" | "recolor" | null>(null);
     const [traceImage, setTraceImage] = useState<SceneImage | null>(null);
+    const [promptOpen, setPromptOpen] = useState(false);
     const summary = sceneSummaries[preset.id]!;
     const slots = getSceneSlots(preset.id, ws.form);
     const available = creativePresets.filter(item => flags[item.tool === "image-generation" ? "image" : "image-edit"]);
@@ -75,7 +76,7 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                         <label className="cs-label">生成模型</label><ModelPicker config={ws.config} value={ws.model} onChange={value => ws.updateConfig("imageModel", value)} capability="image" fullWidth disabled={ws.running} />
                         <ImageSettingsPanel config={ws.config} onConfigChange={ws.updateConfig} theme={theme} showTitle={false} />
                     </details>
-                    <details className="cs-prompt-preview"><summary>查看本次设计指令<ChevronDown size={12} /></summary><pre>{buildScenePrompt(preset.id, ws.form)}{ws.selection ? `\n\n${selectionPrompt}` : ""}</pre></details>
+                    <details className="cs-prompt-preview" open={promptOpen} onToggle={event => setPromptOpen(event.currentTarget.open)}><summary>{ws.selectedPrompt !== null ? "所选结果的原始提示词" : "查看本次设计指令"}<ChevronDown size={12} /></summary><pre aria-label="设计提示词">{ws.selectedPrompt ?? `${buildScenePrompt(preset.id, ws.form)}${ws.selection ? `\n\n${selectionPrompt}` : ""}`}</pre>{ws.selectedPrompt !== null && <p className="cs-help">仅显示原提示词，未改变当前设计要求、模型或参考图。</p>}</details>
                 </fieldset>}
                 <div className="cs-submit-panel">
                     {ws.error && <p className="cs-error" role="alert">{ws.error}</p>}
@@ -96,14 +97,15 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                     <div className="cs-example-foot"><span>AI 功能示意 · 非模型实测</span><p>{summary.limit}</p></div>
                 </div> : view === "history" ? <div className="cs-history">
                     <h2>最近任务</h2><p className="cs-help">仅显示当前账号在「{preset.title}」中已结束的任务，保存在本机浏览器。</p>
-                    {ws.logs.length ? ws.logs.map(log => <button key={log.id} type="button" className="cs-history-item" disabled={ws.running} onClick={() => { void ws.restoreLog(log); setView("results"); }}>
-                        <span className="cs-history-icon"><History size={18} /></span><span><strong>{new Date(log.createdAt).toLocaleString("zh-CN", {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</strong><small>{log.operation === "recolor" ? "本地精确换色 · " : log.selection ? "选区合成 · " : ""}{log.successCount} 张成功{log.failCount ? ` · ${log.failCount} 张失败` : ""} · 继续此任务</small></span><ArrowRight size={15} />
+                    {ws.logs.length ? ws.logs.map(log => <button key={log.id} type="button" className="cs-history-item" disabled={ws.running} onClick={() => { void ws.previewLog(log); setPromptOpen(true); setView("results"); }}>
+                        <span className="cs-history-icon"><History size={18} /></span><span><strong>{new Date(log.createdAt).toLocaleString("zh-CN", {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</strong><small>{log.operation === "recolor" ? "本地精确换色 · " : log.selection ? "选区合成 · " : ""}{log.successCount} 张成功{log.failCount ? ` · ${log.failCount} 张失败` : ""} · 查看结果与提示词</small></span><ArrowRight size={15} />
                     </button>) : <div className="cs-empty"><History size={26} /><h3>还没有生成记录</h3><p>完成一次设计后，会在这里保存参数和结果。</p></div>}
                 </div> : <div className="cs-results">
-                    <div className="cs-results-heading"><h2>{ws.running ? "正在创作" : "设计结果"}</h2>{ws.activeLog && <span>{new Date(ws.activeLog.createdAt).toLocaleString("zh-CN")}</span>}</div>
+                    <div className="cs-results-heading"><h2>{ws.running ? "正在创作" : "设计结果"}</h2>{ws.activeLog && <><span>{new Date(ws.activeLog.createdAt).toLocaleString("zh-CN")}</span><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || ws.previewing} onClick={() => { void ws.restoreLog(ws.activeLog!); setPromptOpen(true); }}>恢复为草稿继续改</button></>}</div>
+                    {ws.previewing && <p className="cs-help" role="status">正在读取所选结果…</p>}
                     {ws.activeLog?.operation === "recolor" && <p className="cs-help cs-operation-note">{ws.activeLog.prompt}</p>}
                     {!ws.results.length ? <div className="cs-empty"><Sparkles size={28} /><h3>让设计从这里开始</h3><p>在左侧完成{slots.length ? "素材和" : ""}设计要求，点击生成。</p><button type="button" onClick={() => setView("example")}><RotateCcw size={14} />看看功能示例</button></div> : <div className="cs-result-grid">{ws.results.map((result, index) => <article key={result.id} className="cs-result-card">
-                        {result.status === "success" && result.image ? <><Image src={result.image.dataUrl} alt={`${preset.title}结果 ${index + 1}`} /><div className="cs-result-meta"><span>方案 {String(index + 1).padStart(2, "0")}</span><button type="button" onClick={() => { void ws.download(result.image!, index); }}><Download size={14} />下载原图</button>{preset.id === "style-to-sketch" && <button type="button" onClick={() => setTraceImage(result.image!)}>导出 SVG</button>}</div></> : result.status === "failed" ? <div className="cs-result-message"><span>方案 {index + 1} {result.uncompositedImage ? "合成未完成" : "生成失败"}</span><p>{result.error}</p>{result.uncompositedImage && <button type="button" className="cs-tool-entry" onClick={() => void ws.download(result.uncompositedImage!, index)}><Download size={14} />下载未合成图</button>}</div> : <div className="cs-result-message"><LoaderCircle className="animate-spin" size={25} /><span>正在生成方案 {index + 1}</span><small>请保留此页面，避免中断结果保存</small></div>}
+                        {result.status === "success" && result.image ? <><Image src={result.image.dataUrl} alt={`${preset.title}结果 ${index + 1}`} onClick={() => { ws.selectResultPrompt(result); setPromptOpen(true); }} /><div className="cs-result-meta"><span>方案 {String(index + 1).padStart(2, "0")}</span><button type="button" onClick={() => { void ws.download(result.image!, index); }}><Download size={14} />下载原图</button>{preset.id === "style-to-sketch" && <button type="button" onClick={() => setTraceImage(result.image!)}>导出 SVG</button>}</div></> : result.status === "failed" ? <div className="cs-result-message"><span>方案 {index + 1} {result.uncompositedImage ? "合成未完成" : "生成失败"}</span><p>{result.error}</p>{result.uncompositedImage && <button type="button" className="cs-tool-entry" onClick={() => void ws.download(result.uncompositedImage!, index)}><Download size={14} />下载未合成图</button>}</div> : <div className="cs-result-message"><LoaderCircle className="animate-spin" size={25} /><span>正在生成方案 {index + 1}</span><small>请保留此页面，避免中断结果保存</small></div>}
                     </article>)}</div>}
                     {!!ws.results.length && <p className="cs-result-limit">{summary.limit}</p>}
                 </div>}
