@@ -11,8 +11,10 @@ const initialHandshakeRetryCodes = new Set([
   "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "ERR_TLS_CERT_ALTNAME_INVALID",
   // Safe only with this native worker's proven pre-secureConnect/no-HTTP phase.
   // A reset from ordinary fetch or after HTTP starts remains non-retryable.
-  "ECONNRESET",
+  "ECONNRESET", "PROVIDER_CONNECT_TIMEOUT",
 ]);
+const defaultConnectTimeoutMs = 10_000;
+const connectionAttempts = [];
 let headersSent = false;
 
 function fail(error) {
@@ -26,7 +28,8 @@ function fail(error) {
     process.stdout.end(`${JSON.stringify({ error: {
       message,
       code: typeof error?.code === "string" ? error.code : "PROVIDER_TRANSPORT_ERROR",
-      phase: error?.phase || "unknown", attempts: error?.attempts || 1,
+      phase: error?.phase || "unknown", attempts: error?.attempts || connectionAttempts.length || 1,
+      connectionAttempts,
     } })}\n`, () => process.exit(1));
   } else {
     // pipeline has closed the failed upstream stream. Do not leave a broken
@@ -37,50 +40,86 @@ function fail(error) {
 
 function requestOnce(input, body, attempts) {
   return new Promise((resolve, reject) => {
+    const started = performance.now();
     let tlsEstablished = false;
     let httpStarted = false;
     let settled = false;
-    const agent = new https.Agent({ proxyEnv: process.env, keepAlive: false, maxCachedSessions: 0 });
-    const request = https.request(input.url, {
-      method: input.method,
-      headers: { ...input.headers, "content-length": String(body.length), connection: "close" },
-      agent,
-      rejectUnauthorized: true,
-      secureOptions: constants.SSL_OP_NO_RENEGOTIATION,
+    let connectMs;
+    let agent;
+    let request;
+    let pendingSocket;
+    const elapsedMs = () => Math.round(Math.max(0, performance.now() - started) * 100) / 100;
+    const recordAttempt = (phase, error) => connectionAttempts.push({
+      attempt: attempts, phase, elapsedMs: elapsedMs(),
+      ...(connectMs === undefined ? {} : { connectMs }),
+      ...(typeof error?.code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? { code: error.code } : {}),
     });
-    request.on("error", (error) => {
-      // Native proxy setup may emit another request error while its failed
-      // socket is being destroyed. Keep the listener, but settle only once.
+    const failAttempt = (error) => {
+      // Settle BEFORE destruction: a late proxy/TLS callback must not send HTTP,
+      // and cleanup can emit another error from the same request/socket.
       if (settled) return;
       settled = true;
-      agent.destroy();
-      Object.assign(error, { attempts, phase: !tlsEstablished && !httpStarted ? "initial_tls" : "http_started" });
+      clearTimeout(connectDeadline);
+      const phase = !tlsEstablished && !httpStarted ? "initial_tls" : "http_started";
+      recordAttempt(phase, error);
+      Object.assign(error, { attempts, phase });
+      request?.destroy(error);
+      // During CONNECT the native Agent has not yet attached its socket to the
+      // request or socket pool. Agent.destroy() alone cannot close that socket.
+      pendingSocket?.destroy();
+      agent?.destroy();
       reject(error);
-    });
-    request.once("response", (response) => {
-      settled = true;
-      response.once("close", () => agent.destroy());
-      resolve(response);
-    });
-    request.once("socket", (socket) => {
-      socket.disableRenegotiation();
-      const sendOnce = () => {
-        if (httpStarted || settled) return;
-        tlsEstablished = true;
-        if (!socket.authorized || socket.destroyed || request.destroyed) {
-          request.destroy(new Error("Provider TLS peer was not authorized"));
-          return;
-        }
-        // Irreversibly mark the uncertain/possibly charged phase BEFORE the
-        // only operation that can write business HTTP headers or body.
-        httpStarted = true;
-        request.end(body);
+    };
+    const connectDeadline = setTimeout(() => {
+      if (settled || tlsEstablished || httpStarted) return;
+      failAttempt(Object.assign(new Error("Provider connection timed out before secure TLS was established"), { code: "PROVIDER_CONNECT_TIMEOUT" }));
+    }, input.connectTimeoutMs);
+    try {
+      agent = new https.Agent({ proxyEnv: process.env, keepAlive: false, maxCachedSessions: 0 });
+      const createConnection = agent.createConnection.bind(agent);
+      agent.createConnection = (...args) => {
+        pendingSocket = createConnection(...args);
+        return pendingSocket;
       };
-      socket.once("secureConnect", sendOnce);
-      // CONNECT agents deliver the target socket only AFTER its TLS handshake.
-      // Direct sockets arrive earlier; both paths share the same one-send gate.
-      if (socket.encrypted === true && socket.authorized === true) sendOnce();
-    });
+      request = https.request(input.url, {
+        method: input.method,
+        headers: { ...input.headers, "content-length": String(body.length), connection: "close" },
+        agent,
+        rejectUnauthorized: true,
+        secureOptions: constants.SSL_OP_NO_RENEGOTIATION,
+      });
+      request.on("error", failAttempt);
+      request.once("response", (response) => {
+        if (settled) { response.destroy(); return; }
+        settled = true;
+        clearTimeout(connectDeadline);
+        recordAttempt("http_started");
+        response.once("close", () => agent.destroy());
+        resolve(response);
+      });
+      request.once("socket", (socket) => {
+        if (settled) { socket.destroy(); return; }
+        socket.disableRenegotiation();
+        const sendOnce = () => {
+          if (httpStarted || settled) return;
+          tlsEstablished = true;
+          clearTimeout(connectDeadline);
+          if (!socket.authorized || socket.destroyed || request.destroyed) {
+            failAttempt(new Error("Provider TLS peer was not authorized"));
+            return;
+          }
+          connectMs = elapsedMs();
+          // Irreversibly mark the uncertain/possibly charged phase BEFORE the
+          // only operation that can write business HTTP headers or body.
+          httpStarted = true;
+          request.end(body);
+        };
+        socket.once("secureConnect", sendOnce);
+        // CONNECT agents deliver the target socket only AFTER its TLS handshake.
+        // Direct sockets arrive earlier; both paths share the same one-send gate.
+        if (socket.encrypted === true && socket.authorized === true) sendOnce();
+      });
+    } catch (error) { failAttempt(error); }
   });
 }
 
@@ -93,6 +132,10 @@ try {
   let raw = "";
   for await (const chunk of process.stdin) raw += chunk;
   const input = JSON.parse(raw);
+  if (input.connectTimeoutMs === undefined) input.connectTimeoutMs = defaultConnectTimeoutMs;
+  if (!Number.isInteger(input.connectTimeoutMs) || input.connectTimeoutMs < 50 || input.connectTimeoutMs > defaultConnectTimeoutMs) {
+    throw Object.assign(new Error("Provider connection timeout must be an integer between 50 and 10000 milliseconds"), { code: "INVALID_CONNECT_TIMEOUT", phase: "preflight" });
+  }
   if (new URL(input.url).protocol !== "https:") throw new Error("Provider child transport requires HTTPS");
   // Expect causes ClientRequest's constructor to flush headers before end().
   if (Object.keys(input.headers).some((name) => name.toLowerCase() === "expect")) throw new Error("Expect header is not supported for provider submissions");
@@ -115,7 +158,7 @@ try {
   const encoding = response.headers["content-encoding"];
   const decoder = encoding === "gzip" ? createGunzip() : encoding === "br" ? createBrotliDecompress() : encoding === "deflate" ? createInflate() : null;
   const outputHeaders = decoder ? headers.filter(([key]) => key !== "content-encoding" && key !== "content-length") : headers;
-  process.stdout.write(`${JSON.stringify({ status: response.statusCode, statusText: response.statusMessage, headers: outputHeaders })}\n`);
+  process.stdout.write(`${JSON.stringify({ status: response.statusCode, statusText: response.statusMessage, headers: outputHeaders, connectionAttempts })}\n`);
   headersSent = true;
   if (decoder) await pipeline(response, decoder, process.stdout);
   else await pipeline(response, process.stdout);

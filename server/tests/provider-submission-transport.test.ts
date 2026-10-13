@@ -41,7 +41,200 @@ afterAll(async () => {
   if (fixtureDirectory) await rm(fixtureDirectory, { recursive: true, force: true });
 });
 
+type ConnectionAttempt = { attempt: number; phase: "initial_tls" | "http_started"; elapsedMs: number; connectMs?: number; code?: string };
+type DeadlineFixtureResult = {
+  finished: boolean;
+  exitCode: number | null;
+  connections: number;
+  endedConnections: number;
+  closedConnections: number;
+  closedBeforeRequest: number;
+  requests: number;
+  connects: number;
+  body: string;
+  head: { status?: number; connectionAttempts?: ConnectionAttempt[]; error?: { code: string; phase: string; attempts: number; connectionAttempts: ConnectionAttempt[] } } | null;
+};
+
+async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unknown, watchdogMs = 3_000): Promise<DeadlineFixtureResult> {
+  // The native fixture observes pending proxy sockets independently of Bun.
+  // It never contacts a provider: target, proxy and worker are all loopback.
+  const script = `
+    import { createServer as createHttpsServer } from 'node:https';
+    import { createServer as createHttpServer } from 'node:http';
+    import { createServer as createTcpServer, createConnection } from 'node:net';
+    import { spawn } from 'node:child_process';
+    import { fileURLToPath } from 'node:url';
+    let raw = ''; for await (const chunk of process.stdin) raw += chunk;
+    const config = JSON.parse(raw);
+    const counts = { connections: 0, endedConnections: 0, closedConnections: 0, closedBeforeRequest: 0, requests: 0, connects: 0 };
+    const sockets = new Set();
+    const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
+    const backend = createHttpsServer({ cert: config.cert, key: config.key }, (request, response) => {
+      counts.requests++;
+      counts.closedBeforeRequest = counts.closedConnections;
+      request.resume();
+      request.on('end', () => setTimeout(() => {
+        if (config.mode === 'slow-close') { request.socket.destroy(); return; }
+        response.writeHead(200, { 'content-type': 'text/plain' });
+        response.write('slow ');
+        setTimeout(() => response.end('response'), 300);
+      }, 450));
+    });
+    const backendPort = await listen(backend);
+    function pipeToBackend(socket, established = false, head = Buffer.alloc(0)) {
+      const upstream = createConnection({ host: '127.0.0.1', port: backendPort }, () => {
+        if (established) socket.write('HTTP/1.1 200 Connection Established\\r\\n\\r\\n');
+        if (head.length) upstream.write(head);
+        socket.pipe(upstream); upstream.pipe(socket);
+      });
+      sockets.add(upstream);
+      upstream.on('close', () => sockets.delete(upstream));
+      upstream.on('error', () => socket.destroy());
+      socket.on('error', () => upstream.destroy());
+      socket.on('close', () => upstream.destroy());
+    }
+    const isProxy = config.mode.startsWith('proxy-');
+    const front = isProxy ? createHttpServer() : createTcpServer(socket => {
+      if (config.mode === 'slow-close' || (['recover', 'late-tls'].includes(config.mode) && counts.connections > 1)) pipeToBackend(socket);
+      else if (config.mode === 'late-tls') {
+        const pending = [];
+        const holdClientHello = chunk => pending.push(chunk);
+        socket.on('data', holdClientHello);
+        const lateHandshake = setTimeout(() => {
+          if (socket.destroyed) return;
+          socket.pause(); socket.removeListener('data', holdClientHello);
+          pipeToBackend(socket, false, Buffer.concat(pending));
+        }, 450);
+        socket.once('close', () => clearTimeout(lateHandshake));
+      }
+      else socket.resume(); // Read ClientHello but never complete TLS.
+    });
+    front.prependListener('connection', socket => {
+      counts.connections++; sockets.add(socket);
+      socket.on('error', () => {});
+      // HTTP servers intentionally create allowHalfOpen sockets. Record the
+      // client's real EOF, then acknowledge it; fixture cleanup comes later.
+      socket.on('end', () => { counts.endedConnections++; socket.end(); });
+      socket.on('close', () => { counts.closedConnections++; sockets.delete(socket); });
+    });
+    if (isProxy) front.on('connect', (_request, socket, head) => {
+      counts.connects++;
+      if (config.mode === 'proxy-recover' && counts.connects > 1) pipeToBackend(socket, true, head);
+      else {
+        if (config.mode === 'proxy-tls-blackhole') socket.write('HTTP/1.1 200 Connection Established\\r\\n\\r\\n');
+        socket.resume(); // CONNECT or target TLS remains pending.
+      }
+    });
+    const frontPort = await listen(front);
+    const env = { ...process.env };
+    for (const key of ['HTTP_PROXY','HTTPS_PROXY','NO_PROXY','http_proxy','https_proxy','no_proxy']) delete env[key];
+    if (isProxy) env.HTTPS_PROXY = 'http://fixture-user:fixture-secret@127.0.0.1:' + frontPort;
+    const input = { url: 'https://127.0.0.1:' + (isProxy ? backendPort : frontPort) + '/submit', method: 'POST', headers: { authorization: 'Bearer fixture-model-key' }, body: Buffer.from('private paid job').toString('base64') };
+    if (Object.hasOwn(config, 'connectTimeoutMs')) input.connectTimeoutMs = config.connectTimeoutMs;
+    const child = spawn(process.execPath, [fileURLToPath(config.worker)], { env, stdio: ['pipe','pipe','ignore'] });
+    let output = '', finished = true;
+    child.stdout.on('data', chunk => output += chunk);
+    child.stdin.end(JSON.stringify(input));
+    const watchdog = setTimeout(() => { finished = false; child.kill(); }, config.watchdogMs);
+    const exitCode = await new Promise(resolve => child.once('close', resolve));
+    clearTimeout(watchdog);
+    // Observe TCP closure before cleanup can satisfy any closure assertion.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const separator = output.indexOf('\\n');
+    const result = { finished, exitCode, ...counts, head: separator < 0 ? null : JSON.parse(output.slice(0, separator)), body: separator < 0 ? '' : output.slice(separator + 1) };
+    for (const socket of sockets) socket.destroy();
+    backend.closeAllConnections(); backend.close(); front.close();
+    process.stdout.end(JSON.stringify(result) + '\\n');
+  `;
+  const input = { mode, cert: certificate, key: privateKey, worker: new URL("../src/provider-submission-worker.mjs", import.meta.url).href, watchdogMs, ...(connectTimeoutMs === undefined ? {} : { connectTimeoutMs }) };
+  const fixture = Bun.spawn([Bun.which("node")!, "--input-type=module", "-e", script], { stdin: new Blob([JSON.stringify(input)]), stdout: "pipe", stderr: "pipe", env: { ...process.env } });
+  const stdout = new Response(fixture.stdout).text();
+  const stderr = new Response(fixture.stderr).text();
+  const exitCode = await fixture.exited;
+  if (exitCode !== 0) throw new Error(`Connection deadline fixture failed (${exitCode}): ${await stderr}`);
+  return JSON.parse(await stdout);
+}
+
 describe("provider submission transport", () => {
+  for (const mode of ["tls-blackhole", "proxy-connect-blackhole", "proxy-tls-blackhole"]) {
+    test(`pre-HTTP deadline bounds ${mode}, closes its sockets and never submits or bypasses a proxy`, async () => {
+      const result = await runConnectionDeadlineFixture(mode, 150);
+      expect(result.finished).toBe(true);
+      expect(result.head?.error).toMatchObject({ code: "PROVIDER_CONNECT_TIMEOUT", phase: "initial_tls", attempts: 2 });
+      const attempts = result.head!.error!.connectionAttempts;
+      expect(attempts).toHaveLength(2);
+      for (const [index, attempt] of attempts.entries()) {
+        expect(attempt).toMatchObject({ attempt: index + 1, phase: "initial_tls", code: "PROVIDER_CONNECT_TIMEOUT" });
+        expect(attempt.elapsedMs).toBeGreaterThanOrEqual(100);
+        expect(attempt.elapsedMs).toBeLessThan(1_000);
+        expect(attempt.connectMs).toBeUndefined();
+      }
+      expect(result.connections).toBe(2);
+      expect(result.endedConnections).toBe(2);
+      expect(result.closedConnections).toBe(2);
+      expect(result.requests).toBe(0);
+      expect(result.connects).toBe(mode.startsWith("proxy-") ? 2 : 0);
+      expect(JSON.stringify(attempts)).not.toMatch(/127\.0\.0\.1|fixture-user|fixture-secret|fixture-model-key|private paid job|https?:/);
+    });
+  }
+
+  for (const mode of ["recover", "proxy-recover", "late-tls"]) {
+    test(`pre-HTTP deadline permits only one safe reconnect for ${mode} and is cleared before a slow paid response`, async () => {
+      const result = await runConnectionDeadlineFixture(mode, 150);
+      expect(result.finished).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.head?.status).toBe(200);
+      expect(result.body).toBe("slow response");
+      expect(result.requests).toBe(1);
+      expect(result.connections).toBe(2);
+      expect(result.closedBeforeRequest).toBeGreaterThanOrEqual(1);
+      const attempts = result.head!.connectionAttempts!;
+      expect(attempts).toHaveLength(2);
+      expect(attempts[0]).toMatchObject({ attempt: 1, phase: "initial_tls", code: "PROVIDER_CONNECT_TIMEOUT" });
+      expect(attempts[1]).toMatchObject({ attempt: 2, phase: "http_started" });
+      expect(attempts[1]!.code).toBeUndefined();
+      expect(attempts[1]!.connectMs).toBeGreaterThanOrEqual(0);
+      expect(attempts[1]!.connectMs!).toBeLessThan(150);
+      expect(attempts[1]!.elapsedMs).toBeGreaterThanOrEqual(400);
+      expect(result.connects).toBe(mode.startsWith("proxy-") ? 2 : 0);
+    });
+  }
+
+  test("pre-HTTP deadline does not relabel or replay a paid POST that closes after the connection deadline", async () => {
+    const result = await runConnectionDeadlineFixture("slow-close", 150);
+    expect(result.finished).toBe(true);
+    expect(result.head?.error).toMatchObject({ code: "ECONNRESET", phase: "http_started", attempts: 1 });
+    expect(result.requests).toBe(1);
+    expect(result.connections).toBe(1);
+    const attempts = result.head!.error!.connectionAttempts;
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({ attempt: 1, phase: "http_started", code: "ECONNRESET" });
+    expect(attempts[0]!.connectMs!).toBeLessThan(150);
+    expect(attempts[0]!.elapsedMs).toBeGreaterThanOrEqual(400);
+  });
+
+  test("pre-HTTP deadline rejects IPC overrides that disable or extend the production bound", async () => {
+    for (const timeout of [0, 49, 10_001, "100", null]) {
+      const result = await runConnectionDeadlineFixture("tls-blackhole", timeout, 800);
+      expect(result.finished).toBe(true);
+      expect(result.head?.error).toMatchObject({ code: "INVALID_CONNECT_TIMEOUT", phase: "preflight" });
+      expect(result.head!.error!.connectionAttempts).toEqual([]);
+      expect(result.connections).toBe(0);
+      expect(result.requests).toBe(0);
+    }
+  });
+
+  test("pre-HTTP deadline uses a bounded production default without any IPC override", async () => {
+    const result = await runConnectionDeadlineFixture("recover", undefined, 14_000);
+    expect(result.finished).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.requests).toBe(1);
+    expect(result.connections).toBe(2);
+    expect(result.head!.connectionAttempts![0]).toMatchObject({ phase: "initial_tls", code: "PROVIDER_CONNECT_TIMEOUT" });
+    expect(result.head!.connectionAttempts![0]!.elapsedMs).toBeGreaterThanOrEqual(9_500);
+    expect(result.head!.connectionAttempts![0]!.elapsedMs).toBeLessThan(12_000);
+  }, 16_000);
+
   test("explicit proxy CONNECT omits model credentials and body, then submits once on authorized target TLS", async () => {
     const fixture = nativeProxy!;
     process.env.HTTPS_PROXY = "http://127.0.0.1:1";
@@ -362,6 +555,10 @@ describe("provider submission transport", () => {
       expect(streamError.message).toContain("请求已发出，结果待核查，不会自动重新提交");
       expect(streamError.phase).toBe("response");
       expect(streamError.code).toBe("PROVIDER_RESPONSE_STREAM_ERROR");
+      expect(streamError.attempts).toBe(1);
+      expect(streamError.connectionAttempts).toHaveLength(1);
+      expect(streamError.connectionAttempts[0].phase).toBe("http_started");
+      expect(streamError.connectionAttempts[0].connectMs).toBeGreaterThanOrEqual(0);
       const closeDeadline = Date.now() + 1_000;
       let observed;
       do {

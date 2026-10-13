@@ -1,19 +1,70 @@
 import { fileURLToPath } from "node:url";
 
+export type ProviderConnectionAttempt = {
+  attempt: number;
+  phase: "initial_tls" | "http_started";
+  elapsedMs: number;
+  connectMs?: number;
+  code?: string;
+};
+
+export type ProviderSubmissionDiagnostics = {
+  code: string;
+  phase: "initial_tls" | "http_started" | "response" | "preflight";
+  attempts?: number;
+  connectionAttempts?: ProviderConnectionAttempt[];
+};
+
+/** Only bounded, non-sensitive transport metadata may enter persistent audit logs.
+ * Adapters wrap failures with cause; never infer a safe retry phase from a plain
+ * ECONNRESET, or copy arbitrary Error properties such as proxy credentials.
+ */
+export function readProviderSubmissionDiagnostics(error: unknown): ProviderSubmissionDiagnostics | null {
+  const validCode = (value: unknown): value is string => typeof value === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(value);
+  const validDuration = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+  try {
+    for (let depth = 0; depth < 4 && error && typeof error === "object"; depth++) {
+      const record = error as Record<string, unknown>;
+      if (validCode(record.code) && typeof record.phase === "string" && ["initial_tls", "http_started", "response", "preflight"].includes(record.phase)) {
+        const result: ProviderSubmissionDiagnostics = { code: record.code, phase: record.phase as ProviderSubmissionDiagnostics["phase"] };
+        if (record.attempts === 1 || record.attempts === 2) result.attempts = record.attempts;
+        const connections: ProviderConnectionAttempt[] = [];
+        if (Array.isArray(record.connectionAttempts)) for (const item of record.connectionAttempts.slice(0, 2)) {
+          if (!item || typeof item !== "object" || (item.attempt !== 1 && item.attempt !== 2)
+            || (item.phase !== "initial_tls" && item.phase !== "http_started") || !validDuration(item.elapsedMs)) continue;
+          connections.push({
+            attempt: item.attempt, phase: item.phase, elapsedMs: item.elapsedMs,
+            ...(validDuration(item.connectMs) && item.connectMs <= item.elapsedMs ? { connectMs: item.connectMs } : {}),
+            ...(validCode(item.code) ? { code: item.code } : {}),
+          });
+        }
+        if (connections.length) result.connectionAttempts = connections;
+        return result;
+      }
+      error = record.cause;
+    }
+  } catch { /* Diagnostic inspection must never replace the original failure. */ }
+  return null;
+}
+
 type TransportHead = {
   status?: number;
   statusText?: string;
   headers?: [string, string][];
-  error?: { message: string; code: string; phase: string; attempts: number };
+  connectionAttempts?: ProviderConnectionAttempt[];
+  error?: { message: string; code: string; phase: string; attempts: number; connectionAttempts?: ProviderConnectionAttempt[] };
 };
 
-function submissionError(message: string, details: { code: string; phase: string; attempts?: number }) {
+function submissionError(message: string, details: { code: string; phase: string; attempts?: number; connectionAttempts?: ProviderConnectionAttempt[] }) {
   const status = details.phase === "initial_tls" || details.phase === "preflight"
     ? "模型业务HTTP请求尚未发送"
     : details.phase === "http_started" || details.phase === "response"
       ? "请求已发出，结果待核查，不会自动重新提交"
       : "提交状态未知，结果待核查，不会自动重新提交";
-  return Object.assign(new Error(`${message}（${status}）`), details);
+  const description = details.code === "PROVIDER_CONNECT_TIMEOUT"
+    ? `连接模型服务超时，${details.attempts ?? 1} 次连接均未完成 TLS 握手`
+    : message;
+  return Object.assign(new Error(`${description}（${status}）`), details);
 }
 
 /** A submission-only transport. Parsing, polling and downloads stay outside it.
@@ -83,7 +134,10 @@ export async function fetchProviderSubmission(url: string | URL, init: RequestIn
           if (!chunk.done) { controller.enqueue(chunk.value); return; }
           const exitCode = await exited;
           if (init.signal?.aborted) throw init.signal.reason;
-          if (exitCode !== 0) throw submissionError("Provider response stream was interrupted; the original submission will not be replayed", { code: "PROVIDER_RESPONSE_STREAM_ERROR", phase: "response" });
+          if (exitCode !== 0) throw submissionError("Provider response stream was interrupted; the original submission will not be replayed", {
+            code: "PROVIDER_RESPONSE_STREAM_ERROR", phase: "response",
+            ...(metadata.connectionAttempts?.length ? { attempts: metadata.connectionAttempts.length, connectionAttempts: metadata.connectionAttempts } : {}),
+          });
           cleanup();
           controller.close();
         } catch (error) { cleanup(); child.kill(); controller.error(error); }

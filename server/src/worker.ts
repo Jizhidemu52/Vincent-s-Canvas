@@ -22,7 +22,7 @@ import { classifyDesignDirection } from "./design-direction";
 import { runApiMartImageTask } from "./apimart-image";
 import { videoSourceMetadata, type ProviderVideoSource } from "./video-models";
 import { probeMediaBytes } from "./media-probe";
-import { fetchProviderSubmission } from "./provider-submission-transport";
+import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
 import { createGenerationTiming, type GenerationTiming, type GenerationTimingOutcome } from "./generation-timing";
 import { fetchProviderResult } from "./provider-result";
 
@@ -140,6 +140,7 @@ async function runTask(taskId: string) {
     outcome = "success";
   } catch (error) {
     if (error instanceof VideoSubmissionClaimLost) { outcome = "paused"; return; }
+    const transportDiagnostics = readProviderSubmissionDiagnostics(error);
     const reason =
       error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
     if (task.operation_type === "video_generation" && task.upstream_submission_started_at && !(error instanceof VideoProviderFailure)) {
@@ -174,8 +175,8 @@ async function runTask(taskId: string) {
       );
       await db.query(
         `INSERT INTO audit_logs(actor_user_id,action,target_type,target_id,result,detail)
-                SELECT user_id,'task.failed','task',id::text,'failed',jsonb_build_object('reason',$2::text,'attempts',attempts) FROM tasks WHERE id=$1`,
-        [task.id, reason],
+                SELECT user_id,'task.failed','task',id::text,'failed',jsonb_build_object('reason',$2::text,'attempts',attempts) || $3::jsonb FROM tasks WHERE id=$1`,
+        [task.id, reason, JSON.stringify(transportDiagnostics ? { transport: transportDiagnostics } : {})],
       );
     }
   } finally {
