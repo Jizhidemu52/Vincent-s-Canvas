@@ -1,3 +1,5 @@
+import { providerImageMimeType } from "./provider-image-result";
+
 export type InlineImageResult = { mimeType: string; bytes: Uint8Array };
 
 export function decodeInlineImageResult(value: string): InlineImageResult | null {
@@ -5,5 +7,5 @@ export function decodeInlineImageResult(value: string): InlineImageResult | null
   if (!match) return null;
 
   const bytes = Uint8Array.from(Buffer.from(match[2].replace(/\s/g, ""), "base64"));
-  return bytes.byteLength ? { mimeType: match[1].toLowerCase(), bytes } : null;
+  return bytes.byteLength ? { mimeType: providerImageMimeType(bytes, match[1].toLowerCase()), bytes } : null;
 }

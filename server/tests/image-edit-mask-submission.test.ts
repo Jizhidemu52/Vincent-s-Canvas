@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import ts from "typescript";
 import { openAiImageParameters } from "../src/openai-image-parameters";
 import { buildOpenTokenImageRequest } from "../src/opentoken-image";
+import { inlineProviderImageDataUrl } from "../src/provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "../src/image-edit-input";
 
 const rgba = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC", "base64");
@@ -34,6 +35,7 @@ function harness(extra: Record<string, unknown> = {}) {
     config: { PROVIDER_ENCRYPTION_KEY: "unit-test" },
     decryptSecret: () => '{"apiKey":"unit-test"}',
     openAiImageParameters,
+    inlineProviderImageDataUrl,
     assertImageEditMaskSupport,
     prepareImageEditInput,
     OPENAI_IMAGE_TIMEOUT_MS: 1000,
@@ -165,12 +167,24 @@ describe("image edit mask wire contract", () => {
     expect(submissions).toHaveLength(0);
   });
 
+  test("Worker tags formatless Gemini JPEG bytes correctly before materialization", async () => {
+    const jpeg = "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdAAf/2Q==";
+    let calls = 0;
+    const { api } = harness({ fetchProviderSubmission: async () => {
+      calls++;
+      return Response.json({ data: [{ b64_json: jpeg }] });
+    } });
+    const result = await api.executeProvider({ ...workerTask, model_id: "gemini-3.1-flash-image", operation_type: "image_generation", source_urls: [], parameters: {} }, timing);
+    expect(result[0].url).toBe(`data:image/jpeg;base64,${jpeg}`);
+    expect(calls).toBe(1);
+  });
+
   for (const outputFormat of ["jpeg", "webp"] as const) {
     for (const operation of ["image_generation", "inpaint"] as const) {
-      test(`Worker keeps ${outputFormat} result MIME and omits unsupported GPT response_format during ${operation}`, async () => {
+      test(`Worker identifies returned PNG despite requested ${outputFormat} and omits GPT response_format during ${operation}`, async () => {
         const { api, submissions } = harness();
         const result = await api.executeProvider({ ...workerTask, operation_type: operation, source_urls: operation === "inpaint" ? ["source"] : [], parameters: { output_format: outputFormat } }, timing);
-        expect(result[0].url.startsWith(`data:image/${outputFormat};base64,`)).toBe(true);
+        expect(result[0].url).toBe(`data:image/png;base64,${rgba.toString("base64")}`);
         if (operation === "inpaint") {
           const form = await new Request("https://provider.invalid/v1/images/edits", { method: "POST", body: submissions[0]!.body }).formData();
           expect(form.get("output_format")).toBe(outputFormat);

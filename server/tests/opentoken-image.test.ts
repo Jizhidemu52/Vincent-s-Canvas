@@ -43,7 +43,7 @@ describe("OpenToken image protocol adapter", () => {
     expect(() => buildOpenTokenImageRequest({ ...input, modelId: "gemini-3.1-flash-image", references: [reference], mask })).toThrow("蒙版");
   });
 
-  test("inline JPEG and WebP responses keep the selected MIME type", async () => {
+  test("unknown byte signatures retain the declared output MIME fallback", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => Response.json({ data: [{ b64_json: "AP8BAg==" }] })) as unknown as typeof fetch;
     try {

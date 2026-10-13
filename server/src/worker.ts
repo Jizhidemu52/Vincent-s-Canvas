@@ -25,6 +25,7 @@ import { probeMediaBytes } from "./media-probe";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
 import { createGenerationTiming, type GenerationTiming, type GenerationTimingOutcome } from "./generation-timing";
 import { fetchProviderResult } from "./provider-result";
+import { inlineProviderImageDataUrl } from "./provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-input";
 
 type WorkRow = {
@@ -287,7 +288,7 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
       ?.map(
         (item) =>
           item.url ||
-          (item.b64_json ? `data:image/${outputFormat};base64,${item.b64_json}` : ""),
+          (item.b64_json ? inlineProviderImageDataUrl(item.b64_json, `image/${outputFormat}`) : ""),
       )
       .filter(Boolean) ??
     (body.url ? [body.url] : []);

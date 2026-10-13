@@ -9,7 +9,7 @@ const fallback = boolean("official_fallback", "允许官方渠道回退", "由�
 export function imageOptionFields(profile: Profile): ImageOptionField[] {
     if (profile.kind === "standard") return profile.outputFormats?.length ? [
         { key: "background", label: "背景", options: profile.backgrounds || ["auto", "opaque", "transparent"] },
-        { key: "output_format", label: "输出格式", options: profile.outputFormats },
+        { key: "output_format", label: "输出格式", options: profile.outputFormats, tip: "渠道可能未遵循所选格式；保存以实际返回格式为准，不转码或重压缩。" },
         { ...number("output_compression", "输出压缩质量", 0, 100), tip: "仅 JPEG / WebP 生效；100 为最高质量，PNG 无损无需设置。" },
     ] : [];
     if (profile.kind === "gpt") return [moderation, fallback];

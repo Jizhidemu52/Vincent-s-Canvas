@@ -1,6 +1,7 @@
 import { fetchProviderSubmission } from "./provider-submission-transport";
 import type { GenerationTiming, GenerationTimingStage } from "./generation-timing";
 import { openAiImageParameters, type OpenAiImageParameters } from "./openai-image-parameters";
+import { inlineProviderImageDataUrl, providerImageMimeType } from "./provider-image-result";
 export { normalizeOpenTokenImageSize } from "./openai-image-parameters";
 
 export type OpenTokenReferenceImage = {
@@ -111,14 +112,15 @@ export async function runOpenTokenImage(input: OpenTokenImageInput, timing?: Gen
     }
     return parseOpenTokenImageResponse(await response.json());
   });
-  if ("base64" in result) return `data:image/${request.body?.output_format || request.form?.get("output_format") || "png"};base64,${result.base64}`;
+  if ("base64" in result) return inlineProviderImageDataUrl(result.base64, `image/${request.body?.output_format || request.form?.get("output_format") || "png"}`);
   const download = async () => {
     const image = await fetch(result.url, { signal: AbortSignal.timeout(120_000) }).catch((error) => {
       throw new Error(`OpenToken image result download transport failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     });
     if (!image.ok) throw new Error(`OpenToken image download failed: ${image.status}`);
-    const mimeType = image.headers.get("content-type")?.split(";")[0] || "image/png";
-    return `data:${mimeType};base64,${Buffer.from(await image.arrayBuffer()).toString("base64")}`;
+    const bytes = Buffer.from(await image.arrayBuffer());
+    const mimeType = providerImageMimeType(bytes, image.headers.get("content-type")?.split(";")[0]);
+    return `data:${mimeType};base64,${bytes.toString("base64")}`;
   };
   return /^https?:\/\//i.test(result.url) ? measure("result_download", download) : download();
 }
