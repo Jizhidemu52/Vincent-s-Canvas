@@ -10,7 +10,7 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 const originalModels = useBusinessConfigStore.getState().models;
 afterEach(() => useBusinessConfigStore.setState({ models: originalModels }));
 const models = [
-    { id: "40000000-0000-4000-8000-000000000105", modelId: "40000000-0000-4000-8000-000000000105", name: "日常生图", imageParameterProfile: "standard", capabilities: ["generate", "edit"] },
+    { id: "40000000-0000-4000-8000-000000000105", modelId: "40000000-0000-4000-8000-000000000105", name: "gpt-image-2", imageParameterProfile: "standard", capabilities: ["generate", "edit"] },
     { id: "pixel-model", modelId: "pixel-model", name: "像素模型", imageParameterProfile: "pixel", capabilities: ["generate", "edit"] },
     { id: "resolution-model", modelId: "resolution-model", name: "分辨率模型", imageParameterProfile: "resolution", capabilities: ["generate", "edit"] },
     { id: "speed-model", modelId: "speed-model", name: "速度模型", imageParameterProfile: "speed", capabilities: ["generate"] },

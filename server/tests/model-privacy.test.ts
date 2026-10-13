@@ -4,6 +4,18 @@ import { designerModelPrivacy, redactDesignerModelData } from "../src/model-priv
 import type { Database } from "../src/db";
 
 const model = { id: "image-config-id", name: "Private Image", modelId: "gpt-image-2.5-flare", providerName: "Private Provider", capabilities: ["generate", "edit"], publicNumber: 2 };
+test("curated public model IDs survive history projection without exposing provider details", () => {
+    const configured = { ...model, providerName: "OpenToken" };
+    expect(redactDesignerModelData({ modelName: configured.name, modelId: configured.modelId, failureReason: `OpenToken: ${configured.modelId} failed` }, [configured], "designer"))
+        .toEqual({ modelName: configured.modelId, modelId: configured.id, failureReason: `图片服务: ${configured.modelId} failed` });
+});
+
+test("short configured names do not recursively rewrite public model IDs", () => {
+    const configured = { ...model, name: "gemini", modelId: "gemini-3.1-flash-image", providerName: "OpenToken" };
+    expect(redactDesignerModelData({ meta: "OpenToken: gemini · gemini-3.1-flash-image" }, [configured], "designer"))
+        .toEqual({ meta: "图片服务: gemini-3.1-flash-image · gemini-3.1-flash-image" });
+});
+
 test("designer history, canvas undo metadata and task diagnostics hide identity without modifying stored data", () => {
     const original = { modelName: model.name, createdAt: new Date(), metadata: { model: model.modelId },
         document: { history: { past: [{ nodes: [{ metadata: { config: { imageModel: `default::${model.modelId}` } } }] }] } },

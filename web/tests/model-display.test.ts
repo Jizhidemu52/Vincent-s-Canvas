@@ -10,13 +10,30 @@ const video = { ...image, id: "video", modelId: "wan2.7", name: "Wan", capabilit
 const originalModels = useBusinessConfigStore.getState().models;
 const originalUser = useUserStore.getState().user;
 
-test("feature labels follow opaque model IDs across pickers, metadata and admin mappings", () => {
-    const named = { ...real, publicName: "细节精修" };
-    expect(imageModelDisplayName(named.id, [named], "designer")).toBe("细节精修");
-    expect(imageModelDisplayName(named.modelId, [named], "designer")).toBe("细节精修");
+test.each(["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-3.1-flash-image"])("public model ID %s survives picker labels and metadata masking", (modelId) => {
+    const named = { ...image, name: modelId, publicName: modelId };
+    expect(imageModelDisplayName(named.id, [named], "designer")).toBe(modelId);
+    expect(imageModelDisplayName(modelId, [named], "designer")).toBe(modelId);
     expect(imageModelDisplayName(named.id, [named], "super_admin")).toBe(named.name);
-    expect(displayModelMetadata({ modelName: named.modelId }, [named], "designer")).toEqual({ modelName: "细节精修" });
+    expect(displayModelMetadata({ modelName: named.modelId, meta: `模型 ${modelId}` }, [named], "designer")).toEqual({ modelName: modelId, meta: `模型 ${modelId}` });
+    expect(maskImageModelText(`模型 ${modelId} · midjourney`, [named], "designer")).toBe(`模型 ${modelId} · 出图模型`);
+    useBusinessConfigStore.setState({ models: [named] });
+    useUserStore.setState({ user: null });
+    expect(modelOptionLabel(defaultConfig, named.id)).toBe(modelId);
+    expect(exportModelMetadata({ modelId, modelName: modelId })).toEqual({ modelId: named.id, modelName: modelId });
     expect(modelOptionName(`default::${named.id}`)).toBe(named.id);
+});
+
+test("short private names cannot recursively rewrite a public model ID", () => {
+    const named = { ...real, name: "gemini", modelId: "gemini-3.1-flash-image", publicName: "gemini-3.1-flash-image" };
+    expect(maskImageModelText("gemini · gemini-3.1-flash-image · midjourney", [named], "designer"))
+        .toBe("gemini-3.1-flash-image · gemini-3.1-flash-image · 出图模型");
+});
+
+test("the four-model catalog preserves complete IDs instead of matching the GPT Image 2 prefix", () => {
+    const ids = ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-3.1-flash-image"];
+    const catalog = ids.map((modelId, index) => ({ ...image, id: `image-${index}`, modelId: `image-${index}`, name: modelId, publicName: modelId }));
+    expect(maskImageModelText(ids.join(" · "), catalog, "designer")).toBe(ids.join(" · "));
 });
 
 test("export retains opaque model references and user prompts without disclosing real names", () => {

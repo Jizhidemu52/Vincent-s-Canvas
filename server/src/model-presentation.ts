@@ -2,13 +2,12 @@ import { imageParameterProfile } from "./image-parameter-profile";
 
 const imageCapabilities = ["generate", "edit", "upscale", "remove_background", "batch"];
 
-// Usage labels, not exclusive capabilities or quality guarantees. See the
-// feature guide for the official model descriptions used for these names.
+// Show upstream model IDs as labels; usage descriptions are not quality guarantees.
 const openTokenImageLabels: Readonly<Record<string, { name: string; description: string }>> = {
-  "gpt-image-2": { name: "日常生图", description: "直接描述，生成新图片" },
-  "gpt-image-2.5-flare": { name: "快速试稿", description: "快速看效果，尝试不同设计方向" },
-  "gpt-image-2.5-sunburst": { name: "细节精修", description: "已有图片，仔细调整局部细节" },
-  "gemini-3.1-flash-image": { name: "备用生图", description: "前三个模型不合适时再试" },
+  "gpt-image-2": { name: "gpt-image-2", description: "直接描述，生成新图片" },
+  "gpt-image-2.5-flare": { name: "gpt-image-2.5-flare", description: "快速看效果，尝试不同设计方向" },
+  "gpt-image-2.5-sunburst": { name: "gpt-image-2.5-sunburst", description: "已有图片，仔细调整局部细节" },
+  "gemini-3.1-flash-image": { name: "gemini-3.1-flash-image", description: "前三个模型不合适时再试" },
 };
 
 function openTokenImageLabel(model: Record<string, unknown>) {
@@ -73,7 +72,7 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
   const label = image ? openTokenImageLabel(model) : undefined;
   return {
     id: model.id,
-    name: hidden ? publicModelName(model) : model.name,
+    name: label?.name || (hidden ? publicModelName(model) : model.name),
     modelId: hidden ? model.id : model.modelId,
     capabilities: model.capabilities,
     creditCost: model.creditCost,

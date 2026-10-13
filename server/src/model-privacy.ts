@@ -15,11 +15,13 @@ export function redactDesignerModelData<T>(body: T, catalog: readonly Record<str
         if (typeof key === "string" && key) index.set(key, model);
     }
     const find = (value: string) => index.get(value.includes("::") ? value.slice(value.indexOf("::") + 2) : value);
-    const replacements = models.flatMap(model => [model.modelId, model.name, model.providerName]
+    const replacements = new Map(models.flatMap(model => [model.modelId, model.name, model.providerName]
         .filter((name): name is string => typeof name === "string" && name.length > 2)
-        .map(name => [name, name === model.providerName ? "图片服务" : publicModelName(model)] as const))
-        .sort((a, b) => b[0].length - a[0].length);
-    const redactText = (value: string) => replacements.reduce((text, [name, label]) => text.split(name).join(label), value);
+        .map(name => [name, name === model.providerName ? "图片服务" : publicModelName(model)] as const)));
+    const names = [...replacements.keys()].sort((a, b) => b.length - a.length).map(name => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const pattern = names.length ? new RegExp(names.join("|"), "g") : undefined;
+    // Do not run a replacement label through later private-name replacements.
+    const redactText = (value: string) => pattern ? value.replace(pattern, name => replacements.get(name)!) : value;
     const visit = (value: unknown, field = ""): unknown => {
         if (typeof value === "string") {
             const model = find(value);

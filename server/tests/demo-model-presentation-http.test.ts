@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 
-test("designer sees four feature-named OpenToken images while UUID submission still calls the configured upstream model", async () => {
+test("designer sees four model-ID-named OpenToken images while UUID submission still calls the configured upstream model", async () => {
   const submissions: Array<Record<string, unknown>> = [];
   const provider = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     expect(request.headers.get("authorization")).toBe("Bearer fake-key-no-paid-network");
@@ -33,19 +33,18 @@ test("designer sees four feature-named OpenToken images while UUID submission st
     const models = (await request("/api/models", designerCookie).then((response) => response.json())).models as Array<Record<string, any>>;
     const images = models.filter((model) => model.modelIdentityHidden);
     expect(images.map(model => [model.id, model.name])).toEqual([
-      ["40000000-0000-4000-8000-000000000105", "日常生图"],
-      ["40000000-0000-4000-8000-000000000107", "快速试稿"],
-      ["40000000-0000-4000-8000-000000000108", "细节精修"],
-      ["40000000-0000-4000-8000-000000000106", "备用生图"],
+      ["40000000-0000-4000-8000-000000000105", "gpt-image-2"],
+      ["40000000-0000-4000-8000-000000000107", "gpt-image-2.5-flare"],
+      ["40000000-0000-4000-8000-000000000108", "gpt-image-2.5-sunburst"],
+      ["40000000-0000-4000-8000-000000000106", "gemini-3.1-flash-image"],
     ]);
     expect(models.some(model => model.modelId === "happyhorse-1.1")).toBe(true);
     expect(models.some(model => model.modelId === "claude-fable-5")).toBe(true);
     for (const model of images) {
-      expect(model.name.length).toBeLessThanOrEqual(8);
       expect(model.modelId).toBe(model.id);
       expect(model.publicName).toBe(model.name);
       expect(model.publicDescription).toEqual(expect.any(String));
-      expect(JSON.stringify(model)).not.toMatch(/gpt|gemini|midjourney|apimart|opentoken/i);
+      expect(JSON.stringify(model)).not.toMatch(/midjourney|apimart|opentoken|fake-key/i);
     }
     expect([403, 404]).toContain((await request("/api/admin/model-configuration/models", designerCookie)).status);
     const alias = images.find((model) => model.id === "40000000-0000-4000-8000-000000000107")!;

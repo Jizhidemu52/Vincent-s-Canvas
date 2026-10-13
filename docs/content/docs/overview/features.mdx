@@ -37,9 +37,9 @@ description: 公司内部 AI 设计平台当前功能
 - 画布网站 Agent 输入区可直接选择后台已启用的对话模型，与图像、视频模型分别选择；管理员的连接配置指向真实 API 后台，不在画布重复填写密钥。
 - API Key 只在管理员端提交，使用服务端加密密钥保存，设计师接口不返回原文。
 - 模型配置包含能力、单次积分、人民币成本、并发限制和启用状态。
-- 出图列表仅保留已启用且凭据可用的四个 OpenToken 型号，顺序固定为“日常生图”（GPT Image 2）、“快速试稿”（GPT Image 2.5 Flare）、“细节精修”（GPT Image 2.5 Sunburst）、“备用生图”（Gemini 3.1 Flash Image，最后）；下拉菜单附一句用途说明。其他图片配置与历史不删除，对话、视频和音频保持原配置。
-- 用途名称是选择提示，不代表独占能力或质量保证：直接描述生新图、快速探索设计方向、已有图精修；Gemini 按团队使用偏好标记为“前三个模型不合适时再试”，不是客观性能排名，也不暗示它是服装改款首选。能力参考 [GPT Image 2](https://developers.openai.com/api/docs/models/gpt-image-2)、[Flare / Sunburst 官方介绍](https://openai.com/index/introducing-chatgpt-images-2-5/) 与 [Gemini 图像生成文档](https://ai.google.dev/gemini-api/docs/image-generation)；不承诺原图像素完全不变，也不将官方全部参数视为渠道已支持。
-- 管理员保留真实模型名称及设计师端名称对照，未入选图片配置仍可用原编号识别历史。设计师接口使用内部模型 ID，参数按匿名能力类型展示，不返回图片供应商名称；图片模型选择、历史、素材、画布系统元数据与导出同步匿名化，用户自行输入的提示词不改写。用途名称不参与路由，不改变对应的实际 Provider 调用。
+- 出图列表仅保留已启用且凭据可用的四个 OpenToken 型号，直接显示模型 ID，顺序固定为 `gpt-image-2`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gemini-3.1-flash-image`；下拉菜单保留简短用途说明。其他图片配置与历史不删除，对话、视频和音频保持原配置。
+- 用途说明是选择提示，不代表独占能力或质量保证：直接描述生新图、快速探索设计方向、已有图精修；Gemini 按团队使用偏好标记为“前三个模型不合适时再试”，不是客观性能排名，也不暗示它是服装改款首选。能力参考 [GPT Image 2](https://developers.openai.com/api/docs/models/gpt-image-2)、[Flare / Sunburst 官方介绍](https://openai.com/index/introducing-chatgpt-images-2-5/) 与 [Gemini 图像生成文档](https://ai.google.dev/gemini-api/docs/image-generation)；不承诺原图像素完全不变，也不将官方全部参数视为渠道已支持。
+- 管理员保留原始配置名称及展示名称对照，未入选图片配置仍可用原编号识别历史。四个已公开型号在选择器、历史和系统元数据中显示模型 ID；设计师请求及可恢复导出中的模型引用仍使用内部配置 UUID，参数按中性能力类型展示，不返回供应商配置或密钥。其他旧型号继续匿名显示，用户自行输入的提示词不改写。显示名称不参与路由，不改变实际 Provider 调用。
 - 服务端验证任务类型与模型能力，音频任务不能误用图片模型。
 - RunningHub、ComfyUI 和自定义工作流统一配置提交路径、状态路径、模板变量、成功/失败值与结果路径。
 

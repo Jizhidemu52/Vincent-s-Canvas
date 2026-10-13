@@ -31,13 +31,16 @@ export function imageModelDisplayName(value: string, models: readonly DisplayMod
 
 export function maskImageModelText(text: string, models: readonly DisplayModel[] = useBusinessConfigStore.getState().models, role = useUserStore.getState().user?.role) {
     if (isAdminRole(role)) return text;
-    let result = text;
+    const replacements = new Map<string, string>();
     for (const model of models.filter(isImageDisplayModel)) {
-        for (const name of [model.modelId, model.name].filter(Boolean).sort((a, b) => b.length - a.length)) {
-            result = result.split(name).join(imageModelDisplayName(model.id, models, role));
+        for (const name of [model.modelId, model.name, model.publicName].filter((value): value is string => Boolean(value))) {
+            replacements.set(name.toLowerCase(), imageModelDisplayName(model.id, models, role));
         }
     }
-    return result.replace(legacyImageName, "出图模型");
+    const names = [...replacements.keys()].sort((a, b) => b.length - a.length).map(name => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const pattern = new RegExp([legacyImageName.source, ...names].join("|"), "gi");
+    // Replace once so published IDs are neither masked nor expanded by a shorter name.
+    return text.replace(pattern, name => replacements.get(name.toLowerCase()) || "出图模型");
 }
 
 /** Hide system model metadata in previews/exports without altering user prompts. */
