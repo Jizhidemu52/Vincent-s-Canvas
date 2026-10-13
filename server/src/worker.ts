@@ -6,7 +6,6 @@ import { settleReservation } from "./billing";
 import { TASK_LEASE_SECONDS, canAutomaticallyRetryTask, queueScore, recalculateBatch, restoreWaitingTasksToQueue, type TaskPriority } from "./tasks";
 import { ObjectStorage } from "./object-storage";
 import {
-  decodeWorkflowImage,
   normalizeWorkflowOutputs,
   parsePromptVariables,
   readPath,
@@ -24,6 +23,8 @@ import { runApiMartImageTask } from "./apimart-image";
 import { videoSourceMetadata, type ProviderVideoSource } from "./video-models";
 import { probeMediaBytes } from "./media-probe";
 import { fetchProviderSubmission } from "./provider-submission-transport";
+import { createGenerationTiming, type GenerationTiming, type GenerationTimingOutcome } from "./generation-timing";
+import { fetchProviderResult } from "./provider-result";
 
 type WorkRow = {
   id: string;
@@ -104,36 +105,41 @@ async function runTask(taskId: string) {
     return;
   }
   const stopLeaseHeartbeat = startTaskLeaseHeartbeat(taskId);
+  const timing = createGenerationTiming({ taskId, modelConfigId: task.model_config_id, attempt: task.attempts, runtime: "worker" });
+  let outcome: GenerationTimingOutcome = "failed";
   try {
     if (config.TASK_MOCK_MODE === "true" && (task.operation_type === "video_generation" || task.operation_type === "audio_generation"))
       throw new Error("模拟模式不提供真实视频或音频，请配置真实服务后生成");
     const providerResults =
       config.TASK_MOCK_MODE === "true"
         ? [{ bytes: Buffer.from(mockSvg(task.id)), mimeType: "image/svg+xml" }]
-        : await executeProvider(task);
-    const resultUrls = await storeResults(task, providerResults);
-    await settleReservation(db, task.request_id, "capture");
-    const client = await db.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query(
-        "UPDATE tasks SET status='success',result_urls=$1,lease_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$2",
-        [JSON.stringify(resultUrls), task.id],
-      );
-      await client.query(
-        `INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,status)
+        : await timing.measure("provider_execution", () => executeProvider(task, timing));
+    const resultUrls = await timing.measure("result_store", () => storeResults(task, providerResults));
+    await timing.measure("task_finalize", async () => {
+      await settleReservation(db, task.request_id, "capture");
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "UPDATE tasks SET status='success',result_urls=$1,lease_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$2",
+          [JSON.stringify(resultUrls), task.id],
+        );
+        await client.query(
+          `INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,status)
                 SELECT id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,'success' FROM tasks WHERE id=$1 ON CONFLICT(task_id) DO NOTHING`,
-        [task.id],
-      );
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+          [task.id],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    });
+    outcome = "success";
   } catch (error) {
-    if (error instanceof VideoSubmissionClaimLost) return;
+    if (error instanceof VideoSubmissionClaimLost) { outcome = "paused"; return; }
     const reason =
       error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
     if (task.operation_type === "video_generation" && task.upstream_submission_started_at && !(error instanceof VideoProviderFailure)) {
@@ -142,6 +148,7 @@ async function runTask(taskId: string) {
         "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND status='processing'",
         [task.upstream_task_id ? `${reason}；已暂停，可恢复查询原视频任务，不会重新生成` : `${reason}；提交状态待核实，不会自动重新生成`, task.id],
       );
+      outcome = "paused";
     } else if (canAutomaticallyRetryTask(task.operation_type, task.upstream_submission_started_at, task.attempts)) {
       await db.query(
         "UPDATE tasks SET status='waiting',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2",
@@ -151,6 +158,7 @@ async function runTask(taskId: string) {
         score: queueScore(task.priority, Date.now() + task.attempts * 5_000),
         value: task.id,
       });
+      outcome = "retry";
     } else {
       await settleReservation(db, task.request_id, "release").catch(
         () => undefined,
@@ -171,6 +179,7 @@ async function runTask(taskId: string) {
       );
     }
   } finally {
+    timing.finish(outcome);
     stopLeaseHeartbeat();
     await cache.decr(semaphoreKey);
     if (task.batch_id) await recalculateBatch(db, task.batch_id);
@@ -180,7 +189,7 @@ async function runTask(taskId: string) {
 import { openAiImageParameters } from "./openai-image-parameters";
 import { OPENAI_IMAGE_TIMEOUT_MS } from "./opentoken-image";
 
-async function executeProvider(task: WorkRow) {
+async function executeProvider(task: WorkRow, timing: GenerationTiming) {
   if (!task.protocol || !task.base_url || !task.model_id)
     throw new Error("任务模型或 Provider 未配置");
   if (!task.encrypted_credentials || !config.PROVIDER_ENCRYPTION_KEY)
@@ -213,7 +222,7 @@ async function executeProvider(task: WorkRow) {
     form.set("n", "1");
     form.set("response_format", "b64_json");
     for (const [key, value] of Object.entries(openAiImageParameters(task.parameters, task.model_id))) form.set(key, String(value));
-    const sourceAssets = await loadSourceAssets(task.source_urls, task.user_id);
+    const sourceAssets = await timing.measure("prepare", () => loadSourceAssets(task.source_urls, task.user_id));
     for (const [index, source] of sourceAssets.entries()) {
       form.append(
         "image",
@@ -223,12 +232,12 @@ async function executeProvider(task: WorkRow) {
         source.filename || `reference-${index + 1}.png`,
       );
     }
-    response = await fetchProviderSubmission(`${task.base_url.replace(/\/$/, "")}/images/edits`, {
+    response = await timing.measure("provider_request", () => fetchProviderSubmission(`${task.base_url!.replace(/\/$/, "")}/images/edits`, {
       method: "POST",
       headers: authorization,
       body: form,
       signal: AbortSignal.timeout(OPENAI_IMAGE_TIMEOUT_MS),
-    });
+    }));
   } else {
     const endpoint =
       task.protocol === "openai"
@@ -251,18 +260,18 @@ async function executeProvider(task: WorkRow) {
               Object.entries(credentials).filter(([key]) => key !== "apiKey"),
             ),
           };
-    response = await fetchProviderSubmission(endpoint, {
+    response = await timing.measure("provider_request", () => fetchProviderSubmission(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json", ...authorization },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(180_000),
-    });
+    }));
   }
-  if (!response.ok)
-    throw new Error(
-      `Provider ${response.status}: ${(await response.text()).slice(0, 500)}`,
-    );
-  const body = (await response.json()) as {
+  const body = (await timing.measure("provider_response", async () => {
+    if (!response.ok)
+      throw new Error(`Provider ${response.status}: ${(await response.text()).slice(0, 500)}`);
+    return response.json();
+  })) as {
     data?: Array<{ url?: string; b64_json?: string }>;
     resultUrls?: string[];
     url?: string;
@@ -278,7 +287,7 @@ async function executeProvider(task: WorkRow) {
       .filter(Boolean) ??
     (body.url ? [body.url] : []);
   if (!urls.length) throw new Error("Provider 未返回图片结果");
-  return Promise.all(urls.map(fetchResult));
+  return Promise.all(urls.map(url => fetchProviderResult(url, timing)));
 }
 
 async function executeApiMartImage(
@@ -294,7 +303,7 @@ async function executeApiMartImage(
     parameters: task.parameters,
     sourceDataUrls: sourceAssets.map((asset) => `data:${asset.mimeType};base64,${Buffer.from(asset.bytes).toString("base64")}`),
   });
-  return Promise.all(outputUrls.map(fetchResult));
+  return Promise.all(outputUrls.map(url => fetchProviderResult(url)));
 }
 
 async function executeOpenAiAudio(
@@ -435,7 +444,7 @@ async function executeWorkflow(
     );
   let payload = (await submit.json()) as unknown;
   let outputs = normalizeWorkflowOutputs(readPath(payload, task.output_path!));
-  if (outputs.length) return Promise.all(outputs.map(fetchResult));
+  if (outputs.length) return Promise.all(outputs.map(url => fetchProviderResult(url)));
   const externalId = task.external_task_path
     ? readPath(payload, task.external_task_path)
     : null;
@@ -458,7 +467,7 @@ async function executeWorkflow(
       throw new Error(`工作流状态查询失败 ${statusResponse.status}`);
     payload = await statusResponse.json();
     outputs = normalizeWorkflowOutputs(readPath(payload, task.output_path!));
-    if (outputs.length) return Promise.all(outputs.map(fetchResult));
+    if (outputs.length) return Promise.all(outputs.map(url => fetchProviderResult(url)));
     const state = String(
       task.status_value_path ? readPath(payload, task.status_value_path) : "",
     ).toLowerCase();
@@ -535,21 +544,6 @@ async function loadSourceAsset(url: string, userId: string): Promise<SourceAsset
     mimeType: asset.mime_type,
     filename: asset.filename,
     ...videoSourceMetadata(asset.metadata),
-  };
-}
-
-async function fetchResult(url: string) {
-  const inlineImage = decodeWorkflowImage(url);
-  if (inlineImage) return inlineImage;
-  if (url.startsWith("data:"))
-    throw new Error("Provider 返回了无法识别的内联图片");
-  const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-  if (!response.ok)
-    throw new Error(`下载 Provider 结果失败：${response.status}`);
-  return {
-    bytes: Buffer.from(await response.arrayBuffer()),
-    mimeType:
-      response.headers.get("content-type")?.split(";")[0] || "image/png",
   };
 }
 

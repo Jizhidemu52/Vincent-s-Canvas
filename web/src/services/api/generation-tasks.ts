@@ -145,7 +145,7 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
         if (input.signal?.aborted && (input.cancelOnAbort?.() ?? true)) await cancelTasks(ids);
         throw error;
     } finally {
-        await refreshSessionBalance();
+        void refreshSessionBalance();
     }
 }
 
@@ -199,7 +199,7 @@ export async function requestQueuedImageBatch(input: { modelId: string; prompt: 
         }
         throw error;
     } finally {
-        await refreshSessionBalance();
+        void refreshSessionBalance();
     }
 }
 
@@ -336,7 +336,7 @@ async function waitForQueuedMedia(submitted: QueuedTask, signal?: AbortSignal) {
         if (signal?.aborted) await cancelTasks(ids);
         throw error;
     } finally {
-        await refreshSessionBalance();
+        void refreshSessionBalance();
     }
 }
 

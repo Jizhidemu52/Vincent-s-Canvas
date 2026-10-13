@@ -43,6 +43,14 @@ API、Worker 和本机演示服务仍运行于 Bun；对话及已接入的图片
 
 非视频任务执行报错后不再自动重试整个任务；若服务重启时发现已在执行但结果不明的任务，则暂停并保留待核查状态，普通恢复按钮不能直接重新提交。已发出请求但遇网络故障时，上游仍可能已经执行，请先核查结果，避免重复计费。视频仍沿用原上游任务 ID 恢复查询。
 
+## 生图耗时定位
+
+正式 Worker 与单机演示的 OpenToken 图片调用输出 `event=generation_timing` 的 JSON 日志，可按 `taskId` 关联同一任务。日志只包含任务 ID、模型配置 ID、尝试次数、运行入口、阶段、结果和毫秒耗时，不包含提示词、图片内容、Provider URL、凭据或错误正文；日志写入失败不会中断生成。
+
+`provider_request` 是发送请求至收到响应头，`provider_response` 是读取并解析响应体，`result_download` 是上游返回图片 URL 后取回图片（内联图片不产生该下载阶段），`result_store` 是保存结果，正式 Worker 的 `task_finalize` 是结算及完成状态落库。`prepare` 记录请求准备或参考图读取。每段有 `phase=start/end`，未结束的 `start` 表示当前仍在等待该边界；`phase=complete` 记录本轮执行结果。`durationMs` 是单段时长，`elapsedMs` 是本轮开始后的累计时长；正式 Worker 的 `provider_execution` 包含其内部阶段，不能与子阶段相加。工作流及非 OpenAI 协议目前只有整体执行/保存计时，不承诺同样细分。
+
+这些时间不能直接区分供应商内部排队与模型推理；即使响应头提前返回，主要等待也可能落在读取响应体。后端队列耗时仍查任务的 `queuedAt/startedAt`。图片、批量和媒体任务结束后的会话刷新在后台继续，不阻塞结果交付，也不跳过员工身份与账号状态更新。
+
 ## 单机演示数据保存
 
 `bun run dev:demo` 自动将上传原文件、素材名称/标签/备注和任务记录保存到 `server/.data/local-demo.sqlite`；默认路径以源码位置为基准，不随当前工作目录改变。`DEMO_STATE_PATH` 可覆盖路径，建议使用持久磁盘的绝对路径。该目录不提交 Git，请确保可写并定期备份。

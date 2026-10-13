@@ -22,7 +22,7 @@ import { useAssetStore, type AssetInput } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { loadCanvasImageTools } from "@/lib/canvas/canvas-image-tool-loader";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
-import { readCanvasSystemClipboard } from "@/lib/canvas/canvas-system-clipboard";
+import { bindCanvasClipboardEvents } from "@/lib/canvas/canvas-system-clipboard";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { zoomViewportAtCanvasCenter } from "@/lib/canvas/canvas-viewport-interaction";
@@ -169,6 +169,7 @@ const CanvasNodeHoverToolbar = lazy(loadCanvasNodeHoverToolbar);
 const CanvasNodeInfoModal = lazy(loadCanvasNodeInfoModal);
 
 type CanvasClipboard = {
+    token: string;
     nodes: CanvasNodeData[];
     connections: CanvasConnection[];
     groups?: CanvasNodeGroup[];
@@ -1772,15 +1773,17 @@ function WirelessCanvasPage() {
         if (!copiedNodes.length) return;
 
         clipboardRef.current = {
+            token: nanoid(),
             nodes: copiedNodes,
             connections: connectionsRef.current.filter((connection) => selectedIds.has(connection.fromNodeId) && selectedIds.has(connection.toNodeId)).map((connection) => ({ ...connection })),
             groups: groupsRef.current.filter(group => group.nodeIds.length && group.nodeIds.every(id => selectedIds.has(id))),
         };
+        return { token: clipboardRef.current.token, text: copiedNodes.map(node => node.title).join("\n") };
     }, []);
 
-    const pasteCopiedNodes = useCallback(() => {
+    const pasteCopiedNodes = useCallback((token: string) => {
         const clipboard = clipboardRef.current;
-        if (!clipboard?.nodes.length) return false;
+        if (!clipboard?.nodes.length || clipboard.token !== token) return false;
 
         const center = getCanvasCenter();
         const bounds = clipboard.nodes.reduce(
@@ -2223,7 +2226,7 @@ function WirelessCanvasPage() {
         });
     }, [imageOperationRunner, message, projectId]);
 
-    const createImageFileNode = useCallback(async (file: File, position: Position, signal?: AbortSignal) => {
+    const createImageFileNode = useCallback(async (file: File, position: Position, signal?: AbortSignal, preserveQuickGeneratePrompt = false) => {
         signal?.throwIfAborted();
         const image = await uploadImage(file);
         signal?.throwIfAborted();
@@ -2239,11 +2242,14 @@ function WirelessCanvasPage() {
             metadata: imageMetadata(image),
         };
 
+        // Clipboard import selects its new reference, but must not replace the live creation draft.
+        // Consume this selection without inventing a source prompt on the uploaded image.
+        if (preserveQuickGeneratePrompt) syncSelectedPromptRef.current(new Set([id]), [newNode], projectId);
         setNodes((prev) => [...prev, newNode]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
         setDialogNodeId(id);
-    }, []);
+    }, [projectId]);
 
     const createVideoFileNode = useCallback(async (file: File, position: Position) => {
         const video = await uploadMediaFile(file, "video");
@@ -2306,19 +2312,22 @@ function WirelessCanvasPage() {
         [getCanvasCenter],
     );
 
-    const pasteSystemClipboard = useCallback(async () => {
-        await runLocalImageOperation("clipboard-paste", "粘贴", async (signal) => {
-            const content = await readCanvasSystemClipboard(navigator.clipboard);
-            signal.throwIfAborted();
-            if (content.kind === "image") {
-                const file = new File([content.blob], "clipboard-image.png", { type: content.type });
-                await createImageFileNode(file, getCanvasCenter(), signal);
-                message.success("已从剪切板添加图片");
-                return;
+    const pasteSystemClipboard = useCallback(async (files: File[]) => {
+        const center = getCanvasCenter();
+        await runLocalImageOperation(`clipboard-paste:${nanoid()}`, "粘贴", async (signal) => {
+            for (const [index, file] of files.entries()) {
+                await createImageFileNode(file, { x: center.x + index * 36, y: center.y + index * 36 }, signal, true);
             }
-            if (createTextNodeFromClipboard(content.text)) message.success("已从剪切板添加文本");
+            message.success(files.length === 1 ? "已从剪切板添加图片" : `已从剪切板添加 ${files.length} 张图片`);
         });
-    }, [createImageFileNode, createTextNodeFromClipboard, getCanvasCenter, message, runLocalImageOperation]);
+    }, [createImageFileNode, getCanvasCenter, message, runLocalImageOperation]);
+
+    useEffect(() => bindCanvasClipboardEvents(window, {
+        copyNodes: copySelectedNodes,
+        pasteNodes: pasteCopiedNodes,
+        pasteImages: pasteSystemClipboard,
+        pasteText: createTextNodeFromClipboard,
+    }), [copySelectedNodes, pasteCopiedNodes, pasteSystemClipboard, createTextNodeFromClipboard]);
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -2333,7 +2342,7 @@ function WirelessCanvasPage() {
                 return;
             }
 
-            if (isModifierShortcut && ["z", "y", "a", "c", "v"].includes(key)) {
+            if (isModifierShortcut && ["z", "y", "a"].includes(key)) {
                 event.preventDefault();
                 switch (key) {
                     case "z":
@@ -2346,10 +2355,6 @@ function WirelessCanvasPage() {
                         setSelectedConnectionId(null);
                         setContextMenu(null);
                         cancelSelectionPreview();
-                        break;
-                    case "c": copySelectedNodes(); break;
-                    case "v":
-                        if (!event.repeat && !pasteCopiedNodes()) void pasteSystemClipboard();
                         break;
                 }
                 return;
@@ -2385,7 +2390,7 @@ function WirelessCanvasPage() {
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [cancelSelectionPreview, commitSelectedNodeIds, copySelectedNodes, createSelectedGroup, deleteConnection, deleteNodes, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas]);
+    }, [cancelSelectionPreview, commitSelectedNodeIds, createSelectedGroup, deleteConnection, deleteNodes, redoCanvas, selectedConnectionId, setConnecting, undoCanvas]);
 
     const handleConnectStart = useCallback(
         (event: ReactMouseEvent, nodeId: string, handleType: "source" | "target") => {

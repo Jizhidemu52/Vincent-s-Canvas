@@ -12,6 +12,7 @@ import { applyDemoProviderCredentials } from "./demo-provider-credentials";
 import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
 import { resolveDemoHost } from "./demo-network-config";
 import { isOpenTokenImageModel, runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
+import { createGenerationTiming } from "./generation-timing";
 import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, chatFunctionToolsSchema, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
 import { fetchProviderSubmission } from "./provider-submission-transport";
 import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
@@ -2007,18 +2008,22 @@ async function runOpenTokenImageTaskForDemo(
   parameters: Record<string, unknown>,
   sources: DemoAsset[],
 ) {
+  const timing = createGenerationTiming({ taskId: task.id, modelConfigId: task.modelConfigId, runtime: "demo" });
   try {
     updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
-    completeDemoImageTask(task, user.id, await runOpenTokenImage({
+    const resultUrl = await runOpenTokenImage({
       baseUrl: openTokenBaseUrl,
       apiKey: openTokenApiKey,
       modelId,
       prompt,
       ...openAiImageParameters(parameters, modelId),
       references: sources.map((source) => ({ filename: source.filename, mimeType: source.mimeType, bytes: source.bytes })),
-    }));
+    }, timing);
+    await timing.measure("result_store", () => completeDemoImageTask(task, user.id, resultUrl));
   } catch (error) {
     finishDemoTaskFailure(task, error, { status: "failed", failureReason: error instanceof Error ? error.message : "OpenToken image task failed" }, user);
+  } finally {
+    timing.finish(task.status === "success" ? "success" : task.status === "paused" ? "paused" : "failed");
   }
 }
 

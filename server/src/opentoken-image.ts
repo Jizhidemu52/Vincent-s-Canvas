@@ -1,4 +1,5 @@
 import { fetchProviderSubmission } from "./provider-submission-transport";
+import type { GenerationTiming, GenerationTimingStage } from "./generation-timing";
 
 export type OpenTokenReferenceImage = {
   filename: string;
@@ -115,27 +116,33 @@ export function openTokenErrorMessage(value: unknown) {
       : "";
 }
 
-export async function runOpenTokenImage(input: OpenTokenImageInput): Promise<string> {
+export async function runOpenTokenImage(input: OpenTokenImageInput, timing?: GenerationTiming): Promise<string> {
   if (!input.apiKey.trim()) throw new Error("OpenToken API key is not configured");
-  const request = buildOpenTokenImageRequest(input);
-  const response = await fetchProviderSubmission(request.url, {
+  const measure = <T>(stage: GenerationTimingStage, action: () => Promise<T> | T) => timing ? timing.measure(stage, action) : action();
+  const request = await measure("prepare", () => buildOpenTokenImageRequest(input));
+  const response = await measure("provider_request", () => fetchProviderSubmission(request.url, {
     method: request.method,
     headers: request.headers,
     body: request.form || JSON.stringify(request.body),
     signal: AbortSignal.timeout(OPENAI_IMAGE_TIMEOUT_MS),
   }).catch((error) => {
     throw new Error(`OpenToken image submission transport failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }));
+  const result = await measure("provider_response", async () => {
+    if (!response.ok) {
+      const message = openTokenErrorMessage(await response.json().catch(() => null));
+      throw new Error(`OpenToken image request failed: ${response.status}${message ? `: ${message}` : ""}`);
+    }
+    return parseOpenTokenImageResponse(await response.json());
   });
-  if (!response.ok) {
-    const message = openTokenErrorMessage(await response.json().catch(() => null));
-    throw new Error(`OpenToken image request failed: ${response.status}${message ? `: ${message}` : ""}`);
-  }
-  const result = parseOpenTokenImageResponse(await response.json());
   if ("base64" in result) return `data:image/png;base64,${result.base64}`;
-  const image = await fetch(result.url, { signal: AbortSignal.timeout(120_000) }).catch((error) => {
-    throw new Error(`OpenToken image result download transport failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-  });
-  if (!image.ok) throw new Error(`OpenToken image download failed: ${image.status}`);
-  const mimeType = image.headers.get("content-type")?.split(";")[0] || "image/png";
-  return `data:${mimeType};base64,${Buffer.from(await image.arrayBuffer()).toString("base64")}`;
+  const download = async () => {
+    const image = await fetch(result.url, { signal: AbortSignal.timeout(120_000) }).catch((error) => {
+      throw new Error(`OpenToken image result download transport failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    });
+    if (!image.ok) throw new Error(`OpenToken image download failed: ${image.status}`);
+    const mimeType = image.headers.get("content-type")?.split(";")[0] || "image/png";
+    return `data:${mimeType};base64,${Buffer.from(await image.arrayBuffer()).toString("base64")}`;
+  };
+  return /^https?:\/\//i.test(result.url) ? measure("result_download", download) : download();
 }

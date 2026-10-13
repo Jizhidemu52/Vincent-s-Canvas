@@ -9,7 +9,9 @@ export const CANVAS_PROJECT_BUDGET = {
     // PDF generation and assistant processing remain separate on-demand chunks.
     // Persisted undo/redo, offline-safe tool loading, and inline comparison's
     // source snapshots/entry point add a small entry cost; comparison UI stays lazy.
-    gzipBytes: 82 * 1024,
+    // Native copy/paste routing also lives in the entry so HTTP screenshot paste
+    // works on the first gesture; reserve 1 KiB for that path, keeping the gate.
+    gzipBytes: 83 * 1024,
 };
 
 export function bundleBudgetViolations(entries) {

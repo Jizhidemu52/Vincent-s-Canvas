@@ -66,13 +66,13 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                     onMissingConfig={onMissingConfig} className="cw-model-picker" />
                 <button type="button" className="cw-reference-button" title="添加参考图" aria-label="添加参考图" disabled={running || references.length >= referenceValidation.maximum} onClick={onPickReferences}><Paperclip size={17} /></button>
                 </div>
-                <textarea className="cw-prompt" aria-label="描述图像" placeholder={!profile.requiresPrompt ? "添加 2–4 张参考图，直接生成合成图，无需描述。" : references.length ? "描述想如何修改，可用「图1」「图2」指定参考图…" : "描述你想创作的图像…"}
-                    value={prompt} maxLength={2000} disabled={running || !profile.requiresPrompt}
+                <textarea className="cw-prompt" data-canvas-image-paste aria-label="描述图像" placeholder={!profile.requiresPrompt ? "添加 2–4 张参考图，直接生成合成图，无需描述。" : references.length ? "描述想如何修改，可用「图1」「图2」指定参考图…" : "描述你想创作的图像…"}
+                    value={prompt} maxLength={2000} disabled={running || !profile.requiresPrompt} title="Enter 生成，Shift+Enter 换行"
                     onChange={(event) => onPromptChange(event.target.value)}
                     onKeyDown={(event) => {
-                        if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !disabled) {
-                            event.preventDefault(); onGenerate();
-                        }
+                        if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
+                        event.preventDefault();
+                        if (!disabled && !event.repeat) onGenerate();
                     }} />
                 <CanvasQuickReferenceTray references={references} disabled={running} onMove={onMoveReference} onRemove={onRemoveReference} onClear={onClearReferences} />
                 <details className="cw-selection-hint">
@@ -99,7 +99,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                     <button type="button" className="cw-generate-button" disabled={disabled} onClick={onGenerate}>
                         {running ? <><LoaderCircle size={16} className="animate-spin" />提交中…</> : references.length ? "生成修改图" : "生成"}
                     </button>
-                    {deploymentFeatures.creditsEnabled ? <span className="cw-estimate" title={`预计 ¥${estimateRmb.toFixed(2)}，剩余 ${remainingCredits ?? "-"} 积分`}>{estimateCredits} 积分</span> : <span className="cw-shortcut" aria-hidden>Ctrl ↵</span>}
+                    {deploymentFeatures.creditsEnabled ? <span className="cw-estimate" title={`预计 ¥${estimateRmb.toFixed(2)}，剩余 ${remainingCredits ?? "-"} 积分`}>{estimateCredits} 积分</span> : <span className="cw-shortcut" aria-hidden>Enter ↵</span>}
                 </div>
             </div>
         </div>

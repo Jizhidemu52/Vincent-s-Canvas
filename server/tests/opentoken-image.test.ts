@@ -7,8 +7,150 @@ import {
   parseOpenTokenImageResponse,
   runOpenTokenImage,
 } from "../src/opentoken-image";
+import type { GenerationTiming, GenerationTimingStage } from "../src/generation-timing";
+import { openAiImageParameters } from "../src/openai-image-parameters";
+
+function recordTiming(events: string[]): GenerationTiming {
+  return {
+    async measure<T>(stage: GenerationTimingStage, action: () => Promise<T> | T): Promise<T> {
+      events.push(`${stage}:start`);
+      try {
+        const result = await action();
+        events.push(`${stage}:success`);
+        return result;
+      } catch (error) {
+        events.push(`${stage}:failed`);
+        throw error;
+      }
+    },
+    finish(outcome) { events.push(`finish:${outcome}`); },
+  };
+}
 
 describe("OpenToken image protocol adapter", () => {
+  for (const modelId of ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"] as const) {
+    for (const quality of ["low", "medium", "high", "auto"] as const) {
+      test(`${modelId} forwards ${quality} unchanged through generation and edit parameters`, async () => {
+        const input = {
+          baseUrl: "https://example.test/v1", apiKey: "test-only", modelId, prompt: "quality fixture",
+          ...openAiImageParameters({ quality, size: "1024x1024", resolution: "4k" }, modelId),
+        };
+        const generation = buildOpenTokenImageRequest(input);
+        expect(generation.url).toBe("https://example.test/v1/images/generations");
+        expect(generation.body).toEqual({ model: modelId, prompt: "quality fixture", n: 1, size: "1024x1024", quality });
+        const source = new Uint8Array([0, 255, 1, 2]);
+        const edit = buildOpenTokenImageRequest({ ...input, references: [{ filename: "source.png", mimeType: "image/png", bytes: source }] });
+        expect(edit.url).toBe("https://example.test/v1/images/edits");
+        expect(edit.method).toBe(generation.method);
+        expect(edit.form?.get("quality")).toBe(quality);
+        expect(edit.form?.get("size")).toBe("1024x1024");
+        expect(edit.form?.get("model")).toBe(modelId);
+        expect(new Uint8Array(await (edit.form?.get("image") as Blob).arrayBuffer())).toEqual(source);
+      });
+    }
+  }
+
+  test("times response headers, JSON and complete result bytes separately without changing the image", async () => {
+    const events: string[] = [];
+    const provider = Response.json({ data: [{ url: "https://image.test/result.webp" }] });
+    const readJson = provider.json.bind(provider);
+    provider.json = async () => { events.push("read_json"); return readJson(); };
+    const image = new Response(new Uint8Array([0, 255, 1, 2]), { headers: { "content-type": "image/webp; charset=binary" } });
+    const readBytes = image.arrayBuffer.bind(image);
+    image.arrayBuffer = async () => { events.push("read_image_body"); return readBytes(); };
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async (url: string | URL | Request) => {
+      if (String(url) === "http://opentoken.test/v1/images/generations") { events.push("submit"); return provider; }
+      if (String(url) === "https://image.test/result.webp") { events.push("download"); return image; }
+      throw new Error("Unexpected network request");
+    }, { preconnect() {} }));
+    try {
+      const result = await runOpenTokenImage({ baseUrl: "http://opentoken.test/v1", apiKey: "test-key", prompt: "test", quality: "high" }, recordTiming(events));
+      expect(result).toBe("data:image/webp;base64,AP8BAg==");
+      expect(events).toEqual([
+        "prepare:start", "prepare:success",
+        "provider_request:start", "submit", "provider_request:success",
+        "provider_response:start", "read_json", "provider_response:success",
+        "result_download:start", "download", "read_image_body", "result_download:success",
+      ]);
+    } finally { fetchMock.mockRestore(); }
+  });
+
+  test("inline base64 results do not report a download that never happened", async () => {
+    const events: string[] = [];
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async () => Response.json({ data: [{ b64_json: "AP8BAg==" }] }), { preconnect() {} }));
+    try {
+      expect(await runOpenTokenImage({ baseUrl: "http://opentoken.test/v1", apiKey: "test-key", prompt: "test" }, recordTiming(events))).toBe("data:image/png;base64,AP8BAg==");
+      expect(events).toEqual([
+        "prepare:start", "prepare:success",
+        "provider_request:start", "provider_request:success",
+        "provider_response:start", "provider_response:success",
+      ]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally { fetchMock.mockRestore(); }
+  });
+
+  test("a data URL in the provider URL field is not classified as a network download", async () => {
+    const events: string[] = [];
+    const nativeFetch = globalThis.fetch;
+    const inline = "data:image/png;base64,AP8BAg==";
+    const fetchMock = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url) === "http://opentoken.test/v1/images/generations") return Response.json({ data: [{ url: inline }] });
+      if (String(url) === inline) return nativeFetch(url, init);
+      throw new Error("Unexpected remote download");
+    }, { preconnect() {} }));
+    try {
+      expect(await runOpenTokenImage({ baseUrl: "http://opentoken.test/v1", apiKey: "test-key", prompt: "test" }, recordTiming(events))).toBe(inline);
+      expect(events).toEqual(["prepare:start", "prepare:success", "provider_request:start", "provider_request:success", "provider_response:start", "provider_response:success"]);
+    } finally { fetchMock.mockRestore(); }
+  });
+
+  for (const failedStage of ["provider_response", "result_download"] as const) {
+    test(`a ${failedStage} body failure is timed and preserves the error without resubmitting`, async () => {
+      const events: string[] = [];
+      const failure = new Error("response body interrupted");
+      let submissions = 0;
+      const fetchMock = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async (url: string | URL | Request) => {
+        if (String(url) === "http://opentoken.test/v1/images/generations") {
+          submissions++;
+          const provider = Response.json({ data: [{ url: "https://image.test/result.png" }] });
+          if (failedStage === "provider_response") provider.json = async () => { throw failure; };
+          return provider;
+        }
+        if (String(url) === "https://image.test/result.png") {
+          const image = new Response(new Uint8Array([1]));
+          image.arrayBuffer = async () => { throw failure; };
+          return image;
+        }
+        throw new Error("Unexpected network request");
+      }, { preconnect() {} }));
+      try {
+        const error = await runOpenTokenImage({ baseUrl: "http://opentoken.test/v1", apiKey: "test-key", prompt: "test" }, recordTiming(events)).catch(error => error);
+        expect(error).toBe(failure);
+        expect(events.at(-1)).toBe(`${failedStage}:failed`);
+        expect(submissions).toBe(1);
+      } finally { fetchMock.mockRestore(); }
+    });
+  }
+
+  for (const validJson of [true, false]) {
+    test(`provider HTTP errors time the ${validJson ? "JSON" : "invalid JSON"} response without swallowing its status`, async () => {
+      const events: string[] = [];
+      const provider = validJson ? Response.json({ error: { message: "quota exceeded" } }, { status: 429 }) : new Response("upstream unavailable", { status: 503 });
+      const readJson = provider.json.bind(provider);
+      provider.json = async () => { events.push("read_error_json"); return readJson(); };
+      const fetchMock = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async () => provider, { preconnect() {} }));
+      try {
+        await expect(runOpenTokenImage({ baseUrl: "http://opentoken.test/v1", apiKey: "test-key", prompt: "test" }, recordTiming(events))).rejects.toThrow(validJson ? "OpenToken image request failed: 429: quota exceeded" : "OpenToken image request failed: 503");
+        expect(events).toEqual([
+          "prepare:start", "prepare:success",
+          "provider_request:start", "provider_request:success",
+          "provider_response:start", "read_error_json", "provider_response:failed",
+        ]);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      } finally { fetchMock.mockRestore(); }
+    });
+  }
+
   test("distinguishes submission and result-download transport failures without resubmitting", async () => {
     const fetchMock = spyOn(globalThis, "fetch");
     const input = { baseUrl: "http://opentoken.test/v1", apiKey: "test-key", prompt: "test" };

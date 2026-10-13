@@ -155,3 +155,42 @@ test("generation in progress keeps parameter and submit locks when settings are 
     expect(opened.fieldset.props.disabled).toBe(true);
     expect(opened.tree.find(element => element.props.className === "cw-generate-button")!.props.disabled).toBe(true);
 });
+
+function pressPrompt(props: Partial<Props>, patch: Record<string, unknown> = {}) {
+    let submissions = 0;
+    let prevented = false;
+    const rendered = controls({ ...props, onGenerate: () => { submissions++; } })();
+    const prompt = rendered.tree.find(element => element.type === "textarea")!;
+    prompt.props.onKeyDown({ key: "Enter", shiftKey: false, ctrlKey: false, metaKey: false, keyCode: 13, nativeEvent: { isComposing: false },
+        preventDefault: () => { prevented = true; }, ...patch });
+    return { submissions, prevented, buttonDisabled: rendered.tree.find(element => element.props.className === "cw-generate-button")!.props.disabled };
+}
+
+test("Enter submits generation and modification while Ctrl/Cmd+Enter remain compatible", () => {
+    for (const references of [[], initialProps.references]) {
+        for (const modifier of [{}, { ctrlKey: true }, { metaKey: true }]) {
+            expect(pressPrompt({ references }, modifier)).toEqual({ submissions: 1, prevented: true, buttonDisabled: false });
+        }
+    }
+});
+
+test("held Enter cannot resubmit after the generate button becomes available again", () => {
+    for (const modifier of [{}, { ctrlKey: true }, { metaKey: true }]) {
+        expect(pressPrompt({}, { ...modifier, repeat: true })).toEqual({ submissions: 0, prevented: true, buttonDisabled: false });
+    }
+});
+
+test("Shift+Enter and composing Enter remain with the text editor", () => {
+    for (const input of [{ shiftKey: true }, { shiftKey: true, ctrlKey: true }, { nativeEvent: { isComposing: true } }, { nativeEvent: { isComposing: true }, ctrlKey: true }, { keyCode: 229 }, { keyCode: 229, metaKey: true }]) {
+        expect(pressPrompt({}, input)).toEqual({ submissions: 0, prevented: false, buttonDisabled: false });
+    }
+});
+
+test("Enter never bypasses the generate button's running, empty-prompt or invalid-reference locks", () => {
+    const tooMany = Array.from({ length: 30 }, (_, index) => ({ ...initialProps.references[0]!, id: `reference-${index}` }));
+    for (const props of [{ running: true }, { prompt: " " }, { references: tooMany }]) {
+        const result = pressPrompt(props);
+        expect(result.buttonDisabled).toBe(true);
+        expect(result.submissions).toBe(0);
+    }
+});
