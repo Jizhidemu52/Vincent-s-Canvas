@@ -7,12 +7,12 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { canvasQuickGeneratePanelPropsEqual, type CanvasQuickGeneratePanelRenderState } from "@/lib/canvas/canvas-quick-generate-render-stability";
 import { validateImageReferences } from "@/lib/image-reference-policy";
-import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionName, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { resolveCapabilityModel } from "@/lib/model-picker-options";
-import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { imageModelProfile, imageModelSettingsError, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import type { ReferenceImage } from "@/types/image";
 
 type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "embedded" | "config" | "references"> & {
@@ -49,7 +49,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     }, [availableModel, running, size, quality, count, settings.size, settings.quality, settings.count, onSizeChange, onQualityChange, onCountChange]);
     if (!open) return null;
     const referenceValidation = validateImageReferences(modelOptionName(model), references);
-    const disabled = running || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid;
+    const disabled = running || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(imageModelSettingsError(settings.size, profile));
     return (
         <div data-testid="canvas-quick-generate-panel" data-canvas-no-zoom
             className={embedded ? "cw-generator" : "cw-generator cw-generator-mobile cw-surface max-h-[calc(100dvh-144px)] overflow-y-auto"}
@@ -93,6 +93,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                             if (key === "size") onSizeChange(value);
                             if (key === "quality") onQualityChange(value);
                             if (key === "count") onCountChange(Number(value));
+                            if (key === "imageOptions") useConfigStore.getState().updateConfig("imageOptions", value);
                         }} />
                     </fieldset>
                 <div className={`cw-generate-action ${disabled ? "is-disabled" : ""}`}>

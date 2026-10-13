@@ -3,12 +3,13 @@ import { ConfigProvider } from "antd";
 import { ChevronDown, Minus, Plus, Ratio, Layers2 } from "lucide-react";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
-import { normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
+import { imageModelSettingsError, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
+import { imageOptionFields, readImageOptions } from "@/lib/image-advanced-settings";
 import "./image-settings-panel.css";
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "quality" | "size" | "count", value: string) => void;
+    onConfigChange: (key: "quality" | "size" | "count" | "imageOptions", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
@@ -23,6 +24,17 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const count = Math.min(maxCount, Number(normalized.count));
     const custom = !profile.sizes.includes(normalized.size);
     const dimensions = /^\d+x\d+$/.test(normalized.size) ? normalized.size.split("x").map(Number) : [1024, 1024];
+    const sizeError = imageModelSettingsError(normalized.size, profile);
+    const fields = imageOptionFields(profile);
+    const options = readImageOptions(config.imageOptions);
+    const updateOption = (key: string, value: string) => {
+        const next = { ...options, [key]: value };
+        if (!value) delete next[key];
+        if (key === "background" && value === "transparent" && options.output_format === "jpeg") next.output_format = "png";
+        if (key === "output_format" && value === "jpeg" && options.background === "transparent") next.background = "opaque";
+        if (key === "dimensions" && value) onConfigChange("size", ({ SQUARE: "1:1", PORTRAIT: "2:3", LANDSCAPE: "3:2" } as Record<string, string>)[value]!);
+        onConfigChange("imageOptions", JSON.stringify(next));
+    };
     useEffect(() => {
         for (const key of ["size", "quality", "count"] as const) {
             const value = key === "count" ? String(count) : normalized[key];
@@ -51,7 +63,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <ChevronDown size={13} aria-hidden />
                 </label>
             </div>
-            <p className="text-xs leading-5" style={{ color: theme.node.muted }}>仅影响下次 AI 生成，不改变已有图片。{normalized.size === "auto" ? "自适应由模型结合描述和参考图决定输出尺寸。" : "精确像素尺寸请使用「编辑图片」中的自定义尺寸。"}</p>
+            <p className="text-xs leading-5" style={{ color: theme.node.muted }}>仅影响下次 AI 生成，不改变已有图片。{profile.tip} 高画质、大尺寸可能增加费用与耗时。</p>
             <div className="ip-row">
                 <span className="ip-label">{profile.qualityLabel}</span>
                 <div className="ip-segments" role="group" aria-label={profile.qualityLabel}>
@@ -72,10 +84,27 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
             </div>
             {profile.customSize ? <details className="ip-details">
                 <summary>自定义像素<ChevronDown size={13} /></summary>
+                {profile.sizeConstraintMessage ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{profile.sizeConstraintMessage}</p> : null}
                 <div className="ip-dimensions">
                     {["宽度", "高度"].map((label, index) => <label key={`${label}-${dimensions[index]}`}><span>{label}</span><input aria-label={`自定义${label}`} type="number" min={1} step={snapToStep ? 16 : 1} defaultValue={dimensions[index]} onBlur={event => commitDimension(index, event.currentTarget)} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>)}
                 </div>
                 <label className="ip-align"><input type="checkbox" checked={snapToStep} onChange={event => setSnapToStep(event.target.checked)} />16倍数对齐</label>
+            </details> : null}
+            {profile.customAspect ? <label className="ip-row"><span className="ip-label">自由比例</span><input key={normalized.size} aria-label="自定义宽高比" defaultValue={normalized.size} placeholder="例如 7:5" className="min-w-0 rounded border px-2 py-1.5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }} onBlur={event => { if (/^[1-9]\d*:[1-9]\d*$/.test(event.currentTarget.value)) onConfigChange("size", event.currentTarget.value); else event.currentTarget.value = normalized.size; }} /></label> : null}
+            {sizeError ? <p role="alert" className="text-xs text-destructive">{sizeError}</p> : null}
+            {fields.length ? <details className="ip-details">
+                <summary>全部高级参数<ChevronDown size={13} /></summary>
+                <p className="text-xs leading-5" style={{ color: theme.node.muted }}>留空使用渠道默认；只提交当前模型支持的字段。</p>
+                <div className="flex flex-col gap-3 py-2">
+                    {fields.map(field => <label key={field.key} className="flex flex-col gap-1 text-xs">
+                        <span>{field.label} <span style={{ color: theme.node.muted }}>({field.key})</span></span>
+                        {field.options || field.type === "boolean" ? <select aria-label={field.label} value={options[field.key] || ""} className="w-full rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)}>
+                            <option value="">渠道默认</option>
+                            {(field.options || ["true", "false"]).map(value => <option key={value} value={value}>{({ true: "开启", false: "关闭", auto: "自动 (auto)", opaque: "不透明 (opaque)", transparent: "透明 (transparent)" } as Record<string, string>)[value] || value}</option>)}
+                        </select> : <input aria-label={field.label} type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.step} value={options[field.key] || ""} placeholder="渠道默认" disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(options.output_format || "png")} className="w-full rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)} />}
+                        {field.tip ? <span className="leading-5" style={{ color: theme.node.muted }}>{field.tip}</span> : null}
+                    </label>)}
+                </div>
             </details> : null}
         </div>
     );
@@ -86,9 +115,9 @@ export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; ch
 }
 
 export function imageQualityLabel(value: string) {
-    return ({ auto: "自动", high: "高", medium: "中", low: "低", relax: "休闲", fast: "快速", turbo: "极速" } as Record<string, string>)[value] || value.toUpperCase();
+    return ({ auto: "自动 auto", high: "高 high", xhigh: "超高 xhigh", max: "最高 max", medium: "中 medium", low: "低 low", relax: "休闲", fast: "快速", turbo: "极速" } as Record<string, string>)[value] || value.toUpperCase();
 }
 
 export function imageSizeLabel(size: string) {
-    return ({ auto: "自适应", "1024x1024": "1:1", "1536x1024": "3:2", "1024x1536": "2:3" } as Record<string, string>)[size] || size;
+    return ({ auto: "自适应", "1024x1024": "1:1", "1536x1024": "3:2", "1024x1536": "2:3", "2048x2048": "2K 方形", "2048x1152": "2K 横向", "1152x2048": "2K 纵向", "3840x2160": "4K 横向", "2160x3840": "4K 纵向", "2880x2880": "4K 档方形" } as Record<string, string>)[size] || size;
 }

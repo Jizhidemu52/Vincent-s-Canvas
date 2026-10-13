@@ -27,7 +27,7 @@ export type SceneImage = ReferenceImage & {
     sourceTaskId?: string; durationMs?: number;
 };
 export type SceneImages = Partial<Record<SceneSlotId, SceneImage>>;
-export type SceneParameters = Pick<AiConfig, "model" | "imageModel" | "size" | "quality" | "count">;
+export type SceneParameters = Pick<AiConfig, "model" | "imageModel" | "size" | "quality" | "count" | "imageOptions">;
 export type SceneSelection = { sourceId: string; mask: SceneImage };
 export type SceneResult = { id: string; status: "pending" | "success" | "failed"; image?: SceneImage; uncompositedImage?: SceneImage; error?: string };
 export type SceneLog = {
@@ -46,7 +46,7 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : "
 
 /** Only these image settings may enter a local draft or history record. */
 export function sceneParameters(config: SceneParameters): SceneParameters {
-    return { model: config.model, imageModel: config.imageModel, size: config.size, quality: config.quality, count: config.count };
+    return { model: config.model, imageModel: config.imageModel, size: config.size, quality: config.quality, count: config.count, ...(config.imageOptions !== undefined ? { imageOptions: config.imageOptions } : {}) };
 }
 
 function storedImage(image: SceneImage): SceneImage {

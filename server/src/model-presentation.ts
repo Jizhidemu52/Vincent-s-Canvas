@@ -5,8 +5,8 @@ const imageCapabilities = ["generate", "edit", "upscale", "remove_background", "
 // Show upstream model IDs as labels; usage descriptions are not quality guarantees.
 const openTokenImageLabels: Readonly<Record<string, { name: string; description: string }>> = {
   "gpt-image-2": { name: "gpt-image-2", description: "直接描述，生成新图片" },
-  "gpt-image-2.5-flare": { name: "gpt-image-2.5-flare", description: "快速看效果，尝试不同设计方向" },
-  "gpt-image-2.5-sunburst": { name: "gpt-image-2.5-sunburst", description: "已有图片，仔细调整局部细节" },
+  "gpt-image-2.5-flare": { name: "gpt-image-2.5-flare", description: "速度优先；画质与像素尺寸可独立选择" },
+  "gpt-image-2.5-sunburst": { name: "gpt-image-2.5-sunburst", description: "质量优先；新建默认 high，支持文生图与改图" },
   "gemini-3.1-flash-image": { name: "gemini-3.1-flash-image", description: "前三个模型不合适时再试" },
 };
 
@@ -60,6 +60,7 @@ export function publicModelName(model: Record<string, unknown>) {
 }
 
 const anonymousProfiles = {
+  "standard-flex": "standard-flex", "standard-flex-plus": "standard-flex-plus",
   standard: "standard", gpt: "pixel", gemini: "resolution", midjourney: "speed",
   "midjourney-blend": "blend", unverified: "unverified",
 } as const;

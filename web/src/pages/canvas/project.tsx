@@ -65,7 +65,7 @@ import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } fro
 import { buildWorkflowVideoStageDispatch, completeAgentMediaWorkflowStage, restoreAgentMediaWorkflow, selectWorkflowCandidate } from "@/lib/canvas/agent-media-workflow";
 import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workflow-stage";
 import { createCanvasMentionReferenceIndex, createCanvasResourceReferenceIndex } from "@/lib/canvas/canvas-resource-references";
-import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
+import { canvasImageReferenceMentions, resolveCanvasNodeImageReferences } from "@/lib/canvas/canvas-image-references";
 import { syncCanvasSelectionReferences, type CanvasSelectionReference } from "@/lib/canvas/canvas-selection-references";
 import { createCanvasSelectionPromptSync } from "@/lib/canvas/canvas-selection-prompt";
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
@@ -1510,13 +1510,20 @@ function WirelessCanvasPage() {
     const activeResourceReferenceByNodeId = useMemo(
         () => {
             const references = new Map((resourceContextNodeId ? mentionReferenceIndex.get(resourceContextNodeId) : []).map((reference) => [reference.nodeId, reference]));
+            const contextNode = resourceContextNodeId ? nodeById.get(resourceContextNodeId) : undefined;
+            if (!assistantOpen && !quickGenerateOpen && contextNode?.type === CanvasNodeType.Image) {
+                references.forEach((reference, id) => { if (reference.kind === "image") references.delete(id); });
+                canvasImageReferenceMentions(resolveCanvasNodeImageReferences(contextNode, nodes, connections)).forEach(reference => {
+                    if (nodeById.has(reference.nodeId)) references.set(reference.nodeId, reference);
+                });
+            }
             if (!assistantOpen && quickGenerateOpen) quickGenerateReferences.forEach((reference, index) => {
                 const canvasReference = reference.canvasNodeId ? globalResourceReferenceIndex.get(reference.canvasNodeId) : undefined;
                 if (canvasReference) references.set(canvasReference.nodeId, { ...canvasReference, label: `图片${index + 1}`, active: true });
             });
             return references;
         },
-        [assistantOpen, globalResourceReferenceIndex, mentionReferenceIndex, quickGenerateOpen, quickGenerateReferences, resourceContextNodeId],
+        [assistantOpen, connections, globalResourceReferenceIndex, mentionReferenceIndex, nodeById, nodes, quickGenerateOpen, quickGenerateReferences, resourceContextNodeId],
     );
     const resourceReferenceForNodeId = useCallback(
         (nodeId: string) => activeResourceReferenceByNodeId.get(nodeId) || globalResourceReferenceIndex.get(nodeId),
@@ -3856,12 +3863,8 @@ function WirelessCanvasPage() {
                     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
                     const isImageNode = sourceNode?.type === CanvasNodeType.Image;
                     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;
-                    const sourceReference =
-                        isImageNode && sourceNode?.metadata?.content
-                            ? [{ id: sourceNode.id, name: `${sourceNode.title || sourceNode.id}.png`, type: sourceNode.metadata.mimeType || "image/png", dataUrl: sourceNode.metadata.content, storageKey: sourceNode.metadata.storageKey }]
-                            : [];
-                    const savedReferences = sourceNode ? resolveCanvasImageReferences(sourceNode, nodesRef.current, connectionsRef.current) : [];
-                    const referenceImages = sourceReference.length ? [...sourceReference, ...savedReferences] : savedReferences.length ? savedReferences : generationContext.referenceImages;
+                    const savedReferences = sourceNode ? resolveCanvasNodeImageReferences(sourceNode, nodesRef.current, connectionsRef.current) : [];
+                    const referenceImages = savedReferences.length ? savedReferences : generationContext.referenceImages;
                     const referenceValidation = validateImageReferences(modelOptionName(generationConfig.model), referenceImages);
                     if (!referenceValidation.valid) {
                         message.error(referenceValidation.message);
@@ -4392,6 +4395,7 @@ function WirelessCanvasPage() {
                           ...effectiveConfig,
                           model: savedImageMetadata.model || effectiveConfig.imageModel || effectiveConfig.model,
                           quality: savedImageMetadata.quality || effectiveConfig.quality,
+                          imageOptions: savedImageMetadata.imageOptions ?? effectiveConfig.imageOptions,
                           size: savedImageMetadata.size || effectiveConfig.size,
                           count: "1",
                       }
@@ -5589,6 +5593,7 @@ function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: A
         model: config.model,
         size: config.size,
         quality: config.quality,
+        imageOptions: config.imageOptions || "",
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
         compareSources: references.map(canvasCompareSource),
@@ -5801,6 +5806,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         systemPrompt: node?.metadata?.systemPrompt ?? config.systemPrompt,
         model: node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
+        imageOptions: node?.metadata?.imageOptions ?? config.imageOptions,
         size: node?.metadata?.size || config.size || defaultConfig.size,
         videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
         videoMode: node?.metadata?.videoMode || config.videoMode || defaultConfig.videoMode,

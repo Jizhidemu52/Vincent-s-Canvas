@@ -1,5 +1,7 @@
 import { fetchProviderSubmission } from "./provider-submission-transport";
 import type { GenerationTiming, GenerationTimingStage } from "./generation-timing";
+import { openAiImageParameters, type OpenAiImageParameters } from "./openai-image-parameters";
+export { normalizeOpenTokenImageSize } from "./openai-image-parameters";
 
 export type OpenTokenReferenceImage = {
   filename: string;
@@ -14,29 +16,24 @@ export function isOpenTokenImageModel(value: unknown): value is OpenTokenImageMo
 }
 export const OPENAI_IMAGE_TIMEOUT_MS = 600_000;
 
-export type OpenTokenImageInput = {
+export type OpenTokenImageInput = OpenAiImageParameters & {
   baseUrl: string;
   apiKey: string;
   modelId?: OpenTokenImageModel;
   prompt: string;
-  size?: string;
-  quality?: "low" | "medium" | "high" | "auto";
   resolution?: "1k" | "2k" | "4k";
-  background?: "transparent";
-  output_format?: "png";
   references?: OpenTokenReferenceImage[];
+  mask?: OpenTokenReferenceImage;
 };
 
 export type OpenTokenImageRequest = {
   url: string;
   method: "POST";
   headers: Record<string, string>;
-  body?: {
+  body?: OpenAiImageParameters & {
     model: OpenTokenImageModel;
     prompt: string;
     n: 1;
-    size?: string;
-    quality?: "low" | "medium" | "high" | "auto";
   };
   form?: FormData;
 };
@@ -46,23 +43,20 @@ export function buildOpenTokenImageRequest(input: OpenTokenImageInput): OpenToke
   const references = input.references || [];
   const modelId = input.modelId || "gpt-image-2";
   const headers = { authorization: `Bearer ${input.apiKey}` };
-  const size = modelId === "gemini-3.1-flash-image" ? undefined : normalizeOpenTokenImageSize(input.size);
-  const quality = modelId === "gemini-3.1-flash-image" ? undefined : normalizeOpenTokenImageQuality(input.quality, input.resolution);
+  if (input.mask && !references.length) throw new Error("蒙版编辑必须提供原图");
+  if (input.mask && modelId === "gemini-3.1-flash-image") throw new Error("当前模型没有已确认的蒙版编辑接口");
+  const parameters = openAiImageParameters(input, modelId);
   if (references.length) {
     const form = new FormData();
     form.set("model", modelId);
     form.set("prompt", input.prompt);
     form.set("n", "1");
-    if (size) form.set("size", size);
-    if (quality) form.set("quality", quality);
-    if (input.background === "transparent") {
-      form.set("background", "transparent");
-      form.set("output_format", "png");
-    }
+    for (const [key, value] of Object.entries(parameters)) form.set(key, String(value));
     for (const reference of references) {
       const bytes = new Uint8Array(reference.bytes).buffer;
       form.append("image", new Blob([bytes], { type: reference.mimeType }), reference.filename);
     }
+    if (input.mask) form.set("mask", new Blob([new Uint8Array(input.mask.bytes).buffer], { type: input.mask.mimeType }), input.mask.filename);
     return { url: `${baseUrl}/images/edits`, method: "POST", headers, form };
   }
   return {
@@ -73,27 +67,9 @@ export function buildOpenTokenImageRequest(input: OpenTokenImageInput): OpenToke
       model: modelId,
       prompt: input.prompt,
       n: 1,
-      ...(size ? { size } : {}),
-      ...(quality ? { quality } : {}),
+      ...parameters,
     },
   };
-}
-
-export function normalizeOpenTokenImageSize(value?: string) {
-  const size = String(value || "1024x1024").trim().toLowerCase();
-  if (size === "auto") return "auto";
-  if (size === "1024x1024" || size.includes("1:1")) return "1024x1024";
-  if (size === "1536x1024" || /16:9|4:3|3:2|landscape/.test(size)) return "1536x1024";
-  if (size === "1024x1536" || /9:16|3:4|2:3|portrait/.test(size)) return "1024x1536";
-  return "1024x1024";
-}
-
-function normalizeOpenTokenImageQuality(
-  quality?: OpenTokenImageInput["quality"],
-  resolution?: OpenTokenImageInput["resolution"],
-) {
-  if (quality === "low" || quality === "medium" || quality === "high" || quality === "auto") return quality;
-  return resolution === "4k" ? "high" : resolution === "2k" ? "medium" : "low";
 }
 
 export function parseOpenTokenImageResponse(value: unknown): { url: string } | { base64: string } {
@@ -135,7 +111,7 @@ export async function runOpenTokenImage(input: OpenTokenImageInput, timing?: Gen
     }
     return parseOpenTokenImageResponse(await response.json());
   });
-  if ("base64" in result) return `data:image/png;base64,${result.base64}`;
+  if ("base64" in result) return `data:image/${request.body?.output_format || request.form?.get("output_format") || "png"};base64,${result.base64}`;
   const download = async () => {
     const image = await fetch(result.url, { signal: AbortSignal.timeout(120_000) }).catch((error) => {
       throw new Error(`OpenToken image result download transport failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });

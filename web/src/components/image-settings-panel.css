@@ -5,8 +5,8 @@
 .ip-select { position: relative; min-width: 0; max-width: 190px; flex: 1; }
 .ip-select select { display: block; width: 100%; height: 36px; padding: 0 26px 0 10px; border: 1px solid var(--ip-border); border-radius: 7px; background: var(--ip-panel); color: var(--ip-text); appearance: none; cursor: pointer; font: inherit; text-overflow: ellipsis; }
 .ip-select > svg { position: absolute; right: 8px; top: 12px; pointer-events: none; color: var(--ip-muted); }
-.ip-segments { display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: var(--ip-soft); min-width: 0; flex: 1; max-width: 190px; }
-.ip-segments button { min-width: 0; flex: 1; min-height: 30px; border: 0; border-radius: 5px; padding: 0 4px; background: transparent; color: var(--ip-muted); cursor: pointer; white-space: nowrap; }
+.ip-segments { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 8px; background: var(--ip-soft); min-width: 0; flex: 1; max-width: 220px; }
+.ip-segments button { min-width: 60px; flex: 1; min-height: 30px; border: 0; border-radius: 5px; padding: 0 4px; background: transparent; color: var(--ip-muted); cursor: pointer; white-space: nowrap; }
 .ip-segments button[aria-pressed="true"] { background: var(--ip-panel); color: var(--ip-text); box-shadow: 0 1px 3px #00000013; font-weight: 600; }
 .ip-count { display: flex; flex: 1; align-items: center; gap: 10px; max-width: 190px; min-width: 0; }
 .ip-count > input { min-width: 0; width: 100%; flex: 1; height: 24px; accent-color: var(--ip-text); cursor: pointer; }

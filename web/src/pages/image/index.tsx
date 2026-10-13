@@ -91,7 +91,7 @@ type GenerationLog = {
     thumbnails: string[];
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count" | "imageOptions">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -629,6 +629,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             setReferences(draft.references.map(item => createImageReferenceItem(item, "template")));
             updateConfig("imageModel", draft.config.imageModel);
             updateConfig("size", draft.config.size); updateConfig("quality", draft.config.quality);
+            updateConfig("imageOptions", draft.config.imageOptions || "");
             updateConfig("count", previewLog.config.count); updateConfig("systemPrompt", draft.config.systemPrompt);
             message.success("已完整恢复为草稿，可继续修改；尚未生成或扣费，AI 再次生成不保证结果相同");
         } catch (error) { message.error(error instanceof Error ? error.message : "历史恢复失败，当前草稿未改变"); }
@@ -1163,6 +1164,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         model: log.config?.model || log.model || "",
         imageModel: log.config?.imageModel || log.model || "",
         quality: log.config?.quality || log.quality || "",
+        imageOptions: log.config?.imageOptions || "",
         size: log.config?.size || log.size || "",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
     };
@@ -1211,6 +1213,7 @@ function buildLog({
         model: config.model,
         imageModel: config.imageModel,
         quality: config.quality,
+        imageOptions: config.imageOptions || "",
         size: config.size,
         count: config.count,
     };

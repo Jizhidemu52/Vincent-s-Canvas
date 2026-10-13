@@ -22,7 +22,7 @@ import { ReferenceImageTray } from "@/components/reference-images/reference-imag
 import type { InsertAssetPayload } from "./asset-picker-modal";
 import { loadAssetPickerModal } from "@/lib/canvas/canvas-node-tool-loaders";
 import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
-import { resolveCanvasImageReferences, toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
+import { canvasImageReferenceMentions, resolveCanvasNodeImageReferences, toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraft } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
 import { uploadImage } from "@/services/image-storage";
@@ -69,7 +69,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [canvasPickerOpen, setCanvasPickerOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const uploadInputRef = useRef<HTMLInputElement>(null);
-    const imageReferences = mode === "image" ? resolveCanvasImageReferences(node, canvasNodes, canvasConnections) : [];
+    const imageReferences = mode === "image" ? resolveCanvasNodeImageReferences(node, canvasNodes, canvasConnections) : [];
+    const fixedReferenceKey = hasImageContent ? imageReferences[0]?.referenceKey : undefined;
+    const promptReferences: CanvasResourceReference[] = mode === "image" ? [
+        ...canvasImageReferenceMentions(imageReferences),
+        ...mentionReferences.filter(reference => reference.kind !== "image"),
+    ] : mentionReferences;
     const referenceValidation = validateImageReferences(modelOptionName(config.model), imageReferences);
     const videoContext = mode === "video" ? buildNodeGenerationContext(node.id, canvasNodes, canvasConnections, prompt) : null;
     const videoConfig = mode === "video" ? { ...config, ...normalizeVideoModelConfig(config) } : config;
@@ -101,17 +106,18 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     };
 
     const saveReferences = (next: typeof imageReferences) => {
-        const connectedKeys = imageReferences.filter((reference) => reference.origin === "connection").map((reference) => reference.referenceKey);
-        const nextKeys = new Set(next.map((reference) => reference.referenceKey));
+        const additional = next.filter(reference => reference.referenceKey !== fixedReferenceKey);
+        const connectedKeys = new Set([...(node.metadata?.excludedConnectedImageReferenceKeys || []), ...imageReferences.filter((reference) => reference.origin === "connection").map((reference) => reference.referenceKey)]);
+        const nextKeys = new Set(additional.map((reference) => reference.referenceKey));
         onConfigChange(node.id, {
-            manualImageReferences: next.filter((reference) => reference.origin !== "connection").map(toCanvasStoredImageReference),
-            excludedConnectedImageReferenceKeys: connectedKeys.filter((key) => !nextKeys.has(key)),
-            imageReferenceOrder: next.map((reference) => reference.referenceKey),
+            manualImageReferences: additional.filter((reference) => reference.origin !== "connection").map(toCanvasStoredImageReference),
+            excludedConnectedImageReferenceKeys: [...connectedKeys].filter((key) => !nextKeys.has(key)),
+            imageReferenceOrder: additional.map((reference) => reference.referenceKey),
         });
     };
 
     const addCanvasNodes = (nodeIds: string[]) => {
-        const selected = canvasNodes.filter((candidate) => nodeIds.includes(candidate.id) && candidate.type === CanvasNodeType.Image && candidate.metadata?.content)
+        const selected = canvasNodes.filter((candidate) => candidate.id !== node.id && nodeIds.includes(candidate.id) && candidate.type === CanvasNodeType.Image && candidate.metadata?.content)
             .map((candidate) => createImageReferenceItem({ id: candidate.id, name: `${candidate.title || candidate.id}.png`, type: candidate.metadata?.mimeType || "image/png", dataUrl: candidate.metadata!.content!, storageKey: candidate.metadata?.storageKey }, "canvas"));
         saveReferences(dedupeImageReferences([...imageReferences, ...selected]));
         setCanvasPickerOpen(false);
@@ -144,7 +150,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         >
             <CanvasResourceMentionTextarea
                 value={prompt}
-                references={mentionReferences}
+                references={promptReferences}
                 onChange={updatePrompt}
                 onSubmit={submit}
                 className="thin-scrollbar h-24 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-5 outline-none"
@@ -152,7 +158,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
 
-            {mode === "image" ? <div className="mt-2"><ReferenceImageTray references={imageReferences} validation={referenceValidation} onChange={saveReferences} onRequestUpload={() => uploadInputRef.current?.click()} onRequestAssets={() => setAssetPickerOpen(true)} onRequestCanvas={() => setCanvasPickerOpen(true)} /></div> : null}
+            {mode === "image" ? <div className="mt-2"><ReferenceImageTray references={imageReferences} fixedReferenceKey={fixedReferenceKey} validation={referenceValidation} onChange={saveReferences} onRequestUpload={() => uploadInputRef.current?.click()} onRequestAssets={() => setAssetPickerOpen(true)} onRequestCanvas={() => setCanvasPickerOpen(true)} /></div> : null}
             {videoValidation ? <p role="alert" className="mt-2 text-xs text-destructive">{videoValidation}。已连接素材会保留。</p> : null}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
@@ -240,6 +246,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         ...globalConfig,
         model: node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
+        imageOptions: node.metadata?.imageOptions ?? globalConfig.imageOptions,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
         videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,
         videoMode: node.metadata?.videoMode || globalConfig.videoMode || defaultConfig.videoMode,

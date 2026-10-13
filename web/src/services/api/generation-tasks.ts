@@ -149,7 +149,7 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
     }
 }
 
-export async function requestQueuedImageBatch(input: { modelId: string; prompt: string; files: Array<{ file: File; title: string }>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+export async function requestQueuedImageBatch(input: { modelId: string; prompt: string; parameters?: Record<string, unknown>; files: Array<{ file: File; title: string }>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
     const model = await resolvePublicModel(input.modelId);
     const uploadedItems: Array<{ itemIndex: number; sourceUrl: string }> = [];
     const uploadFailures: QueuedBatchFailure[] = [];
@@ -175,6 +175,7 @@ export async function requestQueuedImageBatch(input: { modelId: string; prompt: 
             operationType: "batch_image",
             modelConfigId: model.id,
             prompt: input.prompt,
+            parameters: input.parameters || {},
             priority: "normal",
             items: uploadedItems.map((item) => ({ sourceUrls: [item.sourceUrl] })),
         }),

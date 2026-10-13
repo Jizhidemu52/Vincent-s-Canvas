@@ -28,8 +28,30 @@ function recordTiming(events: string[]): GenerationTiming {
 }
 
 describe("OpenToken image protocol adapter", () => {
+  test("all documented image fields reach both endpoints and a mask is a separate file", async () => {
+    const reference = { filename: "source.png", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]) };
+    const mask = { filename: "mask.png", mimeType: "image/png", bytes: new Uint8Array([4, 5, 6]) };
+    const input = { baseUrl: "https://example.test/v1", apiKey: "test", modelId: "gpt-image-2.5-flare" as const, prompt: "edit", size: "3840x2160", quality: "max" as const, background: "transparent" as const, output_format: "webp" as const, output_compression: 90 };
+    expect(buildOpenTokenImageRequest(input).body).toEqual({ model: input.modelId, prompt: "edit", n: 1, size: "3840x2160", quality: "max", background: "transparent", output_format: "webp", output_compression: 90 });
+    const edit = buildOpenTokenImageRequest({ ...input, references: [reference], mask });
+    expect(edit.form?.getAll("image")).toHaveLength(1);
+    expect(edit.form?.get("quality")).toBe("max");
+    expect(edit.form?.get("output_format")).toBe("webp");
+    expect(edit.form?.get("output_compression")).toBe("90");
+    expect(Array.from(new Uint8Array(await (edit.form?.get("mask") as File).arrayBuffer()))).toEqual([4, 5, 6]);
+    expect(() => buildOpenTokenImageRequest({ ...input, mask })).toThrow("原图");
+    expect(() => buildOpenTokenImageRequest({ ...input, modelId: "gemini-3.1-flash-image", references: [reference], mask })).toThrow("蒙版");
+  });
+
+  test("inline JPEG and WebP responses keep the selected MIME type", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => Response.json({ data: [{ b64_json: "AP8BAg==" }] })) as unknown as typeof fetch;
+    try {
+      for (const output_format of ["jpeg", "webp"] as const) expect(await runOpenTokenImage({ baseUrl: "http://opentoken.test/v1", apiKey: "test", prompt: "test", output_format })).toBe(`data:image/${output_format};base64,AP8BAg==`);
+    } finally { globalThis.fetch = originalFetch; }
+  });
   for (const modelId of ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"] as const) {
-    for (const quality of ["low", "medium", "high", "auto"] as const) {
+    for (const quality of ["low", "medium", "high", "auto", ...(modelId === "gpt-image-2" ? [] : ["xhigh", "max"] as const)] as const) {
       test(`${modelId} forwards ${quality} unchanged through generation and edit parameters`, async () => {
         const input = {
           baseUrl: "https://example.test/v1", apiKey: "test-only", modelId, prompt: "quality fixture",
@@ -221,7 +243,7 @@ describe("OpenToken image protocol adapter", () => {
         prompt: "A blue ceramic button on a white background",
         n: 1,
         size: "1024x1024",
-        quality: "low",
+        quality: "auto",
       },
     });
   });
@@ -254,7 +276,7 @@ describe("OpenToken image protocol adapter", () => {
     expect(request.form?.get("model")).toBe("gpt-image-2");
     expect(request.form?.get("prompt")).toBe("Replace the background with light gray");
     expect(request.form?.get("size")).toBe("1024x1024");
-    expect(request.form?.get("quality")).toBe("low");
+    expect(request.form?.get("quality")).toBe("auto");
     expect(request.form?.getAll("image")).toHaveLength(1);
   });
 
@@ -263,9 +285,9 @@ describe("OpenToken image protocol adapter", () => {
     expect(parseOpenTokenImageResponse({ data: [{ b64_json: "aGVsbG8=" }] })).toEqual({ base64: "aGVsbG8=" });
   });
 
-  test("maps canvas ratios to OpenToken's exact supported size values", () => {
-    expect(buildOpenTokenImageRequest({ baseUrl: "https://cn2.gw.opentoken.io/v1", apiKey: "test-key", prompt: "landscape", size: "16:9" }).body?.size).toBe("1536x1024");
-    expect(buildOpenTokenImageRequest({ baseUrl: "https://cn2.gw.opentoken.io/v1", apiKey: "test-key", prompt: "portrait", size: "9:16" }).body?.size).toBe("1024x1536");
+  test("maps legacy canvas ratios without changing the requested composition", () => {
+    expect(buildOpenTokenImageRequest({ baseUrl: "https://cn2.gw.opentoken.io/v1", apiKey: "test-key", prompt: "landscape", size: "16:9" }).body?.size).toBe("1536x864");
+    expect(buildOpenTokenImageRequest({ baseUrl: "https://cn2.gw.opentoken.io/v1", apiKey: "test-key", prompt: "portrait", size: "9:16" }).body?.size).toBe("864x1536");
     expect(buildOpenTokenImageRequest({ baseUrl: "https://cn2.gw.opentoken.io/v1", apiKey: "test-key", prompt: "adaptive", size: "auto" }).body?.size).toBe("auto");
   });
 

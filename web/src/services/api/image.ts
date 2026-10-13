@@ -1,11 +1,12 @@
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
-import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { imageModelProfile, imageModelSettingsError, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { requestQueuedImageBatch, requestQueuedImages, type QueuedBatchItem } from "@/services/api/generation-tasks";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import { generationDraftInput } from "./generation-history";
+import { imageAdvancedParameters, readImageOptions } from "@/lib/image-advanced-settings";
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -71,7 +72,9 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const validation = validateImageReferences(modelOptionName(config.model || config.imageModel), references);
     if (!validation.valid) throw new Error(validation.message);
     const count = Number(normalizeImageModelSettings(config, profile).count);
+    const imageOptions = readImageOptions(config.imageOptions);
     const transparent = profile.kind === "standard" && references.length === 1 && !mask
+        && !imageOptions.background && !imageOptions.output_format
         && await import("@/lib/image-alpha").then(module => module.imageHasTransparency(references[0]!));
     options?.signal?.throwIfAborted();
     return requestQueuedImages({
@@ -94,16 +97,20 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 export function imageTaskParameters(config: AiConfig) {
     const profile = imageModelProfile(config.model || config.imageModel);
     if (!profile.verified) return {};
+    const error = imageModelSettingsError(config.size, profile);
+    if (error) throw new Error(error);
     const { size, quality } = normalizeImageModelSettings(config, profile);
-    if (profile.kind === "standard") return { size, quality };
-    if (profile.kind === "midjourney" || profile.kind === "midjourney-blend") return { size, midjourneySpeed: quality };
-    return { size, resolution: quality };
+    const advanced = imageAdvancedParameters(config.imageOptions, profile);
+    if (profile.kind === "standard") return { size, quality, ...advanced };
+    if (profile.kind === "midjourney" || profile.kind === "midjourney-blend") return { size, midjourneySpeed: quality, ...advanced };
+    return { size, resolution: quality, ...advanced };
 }
 
 export async function requestBatchEdit(config: AiConfig, prompt: string, files: Array<{ file: File; title: string }>, options?: { signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
     return requestQueuedImageBatch({
         modelId: modelOptionName(config.model || config.imageModel),
         prompt: withSystemPrompt(config, prompt),
+        parameters: imageTaskParameters(config),
         files,
         signal: options?.signal,
         onSubmitted: options?.onSubmitted,

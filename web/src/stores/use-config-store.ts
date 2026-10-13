@@ -47,6 +47,7 @@ export type AiConfig = {
     textModels: string[];
     audioModels: string[];
     quality: string;
+    imageOptions?: string;
     size: string;
     count: string;
     canvasImageCount: string;
@@ -72,11 +73,11 @@ export const defaultConfig: AiConfig = {
             baseUrl: OPENAI_BASE_URL,
             apiKey: "",
             apiFormat: "openai",
-            models: ["gpt-image-2", "happyhorse-1.1", DEFAULT_SERVER_TEXT_MODEL, "gpt-5.5", "gpt-4o-mini-tts"],
+            models: ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-3.1-flash-image", "happyhorse-1.1", DEFAULT_SERVER_TEXT_MODEL, "gpt-5.5", "gpt-4o-mini-tts"],
         },
     ],
-    model: "default::gpt-image-2",
-    imageModel: "default::gpt-image-2",
+    model: "default::gpt-image-2.5-sunburst",
+    imageModel: "default::gpt-image-2.5-sunburst",
     videoModel: "default::happyhorse-1.1",
     textModel: `default::${DEFAULT_SERVER_TEXT_MODEL}`,
     audioModel: "default::gpt-4o-mini-tts",
@@ -93,12 +94,13 @@ export const defaultConfig: AiConfig = {
     claudeThinking: "false",
     claudeMaxTokens: "2048",
     systemPrompt: "",
-    models: ["default::gpt-image-2", "default::happyhorse-1.1", `default::${DEFAULT_SERVER_TEXT_MODEL}`, "default::gpt-5.5", "default::gpt-4o-mini-tts"],
-    imageModels: ["default::gpt-image-2"],
+    models: ["default::gpt-image-2", "default::gpt-image-2.5-flare", "default::gpt-image-2.5-sunburst", "default::gemini-3.1-flash-image", "default::happyhorse-1.1", `default::${DEFAULT_SERVER_TEXT_MODEL}`, "default::gpt-5.5", "default::gpt-4o-mini-tts"],
+    imageModels: ["default::gpt-image-2", "default::gpt-image-2.5-flare", "default::gpt-image-2.5-sunburst", "default::gemini-3.1-flash-image"],
     videoModels: ["default::happyhorse-1.1"],
     textModels: [`default::${DEFAULT_SERVER_TEXT_MODEL}`, "default::gpt-5.5"],
     audioModels: ["default::gpt-4o-mini-tts"],
-    quality: "auto",
+    quality: "high",
+    imageOptions: "",
     size: "1:1",
     count: "1",
     canvasImageCount: "3",

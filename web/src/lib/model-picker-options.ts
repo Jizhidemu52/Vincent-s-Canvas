@@ -1,7 +1,7 @@
 import { modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 export type ModelPickerSource = "server" | "local";
-type CapabilityModel = { modelId: string; capabilities: readonly string[] };
+type CapabilityModel = { id?: string; modelId: string; name?: string; publicName?: string; capabilities: readonly string[] };
 
 export function resolveModelPickerSource(channelMode: AiConfig["channelMode"], source: ModelPickerSource | undefined, standalone: boolean): ModelPickerSource {
     // Existing company-edition callers use server APIs even though their effective config says "local".
@@ -28,8 +28,10 @@ export function resolveModelPickerValue(value: string | undefined, options: read
 
 export function resolveCapabilityModel(config: AiConfig, capability: ModelCapability, models: readonly CapabilityModel[], current?: string, source: ModelPickerSource = "server") {
     const options = getModelPickerOptions(config, capability, models, source);
-    return resolveModelPickerValue(current, options, source)
-        || resolveModelPickerValue(config[`${capability}Model`], options, source)
+    const resolve = (value?: string) => resolveModelPickerValue(value, options, source)
+        || (source === "server" && value ? models.find(model => options.includes(model.modelId) && [model.id, model.name, model.publicName].includes(modelOptionName(value)))?.modelId : "");
+    return resolve(current)
+        || resolve(config[`${capability}Model`])
         || options[0]
         || "";
 }

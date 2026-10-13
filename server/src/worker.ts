@@ -25,6 +25,7 @@ import { probeMediaBytes } from "./media-probe";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
 import { createGenerationTiming, type GenerationTiming, type GenerationTimingOutcome } from "./generation-timing";
 import { fetchProviderResult } from "./provider-result";
+import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-input";
 
 type WorkRow = {
   id: string;
@@ -193,6 +194,7 @@ import { OPENAI_IMAGE_TIMEOUT_MS } from "./opentoken-image";
 async function executeProvider(task: WorkRow, timing: GenerationTiming) {
   if (!task.protocol || !task.base_url || !task.model_id)
     throw new Error("任务模型或 Provider 未配置");
+  assertImageEditMaskSupport(task.parameters, { protocol: task.protocol, modelId: task.model_id, operationType: task.operation_type, workflow: Boolean(task.workflow_config_id) }, task.source_urls.length);
   if (!task.encrypted_credentials || !config.PROVIDER_ENCRYPTION_KEY)
     throw new Error("Provider 服务端凭据未配置");
   const credentials = JSON.parse(
@@ -214,17 +216,17 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
   let response: Response;
   if (
     task.protocol === "openai" &&
-    task.operation_type !== "image_generation" &&
     task.source_urls.length
   ) {
     const form = new FormData();
     form.set("model", task.model_id);
     form.set("prompt", task.prompt);
     form.set("n", "1");
-    form.set("response_format", "b64_json");
+    if (!task.model_id.startsWith("gpt-image-")) form.set("response_format", "b64_json");
     for (const [key, value] of Object.entries(openAiImageParameters(task.parameters, task.model_id))) form.set(key, String(value));
     const sourceAssets = await timing.measure("prepare", () => loadSourceAssets(task.source_urls, task.user_id));
-    for (const [index, source] of sourceAssets.entries()) {
+    const editInput = await timing.measure("prepare", () => prepareImageEditInput(sourceAssets, task.parameters, { protocol: task.protocol!, modelId: task.model_id!, operationType: task.operation_type }));
+    for (const [index, source] of editInput.references.entries()) {
       form.append(
         "image",
         new Blob([Uint8Array.from(source.bytes).buffer], {
@@ -233,6 +235,7 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
         source.filename || `reference-${index + 1}.png`,
       );
     }
+    if (editInput.mask) form.set("mask", new Blob([Uint8Array.from(editInput.mask.bytes).buffer], { type: editInput.mask.mimeType }), editInput.mask.filename || "mask.png");
     response = await timing.measure("provider_request", () => fetchProviderSubmission(`${task.base_url!.replace(/\/$/, "")}/images/edits`, {
       method: "POST",
       headers: authorization,
@@ -250,7 +253,7 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
             model: task.model_id,
             prompt: task.prompt,
             n: 1,
-            response_format: "b64_json",
+            ...(!task.model_id.startsWith("gpt-image-") ? { response_format: "b64_json" } : {}),
             ...openAiImageParameters(task.parameters, task.model_id),
           }
         : {
@@ -277,13 +280,14 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
     resultUrls?: string[];
     url?: string;
   };
+  const outputFormat = task.protocol === "openai" ? openAiImageParameters(task.parameters, task.model_id).output_format || "png" : "png";
   const urls =
     body.resultUrls ??
     body.data
       ?.map(
         (item) =>
           item.url ||
-          (item.b64_json ? `data:image/png;base64,${item.b64_json}` : ""),
+          (item.b64_json ? `data:image/${outputFormat};base64,${item.b64_json}` : ""),
       )
       .filter(Boolean) ??
     (body.url ? [body.url] : []);

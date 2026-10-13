@@ -5,7 +5,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 
-export type GenerationDraftConfig = Pick<AiConfig, "model" | "imageModel" | "size" | "quality" | "count" | "systemPrompt">;
+export type GenerationDraftConfig = Pick<AiConfig, "model" | "imageModel" | "size" | "quality" | "count" | "systemPrompt" | "imageOptions">;
 export type GenerationDraftInput = { prompt: string; config: GenerationDraftConfig; maskReferenceIndex?: number };
 export type ArchivedReference = { id: string; name: string; originalFileName?: string; type: string; bytes: number; sha256: string; url: string; sourceAssetId?: string };
 export type GenerationInputArchive = {
@@ -15,7 +15,7 @@ export type GenerationInputArchive = {
     maskReferenceIndex?: number;
 };
 export function generationDraftInput(config: AiConfig, prompt: string): GenerationDraftInput {
-    return { prompt, config: { model: config.model, imageModel: config.imageModel, size: config.size, quality: config.quality, count: config.count, systemPrompt: config.systemPrompt } };
+    return { prompt, config: { model: config.model, imageModel: config.imageModel, size: config.size, quality: config.quality, count: config.count, systemPrompt: config.systemPrompt, imageOptions: config.imageOptions || "" } };
 }
 export async function fingerprintImage(blob: Blob) {
     return bytesToHex(sha256(new Uint8Array(await blob.arrayBuffer())));

@@ -53,8 +53,9 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
       path: "/midjourney/generations/blend",
       payload: {
         image_urls: references,
-        size: normalizeAspect(input.parameters.size, kind),
+        ...(input.parameters.size ? { size: normalizeAspect(input.parameters.size, kind) } : {}),
         speed: normalizeMidjourneySpeed(input.parameters.midjourneySpeed),
+        ...apiMartImageOptions(input.parameters, kind),
       },
       pollIntervalMs: 2_000,
       timeoutMs: 15 * 60_000,
@@ -69,6 +70,7 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
         ...(input.parameters.midjourneyVersion ? { version: String(input.parameters.midjourneyVersion) } : {}),
         ...(references.length ? { image_urls: references } : {}),
         speed: normalizeMidjourneySpeed(input.parameters.midjourneySpeed),
+        ...apiMartImageOptions(input.parameters, kind),
       },
       pollIntervalMs: 2_000,
       timeoutMs: 15 * 60_000,
@@ -86,9 +88,11 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
     n: 1, // UI batch counts are split into independent tasks before reaching the adapter.
     size: normalizeAspect(input.parameters.size, kind),
     resolution: kind === "gpt-image-2" ? normalizeGptResolution(input.parameters.resolution) : normalizeGeminiResolution(input.parameters.resolution),
+    ...apiMartImageOptions(input.parameters, kind),
   };
   if (references.length) payload.image_urls = references;
   if (kind === "gemini-3.1-flash-image-preview") {
+    if (String(payload.model).endsWith("-official")) delete payload.official_fallback;
     if (input.parameters.officialFallback === true && !String(payload.model).endsWith("-official")) payload.official_fallback = true;
     if (input.parameters.googleSearch === true) payload.google_search = true;
     if (input.parameters.googleImageSearch === true) {
@@ -98,6 +102,54 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
   }
 
   return { path: "/images/generations", payload, pollIntervalMs: 2_000, timeoutMs: 15 * 60_000 };
+}
+
+/** Documented optional fields only; reject malformed values before the paid submission. */
+export function apiMartImageOptions(parameters: Record<string, unknown>, kind: ApiMartImageModel) {
+  const options: Record<string, unknown> = {};
+  const bool = (key: string) => {
+    if (parameters[key] === undefined) return;
+    if (typeof parameters[key] !== "boolean") throw new Error(`${key} 必须为布尔值`);
+    options[key] = parameters[key];
+  };
+  bool("nsfw_check");
+  if (kind === "gpt-image-2" || kind === "gemini-3.1-flash-image-preview") {
+    bool("official_fallback");
+    if (kind === "gemini-3.1-flash-image-preview") {
+      bool("google_search"); bool("google_image_search");
+      if (options.google_image_search) options.google_search = true;
+    }
+    return options;
+  }
+  if (parameters.metadata !== undefined) {
+    if (!parameters.metadata || typeof parameters.metadata !== "object" || Array.isArray(parameters.metadata)) throw new Error("metadata 必须为对象");
+    options.metadata = parameters.metadata;
+  }
+  if (kind === "midjourney-blend") {
+    if (parameters.dimensions !== undefined) {
+      if (!["SQUARE", "PORTRAIT", "LANDSCAPE"].includes(String(parameters.dimensions))) throw new Error("dimensions 必须为 SQUARE/PORTRAIT/LANDSCAPE");
+      options.dimensions = parameters.dimensions;
+    }
+    return options;
+  }
+  for (const key of ["tile", "niji", "raw", "draft", "hd"]) bool(key);
+  for (const key of ["version", "style", "negative_prompt", "cref", "sref", "dref", "extra"]) {
+    if (parameters[key] === undefined) continue;
+    if (typeof parameters[key] !== "string" || !parameters[key].trim()) throw new Error(`${key} 必须为非空文本`);
+    options[key] = parameters[key];
+  }
+  if (parameters.midjourneyQuality !== undefined) {
+    if (!["0.25", "0.5", "1", "2"].includes(String(parameters.midjourneyQuality))) throw new Error("Midjourney quality 必须为 0.25/0.5/1/2");
+    options.quality = String(parameters.midjourneyQuality);
+  }
+  const ranges: Record<string, [number, number, boolean]> = { seed: [0, 4294967295, true], stylize: [0, 1000, true], chaos: [0, 100, true], weird: [0, 3000, true], iw: [0, 3, false], cw: [0, 100, true], sw: [0, 1000, true], dw: [0, 100, false], repeat: [2, 40, true], stop: [10, 100, true] };
+  for (const [key, [min, max, integer]] of Object.entries(ranges)) {
+    const value = parameters[key];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max || (integer && !Number.isInteger(value))) throw new Error(`${key} 必须为 ${min}–${max} 范围内的${integer ? "整数" : "数值"}`);
+    options[key] = value;
+  }
+  return options;
 }
 
 export async function runApiMartImageTask(input: ApiMartImageInput & { baseUrl: string; apiKey: string }): Promise<string[]> {

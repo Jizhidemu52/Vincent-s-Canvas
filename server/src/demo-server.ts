@@ -3,6 +3,7 @@ import { assetMetadataSchema } from "./asset-metadata";
 import { assignDemoPublicModelNumbers, isSelectableCreativeModel, presentAdminModel, presentPublicModel } from "./model-presentation";
 import { redactDesignerModelData } from "./model-privacy";
 import { openAiImageParameters } from "./openai-image-parameters";
+import { ImageEditInputError, prepareImageEditInput, type ImageEditInput } from "./image-edit-input";
 import { deploymentFeatures } from "./deployment-features";
 import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
 import { resolveStandaloneStaticPath } from "./demo-standalone-web";
@@ -1360,11 +1361,18 @@ Bun.serve({
           sources.push(source);
         }
         const imageModelId = String(model.modelId);
+        let editInput: ImageEditInput<DemoAsset>;
+        try {
+          editInput = await prepareImageEditInput(sources, input.parameters || {}, { protocol: model.providerId === openTokenProviderId ? "openai" : "apimart", modelId: imageModelId, operationType: input.operationType! });
+        } catch (error) {
+          if (error instanceof ImageEditInputError) return json({ error: error.code, message: error.message }, 400);
+          throw error;
+        }
         if ((imageModelId === "midjourney" || imageModelId === "midjourney-blend") && input.operationType !== "image_generation")
           return json({ error: "MODEL_CAPABILITY_MISMATCH", message: "Midjourney 当前只支持文生图，请选择 GPT-Image-2 或 Gemini 图片模型进行编辑" }, 400);
         const apiMartModel = model.providerId === openTokenProviderId ? null : apiMartImageModel(imageModelId);
         const isGptImage2 = imageModelId.startsWith("gpt-image-2") || apiMartModel === "gpt-image-2";
-        if (sources.length > (isGptImage2 ? 16 : imageModelId === "midjourney" ? 0 : imageModelId === "midjourney-blend" ? 4 : 14))
+        if (editInput.references.length > (isGptImage2 ? 16 : imageModelId === "midjourney" ? 0 : imageModelId === "midjourney-blend" ? 4 : 14))
           return json(
             {
               error: "TOO_MANY_REFERENCES",
@@ -1417,6 +1425,7 @@ Bun.serve({
             input.prompt || "",
             input.parameters || {},
             sources,
+            editInput,
           );
         else
           void runApiMartImageTaskForDemo(
@@ -2007,9 +2016,11 @@ async function runOpenTokenImageTaskForDemo(
   prompt: string,
   parameters: Record<string, unknown>,
   sources: DemoAsset[],
+  preparedInput?: ImageEditInput<DemoAsset>,
 ) {
   const timing = createGenerationTiming({ taskId: task.id, modelConfigId: task.modelConfigId, runtime: "demo" });
   try {
+    const editInput = preparedInput || await timing.measure("prepare", () => prepareImageEditInput(sources, parameters, { protocol: "openai", modelId, operationType: task.operationType }));
     updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
     const resultUrl = await runOpenTokenImage({
       baseUrl: openTokenBaseUrl,
@@ -2017,7 +2028,8 @@ async function runOpenTokenImageTaskForDemo(
       modelId,
       prompt,
       ...openAiImageParameters(parameters, modelId),
-      references: sources.map((source) => ({ filename: source.filename, mimeType: source.mimeType, bytes: source.bytes })),
+      references: editInput.references.map((source) => ({ filename: source.filename, mimeType: source.mimeType, bytes: source.bytes })),
+      ...(editInput.mask ? { mask: { filename: editInput.mask.filename, mimeType: editInput.mask.mimeType, bytes: editInput.mask.bytes } } : {}),
     }, timing);
     await timing.measure("result_store", () => completeDemoImageTask(task, user.id, resultUrl));
   } catch (error) {
