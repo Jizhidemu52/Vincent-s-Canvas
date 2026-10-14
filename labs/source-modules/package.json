@@ -1,0 +1,15 @@
+{
+  "name": "vincent-source-module-labs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated original-source module experiments, not production integrations",
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "test:invoke": "node invoke-comfy/tests/run-invoke.mjs",
+    "test:fabric": "node fabric/browser.test.mjs",
+    "test:tldraw": "node tldraw/harness/run-browser.mjs",
+    "test:sdk-ui": "node brand-sdk/sdk-browser-test.mjs"
+  },
+  "devDependencies": { "playwright": "1.62.1" }
+}

@@ -19,3 +19,4 @@ web/out
 .playwright-cli
 output
 server/.data
+labs

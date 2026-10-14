@@ -42,6 +42,7 @@ web/                 React + TypeScript + Vite 前端与测试
 server/              Bun API、Worker、模型适配、数据库迁移与测试
 ops/                 部署预检、离线包、备份恢复和压测
 docs/                操作、部署、开发与验收文档
+labs/                独立中文设计工作台与开源模块实测，不接入正式画布
 Build-LAN.*          Windows 前端构建入口
 Start-LAN.*          Windows 试用 / 企业 OA 试点启动入口
 docker-compose.yml   完整服务器服务编排
@@ -51,6 +52,7 @@ docker-compose.yml   完整服务器服务编排
 
 - [操作手册](docs/manual/user-guide.md) · [文档导航](docs/index.md) · [部署与更新](docs/manual/installation-guide.md)
 - [当前待验收项](docs/content/docs/progress/pending-test.mdx) · [版本记录](CHANGELOG.md)
+- [独立设计实验室](labs/README.txt)：图案定位、花型循环、系列配方（手动／随机配色），以及六个开源模块的固定版本实测；只在本机独立运行，不调用付费模型，不代表正式功能接入。
 - 更新前备份配置和实际数据；按对应部署手册拉取、构建、迁移并重启，不强制覆盖本地改动。
 - 企业画布与原图按员工云端保存；确认已同步后可恢复，独立聊天与创意草稿仍为员工分区的浏览器数据。本机试用画布仅本地保存，换设备或清理前先导出；旧账号与共用数据不自动迁移或公开。
 - 公司正式入口仅允许公司网络访问，网页、API 和媒体均需网关/防火墙限制。服务器位置、出口 IP 和真实员工联调尚待 IT 提供并验收，当前试用地址不等于正式部署完成。

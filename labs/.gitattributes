@@ -1,0 +1,2 @@
+# Preserve the vendored upstream build checksum on Windows checkouts.
+design-workbench/recipe/vendor/chroma-js/chroma.mjs -text

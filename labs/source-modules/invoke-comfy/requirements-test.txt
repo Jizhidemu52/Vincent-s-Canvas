@@ -1,0 +1,5 @@
+# Optional ComfyUI module tests only. No GPU models are downloaded.
+# Use a dedicated venv; install the CPU torch wheel with the official PyTorch index.
+torch==2.10.0
+typing_extensions==4.15.0
+packaging==26.0

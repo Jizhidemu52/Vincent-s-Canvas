@@ -1,0 +1,18 @@
+{
+  "scope": "Six upstream source-module experiments, NOT complete product acceptance or production integration",
+  "sourcePins": "source-manifest.json",
+  "paidProviderCalls": 0,
+  "originalFixedSourceResults": {
+    "fabric": { "positiveChecks": 14, "observedGaps": 2, "gaps": ["Lock fields are not persisted in JSON", "Clear path calls a missing canvas.clearHistory API"], "rgbaDifferingPixelPercent": 0.0287 },
+    "tldraw": { "scenarios": 12, "passed": 7, "observedGaps": 5, "harnessFailures": 0, "gaps": ["Stale upstream results can be reused", "No request-level result cache on rerun", "Failed node remains running and sibling request can write late", "Stop does not cancel in-flight requests", "Older completion can overwrite newer output"] },
+    "invoke": { "passed": 9, "failedHypothesisProbe": 1, "probe": "I09: empty-alpha active mask still has hasSelection=true; not enough contract evidence to label this a product bug" },
+    "comfy": { "passed": 13, "failed": 0, "boundaries": ["Manual restage is not automatic retry", "Stable key is not disk persistence", "Content cache is not tenant isolation", "Duplicate release callback can make counters negative"] },
+    "loomicAndSdk": { "behaviorChecks": 12, "boundaryObservationChecksIncluded": 4, "sdkBrowserInteractionGroups": 7, "findings": ["Image role omitted", "Signing failure leaves raw storage path", "Database error confused with absent kit", "definePlugin does not validate or sandbox plugins"] }
+  },
+  "packagingChecks": {
+    "sharedPlaywrightInstall": "npm install --ignore-scripts completed; exact version and lockfile included",
+    "remoteSetupPath": "Setup-Sources.ps1 -Only sdk downloaded official source and verified the pinned commit and original license",
+    "invokeRuntimeRerun": { "source": "Local copy of existing pristine pinned checkout, not a fresh network clone", "passed": 9, "failedHypothesisProbe": 1, "pageErrors": [], "originalSourceFilesLoaded": 8 },
+    "notRepeated": ["All-six remote clones", "All browser scenario suites", "Fresh Python/torch environment", "GPU inference", "Paid models", "Production integration"]
+  }
+}

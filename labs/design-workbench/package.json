@@ -1,0 +1,14 @@
+{
+  "name": "vincent-design-workbench-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun --no-env-file run server.ts",
+    "test": "node --test placement/model.test.mjs repeat/geometry.test.mjs recipe/engine.test.mjs recipe/color-tools.test.mjs",
+    "test:browser": "node qa/shell-check.mjs && node placement/browser.test.mjs && node repeat/qa/browser-check.mjs && node recipe/qa/smoke.mjs && node recipe/qa/color-ui.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

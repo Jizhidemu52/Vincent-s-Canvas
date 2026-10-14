@@ -1,0 +1,16 @@
+本地配色模块依赖：chroma.js 3.2.0
+上游仓库：https://github.com/gka/chroma.js
+固定标签：v3.2.0
+标签提交：91eee6285b2e890c423f2fccfd6c7ed3c3ec6dc0
+下载：npm pack chroma-js@3.2.0 --ignore-scripts
+官方发布包：https://registry.npmjs.org/chroma-js/-/chroma-js-3.2.0.tgz
+发布包 SHA-256：9C9088F9E370883CBE47C534F7A6CF5FE4D9C99F0C4C5F03EDD692774C49F57A
+发布包 SRI：sha512-os/OippSlX1RlWWr+QDPcGUZs0uoqr32urfxESG9U93lhUfbnlyckte84Q8P1UQY/qth983AS1JONKmLS4T0nw==
+生成浏览器模块：bun build package/index.js --target browser --format esm --outfile chroma.mjs --minify
+生成模块 SHA-256：EEBD7F682A43B54043F19566492CEF1417CC361CB69C0A7E31E002939DBFC6C4
+本交付仅保留上述浏览器构建产物和未经改写的原始 LICENSE；不重复收录完整 npm 发布包。
+需要重建时，下载上述固定版本发布包后执行同一构建命令；完整原许可位于本目录 LICENSE。
+许可：BSD-3-Clause AND Apache-2.0（包中包含 ColorBrewer 数据的许可说明）。
+用途：实际调用 chroma 的 HEX/HSL/OKLCH 转换与色差计算，用于手动选色、随机配色和本地滤色。
+本模块不是潘通色库，不包含或伪造潘通色号映射。没有外网运行时依赖，不调用付费模型。
+衣物换色仍是本地彩色像素滤色，不是服装语义分割；显示器色彩不是生产实体色标准。

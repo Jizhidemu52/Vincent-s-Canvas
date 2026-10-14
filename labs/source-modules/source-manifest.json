@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "scope": "Source-module experiments only; no production integration or real model inference",
+  "sources": [
+    {
+      "id": "fabric",
+      "repository": "https://github.com/ikuaitu/vue-fabric-editor.git",
+      "commit": "b3bdcfb0bd6d8f98e7483cf561ac03ba56c0d889",
+      "checkout": "fabric/upstream",
+      "licenseFile": "LICENSE",
+      "licenseObservation": "MIT at repository root; core package metadata lists ISC. Retain both original notices.",
+      "sparsePaths": ["src", "public", "packages/core"]
+    },
+    {
+      "id": "tldraw",
+      "repository": "https://github.com/tldraw/tldraw.git",
+      "commit": "e599aa1a1df78ba656fb952db55d25fc66653a50",
+      "checkout": "tldraw/upstream",
+      "licenseFile": "LICENSE.md",
+      "licenseObservation": "Custom tldraw license; template README wording differs. Development experiment only; production permission is not granted by this lab.",
+      "sparsePaths": ["internal/config", "packages", "templates/image-pipeline"]
+    },
+    {
+      "id": "loomic",
+      "repository": "https://github.com/fancyboi999/Loomic.git",
+      "commit": "21206c30054572291b9df000d84568aeca97aeda",
+      "checkout": "brand-sdk/loomic-source",
+      "licenseFile": "LICENSE",
+      "licenseObservation": "MIT; source and copyright remain in the downloaded checkout.",
+      "sparsePaths": ["apps/server/src/agent/tools"]
+    },
+    {
+      "id": "sdk",
+      "repository": "https://github.com/basketikun/infinite-canvas.git",
+      "commit": "3a6b64b602ad062b29fac66902ed18a7ef5fd9dc",
+      "checkout": "brand-sdk/sdk-source",
+      "licenseFile": "LICENSE",
+      "licenseObservation": "MIT; source and copyright remain in the downloaded checkout.",
+      "sparsePaths": ["plugins/canvas/registry", "plugins/canvas/sdk", "plugins/canvas/sticky-note"]
+    },
+    {
+      "id": "invoke",
+      "repository": "https://github.com/invoke-ai/InvokeAI.git",
+      "commit": "723d6007427b83cd3d2e2237a5db30da4e55c720",
+      "checkout": "invoke-comfy/sources/InvokeAI",
+      "licenseFile": "LICENSE",
+      "licenseObservation": "Apache-2.0; original notices are retained in the downloaded checkout.",
+      "sparsePaths": ["invokeai/frontend/webv2/src/workbench/canvas-engine", "invokeai/frontend/webv2/src/workbench/widgets/canvas"]
+    },
+    {
+      "id": "comfy",
+      "repository": "https://github.com/Comfy-Org/ComfyUI.git",
+      "commit": "e0a32bce84f4603f2b61b16b50f8958e68fd6171",
+      "checkout": "invoke-comfy/sources/ComfyUI",
+      "licenseFile": "LICENSE",
+      "licenseObservation": "GPL-3.0; this separate module test does not approve copying or bundling into a closed-source product.",
+      "sparsePaths": ["comfy/comfy_types", "comfy_api/internal", "comfy_api/latest", "comfy_execution"]
+    }
+  ]
+}

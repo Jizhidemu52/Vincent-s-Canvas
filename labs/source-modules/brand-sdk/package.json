@@ -1,0 +1,25 @@
+{
+  "name": "source-module-brand-sdk-validation",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "bun --no-env-file run source-tests.ts" },
+  "overrides": {
+    "@langchain/core": "1.1.35",
+    "@langchain/langgraph": "1.2.5",
+    "@langchain/langgraph-checkpoint": "1.0.1",
+    "@langchain/langgraph-sdk": "1.8.0",
+    "langsmith": "0.5.12"
+  },
+  "dependencies": {
+    "langchain": "1.2.36",
+    "@langchain/core": "1.1.35",
+    "@langchain/langgraph": "1.2.5",
+    "@langchain/langgraph-checkpoint": "1.0.1",
+    "@langchain/langgraph-sdk": "1.8.0",
+    "langsmith": "0.5.12",
+    "zod": "4.3.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "esbuild": "0.25.12"
+  }
+}

@@ -24,6 +24,7 @@
 | `server/src/` | Bun / TypeScript API、Worker、Provider 适配与数据库迁移 |
 | `web/tests/`、`server/tests/` | 自动化测试 |
 | `ops/` | 部署预检、离线包、备份恢复与压测 |
+| `labs/` | 独立设计 Demo 与开源模块实测，入口见 [实验室说明](../labs/README.txt)；非正式功能 |
 | `docs/manual/` | 用户与运维手册 |
 | `docs/content/docs/` | 功能、数据结构、开发与验收说明 |
 
