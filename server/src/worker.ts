@@ -27,6 +27,7 @@ import { createGenerationTiming, type GenerationTiming, type GenerationTimingOut
 import { fetchProviderResult } from "./provider-result";
 import { inlineProviderImageDataUrl } from "./provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-input";
+import { imageResultExtension, storeImageResult } from "./image-result-storage";
 
 type WorkRow = {
   id: string;
@@ -109,6 +110,7 @@ async function runTask(taskId: string) {
   const stopLeaseHeartbeat = startTaskLeaseHeartbeat(taskId);
   const timing = createGenerationTiming({ taskId, modelConfigId: task.model_config_id, attempt: task.attempts, runtime: "worker" });
   let outcome: GenerationTimingOutcome = "failed";
+  let providerProducedResult = false;
   try {
     if (config.TASK_MOCK_MODE === "true" && (task.operation_type === "video_generation" || task.operation_type === "audio_generation"))
       throw new Error("模拟模式不提供真实视频或音频，请配置真实服务后生成");
@@ -116,6 +118,7 @@ async function runTask(taskId: string) {
       config.TASK_MOCK_MODE === "true"
         ? [{ bytes: Buffer.from(mockSvg(task.id)), mimeType: "image/svg+xml" }]
         : await timing.measure("provider_execution", () => executeProvider(task, timing));
+    providerProducedResult = true;
     const resultUrls = await timing.measure("result_store", () => storeResults(task, providerResults));
     await timing.measure("task_finalize", async () => {
       await settleReservation(db, task.request_id, "capture");
@@ -145,7 +148,14 @@ async function runTask(taskId: string) {
     const transportDiagnostics = readProviderSubmissionDiagnostics(error);
     const reason =
       error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
-    if (task.operation_type === "video_generation" && task.upstream_submission_started_at && !(error instanceof VideoProviderFailure)) {
+    if (providerProducedResult) {
+      // Local processing/storage failures must not replay paid work or claim it never happened.
+      await db.query(
+        "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND status='processing'",
+        [`${reason}；上游已返回结果，不能直接恢复或重新生成，请先检查已保存素材。`, task.id],
+      );
+      outcome = "paused";
+    } else if (task.operation_type === "video_generation" && task.upstream_submission_started_at && !(error instanceof VideoProviderFailure)) {
       // Keep the original reservation while upstream work may still exist. Recovery only polls its persisted ID.
       await db.query(
         "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND status='processing'",
@@ -561,12 +571,44 @@ async function storeResults(
     throw new Error("公司对象存储尚未配置，不能保存生成结果");
   const urls: string[] = [];
   for (const [index, result] of results.entries()) {
+    if (["image/png", "image/jpeg", "image/webp"].includes(result.mimeType)) {
+      const primary = await storeImageResult({
+        result, parameters: task.parameters, resultIndex: index,
+        prepareEditInput: async () => {
+          const archive = task.parameters.inputArchive as Record<string, unknown> | undefined;
+          if (archive?.maskReferenceIndex === undefined) return { references: [] };
+          return prepareImageEditInput(await loadSourceAssets(task.source_urls, task.user_id), task.parameters,
+            { protocol: task.protocol!, modelId: task.model_id!, operationType: task.operation_type });
+        },
+        save: async (role, image, metadata) => saveResultAsset(task, index, image, role, metadata),
+        updateMetadata: async (asset, metadata) => {
+          await db.query("UPDATE assets SET metadata=COALESCE(metadata,'{}'::jsonb) || $1::jsonb,updated_at=now() WHERE id=$2 AND owner_user_id=$3", [JSON.stringify(metadata), asset.assetId, task.user_id]);
+        },
+      });
+      await recordAssetEvent(db, {
+        assetId: primary.assetId, actor: null, eventType: "asset.generated",
+        idempotencyKey: `task:${task.id}:asset:${primary.assetId}:generated`,
+        metadata: { resultIndex: index, operationType: task.operation_type },
+      });
+      urls.push(`/api/assets/${primary.assetId}/content`);
+      continue;
+    }
+    const asset = await saveResultAsset(task, index, result, "primary", {});
+    await recordAssetEvent(db, {
+      assetId: asset.assetId, actor: null, eventType: "asset.generated",
+      idempotencyKey: `task:${task.id}:asset:${asset.assetId}:generated`,
+      metadata: { resultIndex: index, operationType: task.operation_type },
+    });
+    urls.push(`/api/assets/${asset.assetId}/content`);
+  }
+  return urls;
+}
+
+async function saveResultAsset(task: WorkRow, index: number, result: { bytes: Uint8Array; mimeType: string }, role: string, metadata: Record<string, unknown>) {
     const id = randomUUID();
     const extension =
-      result.mimeType === "image/jpeg"
-        ? "jpg"
-        : result.mimeType === "image/svg+xml"
-          ? "svg"
+      result.mimeType.startsWith("image/")
+        ? imageResultExtension(result.mimeType)
           : result.mimeType.includes("webm")
             ? "webm"
             : result.mimeType.startsWith("video/")
@@ -580,7 +622,7 @@ async function storeResults(
                     : result.mimeType.startsWith("audio/")
                       ? "mp3"
                       : "png";
-    const filename = `task-${task.id}-${index + 1}.${extension}`;
+    const filename = `task-${task.id}-${index + 1}${role === "primary" ? "" : `-${role}`}.${extension}`;
     const key = `users/${task.user_id}/generated/${task.id}/${filename}`;
     await storage.put(key, result.bytes, result.mimeType);
     const kind = result.mimeType.startsWith("video/")
@@ -594,11 +636,11 @@ async function storeResults(
       tool: task.parameters.tool,
     });
     const asset = await db.query<{ id: string }>(
-      `INSERT INTO assets(id,owner_user_id,department_id,project_external_id,task_id,object_key,filename,mime_type,byte_size,kind,source,operation_type,prompt,model_config_id,status,primary_direction,secondary_directions,direction_rule_version,direction_evidence)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'ready',$15,$16,$17,$18)
+      `INSERT INTO assets(id,owner_user_id,department_id,project_external_id,task_id,object_key,filename,mime_type,byte_size,kind,source,operation_type,prompt,model_config_id,status,primary_direction,secondary_directions,direction_rule_version,direction_evidence,metadata)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'ready',$15,$16,$17,$18,$19)
             ON CONFLICT(object_key) DO UPDATE SET status='ready',byte_size=EXCLUDED.byte_size,mime_type=EXCLUDED.mime_type,
               primary_direction=EXCLUDED.primary_direction,secondary_directions=EXCLUDED.secondary_directions,
-              direction_rule_version=EXCLUDED.direction_rule_version,direction_evidence=EXCLUDED.direction_evidence,updated_at=now()
+              direction_rule_version=EXCLUDED.direction_rule_version,direction_evidence=EXCLUDED.direction_evidence,metadata=EXCLUDED.metadata,updated_at=now()
             RETURNING id`,
       [
         id,
@@ -623,19 +665,10 @@ async function storeResults(
         JSON.stringify(direction.secondaryDirections),
         direction.ruleVersion,
         JSON.stringify(direction.evidence),
+        JSON.stringify(metadata),
       ],
     );
-    const assetId = asset.rows[0]!.id;
-    await recordAssetEvent(db, {
-      assetId,
-      actor: null,
-      eventType: "asset.generated",
-      idempotencyKey: `task:${task.id}:asset:${assetId}:generated`,
-      metadata: { resultIndex: index, operationType: task.operation_type },
-    });
-    urls.push(`/api/assets/${assetId}/content`);
-  }
-  return urls;
+    return { assetId: asset.rows[0]!.id, mimeType: result.mimeType, filename };
 }
 
 function mockSvg(id: string) {

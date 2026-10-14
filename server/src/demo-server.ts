@@ -19,6 +19,8 @@ import { fetchProviderSubmission } from "./provider-submission-transport";
 import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
 import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./demo-video-sources";
 import { decodeInlineImageResult } from "./demo-task-result-assets";
+import { ImageResultPersistenceError, imageResultExtension, storeImageResult } from "./image-result-storage";
+import { ImageResultVariantsError, imageResultVariantIds, isAuxiliaryImageResult, resolveImageResultVariants, type ImageResultAsset } from "./image-result-variants";
 import { syncDemoProject } from "./demo-projects";
 import { createDemoBatchTaskInputs } from "./demo-batch-tasks";
 import { buildVideoProviderRequest, getVideoModelCapability, isSupportedVideoModelId, supportedVideoModelIds, type ProviderVideoSource, type SupportedVideoModelId, type VideoProviderParameters, videoTaskStatusPath } from "./video-models";
@@ -672,6 +674,7 @@ function pauseDemoTaskForStorageFailure(task: DemoTask) {
 
 function finishDemoTaskFailure(task: DemoTask, error: unknown, patch: Partial<DemoTask>, user?: { creditBalance: number }) {
   if (error instanceof DemoStorageError) { pauseDemoTaskForStorageFailure(task); return; }
+  if (error instanceof ImageResultPersistenceError) patch = { ...patch, status: "paused", errorCode: error.code, failureReason: error.message };
   const refund = patch.status === "failed" && Boolean(user) && !task.refundedAt;
   try {
     updateDemoTask(task, { ...patch, updatedAt: now(), ...(refund ? { refundedAt: now() } : {}) });
@@ -682,16 +685,27 @@ function finishDemoTaskFailure(task: DemoTask, error: unknown, patch: Partial<De
   }
 }
 
-function completeDemoImageTask(task: DemoTask, ownerUserId: string, resultUrl: string) {
+async function completeDemoImageTask(task: DemoTask, ownerUserId: string, resultUrl: string, editInput?: ImageEditInput<DemoAsset>) {
   const inlineImage = decodeInlineImageResult(resultUrl);
   if (!inlineImage) throw new Error("图片结果为空或格式无效，未保存为成功任务");
-  const assets: DemoAsset[] = [];
-  const id = crypto.randomUUID();
-  const extension = inlineImage.mimeType.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "png";
-  assets.push({ id, ownerUserId, filename: `generation-${task.id}.${extension}`, taskId: task.id,
-    projectId: task.projectId, mimeType: inlineImage.mimeType, bytes: inlineImage.bytes, createdAt: now() });
-  resultUrl = `/api/assets/${id}/content`;
-  updateDemoTask(task, { resultUrls: [resultUrl], status: "success", updatedAt: now() }, assets);
+  const primary = await storeImageResult({
+    result: inlineImage, parameters: task.parameters ?? {}, resultIndex: 0,
+    prepareEditInput: async () => editInput || { references: [] },
+    save: async (role, image, metadata) => {
+      const filename = `generation-${task.id}${role === "primary" ? "" : `-${role}`}.${imageResultExtension(image.mimeType)}`;
+      const existing = [...demoAssets.values()].find(asset => asset.ownerUserId === ownerUserId && asset.taskId === task.id && asset.filename === filename);
+      const asset: DemoAsset = { id: existing?.id || crypto.randomUUID(), ownerUserId, filename, taskId: task.id,
+        projectId: task.projectId, mimeType: image.mimeType, bytes: image.bytes, createdAt: existing?.createdAt || now(), metadata };
+      saveDemoAsset(asset);
+      return { assetId: asset.id, filename, mimeType: asset.mimeType };
+    },
+    updateMetadata: async (asset, metadata) => {
+      const current = demoAssets.get(asset.assetId)!;
+      saveDemoAsset({ ...current, metadata: { ...current.metadata, ...metadata } });
+    },
+  });
+  resultUrl = `/api/assets/${primary.assetId}/content`;
+  updateDemoTask(task, { resultUrls: [resultUrl], status: "success", updatedAt: now() });
 }
 
 Bun.serve({
@@ -850,6 +864,25 @@ Bun.serve({
 
     if ((features.oaLoginEnabled || path === "/api/assets/upload-request" || /^\/api\/assets\/[^/]+\/content-upload$/.test(path)) && request.headers.has("x-canvas-owner-id") && request.headers.get("x-canvas-owner-id") !== user.id) {
       return json({ error: "CANVAS_OWNER_MISMATCH", message: "当前员工身份已变化，请重新打开画布后再试。" }, 403);
+    }
+
+    if (/^\/api\/assets\/[^/]+\/variants$/.test(path) && request.method === "GET") {
+      const variantHeaders = { "cache-control": "private, no-store" };
+      const asset = demoAssets.get(path.split("/")[3]!);
+      if (!asset || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) || !asset.bytes.byteLength)
+        return json({ error: "NOT_FOUND", message: "素材不存在或无权访问" }, 404, variantHeaders);
+      const asResultAsset = (item: DemoAsset): ImageResultAsset => ({ ...item, taskId: item.taskId || null, status: item.bytes.byteLength ? "ready" : "pending" });
+      try {
+        const primary = asResultAsset(asset);
+        const related = imageResultVariantIds(primary).flatMap(id => {
+          const item = demoAssets.get(id);
+          return item ? [asResultAsset(item)] : [];
+        });
+        return json(resolveImageResultVariants(primary, related), 200, variantHeaders);
+      } catch (error) {
+        if (error instanceof ImageResultVariantsError) return json({ error: error.code, message: error.message }, 409, variantHeaders);
+        throw error;
+      }
     }
 
     if (path === "/api/canvas-documents" || /^\/api\/canvas-documents\/[^/]+$/.test(path)) {
@@ -1582,7 +1615,7 @@ Bun.serve({
     if ((path === "/api/assets" || path === "/api/admin/assets") && request.method === "GET") {
       const adminView = path === "/api/admin/assets";
       if (adminView && !user.role.includes("admin")) return json({ message: "无权访问管理素材" }, 403);
-      return json({ assets: [...demoAssets.values()].filter((asset) => (adminView ? canManageDemoOwner(user, asset.ownerUserId) : asset.ownerUserId === user.id) && asset.bytes.byteLength).map((asset) => {
+      return json({ assets: [...demoAssets.values()].filter((asset) => (adminView ? canManageDemoOwner(user, asset.ownerUserId) : asset.ownerUserId === user.id) && asset.bytes.byteLength && !isAuxiliaryImageResult(asset.metadata)).map((asset) => {
         const task = asset.taskId ? demoTasks.get(asset.taskId) : undefined;
         const owner = demoOwner(asset.ownerUserId);
         return { id: asset.id, ownerUserId: asset.ownerUserId, ownerName: owner?.displayName || asset.ownerUserId, departmentId: owner?.departmentId || null,
@@ -2001,7 +2034,7 @@ async function runApiMartImageTaskForDemo(
 ) {
   try {
     updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
-    completeDemoImageTask(task, user.id, await callApiMartImage(modelId, prompt, parameters, sources));
+    await completeDemoImageTask(task, user.id, await callApiMartImage(modelId, prompt, parameters, sources));
   } catch (error) {
     finishDemoTaskFailure(task, error, { status: "failed", failureReason: isProviderNetworkError(error)
       ? "无法与图像服务建立安全连接。请检查服务器外网、TLS 证书策略或稍后重试；本次积分已自动退还。"
@@ -2031,7 +2064,7 @@ async function runOpenTokenImageTaskForDemo(
       references: editInput.references.map((source) => ({ filename: source.filename, mimeType: source.mimeType, bytes: source.bytes })),
       ...(editInput.mask ? { mask: { filename: editInput.mask.filename, mimeType: editInput.mask.mimeType, bytes: editInput.mask.bytes } } : {}),
     }, timing);
-    await timing.measure("result_store", () => completeDemoImageTask(task, user.id, resultUrl));
+    await timing.measure("result_store", () => completeDemoImageTask(task, user.id, resultUrl, editInput));
   } catch (error) {
     finishDemoTaskFailure(task, error, { status: "failed", failureReason: error instanceof Error ? error.message : "OpenToken image task failed" }, user);
   } finally {
@@ -2402,7 +2435,7 @@ async function runInternalAiSeamlessTask(
 ) {
   try {
     updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
-    completeDemoImageTask(task, user.id, await callInternalAiSeamless(task, source, parameters));
+    await completeDemoImageTask(task, user.id, await callInternalAiSeamless(task, source, parameters));
   } catch (error) {
     finishDemoTaskFailure(task, error, { status: "failed", failureReason: error instanceof Error ? error.message : "内部 AI 无缝拼接失败" }, user);
   }

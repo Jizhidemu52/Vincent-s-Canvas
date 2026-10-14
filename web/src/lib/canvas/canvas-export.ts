@@ -3,6 +3,8 @@ import { saveAs } from "file-saver";
 import { createZip, type ZipOptions } from "@/lib/zip";
 import { getMediaBlob } from "@/services/file-storage";
 import { getImageBlob } from "@/services/image-storage";
+import { readMediaSource, serverMediaId } from "@/services/canvas-media-links";
+import { fetchServerAssetContent, fetchServerAssetVariants, type ServerAssetVariant, type ServerAssetVariants } from "@/services/api/server-assets";
 import type { CanvasExportAsset, CanvasExportFile } from "@/types/canvas-export";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasNodeData } from "@/types/canvas";
@@ -55,6 +57,36 @@ export async function downloadCanvasImage(node: CanvasNodeData) {
     const fileName = canvasImageDownloadFileName(node);
     const result = await prepareCanvasImageDownload(blob, fileName);
     saveAs(result, fileName);
+}
+
+/** Resolve only the current media, never a task ID left over after a local edit. */
+export async function loadCanvasImageVariants(node: CanvasNodeData, sources: {
+    readMediaSource?: typeof readMediaSource;
+    fetchVariants?: typeof fetchServerAssetVariants;
+} = {}) {
+    const source = node.metadata?.storageKey
+        ? await (sources.readMediaSource || readMediaSource)(node.metadata.storageKey)
+        : node.metadata?.content;
+    const assetId = serverMediaId(source || "");
+    return assetId ? (sources.fetchVariants || fetchServerAssetVariants)(assetId) : null;
+}
+
+export function hasCanvasImageVariants(variants: ServerAssetVariants) {
+    return variants.original.assetId !== variants.primary.assetId || Boolean(variants.export && variants.export.assetId !== variants.primary.assetId);
+}
+
+/** Server variants already have the intended encoding. Preserve their exact bytes. */
+export async function downloadCanvasImageVariant(node: CanvasNodeData, variant: ServerAssetVariant, kind: "primary" | "original" | "export", sources: {
+    fetchBlob?: typeof fetchServerAssetContent;
+    save?: (blob: Blob, filename: string) => void;
+} = {}) {
+    const blob = await (sources.fetchBlob || fetchServerAssetContent)(variant.assetId);
+    if (!blob.size) throw new Error("图片内容为空，无法下载");
+    const mimeType = blob.type.split(";")[0]?.trim() || variant.mimeType;
+    if (!mimeType.startsWith("image/")) throw new Error("下载的内容不是图片，未保存文件");
+    const fileName = canvasImageDownloadFileName({ ...node, metadata: { ...node.metadata, mimeType } });
+    const suffix = kind === "original" ? "_渠道原件" : kind === "export" ? "_格式副本" : "";
+    (sources.save || saveAs)(blob, fileName.replace(/(\.[^.]+)$/, `${suffix}$1`));
 }
 
 export async function prepareCanvasImageDownload(blob: Blob, fileName: string, encode = encodeImageBlob) {

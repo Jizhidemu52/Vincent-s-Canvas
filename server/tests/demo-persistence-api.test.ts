@@ -316,3 +316,63 @@ test("SQLite rejected writes return 503 and leave both original asset bytes and 
     expect(demo.providerRequests).toEqual([]);
   } finally { await demo.close(); }
 }, 60_000);
+
+test("real demo variants HTTP preserves downloads and relations across restart, hides auxiliary assets and rejects foreign originals", async () => {
+  const demo = await createHarness();
+  try {
+    await demo.start();
+    const { user } = await demo.json<{ user: { id: string } }>("/api/auth/session");
+    await demo.stop();
+    const taskId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const original = { id: crypto.randomUUID(), ownerUserId: user.id, taskId, filename: "provider-original.png", mimeType: "image/png", bytes: new Uint8Array([137, 80, 78, 71, 0, 255, 1, 2]), createdAt };
+    const primary = { id: crypto.randomUUID(), ownerUserId: user.id, taskId, filename: "strict-result.png", mimeType: "image/png", bytes: new Uint8Array([137, 80, 78, 71, 3, 254, 4, 5]), createdAt };
+    const exported = { id: crypto.randomUUID(), ownerUserId: user.id, taskId, filename: "requested-copy.webp", mimeType: "image/webp", bytes: new Uint8Array([82, 73, 70, 70, 6, 253, 7, 8]), createdAt };
+    const foreign = { id: crypto.randomUUID(), ownerUserId: crypto.randomUUID(), taskId, filename: "another-employee.png", mimeType: "image/png", bytes: new Uint8Array([9, 10, 11]), createdAt };
+    const forged = { ...primary, id: crypto.randomUUID(), filename: "bad-relation.png" };
+    const reference = (asset: typeof original) => ({ assetId: asset.id, mimeType: asset.mimeType, filename: asset.filename });
+    const common = { version: 1, resultIndex: 0, original: reference(original), maskComposited: true, requestedOutputFormat: "webp", outputCompression: 84, operations: ["strict_mask_composite", "format_export"] };
+    const warning = "WebP 导出副本不承诺无损主图的逐像素一致性";
+    const savedPrimary = { ...primary, metadata: { imageResult: { ...common, role: "primary", export: reference(exported), warning } } };
+    const task = { id: taskId, requestId: `variants-${taskId}`, ownerUserId: user.id, status: "success" as const, operationType: "inpaint", resultUrls: [`/api/assets/${primary.id}/content`], credits: 0, createdAt, parameters: { output_format: "webp", output_compression: 84 } };
+    const store = new DemoStateStore<typeof original & { metadata?: Record<string, unknown> }, typeof task>(demo.databasePath);
+    try {
+      store.save({ assets: [
+        { ...original, metadata: { imageResult: { ...common, role: "provider-original" } } },
+        savedPrimary,
+        { ...exported, metadata: { imageResult: { ...common, role: "export" } } },
+        foreign,
+        { ...forged, metadata: { imageResult: { ...common, role: "primary", original: reference(foreign) } } },
+      ], tasks: [task] });
+    } finally { store.close(); }
+
+    const expectedVariant = (asset: typeof original) => ({ ...reference(asset), url: `/api/assets/${asset.id}/content` });
+    for (let restart = 0; restart < 2; restart++) {
+      await demo.start();
+      const response = await demo.request(`/api/assets/${primary.id}/variants`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(await response.json()).toEqual({ primary: expectedVariant(primary), original: expectedVariant(original), export: expectedVariant(exported), maskComposited: true, warning });
+      const listed = (await demo.json<{ assets: ListedAsset[] }>("/api/assets")).assets;
+      expect(listed.map(asset => asset.id).sort()).toEqual([primary.id, forged.id].sort());
+      expect(listed.find(asset => asset.id === primary.id)?.metadata).toEqual(savedPrimary.metadata);
+      const recovered = await demo.json<{ task: ApiTask & { resultUrls: string[] } }>(`/api/tasks/${taskId}`);
+      expect(recovered.task.resultUrls).toEqual([`/api/assets/${primary.id}/content`]);
+      expect(recovered.task.status).toBe("success");
+      for (const asset of [original, primary, exported]) {
+        const content = await demo.request(`/api/assets/${asset.id}/content`);
+        expect(content.status).toBe(200);
+        expect(content.headers.get("content-type")).toBe(asset.mimeType);
+        expect(content.headers.get("cache-control")).toBe("private, no-store");
+        expect(new Uint8Array(await content.arrayBuffer())).toEqual(asset.bytes);
+      }
+      for (const suffix of ["content", "variants"]) expect((await demo.request(`/api/assets/${foreign.id}/${suffix}`)).status).toBe(404);
+      const rejectedRelation = await demo.request(`/api/assets/${forged.id}/variants`);
+      expect(rejectedRelation.status).toBe(409);
+      const failure = await rejectedRelation.text();
+      expect(failure).not.toContain(foreign.id);
+      expect(failure).not.toContain(foreign.filename);
+      expect(demo.providerRequests).toEqual([]);
+    }
+  } finally { await demo.close(); }
+}, 60_000);

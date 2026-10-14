@@ -130,7 +130,8 @@ export function createAdminProjectsRouter(db: Database) {
                      WHERE t.user_id=p.owner_user_id AND t.project_id=p.external_id) AS "taskCount",
                     (SELECT COUNT(*)::int FROM assets a
                      WHERE a.owner_user_id=p.owner_user_id AND a.project_external_id=p.external_id
-                       AND a.deleted_at IS NULL) AS "assetCount",
+                       AND a.deleted_at IS NULL
+                       AND NOT (COALESCE(a.metadata->'imageResult'->>'version','')='1' AND COALESCE(a.metadata->'imageResult'->>'role','') IN ('provider-original','export'))) AS "assetCount",
                     (SELECT COALESCE(SUM(h.credits),0)::int FROM generation_history h
                      WHERE h.user_id=p.owner_user_id AND h.project_id=p.external_id) AS credits,
                     p.updated_at AS "updatedAt"

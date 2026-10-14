@@ -8,7 +8,7 @@ import { useCanvasImageTasks } from "./use-canvas-image-tasks";
 import { controlQueuedBatch, QueuedTaskFailedError, QueuedTaskPausedError, type QueuedBatchAction } from "@/services/api/generation-tasks";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { recoverVideoGenerationTask, requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
-import { fetchServerAssetContent } from "@/services/api/server-assets";
+import { fetchServerAssetContent, type ServerAssetVariants } from "@/services/api/server-assets";
 import { hydratePromptReuse } from "@/services/api/prompts";
 import { defaultConfig, modelOptionName, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { releaseUnusedImageObjectUrls, resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
@@ -157,6 +157,7 @@ const CanvasNodeAngleDialog = lazy(loadCanvasNodeAngleDialog);
 const CanvasNodeCropDialog = lazy(loadCanvasNodeCropDialog);
 const CanvasImageEditorDialog = lazy(loadCanvasImageEditorDialog);
 const CanvasImagePdfDialog = lazy(() => import("@/components/canvas/canvas-image-pdf-dialog").then(module => ({ default: module.CanvasImagePdfDialog })));
+const CanvasImageDownloadDialog = lazy(() => import("./canvas-image-download-dialog").then(module => ({ default: module.CanvasImageDownloadDialog })));
 const CanvasNodeMaskEditDialog = lazy(loadCanvasNodeMaskEditDialog);
 const CanvasNodeSplitDialog = lazy(loadCanvasNodeSplitDialog);
 const CanvasNodeUpscaleDialog = lazy(loadCanvasNodeUpscaleDialog);
@@ -539,6 +540,7 @@ function WirelessCanvasPage() {
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [manualEditNode, setManualEditNode] = useState<CanvasNodeData | null>(null);
     const [imageExport, setImageExport] = useState<{ nodes: CanvasNodeData[]; ids: string[] } | null>(null);
+    const [imageDownload, setImageDownload] = useState<{ projectId: string; node: CanvasNodeData; variants: ServerAssetVariants } | null>(null);
     const [renameNode, setRenameNode] = useState<{ id: string; name: string } | null>(null);
     const [renameGroup, setRenameGroup] = useState<{ id: string; name: string } | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
@@ -609,6 +611,8 @@ function WirelessCanvasPage() {
         setQuickGenerateModel((current) => current || effectiveConfig.imageModel || effectiveConfig.model);
         setQuickGenerateSize((current) => current || effectiveConfig.size || defaultConfig.size);
     }, [effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size]);
+
+    useEffect(() => { setImageDownload(null); }, [projectId]);
 
     useEffect(() => {
         if (maskEditNodeId) setMaskEditModel(effectiveConfig.imageModel || effectiveConfig.model);
@@ -2581,11 +2585,21 @@ function WirelessCanvasPage() {
     const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
         if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
         try {
-            const { downloadCanvasContent, downloadCanvasImage } = await loadCanvasExport();
-            if (node.type === CanvasNodeType.Image) await downloadCanvasImage(node);
+            const { downloadCanvasContent, downloadCanvasImage, loadCanvasImageVariants, hasCanvasImageVariants } = await loadCanvasExport();
+            if (node.type === CanvasNodeType.Image) {
+                const variants = await loadCanvasImageVariants(node);
+                const current = nodesRef.current.find(item => item.id === node.id);
+                if (savedProjectIdRef.current !== projectId || !current || current.metadata?.content !== node.metadata.content || current.metadata?.storageKey !== node.metadata.storageKey) return;
+                if (variants && hasCanvasImageVariants(variants)) {
+                    setImageDownload({ projectId, node: current, variants });
+                    return;
+                }
+                if (variants?.warning) message.warning(`后处理提示：${variants.warning}`);
+                await downloadCanvasImage(node);
+            }
             else downloadCanvasContent(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : audioExtension(node.metadata.mimeType)}`);
         } catch (error) { message.error(error instanceof Error ? error.message : "图片下载失败"); }
-    }, [message]);
+    }, [message, projectId]);
 
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
@@ -5134,6 +5148,7 @@ function WirelessCanvasPage() {
                     <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>修改名称不改变图片内容或版本号。图片下载时会附带当前版本。</p>
                 </Modal>
                 {imageExport ? <Suspense fallback={null}><CanvasImagePdfDialog nodes={imageExport.nodes} defaultSelectedIds={imageExport.ids} defaultName={currentProject?.title || "图片集"} onClose={() => setImageExport(null)} /></Suspense> : null}
+                {imageDownload?.projectId === projectId && nodes.some(node => node.id === imageDownload.node.id && node.metadata?.content === imageDownload.node.metadata?.content && node.metadata?.storageKey === imageDownload.node.metadata?.storageKey) ? <Suspense fallback={null}><CanvasImageDownloadDialog node={imageDownload.node} variants={imageDownload.variants} onClose={() => setImageDownload(null)} /></Suspense> : null}
 
                 {infoNode ? (
                     <Suspense fallback={null}>

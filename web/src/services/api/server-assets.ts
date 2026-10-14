@@ -30,12 +30,20 @@ export type ServerAsset = {
 };
 export type ServerProject = { id: string; externalId: string; name: string; ownerName: string; departmentName: string | null; status: string; taskCount: number; assetCount: number; credits: number; updatedAt: string };
 export type UserProject = { id: string; externalId: string; name: string; status: string; createdAt: string; updatedAt: string };
+export type ServerAssetVariant = { assetId: string; url: string; mimeType: string; filename: string };
+export type ServerAssetVariants = {
+    primary: ServerAssetVariant;
+    original: ServerAssetVariant;
+    export?: ServerAssetVariant;
+    maskComposited: boolean;
+    warning?: string;
+};
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(path, { ...init, credentials: "include" });
     if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(payload.message || "素材请求失败");
+        const payload = (await response.json().catch(() => ({}))) as { message?: string; msg?: string };
+        throw new Error(payload.msg || payload.message || "素材请求失败");
     }
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
@@ -44,6 +52,15 @@ export const listServerAssets = (signal?: AbortSignal) => request<{ assets: Serv
 export const listAdminServerAssets = () => request<{ assets: ServerAsset[] }>("/api/admin/assets");
 export const listAdminServerProjects = () => request<{ projects: ServerProject[] }>("/api/admin/projects");
 export const listServerProjects = (signal?: AbortSignal) => request<{ projects: UserProject[] }>("/api/projects", { signal });
+
+export async function fetchServerAssetVariants(id: string, signal?: AbortSignal): Promise<ServerAssetVariants> {
+    const payload = await request<ServerAssetVariants | { code: number; data: ServerAssetVariants; msg: string }>(`/api/assets/${encodeURIComponent(id)}/variants`, { signal });
+    if ("code" in payload) {
+        if (payload.code !== 0) throw new Error(payload.msg || "图片版本读取失败");
+        return payload.data;
+    }
+    return payload;
+}
 
 export async function uploadServerAsset(file: File, metadata: Record<string, unknown> = {}, options: { projectId?: string; clientReferenceId?: string; expectedOwnerId?: string; signal?: AbortSignal } = {}) {
     const { expectedOwnerId, signal, ...bodyOptions } = options;

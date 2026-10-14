@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import ts from "typescript";
 import { buildApiMartImageRequest } from "../src/apimart-image";
 import { DemoStateStore, DemoStorageError } from "../src/demo-state-store";
+import { ImageResultPersistenceError } from "../src/image-result-storage";
 
 const stores: DemoStateStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
@@ -33,7 +34,7 @@ const productionCode = ts.transpileModule([
 
 type FailurePhase = "submission" | "polling" | "download";
 type RecordedRequest = { url: string; method: string; init?: RequestInit };
-type DemoImageTask = { id: string; requestId: string; credits: number; status: string; failureReason?: string };
+type DemoImageTask = { id: string; requestId: string; credits: number; status: string; failureReason?: string; parameters: Record<string, unknown> };
 type Harness = {
   callGptImage2(prompt: string, parameters: Record<string, unknown>, sources: Array<{ mimeType: string; bytes: Uint8Array }>): Promise<string>;
   runApiMartImageTaskForDemo(task: DemoImageTask, user: { id: string; creditBalance: number }, modelId: string, prompt: string, parameters: Record<string, unknown>, sources: unknown[]): Promise<void>;
@@ -47,13 +48,13 @@ function createHarness(failurePhase?: FailurePhase) {
   let completed = 0;
   const failure = Object.assign(new Error("unknown certificate verification error"), { code: "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR" });
   const dependencies = {
-    demoState, DemoStorageError, demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
+    demoState, DemoStorageError, ImageResultPersistenceError, demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
     apiMartBaseUrl: "https://apimart.invalid/v1",
     apiMartApiKey: "mock-model-key",
     buildApiMartImageRequest,
     Bun: { sleep: async () => {} },
     sleep: async () => {},
-    completeDemoImageTask: () => { completed++; },
+    completeDemoImageTask: async () => { completed++; },
     fetchProviderSubmission: async (url: string, init?: RequestInit) => {
       paid.push({ url: String(url), method: init?.method || "GET", init });
       if (failurePhase === "submission") throw failure;
@@ -105,7 +106,7 @@ describe("demo image paid-submission boundaries", () => {
 
     test(`APIMart demo does not use a whole-job fallback after a ${phase} network failure`, async () => {
       const harness = createHarness(phase);
-      const task: DemoImageTask = { id: "task", requestId: "request", status: "processing", credits: 3 };
+      const task: DemoImageTask = { id: "task", requestId: "request", status: "processing", credits: 3, parameters: {} };
       const user = { id: "test-owner", creditBalance: 10 };
       await harness.api.runApiMartImageTaskForDemo(task, user, "gemini-3.1-flash-image-preview", "paid prompt", {}, []);
       expect(task.status).toBe("failed");

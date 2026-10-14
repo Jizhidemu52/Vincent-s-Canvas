@@ -95,7 +95,7 @@ export function createPromptTemplatesRouter(db: Database) {
       );
       const task = result.rows[0];
       if (!task) throw notFound();
-      const assets = await db.query<{ id: string }>("SELECT id FROM assets WHERE task_id=$1 AND owner_user_id=$2 AND deleted_at IS NULL ORDER BY created_at LIMIT 20", [task.id, actor.id]);
+      const assets = await db.query<{ id: string }>("SELECT id FROM assets WHERE task_id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND NOT (COALESCE(metadata->'imageResult'->>'version','')='1' AND COALESCE(metadata->'imageResult'->>'role','') IN ('provider-original','export')) ORDER BY created_at LIMIT 20", [task.id, actor.id]);
       const snapshot = promptSnapshotSchema.parse({ title: titleFromPrompt(task.prompt), prompt: task.prompt, targetTool: toolFromOperation(task.operationType, task.parameters), modelConfigId: task.modelConfigId, parameters: task.parameters, referenceAssetIds: assets.rows.map((item) => item.id), sourceTaskId: task.id });
       const template = await createPersonalTemplate(db, actor, snapshot);
       await writeAudit(db, { actor, action: "prompt.saved_from_task", targetType: "prompt_template", targetId: template.id, departmentId: actor.departmentId, result: "success", detail: { taskId: task.id }, ip: request.ip });

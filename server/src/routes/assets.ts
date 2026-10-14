@@ -12,6 +12,7 @@ import {
 import { writeAudit } from "../audit";
 import { assetMetadataSchema } from "../asset-metadata";
 import { assertCanvasOwner, CanvasDocumentError } from "../canvas-document";
+import { imageResultVariantIds, ImageResultVariantsError, resolveImageResultVariants, type ImageResultAsset } from "../image-result-variants";
 import type { Database } from "../db";
 import { ObjectStorage } from "../object-storage";
 import { requireRole } from "../rbac";
@@ -44,6 +45,8 @@ const visibilitySchema = z.object({ visibility: z.enum(["private", "company"]) }
 const reverseSchema = z.object({ idempotencyKey: z.string().trim().min(8).max(160), reason: z.string().trim().min(2).max(500) });
 
 const assetSelect = `a.id,a.owner_user_id AS "ownerUserId",u.display_name AS "ownerName",a.department_id AS "departmentId",d.name AS "departmentName",a.project_id AS "projectId",p.name AS "projectName",a.task_id AS "taskId",a.filename,a.mime_type AS "mimeType",a.byte_size::int AS "byteSize",a.kind,a.source,a.operation_type AS "operationType",a.prompt,m.name AS "modelName",a.status,a.visibility_scope AS "visibilityScope",a.metadata,a.deleted_at AS "deletedAt",a.created_at AS "createdAt"`;
+const primaryImageAssetClause = `NOT (COALESCE(a.metadata->'imageResult'->>'version','')='1' AND COALESCE(a.metadata->'imageResult'->>'role','') IN ('provider-original','export'))`;
+const variantAssetSelect = `a.id,a.owner_user_id AS "ownerUserId",a.task_id AS "taskId",a.filename,a.mime_type AS "mimeType",a.status,a.metadata,a.deleted_at AS "deletedAt"`;
 
 export function accessClause(actor: SessionUser, alias = "a") {
   if (actor.role === "super_admin") return { sql: "TRUE", values: [] as unknown[] };
@@ -85,7 +88,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const access = accessClause(actor);
       const result = await db.query(
-        `SELECT ${assetSelect} FROM assets a JOIN users u ON u.id=a.owner_user_id LEFT JOIN departments d ON d.id=a.department_id LEFT JOIN projects p ON p.id=a.project_id LEFT JOIN model_configs m ON m.id=a.model_config_id WHERE a.deleted_at IS NULL AND ${access.sql} ORDER BY a.created_at DESC LIMIT 2000`,
+        `SELECT ${assetSelect} FROM assets a JOIN users u ON u.id=a.owner_user_id LEFT JOIN departments d ON d.id=a.department_id LEFT JOIN projects p ON p.id=a.project_id LEFT JOIN model_configs m ON m.id=a.model_config_id WHERE a.deleted_at IS NULL AND ${primaryImageAssetClause} AND ${access.sql} ORDER BY a.created_at DESC LIMIT 2000`,
         access.values,
       );
       response.json({ assets: await withProjections(db, result.rows) });
@@ -160,6 +163,31 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       response.status(204).end();
     } catch (error) {
       if (error instanceof CanvasDocumentError) response.status(error.status).json({ error: error.code, message: error.message });
+      else next(error);
+    }
+  });
+
+  router.get("/:id/variants", async (request, response, next) => {
+    try {
+      const id = z.string().uuid().parse(request.params.id);
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const access = accessClause(actor);
+      const shifted = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 1}`);
+      const result = await db.query<ImageResultAsset>(
+        `SELECT ${variantAssetSelect} FROM assets a WHERE a.id=$1 AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}`,
+        [id, ...access.values],
+      );
+      const primary = result.rows[0];
+      if (!primary) { response.status(404).json({ error: "NOT_FOUND", message: "素材不存在或无权访问" }); return; }
+      const ids = imageResultVariantIds(primary);
+      const relatedAccess = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 3}`);
+      const related = ids.length ? await db.query<ImageResultAsset>(
+        `SELECT ${variantAssetSelect} FROM assets a WHERE a.id=ANY($1::uuid[]) AND a.owner_user_id=$2 AND a.task_id=$3 AND a.status='ready' AND a.deleted_at IS NULL AND ${relatedAccess}`,
+        [ids, primary.ownerUserId, primary.taskId ?? null, ...access.values],
+      ) : { rows: [] };
+      response.json(resolveImageResultVariants(primary, related.rows));
+    } catch (error) {
+      if (error instanceof ImageResultVariantsError) response.status(error.status).json({ error: error.code, message: error.message });
       else next(error);
     }
   });
@@ -312,7 +340,7 @@ export function createAdminAssetsRouter(db: Database) {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const values: unknown[] = [];
-      const where = actor.role === "department_admin" ? (values.push(actor.departmentId), "WHERE a.department_id=$1") : "";
+      const where = `WHERE ${primaryImageAssetClause}${actor.role === "department_admin" ? (values.push(actor.departmentId), " AND a.department_id=$1") : ""}`;
       const result = await db.query(`SELECT ${assetSelect} FROM assets a JOIN users u ON u.id=a.owner_user_id LEFT JOIN departments d ON d.id=a.department_id LEFT JOIN projects p ON p.id=a.project_id LEFT JOIN model_configs m ON m.id=a.model_config_id ${where} ORDER BY a.created_at DESC LIMIT 5000`, values);
       response.json({ assets: await withProjections(db, result.rows) });
     } catch (error) { next(error); }

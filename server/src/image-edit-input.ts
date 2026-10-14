@@ -11,6 +11,32 @@ export class ImageEditInputError extends Error {
   readonly code = "INVALID_IMAGE_MASK";
 }
 
+type OrientationMetadata = {
+  tags?: Record<string, unknown>;
+  side_data_list?: Array<{ side_data_type?: string; displaymatrix?: string; rotation?: number }>;
+};
+export type ImageOrientationProbe = { frames?: OrientationMetadata[]; streams?: OrientationMetadata[] };
+
+/** Inspect FFprobe-decoded metadata, never parse EXIF bytes ourselves. Rotation alone misses mirrors. */
+export function hasNonIdentityImageOrientation(probe: ImageOrientationProbe) {
+  const identity = [65536, 0, 0, 0, 65536, 0, 0, 0, 1073741824];
+  return [...(probe.frames || []), ...(probe.streams || [])].some(item => {
+    for (const [key, value] of Object.entries(item.tags || {})) {
+      if (/^orientation$/i.test(key) && Number(value) !== 1) return true;
+      if (/^rotate$/i.test(key) && (!Number.isFinite(Number(value)) || Number(value) % 360 !== 0)) return true;
+    }
+    return (item.side_data_list || []).some(data => {
+      if (data.rotation !== undefined && (!Number.isFinite(data.rotation) || data.rotation % 360 !== 0)) return true;
+      if (data.displaymatrix !== undefined || /display\s*matrix/i.test(data.side_data_type || "")) {
+        // FFprobe emits three numbered rows; require the complete identity matrix, including reflections.
+        const matrix = data.displaymatrix?.replace(/^\s*\d+:/gm, "").trim().split(/\s+/).map(Number);
+        return !matrix || matrix.length !== 9 || matrix.some((value, index) => value !== identity[index]);
+      }
+      return false;
+    });
+  });
+}
+
 function archivedMaskIndex(parameters: Record<string, unknown>) {
   const archive = parameters.inputArchive;
   if (!archive || typeof archive !== "object" || !("maskReferenceIndex" in archive)) return undefined;
@@ -44,7 +70,7 @@ export async function prepareImageEditInput<T extends ImageEditSource>(sources: 
   }
   const sourceMeta = await inspectEditImage(original);
   const maskMeta = await inspectEditImage(mask);
-  if (!/^(?:rgba|bgra|argb|abgr|ya8|(?:rgba|bgra|ya)64(?:le|be)|ya16(?:le|be))$/.test(maskMeta.pixelFormat)) {
+  if (!/^(?:rgba|bgra|argb|abgr|ya8)$/.test(maskMeta.pixelFormat)) {
     throw new ImageEditInputError("PNG 蒙版缺少 alpha 透明通道，请重新绘制蒙版；尚未提交生成");
   }
   if (maskMeta.width !== sourceMeta.width || maskMeta.height !== sourceMeta.height) {
@@ -67,7 +93,7 @@ async function inspectEditImage(source: ImageEditSource) {
       execFile(process.env.FFPROBE_PATH || "ffprobe", [
         "-v", "error", "-max_alloc", "268435456", "-threads", "1",
         "-protocol_whitelist", "file,pipe", "-format_whitelist", "png_pipe,jpeg_pipe,webp_pipe",
-        "-count_frames", "-show_entries", "format=format_name:stream=codec_type,width,height,pix_fmt,nb_read_frames",
+        "-read_intervals", "%+#2", "-count_frames", "-show_entries", "format=format_name:stream=codec_type,width,height,pix_fmt,nb_read_frames:stream_tags:stream_side_data:frame_tags:frame_side_data",
         "-of", "json", file,
       ], { timeout: 20_000, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout, stderr) => {
         if (error || stderr.trim()) reject(new ImageEditInputError((error as NodeJS.ErrnoException | null)?.code === "ENOENT"
@@ -76,10 +102,20 @@ async function inspectEditImage(source: ImageEditSource) {
         else resolve(stdout);
       });
     });
-    const decoded = JSON.parse(output) as { format?: { format_name?: string }; streams?: Array<{ codec_type?: string; width?: number; height?: number; pix_fmt?: string; nb_read_frames?: string }> };
+    const decoded = JSON.parse(output) as { format?: { format_name?: string }; frames?: OrientationMetadata[];
+      streams?: Array<OrientationMetadata & { codec_type?: string; width?: number; height?: number; pix_fmt?: string; nb_read_frames?: string }> };
     const image = decoded.streams?.find(stream => stream.codec_type === "video");
-    if (decoded.format?.format_name !== formats[source.mimeType] || !image || Number(image.nb_read_frames) !== 1 || !Number.isInteger(image.width) || !Number.isInteger(image.height) || image.width! < 1 || image.height! < 1 || image.width! * image.height! > 100_000_000) {
+    if (decoded.format?.format_name !== formats[source.mimeType] || !image || Number(image.nb_read_frames) !== 1 || !Number.isInteger(image.width) || !Number.isInteger(image.height) || image.width! < 1 || image.height! < 1) {
       throw new ImageEditInputError("原图或蒙版的真实格式、像素尺寸或单帧内容无效；尚未提交生成");
+    }
+    if (image.width! > 8192 || image.height! > 8192 || image.width! * image.height! > 16_777_216) {
+      throw new ImageEditInputError("严格蒙版编辑仅支持单边不超过 8192、总像素不超过 16777216 的原图和蒙版；尚未提交生成");
+    }
+    if (/(?:9|10|12|14|16|48|64)(?:le|be)?$/.test(image.pix_fmt || "")) {
+      throw new ImageEditInputError("严格蒙版编辑仅支持 8 位（8-bit）原图和蒙版，不自动降低高位深图片精度；尚未提交生成");
+    }
+    if (hasNonIdentityImageOrientation(decoded)) {
+      throw new ImageEditInputError("原图或蒙版含旋转或镜像方向信息，无法保证蒙版坐标一致；请先另存为正常方向 PNG 再编辑，尚未提交生成");
     }
     return { width: image.width!, height: image.height!, pixelFormat: image.pix_fmt || "" };
   } finally {
