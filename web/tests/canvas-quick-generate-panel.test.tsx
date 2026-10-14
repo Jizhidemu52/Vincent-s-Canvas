@@ -6,7 +6,7 @@ import { useUserStore, type LocalUser } from "@/stores/use-user-store";
 
 const noop = () => undefined;
 function render(count: number, running = false) {
-    return renderToStaticMarkup(<CanvasQuickGeneratePanel embedded open prompt="修改花瓶颜色" model="gpt-image-2" size="1:1" quality="auto" onQualityChange={noop} count={1} running={running} config={defaultConfig} estimateCredits={0} estimateRmb={0}
+    return renderToStaticMarkup(<CanvasQuickGeneratePanel embedded open prompt="修改花瓶颜色" model="gpt-image-2" size="1:1" quality="auto" onQualityChange={noop} count={1} imageOptions="" onImageOptionsChange={noop} running={running} config={defaultConfig} estimateCredits={0} estimateRmb={0}
         references={Array.from({ length: count }, (_, index) => ({ id: String(index), name: `reference-${index}`, type: "image/png", dataUrl: `data:image/png;base64,${index}` }))}
         onClose={noop} onPromptChange={noop} onModelChange={noop} onSizeChange={noop} onCountChange={noop} onPickReferences={noop} onRemoveReference={noop} onClearReferences={noop} onMoveReference={noop} onMissingConfig={noop} onGenerate={noop} />);
 }

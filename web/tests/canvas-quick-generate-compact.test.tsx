@@ -7,7 +7,7 @@ import ts from "typescript";
 import { CanvasQuickGeneratePanel } from "@/components/canvas/canvas-quick-generate-panel";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
-import { defaultConfig } from "@/stores/use-config-store";
+import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 
 type Props = ComponentProps<typeof CanvasQuickGeneratePanel>;
 const noop = () => undefined;
@@ -16,6 +16,7 @@ const models = ["gpt-image-2", "vcen-gpt2", "nano-banana-2", "midjourney-v7", "g
 }));
 const initialProps: Props = {
     embedded: true, open: true, prompt: "将花瓶改成绿色", model: "gpt-image-2", size: "1536x1024", quality: "high", count: 3,
+    imageOptions: "", onImageOptionsChange: noop,
     references: [{ id: "ref-1", name: "花瓶", type: "image/png", dataUrl: "data:image/png;base64,example" }],
     running: false, config: defaultConfig, estimateCredits: 0, estimateRmb: 0,
     onClose: noop, onPromptChange: noop, onModelChange: noop, onSizeChange: noop, onQualityChange: noop, onCountChange: noop,
@@ -57,8 +58,8 @@ test("generation settings start collapsed with a connected accessible toggle whi
 
 test("collapsed summary reflects normalized pixels, adapter quality labels and actual task count", () => {
     const cases: { patch: Partial<Props>; summary: string }[] = [
-        { patch: {}, summary: "1536 × 1024 · 画质高 · 3 张" },
-        { patch: { size: "auto", quality: "auto", count: 1 }, summary: "自适应 · 画质自动 · 1 张" },
+        { patch: {}, summary: "1536 × 1024 · 画质高 high · 3 张" },
+        { patch: { size: "auto", quality: "auto", count: 1 }, summary: "自适应 · 画质自动 auto · 1 张" },
         { patch: { model: "vcen-gpt2", size: "728x90", quality: "2k", count: 5 }, summary: "728 × 90 · 分辨率2K · 5 张" },
         { patch: { model: "nano-banana-2", size: "16:9", quality: "0.5k", count: 10 }, summary: "16:9 · 分辨率0.5K · 10 张" },
         { patch: { model: "midjourney-v7", size: "3:2", quality: "turbo", count: 9 }, summary: "3:2 · 生成速度极速 · 1 个任务" },
@@ -139,7 +140,7 @@ test("opening, editing and reclosing settings retains latest values without clea
     const reclosed = render({ quality: "medium" });
     expect(reclosed.fieldset.props.hidden).toBe(true);
     expect(reclosed.settings.props.config).toMatchObject({ size: "1536x1024", quality: "medium", count: "3" });
-    expect(renderToStaticMarkup(reclosed.toggle)).toContain("1536 × 1024 · 画质中 · 3 张");
+    expect(renderToStaticMarkup(reclosed.toggle)).toContain("1536 × 1024 · 画质中 medium · 3 张");
     expect(reclosed.tree.find(element => element.type === "textarea")!.props.value).toBe(initialProps.prompt);
     expect(reclosed.tree.find(element => element.props.references)?.props.references).toBe(initialProps.references);
     expect(changes).toEqual([["quality", "medium"]]);
@@ -154,6 +155,19 @@ test("generation in progress keeps parameter and submit locks when settings are 
     expect(opened.fieldset.props.hidden).toBe(false);
     expect(opened.fieldset.props.disabled).toBe(true);
     expect(opened.tree.find(element => element.props.className === "cw-generate-button")!.props.disabled).toBe(true);
+});
+
+test("selected advanced settings override global defaults and editing only updates the local composer", () => {
+    const globalBefore = useConfigStore.getState();
+    const changes: string[] = [];
+    const savedOptions = '{"output_format":"webp","output_compression":83}';
+    const render = controls({ config: { ...defaultConfig, imageOptions: savedOptions }, imageOptions: "", onImageOptionsChange: value => changes.push(value) });
+    expect(render().settings.props.config.imageOptions).toBe("");
+    const selected = render({ imageOptions: savedOptions });
+    expect(selected.settings.props.config.imageOptions).toBe(savedOptions);
+    selected.settings.props.onConfigChange("imageOptions", "");
+    expect(changes).toEqual([""]);
+    expect(useConfigStore.getState()).toBe(globalBefore);
 });
 
 function pressPrompt(props: Partial<Props>, patch: Record<string, unknown> = {}) {

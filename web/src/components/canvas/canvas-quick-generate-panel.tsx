@@ -7,7 +7,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { canvasQuickGeneratePanelPropsEqual, type CanvasQuickGeneratePanelRenderState } from "@/lib/canvas/canvas-quick-generate-render-stability";
 import { validateImageReferences } from "@/lib/image-reference-policy";
-import { modelOptionName, useConfigStore, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -22,9 +22,9 @@ type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "
 };
 
 export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
-    embedded = false, open, prompt, model, size, quality, count, references, running,
+    embedded = false, open, prompt, model, size, quality, count, imageOptions, references, running,
     estimateCredits, estimateRmb, remainingCredits, config, onClose, onPromptChange,
-    onModelChange, onSizeChange, onQualityChange, onCountChange, onPickReferences, onRemoveReference,
+    onModelChange, onSizeChange, onQualityChange, onCountChange, onImageOptionsChange, onPickReferences, onRemoveReference,
     onClearReferences, onMoveReference, onMissingConfig, onGenerate, positioned, onClearPosition,
 }: CanvasQuickGeneratePanelProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -89,11 +89,11 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                         <ChevronDown size={14} aria-hidden className={`shrink-0 ${settingsExpanded ? "rotate-180" : ""}`} />
                     </button>
                     <fieldset id={settingsId} hidden={!settingsExpanded} aria-labelledby={`${settingsId}-toggle`} disabled={running || !availableModel} className="max-h-[min(36dvh,320px)] min-w-0 overflow-y-auto border-0 p-0">
-                        <ImageSettingsPanel config={{ ...config, model, imageModel: model, ...settings }} theme={theme} showTitle={false} onConfigChange={(key, value) => {
+                        <ImageSettingsPanel config={{ ...config, model, imageModel: model, ...settings, imageOptions }} theme={theme} showTitle={false} onConfigChange={(key, value) => {
                             if (key === "size") onSizeChange(value);
                             if (key === "quality") onQualityChange(value);
                             if (key === "count") onCountChange(Number(value));
-                            if (key === "imageOptions") useConfigStore.getState().updateConfig("imageOptions", value);
+                            if (key === "imageOptions") onImageOptionsChange(value);
                         }} />
                     </fieldset>
                 <div className={`cw-generate-action ${disabled ? "is-disabled" : ""}`}>

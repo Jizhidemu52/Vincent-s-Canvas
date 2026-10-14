@@ -1,10 +1,12 @@
-import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 
-/** Read original prompts once per selection, without replacing an active edit. */
-export function createCanvasSelectionPromptSync() {
+type SelectedGenerationSettings = Pick<CanvasNodeMetadata, "model" | "size" | "quality" | "count" | "imageOptions"> & { prompt: string };
+
+/** Read saved image settings once per selection, without replacing active edits. */
+export function createCanvasSelectionGenerationSync() {
     let previousSelectionKey: string | undefined;
 
-    return (selectedIds: ReadonlySet<string>, selectedNodes: readonly CanvasNodeData[], projectId?: string) => {
+    return (selectedIds: ReadonlySet<string>, selectedNodes: readonly CanvasNodeData[], projectId?: string): SelectedGenerationSettings | undefined => {
         const selectionKey = JSON.stringify([projectId, ...Array.from(selectedIds).sort()]);
         if (selectionKey === previousSelectionKey) return undefined;
 
@@ -16,6 +18,18 @@ export function createCanvasSelectionPromptSync() {
         // Clicking empty canvas keeps the current draft available for creation.
         if (!selectedIds.size || (node && node.type !== CanvasNodeType.Image)) return undefined;
         // Multiple nodes have no single original prompt; uploaded images may have none.
-        return node?.metadata?.prompt ?? "";
+        const settings: SelectedGenerationSettings = { prompt: node?.metadata?.prompt ?? "" };
+        for (const key of ["model", "size", "quality", "imageOptions"] as const) {
+            const value = node?.metadata?.[key];
+            if (value !== undefined) settings[key] = value;
+        }
+        if (node?.metadata?.count !== undefined) settings.count = node.metadata.count;
+        return settings;
     };
+}
+
+/** The assistant still recalls only the original prompt. */
+export function createCanvasSelectionPromptSync() {
+    const sync = createCanvasSelectionGenerationSync();
+    return (selectedIds: ReadonlySet<string>, selectedNodes: readonly CanvasNodeData[], projectId?: string) => sync(selectedIds, selectedNodes, projectId)?.prompt;
 }

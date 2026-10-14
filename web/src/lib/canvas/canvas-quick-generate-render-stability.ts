@@ -6,6 +6,7 @@ export type CanvasQuickGeneratePanelRenderState = {
     size: string;
     quality: string;
     count: number;
+    imageOptions: string;
     references: readonly unknown[];
     running: boolean;
     positioned?: boolean;
@@ -20,6 +21,7 @@ export type CanvasQuickGeneratePanelRenderState = {
     onSizeChange: (value: string) => void;
     onQualityChange: (value: string) => void;
     onCountChange: (value: number) => void;
+    onImageOptionsChange: (value: string) => void;
     onPickReferences: () => void;
     onRemoveReference: (id: string) => void;
     onClearReferences: () => void;
@@ -42,6 +44,7 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
         previous.size === next.size &&
         previous.quality === next.quality &&
         previous.count === next.count &&
+        previous.imageOptions === next.imageOptions &&
         previous.references === next.references &&
         previous.running === next.running &&
         previous.positioned === next.positioned &&
@@ -56,6 +59,7 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
         previous.onSizeChange === next.onSizeChange &&
         previous.onQualityChange === next.onQualityChange &&
         previous.onCountChange === next.onCountChange &&
+        previous.onImageOptionsChange === next.onImageOptionsChange &&
         previous.onPickReferences === next.onPickReferences &&
         previous.onRemoveReference === next.onRemoveReference &&
         previous.onClearReferences === next.onClearReferences &&

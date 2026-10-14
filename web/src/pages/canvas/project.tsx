@@ -67,7 +67,7 @@ import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workfl
 import { createCanvasMentionReferenceIndex, createCanvasResourceReferenceIndex } from "@/lib/canvas/canvas-resource-references";
 import { canvasImageReferenceMentions, resolveCanvasNodeImageReferences } from "@/lib/canvas/canvas-image-references";
 import { syncCanvasSelectionReferences, type CanvasSelectionReference } from "@/lib/canvas/canvas-selection-references";
-import { createCanvasSelectionPromptSync } from "@/lib/canvas/canvas-selection-prompt";
+import { createCanvasSelectionGenerationSync } from "@/lib/canvas/canvas-selection-prompt";
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
 import { canvasImageBaseName, canvasImageExportStem, canvasImageVersion, canvasImageReferenceIdentity, originalCanvasImageFileName, originalReferenceFileName } from "@/lib/canvas/canvas-image-filename";
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
@@ -521,6 +521,7 @@ function WirelessCanvasPage() {
     const [quickGenerateSize, setQuickGenerateSize] = useState(effectiveConfig.size || defaultConfig.size);
     const [quickGenerateQuality, setQuickGenerateQuality] = useState(effectiveConfig.quality || defaultConfig.quality);
     const [quickGenerateCount, setQuickGenerateCount] = useState(2);
+    const [quickGenerateImageOptions, setQuickGenerateImageOptions] = useState(effectiveConfig.imageOptions || "");
     const [quickGenerateReferences, setQuickGenerateReferences] = useState<CanvasSelectionReference[]>([]);
     const [quickGenerateRunning, setQuickGenerateRunning] = useState(false);
     const quickSubmissionRef = useRef<symbol | null>(null);
@@ -1540,10 +1541,16 @@ function WirelessCanvasPage() {
     const agentSnapshotRef = useRef(agentSnapshot);
     agentSnapshotRef.current = agentSnapshot;
     const assistantSelectedNodes = agentSelectedNodeCacheRef.current.select(nodes, selectedNodeIds, nodeById, canvasSpatialIndex.nodeOrderById);
-    const syncSelectedPromptRef = useRef(createCanvasSelectionPromptSync());
+    const syncSelectedGenerationRef = useRef(createCanvasSelectionGenerationSync());
     useEffect(() => {
-        const selectedPrompt = syncSelectedPromptRef.current(selectedNodeIds, assistantSelectedNodes, projectId);
-        if (selectedPrompt !== undefined) setQuickGeneratePrompt(selectedPrompt);
+        const saved = syncSelectedGenerationRef.current(selectedNodeIds, assistantSelectedNodes, projectId);
+        if (!saved) return;
+        setQuickGeneratePrompt(saved.prompt);
+        if (saved.model !== undefined) setQuickGenerateModel(saved.model);
+        if (saved.size !== undefined) setQuickGenerateSize(saved.size);
+        if (saved.quality !== undefined) setQuickGenerateQuality(saved.quality);
+        if (saved.count !== undefined) setQuickGenerateCount(saved.count);
+        if (saved.imageOptions !== undefined) setQuickGenerateImageOptions(saved.imageOptions);
     }, [assistantSelectedNodes, projectId, selectedNodeIds]);
     const applyAgentOps = useCallback(
         (ops?: CanvasAgentOp[]) => {
@@ -2255,7 +2262,7 @@ function WirelessCanvasPage() {
 
         // Clipboard import selects its new reference, but must not replace the live creation draft.
         // Consume this selection without inventing a source prompt on the uploaded image.
-        if (preserveQuickGeneratePrompt) syncSelectedPromptRef.current(new Set([id]), [newNode], projectId);
+        if (preserveQuickGeneratePrompt) syncSelectedGenerationRef.current(new Set([id]), [newNode], projectId);
         setNodes((prev) => [...prev, newNode]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
@@ -3226,6 +3233,7 @@ function WirelessCanvasPage() {
             model,
             imageModel: model,
             ...settings,
+            imageOptions: quickGenerateImageOptions,
             count: "1",
             canvasImageCount: String(count),
         };
@@ -3279,7 +3287,7 @@ function WirelessCanvasPage() {
             metadata: {
                 prompt,
                 status: NODE_STATUS_LOADING,
-                ...buildImageGenerationMetadata(generationType, generationConfig, 1, references),
+                ...buildImageGenerationMetadata(generationType, generationConfig, count, references),
             },
         }));
         const controller = new AbortController();
@@ -3327,7 +3335,7 @@ function WirelessCanvasPage() {
                                           ...node.metadata,
                                           ...metadata,
                                           prompt,
-                                          ...buildImageGenerationMetadata(generationType, generationConfig, 1, references),
+                                          ...buildImageGenerationMetadata(generationType, generationConfig, count, references),
                                       },
                                   }
                                 : node,
@@ -3387,6 +3395,7 @@ function WirelessCanvasPage() {
         message,
         projectId,
         quickGenerateCount,
+        quickGenerateImageOptions,
         quickGenerateModel,
         quickGeneratePrompt,
         quickGeneratePosition,
@@ -4834,6 +4843,7 @@ function WirelessCanvasPage() {
                         size={quickGenerateSize}
                         quality={quickGenerateQuality}
                         count={quickGenerateCount}
+                        imageOptions={quickGenerateImageOptions}
                         references={quickGenerateReferences}
                         running={quickGenerateRunning}
                         positioned={Boolean(quickGeneratePosition)}
@@ -4848,6 +4858,7 @@ function WirelessCanvasPage() {
                         onSizeChange={setQuickGenerateSize}
                         onQualityChange={setQuickGenerateQuality}
                         onCountChange={setQuickGenerateCount}
+                        onImageOptionsChange={setQuickGenerateImageOptions}
                         onPickReferences={pickQuickGenerateReferences}
                         onRemoveReference={removeQuickGenerateReference}
                         onClearReferences={clearQuickGenerateReferences}

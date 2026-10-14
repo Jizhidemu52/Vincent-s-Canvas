@@ -15,6 +15,7 @@ function state(overrides: Partial<CanvasQuickGeneratePanelRenderState> = {}): Ca
         size: "1:1",
         quality: "auto",
         count: 2,
+        imageOptions: "",
         references,
         running: false,
         estimateCredits: 4,
@@ -27,6 +28,7 @@ function state(overrides: Partial<CanvasQuickGeneratePanelRenderState> = {}): Ca
         onSizeChange: noop,
         onQualityChange: noop,
         onCountChange: noop,
+        onImageOptionsChange: noop,
         onPickReferences: noop,
         onRemoveReference: noop,
         onClearReferences: noop,
@@ -45,6 +47,7 @@ describe("canvas quick-generate panel render stability", () => {
     test("refreshes the panel when a generation setting changes", () => {
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ count: 3 }))).toBe(false);
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ quality: "high" }))).toBe(false);
+        expect(canvasQuickGeneratePanelPropsEqual(state(), state({ imageOptions: '{"output_format":"webp"}' }))).toBe(false);
     });
 
     test("refreshes the panel when a reference collection changes", () => {
@@ -53,5 +56,6 @@ describe("canvas quick-generate panel render stability", () => {
 
     test("refreshes the panel when an action callback changes", () => {
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ onGenerate: () => undefined }))).toBe(false);
+        expect(canvasQuickGeneratePanelPropsEqual(state(), state({ onImageOptionsChange: () => undefined }))).toBe(false);
     });
 });
