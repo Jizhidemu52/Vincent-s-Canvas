@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ComponentProps, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Popover } from "radix-ui";
+import { Dialog, Popover } from "radix-ui";
 import ts from "typescript";
 import { CanvasQuickQualityOptions, CanvasQuickRatioOptions, CanvasQuickSettingsPopovers } from "@/components/canvas/canvas-quick-settings-popovers";
 import { ImageSettingsPanel, imageSizeLabel } from "@/components/image-settings-panel";
@@ -134,14 +134,14 @@ function componentModule(path: string) {
     };
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code)((name: string) => name === "react" ? react
-        : name === "radix-ui" ? { Popover }
+        : name === "radix-ui" ? { Dialog, Popover }
             : name === "@/components/image-settings-panel" ? { ImageSettingsPanel, imageSizeLabel }
                 : name === "@/lib/image-model-settings" ? { ...requireModule(name), useImageModelProfile: profile }
                     : requireModule(name), module, module.exports);
     return { exports: module.exports, render<T>(render: (exports: any) => T) { cursor = 0; effects = []; const result = render(module.exports); effects.forEach(effect => effect()); return result; } };
 }
 
-test("side popovers are mutually exclusive, close after a ratio choice, and use the right-side portal contract", () => {
+test("menus open below their triggers without upward flipping and the spacious dialog is mutually exclusive", () => {
     const module = componentModule("../src/components/canvas/canvas-quick-settings-popovers.tsx");
     const changes: Array<[string, string]> = [];
     const props: Props = { config: config(), profile: profile("mark-flare"), theme: canvasThemes.dark, referenceCount: 0, disabled: false, onConfigChange: (key, value) => changes.push([key, value]) };
@@ -152,7 +152,7 @@ test("side popovers are mutually exclusive, close after a ratio choice, and use 
             return elements((component.type as (props: any) => ReactElement)(component.props));
         };
     };
-    const root = (tree: ReactElement<any>[]) => tree.find(item => item.type === Popover.Root)!;
+    const root = (tree: ReactElement<any>[]) => tree.find(item => item.type === Popover.Root || item.type === Dialog.Root)!;
     const initial = render();
     for (const id of ["size", "quality", "advanced"]) expect(root(initial(id)).props.open).toBe(false);
     root(initial("size")).props.onOpenChange(true);
@@ -160,7 +160,8 @@ test("side popovers are mutually exclusive, close after a ratio choice, and use 
     expect(root(opened("size")).props.open).toBe(true);
     expect(root(opened("quality")).props.open).toBe(false);
     const portal = opened("size").find(item => item.type === Popover.Content)!;
-    expect(portal.props).toMatchObject({ side: "right", align: "end", sideOffset: 8, collisionPadding: 12 });
+    expect(portal.props).toMatchObject({ side: "bottom", align: "center", sideOffset: 10, collisionPadding: 12, avoidCollisions: false });
+    expect(opened("size").find(item => item.type === Popover.Anchor)!.props.virtualRef).toBe(opened("quality").find(item => item.type === Popover.Anchor)!.props.virtualRef);
     expect(portal.props.style["--cw-parameter-panel"]).toBe(canvasThemes.dark.node.panel);
     const ratio = opened("size").find(item => item.type === module.exports.CanvasQuickRatioOptions)!;
     ratio.props.onChange("16:9");
@@ -173,6 +174,9 @@ test("side popovers are mutually exclusive, close after a ratio choice, and use 
     expect(root(advanced("advanced")).props.open).toBe(true);
     expect(root(advanced("quality")).props.open).toBe(false);
     expect(advanced("advanced").find(item => item.type === ImageSettingsPanel)!.props.compact).toBe(true);
+    expect(advanced("advanced").find(item => item.type === ImageSettingsPanel)!.props.spacious).toBe(true);
+    expect(advanced("advanced").some(item => item.type === Dialog.Content)).toBe(true);
+    expect(advanced("advanced").some(item => item.type === Popover.Content)).toBe(false);
     expect(root(render({ disabled: true })("advanced")).props.open).toBe(false);
     expect(root(render()("advanced")).props.open).toBe(false);
 });
@@ -201,7 +205,7 @@ test("every parameter popover has a persistent return action that only closes it
         return elements((component.type as (props: any) => ReactElement)(component.props));
     };
     const root = (tree: ReactElement<any>[]) => tree.find(item => item.type === Popover.Root)!;
-    for (const id of ["size", "quality", "advanced"]) {
+    for (const id of ["size", "quality"]) {
         root(render(id)).props.onOpenChange(true);
         const opened = render(id);
         expect(root(opened).props.open).toBe(true);
@@ -221,7 +225,7 @@ test("every parameter popover has a persistent return action that only closes it
         expect(content.props.onCloseAutoFocus).toBeUndefined();
         root(opened).props.onOpenChange(false);
         expect(root(render(id)).props.open).toBe(false);
-        for (const other of ["size", "quality", "advanced"]) expect(root(render(other)).props.open).toBe(false);
+        for (const other of ["size", "quality"]) expect(root(render(other)).props.open).toBe(false);
         expect(changes).toEqual([]);
         expect(value).toEqual(original);
         expect(props.referenceCount).toBe(3);
@@ -229,6 +233,36 @@ test("every parameter popover has a persistent return action that only closes it
     const css = readFileSync(new URL("../src/components/canvas/canvas-quick-settings-popovers.css", import.meta.url), "utf8");
     expect(css).toMatch(/\.cw-parameter-header\s*\{[^}]*position:\s*sticky;[^}]*top:\s*0;[^}]*flex:\s*0 0 auto;/);
     expect(css).toMatch(/\.cw-parameter-body\s*\{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/);
+});
+
+test("large advanced dialog keeps an accessible title, description and close actions without clearing settings", () => {
+    const module = componentModule("../src/components/canvas/canvas-quick-settings-popovers.tsx");
+    const changes: Array<[string, string]> = [];
+    const value = config({ imageOptions: '{"resolution":"2k","background":"transparent","output_format":"png"}' });
+    const before = structuredClone(value);
+    const props: Props = { config: value, profile: profile("mark-flare"), theme: canvasThemes.dark, referenceCount: 2, disabled: false, onConfigChange: (key, next) => changes.push([key, next]) };
+    const render = () => {
+        const tree = module.render(exports => elements(exports.CanvasQuickSettingsPopovers(props)));
+        const component = tree.find(item => item.props.id === "advanced")!;
+        return elements((component.type as Function)(component.props));
+    };
+    render().find(item => item.type === Dialog.Root)!.props.onOpenChange(true);
+    const opened = render();
+    expect(opened.find(item => item.type === Dialog.Root)!.props.open).toBe(true);
+    expect(opened.find(item => item.type === Dialog.Title)!.props.children).toBe("图像高级设置");
+    expect(opened.some(item => item.type === Dialog.Description)).toBe(true);
+    expect(opened.some(item => item.type === Dialog.Overlay)).toBe(true);
+    const content = opened.find(item => item.type === Dialog.Content)!;
+    expect(content.props.style["--cw-parameter-panel"]).toBe(canvasThemes.dark.node.panel);
+    expect(content.props.onCloseAutoFocus).toBeUndefined();
+    const closeButtons = opened.filter(item => item.type === Dialog.Close);
+    expect(closeButtons).toHaveLength(2);
+    expect(closeButtons[0]!.props.children.props["aria-label"]).toBe("返回创建面板");
+    expect(closeButtons[1]!.props.children.props.children).toBe("完成设置");
+    opened.find(item => item.type === Dialog.Root)!.props.onOpenChange(false);
+    expect(render().find(item => item.type === Dialog.Root)!.props.open).toBe(false);
+    expect(changes).toEqual([]);
+    expect(value).toEqual(before);
 });
 
 test("compact advanced handlers keep transparency and JPEG mutually compatible in actual payloads", () => {

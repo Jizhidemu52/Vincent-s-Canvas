@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowLeft, Check, ChevronDown, ChevronRight, ImageIcon } from "lucide-react";
 import { Popover } from "radix-ui";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -26,9 +26,32 @@ export function CanvasModelPicker({ options, value, label, emptyLabel, open, dis
     const theme = canvasThemes[themeName];
     const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
     const menuRef = useRef<HTMLDivElement>(null);
+    const openingFocusFrame = useRef<number | null>(null);
     const listId = useId();
     const current = options.find(option => option.value === value);
     const featured = commonCanvasModels(options);
+    useEffect(() => () => {
+        if (openingFocusFrame.current !== null) cancelAnimationFrame(openingFocusFrame.current);
+    }, []);
+    const focusOnOpen = (event: Event) => {
+        event.preventDefault();
+        const menu = menuRef.current;
+        if (!menu || disabled) return;
+        if (current && !featured.some(option => option.value === current.value)) {
+            setExpanded(previous => previous.has(current.family) ? previous : new Set([...previous, current.family]));
+        }
+        if (openingFocusFrame.current !== null) cancelAnimationFrame(openingFocusFrame.current);
+        // Wait for the newly expanded family to render. Only the opening event
+        // moves focus; later list updates and manual collapses leave it alone.
+        openingFocusFrame.current = requestAnimationFrame(() => {
+            openingFocusFrame.current = null;
+            if (menuRef.current !== menu || !menu.isConnected) return;
+            const selected = menu.querySelector<HTMLButtonElement>('button[data-model-choice][aria-selected="true"]:not(:disabled)');
+            const target = selected || menu.querySelector<HTMLButtonElement>('button[aria-label="关闭模型选择"]:not(:disabled)');
+            target?.focus({ preventScroll: true });
+            selected?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        });
+    };
     const palette = {
         "--cmp-panel": theme.node.panel, "--cmp-text": theme.node.text, "--cmp-muted": theme.node.muted,
         "--cmp-border": theme.node.stroke, "--cmp-hover": theme.toolbar.itemHover, "--cmp-selected": theme.toolbar.activeBg,
@@ -58,13 +81,13 @@ export function CanvasModelPicker({ options, value, label, emptyLabel, open, dis
                 onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()}>
                 <ModelLogo option={current} compact />
                 <span className="canvas-model-trigger-name">{label}</span>
-                <ChevronDown className="canvas-model-trigger-chevron" size={15} aria-hidden="true" />
+                <ChevronDown className={cn("canvas-model-trigger-chevron", open && !disabled && "is-open")} size={15} aria-hidden="true" />
             </button>
         </Popover.Trigger>
         <Popover.Portal>
             <Popover.Content ref={menuRef} id={listId} data-testid="canvas-model-picker-menu" data-canvas-no-zoom data-theme={themeName}
                 aria-label="选择画布模型" className="canvas-model-menu" style={palette} side="right" align="start" sideOffset={12} collisionPadding={12}
-                onOpenAutoFocus={event => { event.preventDefault(); (menuRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]') || menuRef.current?.querySelector<HTMLButtonElement>("button"))?.focus(); }}
+                onOpenAutoFocus={focusOnOpen}
                 onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}
                 onKeyDown={moveFocus}>
                 <div className="canvas-model-menu-header">

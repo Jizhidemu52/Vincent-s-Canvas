@@ -26,3 +26,68 @@
 .ip-align { display: flex; align-items: center; gap: 6px; min-height: 32px; color: var(--ip-muted); }
 .ip-align input { accent-color: var(--ip-text); }
 .image-parameters :is(button, input, select, summary):focus-visible { outline: 2px solid var(--ip-muted); outline-offset: 2px; }
+
+/* Dialog-only layout. Existing side panels retain their compact presentation. */
+.image-parameters.ip-spacious { display: flex; flex-direction: column; gap: 24px; font-size: 14px; line-height: 1.5; }
+.ip-spacious .ip-title { margin: 0; font-size: 18px; }
+.ip-spacious .ip-row { min-height: 48px; gap: 20px; }
+.ip-spacious .ip-select { max-width: 340px; }
+.ip-spacious .ip-select select { height: 44px; border-radius: 10px; padding-left: 14px; font-size: 14px; }
+.ip-spacious .ip-select > svg { top: 15px; right: 12px; }
+.ip-spacious .ip-row > input { min-height: 44px; width: min(100%, 340px); font-size: 15px; }
+.ip-spacious .ip-section { min-width: 0; }
+.ip-spacious .ip-section-heading { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+.ip-spacious .ip-section-icon { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; color: var(--ip-text); border-radius: 11px; background: var(--ip-soft); border: 1px solid var(--ip-border); }
+.ip-spacious .ip-section-heading > div { min-width: 0; flex: 1; }
+.ip-spacious .ip-section-heading h3 { margin: 0; color: var(--ip-text); font-size: 16px; font-weight: 650; line-height: 1.5; }
+.ip-spacious .ip-section-heading p { margin: 4px 0 0; color: var(--ip-muted); font-size: 13px; line-height: 1.6; }
+.ip-spacious .ip-section-badge { flex-shrink: 0; border: 1px solid var(--ip-border); border-radius: 6px; padding: 2px 7px; margin-top: 3px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ip-muted); }
+.ip-spacious .ip-size-section { border: 1px solid var(--ip-border); border-radius: 16px; padding: 22px; background: var(--ip-panel); }
+.ip-spacious .ip-section-notice { color: var(--ip-muted); background: var(--ip-soft); border-radius: 10px; padding: 11px 13px; margin: 0 0 18px; font-size: 13px; line-height: 1.7; }
+.ip-spacious .ip-size-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.ip-spacious .ip-size-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 14px; font-weight: 600; }
+.ip-spacious .ip-dimension-input { display: flex; align-items: center; gap: 8px; min-width: 0; height: 48px; padding: 0 14px; background: var(--ip-soft); border: 1px solid var(--ip-border); border-radius: 10px; }
+.ip-spacious .ip-dimension-input:focus-within { border-color: var(--ip-text); }
+.ip-spacious .ip-dimension-input input { width: 100%; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: var(--ip-text); font-family: inherit; font-size: 16px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.ip-spacious .ip-dimension-input > span { color: var(--ip-muted); font-size: 12px; font-weight: 500; }
+.ip-spacious .ip-snap-control { display: flex; gap: 10px; align-items: flex-start; margin-top: 18px; color: var(--ip-text); cursor: pointer; }
+.ip-spacious .ip-snap-control > input { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 3px; accent-color: var(--ip-text); }
+.ip-spacious .ip-snap-control > span { display: flex; flex-direction: column; gap: 3px; }
+.ip-spacious .ip-snap-control strong { font-size: 14px; font-weight: 550; }
+.ip-spacious .ip-snap-control span > span { color: var(--ip-muted); font-size: 12px; }
+.ip-spacious .ip-options-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.ip-spacious .ip-option-card { min-width: 0; margin: 0; padding: 8px 18px 18px; border: 1px solid var(--ip-border); border-radius: 13px; background: var(--ip-panel); }
+.ip-spacious .ip-option-card legend { max-width: 100%; padding: 0 5px; margin-left: -5px; color: var(--ip-text); font-size: 14px; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
+.ip-spacious .ip-option-card-wide { grid-column: 1 / -1; }
+.ip-spacious .ip-option-key { display: block; margin: 0 0 12px; color: var(--ip-muted); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.ip-spacious .ip-option-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(65px, 1fr)); gap: 6px; }
+.ip-spacious .ip-option-choice { position: relative; min-width: 0; cursor: pointer; }
+.ip-spacious .ip-option-choice input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.ip-spacious .ip-option-choice > span { display: grid; place-items: center; min-height: 42px; height: 100%; padding: 8px 5px; border: 1px solid var(--ip-border); border-radius: 8px; background: var(--ip-soft); color: var(--ip-muted); font-size: 14px; text-align: center; overflow-wrap: anywhere; transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease; }
+.ip-spacious .ip-option-choice:hover > span { border-color: var(--ip-muted); color: var(--ip-text); }
+.ip-spacious .ip-option-choice input:checked + span { background: var(--ip-text); color: var(--ip-panel); border-color: var(--ip-text); font-weight: 600; }
+.ip-spacious .ip-option-choice input:focus-visible + span { outline: 2px solid var(--ip-text); outline-offset: 3px; }
+.ip-spacious .ip-option-choice input:disabled + span { opacity: .45; cursor: not-allowed; }
+.ip-spacious .ip-option-input { display: block; width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--ip-border); border-radius: 9px; background: var(--ip-soft); color: var(--ip-text); font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; }
+.ip-spacious .ip-option-input::placeholder { color: var(--ip-muted); opacity: .85; }
+.ip-spacious .ip-option-input:disabled { opacity: .45; cursor: not-allowed; }
+.ip-spacious .ip-option-textarea { resize: vertical; line-height: 1.65; }
+.ip-spacious .ip-option-help { margin: 11px 0 0; color: var(--ip-muted); font-size: 12px; line-height: 1.7; }
+.ip-spacious .ip-option-range { display: block; font-variant-numeric: tabular-nums; }
+.ip-spacious .ip-option-card.is-inactive legend { color: var(--ip-muted); }
+.ip-spacious [role="alert"] { margin: -12px 0 0; font-size: 13px; line-height: 1.7; }
+.ip-spacious :is(input, textarea, select):focus-visible { outline: 2px solid var(--ip-text); outline-offset: 2px; }
+.ip-spacious .ip-dimension-input input:focus-visible { outline: none; }
+@media (max-width: 640px) {
+    .image-parameters.ip-spacious { gap: 20px; }
+    .ip-spacious .ip-size-section { padding: 16px; }
+    .ip-spacious .ip-size-grid, .ip-spacious .ip-options-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+    .ip-spacious .ip-option-card { padding: 8px 14px 14px; }
+    .ip-spacious .ip-section-heading { gap: 10px; }
+    .ip-spacious .ip-section-badge { display: none; }
+    .ip-spacious .ip-row { align-items: flex-start; flex-direction: column; gap: 8px; }
+    .ip-spacious .ip-select, .ip-spacious .ip-row > input { width: 100%; max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ip-spacious .ip-option-choice > span { transition: none; }
+}

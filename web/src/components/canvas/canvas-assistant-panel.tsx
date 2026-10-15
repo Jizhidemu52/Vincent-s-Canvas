@@ -7,6 +7,7 @@ import { motion } from "motion/react";
 import { modelOptionName, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
 import { ModelPicker } from "@/components/model-picker";
+import { CanvasPanelSizeControl } from "@/components/canvas/canvas-panel-size-control";
 import { getModelPickerOptions, resolveModelPickerSource } from "@/lib/model-picker-options";
 import { standaloneEdition } from "@/lib/standalone-edition";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -1266,6 +1267,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                     <button type="button" role="tab" aria-selected={false} onClick={collapse}>创建</button>
                     <button type="button" role="tab" aria-selected={true} onClick={() => setView("chat")}>对话</button>
                     <div className="ml-auto flex items-center gap-1">
+                        {layout !== "wide" ? <CanvasPanelSizeControl kind="chat" /> : null}
                         {onToggleLayout ? <Tooltip title={layout === "wide" ? "切换为左侧窄栏" : "切换为宽屏对话"}><button type="button" className="cw-icon" aria-label={layout === "wide" ? "切换为左侧窄栏" : "切换为宽屏对话"} onClick={onToggleLayout}>{layout === "wide" ? <PanelLeft className="size-4.5" /> : <Maximize2 className="size-4.5" />}</button></Tooltip> : null}
                         {hasMessages ? <Tooltip title="新对话"><button type="button" className="cw-icon" aria-label="新对话" onClick={() => { startChatSession(); setView("chat"); }}><Plus className="size-4" /></button></Tooltip> : null}
                         <Dropdown trigger={["click"]} menu={{ items: [
@@ -1349,20 +1351,22 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
         const capability = videoCapabilities.find((item) => item.modelId === model)?.capability;
         onChange(capability ? normalizeAgentVideoSettings({ ...settings, videoModel: model }, capability) : { videoModel: model });
     };
-    const modelPicker = <ModelPicker toolKey={toolKey} config={config} value={currentModel} capability={isImage ? "image" : "video"} onChange={changeModel} disabled={loading || !currentModels.length} className="h-8 min-w-0 max-w-[165px] rounded-md border-0 bg-transparent px-1 text-xs shadow-none" />;
+    const modelPicker = <ModelPicker toolKey={toolKey} variant="canvas" fullWidth config={config} value={currentModel} capability={isImage ? "image" : "video"} onChange={changeModel} disabled={loading || !currentModels.length} className="h-auto min-h-11 w-full min-w-0 max-w-none rounded-lg border-0 bg-transparent px-2 text-base shadow-none" />;
     return (
         <>
-            <div className="inline-flex shrink-0 gap-0.5" role="tablist" aria-label="生成类型">
-                <Tooltip title="图像"><button type="button" role="tab" aria-label="图像" aria-selected={isImage} className="grid size-9 place-items-center rounded-md" style={{ background: isImage ? theme.node.fill : "transparent", color: theme.node.text }} onClick={() => onChange(normalizeAgentImageSettings({ ...settings, mode: "image" }, imageProfile))}><ImageIcon className="size-5" /></button></Tooltip>
-                <Tooltip title="视频"><button type="button" role="tab" aria-label="视频" aria-selected={!isImage} className="grid size-9 place-items-center rounded-md" style={{ background: !isImage ? theme.node.fill : "transparent", color: theme.node.text }} onClick={() => onChange(videoCapability ? normalizeAgentVideoSettings({ ...settings, mode: "video" }, videoCapability) : { mode: "video" })}><Video className="size-5" /></button></Tooltip>
+            <div data-testid="canvas-agent-generation-model" className="col-span-2 min-w-0 w-full">
+                {modelPicker}
             </div>
-            {isImage ? <div className="min-w-0 max-w-[115px]">{modelPicker}</div> : null}
+            <div data-testid="canvas-agent-generation-actions" className="flex min-w-0 flex-wrap items-center gap-1">
+            <div className="inline-flex shrink-0 gap-1" role="tablist" aria-label="生成类型">
+                <Tooltip title="图像"><button type="button" role="tab" aria-label="图像" aria-selected={isImage} className="grid size-11 shrink-0 place-items-center rounded-lg" style={{ background: isImage ? theme.node.fill : "transparent", color: theme.node.text }} onClick={() => onChange(normalizeAgentImageSettings({ ...settings, mode: "image" }, imageProfile))}><ImageIcon className="size-5" /></button></Tooltip>
+                <Tooltip title="视频"><button type="button" role="tab" aria-label="视频" aria-selected={!isImage} className="grid size-11 shrink-0 place-items-center rounded-lg" style={{ background: !isImage ? theme.node.fill : "transparent", color: theme.node.text }} onClick={() => onChange(videoCapability ? normalizeAgentVideoSettings({ ...settings, mode: "video" }, videoCapability) : { mode: "video" })}><Video className="size-5" /></button></Tooltip>
+            </div>
             <Popover trigger="click" placement="topLeft" content={
                 <div data-canvas-no-zoom className="w-[280px] max-w-[calc(100vw-48px)] text-xs">
                     <div className="mb-3 text-sm font-semibold">{isImage ? "图像设置" : "视频设置"}</div>
                     {loading ? <p className="mb-3" role="status">正在加载模型与参数…</p> : error ? <div className="mb-3 space-y-2" role="alert"><p>{error}</p><Button size="small" onClick={onRetry}>重新加载</Button></div> : !currentModels.length ? <p className="mb-3" role="status">尚未配置可用的{isImage ? "图像" : "视频"}模型，请在后台启用模型后重新加载。</p> : null}
                     <div className="grid gap-2">
-                        {!isImage ? <div className="flex min-h-9 items-center justify-between gap-3"><span className="opacity-60">模型</span>{modelPicker}</div> : null}
                         {isImage ? <ImageSettingsPanel config={{ ...config, model: settings.imageModel, imageModel: settings.imageModel, size: imageSettings.size, quality: imageSettings.quality, count: imageSettings.imageCount, imageOptions: imageSettings.imageOptions }} profile={imageProfile} referenceCount={editing ? 1 : 0} theme={theme} showTitle={false}
                             onConfigChange={(key, value) => onChange({ [key === "count" ? "imageCount" : key]: value })} /> : <>
                             <AgentParameterSelect label="时长" value={settings.videoSeconds} values={videoCapability ? [...(videoSpec?.supportsAutoDuration ? ["-1"] : []), ...Array.from({ length: videoCapability.seconds[1] - videoCapability.seconds[0] + 1 }, (_, index) => String(videoCapability.seconds[0] + index))] : []} suffix=" 秒" onChange={(videoSeconds) => onChange({ videoSeconds })} />
@@ -1375,8 +1379,9 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
                     {extra}
                 </div>
             }>
-                <button type="button" aria-label={isImage ? "图像设置" : "视频设置"} className="grid size-9 shrink-0 place-items-center rounded-md hover:opacity-60" style={{ color: theme.node.muted }}><Settings2 className="size-5" /></button>
+                <button type="button" aria-label={isImage ? "图像设置" : "视频设置"} className="grid size-11 shrink-0 place-items-center rounded-lg hover:opacity-60" style={{ color: theme.node.muted }}><Settings2 className="size-5" /></button>
             </Popover>
+            </div>
         </>
     );
 }

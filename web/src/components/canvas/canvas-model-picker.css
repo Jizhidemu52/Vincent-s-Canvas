@@ -1,12 +1,14 @@
 .canvas-model-trigger {
-    display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; min-height: 44px;
-    border: 0; border-radius: 6px; background: transparent; color: var(--cmp-text); padding: 8px;
-    font: inherit; font-size: 14px; font-weight: 500; text-align: left; box-shadow: none; cursor: pointer;
+    display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; min-height: 52px;
+    border: 0; border-radius: 6px; background: transparent; color: var(--cmp-text); padding: 10px;
+    font: inherit; font-size: 16px; font-weight: 500; text-align: left; box-shadow: none; cursor: pointer;
 }
 .canvas-model-trigger:hover:not(:disabled) { background: var(--cmp-hover); }
 .canvas-model-trigger:disabled { cursor: not-allowed; opacity: .55; }
 .canvas-model-trigger-name { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
-.canvas-model-trigger-chevron { margin-left: auto; flex-shrink: 0; color: var(--cmp-muted); }
+.canvas-model-trigger-chevron { margin-left: auto; flex-shrink: 0; color: var(--cmp-muted); transition: transform 150ms ease; }
+.canvas-model-trigger-chevron.is-open { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .canvas-model-trigger-chevron { transition: none; } }
 .canvas-model-trigger:focus-visible, .canvas-model-menu button:focus-visible { outline: 2px solid var(--cmp-text); outline-offset: 2px; }
 .canvas-model-menu {
     z-index: 1400; box-sizing: border-box; display: flex; flex-direction: column; width: min(320px, calc(100vw - 24px));
@@ -32,8 +34,8 @@
 .canvas-model-option[aria-selected="true"] { background: var(--cmp-selected); }
 .canvas-model-logo { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex: 0 0 36px; border: 1px solid var(--cmp-border); border-radius: 8px; background: var(--cmp-panel); color: var(--cmp-text); }
 .canvas-model-logo img { width: 23px; height: 23px; object-fit: contain; }
-.canvas-model-logo-compact { width: 24px; height: 24px; flex-basis: 24px; border: 0; border-radius: 4px; background: transparent; }
-.canvas-model-logo-compact img { width: 21px; height: 21px; }
+.canvas-model-logo-compact { width: 28px; height: 28px; flex-basis: 28px; border: 0; border-radius: 4px; background: transparent; }
+.canvas-model-logo-compact img { width: 24px; height: 24px; }
 .canvas-model-option-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
 .canvas-model-option-heading { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .canvas-model-option-name { font-size: 14px; font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }

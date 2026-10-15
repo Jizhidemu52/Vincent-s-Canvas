@@ -83,3 +83,40 @@ test("Agent only shows supported video audio and includes Seedance intelligent d
     expect(seedance).toContain('value="30"');
     expect(seedance).not.toContain('value="1080P"');
 });
+
+test("image and video generation models occupy a full-width row without narrow or fixed-height overrides", () => {
+    for (const mode of ["image", "video"] as const) {
+        const result = controls({ mode, imageModel: "gpt-image-2.5-flare" });
+        const row = result.elements.find(element => element.props["data-testid"] === "canvas-agent-generation-model");
+        expect(row).toBeDefined();
+        expect(row!.props.className).toContain("col-span-2");
+        expect(row!.props.className).toContain("min-w-0");
+        expect(row!.props.className).toContain("w-full");
+        const picker = findElements(row).find(element => element.props.toolKey);
+        expect(picker).toBeDefined();
+        expect(picker!.props.variant).toBe("canvas");
+        expect(picker!.props.fullWidth).toBe(true);
+        expect(picker!.props.className).toContain("h-auto");
+        expect(picker!.props.className).toContain("min-h-11");
+        expect(picker!.props.className).toContain("text-base");
+        expect(picker!.props.className).not.toMatch(/h-8|max-w-\[(115|165)px\]|text-xs/);
+        expect(picker!.props.value).toBe(mode === "image" ? "gpt-image-2.5-flare" : "wan2.7");
+        expect(findElements(row).some(element => element.props.role === "tablist" || element.props.content)).toBe(false);
+    }
+});
+
+test("type and settings controls stay together on a separate row with 44-pixel targets and unchanged mode changes", () => {
+    const result = controls({ imageModel: "gpt-image-2.5-flare" });
+    const actions = result.elements.find(element => element.props["data-testid"] === "canvas-agent-generation-actions");
+    expect(actions).toBeDefined();
+    const actionElements = findElements(actions);
+    expect(actionElements.some(element => element.props.toolKey)).toBe(false);
+    const image = actionElements.find(element => element.props.role === "tab" && element.props["aria-label"] === "图像")!;
+    const video = actionElements.find(element => element.props.role === "tab" && element.props["aria-label"] === "视频")!;
+    const settings = actionElements.find(element => element.type === "button" && element.props["aria-label"] === "图像设置")!;
+    for (const control of [image, video, settings]) expect(control.props.className).toContain("size-11");
+    video.props.onClick();
+    expect(result.changes.at(-1)).toMatchObject({ mode: "video", videoModel: "wan2.7" });
+    image.props.onClick();
+    expect(result.changes.at(-1)).toMatchObject({ mode: "image", imageModel: "gpt-image-2.5-flare", imageCount: "1" });
+});

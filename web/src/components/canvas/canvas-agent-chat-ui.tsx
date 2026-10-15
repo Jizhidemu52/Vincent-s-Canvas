@@ -176,8 +176,8 @@ export function AgentChatComposer({
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canSubmit = !disabled && !sending && Boolean(prompt.trim() || attachments.length);
     return (
-        <div className="px-2 pb-2 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
-            <div className="rounded-xl border px-2.5 pb-2 pt-2 shadow-sm" style={{ background: theme.node.panel, borderColor: theme.node.stroke }}>
+        <div className="min-w-0 w-full shrink-0 px-2 pb-2 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
+            <div className="min-w-0 rounded-xl border px-2.5 pb-2 pt-2 shadow-sm" style={{ background: theme.node.panel, borderColor: theme.node.stroke }}>
                 {attachments.length ? (
                     <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
                         {attachments.map((item) => (
@@ -211,12 +211,10 @@ export function AgentChatComposer({
                     style={{ color: theme.node.text }}
                     placeholder={placeholder}
                 />
-                <div className="mt-2 flex items-center justify-between gap-1 border-t pt-2" style={{ borderColor: theme.node.stroke }}>
-                    <div className="flex min-w-0 flex-1 items-center gap-1">
-                        {generationControls}
-                        {left}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
+                <div data-testid="canvas-agent-composer-controls" className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 border-t pt-2" style={{ borderColor: theme.node.stroke }}>
+                    {generationControls ? <div data-testid="canvas-agent-generation-slot" className="contents">{generationControls}</div>
+                        : <div className="flex min-w-0 flex-wrap items-center gap-1">{left}</div>}
+                    <div data-testid="canvas-agent-composer-actions" className={`flex shrink-0 items-center justify-end gap-1${generationControls ? " col-start-2 row-start-2" : ""}`}>
                         {onAddFiles ? (
                             <>
                                 <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={(event) => {
@@ -224,12 +222,13 @@ export function AgentChatComposer({
                                     event.target.value = "";
                                 }} />
                                 <Tooltip title="上传图片">
-                                    <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8 !p-0" aria-label="添加参考图" disabled={sending} style={{ color: theme.node.muted }} icon={<ImagePlus className="size-5" />} onClick={() => fileInputRef.current?.click()} />
+                                    <Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" aria-label="添加参考图" disabled={sending} style={{ color: theme.node.muted }} icon={<ImagePlus className="size-5" />} onClick={() => fileInputRef.current?.click()} />
                                 </Tooltip>
                             </>
                         ) : null}
-                    <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8 !p-0" style={{ background: canSubmit ? theme.node.text : theme.node.fill, color: canSubmit ? theme.node.panel : theme.node.faint }} disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={() => void onSubmit()} aria-label="发送" />
+                    <Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" style={{ background: canSubmit ? theme.node.text : theme.node.fill, color: canSubmit ? theme.node.panel : theme.node.faint }} disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={() => void onSubmit()} aria-label="发送" />
                     </div>
+                    {generationControls && left ? <div className="col-span-2 min-w-0">{left}</div> : null}
                 </div>
             </div>
         </div>

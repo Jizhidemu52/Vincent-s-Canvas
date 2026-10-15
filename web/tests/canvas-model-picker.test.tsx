@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import React, { type ReactElement } from "react";
+import React, { type DependencyList, type EffectCallback, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { canvasImageModelDetails, canvasModelGroups, canvasModelPresentation, commonCanvasModels, type CanvasModelOption } from "@/lib/canvas/canvas-model-picker-options";
@@ -179,7 +179,7 @@ test("canvas menu has one scrollable list, expandable families, separate theme, 
     const states: unknown[] = [];
     const selected: string[] = [], opened: boolean[] = [];
     const exports = loadComponent("../src/components/canvas/canvas-model-picker.tsx", {
-        react: { ...React, useId: () => "menu-id", useRef: () => ({ current: null }), useState: (initial: unknown) => {
+        react: { ...React, useEffect() {}, useId: () => "menu-id", useRef: () => ({ current: null }), useState: (initial: unknown) => {
             const index = hookIndex++;
             if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial;
             return [states[index], (next: unknown) => { states[index] = typeof next === "function" ? next(states[index]) : next; }];
@@ -223,4 +223,107 @@ test("canvas menu has one scrollable list, expandable families, separate theme, 
     expect(disabledRoot.props.open).toBe(false);
     elements(disabledRoot).find(item => typeof item.type === "function" && item.type.name === "CanvasModelRow")!.props.onSelect("id-8");
     expect(selected).toEqual(["id-7"]);
+});
+
+function menuOpeningHarness(initial: { options: CanvasModelOption[]; value: string }) {
+    const states: any[] = [], effects: Array<{ deps?: DependencyList; cleanup?: ReturnType<EffectCallback> }> = [];
+    const pendingEffects: Array<() => void> = [];
+    const frames = new Map<number, FrameRequestCallback>();
+    const focused: Array<{ target: string; options?: FocusOptions }> = [], scrolled: string[] = [], changed: string[] = [];
+    const originalRaf = globalThis.requestAnimationFrame, originalCancel = globalThis.cancelAnimationFrame;
+    let cursor = 0, nextFrame = 0, tree: ReactElement<any>[] = [];
+    let props = { ...initial, label: "Current", emptyLabel: "暂无模型", open: true, disabled: false, bound: false, categoryLabel: "图像模型", onOpenChange() {}, onValueChange: (value: string) => changed.push(value) };
+    globalThis.requestAnimationFrame = callback => { const id = ++nextFrame; frames.set(id, callback); return id; };
+    globalThis.cancelAnimationFrame = id => { frames.delete(id); };
+    const equal = (a?: DependencyList, b?: DependencyList) => Boolean(a && b && a.length === b.length && a.every((value, index) => Object.is(value, b[index])));
+    const menu = { isConnected: true, querySelector: (selector: string) => {
+        const row = tree.find(item => typeof item.type === "function" && item.type.name === "CanvasModelRow" && item.props.selected);
+        const selected = selector.includes('aria-selected="true"');
+        if (selected && !row) return null;
+        const target = selected ? row!.props.option.value : "back";
+        return { focus: (options?: FocusOptions) => focused.push({ target, options }), scrollIntoView: () => scrolled.push(target) };
+    } };
+    const exports = loadComponent("../src/components/canvas/canvas-model-picker.tsx", {
+        react: { ...React, useId: () => "menu-opening-id",
+            useState: (initial: any) => { const index = cursor++; if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial; return [states[index], (next: any) => { states[index] = typeof next === "function" ? next(states[index]) : next; }]; },
+            useRef: (value: unknown) => { const index = cursor++; return states[index] ||= { current: value }; },
+            useEffect: (effect: EffectCallback, deps?: DependencyList) => { const index = cursor++; if (!effects[index] || !equal(effects[index].deps, deps)) pendingEffects.push(() => { effects[index]?.cleanup?.(); effects[index] = { deps, cleanup: effect() }; }); },
+        },
+        "radix-ui": { Popover: { Root: "PopoverRoot", Trigger: "PopoverTrigger", Portal: "PopoverPortal", Content: "PopoverContent" } },
+        "@/stores/use-theme-store": { useThemeStore: (select: Function) => select({ theme: "light" }) },
+    });
+    const render = (patch: Partial<typeof props> = {}) => {
+        props = { ...props, ...patch }; cursor = 0;
+        tree = elements(exports.CanvasModelPicker!(props));
+        tree.find(item => item.type === "PopoverContent")!.props.ref.current = props.open && !props.disabled ? menu : null;
+        for (const effect of pendingEffects.splice(0)) effect();
+        return tree;
+    };
+    return { render, focused, scrolled, changed,
+        open: () => { tree.find(item => item.type === "PopoverContent")!.props.onOpenAutoFocus({ preventDefault() {} }); },
+        frame: () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(1)); },
+        pendingFrames: () => frames.size,
+        dispose: () => { effects.forEach(effect => effect.cleanup?.()); globalThis.requestAnimationFrame = originalRaf; globalThis.cancelAnimationFrame = originalCancel; },
+    };
+}
+
+const openingOptions: CanvasModelOption[] = [
+    { value: "featured", name: "Featured", family: "First family", details: [], isFeatured: true, displayOrder: 0 },
+    { value: "current", name: "Current", family: "Second family", details: [] },
+    { value: "other", name: "Other", family: "Third family", details: [] },
+];
+
+test("opening a non-featured current model expands its family before focusing and scrolling it into view", () => {
+    const menu = menuOpeningHarness({ options: openingOptions, value: "current" });
+    try {
+        menu.render(); menu.open();
+        const tree = menu.render();
+        const families = tree.filter(item => item.props.className === "canvas-model-family-toggle");
+        expect(families.map(item => item.props["aria-expanded"])).toEqual([false, true, false]);
+        expect(menu.focused).toEqual([]);
+        menu.frame();
+        expect(menu.focused).toEqual([{ target: "current", options: { preventScroll: true } }]);
+        expect(menu.scrolled).toEqual(["current"]);
+        expect(menu.changed).toEqual([]);
+        expect(tree.find(item => typeof item.props.className === "string" && item.props.className.includes("canvas-model-trigger-chevron"))!.props.className).toContain("is-open");
+    } finally { menu.dispose(); }
+});
+
+test("an open menu never refocuses or re-expands after option or selection updates", () => {
+    const menu = menuOpeningHarness({ options: openingOptions, value: "current" });
+    try {
+        menu.render(); menu.open(); menu.render(); menu.frame();
+        const tree = menu.render();
+        tree.filter(item => item.props.className === "canvas-model-family-toggle")[1]!.props.onClick();
+        const updated = menu.render({ options: openingOptions.slice(1), value: "other" });
+        expect(updated.filter(item => item.props.className === "canvas-model-family-toggle").map(item => item.props["aria-expanded"])).toEqual([false, false]);
+        expect(menu.pendingFrames()).toBe(0);
+        menu.frame();
+        expect(menu.focused.map(item => item.target)).toEqual(["current"]);
+    } finally { menu.dispose(); }
+});
+
+test("featured models focus in place without expanding their duplicate family; missing values focus the return control", () => {
+    for (const value of ["featured", "missing"]) {
+        const menu = menuOpeningHarness({ options: openingOptions, value });
+        try {
+            menu.render(); menu.open(); const tree = menu.render(); menu.frame();
+            expect(tree.filter(item => item.props.className === "canvas-model-family-toggle").map(item => item.props["aria-expanded"])).toEqual([false, false, false]);
+            expect(menu.focused.map(item => item.target)).toEqual([value === "featured" ? "featured" : "back"]);
+            expect(menu.scrolled).toEqual(value === "featured" ? ["featured"] : []);
+            expect(menu.changed).toEqual([]);
+        } finally { menu.dispose(); }
+    }
+});
+
+test("closing or disabling before the focus frame prevents stale focus and resets the trigger feedback", () => {
+    for (const patch of [{ open: false }, { disabled: true }]) {
+        const menu = menuOpeningHarness({ options: openingOptions, value: "current" });
+        try {
+            menu.render(); menu.open(); const tree = menu.render(patch); menu.frame();
+            expect(menu.focused).toEqual([]);
+            expect(tree.find(item => item.props.role === "combobox")!.props["aria-expanded"]).toBe(false);
+            expect(tree.find(item => typeof item.props.className === "string" && item.props.className.includes("canvas-model-trigger-chevron"))!.props.className).not.toContain("is-open");
+        } finally { menu.dispose(); }
+    }
 });

@@ -8,6 +8,7 @@ import type { ContextMenuState } from "@/types/canvas";
 
 type CanvasContextMenuProps = {
     menu: ContextMenuState;
+    targetCount?: number;
     onClose: () => void;
     onDuplicate: () => void;
     onDelete: () => void;
@@ -24,7 +25,7 @@ export function canvasContextMenuPosition(x: number, y: number, width: number, h
     return { left: Math.max(margin, Math.min(x, viewport.width - fittedWidth - margin)), top: Math.max(margin, Math.min(y, viewport.height - fittedHeight - margin)), width: fittedWidth, maxHeight: Math.max(0, viewport.height - margin * 2) };
 }
 
-export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete, onUpload, onGenerate, onRename, onGroup }: CanvasContextMenuProps) {
+export function CanvasNodeContextMenu({ menu, targetCount = 1, onClose, onDuplicate, onDelete, onUpload, onGenerate, onRename, onGroup }: CanvasContextMenuProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const canGenerate = useModuleEnabled("canvas-image");
     const menuRef = useRef<HTMLDivElement>(null);
@@ -32,8 +33,10 @@ export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete, on
     const closeRef = useRef(onClose);
     closeRef.current = onClose;
     const restoreFocusRef = useRef(true);
+    const isMultiTarget = menu.type === "node" && targetCount > 1;
+    const canRename = menu.type === "node" && !isMultiTarget && Boolean(onRename);
     const itemCount = menu.type === "canvas" ? Number(Boolean(onUpload)) + Number(Boolean(onGroup)) + Number(canGenerate && Boolean(onGenerate))
-        : (menu.type === "node" ? 2 + Number(Boolean(onRename)) : 1) + Number(Boolean(onGroup));
+        : (menu.type === "node" ? 2 + Number(canRename) : 1) + Number(Boolean(onGroup));
     const [position, setPosition] = useState(() => canvasContextMenuPosition(menu.x, menu.y, 220, 10 + itemCount * 32 + Math.max(0, itemCount - 1) * 4, { width: window.innerWidth, height: window.innerHeight }));
 
     useLayoutEffect(() => {
@@ -96,10 +99,10 @@ export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete, on
             onKeyDown={onKeyDown}
         >
             {menu.type === "canvas" && onUpload ? <MenuButton icon={<Upload className="size-4" />} label="上传图片" action="upload" onClick={() => choose(onUpload)} /> : null}
-            {menu.type === "node" ? <MenuButton icon={<Copy className="size-4" />} label="复制" action="duplicate" onClick={() => choose(onDuplicate)} /> : null}
-            {menu.type === "node" && onRename ? <MenuButton icon={<PencilLine className="size-4" />} label="重命名" action="rename" onClick={() => choose(onRename)} /> : null}
+            {menu.type === "node" ? <MenuButton icon={<Copy className="size-4" />} label={isMultiTarget ? `复制所选 ${targetCount} 项` : "复制"} action="duplicate" onClick={() => choose(onDuplicate)} /> : null}
+            {canRename && onRename ? <MenuButton icon={<PencilLine className="size-4" />} label="重命名" action="rename" onClick={() => choose(onRename)} /> : null}
             {onGroup ? <MenuButton icon={<FolderPlus className="size-4" />} label="创建款式组" action="group" onClick={() => choose(onGroup)} /> : null}
-            {menu.type === "canvas" ? canGenerate && onGenerate && <MenuButton icon={<Plus className="size-4" />} label="生成" action="generate" onClick={() => choose(onGenerate)} /> : <MenuButton icon={<Trash2 className="size-4" />} label="删除" action="delete" onClick={() => choose(onDelete)} />}
+            {menu.type === "canvas" ? canGenerate && onGenerate && <MenuButton icon={<Plus className="size-4" />} label="生成" action="generate" onClick={() => choose(onGenerate)} /> : <MenuButton icon={<Trash2 className="size-4" />} label={isMultiTarget ? `删除所选 ${targetCount} 项` : "删除"} action="delete" onClick={() => choose(onDelete)} />}
         </div>
     );
 }

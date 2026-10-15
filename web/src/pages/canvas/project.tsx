@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronDown, Bot, Download, Globe, Home, ImageIcon, Images, Info, LayoutGrid, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Share2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 
@@ -30,6 +30,7 @@ import { loadCanvasImageTools } from "@/lib/canvas/canvas-image-tool-loader";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
 import { canvasImageUsageInput } from "@/lib/canvas/canvas-image-usage";
 import { bindCanvasClipboardEvents } from "@/lib/canvas/canvas-system-clipboard";
+import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { zoomViewportAtCanvasCenter } from "@/lib/canvas/canvas-viewport-interaction";
@@ -58,6 +59,8 @@ import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal"
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { useCanvasExport } from "@/hooks/use-canvas-export";
 import { useCanvasDesktopLayout } from "@/hooks/use-canvas-desktop-layout";
+import { clampCanvasPanelWidth, clampCanvasPromptHeight } from "@/lib/canvas/canvas-panel-width";
+import { useCanvasPanelStore } from "@/stores/canvas/use-canvas-panel-store";
 import { shouldOpenCanvasCreationPanel } from "@/lib/canvas/canvas-layout-breakpoint";
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
 import { flushCanvasPersistence, loadCanvasProject, useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
@@ -175,6 +178,9 @@ const CanvasConfigComposer = lazy(loadCanvasConfigComposer);
 const CanvasConfigNodePanel = lazy(loadCanvasConfigNodePanel);
 const CanvasNodePromptPanel = lazy(loadCanvasNodePromptPanel);
 const CanvasQuickGeneratePanel = lazy(loadCanvasQuickGeneratePanel);
+const loadCanvasPanelControls = () => import("@/components/canvas/canvas-panel-size-control");
+const CanvasPanelResizeHandle = lazy(() => loadCanvasPanelControls().then(module => ({ default: module.CanvasPanelResizeHandle })));
+const CanvasPanelSizeControl = lazy(() => loadCanvasPanelControls().then(module => ({ default: module.CanvasPanelSizeControl })));
 const CanvasNodeHoverToolbar = lazy(loadCanvasNodeHoverToolbar);
 const CanvasNodeInfoModal = lazy(loadCanvasNodeInfoModal);
 
@@ -518,6 +524,9 @@ function WirelessCanvasPage() {
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const isCanvasDesktopLayout = useCanvasDesktopLayout();
+    const createPanelWidth = useCanvasPanelStore((state) => state.createWidth);
+    const chatPanelWidth = useCanvasPanelStore((state) => state.chatWidth);
+    const createPromptHeight = useCanvasPanelStore((state) => state.promptHeight);
     const [quickGenerateOpen, setQuickGenerateOpen] = useState(false);
     const [quickGeneratePrompt, setQuickGeneratePrompt] = useState("");
     const [quickGeneratePosition, setQuickGeneratePosition] = useState<Position | null>(null);
@@ -1760,45 +1769,27 @@ function WirelessCanvasPage() {
         cleanupCanvasFiles({ projectId, nodes: [], chatSessions: [] });
     }, [cleanupCanvasFiles, deselectCanvas, projectId]);
 
-    const duplicateNode = useCallback((nodeId: string) => {
-        const source = nodesRef.current.find((node) => node.id === nodeId);
-        if (!source) return;
-
-        const id = `${source.type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const next: CanvasNodeData = {
-            ...source,
-            id,
-            title: `${source.title} Copy`,
-            position: { x: source.position.x + 36, y: source.position.y + 36 },
-        };
-
-        setNodes((prev) => [...prev, next]);
-        setSelectedNodeIds(new Set([id]));
+    const duplicateNodes = useCallback((ids: ReadonlySet<string>) => {
+        const source = copyCanvasNodeGraph(nodesRef.current, connectionsRef.current, groupsRef.current, ids);
+        if (!source.nodes.length) return;
+        const next = cloneCanvasNodeGraph(source, { x: 36, y: 36 });
+        setNodes(prev => [...prev, ...next.nodes]);
+        setConnections(prev => [...prev, ...next.connections]);
+        if (next.groups?.length) setGroups(current => [...current, ...next.groups!]);
+        setSelectedNodeIds(new Set(next.nodes.map(node => node.id)));
         setSelectedConnectionId(null);
-        setDialogNodeId(id);
+        setDialogNodeId(next.nodes.length === 1 ? next.nodes[0]!.id : null);
     }, []);
 
     const copySelectedNodes = useCallback(() => {
         const selectedIds = selectedNodeIdsRef.current;
         if (!selectedIds.size) return;
 
-        const copiedNodes = nodesRef.current
-            .filter((node) => selectedIds.has(node.id))
-            .map((node) => ({
-                ...node,
-                position: { ...node.position },
-                metadata: node.metadata ? { ...node.metadata } : undefined,
-            }));
+        const graph = copyCanvasNodeGraph(nodesRef.current, connectionsRef.current, groupsRef.current, selectedIds);
+        if (!graph.nodes.length) return;
 
-        if (!copiedNodes.length) return;
-
-        clipboardRef.current = {
-            token: nanoid(),
-            nodes: copiedNodes,
-            connections: connectionsRef.current.filter((connection) => selectedIds.has(connection.fromNodeId) && selectedIds.has(connection.toNodeId)).map((connection) => ({ ...connection })),
-            groups: groupsRef.current.filter(group => group.nodeIds.length && group.nodeIds.every(id => selectedIds.has(id))),
-        };
-        return { token: clipboardRef.current.token, text: copiedNodes.map(node => node.title).join("\n") };
+        clipboardRef.current = { token: nanoid(), ...graph };
+        return { token: clipboardRef.current.token, text: graph.nodes.map(node => node.title).join("\n") };
     }, []);
 
     const pasteCopiedNodes = useCallback((token: string) => {
@@ -1817,47 +1808,11 @@ function WirelessCanvasPage() {
         );
         const dx = center.x - (bounds.left + bounds.right) / 2;
         const dy = center.y - (bounds.top + bounds.bottom) / 2;
-        const idMap = new Map<string, string>();
-        const nextNodes = clipboard.nodes.map((node, index) => {
-            const id = `${node.type}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
-            idMap.set(node.id, id);
-            return {
-                ...node,
-                id,
-                title: node.title.endsWith(" Copy") ? node.title : `${node.title} Copy`,
-                position: {
-                    x: node.position.x + dx,
-                    y: node.position.y + dy,
-                },
-                metadata: node.metadata ? { ...node.metadata } : undefined,
-            };
-        });
-
-        const nextConnections = clipboard.connections.flatMap((connection, index) => {
-            const fromNodeId = idMap.get(connection.fromNodeId);
-            const toNodeId = idMap.get(connection.toNodeId);
-            if (!fromNodeId || !toNodeId) return [];
-            return [
-                {
-                    ...connection,
-                    id: `conn-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
-                    fromNodeId,
-                    toNodeId,
-                },
-            ];
-        });
-
-        // A copied style group owns its copied batches, never their source IDs.
-        nextNodes.forEach(node => {
-            if (!node.metadata) return;
-            if (node.metadata.batchRootId) node.metadata.batchRootId = idMap.get(node.metadata.batchRootId);
-            if (node.metadata.batchChildIds) node.metadata.batchChildIds = node.metadata.batchChildIds.flatMap(id => idMap.has(id) ? [idMap.get(id)!] : []);
-            if (node.metadata.primaryImageId) node.metadata.primaryImageId = idMap.get(node.metadata.primaryImageId);
-        });
+        const { nodes: nextNodes, connections: nextConnections, groups: nextGroups } = cloneCanvasNodeGraph(clipboard, { x: dx, y: dy });
 
         setNodes((prev) => [...prev, ...nextNodes]);
         setConnections((prev) => [...prev, ...nextConnections]);
-        if (clipboard.groups?.length) setGroups(current => [...current, ...clipboard.groups!.map(group => ({ ...group, id: `group-${nanoid()}`, nodeIds: group.nodeIds.flatMap(id => idMap.has(id) ? [idMap.get(id)!] : []) }))]);
+        if (nextGroups?.length) setGroups(current => [...current, ...nextGroups]);
         setSelectedNodeIds(new Set(nextNodes.map((node) => node.id)));
         setSelectedConnectionId(null);
         setContextMenu(null);
@@ -2014,6 +1969,7 @@ function WirelessCanvasPage() {
 
     const handleNodeMouseDown = useCallback((event: ReactMouseEvent, nodeId: string, groupSelection?: ReadonlySet<string>) => {
         event.stopPropagation();
+        if (event.button !== 0) return;
         setContextMenu(null);
         setHoveredNodeId(null);
         setToolbarNodeId(null);
@@ -2415,6 +2371,7 @@ function WirelessCanvasPage() {
     const handleConnectStart = useCallback(
         (event: ReactMouseEvent, nodeId: string, handleType: "source" | "target") => {
             event.stopPropagation();
+            if (event.button !== 0) return;
             const connection = { nodeId, handleType } as ConnectionHandle;
             const mouseWorld = screenToCanvas(event.clientX, event.clientY);
             connectionInitialPreviewRef.current = { handle: connection, mouseWorld };
@@ -4636,8 +4593,16 @@ function WirelessCanvasPage() {
     const handleNodeContextMenu = useCallback((event: ReactMouseEvent, nodeId: string) => {
         event.preventDefault();
         event.stopPropagation();
+        if (!selectedNodeIdsRef.current.has(nodeId)) commitSelectedNodeIds(new Set([nodeId]));
+        setSelectedConnectionId(null);
+        setHoveredNodeId(null);
+        setToolbarNodeId(null);
         setContextMenu({ type: "node", x: event.clientX, y: event.clientY, nodeId });
-    }, []);
+    }, [commitSelectedNodeIds]);
+
+    const contextMenuNodeIds = useMemo(() => contextMenu?.type === "node"
+        ? new Set(selectedNodeIds.has(contextMenu.nodeId) ? selectedNodeIds : [contextMenu.nodeId])
+        : new Set<string>(), [contextMenu, selectedNodeIds]);
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
@@ -4911,14 +4876,15 @@ function WirelessCanvasPage() {
     );
 
     return (
-        <main className="cw-workspace relative flex h-full min-h-0 overflow-hidden" data-theme={canvasThemeKey} style={{ background: theme.canvas.background, color: theme.node.text }}>
+        <main className="cw-workspace relative flex h-full min-h-0 overflow-hidden" data-theme={canvasThemeKey} style={{ background: theme.canvas.background, color: theme.node.text, "--cw-create-width": `${clampCanvasPanelWidth("create", createPanelWidth)}px`, "--cw-chat-width": `${clampCanvasPanelWidth("chat", chatPanelWidth)}px`, "--cw-prompt-height": `${clampCanvasPromptHeight(createPromptHeight)}px` } as CSSProperties}>
             <aside data-testid="canvas-left-generator-rail" className={`cw-create-panel ${quickGenerateOpen ? "cw-surface" : "is-collapsed"} ${assistantOpen ? "is-hidden" : ""}`}>
                 <div className="cw-tabs" role="tablist" aria-label="创作模式">
                     <button role="tab" aria-selected={!assistantOpen} type="button" onClick={openQuickGenerateFromToolbar}>创建</button>
                     <button role="tab" aria-selected={assistantOpen} type="button" onClick={toggleAgentFromTopBar}>对话</button>
-                    <button type="button" className="cw-icon" style={{ marginLeft: "auto" }} aria-label={quickGenerateOpen ? "收起创建面板" : "展开创建面板"} aria-expanded={quickGenerateOpen} onClick={quickGenerateOpen ? closeQuickGeneratePanel : openQuickGenerateFromToolbar}><ChevronDown size={16} className={quickGenerateOpen ? "rotate-180" : undefined} /></button>
+                    <div className="cw-tabs-actions">{quickGenerateOpen ? <Suspense fallback={null}><CanvasPanelSizeControl kind="create" /></Suspense> : null}<button type="button" className="cw-icon" aria-label={quickGenerateOpen ? "收起创建面板" : "展开创建面板"} aria-expanded={quickGenerateOpen} onClick={quickGenerateOpen ? closeQuickGeneratePanel : openQuickGenerateFromToolbar}><ChevronDown size={18} className={quickGenerateOpen ? "rotate-180" : undefined} /></button></div>
                 </div>
                 {isCanvasDesktopLayout ? quickGeneratePanel : null}
+                {isCanvasDesktopLayout && quickGenerateOpen && !assistantOpen ? <Suspense fallback={null}><CanvasPanelResizeHandle kind="create" /></Suspense> : null}
             </aside>
             <section className="relative min-w-0 flex-1 overflow-hidden">
                 <CanvasTopBar
@@ -5159,6 +5125,7 @@ function WirelessCanvasPage() {
                     <Suspense fallback={null}>
                     <CanvasNodeContextMenu
                         menu={contextMenu}
+                        targetCount={contextMenuNodeIds.size}
                         onGroup={localToolsEnabled && selectedNodeIds.size >= 2 && (contextMenu.type === "canvas" || (contextMenu.type === "node" && selectedNodeIds.has(contextMenu.nodeId))) ? createSelectedGroup : undefined}
                         onClose={() => setContextMenu(null)}
                         onUpload={contextMenu.type === "canvas" ? () => handleUploadRequest(undefined, contextMenu.canvasPosition) : undefined}
@@ -5171,7 +5138,7 @@ function WirelessCanvasPage() {
                         }}
                         onDuplicate={() => {
                             if (contextMenu.type !== "node") return;
-                            duplicateNode(contextMenu.nodeId);
+                            duplicateNodes(contextMenuNodeIds);
                             setContextMenu(null);
                         }}
                         onRename={() => {
@@ -5182,7 +5149,7 @@ function WirelessCanvasPage() {
                         }}
                         onDelete={() => {
                             if (contextMenu.type === "node") {
-                                deleteNodes(new Set([contextMenu.nodeId]));
+                                deleteNodes(contextMenuNodeIds);
                             } else if (contextMenu.type === "connection") {
                                 deleteConnection(contextMenu.connectionId);
                             }
@@ -5398,6 +5365,7 @@ function WirelessCanvasPage() {
             </section>
             {assistantMounted ? (
                 <div className={`cw-agent-panel cw-surface ${agentLayout === "wide" ? "is-wide" : ""}`} style={{ display: assistantCollapsed && !assistantClosing ? "none" : undefined, pointerEvents: assistantClosing ? "none" : undefined }}>
+                {isCanvasDesktopLayout && agentLayout !== "wide" ? <Suspense fallback={null}><CanvasPanelResizeHandle kind="chat" /></Suspense> : null}
                 <Suspense fallback={<CanvasAgentPanelLoading /> }>
                     <CanvasAssistantPanel
                         layout={agentLayout}

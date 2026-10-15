@@ -1,6 +1,6 @@
 import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "react";
 import { ConfigProvider } from "antd";
-import { ChevronDown, Ratio, Layers2 } from "lucide-react";
+import { ChevronDown, Ratio, Layers2, SlidersHorizontal } from "lucide-react";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
 import { imageModelSettingsError, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
@@ -18,9 +18,11 @@ type ImageSettingsPanelProps = {
     referenceCount?: number;
     /** Canvas side popover: base controls live in the compact parameter row. */
     compact?: boolean;
+    /** Wide canvas dialog: readable cards while preserving the legacy compact layout. */
+    spacious?: boolean;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0, compact = false }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0, compact = false, spacious = false }: ImageSettingsPanelProps) {
     const [snapToStep, setSnapToStep] = useState(false);
     const cachedProfile = useImageModelProfile(config.model || config.imageModel);
     const profile = suppliedProfile || cachedProfile;
@@ -67,7 +69,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
         onConfigChange("size", next.join("x"));
     };
     return (
-        <div className={`image-parameters ${className}`} style={{ "--ip-text": theme.node.text, "--ip-muted": theme.node.muted, "--ip-border": theme.node.stroke, "--ip-soft": theme.node.fill, "--ip-panel": theme.toolbar.panel } as CSSProperties}
+        <div className={`image-parameters${spacious ? " ip-spacious" : ""} ${className}`} style={{ "--ip-text": theme.node.text, "--ip-muted": theme.node.muted, "--ip-border": theme.node.stroke, "--ip-soft": theme.node.fill, "--ip-panel": theme.toolbar.panel } as CSSProperties}
             onMouseDown={event => event.stopPropagation()}>
             {showTitle ? <div className="ip-title">图像设置</div> : null}
             {profile.kind === "midjourney-blend" ? <>
@@ -115,7 +117,21 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 <span className="ip-label" title="每次提交生成 1 张图片；可连续提交多个独立任务。"><Layers2 size={15} />任务数</span>
                 <span className="ip-fixed-count">1 个任务</span>
             </div> : null}
-            {profile.customSize ? <details className="ip-details" open={compact || undefined}>
+            {profile.customSize && spacious ? <section className="ip-section ip-size-section" aria-labelledby={`${resolutionNoticeId}-size-title`}>
+                <div className="ip-section-heading">
+                    <span className="ip-section-icon"><Ratio size={19} aria-hidden /></span>
+                    <div><h3 id={`${resolutionNoticeId}-size-title`}>自定义像素</h3><p>精确设置下一次生成图片的宽度和高度。</p></div>
+                    <span className="ip-section-badge">PX</span>
+                </div>
+                {profile.sizeConstraintMessage ? <p className="ip-section-notice">{profile.sizeConstraintMessage}</p> : null}
+                <div className="ip-size-grid">
+                    {["宽度", "高度"].map((label, index) => <label key={`${label}-${dimensions[index]}`} className="ip-size-field">
+                        <span>{label}</span>
+                        <span className="ip-dimension-input"><input aria-label={`自定义${label}`} type="number" min={1} step={snapToStep ? 16 : 1} defaultValue={dimensions[index]} onBlur={event => commitDimension(index, event.currentTarget)} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span aria-hidden>px</span></span>
+                    </label>)}
+                </div>
+                <label className="ip-snap-control"><input type="checkbox" checked={snapToStep} onChange={event => setSnapToStep(event.target.checked)} /><span><strong>16 倍数对齐</strong><span>调整尺寸时向上对齐到最近的 16 像素倍数。</span></span></label>
+            </section> : profile.customSize ? <details className="ip-details" open={compact || undefined}>
                 <summary>自定义像素<ChevronDown size={13} /></summary>
                 {profile.sizeConstraintMessage ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{profile.sizeConstraintMessage}</p> : null}
                 <div className="ip-dimensions">
@@ -125,7 +141,36 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
             </details> : null}
             {profile.customAspect ? <label className="ip-row"><span className="ip-label">自由比例</span><input key={normalized.size} aria-label="自定义宽高比" defaultValue={normalized.size} placeholder="例如 7:5" className="min-w-0 rounded border px-2 py-1.5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }} onBlur={event => { if (/^[1-9]\d*:[1-9]\d*$/.test(event.currentTarget.value)) onConfigChange("size", event.currentTarget.value); else event.currentTarget.value = normalized.size; }} /></label> : null}
             {sizeError ? <p role="alert" className="text-xs text-destructive">{sizeError}</p> : null}
-            {fields.length ? <details className="ip-details" open={compact || undefined}>
+            {fields.length && spacious ? <section className="ip-section ip-advanced-section" aria-labelledby={`${resolutionNoticeId}-advanced-title`}>
+                <div className="ip-section-heading">
+                    <span className="ip-section-icon"><SlidersHorizontal size={19} aria-hidden /></span>
+                    <div><h3 id={`${resolutionNoticeId}-advanced-title`}>全部高级参数</h3><p>留空使用渠道默认；只提交当前模型支持的字段。</p></div>
+                    <span className="ip-section-badge">{fields.length} 项</span>
+                </div>
+                <div className="ip-options-grid">
+                    {fields.map(field => {
+                        const choices = field.options || (field.type === "boolean" ? ["true", "false"] : undefined);
+                        const value = options[field.key] || "";
+                        const disabled = field.key === "output_compression" && !["jpeg", "webp"].includes(options.output_format || "png");
+                        const isLongText = field.type === "json" || ["negative_prompt", "extra"].includes(field.key);
+                        const helpId = `${resolutionNoticeId}-${field.key}-help`;
+                        const range = field.type === "number" ? `范围 ${field.min}–${field.max}${field.step !== undefined && field.step !== 1 ? `，步长 ${field.step}` : ""}` : "";
+                        return <fieldset key={field.key} data-image-field={field.key} className={`ip-option-card${isLongText ? " ip-option-card-wide" : ""}${disabled ? " is-inactive" : ""}`}>
+                            <legend>{field.label}</legend>
+                            <code className="ip-option-key">{field.key}</code>
+                            {choices && choices.length <= 4 ? <div className="ip-option-choices" role="radiogroup" aria-label={field.label} aria-describedby={field.tip ? helpId : undefined}>
+                                {["", ...choices].map(choice => <label className="ip-option-choice" key={choice || "default"}>
+                                    <input type="radio" name={`${resolutionNoticeId}-${field.key}`} data-image-option={field.key} value={choice} checked={value === choice} onChange={event => { if (event.target.checked) updateOption(field.key, choice); }} />
+                                    <span>{imageOptionLabel(choice)}</span>
+                                </label>)}
+                            </div> : choices ? <select className="ip-option-input" aria-label={field.label} value={value} aria-describedby={field.tip ? helpId : undefined} onChange={event => updateOption(field.key, event.target.value)}>
+                                <option value="">渠道默认</option>{choices.map(choice => <option key={choice} value={choice}>{imageOptionLabel(choice)}</option>)}
+                            </select> : isLongText ? <textarea className="ip-option-input ip-option-textarea" aria-label={field.label} aria-describedby={field.tip ? helpId : undefined} value={value} placeholder={field.type === "json" ? '渠道默认，或填写 JSON 对象，例如 {"job":"cloth"}' : "留空使用渠道默认"} rows={field.type === "json" ? 4 : 2} spellCheck={field.type === "json" ? false : undefined} onChange={event => updateOption(field.key, event.target.value)} /> : <input className="ip-option-input" aria-label={field.label} aria-describedby={field.tip || range ? helpId : undefined} type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.step} value={value} placeholder="渠道默认" disabled={disabled} onChange={event => updateOption(field.key, event.target.value)} />}
+                            {field.tip || range ? <p id={helpId} className="ip-option-help">{range ? <span className="ip-option-range">{range}</span> : null}{field.tip}</p> : null}
+                        </fieldset>;
+                    })}
+                </div>
+            </section> : fields.length ? <details className="ip-details" open={compact || undefined}>
                 <summary>全部高级参数<ChevronDown size={13} /></summary>
                 <p className="text-xs leading-5" style={{ color: theme.node.muted }}>留空使用渠道默认；只提交当前模型支持的字段。</p>
                 <div className="flex flex-col gap-3 py-2">
@@ -141,6 +186,10 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
             </details> : null}
         </div>
     );
+}
+
+function imageOptionLabel(value: string) {
+    return ({ "": "渠道默认", true: "开启", false: "关闭", auto: "自动", opaque: "不透明", transparent: "透明", png: "PNG", jpeg: "JPEG", webp: "WebP" } as Record<string, string>)[value] || value;
 }
 
 export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; children: ReactNode }) {

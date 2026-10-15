@@ -4,6 +4,7 @@ import ts from "typescript";
 
 import { getNodeSpec } from "@/constant/canvas";
 import * as clipboard from "@/lib/canvas/canvas-system-clipboard";
+import * as nodeCopy from "@/lib/canvas/canvas-node-copy";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
@@ -68,7 +69,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const noop = () => {};
     const update = <T>(ref: { current: T }) => (value: T | ((current: T) => T)) => { ref.current = typeof value === "function" ? (value as (current: T) => T)(ref.current) : value; };
     const env = {
-        ...clipboard, shouldIgnoreCanvasShortcut, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success",
+        ...clipboard, ...nodeCopy, shouldIgnoreCanvasShortcut, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success",
         window: target, navigator: {}, // HTTP/permissionless path: no navigator.clipboard exists.
         useCallback: (callback: unknown) => callback,
         useEffect: (effect: () => (() => void) | void) => { const dispose = effect(); if (dispose) disposers.push(dispose); },

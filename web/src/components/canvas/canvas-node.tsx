@@ -332,6 +332,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 
     const handleResizeMouseDown = (event: React.MouseEvent, corner: ResizeCorner) => {
         event.stopPropagation();
+        if (event.button !== 0) return;
         event.preventDefault();
         resizeRef.current = {
             isResizing: true,
@@ -393,6 +394,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     boxShadow: useOverview || hasImageContent ? imageFrameRing : isMoving ? undefined : isActive ? `0 0 0 1px ${theme.canvas.selectionStroke}55, 0 16px 40px rgba(15,23,42,.10)` : isRelated && !isBatchChild ? `0 0 0 1px ${theme.node.muted}55, 0 18px 48px rgba(0,0,0,.14)` : undefined,
                 }}
                 onMouseDown={(event) => {
+                    if (event.button !== 0) { event.stopPropagation(); return; }
                     if (event.target instanceof Element && event.target.closest("[data-canvas-no-zoom]")) return;
                     onMouseDown(event, data.id);
                 }}

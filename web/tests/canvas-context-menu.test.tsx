@@ -16,14 +16,16 @@ function elements(node: unknown): ReactElement<any>[] {
     return [element, ...elements(element.props.children)];
 }
 
-function withMenu(run: (harness: ReturnType<typeof createMenuHarness>) => void, options: { canGenerate?: boolean; type?: "canvas" | "node" | "connection"; theme?: "light" | "dark"; onUpload?: boolean } = {}) {
+type MenuHarnessOptions = { canGenerate?: boolean; type?: "canvas" | "node" | "connection"; theme?: "light" | "dark"; onUpload?: boolean; targetCount?: number };
+
+function withMenu(run: (harness: ReturnType<typeof createMenuHarness>) => void, options: MenuHarnessOptions = {}) {
     const names = ["window", "document", "Element", "HTMLElement", "Node"] as const;
     const saved = names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
     try { run(createMenuHarness(options)); }
     finally { for (const [name, descriptor] of saved) if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); }
 }
 
-function createMenuHarness({ canGenerate = true, type = "canvas", theme = "light", onUpload = true }: { canGenerate?: boolean; type?: "canvas" | "node" | "connection"; theme?: "light" | "dark"; onUpload?: boolean }) {
+function createMenuHarness({ canGenerate = true, type = "canvas", theme = "light", onUpload = true, targetCount }: MenuHarnessOptions) {
     const events: string[] = [];
     const layoutEffects: Array<() => (() => void) | undefined> = [], effects: Array<() => (() => void) | undefined> = [];
     const handlers = new Map<string, (event: any) => void>();
@@ -51,7 +53,7 @@ function createMenuHarness({ canGenerate = true, type = "canvas", theme = "light
     };
     const module = { exports: {} as Record<string, (props: any) => ReactElement<any>> };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name] || localRequire(name), module, module.exports);
-    const root = module.exports.CanvasNodeContextMenu!({ menu: { type, x: 795, y: 595, canvasPosition: { x: 50, y: 60 }, nodeId: "node", connectionId: "connection" }, onClose: () => events.push("close"), onDuplicate: () => events.push("duplicate"), onDelete: () => events.push("delete"), onGenerate: () => events.push("generate"), onGroup: () => events.push("group"), onRename: () => events.push("rename"), ...(onUpload ? { onUpload: () => events.push("upload") } : {}) });
+    const root = module.exports.CanvasNodeContextMenu!({ menu: { type, x: 795, y: 595, canvasPosition: { x: 50, y: 60 }, nodeId: "node", connectionId: "connection" }, targetCount, onClose: () => events.push("close"), onDuplicate: () => events.push("duplicate"), onDelete: () => events.push("delete"), onGenerate: () => events.push("generate"), onGroup: () => events.push("group"), onRename: () => events.push("rename"), ...(onUpload ? { onUpload: () => events.push("upload") } : {}) });
     const menuButtons = elements(root).filter(item => typeof item.type === "function" && item.type.name === "MenuButton");
     menuElement.children = menuButtons.map(() => new FakeElement());
     root.props.ref.current = menuElement;
@@ -116,6 +118,66 @@ test("node and connection actions preserve behavior with Chinese labels and stab
         expect(harness.root.props.style.background).not.toBe("#ffffff");
         harness.unmount();
     }, { type: "connection", theme: "dark" });
+});
+
+test.each([2, 7])("a %i-node selection shows its size and hides rename even when a rename callback exists", targetCount => {
+    withMenu(harness => {
+        expect(harness.menuButtons.map(item => item.props.label)).toEqual([`复制所选 ${targetCount} 项`, "创建款式组", `删除所选 ${targetCount} 项`]);
+        expect(harness.menuButtons.map(item => item.props.action)).toEqual(["duplicate", "group", "delete"]);
+        expect(harness.menuButtons.some(item => item.props.action === "rename")).toBe(false);
+        expect(harness.events).toEqual([]);
+        harness.unmount();
+    }, { type: "node", targetCount });
+});
+
+test.each(["duplicate", "delete"])("multi-node %s activates its bulk callback and closes exactly once", action => {
+    withMenu(harness => {
+        const menuItem = harness.menuButtons.find(item => item.props.action === action)!;
+        const button = harness.exports.MenuButton!(menuItem.props);
+        expect(button.props["data-usage-control"]).toBe(`canvas-tool.${action}`);
+        button.props.onClick({ preventDefault() {}, stopPropagation() {} });
+        expect(harness.events).toEqual([action, "close"]);
+        expect(harness.events).not.toContain("rename");
+        harness.unmount();
+    }, { type: "node", targetCount: 4 });
+});
+
+test.each([
+    [undefined, 4, 442],
+    [1, 4, 442],
+    [5, 3, 478],
+] as const)("node keyboard navigation and initial fitting match targetCount=%s", (targetCount, expectedCount, expectedTop) => {
+    withMenu(harness => {
+        expect(harness.menuButtons).toHaveLength(expectedCount);
+        // Initial placement must count only visible items, including the removed multi-rename item.
+        expect(harness.root.props.style.top).toBe(expectedTop);
+        const visited = [];
+        for (let index = 0; index < expectedCount; index++) {
+            visited.push(harness.document.activeElement);
+            expect(harness.key("ArrowDown")).toEqual({ prevented: true, stopped: true });
+        }
+        expect(visited).toEqual(harness.menuElement.children);
+        expect(new Set(visited).size).toBe(expectedCount);
+        expect(harness.document.activeElement).toBe(harness.menuElement.children[0]);
+        harness.key("ArrowUp");
+        expect(harness.document.activeElement).toBe(harness.menuElement.children.at(-1));
+        harness.key("Home");
+        expect(harness.document.activeElement).toBe(harness.menuElement.children[0]);
+        harness.key("End");
+        expect(harness.document.activeElement).toBe(harness.menuElement.children.at(-1));
+        expect(harness.events).toEqual([]);
+        harness.unmount();
+    }, { type: "node", targetCount });
+});
+
+test.each([
+    ["canvas", ["上传图片", "创建款式组", "生成"]],
+    ["connection", ["创建款式组", "删除"]],
+] as const)("targetCount does not change %s menu labels or items", (type, labels) => {
+    withMenu(harness => {
+        expect(harness.menuButtons.map(item => item.props.label)).toEqual([...labels]);
+        harness.unmount();
+    }, { type, targetCount: 6 });
 });
 
 test("first item focuses, arrows wrap, Home/End navigate, and Escape restores the prior focus", () => {

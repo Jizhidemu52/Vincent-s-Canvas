@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
-import { Popover } from "radix-ui";
-import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import { Dialog, Popover } from "radix-ui";
+import { ChevronDown, SlidersHorizontal, X } from "lucide-react";
 import { ImageSettingsPanel, imageSizeLabel } from "@/components/image-settings-panel";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import { imageOptionFields, readImageOptions } from "@/lib/image-advanced-settings";
@@ -71,17 +71,17 @@ export function CanvasQuickQualityOptions({ config, profile, referenceCount, onC
     </div>;
 }
 
-function ParameterPopover({ id, label, summary, icon, disabled, active, onActiveChange, anchor, style, children }: {
+function ParameterPopover({ id, label, summary, icon, disabled, active, onActiveChange, style, anchor, children }: {
     id: Parameter; label: string; summary: string; icon?: ReactNode; disabled: boolean; active: Parameter | null;
-    onActiveChange: (value: Parameter | null) => void; anchor: RefObject<{ getBoundingClientRect: () => DOMRect }>; style: CSSProperties; children: ReactNode;
+    onActiveChange: (value: Parameter | null) => void; style: CSSProperties; anchor: RefObject<HTMLDivElement>; children: ReactNode;
 }) {
     return <Popover.Root open={!disabled && active === id} onOpenChange={open => onActiveChange(open ? id : null)}>
-        <Popover.Anchor virtualRef={anchor} />
         <Popover.Trigger asChild><button type="button" className={`cw-parameter-trigger cw-parameter-trigger-${id}`} disabled={disabled} aria-label={label} title={`${label}：${summary}`}>
             {icon}<span>{summary}</span>{id !== "advanced" ? <ChevronDown size={11} aria-hidden /> : null}
         </button></Popover.Trigger>
+        <Popover.Anchor virtualRef={anchor} />
         <Popover.Portal><Popover.Content className={`cw-parameter-popover cw-parameter-popover-${id}`} data-canvas-no-zoom
-            aria-label={label} side="right" align="end" sideOffset={8} collisionPadding={12} style={style}
+            aria-label={label} side="bottom" align="center" sideOffset={10} collisionPadding={12} avoidCollisions={false} style={style}
             onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
             onWheel={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
             <header className="cw-parameter-header">
@@ -93,17 +93,33 @@ function ParameterPopover({ id, label, summary, icon, disabled, active, onActive
     </Popover.Root>;
 }
 
+function AdvancedSettingsDialog({ active, onActiveChange, disabled, style, config, profile, theme, referenceCount, onConfigChange }: Props & {
+    id: "advanced"; active: Parameter | null; onActiveChange: (value: Parameter | null) => void; style: CSSProperties;
+}) {
+    return <Dialog.Root open={!disabled && active === "advanced"} onOpenChange={open => onActiveChange(open ? "advanced" : null)}>
+        <Dialog.Trigger asChild><button type="button" className="cw-parameter-trigger cw-parameter-trigger-advanced" aria-label="更多设置" disabled={disabled}><SlidersHorizontal size={18} /><span>更多设置</span></button></Dialog.Trigger>
+        <Dialog.Portal>
+            <Dialog.Overlay className="cw-settings-overlay" />
+            <Dialog.Content className="cw-settings-dialog" style={style} data-canvas-no-zoom
+                onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+                <header className="cw-settings-dialog-header">
+                    <div><Dialog.Title>图像高级设置</Dialog.Title><Dialog.Description>选择输出尺寸、格式和模型支持的额外参数。</Dialog.Description></div>
+                    <Dialog.Close asChild><button type="button" className="cw-settings-close" aria-label="返回创建面板"><X size={22} /></button></Dialog.Close>
+                </header>
+                <div className="cw-settings-dialog-body">
+                    <div className="cw-settings-overview"><span>当前输出</span><strong>{sizeLabel(config.size)}</strong><span>{qualityLabel(config.quality)}</span><span>每次 1 张</span></div>
+                    <fieldset disabled={disabled} className="cw-advanced-fields"><ImageSettingsPanel spacious compact showTitle={false} config={config} profile={profile} referenceCount={referenceCount}
+                        theme={theme} onConfigChange={onConfigChange} /></fieldset>
+                </div>
+                <footer className="cw-settings-dialog-footer"><span>设置自动应用于下一次生成，不改变已有图片。</span><Dialog.Close asChild><button type="button" className="cw-settings-done">完成设置</button></Dialog.Close></footer>
+            </Dialog.Content>
+        </Dialog.Portal>
+    </Dialog.Root>;
+}
+
 export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceCount, disabled, onConfigChange }: Props) {
     const [active, setActive] = useState<Parameter | null>(null);
-    const rowRef = useRef<HTMLDivElement>(null);
-    // All popovers sit beyond the side panel, not on top of the other parameter buttons.
-    const anchor = useRef({ getBoundingClientRect: () => {
-        const row = rowRef.current;
-        if (!row) return new DOMRect();
-        const rect = row.getBoundingClientRect();
-        const panel = row.closest(".cw-generator")?.getBoundingClientRect();
-        return new DOMRect(panel?.right ?? rect.right, rect.top, 0, rect.height);
-    } });
+    const parameterRow = useRef<HTMLDivElement>(null!);
     const settings = normalizeImageModelSettings(config, profile);
     const options = readImageOptions(config.imageOptions);
     const resolution = profile.resolutions.includes(options.resolution || "") ? options.resolution! : "1k";
@@ -118,18 +134,15 @@ export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceC
     useEffect(() => {
         if (!disabled && profile.resolutions.length && options.resolution !== resolution) onConfigChange("imageOptions", JSON.stringify({ ...options, resolution }));
     }, [config.imageOptions, disabled, profile.resolutions.length, resolution, onConfigChange]);
-    const common = { active, onActiveChange: setActive, anchor, style };
-    return <div ref={rowRef} className="cw-parameter-row" aria-label="生成参数" style={style}>
-        <ParameterPopover {...common} id="size" label="宽高比" summary={sizeLabel(settings.size)} icon={<RatioOutline value={settings.size} />} disabled={disabled || !profile.verified}>
+    const common = { active, onActiveChange: setActive, style };
+    return <div ref={parameterRow} className="cw-parameter-row" data-open={active || undefined} aria-label="生成参数" style={style}>
+        <ParameterPopover {...common} anchor={parameterRow} id="size" label="宽高比" summary={sizeLabel(settings.size)} icon={<RatioOutline value={settings.size} />} disabled={disabled || !profile.verified}>
             <CanvasQuickRatioOptions profile={profile} value={settings.size} onChange={value => { onConfigChange("size", value); setActive(null); }}
                 onAdvanced={profile.customSize || profile.customAspect ? () => setActive("advanced") : undefined} />
         </ParameterPopover>
-        <ParameterPopover {...common} id="quality" label={profile.resolutions.length ? "分辨率与质量" : profile.qualityLabel} summary={qualitySummary} disabled={disabled || !profile.verified}>
+        <ParameterPopover {...common} anchor={parameterRow} id="quality" label={profile.resolutions.length ? "分辨率与质量" : profile.qualityLabel} summary={qualitySummary} disabled={disabled || !profile.verified}>
             <CanvasQuickQualityOptions config={config} profile={profile} referenceCount={referenceCount} onConfigChange={onConfigChange} />
         </ParameterPopover>
-        <ParameterPopover {...common} id="advanced" label="更多设置" summary="更多设置" icon={<SlidersHorizontal size={14} />} disabled={disabled || !hasAdvanced}>
-            <fieldset disabled={disabled} className="cw-advanced-fields"><ImageSettingsPanel compact showTitle={false} config={config} profile={profile} referenceCount={referenceCount}
-                theme={theme} onConfigChange={onConfigChange} /></fieldset>
-        </ParameterPopover>
+        <AdvancedSettingsDialog {...common} id="advanced" config={config} profile={profile} theme={theme} referenceCount={referenceCount} onConfigChange={onConfigChange} disabled={disabled || !hasAdvanced} />
     </div>;
 }
