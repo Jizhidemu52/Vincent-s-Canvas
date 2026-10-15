@@ -12,6 +12,7 @@ import { syncProjectMetadata } from "@/services/api/projects";
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const authStatus = useUserStore((state) => state.status);
     const ownerId = useUserStore((state) => state.user?.id);
+    const ownerRole = useUserStore((state) => state.user?.role);
     const hydrateSession = useUserStore((state) => state.hydrateSession);
     const refreshBusinessConfig = useBusinessConfigStore((state) => state.refresh);
     const refreshModules = useModuleStore((state) => state.refresh);
@@ -35,17 +36,18 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             isVisible: () => document.visibilityState === "visible",
             submit: syncProjectMetadata,
         });
-        const refresh = async () => {
+        const refresh = async (background = false) => {
             await hydrateSession();
-            if (disposed || useUserStore.getState().user?.id !== ownerId) return;
-            void refreshBusinessConfig().catch(() => undefined);
+            const currentUser = useUserStore.getState().user;
+            if (disposed || currentUser?.id !== ownerId || currentUser.role !== ownerRole) return;
+            void refreshBusinessConfig({ background }).catch(() => undefined);
             void refreshModules().catch(() => undefined);
             void projectSync.sync();
         };
         refresh();
-        const timer = window.setInterval(refresh, 10_000);
+        const timer = window.setInterval(() => refresh(true), 10_000);
         const onVisibility = () => {
-            if (document.visibilityState === "visible") refresh();
+            if (document.visibilityState === "visible") refresh(true);
         };
         document.addEventListener("visibilitychange", onVisibility);
         return () => {
@@ -54,7 +56,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             window.clearInterval(timer);
             document.removeEventListener("visibilitychange", onVisibility);
         };
-    }, [authStatus, ownerId, hydrateSession, refreshBusinessConfig, refreshModules]);
+    }, [authStatus, ownerId, ownerRole, hydrateSession, refreshBusinessConfig, refreshModules]);
 
     return <>{children}</>;
 }

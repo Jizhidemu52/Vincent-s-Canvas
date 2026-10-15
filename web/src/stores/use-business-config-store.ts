@@ -5,7 +5,7 @@ import { estimateServerUsage, getBusinessConfig, type BusinessConfig } from "@/s
 type BusinessConfigStore = BusinessConfig & {
     status: "idle" | "loading" | "ready" | "error";
     error: string | null;
-    refresh: () => Promise<void>;
+    refresh: (options?: { background?: boolean }) => Promise<void>;
     estimate: (input: { operationType: string; modelId?: string; toolKey?: string; quantity?: number }) => ReturnType<typeof estimateServerUsage>;
 };
 
@@ -17,9 +17,11 @@ export const useBusinessConfigStore = create<BusinessConfigStore>((set, get) => 
     tools: [],
     status: "idle",
     error: null,
-    refresh: async () => {
+    refresh: async ({ background = false } = {}) => {
         if (refreshPromise) return refreshPromise;
-        set({ status: "loading", error: null });
+        // Same-session polling must not disable live model controls or dismiss settings.
+        // First loads, explicit reloads and error recovery still block stale configuration.
+        set(state => ({ status: background && state.status === "ready" ? "ready" : "loading", error: null }));
         refreshPromise = getBusinessConfig()
             .then((config) => set({ ...config, status: "ready", error: null }))
             .catch((error: unknown) => {
