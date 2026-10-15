@@ -1,5 +1,42 @@
 import type { ThemeConfig } from "antd";
 import { theme as antdTheme } from "antd";
+import { canvasThemes, type CanvasColorTheme } from "./canvas-theme";
+
+/** Canvas controls also render in portals: scope their neutral theme in context. */
+export function getCanvasAntThemeConfig(mode: CanvasColorTheme): ThemeConfig {
+    const colors = canvasThemes[mode];
+    return {
+        inherit: false,
+        algorithm: mode === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        cssVar: { key: `canvas-workspace-${mode}` },
+        token: {
+            colorPrimary: colors.node.text,
+            colorInfo: colors.node.text,
+            colorBgLayout: colors.canvas.background,
+            colorBgContainer: colors.node.panel,
+            colorBgElevated: colors.node.panel,
+            colorBorder: colors.node.stroke,
+            colorBorderSecondary: colors.node.stroke,
+            colorText: colors.node.text,
+            colorTextSecondary: colors.node.muted,
+            colorTextLightSolid: colors.node.panel,
+            colorFillSecondary: colors.toolbar.itemHover,
+            colorFillTertiary: colors.toolbar.activeBg,
+            borderRadius: 6,
+            borderRadiusLG: 10,
+            controlHeight: 32,
+            fontSize: 12,
+            fontFamily: '"Geist Variable", "PingFang SC", "Microsoft YaHei", sans-serif',
+            boxShadowSecondary: "0 3px 16px rgba(0,0,0,.10)",
+        },
+        components: {
+            Button: { primaryShadow: "none", defaultShadow: "none" },
+            Dropdown: { paddingBlock: 4, controlPaddingHorizontal: 10 },
+            Menu: { itemHeight: 32, itemMarginInline: 4, itemMarginBlock: 2, itemHoverBg: colors.toolbar.itemHover, itemSelectedBg: colors.toolbar.activeBg, itemSelectedColor: colors.node.text },
+            Select: { optionActiveBg: colors.toolbar.itemHover, optionSelectedBg: colors.toolbar.activeBg, optionSelectedColor: colors.node.text },
+        },
+    };
+}
 
 const orange = {
     light: {

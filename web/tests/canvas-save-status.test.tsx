@@ -9,7 +9,7 @@ const code = ts.transpileModule(readFileSync(new URL("../src/components/canvas/c
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 }).outputText;
 
-function statusView(cloudStatus: string, cloudError = "") {
+function statusView(cloudStatus: string, cloudError = "", compact = false) {
     const state = { cloudStatus, cloudError };
     const module = { exports: {} as any };
     let retries = 0;
@@ -18,7 +18,7 @@ function statusView(cloudStatus: string, cloudError = "") {
         flushCanvasCloudPersistence: async () => { retries += 1; },
     } : requireModule(name);
     new Function("require", "module", "exports", code)(load, module, module.exports);
-    const element = module.exports.CanvasSaveStatus();
+    const element = module.exports.CanvasSaveStatus({ compact });
     return { element, html: renderToStaticMarkup(element), retries: () => retries };
 }
 
@@ -46,4 +46,13 @@ test("only confirmed cloud completion claims that the server saved the canvas an
     }
     expect(statusView("synced").html).toContain("画布与图片已保存至服务器");
     expect(statusView("synced").html).toContain("服务器已保存原图");
+});
+
+test("compact status retains an accessible persistence label and a visible failure retry", () => {
+    const normal = statusView("local", "", true);
+    expect(normal.html).toContain('aria-label="保存在当前浏览器"');
+    const failed = statusView("local-error", "写入失败", true);
+    expect(failed.html).toContain("保存失败 · 重试");
+    failed.element.props.children.props.onClick();
+    expect(failed.retries()).toBe(1);
 });

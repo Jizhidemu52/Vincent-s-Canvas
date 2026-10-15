@@ -20,7 +20,7 @@ test("Mark choices require the fixed provider and exact supported IDs, without c
     { ...mark, id: "unsupported", modelId: "gpt-image-2.5-ext" },
     { ...mark, id: "wrong-protocol", protocol: "openai" },
   ];
-  expect(selectCreativeModels(models).map(model => model.id)).toEqual(["opentoken-flare", mark.id, "sunburst", "nano"]);
+  expect(selectCreativeModels(models).map(model => model.id)).toEqual([mark.id, "sunburst", "nano", "opentoken-flare"]);
   expect(models).toHaveLength(8);
 });
 

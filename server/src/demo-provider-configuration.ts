@@ -1,4 +1,4 @@
-import { selectCreativeModels } from "./model-presentation";
+import { applyModelPresentation, selectCreativeModels } from "./model-presentation";
 
 export const videoModelConfigIds = {
   "MiniMax-H3": "40000000-0000-4000-8000-000000000110",
@@ -13,13 +13,18 @@ export function listAvailableDemoModels<T extends Record<string, unknown>>(
 ) {
   const configuredProviderIds = new Set(
     providers
-      .filter((provider) => provider.hasCredentials === true)
+      .filter((provider) => provider.hasCredentials === true && provider.enabled !== false)
       .map((provider) => String(provider.id)),
   );
 
-  return selectCreativeModels(models.filter(
+  const available = models.filter(
     (model) => model.enabled === true && !String(model.modelId).startsWith("demo-") && configuredProviderIds.has(String(model.providerId)),
-  ));
+  ).map(model => {
+    const provider = providers.find(item => item.id === model.providerId);
+    return { ...model, protocol: provider?.protocol ?? model.protocol, providerEnabled: provider?.enabled !== false };
+  });
+  // Demo deliberately has no admin mutation surface; it uses the same first-run presentation policy.
+  return selectCreativeModels(applyModelPresentation(available, null));
 }
 
 export function resolveDemoExternalProviders(input: {

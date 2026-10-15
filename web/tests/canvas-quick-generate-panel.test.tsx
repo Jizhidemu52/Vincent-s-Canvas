@@ -18,12 +18,12 @@ function render(count: number, running = false, enabled = true) {
     finally { Object.assign(business, savedBusiness); modules.flags = savedFlags; }
 }
 test("the same composer switches between creation and editing with numbered references", () => {
-    expect(render(0)).toContain("点击或框选画布图片");
+    expect(render(0)).toContain('aria-label="参考图说明"');
     const markup = render(2);
     expect(markup).toContain("生成修改图");
     expect(markup).toContain("参考图 1：reference-0，点击调整顺序");
     expect(markup).toContain("参考图 2：reference-1，点击调整顺序");
-    expect(markup).toContain("原图保留。取消选中不会清空参考图");
+    expect(markup).toContain('aria-label="参考图说明"');
 });
 test("too many references remain visible but cannot be submitted", () => {
     const markup = render(17);

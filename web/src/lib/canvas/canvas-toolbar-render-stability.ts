@@ -5,6 +5,8 @@ export type CanvasToolbarRenderState = {
     interactionMode?: "select" | "hand";
     onInteractionModeChange?: (mode: "select" | "hand") => void;
     children?: ReactNode;
+    viewControls?: ReactNode;
+    onOpenTools?: () => void;
     selectedCount: number;
     canUndo: boolean;
     canRedo: boolean;
@@ -39,6 +41,8 @@ export function canvasToolbarPropsEqual(previous: CanvasToolbarRenderState, next
         previous.interactionMode === next.interactionMode &&
         previous.onInteractionModeChange === next.onInteractionModeChange &&
         previous.children === next.children &&
+        previous.viewControls === next.viewControls &&
+        previous.onOpenTools === next.onOpenTools &&
         previous.selectedCount === next.selectedCount &&
         previous.canUndo === next.canUndo &&
         previous.canRedo === next.canRedo &&

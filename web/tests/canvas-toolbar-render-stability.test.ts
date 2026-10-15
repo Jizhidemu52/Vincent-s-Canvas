@@ -43,4 +43,10 @@ describe("canvas toolbar render stability", () => {
     test("refreshes the toolbar when its visible selection state changes", () => {
         expect(canvasToolbarPropsEqual(state(), state({ selectedCount: 2 }))).toBe(false);
     });
+
+    test("refreshes relocated view controls and the workspace directory action", () => {
+        expect(canvasToolbarPropsEqual(state({ viewControls: "100%" }), state({ viewControls: "150%" }))).toBe(false);
+        expect(canvasToolbarPropsEqual(state({ onOpenTools: noop }), state({ onOpenTools: () => undefined }))).toBe(false);
+        expect(canvasToolbarPropsEqual(state({ onOpenTools: noop, viewControls: "100%" }), state({ onOpenTools: noop, viewControls: "100%" }))).toBe(true);
+    });
 });

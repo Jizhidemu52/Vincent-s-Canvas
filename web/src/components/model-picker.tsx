@@ -1,5 +1,9 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { Cpu } from "lucide-react";
+import { CanvasModelPicker } from "@/components/canvas/canvas-model-picker";
+import { canvasImageModelDetails, canvasModelPresentation } from "@/lib/canvas/canvas-model-picker-options";
+import { imageModelProfile } from "@/lib/image-model-settings";
+import { referencePolicyForModel } from "@/lib/image-reference-policy";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
@@ -25,13 +29,14 @@ type ModelPickerProps = {
     modelsSource?: ModelPickerSource;
     disabled?: boolean;
     toolKey?: ToolKey;
+    variant?: "default" | "canvas";
 };
 
 export function shouldRefreshModelPickerConfig(capability: ModelCapability | undefined, status: "idle" | "loading" | "ready" | "error", source: ModelPickerSource = "server") {
     return source === "server" && Boolean(capability) && status === "idle";
 }
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, modelsSource, disabled = false, toolKey }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, modelsSource, disabled = false, toolKey, variant }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const canManageConfig = useCanManageConfig();
@@ -58,12 +63,12 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const emptyLabel = usesServerModels && businessConfigStatus !== "ready"
         ? businessConfigStatus === "error" ? "模型配置加载失败" : "正在加载模型…"
         : emptyModelLabel(config, capability, canManageConfig, source);
-    const labelFor = (model: string) => {
+    const nameFor = (model: string) => {
         const serverModel = serverModels.find(item => item.modelId === model);
-        const name = imageModelIdentityHidden(model, businessModels) ? imageModelDisplayName(model, businessModels)
+        return imageModelIdentityHidden(model, businessModels) ? imageModelDisplayName(model, businessModels)
             : serverModel?.name || modelOptionLabel(config, model);
-        return modelLabelWithUsage(name, serverModel?.publicDescription);
     };
+    const labelFor = (model: string) => modelLabelWithUsage(nameFor(model), serverModels.find(item => item.modelId === model)?.publicDescription);
     const currentLabel = binding?.enabled === false ? "此板块已停用" : binding?.modelConfigId && !boundModel ? "绑定模型不可用" : current ? `${labelFor(current)}${boundModel ? " · 后台指定" : ""}` : options.length ? placeholder : emptyLabel;
 
     useEffect(() => {
@@ -74,18 +79,38 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         return () => window.removeEventListener("model-picker-open", closeOtherPicker);
     }, [pickerId]);
 
+    const pickerDisabled = disabled || binding?.enabled === false || Boolean(binding?.modelConfigId);
+    const changeOpen = (nextOpen: boolean) => {
+        if (pickerDisabled && nextOpen) return;
+        if (nextOpen) emitModelUsage("open");
+        if (nextOpen && !options.length && source === "local" && canManageConfig) onMissingConfig?.();
+        if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
+        setOpen(nextOpen);
+    };
+    const changeValue = (model: string) => {
+        if (!pickerDisabled && options.includes(model)) { onChange(model); emitModelUsage("change", serverModels.find(item => item.modelId === model)?.id); }
+    };
+    if (variant === "canvas" || (variant !== "default" && toolKey?.startsWith("canvas-"))) {
+        const canvasOptions = options.map(model => {
+            const serverModel = serverModels.find(item => item.modelId === model);
+            const profile = capability === "image" ? imageModelProfile(model, businessModels) : undefined;
+            return { value: model, ...canvasModelPresentation(nameFor(model)), description: serverModel?.publicDescription,
+                details: profile ? canvasImageModelDetails(profile, referencePolicyForModel(model, profile)) : [], usageModelId: serverModel?.id,
+                isFeatured: serverModel?.isFeatured === true, displayOrder: serverModel?.displayOrder };
+        });
+        const label = binding?.enabled === false ? "此板块已停用" : binding?.modelConfigId && !boundModel ? "绑定模型不可用"
+            : canvasOptions.find(option => option.value === current)?.name || (options.length ? placeholder : emptyLabel);
+        return <CanvasModelPicker options={canvasOptions} value={current} label={label} emptyLabel={emptyLabel} open={open} disabled={pickerDisabled} bound={Boolean(boundModel)}
+            categoryLabel={`${capability === "image" ? "图像" : modelCapabilityLabel(capability)}模型`} className={className} onOpenChange={changeOpen} onValueChange={changeValue} />;
+    }
+
     return (
         <Select
             open={open}
             value={current}
-            disabled={disabled || binding?.enabled === false || Boolean(binding?.modelConfigId)}
-            onOpenChange={(nextOpen) => {
-                if (nextOpen) emitModelUsage("open");
-                if (nextOpen && !options.length && source === "local" && canManageConfig) onMissingConfig?.();
-                if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
-                setOpen(nextOpen);
-            }}
-            onValueChange={(model) => { if (options.includes(model)) { onChange(model); emitModelUsage("change", serverModels.find(item => item.modelId === model)?.id); } }}
+            disabled={pickerDisabled}
+            onOpenChange={changeOpen}
+            onValueChange={changeValue}
         >
             <SelectTrigger
                 data-usage-control="model"

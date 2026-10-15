@@ -1,7 +1,8 @@
-import { memo, useEffect, useId, useState } from "react";
-import { ChevronDown, ImageIcon, Info, LoaderCircle, Paperclip, X } from "lucide-react";
-import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
+import { memo, useEffect } from "react";
+import { ImageIcon, Info, LoaderCircle, Plus, X } from "lucide-react";
+import { Popover } from "radix-ui";
 import { CanvasQuickReferenceTray } from "@/components/canvas/canvas-quick-reference-tray";
+import { CanvasQuickSettingsPopovers } from "@/components/canvas/canvas-quick-settings-popovers";
 import { ModelPicker } from "@/components/model-picker";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -29,8 +30,6 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     onClearReferences, onMoveReference, onMissingConfig, onGenerate, positioned, onClearPosition,
 }: CanvasQuickGeneratePanelProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const [settingsExpanded, setSettingsExpanded] = useState(false);
-    const settingsId = useId();
     const models = useBusinessConfigStore((state) => state.models);
     const modelStatus = useBusinessConfigStore((state) => state.status);
     const role = useUserStore((state) => state.user?.role);
@@ -44,10 +43,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     }, [availableModel, model, modelStatus, onModelChange, running]);
     const profile = imageModelProfile(availableModel || model, models, role);
     const settings = normalizeImageModelSettings({ size, quality, count: String(count) }, profile);
-    const referenceQualityDisabled = profile.kind === "grok-image" && references.length > 0;
     const activeQuality = settings.quality;
-    const sizeSummary = settings.size.includes("x") ? settings.size.replace("x", " × ") : imageSizeLabel(settings.size);
-    const settingsSummary = `${profile.verified ? `${sizeSummary}${referenceQualityDisabled ? " · 参考图模式" : ` · ${profile.qualityLabel}${imageQualityLabel(settings.quality)}`}` : "渠道默认参数"} · ${settings.count}${profile.maxCount > 1 ? " 张" : " 个任务"}`;
     useEffect(() => {
         if (running || !availableModel) return;
         if (size !== settings.size) onSizeChange(settings.size);
@@ -71,7 +67,6 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 <div className="cw-model-row">
                 <ModelPicker toolKey={toolKey} config={boundConfig} value={availableModel} capability="image" modelsSource="server" disabled={running} fullWidth onChange={onModelChange}
                     onMissingConfig={onMissingConfig} className="cw-model-picker" />
-                <button type="button" className="cw-reference-button" title="添加参考图" aria-label="添加参考图" disabled={running || references.length >= referenceValidation.maximum} onClick={onPickReferences}><Paperclip size={17} /></button>
                 </div>
                 {profile.requiresPrompt ? <textarea className="cw-prompt" data-canvas-image-paste aria-label="描述图像" placeholder={references.length ? "描述想如何修改，可用「图1」「图2」指定参考图…" : "描述你想创作的图像…"}
                     value={prompt} maxLength={profile.kind === "grok-image" ? 8000 : 2000} disabled={running} title="Enter 生成，Shift+Enter 换行"
@@ -81,33 +76,34 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                         event.preventDefault();
                         if (!disabled && !event.repeat) onGenerate();
                     }} /> : <p className="my-3 text-xs leading-5" role="status">添加 2–4 张参考图，直接融合，不使用提示词。原有描述会保留，切换模型后可继续编辑。</p>}
+                <div className="cw-reference-row">
+                    <button type="button" className="cw-add-reference" aria-label="添加参考图" disabled={running || references.length >= referenceValidation.maximum} onClick={onPickReferences}><Plus size={15} aria-hidden /><span>添加参考图</span></button>
+                    <Popover.Root>
+                        <Popover.Trigger asChild><button type="button" className="cw-reference-hint-button" aria-label="参考图说明" title="参考图说明"><Info size={13} aria-hidden /></button></Popover.Trigger>
+                        <Popover.Portal><Popover.Content className="cw-reference-hint-popover" aria-label="参考图说明" side="bottom" align="end" sideOffset={6} collisionPadding={12}
+                            style={{ background: theme.node.panel, color: theme.node.text, borderColor: theme.node.stroke }} data-canvas-no-zoom
+                            onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+                            <p>点击或框选画布图片添加参考图。</p>
+                            <p>按上方顺序编辑参考图，原图保留。取消选中不会清空参考图；请用移除或清空按钮调整。</p>
+                        </Popover.Content></Popover.Portal>
+                    </Popover.Root>
+                </div>
                 <CanvasQuickReferenceTray references={references} disabled={running} onMove={onMoveReference} onRemove={onRemoveReference} onClear={onClearReferences} />
-                <details className="cw-selection-hint">
-                    <summary className="cursor-pointer py-1"><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Info size={12} aria-hidden /><span>{references.length ? "参考图说明" : "点击或框选画布图片添加参考图"}</span></span></summary>
-                    <p className="pt-1">按上方顺序编辑参考图，原图保留。取消选中不会清空参考图；请用移除或清空按钮调整。</p>
-                </details>
                 {!referenceValidation.valid ? <p className="cw-reference-error" role="alert">{referenceValidation.message}</p> : null}
             </div>
             <div className="cw-generator-footer">
-                    <button type="button" id={`${settingsId}-toggle`} aria-expanded={settingsExpanded} aria-controls={settingsId}
-                        className="flex w-full cursor-pointer items-center justify-between gap-2 rounded py-2 text-left text-xs hover:bg-[var(--cw-soft)]"
-                        onClick={() => setSettingsExpanded(value => !value)}>
-                        <span className="min-w-0"><span className="block">生成设置</span><span className="mt-1 block break-words text-[11px]" style={{ color: theme.node.muted }}>{settingsSummary}</span></span>
-                        <ChevronDown size={14} aria-hidden className={`shrink-0 ${settingsExpanded ? "rotate-180" : ""}`} />
-                    </button>
-                    <fieldset id={settingsId} hidden={!settingsExpanded} aria-labelledby={`${settingsId}-toggle`} disabled={running || !availableModel} className="max-h-[min(36dvh,320px)] min-w-0 overflow-y-auto border-0 p-0">
-                        <ImageSettingsPanel config={{ ...config, model, imageModel: model, ...settings, quality: activeQuality, imageOptions }} profile={profile} referenceCount={references.length} theme={theme} showTitle={false} onConfigChange={(key, value) => {
+                        <CanvasQuickSettingsPopovers config={{ ...config, model: availableModel || model, imageModel: availableModel || model, ...settings, quality: activeQuality, imageOptions }} profile={profile} referenceCount={references.length} theme={theme} disabled={running || !availableModel} onConfigChange={(key, value) => {
                             if (key === "size") onSizeChange(value);
                             if (key === "quality") onQualityChange(value);
                             if (key === "count") onCountChange(Number(value));
                             if (key === "imageOptions") onImageOptionsChange(value);
                         }} />
-                    </fieldset>
                 <div className={`cw-generate-action ${disabled ? "is-disabled" : ""}`}>
-                    <button type="button" className="cw-generate-button" disabled={disabled} onClick={onGenerate}>
+                    <button type="button" className="cw-generate-button" disabled={disabled} onClick={onGenerate} title={profile.requiresPrompt ? "Enter 生成，Shift+Enter 换行" : undefined}>
                         {running ? <><LoaderCircle size={16} className="animate-spin" />提交中…</> : !profile.requiresPrompt ? "开始融合" : references.length ? "生成修改图" : "生成"}
+                        <span className="cw-generate-count" aria-label="每次生成 1 张">×1</span>
                     </button>
-                    {deploymentFeatures.creditsEnabled ? <span className="cw-estimate" title={`预计 ¥${estimateRmb.toFixed(2)}，剩余 ${remainingCredits ?? "-"} 积分`}>{estimateCredits} 积分</span> : profile.requiresPrompt ? <span className="cw-shortcut" aria-hidden>Enter ↵</span> : null}
+                    {deploymentFeatures.creditsEnabled ? <span className="cw-estimate" title={`预计 ¥${estimateRmb.toFixed(2)}，剩余 ${remainingCredits ?? "-"} 积分`}>{estimateCredits} 积分</span> : null}
                 </div>
             </div>
         </div>

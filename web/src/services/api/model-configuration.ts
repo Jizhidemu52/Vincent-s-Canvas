@@ -57,3 +57,49 @@ export const publishPrice = (id: string) => request<void>(`${root}/prices/${id}/
 export const listServerWorkflows=()=>request<{workflows:ServerWorkflow[]}>("/api/admin/workflows");
 export const createServerWorkflow=(input:Omit<ServerWorkflow,"id"|"providerName">)=>request<{workflow:ServerWorkflow}>("/api/admin/workflows",{method:"POST",body:JSON.stringify(input)});
 export const updateServerWorkflow=(id:string,input:Partial<Omit<ServerWorkflow,"id"|"providerName">>)=>request<{workflow:ServerWorkflow}>(`/api/admin/workflows/${id}`,{method:"PATCH",body:JSON.stringify(input)});
+
+export type FeaturedModelCandidate = Omit<ServerModel, "workflowConfigId" | "workflowName"> & {
+    protocol: "apimart";
+    providerEnabled: boolean;
+    hasCredentials: boolean;
+    isFeatured: boolean;
+    displayOrder: number;
+};
+export type FeaturedModelConfiguration = {
+    models: FeaturedModelCandidate[];
+    featuredModelIds: string[];
+    maxFeatured: 5;
+};
+
+export class FeaturedModelConfigurationError extends Error {}
+
+async function featuredModelsRequest(init?: RequestInit): Promise<FeaturedModelConfiguration> {
+    try {
+        const response = await fetch(`${root}/featured-models`, { ...init, credentials: "include", cache: "no-store", headers: { "content-type": "application/json" } });
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({})) as { error?: string };
+            const message = response.status === 401 ? "登录已失效，请重新登录后再配置热门模型。"
+                : response.status === 403 ? "仅超级管理员可配置热门模型。"
+                : response.status === 404 ? "当前服务未提供热门模型配置，请确认已连接最新正式后台。"
+                : payload.error === "INVALID_FEATURED_MODEL" ? "所选模型已停用或不属于 Mark 图片接口，请重新加载后选择。"
+                : response.status === 400 ? "热门模型最多选择 5 个且不可重复，请检查后重试。"
+                : "热门模型配置请求失败，请稍后重试。";
+            throw new FeaturedModelConfigurationError(message);
+        }
+        const result = await response.json() as FeaturedModelConfiguration;
+        if (!Array.isArray(result.models) || !Array.isArray(result.featuredModelIds) || result.maxFeatured !== 5
+            || result.featuredModelIds.some(id => typeof id !== "string") || new Set(result.featuredModelIds).size !== result.featuredModelIds.length
+            || result.featuredModelIds.length > 5
+            || result.models.some(model => !model || typeof model.id !== "string" || typeof model.name !== "string" || model.protocol !== "apimart"
+                || typeof model.enabled !== "boolean" || typeof model.providerEnabled !== "boolean" || typeof model.hasCredentials !== "boolean")) {
+            throw new FeaturedModelConfigurationError("热门模型配置响应无效，请重新加载。");
+        }
+        return result;
+    } catch (error) {
+        if (error instanceof FeaturedModelConfigurationError || (error instanceof Error && error.name === "AbortError")) throw error;
+        throw new FeaturedModelConfigurationError("热门模型配置暂时不可用，请检查网络后重试。");
+    }
+}
+
+export const getFeaturedModelConfiguration = (signal?: AbortSignal) => featuredModelsRequest({ signal });
+export const saveFeaturedModelConfiguration = (modelConfigIds: string[], signal?: AbortSignal) => featuredModelsRequest({ method: "PUT", body: JSON.stringify({ modelConfigIds }), signal });

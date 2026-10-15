@@ -8,9 +8,11 @@ import { requireRole } from "../rbac";
 import { encryptSecret } from "../security";
 import { assertValidModelReplacement } from "../prompt-templates";
 import type { AuthenticatedRequest } from "../types";
-import { presentAdminModel, presentPublicModel, selectCreativeModels } from "../model-presentation";
+import { applyModelPresentation, presentAdminModel, presentPublicModel, selectCreativeModels } from "../model-presentation";
+import { readFeaturedModelIds } from "../featured-models";
 import { toolDefinitions } from "../../../shared/feature-catalog";
 import { createMarkImageProviderRouter } from "./mark-image-provider";
+import { createFeaturedModelsRouter } from "./featured-models";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
@@ -23,12 +25,19 @@ const toolKey = z.enum(toolDefinitions.map((item) => item.toolKey) as [typeof to
 const toolConfigurationInput = z.object({ modelConfigId: z.string().uuid().nullable(), enabled: z.boolean(), creditCostOverride: z.number().int().nonnegative().nullable(), rmbCostOverride: z.number().finite().nonnegative().nullable() });
 
 const providerSelect = `id,name,protocol,base_url AS "baseUrl",enabled,(encrypted_credentials IS NOT NULL) AS "hasCredentials",created_at AS "createdAt",updated_at AS "updatedAt"`;
-const modelSelect = `m.id,m.public_number AS "publicNumber",m.provider_id AS "providerId",p.name AS "providerName",m.workflow_config_id AS "workflowConfigId",w.name AS "workflowName",m.replacement_model_config_id AS "replacementModelConfigId",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",m.concurrency_limit AS "concurrencyLimit",m.enabled,m.created_at AS "createdAt",m.updated_at AS "updatedAt"`;
+const modelSelect = `m.id,m.public_number AS "publicNumber",m.provider_id AS "providerId",p.name AS "providerName",p.protocol,p.enabled AS "providerEnabled",m.workflow_config_id AS "workflowConfigId",w.name AS "workflowName",m.replacement_model_config_id AS "replacementModelConfigId",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",m.concurrency_limit AS "concurrencyLimit",m.enabled,m.created_at AS "createdAt",m.updated_at AS "updatedAt"`;
 
 export function createModelConfigurationRouter(db: Database, config: AppConfig) {
     const router = Router();
+    router.use((request, response, next) => {
+        if (!(request as unknown as AuthenticatedRequest).auth) {
+            response.status(401).json({ error: "UNAUTHENTICATED", message: "请先登录" }); return;
+        }
+        next();
+    });
     router.use(requireRole("super_admin"));
     router.use("/mark-images", createMarkImageProviderRouter(db, config));
+    router.use("/featured-models", createFeaturedModelsRouter(db));
 
     router.get("/providers", async (_request, response, next) => {
         try { response.json({ providers: (await db.query(`SELECT ${providerSelect} FROM providers ORDER BY name`)).rows }); }
@@ -62,7 +71,13 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     });
 
     router.get("/models", async (_request, response, next) => {
-        try { response.json({ models: (await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id ORDER BY m.name`)).rows.map(presentAdminModel) }); }
+        try {
+            const [models, featuredIds] = await Promise.all([
+                db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id ORDER BY m.name`),
+                readFeaturedModelIds(db),
+            ]);
+            response.json({ models: applyModelPresentation(models.rows, featuredIds).map(presentAdminModel) });
+        }
         catch (error) { next(error); }
     });
     router.post("/models", async (request, response, next) => {
@@ -184,18 +199,20 @@ export function createPublicModelRouter(db: Database) {
     const router = Router();
     router.get("/", async (request, response, next) => {
         try {
-            const [models, prices, tools] = await Promise.all([
+            const [models, prices, tools, featuredIds] = await Promise.all([
                 db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.id AS "providerId",p.protocol,p.name AS "providerName",p.base_url AS "providerBaseUrl" FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.enabled=true AND p.enabled=true AND (m.workflow_config_id IS NULL OR w.enabled=true) ORDER BY m.public_number NULLS LAST,m.name`),
                 db.query(`SELECT operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version FROM pricing_rule_versions WHERE status='published' ORDER BY operation_type`),
                 db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.enabled,
                     t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion"
                     FROM tool_api_configurations t`),
+                readFeaturedModelIds(db),
             ]);
             const role = (request as AuthenticatedRequest).auth?.role;
-            const selectedModels = selectCreativeModels(models.rows);
+            const presentedModels = applyModelPresentation(models.rows, featuredIds);
+            const selectedModels = selectCreativeModels(presentedModels);
             const selectedIds = new Set(selectedModels.map(model => model.id));
             const boundIds = new Set(tools.rows.filter(tool => tool.enabled && tool.modelConfigId).map(tool => tool.modelConfigId));
-            selectedModels.push(...models.rows.filter(model => boundIds.has(model.id) && !selectedIds.has(model.id)));
+            selectedModels.push(...presentedModels.filter(model => boundIds.has(model.id) && !selectedIds.has(model.id)));
             response.json({ models: selectedModels.map((model) => presentPublicModel(model, role)), prices: prices.rows, tools: toolDefinitions.map(definition => ({
                 ...definition,
                 ...(tools.rows.find(tool => tool.toolKey === definition.toolKey) ?? { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 }),

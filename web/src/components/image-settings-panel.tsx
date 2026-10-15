@@ -16,9 +16,11 @@ type ImageSettingsPanelProps = {
     maxCount?: number;
     profile?: ReturnType<typeof useImageModelProfile>;
     referenceCount?: number;
+    /** Canvas side popover: base controls live in the compact parameter row. */
+    compact?: boolean;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0 }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0, compact = false }: ImageSettingsPanelProps) {
     const [snapToStep, setSnapToStep] = useState(false);
     const cachedProfile = useImageModelProfile(config.model || config.imageModel);
     const profile = suppliedProfile || cachedProfile;
@@ -76,7 +78,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 </label></div>
                 <p className="text-xs leading-5" style={{ color: theme.node.muted }}>选择预设会同步宽高比；实际提交的 size 优先于 dimensions，可在下方改为自由比例。</p>
             </> : null}
-            {profile.verified ? <><div className="ip-row">
+            {!compact && profile.verified ? <><div className="ip-row">
                 <span className="ip-label"><Ratio size={15} />宽高比</span>
                 <label className="ip-select">
                     <select data-usage-control="size" aria-label="宽高比" value={normalized.size} onChange={event => onConfigChange("size", event.target.value)}>
@@ -108,12 +110,12 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     {profile.qualities.map(value => <button key={value} data-usage-control={profile.kind === "gemini" ? "resolution" : "quality"} data-usage-value={value} type="button" aria-pressed={normalized.quality === value} onClick={() => onConfigChange("quality", value)}>{imageQualityLabel(value)}</button>)}
                 </div>}
             </div>}
-            </> : <p className="py-2 text-xs leading-5 opacity-60">{profile.tip}</p>}
-            <div className="ip-row">
+            </> : !profile.verified ? <p className="py-2 text-xs leading-5 opacity-60">{profile.tip}</p> : null}
+            {!compact ? <div className="ip-row">
                 <span className="ip-label" title="每次提交生成 1 张图片；可连续提交多个独立任务。"><Layers2 size={15} />任务数</span>
                 <span className="ip-fixed-count">1 个任务</span>
-            </div>
-            {profile.customSize ? <details className="ip-details">
+            </div> : null}
+            {profile.customSize ? <details className="ip-details" open={compact || undefined}>
                 <summary>自定义像素<ChevronDown size={13} /></summary>
                 {profile.sizeConstraintMessage ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{profile.sizeConstraintMessage}</p> : null}
                 <div className="ip-dimensions">
@@ -123,7 +125,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
             </details> : null}
             {profile.customAspect ? <label className="ip-row"><span className="ip-label">自由比例</span><input key={normalized.size} aria-label="自定义宽高比" defaultValue={normalized.size} placeholder="例如 7:5" className="min-w-0 rounded border px-2 py-1.5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }} onBlur={event => { if (/^[1-9]\d*:[1-9]\d*$/.test(event.currentTarget.value)) onConfigChange("size", event.currentTarget.value); else event.currentTarget.value = normalized.size; }} /></label> : null}
             {sizeError ? <p role="alert" className="text-xs text-destructive">{sizeError}</p> : null}
-            {fields.length ? <details className="ip-details">
+            {fields.length ? <details className="ip-details" open={compact || undefined}>
                 <summary>全部高级参数<ChevronDown size={13} /></summary>
                 <p className="text-xs leading-5" style={{ color: theme.node.muted }}>留空使用渠道默认；只提交当前模型支持的字段。</p>
                 <div className="flex flex-col gap-3 py-2">

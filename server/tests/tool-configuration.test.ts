@@ -35,6 +35,7 @@ function fixture() {
     query: async (sql: string, values: unknown[] = []) => {
       statements.push({ sql, values });
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+      if (sql.includes("FROM model_presentation_settings")) return { rows: [] };
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: flags.get(String(values[0])) }] };
       if (sql.startsWith("INSERT INTO tool_api_configurations")) {
         const [key, modelConfigId, enabled, , creditCostOverride, rmbCostOverride] = values as [ToolConfiguration["toolKey"], string | null, boolean, unknown, number | null, number | null];

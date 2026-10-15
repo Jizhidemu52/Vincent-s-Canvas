@@ -44,4 +44,7 @@ describe("canvas top bar render stability", () => {
     test("refreshes when an action closes over different canvas state", () => {
         expect(canvasTopBarPropsEqual(state(), state({ onExport: () => undefined }))).toBe(false);
     });
+    test("refreshes when the workspace tools action changes", () => {
+        expect(canvasTopBarPropsEqual(state(), state({ onOpenTools: () => undefined }))).toBe(false);
+    });
 });

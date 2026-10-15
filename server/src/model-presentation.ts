@@ -42,6 +42,45 @@ export function isImageModel(model: Record<string, unknown>) {
     && !["chat", "video", "audio"].some((capability) => capabilities.includes(capability));
 }
 
+export const MAX_FEATURED_MODELS = 5;
+
+/** Eligibility is identity-based, never inferred from a provider or model display name. */
+export function isFeaturedModelCandidate(model: Record<string, unknown>) {
+  return isImageModel(model) && Boolean(markImageLabel(model))
+    && Array.isArray(model.capabilities) && model.capabilities.includes("generate");
+}
+
+function defaultModelOrder(model: Record<string, unknown>) {
+  const markIndex = MARK_PLATFORM_MODELS.findIndex(item => item.modelId === model.modelId);
+  if (markImageLabel(model)) return markIndex;
+  const openTokenIndex = Object.keys(openTokenImageLabels).indexOf(String(model.modelId));
+  return MARK_PLATFORM_MODELS.length + (openTokenImageLabel(model) ? openTokenIndex : 100);
+}
+
+function availableFeaturedCandidate(model: Record<string, unknown>) {
+  return isFeaturedModelCandidate(model) && model.enabled !== false && model.providerEnabled !== false;
+}
+
+export function defaultFeaturedModelIds(models: Array<Record<string, unknown>>) {
+  return models.filter(availableFeaturedCandidate).sort((a, b) => defaultModelOrder(a) - defaultModelOrder(b))
+    .slice(0, MAX_FEATURED_MODELS).map(model => String(model.id));
+}
+
+/** null means never configured; an explicitly saved [] must remain empty. */
+export function resolveFeaturedModelIds(models: Array<Record<string, unknown>>, configuredIds: string[] | null) {
+  if (configuredIds === null) return defaultFeaturedModelIds(models);
+  const eligibleIds = new Set(models.filter(availableFeaturedCandidate).map(model => String(model.id)));
+  return [...new Set(configuredIds)].filter(id => eligibleIds.has(id)).slice(0, MAX_FEATURED_MODELS);
+}
+
+export function applyModelPresentation<T extends Record<string, unknown>>(models: T[], configuredIds: string[] | null) {
+  const featured = resolveFeaturedModelIds(models, configuredIds);
+  return models.map(model => {
+    const rank = featured.indexOf(String(model.id));
+    return { ...model, isFeatured: rank >= 0, displayOrder: rank >= 0 ? rank : 1000 + defaultModelOrder(model) };
+  });
+}
+
 export function canSeeModelIdentity(role: unknown) {
   return role === "super_admin" || role === "department_admin";
 }
@@ -61,10 +100,8 @@ export function selectCreativeModels<T extends Record<string, unknown>>(models: 
     seenImages.add(identity);
     return true;
   });
-  const imageOrder = Object.keys(openTokenImageLabels);
-  const order = (model: Record<string, unknown>) => markImageLabel(model)
-    ? imageOrder.length + MARK_PLATFORM_MODELS.findIndex(item => item.modelId === model.modelId)
-    : imageOrder.indexOf(String(model.modelId));
+  const order = (model: Record<string, unknown>) => typeof model.displayOrder === "number" && Number.isFinite(model.displayOrder)
+    ? model.displayOrder : defaultModelOrder(model);
   const images = selected.filter(isImageModel).sort((a, b) => order(a) - order(b));
   let nextImage = 0;
   return selected.map(model => isImageModel(model) ? images[nextImage++]! : model);
@@ -103,6 +140,9 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
     capabilities: model.capabilities,
     creditCost: model.creditCost,
     rmbCost: model.rmbCost,
+    isFeatured: isFeaturedModelCandidate(model) && model.isFeatured === true,
+    displayOrder: typeof model.displayOrder === "number" && Number.isFinite(model.displayOrder)
+      ? model.displayOrder : 1000 + defaultModelOrder(model),
     imageParameterProfile: hidden ? anonymousProfiles[profile] : profile,
     ...(image && mark ? { imageSupportsMask: ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"].includes(mark.modelId) } : {}),
     ...(mark?.modelId === "gemini-3.1-flash-image-preview-official" ? { imageSupportsOfficialFallback: false } : {}),

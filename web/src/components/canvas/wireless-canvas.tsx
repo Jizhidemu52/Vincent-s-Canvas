@@ -361,7 +361,7 @@ const CanvasGrid = memo(function CanvasGrid({ gridRef, viewport, mode }: { gridR
     return (
         <div
             ref={gridRef}
-            className="pointer-events-none absolute inset-0 opacity-20"
+            className="pointer-events-none absolute inset-0"
             style={{
                 backgroundImage,
                 backgroundSize: `${gridSize}px ${gridSize}px`,

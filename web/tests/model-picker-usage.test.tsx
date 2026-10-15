@@ -31,7 +31,7 @@ function picker(models: PublicModel[], current: string, bound = false) {
     };
     const module = { exports: {} as { ModelPicker: (props: Record<string, unknown>) => ReactElement<any> } };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name] || requireModule(name), module, module.exports);
-    const root = module.exports.ModelPicker({ config: defaultConfig, value: current, capability: "image", toolKey: bound ? "canvas-image" : undefined, onChange: (value: string) => selected.push(value) });
+    const root = module.exports.ModelPicker({ config: defaultConfig, value: current, capability: "image", toolKey: bound ? "canvas-image" : undefined, variant: "default", onChange: (value: string) => selected.push(value) });
     return { root, tree: elements(root), selected };
 }
 

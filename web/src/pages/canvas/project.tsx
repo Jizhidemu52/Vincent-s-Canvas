@@ -1,7 +1,7 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ChevronDown, Bot, Download, Globe, Home, ImageIcon, Images, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Share2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
+import { ChevronDown, Bot, Download, Globe, Home, ImageIcon, Images, Info, LayoutGrid, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Share2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 
 import { requestBatchEdit, requestImageQuestion } from "@/services/api/image";
 import { ModelPicker } from "@/components/model-picker";
@@ -22,6 +22,8 @@ import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
+import { UsageCollectionNotice } from "@/components/layout/frequent-navigation";
+import { getCanvasAntThemeConfig } from "@/lib/app-theme";
 import { useAssetStore, type AssetInput } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { loadCanvasImageTools } from "@/lib/canvas/canvas-image-tool-loader";
@@ -32,7 +34,7 @@ import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { zoomViewportAtCanvasCenter } from "@/lib/canvas/canvas-viewport-interaction";
 import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
-import { App, Button, Dropdown, Input, Modal, Progress } from "antd";
+import { App, Button, ConfigProvider, Dropdown, Input, Modal, Popover, Progress } from "antd";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
 import { ActiveConnectionPath, type ActiveConnectionPathHandle, ConnectionPath } from "@/components/canvas/canvas-connections";
 import type { CanvasMediaWorkflowAction } from "@/lib/canvas/canvas-assistant-panel-render-stability";
@@ -53,7 +55,6 @@ import { CanvasNode } from "@/components/canvas/canvas-node";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
 import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
-import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { useCanvasExport } from "@/hooks/use-canvas-export";
 import { useCanvasDesktopLayout } from "@/hooks/use-canvas-desktop-layout";
@@ -146,9 +147,12 @@ import {
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio } from "@/types/media";
 import "./workspace.css";
+import "@fontsource-variable/geist/wght.css";
 
 const CanvasAssistantPanel = lazy(loadCanvasAssistantPanel);
 const CanvasNodeContextMenu = lazy(() => import("@/components/canvas/canvas-context-menu").then(module => ({ default: module.CanvasNodeContextMenu })));
+const CanvasWorkspaceTools = lazy(() => import("@/components/canvas/canvas-workspace-tools").then(module => ({ default: module.CanvasWorkspaceTools })));
+const CanvasZoomControls = lazy(() => import("@/components/canvas/canvas-zoom-controls").then(module => ({ default: module.CanvasZoomControls })));
 const CanvasImageCompareDialog = lazy(() => import("@/components/canvas/canvas-image-compare-dialog").then(module => ({ default: module.CanvasImageCompareDialog })));
 const CanvasDesignTemplateDialog = lazy(() => import("@/components/canvas/canvas-design-template-dialog").then(module => ({ default: module.CanvasDesignTemplateDialog })));
 const CanvasDesignActions = lazy(() => import("@/components/canvas/canvas-design-actions").then(module => ({ default: module.CanvasDesignActions })));
@@ -263,6 +267,8 @@ function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: C
 
 export default function CanvasPage() {
     const [mounted, setMounted] = useState(false);
+    const canvasThemeKey = useThemeStore((state) => state.theme);
+    const canvasAntTheme = useMemo(() => getCanvasAntThemeConfig(canvasThemeKey), [canvasThemeKey]);
 
     useEffect(() => {
         setMounted(true);
@@ -270,40 +276,28 @@ export default function CanvasPage() {
 
     if (!mounted) return <CanvasRefreshShell />;
 
-    return <WirelessCanvasPage />;
+    return <ConfigProvider theme={canvasAntTheme}><App className="h-full"><WirelessCanvasPage /></App></ConfigProvider>;
 }
 
 function CanvasRefreshShell() {
+    const themeKey = useThemeStore(state => state.theme);
+    const theme = canvasThemes[themeKey];
     return (
-        <main className="relative h-full min-h-0 overflow-hidden bg-background text-foreground">
+        <main className="cw-workspace relative h-full min-h-0 overflow-hidden" data-theme={themeKey} style={{ background: theme.canvas.background, color: theme.node.text }} aria-label="正在加载画布">
             <div
-                className="absolute inset-0 opacity-60"
+                className="absolute inset-0"
                 style={{
-                    backgroundImage: "radial-gradient(circle, var(--border) 1px, transparent 1px)",
-                    backgroundSize: "28px 28px",
+                    backgroundImage: `radial-gradient(circle, ${theme.canvas.dot} .9px, transparent 1.1px)`,
+                    backgroundSize: "16px 16px",
                 }}
             />
-
-            <div className="absolute bottom-5 left-1/2 z-50 flex h-14 -translate-x-1/2 items-center gap-1 rounded-xl border px-2 shadow-lg backdrop-blur" style={{ background: "var(--background)", borderColor: "var(--border)" }} aria-hidden="true">
+            <div className="cw-topbar" aria-hidden="true"><div className="cw-project-card cw-surface"><span className="cw-icon cw-brand"><span>V</span></span><span className="cw-project-title">正在加载…</span></div><div className="cw-account-card cw-surface" /></div>
+            <aside className="cw-create-panel cw-surface" aria-hidden="true"><div className="cw-tabs">创建 <span className="opacity-50">对话</span></div><div className="h-[370px]" /></aside>
+            <div className="cw-dock" aria-hidden="true"><div className="cw-tools cw-surface">
                 {Array.from({ length: 7 }).map((_, index) => (
                     <div key={index} className="size-8 rounded-md bg-current opacity-10" />
                 ))}
-            </div>
-
-            <div className="absolute bottom-24 left-6 z-50 h-40 w-[240px] rounded-lg border shadow-2xl backdrop-blur-sm" style={{ background: "var(--background)", borderColor: "var(--border)" }} aria-hidden="true">
-                <div className="absolute left-7 top-7 h-5 w-12 rounded-sm bg-current opacity-10" />
-                <div className="absolute left-28 top-16 h-6 w-16 rounded-sm bg-current opacity-10" />
-                <div className="absolute bottom-7 left-16 h-8 w-20 rounded-sm bg-current opacity-10" />
-                <div className="absolute inset-5 rounded border border-current opacity-15" />
-            </div>
-
-            <div className="absolute bottom-5 left-5 z-50 flex h-14 w-[260px] items-center gap-2 rounded-xl border px-2 shadow-lg backdrop-blur" style={{ background: "var(--background)", borderColor: "var(--border)" }} aria-hidden="true">
-                <div className="size-8 rounded-md bg-current opacity-10" />
-                <div className="size-8 rounded-md bg-current opacity-10" />
-                <div className="h-1 flex-1 rounded-full bg-current opacity-10" />
-                <div className="h-4 w-10 rounded bg-current opacity-10" />
-                <div className="size-8 rounded-md bg-current opacity-10" />
-            </div>
+            </div></div>
         </main>
     );
 }
@@ -506,6 +500,8 @@ function WirelessCanvasPage() {
     const [pendingConnectionCreate, setPendingConnectionCreate] = useState<PendingConnectionCreate | null>(null);
     const [isSelecting, setIsSelecting] = useState(false);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+    const [workspaceToolsOpen, setWorkspaceToolsOpen] = useState(false);
+    const openWorkspaceTools = useCallback(() => setWorkspaceToolsOpen(true), []);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("dots");
@@ -4925,7 +4921,6 @@ function WirelessCanvasPage() {
                 {isCanvasDesktopLayout ? quickGeneratePanel : null}
             </aside>
             <section className="relative min-w-0 flex-1 overflow-hidden">
-                <div className="absolute bottom-3 left-3 z-20"><CanvasSaveStatus /></div>
                 <CanvasTopBar
                     title={currentProject?.title || "未命名画布"}
                     titleDraft={titleDraft}
@@ -4946,6 +4941,7 @@ function WirelessCanvasPage() {
                     onExport={exportCurrentCanvas}
                     onExportImages={openImageExport}
                     onShare={shareFromTopBar}
+                    onOpenTools={openWorkspaceTools}
                     agentOpen={assistantOpen}
                     compactAgentStatus={compactAgentStatus}
                     onToggleAgent={toggleAgentFromTopBar}
@@ -5148,9 +5144,10 @@ function WirelessCanvasPage() {
                     onShowImageInfoChange={setShowImageInfo}
                     onOpenMyAssets={openAssetsFromToolbar}
                     onGroupSelection={createSelectedGroup}
+                    onOpenTools={openWorkspaceTools}
+                    viewControls={<Suspense fallback={null}><CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onScalePreview={previewZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={toggleMiniMap} /></Suspense>}
                 >
                     {localToolsEnabled && <Suspense fallback={null}><CanvasDesignActions selectedCount={selectedNodeIds.size} selectedImages={Array.from(selectedNodeIds).filter(id => nodeById.get(id)?.type === CanvasNodeType.Image && Boolean(nodeById.get(id)?.metadata?.content)).length} onCompare={openImageCompare} onTemplate={() => setTemplateSourceId(null)} onArrange={arrangeNodes} /></Suspense>}
-                    <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onScalePreview={previewZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={toggleMiniMap} />
                 </CanvasToolbar>
 
                 {isMiniMapOpen ? <Suspense fallback={null}><Minimap nodes={minimapNodes} viewport={viewport} viewportSize={size} onViewportPreview={previewMinimapViewport} onViewportChange={commitViewport} /></Suspense> : null}
@@ -5164,6 +5161,7 @@ function WirelessCanvasPage() {
                         menu={contextMenu}
                         onGroup={localToolsEnabled && selectedNodeIds.size >= 2 && (contextMenu.type === "canvas" || (contextMenu.type === "node" && selectedNodeIds.has(contextMenu.nodeId))) ? createSelectedGroup : undefined}
                         onClose={() => setContextMenu(null)}
+                        onUpload={contextMenu.type === "canvas" ? () => handleUploadRequest(undefined, contextMenu.canvasPosition) : undefined}
                         onGenerate={() => {
                             if (contextMenu.type !== "canvas") return;
                             openQuickGenerateFromToolbar();
@@ -5425,6 +5423,7 @@ function WirelessCanvasPage() {
                 </Suspense>
                 </div>
             ) : null}
+            {workspaceToolsOpen ? <Suspense fallback={null}><CanvasWorkspaceTools open={workspaceToolsOpen} onOpenChange={setWorkspaceToolsOpen} /></Suspense> : null}
         </main>
     );
 }
@@ -5463,6 +5462,7 @@ const CanvasTopBar = memo(function CanvasTopBar({
     onExport,
     onExportImages,
     onShare,
+    onOpenTools,
     agentOpen,
     compactAgentStatus,
     onToggleAgent,
@@ -5474,6 +5474,7 @@ const CanvasTopBar = memo(function CanvasTopBar({
     const theme = canvasThemes[colorTheme];
     const titleRef = useRef<HTMLDivElement>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
+    const userName = useUserStore((state) => state.user?.displayName || state.user?.username || "本地工作区");
 
     useEffect(() => {
         if (!isTitleEditing) return;
@@ -5487,13 +5488,15 @@ const CanvasTopBar = memo(function CanvasTopBar({
     return (
         <>
             <div className="cw-topbar">
-                <div className={`cw-project-card ${agentOpen ? "is-agent-open" : ""}`}>
+                <div className={`cw-project-card cw-surface ${agentOpen ? "is-agent-open" : ""}`}>
                     <Dropdown trigger={["click"]} menu={{ items: [
                         { key: "home", icon: <Home className="size-4" />, label: "主页", onClick: onHome },
                         { key: "projects", icon: <Images className="size-4" />, label: "我的画布", onClick: onProjects },
                         { key: "new", icon: <Plus className="size-4" />, label: "新建画布", onClick: onCreateProject },
+                        { key: "tools", icon: <LayoutGrid className="size-4" />, label: "全部工具与板块", onClick: onOpenTools },
                         { type: "divider" },
                         { key: "import", icon: <Upload className="size-4" />, label: "导入素材", onClick: onImportImage },
+                        ...(canImportReferences ? [{ key: "web-import", icon: <Globe className="size-4" />, label: "网页参考图采集", onClick: () => navigate(`/reference-import${canvasId ? `?returnTo=${encodeURIComponent(`/canvas/${canvasId}`)}` : ""}`) }] : []),
                         { key: "export", icon: <Download className="size-4" />, label: "导出画布", onClick: onExport },
                         { key: "export-images", icon: <Images className="size-4" />, label: "导出图片集 / PDF", onClick: onExportImages },
                         { type: "divider" },
@@ -5513,11 +5516,14 @@ const CanvasTopBar = memo(function CanvasTopBar({
                             <button type="button" onDoubleClick={onStartTitleEditing} title="双击修改画布名称">{title}</button>
                         )}
                     </div>
-                    <button type="button" className="cw-share" title="链接不会公开画布；本机试用跨设备请导出" onClick={onShare}>复制链接</button>
+                    <CanvasSaveStatus compact />
+                    <button type="button" className="cw-share" title="复制链接；不会公开画布。本机试用跨设备请导出" onClick={onShare}>链接</button>
                 </div>
-                <div className="cw-account-card">
-                    {canImportReferences ? <button type="button" className="cw-share inline-flex shrink-0 items-center gap-1.5 !px-2" aria-label="网页参考图采集" title="粘贴网页链接采集参考图，无需安装扩展" onClick={() => navigate(`/reference-import${canvasId ? `?returnTo=${encodeURIComponent(`/canvas/${canvasId}`)}` : ""}`)}><Globe className="size-4" /><span className="hidden sm:inline">网页采集</span></button> : null}
+                <div className="cw-account-card cw-surface">
+                    <span className="cw-account-avatar" aria-hidden="true">{userName.slice(0, 1)}</span>
+                    <span className="cw-account-name" title={userName}>{userName}</span>
                     {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} /> : null}
+                    <Popover trigger="click" placement="bottomRight" content={<div className="cw-workspace-notice"><strong>工作区与数据</strong><p>{deploymentFeatures.oaLoginEnabled ? "画布按当前员工身份保存，链接不等于公开分享。" : "本地试用：画布保存在当前浏览器。更换设备前请导出备份。"}</p><UsageCollectionNotice compact /></div>}><button type="button" className="cw-icon" aria-label="工作区与使用记录说明"><Info size={16} /></button></Popover>
                     <UserStatusActions variant="canvas" />
                 </div>
             </div>

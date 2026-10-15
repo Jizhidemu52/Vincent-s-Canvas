@@ -29,7 +29,7 @@ describe("image identity presentation", () => {
   test("only image capabilities are anonymized and unknown fields are never copied", () => {
     const shown = presentPublicModel(image, "designer");
     expect(shown).toEqual({ id: image.id, modelId: image.id, name: "出图模型7", publicName: "出图模型7", modelIdentityHidden: true,
-      capabilities: ["generate", "edit"], creditCost: 4, rmbCost: 0, imageParameterProfile: "pixel" });
+      capabilities: ["generate", "edit"], creditCost: 4, rmbCost: 0, imageParameterProfile: "pixel", isFeatured: false, displayOrder: 1109 });
     expect(image.modelId).toBe("gpt-image-2");
     for (const capability of ["chat", "video", "audio"]) {
       const model = { ...image, capabilities: [capability, "generate"] };

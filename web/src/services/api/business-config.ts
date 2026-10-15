@@ -9,6 +9,9 @@ export type PublicModel = {
     parameterModelId?: string;
     publicName?: string;
     publicDescription?: string;
+    /** Server-curated Mark image models only; an absent flag is never featured. */
+    isFeatured?: boolean;
+    displayOrder?: number;
     modelIdentityHidden?: boolean;
     imageParameterProfile?: import("@/lib/image-model-settings").ImageParameterProfile;
     imageSupportsMask?: boolean;

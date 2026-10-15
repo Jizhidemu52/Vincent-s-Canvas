@@ -464,61 +464,61 @@
         }
     }
 
-    .bg-stone-50 {
+    :root:not(:has(.cw-workspace)) .bg-stone-50 {
         background-color: #fff7ed !important;
     }
 
-    .bg-stone-100 {
+    :root:not(:has(.cw-workspace)) .bg-stone-100 {
         background-color: #ffedd5 !important;
     }
 
-    .bg-stone-900 {
+    :root:not(:has(.cw-workspace)) .bg-stone-900 {
         background-color: #431407 !important;
     }
 
-    .bg-stone-950 {
+    :root:not(:has(.cw-workspace)) .bg-stone-950 {
         background-color: #1c1208 !important;
     }
 
-    .text-stone-950,
-    .text-stone-900 {
+    :root:not(:has(.cw-workspace)) .text-stone-950,
+    :root:not(:has(.cw-workspace)) .text-stone-900 {
         color: #431407 !important;
     }
 
-    .text-stone-600,
-    .text-stone-500 {
+    :root:not(:has(.cw-workspace)) .text-stone-600,
+    :root:not(:has(.cw-workspace)) .text-stone-500 {
         color: #9a3412 !important;
     }
 
-    .text-stone-400,
-    .text-stone-300,
-    .text-stone-100 {
+    :root:not(:has(.cw-workspace)) .text-stone-400,
+    :root:not(:has(.cw-workspace)) .text-stone-300,
+    :root:not(:has(.cw-workspace)) .text-stone-100 {
         color: #fed7aa !important;
     }
 
-    .border-stone-200 {
+    :root:not(:has(.cw-workspace)) .border-stone-200 {
         border-color: #fed7aa !important;
     }
 
-    .border-stone-300 {
+    :root:not(:has(.cw-workspace)) .border-stone-300 {
         border-color: #fdba74 !important;
     }
 
-    .border-stone-700,
-    .border-stone-800 {
+    :root:not(:has(.cw-workspace)) .border-stone-700,
+    :root:not(:has(.cw-workspace)) .border-stone-800 {
         border-color: #7c2d12 !important;
     }
 
-    .dark .text-stone-950,
-    .dark .text-stone-900,
-    .dark .text-stone-100 {
+    :root.dark:not(:has(.cw-workspace)) .text-stone-950,
+    :root.dark:not(:has(.cw-workspace)) .text-stone-900,
+    :root.dark:not(:has(.cw-workspace)) .text-stone-100 {
         color: #ffedd5 !important;
     }
 
-    .dark .text-stone-600,
-    .dark .text-stone-500,
-    .dark .text-stone-400,
-    .dark .text-stone-300 {
+    :root.dark:not(:has(.cw-workspace)) .text-stone-600,
+    :root.dark:not(:has(.cw-workspace)) .text-stone-500,
+    :root.dark:not(:has(.cw-workspace)) .text-stone-400,
+    :root.dark:not(:has(.cw-workspace)) .text-stone-300 {
         color: #fdba74 !important;
     }
 }

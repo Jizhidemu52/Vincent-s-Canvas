@@ -5,7 +5,7 @@ import React, { type ComponentProps, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { CanvasQuickGeneratePanel } from "@/components/canvas/canvas-quick-generate-panel";
-import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { CanvasQuickSettingsPopovers } from "@/components/canvas/canvas-quick-settings-popovers";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 import { useModuleStore } from "@/stores/use-module-store";
@@ -35,54 +35,67 @@ function markup(patch: Partial<Props> = {}) {
     finally { Object.assign(initialState, saved); modules.flags = savedFlags; }
 }
 
-function settingsToggle(html: string) {
-    const button = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(item => item.includes("生成设置"));
-    if (!button) throw new Error("Missing generation settings toggle");
+function parameterButton(html: string, label: string) {
+    const button = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(item => item.includes(`aria-label="${label}"`));
+    if (!button) throw new Error(`Missing parameter button: ${label}`);
     return button;
 }
 
-test("generation settings start collapsed with a connected accessible toggle while core actions stay available", () => {
+test("initial composer has three closed parameter popovers without an inline settings form", () => {
     const html = markup();
-    const toggle = settingsToggle(html);
-    expect(toggle).toContain('aria-expanded="false"');
-    const controlledId = toggle.match(/aria-controls="([^"]+)"/)![1];
-    const fieldset = html.match(/<fieldset\b[^>]*>[\s\S]*?<\/fieldset>/)![0];
-    expect(fieldset).toContain(`id="${controlledId}"`);
-    expect(fieldset).toContain('hidden=""');
-    expect(fieldset).toContain('aria-label="宽高比"');
-    expect(fieldset).not.toContain('aria-label="描述图像"');
-    expect(fieldset).not.toContain("cw-generate-button");
+    for (const label of ["宽高比", "画质", "更多设置"]) expect(parameterButton(html, label)).toContain('aria-expanded="false"');
+    expect(html).not.toContain("<fieldset");
+    expect(html).not.toContain("生成设置");
+    expect(html).not.toContain("自定义宽度");
     expect(html).toContain('aria-label="描述图像"');
     expect(html).toContain('aria-label="已选参考图"');
     expect(html).toContain('aria-label="添加参考图"');
     expect(html).toMatch(/class="cw-generate-button"(?! disabled)/);
     expect(html).toContain("出图模型");
     expect(html).not.toContain("gpt-image-2");
+    expect(html.indexOf('class="cw-add-reference"')).toBeGreaterThan(html.indexOf("</textarea>"));
+    expect(html).toContain('aria-label="每次生成 1 张">×1</span>');
 });
 
-test("collapsed summary reflects normalized pixels, adapter quality labels and actual task count", () => {
-    const cases: { patch: Partial<Props>; summary: string }[] = [
-        { patch: {}, summary: "1536 × 1024 · 画质高 high · 1 个任务" },
-        { patch: { size: "auto", quality: "auto", count: 1 }, summary: "自适应 · 画质自动 auto · 1 个任务" },
-        { patch: { model: "vcen-gpt2", size: "728x90", quality: "2k", count: 5 }, summary: "728 × 90 · 分辨率2K · 1 个任务" },
-        { patch: { model: "nano-banana-2", size: "16:9", quality: "0.5k", count: 10 }, summary: "16:9 · 分辨率0.5K · 1 个任务" },
-        { patch: { model: "midjourney-v7", size: "3:2", quality: "turbo", count: 9 }, summary: "3:2 · 生成速度极速 · 1 个任务" },
-        { patch: { model: "gemini-3.1-flash-image", size: "16:9", quality: "4k" }, summary: "渠道默认参数 · 1 个任务" },
+test("parameter buttons reflect normalized sizes and model-specific quality while count stays fixed", () => {
+    const cases: { patch: Partial<Props>; size: string; quality: string }[] = [
+        { patch: {}, size: "3:2", quality: "高" },
+        { patch: { size: "auto", quality: "auto", count: 1 }, size: "自动", quality: "自动" },
+        { patch: { model: "vcen-gpt2", size: "728x90", quality: "2k", count: 5 }, size: "728x90", quality: "2K" },
+        { patch: { model: "nano-banana-2", size: "16:9", quality: "0.5k", count: 10 }, size: "16:9", quality: "0.5K" },
+        { patch: { model: "midjourney-v7", size: "3:2", quality: "turbo", count: 9 }, size: "3:2", quality: "极速" },
+        { patch: { model: "gemini-3.1-flash-image", size: "16:9", quality: "4k" }, size: "自动", quality: "渠道默认" },
     ];
-    for (const { patch, summary } of cases) {
+    for (const { patch, size, quality } of cases) {
         const html = markup(patch);
-        const toggle = settingsToggle(html);
-        expect(toggle).toContain(summary);
+        expect(parameterButton(html, "宽高比")).toContain(size);
+        expect(html).toContain(`>${quality}</span>`);
+        expect(html).toContain('aria-label="每次生成 1 张">×1</span>');
     }
 });
 
-test("reference retention explanation remains available through a native keyboard and touch disclosure", () => {
-    const details = markup().match(/<details\b[^>]*>[\s\S]*?<\/details>/)![0];
-    expect(details).not.toMatch(/^<details[^>]*\bopen(?:=|\s|>)/);
-    expect(details).toContain("<summary");
-    expect(details).toContain("参考图说明");
-    expect(details).toContain("原图保留。取消选中不会清空参考图");
-    expect(markup({ references: [] })).toContain("点击或框选画布图片添加参考图");
+test("reference guidance occupies one accessible icon in the add-reference row and retains the complete floating explanation", () => {
+    const html = markup();
+    const hint = parameterButton(html, "参考图说明");
+    expect(hint).toContain('aria-expanded="false"');
+    expect(hint).toContain('aria-haspopup="dialog"');
+    expect(hint).toContain('type="button"');
+    expect(html).not.toContain("cw-selection-hint");
+    expect(html).not.toContain("<details");
+    const tree = controls()().tree;
+    const row = tree.find(element => element.props.className === "cw-reference-row")!;
+    const buttons = elements(row.props.children).filter(element => element.type === "button");
+    expect(buttons.map(button => button.props["aria-label"])).toEqual(["添加参考图", "参考图说明"]);
+    const popup = tree.find(element => element.props.className === "cw-reference-hint-popover")!;
+    expect(popup.props).toMatchObject({ side: "bottom", align: "end", "aria-label": "参考图说明" });
+    const explanation = renderToStaticMarkup(<>{popup.props.children}</>);
+    expect(explanation).toContain("点击或框选画布图片添加参考图");
+    expect(explanation).toContain("原图保留。取消选中不会清空参考图；请用移除或清空按钮调整。");
+    expect(tree.findIndex(element => element.props.references)).toBeGreaterThan(tree.indexOf(row));
+    const generate = tree.find(element => element.props.className === "cw-generate-button")!;
+    expect(elements(generate.props.children).some(element => element.props.className === "cw-generate-count")).toBe(true);
+    expect(generate.props.title).toBe("Enter 生成，Shift+Enter 换行");
+    expect(html).not.toContain("cw-shortcut");
 });
 
 // Exercise the actual component's handlers without a browser or global module mocks.
@@ -126,31 +139,23 @@ function controls(patch: Partial<Props> = {}, toolEnabled = true) {
         cursor = 0; effects.length = 0;
         const tree = elements(module.exports.CanvasQuickGeneratePanel({ ...initialProps, ...patch, ...next }));
         effects.forEach(effect => effect());
-        return { tree, toggle: tree.find(element => element.type === "button" && "aria-expanded" in element.props)!, fieldset: tree.find(element => element.type === "fieldset")!, settings: tree.find(element => element.type === ImageSettingsPanel)! };
+        return { tree, settings: tree.find(element => element.type === CanvasQuickSettingsPopovers)! };
     };
 }
 
-test("opening, editing and reclosing settings retains latest values without clearing inputs or invoking generation", () => {
+test("editing popover settings retains latest values without clearing inputs or invoking generation", () => {
     const changes: unknown[] = [];
     const render = controls({
         onSizeChange: value => changes.push(["size", value]), onQualityChange: value => changes.push(["quality", value]), onCountChange: value => changes.push(["count", value]),
         onPromptChange: value => changes.push(["prompt", value]), onClearReferences: () => changes.push("clear"), onGenerate: () => changes.push("generate"),
     });
-    const closed = render();
-    expect(closed.fieldset.props.hidden).toBe(true);
-    closed.toggle.props.onClick();
     const opened = render();
-    expect(opened.toggle.props["aria-expanded"]).toBe(true);
-    expect(opened.fieldset.props.hidden).toBe(false);
     expect(opened.settings.props.config).toMatchObject({ size: "1536x1024", quality: "high", count: "1" });
     expect(changes).toEqual([]);
     opened.settings.props.onConfigChange("quality", "medium");
     expect(changes).toEqual([["quality", "medium"]]);
-    opened.toggle.props.onClick();
     const reclosed = render({ quality: "medium" });
-    expect(reclosed.fieldset.props.hidden).toBe(true);
     expect(reclosed.settings.props.config).toMatchObject({ size: "1536x1024", quality: "medium", count: "1" });
-    expect(renderToStaticMarkup(reclosed.toggle)).toContain("1536 × 1024 · 画质中 medium · 1 个任务");
     expect(reclosed.tree.find(element => element.type === "textarea")!.props.value).toBe(initialProps.prompt);
     expect(reclosed.tree.find(element => element.props.references)?.props.references).toBe(initialProps.references);
     expect(changes).toEqual([["quality", "medium"]]);
@@ -158,12 +163,10 @@ test("opening, editing and reclosing settings retains latest values without clea
     expect(changes).toEqual([["quality", "medium"], "generate"]);
 });
 
-test("generation in progress keeps parameter and submit locks when settings are opened", () => {
+test("generation in progress locks all parameter popovers and submission", () => {
     const render = controls({ running: true });
-    render().toggle.props.onClick();
     const opened = render();
-    expect(opened.fieldset.props.hidden).toBe(false);
-    expect(opened.fieldset.props.disabled).toBe(true);
+    expect(opened.settings.props.disabled).toBe(true);
     expect(opened.tree.find(element => element.props.className === "cw-generate-button")!.props.disabled).toBe(true);
 });
 

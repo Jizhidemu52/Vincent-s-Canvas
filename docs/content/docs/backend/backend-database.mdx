@@ -38,7 +38,19 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 
 `024_model_public_numbers.sql` 为 `model_configs` 新增 `public_number integer` 唯一正整数，以及 `model_public_number_seq` 和写入触发器。现有图片模型按 `created_at,id` 初始化编号；新图片模型从序列分配，停用、改名、重排或修改能力不改变已分配编号。真实 `name`、`model_id`、Provider 配置仍用于管理员维护和服务端调用。
 
-设计师出图列表现仅保留四个 OpenToken 型号，`name` 与 `publicName` 直接显示 `gpt-image-2`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gemini-3.1-flash-image`（固定最后），保留 `publicDescription`。设计师响应中的 `modelId` 仍为配置 UUID，用于请求和可恢复导出；`modelIdentityHidden` 表示配置身份仍受保护，不再表示这四个展示名称匿名。映射在服务端，不新增表字段；原编号保留给其他图片配置及历史。接口不返回渠道配置、密钥或含品牌的参数类型；管理员仍能查看真实配置及对应的 `publicName`。聊天、视频、音频保持原配置。正式服务升级前须执行该迁移。单机演示服务在启动时按完整真实图片目录分配编号（包含未启用项，不包含模拟占位模型），之后在进程内保持编号；其后台配置仍为原有内存配置，不新增配置持久化承诺。
+设计师出图列表保留已知 APIMart 平台图片模型及四个 OpenToken 型号，`name` 与 `publicName` 显示明确的模型名称，保留 `publicDescription`；APIMart 使用 `aplmart-` 展示前缀，两个渠道不会因上游型号相同而合并。设计师响应中的 `modelId` 仍为配置 UUID，用于请求和可恢复导出；APIMart 在所有创作角色下均使用独立配置 UUID，真实上游型号只在管理接口返回。`modelIdentityHidden` 表示配置身份仍受保护，不表示展示名称匿名。原编号保留给其他图片配置及历史。公开接口不返回 Provider 配置或密钥；聊天、视频、音频保持各自能力和参数身份。正式服务升级前须执行相关迁移。单机演示服务在启动时按完整真实图片目录分配编号（包含未启用项，不包含模拟占位模型），之后在进程内保持编号。
+
+## 热门出图模型与排序
+
+`029_model_presentation_settings.sql` 新增单例表 `model_presentation_settings`，`singleton=true` 为主键，`featured_model_ids uuid[]` 保存至多 5 个有序的模型配置 UUID，另存 `updated_by` 和 `updated_at`。迁移不插入默认行：没有记录时按预设顺序选取已启用的 APIMart 平台出图模型，默认依次为 Flare、Sunburst、Nano2.1、MJ Blend、GPT2。已经保存的空数组明确表示“不展示任何热门模型”，不会再次填回默认项。保存后排序在刷新、服务重启和普通平台配置保存后保持；停用、移除或变更为不合格的模型不会被其他模型自动补位。
+
+只有固定 `MARK_IMAGE_PROVIDER_ID`、`apimart` 协议、共享目录中已知型号，且具有 `generate`、不混有 `chat`／`video`／`audio` 能力的模型可进入候选。默认停用的 Grok2 可在启用后选入；Nano2 与 Nano2.1 是独立候选，GPT6 与 HappyHorse 不属于出图热门。后台候选列表保留停用项以说明原因，但不能保存停用模型或已停用平台。凭据是否存在只作为状态提示，不随排序接口读取或修改密钥。
+
+超级管理员使用 `GET /api/admin/model-configuration/featured-models` 读取 `{models,featuredModelIds,maxFeatured}`，通过同路径 `PUT` 一次提交 `{modelConfigIds:[配置UUID...]}`。数组顺序就是展示顺序；重复、超过 5 项或非 UUID 返回 `400 VALIDATION_ERROR`，未知、非目标渠道或停用项返回 `400 INVALID_FEATURED_MODEL`。未认证返回 401，设计师和部门管理员返回 403。保存采用事务、共享模型／平台行锁和与平台配置共用的事务级锁，并在同一事务写入审计；多位管理员同时保存时，每次完整替换整个列表，最后提交的配置生效，不会拼接出混合顺序。
+
+`GET /api/models` 和管理员模型列表投影安全字段 `isFeatured:boolean` 与 `displayOrder:number`；热门按 0 开始排序，非热门从 1000 起排在后面。公共接口只发布有效的热门状态，不泄露上述表、Provider 身份或凭据。其他渠道和未入选模型仍可在完整列表中使用，排序不改变模型 UUID、上游调用身份、工具绑定或价格。
+
+本机试用仍拒绝 `/api/admin/**`，不新增试用管理员或后台写入口。其公共列表复用同一套默认热门算法，SQLite 不保存正式热门后台配置。正式部署需先运行正常 PostgreSQL 迁移；本地展示与路由测试不能替代目标数据库升级和真实管理员会话验收。
 
 ## 正式模块独立配置
 
