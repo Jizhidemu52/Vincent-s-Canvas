@@ -53,7 +53,7 @@ describe("queued image preparation cancellation", () => {
             requests.push({ url: path, method: init?.method || "GET" });
             if (path === "/api/models") {
                 if (stage === "model") controller.abort();
-                return Response.json({ models: [model] });
+                return Response.json({ tools: [], prices: [], models: [model] });
             }
             if (path === "/api/assets/source/content") {
                 if (stage === "source-read") controller.abort();
@@ -85,7 +85,7 @@ describe("queued image preparation cancellation", () => {
         let submittedCalls = 0;
         globalThis.fetch = (async (url, init) => {
             const path = String(url);
-            if (path === "/api/models") return Response.json({ models: [model] });
+            if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [model] });
             if (path === "/api/tasks" && init?.method === "POST") {
                 taskPosts.push(init);
                 return Response.json({ task: { id: "task-1" } });
@@ -111,7 +111,7 @@ describe("queued image preparation cancellation", () => {
         let submissionStarted = false;
         globalThis.fetch = (async (url, init) => {
             const path = String(url);
-            if (path === "/api/models") return Response.json({ models: [model] });
+            if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [model] });
             if (path === "/api/tasks" && init?.method === "POST") {
                 expect(submissionStarted).toBe(true);
                 taskPosts.push(JSON.parse(String(init.body)));
@@ -141,7 +141,7 @@ describe("queued image preparation cancellation", () => {
         globalThis.fetch = (async (url, init) => {
             const path = String(url);
             requests.push(`${init?.method || "GET"} ${path}`);
-            if (path === "/api/models") return Response.json({ models: [model] });
+            if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [model] });
             if (path === "/api/tasks" && init?.method === "POST") return Response.json({ task: { id: "accepted-task" } });
             if (path === "/api/auth/session") return Response.json({}, { status: 401 });
             throw new Error(`Unexpected request ${path}`);

@@ -42,7 +42,7 @@ function controlledNetwork(phase: "initial" | "final", options: { task?: QueuedT
     globalThis.fetch = (async (input, init) => {
         const path = String(input);
         const method = init?.method || "GET";
-        if (path === "/api/models") return Response.json({ models: [model] });
+        if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [model] });
         if (path === "/api/assets/upload-request") return Response.json({ assetId: "reference-1", uploadUrl: null });
         if (path === "/api/tasks" && method === "POST") return Response.json({ task: { id: task.id } });
         if (path === "/api/tasks/batch") return Response.json({ batchId: "batch-1", tasks: [{ id: task.id, itemIndex: 0 }], failures: [] });

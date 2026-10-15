@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import { Button, Modal, Segmented, Slider } from "antd";
 import { RotateCcw, WandSparkles } from "lucide-react";
+import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
+import { useEffectiveConfig } from "@/stores/use-config-store";
+import { ModelPicker } from "@/components/model-picker";
 
 export type CanvasImageAngleParams = {
     horizontalAngle: number;
     pitchAngle: number;
     cameraDistance: number;
     wideAngle: boolean;
+    model?: string;
 };
 
 const defaultParams: CanvasImageAngleParams = {
@@ -18,6 +22,9 @@ const defaultParams: CanvasImageAngleParams = {
 
 export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageAngleParams) => void }) {
     const [params, setParams] = useState(defaultParams);
+    const baseConfig = useEffectiveConfig();
+    const config = useToolConfig({ ...baseConfig, model: params.model || baseConfig.imageModel || baseConfig.model }, "canvas-angle");
+    const toolEnabled = useToolEnabled("canvas-angle");
 
     useEffect(() => {
         if (open) setParams(defaultParams);
@@ -63,7 +70,8 @@ export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { d
                     </div>
                 </div>
                 <div className="flex justify-end">
-                    <Button type="primary" size="large" icon={<WandSparkles className="size-4" />} onClick={() => onConfirm(params)}>
+                    <ModelPicker toolKey="canvas-angle" config={config} value={config.model} onChange={model => update("model", model)} capability="image" />
+                    <Button type="primary" size="large" disabled={!toolEnabled || !config.model} icon={<WandSparkles className="size-4" />} onClick={() => onConfirm({ ...params, model: config.model })}>
                         AI 生成
                     </Button>
                 </div>

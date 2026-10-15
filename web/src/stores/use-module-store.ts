@@ -1,6 +1,8 @@
 import { create } from "zustand";
 
 import { listModuleFlags, moduleKeys, type ModuleFlag, type ModuleKey } from "@/services/api/modules";
+import { moduleDefinitions, moduleIsEnabled } from "../../../shared/feature-catalog";
+import { useBusinessConfigStore } from "./use-business-config-store";
 
 type ModuleStore = {
     flags: Record<ModuleKey, boolean>;
@@ -37,5 +39,13 @@ export const useModuleStore = create<ModuleStore>((set) => ({
 }));
 
 export function useModuleEnabled(key: ModuleKey) {
-    return useModuleStore((state) => state.flags[key]);
+    const flags = useModuleStore((state) => state.flags);
+    const tools = useBusinessConfigStore((state) => state.tools);
+    return isModuleAvailable(flags, tools, key);
+}
+
+export function isModuleAvailable(flags: Partial<Record<ModuleKey, boolean>>, tools: Array<{ toolKey: string; enabled?: boolean }>, key: ModuleKey) {
+    const parent = moduleDefinitions.find(item => item.moduleKey === key)?.parent;
+    return moduleIsEnabled(flags, key) && tools.find(item => item.toolKey === key)?.enabled !== false
+        && (!parent || tools.find(item => item.toolKey === parent)?.enabled !== false);
 }

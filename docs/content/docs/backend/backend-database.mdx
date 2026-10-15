@@ -40,6 +40,23 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 
 设计师出图列表现仅保留四个 OpenToken 型号，`name` 与 `publicName` 直接显示 `gpt-image-2`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gemini-3.1-flash-image`（固定最后），保留 `publicDescription`。设计师响应中的 `modelId` 仍为配置 UUID，用于请求和可恢复导出；`modelIdentityHidden` 表示配置身份仍受保护，不再表示这四个展示名称匿名。映射在服务端，不新增表字段；原编号保留给其他图片配置及历史。接口不返回渠道配置、密钥或含品牌的参数类型；管理员仍能查看真实配置及对应的 `publicName`。聊天、视频、音频保持原配置。正式服务升级前须执行该迁移。单机演示服务在启动时按完整真实图片目录分配编号（包含未启用项，不包含模拟占位模型），之后在进程内保持编号；其后台配置仍为原有内存配置，不新增配置持久化承诺。
 
+## 正式模块独立配置
+
+`shared/feature-catalog.ts` 是正式功能目录：26 个 AI 板块与 17 个入口、本地工具或服务模块，包含正式图案定位、花型循环和系列配方。`026_formal_module_configuration.sql` 扩展 `tool_api_configurations.tool_key` 和 `module_flags.module_key` 的检查约束，补齐目录记录，`ON CONFLICT DO NOTHING` 保留现有开关和绑定。应用新后端前须运行正常迁移流程；本地测试不会代替目标 PostgreSQL 环境验收。
+
+| 字段 | 类型与语义 |
+| --- | --- |
+| `tool_api_configurations.model_config_id` | 可空 UUID；绑定时服务端权威选择该模型，空值允许用户选择已启用且能力匹配的模型 |
+| `enabled` | 当前板块模型调用开关；`false` 拒绝调用，不能回退其他模型 |
+| `credit_cost_override` | 可空非负整数；本板块每次输出的总积分价覆盖，0 是有效覆盖，NULL 沿用操作价加模型价 |
+| `rmb_cost_override` | 可空 `numeric(12,4)`；本板块每次输出的总成本覆盖，0 是有效覆盖，NULL 沿用操作价加模型价 |
+| `configuration_version` | 正整数，每次保存独立配置递增，不修改共享模型或全局操作价格 |
+| `tasks.tool_key` / `batch_tasks.tool_key` | 可空文本外键，保存正式来源板块；历史任务保留原数据 |
+
+管理员工具列表始终返回全部 26 项，公开模型接口同样保留禁用和未绑定项，但不公开 Provider 凭据。显式绑定的启用模型不会被默认精选列表过滤；已禁用模型或 Provider、工作流不能执行。任务、批量任务、视频预检及聊天入口先校验来源与操作匹配、自身和父模块开关，再校验绑定。客户端携带旧模型时返回 `TOOL_MODEL_CHANGED`，要求刷新模型参数，不静默换模型。未提供工具配置的旧调用只规范化已知来源名；显式未知键拒绝。
+
+`credit_reservations.price_snapshot` 记录 `toolKey`、`configurationVersion`、两项可空覆盖价与最终总价，批量任务在本次提交中共用同一份单项快照。源板块已知时提示词价格估算应用相同覆盖规则。此变更不重新启用部署已关闭的积分；独立对话与画布聊天分别配置且仍不新增聊天计费。`module_flags` 的总入口关闭也阻止子模块；本地工具没有服务端 AI 计费接口。
+
 ## 企业 OA 身份与会话
 
 `022_oa_login.sql` 允许 `external_identities.provider='oa'`，`subject` 保存上游已校验的 `userid`；沿用 `(provider,subject)` 和 `(user_id,provider)` 唯一约束。`sessions.auth_provider` 为 `local` 或 `oa`，默认 `local`；企业普通创作拒绝旧非 OA 会话及管理员维护身份，生产管理员接口另保留独立密码认证与角色校验。正式服务启动前须应用迁移；当前局域网 SQLite 服务不运行 PostgreSQL 迁移。

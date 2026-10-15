@@ -24,7 +24,7 @@ test("Agent image requests and brief retain all seven requested outputs when the
 });
 
 test("Agent uses actual standard, Gemini and Midjourney parameter profiles", () => {
-    expect(normalizeAgentImageSettings(imageSettings("gpt-image-2"))).toMatchObject({ size: "1024x1024", quality: "auto", imageCount: "7" });
+    expect(normalizeAgentImageSettings(imageSettings("gpt-image-2"))).toMatchObject({ size: "1152x1536", quality: "auto", imageCount: "7" });
     expect(normalizeAgentImageSettings({ ...imageSettings("nano-banana-2"), quality: "0.5k" })).toMatchObject({ size: "3:4", quality: "0.5k", imageCount: "7" });
     expect(normalizeAgentImageSettings(imageSettings("midjourney-v7"))).toMatchObject({ size: "3:4", quality: "relax", imageCount: "1" });
 });

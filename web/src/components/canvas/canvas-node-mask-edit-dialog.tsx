@@ -6,6 +6,7 @@ import { readImageMeta } from "@/lib/image-utils";
 import { ModelPicker } from "@/components/model-picker";
 import type { AiConfig } from "@/stores/use-config-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 
 export type CanvasImageMaskEditPayload = {
     prompt: string;
@@ -38,6 +39,8 @@ export function CanvasNodeMaskEditDialog({
     onClose: () => void;
     onConfirm: (payload: CanvasImageMaskEditPayload) => void;
 }) {
+    const effectiveConfig = useToolConfig({ ...config, model }, "canvas-mask-edit");
+    const toolEnabled = useToolEnabled("canvas-mask-edit");
     const maskCanvasRef = useRef<HTMLCanvasElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
     const drawingRef = useRef<{ active: boolean; last: { x: number; y: number } | null }>({ active: false, last: null });
@@ -112,13 +115,14 @@ export function CanvasNodeMaskEditDialog({
     };
 
     const submit = () => {
+        if (!toolEnabled) return;
         const nextPrompt = prompt.trim();
         const canvas = maskCanvasRef.current;
         if (!nextPrompt) return setError("请输入修改要求");
         if (!canvas) return;
         if (!canvasHasPaint(canvas)) return setError("请先涂抹局部区域");
-        if (!model) return setError("请选择用于局部编辑的模型");
-        onConfirm({ prompt: nextPrompt, maskDataUrl: buildEditMask(canvas), model });
+        if (!effectiveConfig.model) return setError("请选择用于局部编辑的模型");
+        onConfirm({ prompt: nextPrompt, maskDataUrl: buildEditMask(canvas), model: effectiveConfig.model });
     };
 
     return (
@@ -173,7 +177,7 @@ export function CanvasNodeMaskEditDialog({
                             <span className="font-medium opacity-75">编辑模型</span>
                             {deploymentFeatures.creditsEnabled && typeof estimatedCredits === "number" ? <span className="shrink-0 text-xs font-medium text-orange-600">预计 {estimatedCredits} 积分</span> : null}
                         </div>
-                        <ModelPicker config={config} value={model} onChange={onModelChange} capability="image" fullWidth placeholder="选择局部编辑模型" />
+                        <ModelPicker toolKey="canvas-mask-edit" config={effectiveConfig} value={effectiveConfig.model} onChange={onModelChange} capability="image" fullWidth placeholder="选择局部编辑模型" />
                     </div>
 
                     <div className="space-y-2">
@@ -199,7 +203,7 @@ export function CanvasNodeMaskEditDialog({
                             <Button icon={<X className="size-4" />} onClick={onClose}>
                                 取消
                             </Button>
-                            <Button type="primary" icon={<WandSparkles className="size-4" />} onClick={submit}>
+                            <Button type="primary" disabled={!toolEnabled || !effectiveConfig.model} icon={<WandSparkles className="size-4" />} onClick={submit}>
                                 AI 修改
                             </Button>
                         </div>

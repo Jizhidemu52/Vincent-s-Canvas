@@ -1,24 +1,17 @@
 import type { Database } from "./db";
+import { moduleDefinitions, resolveToolKey, type ModuleKey } from "../../shared/feature-catalog";
 
-export const moduleKeys = [
-  "detail-enhance", "image-edit", "angle-control", "seamless-stitch", "image",
-  "video", "prompts", "assets", "gpt-chat", "canvas", "team", "performance",
-] as const;
-export type ModuleKey = (typeof moduleKeys)[number];
+export { moduleKeys, type ModuleKey } from "../../shared/feature-catalog";
 
 export function moduleForOperation(operationType: string, parameters: Record<string, unknown> = {}): ModuleKey | null {
-  if (operationType === "image_generation") return "image";
-  if (operationType === "upscale") return "detail-enhance";
-  if (operationType === "seamless_stitch") return "seamless-stitch";
-  if (operationType === "video_generation" || operationType === "audio_generation") return "video";
-  if (operationType === "batch_image") return "canvas";
-  if (operationType === "inpaint") return parameters.tool === "angle-control" ? "angle-control" : "image-edit";
-  return null;
+  return resolveToolKey(operationType, typeof parameters.tool === "string" ? parameters.tool : undefined) ?? null;
 }
 
-export async function isModuleEnabled(db: Database, key: ModuleKey) {
+export async function isModuleEnabled(db: Pick<Database, "query">, key: ModuleKey): Promise<boolean> {
   const result = await db.query<{ enabled: boolean }>("SELECT enabled FROM module_flags WHERE module_key=$1", [key]);
-  return result.rows[0]?.enabled === true;
+  if (result.rows[0]?.enabled !== true) return false;
+  const parent = moduleDefinitions.find((item) => item.moduleKey === key)?.parent;
+  return parent ? isModuleEnabled(db, parent) : true;
 }
 
 export class ModuleDisabledError extends Error {
@@ -27,6 +20,6 @@ export class ModuleDisabledError extends Error {
   constructor(public readonly moduleKey: ModuleKey) { super("该功能模块已由超级管理员关闭"); }
 }
 
-export async function assertModuleEnabled(db: Database, key: ModuleKey | null) {
+export async function assertModuleEnabled(db: Pick<Database, "query">, key: ModuleKey | null) {
   if (key && !(await isModuleEnabled(db, key))) throw new ModuleDisabledError(key);
 }

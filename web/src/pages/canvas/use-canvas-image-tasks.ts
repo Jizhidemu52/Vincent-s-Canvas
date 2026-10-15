@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasNodeData } from "@/types/canvas";
 import type { CanvasImageTaskScope } from "./canvas-image-task-runtime";
+import type { ToolKey } from "../../../../shared/feature-catalog";
 
 type Input = {
     projectId: string;
@@ -31,9 +32,9 @@ export function useCanvasImageTasks({ projectId, nodes, setNodes, saveQueue, gen
             return createRuntime({ nodes, setNodes, saveQueue, scope: activeScope, ownerId, generating });
         };
         return {
-            async createOptions(nodeId: string, controller: AbortController, onSubmitted?: () => void) {
+            async createOptions(nodeId: string, controller: AbortController, onSubmitted?: () => void, toolKey?: ToolKey) {
                 const requestId = nanoid();
-                return (await loadRuntime()).createOptions(nodeId, controller, requestId, onSubmitted);
+                return (await loadRuntime()).createOptions(nodeId, controller, requestId, onSubmitted, toolKey);
             },
             async recoverPending(nodeId?: string) {
                 try {

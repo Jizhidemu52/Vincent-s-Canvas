@@ -13,6 +13,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
+import { useToolConfig } from "@/hooks/use-tool-config";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, videoResolutionLabel, videoSizeLabel, videoSecondsLabel } from "@/components/video-settings-panel";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
@@ -103,7 +104,8 @@ export default function VideoPage() {
     const previewLoader = useRef(createLatestVideoPreview()).current;
     const logRefreshRevisionRef = useRef(0);
     const config = useConfigStore((state) => state.config);
-    const effectiveConfig = useEffectiveConfig();
+    const baseConfig = useEffectiveConfig();
+    const effectiveConfig = useToolConfig({ ...baseConfig, model: baseConfig.videoModel || baseConfig.model }, "video");
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = (..._args: unknown[]) => true;
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -142,7 +144,7 @@ export default function VideoPage() {
     const validationError = videoReferenceError(videoConfig, references, videoReferences, audioReferences);
     const currentMode = resolveVideoMode(videoConfig, references.length, videoReferences.length, audioReferences.length);
     useEffect(() => { if (optionalReferenceCount) setReferencesOpen(true); }, [optionalReferenceCount]);
-    const estimatedUsage = estimate({ operationType: "video_generation", modelId: modelOptionName(model), quantity: 1 });
+    const estimatedUsage = estimate({ operationType: "video_generation", toolKey: "video", modelId: modelOptionName(model), quantity: 1 });
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const canGenerate = Boolean(prompt.trim() || (isHappyHorse && currentMode === "first-frame")) && !quotaBlocked && !validationError;
 
@@ -794,7 +796,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog, ref
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker toolKey="video" config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
                 <VideoSettingsPanel config={{ ...config, model, videoModel: model }} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" referenceCount={referenceCount} imageMode={imageMode} />

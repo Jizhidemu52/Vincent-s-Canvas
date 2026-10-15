@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
-import { useModuleStore } from "@/stores/use-module-store";
+import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import type { ModuleKey } from "@/services/api/modules";
 
 type MobileNavDrawerProps = {
@@ -26,6 +26,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
     const adminVisible = useUserStore((state) => isAdminRole(state.user?.role));
     const teamVisible = useUserStore((state) => Boolean(state.user?.groupId));
     const flags = useModuleStore((state) => state.flags);
+    const bindings = useBusinessConfigStore(state => state.tools);
     const getToolBadge = (slug: NavigationToolSlug) => {
         if (!deploymentFeatures.creditsEnabled) return undefined;
         const billing = navigationToolBilling[slug];
@@ -43,7 +44,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
         <Drawer title="功能模块" placement="left" size={300} open={open} onClose={onClose} className="md:hidden">
             <div className="space-y-6">
                 {(["local", "online", "admin"] as const).map((group) => {
-                    const tools = navigationTools.filter((tool) => tool.group === group && (deploymentFeatures.rolePortalsEnabled || tool.group !== "admin") && (tool.slug === "creative" ? flags.image || flags["image-edit"] : tool.slug === "admin" || flags[navigationModuleKey(tool.slug) as ModuleKey]) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
+                    const tools = navigationTools.filter((tool) => tool.group === group && (deploymentFeatures.rolePortalsEnabled || tool.group !== "admin") && (tool.slug === "admin" || isModuleAvailable(flags, bindings, navigationModuleKey(tool.slug) as ModuleKey)) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
                     if (!tools.length) return null;
 
                     return (

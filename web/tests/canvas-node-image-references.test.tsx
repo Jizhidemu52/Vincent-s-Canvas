@@ -39,6 +39,11 @@ function loadComponent<T = (props: any) => ReactElement<any>>(path: string, name
         "@/stores/use-config-store": { ...requireModule("@/stores/use-config-store"), useEffectiveConfig: () => defaultConfig, useConfigStore: (select: Function) => select({ openConfigDialog: noop }) },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ estimate: () => ({ configured: true, credits: 0 }) }) },
         "@/stores/use-theme-store": { useThemeStore: (select: Function) => select({ theme: "light" }) },
+        "@/hooks/use-tool-config": {
+            ...requireModule("@/hooks/use-tool-config"),
+            useToolConfig: (config: typeof defaultConfig) => config,
+            useToolEnabled: (key: string) => key === "canvas-edit" || key === "canvas-image",
+        },
         ...overrides,
     };
     const module = { exports: {} as any };
@@ -49,10 +54,10 @@ function loadComponent<T = (props: any) => ReactElement<any>>(path: string, name
 const renderPanel = loadComponent("../src/components/canvas/canvas-node-prompt-panel.tsx", "CanvasNodePromptPanel");
 const renderTray = loadComponent("../src/components/reference-images/reference-image-tray.tsx", "ReferenceImageTray");
 
-function panel(node = source, canvasNodes = [node], canvasConnections: any[] = []) {
+function panel(node = source, canvasNodes = [node], canvasConnections: any[] = [], renderComponent = renderPanel) {
     let current = node;
     const generate: unknown[][] = [];
-    const render = () => elements(renderPanel({ node: current, canvasNodes, canvasConnections, isRunning: false,
+    const render = () => elements(renderComponent({ node: current, canvasNodes, canvasConnections, isRunning: false,
         onPromptChange: noop, onStop: noop, onGenerate: (...args: unknown[]) => generate.push(args),
         onConfigChange: (_id: string, patch: unknown) => { current = { ...current, metadata: { ...current.metadata, ...(patch as object) } }; },
         // This old, connection-based label must not override the actual image input order.
@@ -112,6 +117,7 @@ test("the edit API receives exactly the displayed and mentioned image order, inc
     const submitted: any[] = [];
     const requestEdit = loadComponent<typeof import("@/services/api/image").requestEdit>("../src/services/api/image.ts", "requestEdit", {
         "@/services/api/generation-tasks": { requestQueuedImages: async (input: unknown) => { submitted.push(input); return []; } },
+        "./tool-runtime": { resolveToolConfig: async (config: typeof defaultConfig) => ({ config, toolKey: "canvas-edit", model: { id: "gpt-image-2", modelId: "gpt-image-2", name: "gpt-image-2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 } }) },
     });
     const app = panel();
     const config = { ...defaultConfig, model: "gpt-image-2", imageModel: "gpt-image-2", systemPrompt: "" };
@@ -164,6 +170,20 @@ test("the reference limit counts the fixed original and disables an over-limit e
     expect(generate.props.disabled).toBe(true);
     generate.props.onClick();
     expect(app.generate).toEqual([]);
+});
+
+test("a disabled node editing tool retains its ordered references and blocks its submit handler", () => {
+    const requireModule = createRequire(new URL("../src/components/canvas/canvas-node-prompt-panel.tsx", import.meta.url));
+    const disabledPanel = loadComponent("../src/components/canvas/canvas-node-prompt-panel.tsx", "CanvasNodePromptPanel", {
+        "@/hooks/use-tool-config": { ...requireModule("@/hooks/use-tool-config"), useToolConfig: (config: typeof defaultConfig) => config, useToolEnabled: () => false },
+    });
+    const app = panel(source, [source], [], disabledPanel);
+    expect(tray(app).props.references.map((item: any) => item.id)).toEqual(["original", "color", "pattern"]);
+    const generate = app.render().find(element => element.props["aria-label"] === "生成")!;
+    expect(generate.props.disabled).toBe(true);
+    generate.props.onClick();
+    expect(app.generate).toEqual([]);
+    expect(app.node.metadata?.draftPrompt).toBe(source.metadata?.draftPrompt);
 });
 
 test("canvas badges follow the node edit references while quick generation keeps its own selected order", () => {

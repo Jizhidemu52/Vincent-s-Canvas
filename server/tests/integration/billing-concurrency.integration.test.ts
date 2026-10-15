@@ -118,6 +118,13 @@ integration("PostgreSQL billing concurrency", () => {
       departmentId = department.rows[0]!.id;
     }
     const userIds: string[] = [];
+    const provider = await database.query<{ id: string }>(
+      "INSERT INTO providers(name,protocol,base_url,enabled) VALUES($1,'custom','https://no-network.invalid',true) RETURNING id", [`Concurrency ${tag}`],
+    );
+    const model = await database.query<{ id: string }>(
+      `INSERT INTO model_configs(provider_id,name,model_id,capabilities,credit_cost,rmb_cost,enabled)
+       VALUES($1,$2,$2,ARRAY['generate'],0,0,true) RETURNING id`, [provider.rows[0]!.id, `database-only-${tag}`],
+    );
     for (let index = 0; index < (options.users ?? 2); index += 1) {
       const user = await database.query<{ id: string }>(
         `INSERT INTO users(username,display_name,department_id,credit_balance,credit_limit,monthly_credit_limit)
@@ -128,7 +135,8 @@ integration("PostgreSQL billing concurrency", () => {
     }
     const input = (userId = userIds[0]!, requestId = randomUUID()): TaskInput => ({
       requestId, userId, departmentId, projectId: `concurrency-${tag}`,
-      operationType: "image_generation", prompt: "database-only billing regression", sourceUrls: [], priority: "normal",
+      operationType: "image_generation", toolKey: "image", modelConfigId: model.rows[0]!.id,
+      prompt: "database-only billing regression", sourceUrls: [], priority: "normal",
     });
     return { departmentId, userIds, input };
   }

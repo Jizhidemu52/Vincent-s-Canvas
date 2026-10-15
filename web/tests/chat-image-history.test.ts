@@ -25,6 +25,7 @@ for (const modelId of ["gpt-6-astra", "claude-fable-5-1"]) {
     test(`${modelId} sends the previous uploaded image in the real second-turn HTTP payload`, async () => {
         const requests: Array<{ url: string; body: any }> = [];
         globalThis.fetch = (async (url, init) => {
+            if (url === "/api/models") return Response.json({ tools: [], prices: [], models: [{ id: "text-model", modelId, name: modelId, capabilities: ["chat"], creditCost: 0, rmbCost: 0 }] });
             requests.push({ url: String(url), body: JSON.parse(String(init?.body)) });
             return Response.json({ content: "verified", toolCalls: [] });
         }) as typeof fetch;
@@ -39,6 +40,7 @@ for (const modelId of ["gpt-6-astra", "claude-fable-5-1"]) {
         expect(requests[0]!.body.input[0].content.filter((part: any) => part.type === "input_image")).toEqual([{ type: "input_image", image_url: image }]);
         const followup = requests[1]!.body;
         expect(followup.modelId).toBe(modelId);
+        expect(followup.toolKey).toBe("gpt-chat");
         expect(followup.input.map((message: any) => message.role)).toEqual(["user", "assistant", "user"]);
         const imageParts = followup.input.map((message: any) => Array.isArray(message.content) ? message.content.filter((part: any) => part.type === "input_image") : []);
         expect(imageParts.map((parts: unknown[]) => parts.length)).toEqual([1, 0, 0]);

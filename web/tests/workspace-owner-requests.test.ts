@@ -20,6 +20,7 @@ test("task and chat HTTP requests bind the displayed employee instead of trustin
     const requests: Array<{ path: string; owner: string | null }> = [];
     globalThis.fetch = (async (path, init) => {
         requests.push({ path: String(path), owner: new Headers(init?.headers).get("X-Canvas-Owner-Id") });
+        if (path === "/api/models") return Response.json({ models: [{ id: "chat-model", modelId: "test-model", name: "Test chat", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [], prices: [] });
         return Response.json({ task: { id: "task-a" }, tasks: [], content: "verified", toolCalls: [] });
     }) as typeof fetch;
     await getQueuedTask("task-a");
@@ -28,9 +29,10 @@ test("task and chat HTTP requests bind the displayed employee instead of trustin
     expect(requests).toEqual([
         { path: "/api/tasks/task-a", owner: "employee-a" },
         { path: "/api/tasks", owner: "employee-a" },
+        { path: "/api/models", owner: null },
         { path: "/api/chat/responses", owner: "employee-a" },
     ]);
     useUserStore.setState({ user: null, status: "guest" });
     await expect(getQueuedTask("task-a")).rejects.toThrow("员工会话已变化");
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(4);
 });

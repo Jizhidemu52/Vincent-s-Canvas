@@ -18,6 +18,8 @@ afterEach(async () => {
 
 type Fixture = {
   moduleEnabled?: boolean;
+  moduleFlags?: Record<string, boolean>;
+  toolBinding?: Record<string, unknown>;
   model?: Record<string, unknown> | null;
   asset?: Record<string, unknown> | null;
   task?: Record<string, unknown> | null;
@@ -31,8 +33,9 @@ function dependencies(fixture: Fixture = {}) {
       reads.push({ sql, params });
       if (!sql.trimStart().startsWith("SELECT")) writes.push(sql);
       if (sql.startsWith("UPDATE tasks SET status='waiting'")) return { rows: [{ id: fixture.task?.id }] };
-      if (sql.includes("FROM module_flags")) return { rows: [{ enabled: fixture.moduleEnabled ?? true }] };
-      if (sql.includes("FROM model_configs")) return { rows: fixture.model === null ? [] : [fixture.model || { id: modelId, name: "Wan", modelId: "wan2.7", capabilities: ["video"] }] };
+      if (sql.includes("FROM module_flags")) return { rows: [{ enabled: fixture.moduleFlags?.[String(params[0])] ?? fixture.moduleEnabled ?? true }] };
+      if (sql.includes("FROM tool_api_configurations")) return { rows: fixture.toolBinding ? [fixture.toolBinding] : [] };
+      if (sql.includes("FROM model_configs")) return { rows: fixture.model === null ? [] : [{ id: modelId, name: "Wan", modelId: "wan2.7", capabilities: ["video"], enabled: true, providerEnabled: true, workflowConfigId: null, ...fixture.model }] };
       if (sql.includes("FROM assets")) return { rows: fixture.asset === null ? [] : [fixture.asset || { id: assetId, mimeType: "image/png", byteSize: 512, status: "ready" }] };
       if (sql.startsWith("SELECT id,request_id")) return { rows: fixture.task ? [{ ...fixture.task, operation_type: fixture.task.operationType }] : [] };
       if (sql.includes("FROM tasks")) return { rows: fixture.task ? [fixture.task] : [] };
@@ -261,5 +264,18 @@ describe("production generation routes", () => {
     expect(query?.sql).toContain("m.enabled=true");
     expect(query?.sql).toContain("p.enabled=true");
     expect(query?.sql).toContain("'video'=ANY(m.capabilities)");
+  });
+
+  test("canvas video capability discovery does not depend on the independent video switch", async () => {
+    const { createGenerationCapabilitiesRouter } = await import("../src/routes/generation-capabilities");
+    const deps = dependencies({ moduleFlags: { video: false, "canvas-video": true, canvas: true } });
+    const url = await serve(createGenerationCapabilitiesRouter(deps.database as never), "/api/generation-capabilities");
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(`${url}?toolKey=canvas-video`)).status).toBe(200);
+    expect((await fetch(`${url}?toolKey=image`)).status).toBe(400);
+    expect((await fetch(`${url}?toolKey=canvas-video&toolKey=video`)).status).toBe(400);
+    const disabled = dependencies({ toolBinding: { enabled: false } });
+    const disabledUrl = await serve(createGenerationCapabilitiesRouter(disabled.database as never), "/api/generation-capabilities");
+    expect((await fetch(`${disabledUrl}?toolKey=canvas-video`)).status).toBe(403);
   });
 });

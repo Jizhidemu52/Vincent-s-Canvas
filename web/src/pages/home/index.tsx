@@ -3,7 +3,8 @@ import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { CanvasPersistedMediaPreview } from "@/components/canvas/canvas-persisted-media-preview";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
-import { useModuleStore } from "@/stores/use-module-store";
+import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import "./home.css";
 
 const entries = [
@@ -19,6 +20,7 @@ export default function IndexPage() {
     const projects = useCanvasStore(state => state.projects);
     const createProject = useCanvasStore(state => state.createProject);
     const flags = useModuleStore(state => state.flags);
+    const tools = useBusinessConfigStore(state => state.tools);
     const recent = useMemo(() => [...projects].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, 8), [projects]);
     const createAndEnter = () => navigate("/canvas/" + createProject("无线画布 " + (projects.length + 1)));
     return (
@@ -29,7 +31,7 @@ export default function IndexPage() {
                     {flags.canvas ? <button type="button" className="wb-primary-link" disabled={!hydrated} onClick={createAndEnter}><Plus size={18} />新建画布</button> : null}
                 </header>
                 <section className="home-tools" aria-label="选择创作工具">
-                    {entries.filter(entry => flags[entry.flag]).map(({ path, icon: Icon, title, description, action }, index) => <Link to={path} className="wb-surface home-tool" key={path}>
+                    {entries.filter(entry => isModuleAvailable(flags, tools, entry.flag)).map(({ path, icon: Icon, title, description, action }, index) => <Link to={path} className="wb-surface home-tool" key={path}>
                         <div className="home-tool-top"><Icon size={24} strokeWidth={1.4} /><span>0{index + 1}</span></div>
                         <h2>{title}</h2><p>{description}</p><span className="home-tool-action">{action}<ArrowRight size={16} /></span>
                     </Link>)}

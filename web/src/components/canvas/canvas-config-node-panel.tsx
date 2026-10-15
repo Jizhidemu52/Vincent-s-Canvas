@@ -14,6 +14,7 @@ import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
+import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
@@ -32,20 +33,24 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const businessModels = useBusinessConfigStore((state) => state.models);
     const businessConfigStatus = useBusinessConfigStore((state) => state.status);
     const mode = node.metadata?.generationMode || "image";
-    const model = businessConfigStatus === "ready" ? resolveCapabilityModel(globalConfig, mode, businessModels, node.metadata?.model) : "";
+    const toolKey = canvasToolKey(mode, inputSummary.imageCount > 0);
+    const boundModelId = useBusinessConfigStore(state => state.tools.find(item => item.toolKey === toolKey)?.modelConfigId);
+    const selectedModel = businessConfigStatus === "ready" ? resolveCapabilityModel(globalConfig, mode, businessModels, node.metadata?.model) : "";
+    const config = useToolConfig(buildNodeConfig(globalConfig, node, mode, selectedModel), toolKey);
+    const model = config.model;
+    const toolEnabled = useToolEnabled(toolKey);
     const hasAvailableModel = Boolean(model);
-    const config = buildNodeConfig(globalConfig, node, mode, model);
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const credits = requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? count : 1 });
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
-    const modelIsSynced = node.metadata?.model === model;
-    const canGenerate = hasAvailableModel && modelIsSynced && (hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput));
+    const modelIsSynced = Boolean(boundModelId) || node.metadata?.model === model;
+    const canGenerate = toolEnabled && hasAvailableModel && modelIsSynced && (hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput));
 
     useEffect(() => {
-        if (!isRunning && businessConfigStatus === "ready" && (node.metadata?.model || "") !== model) onConfigChange(node.id, { model });
-    }, [businessConfigStatus, isRunning, model, node.id, node.metadata?.model, onConfigChange]);
+        if (!boundModelId && !isRunning && businessConfigStatus === "ready" && (node.metadata?.model || "") !== model) onConfigChange(node.id, { model });
+    }, [boundModelId, businessConfigStatus, isRunning, model, node.id, node.metadata?.model, onConfigChange]);
 
     return (
         <div className="flex h-full w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
@@ -116,7 +121,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
             </div>
 
             <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${hasAvailableModel && mode !== "text" ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
-                <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} modelsSource="server" disabled={isRunning} onMissingConfig={() => openConfigDialog(true)} fullWidth />
+                <ModelPicker toolKey={toolKey} className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} modelsSource="server" disabled={isRunning} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                 {hasAvailableModel && mode === "video" ? (
                     <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                 ) : hasAvailableModel && mode === "image" ? (

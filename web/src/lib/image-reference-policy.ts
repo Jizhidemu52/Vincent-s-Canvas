@@ -10,9 +10,8 @@ export type ImageReferenceValidation = {
     supportsReferences: boolean;
 };
 
-export function referencePolicyForModel(modelId: string): Omit<ImageReferenceValidation, "valid" | "message"> & { label: string } {
+export function referencePolicyForModel(modelId: string, profile = imageModelProfile(modelId)): Omit<ImageReferenceValidation, "valid" | "message"> & { label: string } {
     const normalized = modelId.trim().toLowerCase();
-    const profile = imageModelProfile(modelId);
     const label = (name: string) => isAdminRole(useUserStore.getState().user?.role) ? name : "当前模型";
     if (profile.kind === "midjourney-blend") return { label: label("Midjourney Blend"), minimum: 2, maximum: 4, supportsReferences: true };
     if (profile.kind === "midjourney") return { label: label("当前工作台的 Midjourney 参考图"), minimum: 0, maximum: 16, supportsReferences: true };
@@ -22,8 +21,8 @@ export function referencePolicyForModel(modelId: string): Omit<ImageReferenceVal
     return { label: "当前模型", minimum: 0, maximum: 16, supportsReferences: true };
 }
 
-export function validateImageReferences(modelId: string, references: ReferenceImage[]): ImageReferenceValidation {
-    const policy = referencePolicyForModel(modelId);
+export function validateImageReferences(modelId: string, references: ReferenceImage[], profile?: ReturnType<typeof imageModelProfile>): ImageReferenceValidation {
+    const policy = referencePolicyForModel(modelId, profile);
     if (!policy.supportsReferences && references.length) return { ...policy, valid: false, message: "当前模型不支持参考图，请移除参考图或切换模型。" };
     if (references.length < policy.minimum || references.length > policy.maximum) {
         const range = policy.minimum === policy.maximum ? `${policy.maximum}` : `${policy.minimum} 至 ${policy.maximum}`;

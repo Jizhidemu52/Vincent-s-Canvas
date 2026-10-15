@@ -7,16 +7,21 @@ import ts from "typescript";
 import { defaultImageQuickToolIds, readImageQuickToolsConfig } from "@/components/canvas/canvas-image-toolbar-tools";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { moduleKeys, type ModuleKey } from "@/services/api/modules";
+import { isModuleAvailable } from "@/stores/use-module-store";
+import type { BusinessConfig } from "@/services/api/business-config";
 
 const requireModule = createRequire(new URL("../src/components/canvas/canvas-node-hover-toolbar.tsx", import.meta.url));
 const code = ts.transpileModule(readFileSync(new URL("../src/components/canvas/canvas-node-hover-toolbar.tsx", import.meta.url), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
 }).outputText;
 
-function toolbarHarness(theme: "light" | "dark" = "light") {
+function toolbarHarness(theme: "light" | "dark" = "light", options: { flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"] } = {}) {
     const states: unknown[] = [];
     let index = 0;
     const calls: Array<{ name: string; node?: CanvasNodeData }> = [];
+    const flags = { ...Object.fromEntries(moduleKeys.map(key => [key, true])), ...options.flags };
+    const tools = options.tools || [];
     const node: CanvasNodeData = { id: "image", type: CanvasNodeType.Image, title: "花瓶", position: { x: 200, y: 150 }, width: 340, height: 340, metadata: { content: "blob:image", prompt: "绿色花瓶", status: "error" } };
     const dependencies: Record<string, unknown> = {
         react: {
@@ -34,6 +39,8 @@ function toolbarHarness(theme: "light" | "dark" = "light") {
         antd: { ...requireModule("antd"), App: { useApp: () => ({ message: { warning: () => undefined } }) } },
         "@/stores/use-theme-store": { useThemeStore: (selector: (state: unknown) => unknown) => selector({ theme }) },
         "@/hooks/use-copy-text": { useCopyText: () => () => calls.push({ name: "onCopyPrompt", node }) },
+        "@/stores/use-module-store": { isModuleAvailable, useModuleStore: (selector: (state: unknown) => unknown) => selector({ flags, status: "ready" }) },
+        "@/stores/use-business-config-store": { useBusinessConfigStore: (selector: (state: unknown) => unknown) => selector({ tools, models: [], prices: [], status: "ready" }) },
     };
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
@@ -79,6 +86,25 @@ describe("compact image toolbar", () => {
             expect(harness.calls).toContainEqual({ name: handler, node: harness.node });
         }
         expect(items.at(-1).key).toBe("customize");
+    });
+
+    test("disabled local and AI tools disappear from both surfaces while existing image download remains usable", () => {
+        const harness = toolbarHarness("light", {
+            flags: { "canvas-local-tools": false },
+            tools: ["canvas-edit", "canvas-mask-edit"].map(toolKey => ({ toolKey, modelConfigId: null, enabled: false, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 })),
+        });
+        const view = elements(harness.render());
+        const mainActions = view.filter(element => typeof element.props.id === "string" && typeof element.props.onClick === "function");
+        expect(mainActions.map(element => element.props.id)).toEqual(["download"]);
+        const dropdown = view.find(element => element.props.menu?.items)!;
+        const menuKeys = dropdown.props.menu.items.flatMap((item: any) => item.children || [item]).map((item: any) => item.key);
+        for (const key of ["manualEdit", "edit", "maskEdit", "crop", "split", "upscale", "compare", "designTemplate", "resize"]) {
+            expect(menuKeys).not.toContain(key);
+            dropdown.props.menu.onClick({ key, domEvent: { stopPropagation() {} } });
+        }
+        expect(harness.calls).toEqual([]);
+        mainActions[0]!.props.onClick();
+        expect(harness.calls).toEqual([{ name: "onDownload", node: harness.node }]);
     });
 
     test("keeps the toolbar available while its More menu is open", () => {

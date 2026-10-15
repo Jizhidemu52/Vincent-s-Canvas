@@ -8,6 +8,7 @@ import { CanvasQuickGeneratePanel } from "@/components/canvas/canvas-quick-gener
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
+import { useModuleStore } from "@/stores/use-module-store";
 
 type Props = ComponentProps<typeof CanvasQuickGeneratePanel>;
 const noop = () => undefined;
@@ -26,9 +27,11 @@ const initialProps: Props = {
 function markup(patch: Partial<Props> = {}) {
     const initialState = useBusinessConfigStore.getInitialState();
     const saved = { ...initialState };
-    Object.assign(initialState, { models, status: "ready" });
+    const modules = useModuleStore.getInitialState(), savedFlags = modules.flags;
+    Object.assign(initialState, { models, tools: [], status: "ready" });
+    modules.flags = { ...savedFlags, canvas: true, "canvas-image": true, "canvas-edit": true };
     try { return renderToStaticMarkup(<CanvasQuickGeneratePanel {...initialProps} {...patch} />); }
-    finally { Object.assign(initialState, saved); }
+    finally { Object.assign(initialState, saved); modules.flags = savedFlags; }
 }
 
 function settingsToggle(html: string) {
@@ -95,7 +98,7 @@ function elements(value: unknown): ReactElement<any>[] {
     return [element, ...elements(element.props.children)];
 }
 
-function controls(patch: Partial<Props> = {}) {
+function controls(patch: Partial<Props> = {}, toolEnabled = true) {
     const state: unknown[] = [];
     let cursor = 0;
     const effects: (() => void)[] = [];
@@ -109,6 +112,11 @@ function controls(patch: Partial<Props> = {}) {
         "@/stores/use-theme-store": { useThemeStore: (select: (state: object) => unknown) => select({ theme: "light" }) },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: (state: object) => unknown) => select({ models, status: "ready" }) },
         "@/stores/use-user-store": { useUserStore: (select: (state: object) => unknown) => select({ user: { role: "designer" } }) },
+        "@/hooks/use-tool-config": {
+            // This harness has no administrator model binding; retain the supplied composer config.
+            useToolConfig: (config: Props["config"]) => config,
+            useToolEnabled: (key: string) => toolEnabled && ["canvas-image", "canvas-edit"].includes(key),
+        },
     };
     const module = { exports: {} as { CanvasQuickGeneratePanel: (props: Props) => ReactElement } };
     new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
@@ -170,10 +178,10 @@ test("selected advanced settings override global defaults and editing only updat
     expect(useConfigStore.getState()).toBe(globalBefore);
 });
 
-function pressPrompt(props: Partial<Props>, patch: Record<string, unknown> = {}) {
+function pressPrompt(props: Partial<Props>, patch: Record<string, unknown> = {}, toolEnabled = true) {
     let submissions = 0;
     let prevented = false;
-    const rendered = controls({ ...props, onGenerate: () => { submissions++; } })();
+    const rendered = controls({ ...props, onGenerate: () => { submissions++; } }, toolEnabled)();
     const prompt = rendered.tree.find(element => element.type === "textarea")!;
     prompt.props.onKeyDown({ key: "Enter", shiftKey: false, ctrlKey: false, metaKey: false, keyCode: 13, nativeEvent: { isComposing: false },
         preventDefault: () => { prevented = true; }, ...patch });
@@ -206,5 +214,11 @@ test("Enter never bypasses the generate button's running, empty-prompt or invali
         const result = pressPrompt(props);
         expect(result.buttonDisabled).toBe(true);
         expect(result.submissions).toBe(0);
+    }
+});
+
+test("Enter cannot submit a disabled canvas tool even when its prompt, model and references are valid", () => {
+    for (const references of [[], initialProps.references]) {
+        expect(pressPrompt({ references }, {}, false)).toEqual({ submissions: 0, prevented: true, buttonDisabled: true });
     }
 });

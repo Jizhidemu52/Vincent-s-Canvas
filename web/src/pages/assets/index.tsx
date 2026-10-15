@@ -3,6 +3,7 @@ import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState 
 import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
 import { useNavigate } from "react-router-dom";
+import { useModuleEnabled } from "@/stores/use-module-store";
 
 import { useCopyText } from "@/hooks/use-copy-text";
 import { imageModelDisplayName } from "@/lib/model-display";
@@ -63,6 +64,7 @@ const kindOptions = [
 export default function AssetsPage() {
     const { message } = App.useApp();
     const navigate = useNavigate();
+    const referenceImportEnabled = useModuleEnabled("reference-import");
     const copyText = useCopyText();
     const [form] = Form.useForm<AssetFormValues>();
     const coverInputRef = useRef<HTMLInputElement>(null);
@@ -467,7 +469,7 @@ export default function AssetsPage() {
                             </div>
                             <div className="wb-toolbar">
                                 <span className="text-sm text-muted-foreground">共 {filteredAssets.length} 个素材</span>
-                                <Button onClick={() => navigate("/reference-import")}>网页采集</Button>
+                                {referenceImportEnabled ? <Button onClick={() => navigate("/reference-import")}>网页采集</Button> : null}
                                 <Button icon={<Download className="size-4" />} disabled={Boolean(assetAction) || !validAssets.length} onClick={() => void runAssetAction("正在整理导出文件…", exportAllAssets)}>导出素材</Button>
                                 <Button icon={<Upload className="size-4" />} disabled={Boolean(assetAction)} onClick={() => assetInputRef.current?.click()}>导入素材包</Button>
                             </div>

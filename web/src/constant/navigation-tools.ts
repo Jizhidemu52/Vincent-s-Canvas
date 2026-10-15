@@ -114,7 +114,7 @@ export type NavigationGroup = (typeof navigationTools)[number]["group"];
 export type NavigationToolSlug = (typeof navigationTools)[number]["slug"];
 
 export function navigationModuleKey(slug: NavigationToolSlug) {
-    return slug === "my-prompts" ? "prompts" : slug === "design-library" ? "canvas" : slug;
+    return slug === "my-prompts" ? "prompts" : slug;
 }
 
 export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operationType: AdminOperationType; toolKey: string }>> = {

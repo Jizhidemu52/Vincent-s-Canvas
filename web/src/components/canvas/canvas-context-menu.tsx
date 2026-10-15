@@ -4,10 +4,12 @@ import { FolderPlus, PencilLine, Plus, Trash2 } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useModuleEnabled } from "@/stores/use-module-store";
 import type { ContextMenuState } from "@/types/canvas";
 
 export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete, onGenerate, onRename, onGroup }: { menu: ContextMenuState; onClose: () => void; onDuplicate: () => void; onDelete: () => void; onGenerate?: () => void; onRename?: () => void; onGroup?: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const canGenerate = useModuleEnabled("canvas-image");
 
     useEffect(() => {
         const close = (event: PointerEvent) => {
@@ -28,7 +30,7 @@ export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete, on
             {menu.type === "node" ? <MenuButton icon={<Plus className="size-4" />} label="Duplicate" onClick={onDuplicate} /> : null}
             {menu.type === "node" && onRename ? <MenuButton icon={<PencilLine className="size-4" />} label="重命名" onClick={onRename} /> : null}
             {onGroup ? <MenuButton icon={<FolderPlus className="size-4" />} label="创建款式组" onClick={onGroup} /> : null}
-            {menu.type === "canvas" ? <MenuButton icon={<Plus className="size-4" />} label="生成" onClick={onGenerate} /> : <MenuButton icon={<Trash2 className="size-4" />} label="Delete" onClick={onDelete} danger />}
+            {menu.type === "canvas" ? canGenerate && <MenuButton icon={<Plus className="size-4" />} label="生成" onClick={onGenerate} /> : <MenuButton icon={<Trash2 className="size-4" />} label="Delete" onClick={onDelete} danger />}
         </div>
     );
 }

@@ -21,6 +21,7 @@ function controls(patch: Partial<AgentGenerationSettings> = {}) {
     const dependencies: Record<string, unknown> = {
         react: { ...React, useEffect: (effect: () => void) => effects.push(effect) },
         "@/lib/image-model-settings": { imageModelProfile, useImageModelProfile: (model: string) => imageModelProfile(model, []) },
+        "@/hooks/use-tool-config": { useToolConfig: (config: unknown) => config },
     };
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code + "\nexports.controls = AgentGenerationControls;")((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
@@ -44,7 +45,7 @@ test("Agent parameters reflect standard pixel sizes and quality instead of fabri
     expect(result.markup).toContain('aria-label="画质"');
     expect(result.markup).not.toContain('value="4k"');
     result.effects.forEach((effect) => effect());
-    expect(result.changes).toContainEqual({ size: "1024x1024", quality: "auto", imageCount: "7" });
+    expect(result.changes).toContainEqual({ size: "1152x1536", quality: "auto", imageCount: "7" });
 });
 
 test("Agent exposes 0.5K for Gemini and ten images for supported adapters", () => {
@@ -66,7 +67,7 @@ test("Midjourney shows speed and reference policy, not resolution or a useless o
 
 test("switching an Agent image model atomically normalizes its illegal old parameters", () => {
     const result = controls();
-    result.elements.find((element) => typeof element.props.onValueChange === "function")!.props.onValueChange("midjourney-v7");
+    result.elements.find((element) => element.props.toolKey === "canvas-image")!.props.onChange("midjourney-v7");
     expect(result.changes.at(-1)).toMatchObject({ imageModel: "midjourney-v7", imageCount: "1", quality: "relax", size: "3:4" });
 });
 

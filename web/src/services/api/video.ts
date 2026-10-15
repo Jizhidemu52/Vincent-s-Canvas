@@ -7,8 +7,9 @@ import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { HappyHorseMode } from "@/lib/happyhorse-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { resolveToolConfig } from "./tool-runtime";
 
-type RequestOptions = { signal?: AbortSignal; onSubmitted?: (task: VideoGenerationTask) => void };
+type RequestOptions = { signal?: AbortSignal; toolKey?: "video" | "canvas-video"; onSubmitted?: (task: VideoGenerationTask) => void };
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "server"; model: string };
@@ -22,8 +23,9 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 }
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions, happyHorseMode?: HappyHorseMode): Promise<VideoGenerationTask> {
-    const task = await submitQueuedMediaTask(await queuedVideoInput(config, prompt, references, videoReferences, audioReferences, options, happyHorseMode));
-    return { id: task.id, provider: "server", model: modelOptionName(config.model || config.videoModel) };
+    const input = await queuedVideoInput(config, prompt, references, videoReferences, audioReferences, options, happyHorseMode);
+    const task = await submitQueuedMediaTask(input);
+    return { id: task.id, provider: "server", model: input.modelId };
 }
 
 export async function recoverVideoGenerationTask(task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
@@ -60,6 +62,8 @@ export async function storeGeneratedVideo(result: VideoGenerationResult, options
 }
 
 async function queuedVideoInput(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions, happyHorseMode?: HappyHorseMode) {
+    const resolved = await resolveToolConfig(config, "video_generation", options?.toolKey || "video");
+    config = resolved.config;
     const modelId = modelOptionName(config.model || config.videoModel);
     // Preserve the legacy HappyHorse mode when callers still carry the default auto mode.
     const requestConfig = happyHorseMode && (!config.videoMode || config.videoMode === "auto") ? { ...config, videoMode: happyHorseMode } : config;
@@ -97,6 +101,8 @@ async function queuedVideoInput(config: AiConfig, prompt: string, references: Re
     if (resolvedError) throw new Error(resolvedError);
     return {
         modelId,
+        resolvedModel: resolved.model,
+        toolKey: resolved.toolKey,
         prompt,
         operationType: "video_generation",
         parameters,

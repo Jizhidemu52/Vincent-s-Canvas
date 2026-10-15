@@ -7,6 +7,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache bun install --cache-dir=/
 COPY VERSION /app/VERSION
 COPY CHANGELOG.md /app/CHANGELOG.md
 COPY web ./
+COPY shared /app/shared
 RUN bun run build
 
 # 运行镜像：Nginx 提供前端，并把 /api 请求转发到公司后端。

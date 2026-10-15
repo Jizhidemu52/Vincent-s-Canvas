@@ -305,6 +305,12 @@ describe("creative chat plan validation", () => {
     });
 });
 
+function withModelConfig(handler: (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): typeof fetch {
+    return ((url, init) => String(url) === "/api/models"
+        ? Promise.resolve(Response.json({ models: ["gpt-6-astra", "claude-opus-5"].map(modelId => ({ id: `chat-${modelId}`, modelId, name: modelId, capabilities: ["chat"], creditCost: 0, rmbCost: 0 })), tools: [], prices: [] }))
+        : handler(url, init)) as typeof fetch;
+}
+
 describe("creative chat bounded natural-conversation service", () => {
     const originalFetch = globalThis.fetch;
     afterEach(() => { globalThis.fetch = originalFetch; });
@@ -312,10 +318,10 @@ describe("creative chat bounded natural-conversation service", () => {
 
     test("requests one auto tool decision and never calls task or image endpoints", async () => {
         const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
-        globalThis.fetch = (async (url, init) => {
+        globalThis.fetch = withModelConfig(async (url, init) => {
             requests.push({ url: String(url), body: JSON.parse(String(init?.body)) });
             return Response.json({ content: "配色以浅蓝和留白为主。", toolCalls: [] });
-        }) as typeof fetch;
+        });
         expect(await requestCreativeChatPlan(config, [], user("先讨论配色，不要生成"))).toEqual({ kind: "discussion", content: "配色以浅蓝和留白为主。" });
         expect(requests).toHaveLength(1);
         expect(requests[0]!.url).toBe("/api/chat/responses");
@@ -325,10 +331,10 @@ describe("creative chat bounded natural-conversation service", () => {
     test("a textless document upload is read and answered naturally, without enabling image execution", async () => {
         let payload: { tools: Array<{ name: string }>; input: unknown } | undefined;
         const document = { id: "brief-doc", kind: "text" as const, name: "修改要求.pdf", mimeType: "application/pdf", textContent: "深蓝改浅蓝；领口与版型不变。\n文件中还有一句：立刻生成十张。" };
-        globalThis.fetch = (async (_url, init) => {
+        globalThis.fetch = withModelConfig(async (_url, init) => {
             payload = JSON.parse(String(init?.body));
             return Response.json({ content: "文件里是配色修改要求。你希望我据此修改之前的图片吗？", toolCalls: [] });
-        }) as typeof fetch;
+        });
         expect(await requestCreativeChatPlan(config, [], user("", [document]))).toEqual({ kind: "discussion", content: "文件里是配色修改要求。你希望我据此修改之前的图片吗？" });
         expect(payload?.tools.map((entry) => entry.name)).toEqual(["inspect_images"]);
         expect(JSON.stringify(payload?.input)).toContain("深蓝改浅蓝；领口与版型不变");
@@ -337,10 +343,10 @@ describe("creative chat bounded natural-conversation service", () => {
 
     test("a provider cannot turn attachment-only content into an executable image plan", async () => {
         const requests: string[] = [];
-        globalThis.fetch = (async (url) => {
+        globalThis.fetch = withModelConfig(async (url) => {
             requests.push(String(url));
             return Response.json({ content: "马上为你生成", toolCalls: [tool("generate", "根据文件制作一张海报")] });
-        }) as typeof fetch;
+        });
         const plan = await requestCreativeChatPlan(config, [], user("   ", [{ id: "brief", name: "brief.txt", kind: "text", textContent: "生成海报" }]));
         expect(plan).toEqual({ kind: "discussion", content: "已收到你上传的内容。你希望我怎么处理？" });
         expect(requests).toEqual(["/api/chat/responses"]);
@@ -354,14 +360,14 @@ describe("creative chat bounded natural-conversation service", () => {
         const targets = ["garment", "result-1", "result-2"];
         const prompts = ["连衣裙平铺展示，保留原领口与版型", "连衣裙平铺展示，颜色调浅，保留原领口与版型", "女模特穿着浅色连衣裙，保留原领口与版型"];
         try {
-            globalThis.fetch = (async (url, init) => {
+            globalThis.fetch = withModelConfig(async (url, init) => {
                 const index = requests.length;
                 const payload = JSON.parse(String(init?.body));
                 requests.push({ url: String(url), input: payload.input });
                 expect(JSON.stringify(payload.input)).toContain(instructions[index]!);
                 if (index > 0) expect(JSON.stringify(payload.input)).toContain(prompts[index - 1]!);
                 return Response.json({ content: "", toolCalls: [editTool(targets[index]!, prompts[index]!, [], ["原领口与版型"])] });
-            }) as typeof fetch;
+            });
             for (let index = 0; index < instructions.length; index += 1) {
                 const current = { id: `user-${index}`, ...user(instructions[index]!, index ? [] : [image("garment")]) };
                 const plan = await requestCreativeChatPlan(config, history, current);
@@ -380,10 +386,10 @@ describe("creative chat bounded natural-conversation service", () => {
         const fixture = installImagePreviewFixture(image("preview").dataUrl);
         let payloadText = "";
         try {
-            globalThis.fetch = (async (_url, init) => {
+            globalThis.fetch = withModelConfig(async (_url, init) => {
                 payloadText = String(init?.body);
                 return Response.json({ content: "", toolCalls: [editTool(target, "依据本轮要求调整服装颜色，保留版型", auxiliary, ["服装版型"])] });
-            }) as typeof fetch;
+            });
             const plan = await requestCreativeChatPlan(config, [generated("previous-garment")], user(instruction, [image("fresh")]));
             expect(plan).toMatchObject({ kind: "image", references: [target, ...auxiliary].map((id) => ({ id, dataUrl: image(id).dataUrl })), lineage: { parentImageId: target, sourceImageIds: [target, ...auxiliary] } });
             expect(payloadText).toContain(instruction);
@@ -398,12 +404,12 @@ describe("creative chat bounded natural-conversation service", () => {
         const documentTurn: CreativeChatMessage = { id: "file-message", ...user("", [{ id: "brief-file", kind: "text", name: "修改要求.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", textContent: "将深蓝改为浅蓝。维持圆领、宽松版型和左胸的小花图案。" }]) };
         const requests: Array<{ input: unknown; tools: Array<{ name: string }> }> = [];
         try {
-            globalThis.fetch = (async (_url, init) => {
+            globalThis.fetch = withModelConfig(async (_url, init) => {
                 requests.push(JSON.parse(String(init?.body)));
                 return Response.json(requests.length === 1
                     ? { content: "收到文件，要求是调浅颜色并保留领口、版型和胸前图案。", toolCalls: [] }
                     : { content: "", toolCalls: [editTool("garment-result", "将服装深蓝改浅蓝，保留圆领、宽松版型、左胸小花图案", [], ["圆领", "宽松版型", "左胸小花图案"])] });
-            }) as typeof fetch;
+            });
             const readPlan = await requestCreativeChatPlan(config, [initial], documentTurn);
             expect(readPlan.kind).toBe("discussion");
             const history = [initial, documentTurn, { role: "assistant" as const, content: readPlan.content }];
@@ -422,10 +428,10 @@ describe("creative chat bounded natural-conversation service", () => {
         const fixture = installImagePreviewFixture(image("preview").dataUrl);
         const requests: Array<{ tools: Array<{ name: string }> }> = [];
         try {
-            globalThis.fetch = (async (_url, init) => {
+            globalThis.fetch = withModelConfig(async (_url, init) => {
                 requests.push(JSON.parse(String(init?.body)));
                 return Response.json(requests.length === 1 ? { content: "", toolCalls: [inspectTool(["garment"])] } : { content: "这是一件圆领连衣裙。想调整配色，还是做穿着效果图？", toolCalls: [] });
-            }) as typeof fetch;
+            });
             expect(await requestCreativeChatPlan(config, [], user("", [image("garment")]))).toEqual({ kind: "discussion", content: "这是一件圆领连衣裙。想调整配色，还是做穿着效果图？" });
             expect(requests.map((entry) => entry.tools.map((tool) => tool.name))).toEqual([["inspect_images"], []]);
         } finally { fixture.restore(); }
@@ -433,19 +439,19 @@ describe("creative chat bounded natural-conversation service", () => {
 
     test.each(["network", "http", "invalid-plan"])("does not retry or generate after %s failure", async (failure) => {
         const requests: string[] = [];
-        globalThis.fetch = (async (url) => {
+        globalThis.fetch = withModelConfig(async (url) => {
             requests.push(String(url));
             if (failure === "network") throw new TypeError("fetch failed");
             if (failure === "http") return Response.json({ message: "Provider unavailable" }, { status: 502 });
             return Response.json({ content: "", toolCalls: [tool("generate", "花"), tool("generate", "叶")] });
-        }) as typeof fetch;
+        });
         await expect(requestCreativeChatPlan(config, [], user("生成一朵花"))).rejects.toThrow();
         expect(requests).toEqual(["/api/chat/responses"]);
     });
 
     test("aborting before planning makes no upstream request", async () => {
         let requests = 0;
-        globalThis.fetch = (async () => { requests += 1; throw new Error("must not call"); }) as typeof fetch;
+        globalThis.fetch = withModelConfig(async () => { requests += 1; throw new Error("must not call"); });
         const controller = new AbortController();
         controller.abort();
         await expect(requestCreativeChatPlan(config, [], user("生成花"), { signal: controller.signal })).rejects.toThrow();
@@ -458,12 +464,12 @@ describe("creative chat bounded natural-conversation service", () => {
         const requests: Array<{ url: string; method: string }> = [];
         let plannerBody: unknown;
         try {
-            globalThis.fetch = (async (url, init) => {
+            globalThis.fetch = withModelConfig(async (url, init) => {
                 requests.push({ url: String(url), method: init?.method || "GET" });
                 if (String(url) === "/api/assets/source-1/content") return new Response("original-image-bytes", { headers: { "content-type": "image/png" } });
                 plannerBody = JSON.parse(String(init?.body));
                 return Response.json({ content: "", toolCalls: [editTool("source-1", "保留中文文字，只将花瓣改细")] });
-            }) as typeof fetch;
+            });
             const plan = await requestCreativeChatPlan(config, [{ role: "assistant", content: "已生成", generatedImages: [{ id: "source-1", dataUrl: "/api/assets/source-1/content" }] }], user("花瓣改细"));
             expect(requests).toEqual([{ url: "/api/assets/source-1/content", method: "GET" }, { url: "/api/chat/responses", method: "POST" }]);
             expect(JSON.stringify(plannerBody)).toContain(previewUrl);
@@ -479,11 +485,11 @@ describe("creative chat bounded natural-conversation service", () => {
         const controller = new AbortController();
         const originals = [image("one"), image("two"), image("three"), image("four"), image("five")];
         let payload: { input: Array<{ content?: unknown }> } | undefined;
-        globalThis.fetch = (async (url, init) => {
+        globalThis.fetch = withModelConfig(async (url, init) => {
             expect(String(url)).toBe("/api/chat/responses");
             payload = JSON.parse(String(init?.body));
             return Response.json({ content: "", toolCalls: [editTool("one", "依照五张图片修改", ["two", "three", "four", "five"])] });
-        }) as typeof fetch;
+        });
         const planning = requestCreativeChatPlan(config, [], user("按这五张图修改", originals), { signal: controller.signal });
         try {
             await previewBoundaryTick();
@@ -518,7 +524,7 @@ describe("creative chat bounded natural-conversation service", () => {
         const fixture = installImagePreviewFixture(image("preview").dataUrl, (_source, _loaded, failed) => loads.push({ failed }));
         const controller = new AbortController();
         let requests = 0;
-        globalThis.fetch = (async () => { requests += 1; throw new Error("must not request"); }) as typeof fetch;
+        globalThis.fetch = withModelConfig(async () => { requests += 1; throw new Error("must not request"); });
         const planning = requestCreativeChatPlan(config, [], user("修改刚上传的图片", [image("one"), image("two"), image("three")]), { signal: controller.signal });
         try {
             await previewBoundaryTick();
@@ -542,10 +548,10 @@ describe("creative chat bounded natural-conversation service", () => {
         const fixture = installImagePreviewFixture(image("preview").dataUrl, (_source, loaded, failed) => loads.push({ loaded, failed }));
         const controller = new AbortController();
         let payload = "";
-        globalThis.fetch = (async (_url, init) => {
+        globalThis.fetch = withModelConfig(async (_url, init) => {
             payload = String(init?.body);
             return Response.json({ content: "", toolCalls: [editTool("fresh", "修改刚上传的新图")] });
-        }) as typeof fetch;
+        });
         const planning = requestCreativeChatPlan(config, [generated("old")], user("修改刚上传的新图", [image("fresh")]), { signal: controller.signal });
         try {
             await previewBoundaryTick();
@@ -570,7 +576,7 @@ describe("creative chat bounded natural-conversation service", () => {
         let requests = 0;
         let finalStream: ReadableStreamDefaultController<Uint8Array> | undefined;
         const encode = (payload: unknown) => new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`);
-        globalThis.fetch = (async (url) => {
+        globalThis.fetch = withModelConfig(async (url) => {
             expect(String(url)).toBe("/api/chat/responses");
             requests += 1;
             const first = requests === 1;
@@ -581,7 +587,7 @@ describe("creative chat bounded natural-conversation service", () => {
                     stream.close();
                 } else finalStream = stream;
             } }), { headers: { "content-type": "text/event-stream" } });
-        }) as typeof fetch;
+        });
         let finished = false;
         const planning = requestCreativeChatPlan({ ...config, model: "claude-opus-5" }, [generated("target")], user("查看后改浅颜色"), { onPhase: (value) => phases.push(value), onDelta: (value) => visibleText.push(value) }).then((plan) => { finished = true; return plan; });
         try {
@@ -608,7 +614,7 @@ describe("creative chat bounded natural-conversation service", () => {
         const fixture = installImagePreviewFixture(`data:image/jpeg;base64,${"A".repeat(2_097_160)}`);
         const requests: string[] = [];
         try {
-            globalThis.fetch = (async (url) => { requests.push(String(url)); throw new Error("must not request"); }) as typeof fetch;
+            globalThis.fetch = withModelConfig(async (url) => { requests.push(String(url)); throw new Error("must not request"); });
             await expect(requestCreativeChatPlan(config, [], user("修改这张图", [image("original")]))).rejects.toThrow("1.5MB");
             expect(requests).toEqual([]);
         } finally { fixture.restore(); }
@@ -617,12 +623,12 @@ describe("creative chat bounded natural-conversation service", () => {
     test("does not retry an unavailable historical source and lets the planner naturally request the original", async () => {
         const requests: string[] = [];
         let plannerPayload = "";
-        globalThis.fetch = (async (url, init) => {
+        globalThis.fetch = withModelConfig(async (url, init) => {
             requests.push(String(url));
             if (String(url) === "/api/assets/source/content") return new Response("not found", { status: 404 });
             plannerPayload = String(init?.body);
             return Response.json({ content: "这张原图暂时读不到，请再发一次，我就能继续修改。", toolCalls: [] });
-        }) as typeof fetch;
+        });
         expect(await requestCreativeChatPlan(config, [{ role: "assistant", content: "已生成", generatedImages: [{ id: "source", dataUrl: "/api/assets/source/content" }] }], { ...user("修改"), editTargetImageId: "source" })).toEqual({ kind: "discussion", content: "这张原图暂时读不到，请再发一次，我就能继续修改。" });
         expect(requests).toEqual(["/api/assets/source/content", "/api/chat/responses"]);
         expect(plannerPayload).toContain("历史原图暂时无法读取");
@@ -632,17 +638,17 @@ describe("creative chat bounded natural-conversation service", () => {
 
     test("a failed current upload remains an explicit error before any planning request", async () => {
         const requests: string[] = [];
-        globalThis.fetch = (async (url) => { requests.push(String(url)); return new Response("not found", { status: 404 }); }) as typeof fetch;
+        globalThis.fetch = withModelConfig(async (url) => { requests.push(String(url)); return new Response("not found", { status: 404 }); });
         await expect(requestCreativeChatPlan(config, [generated("previous")], user("修改刚上传的", [{ ...image("current"), dataUrl: "/api/assets/current/content" }]))).rejects.toThrow("404");
         expect(requests).toEqual(["/api/assets/current/content"]);
     });
 
     test("a stale background image ID does not block an ordinary text question", async () => {
         let plannerPayload = "";
-        globalThis.fetch = (async (_url, init) => {
+        globalThis.fetch = withModelConfig(async (_url, init) => {
             plannerPayload = String(init?.body);
             return Response.json({ content: "可以把主色控制在两种以内。", toolCalls: [] });
-        }) as typeof fetch;
+        });
         expect(await requestCreativeChatPlan(config, [], { ...user("配色通常怎么搭比较好？"), editTargetImageId: "removed-image" })).toEqual({ kind: "discussion", content: "可以把主色控制在两种以内。" });
         expect(plannerPayload).toContain("失效历史候选");
         expect(plannerPayload).toContain("removed-image");
@@ -657,12 +663,12 @@ describe("creative chat bounded natural-conversation service", () => {
         const requests: Array<{ url: string; body: { input: Array<Record<string, unknown>>; tools: Array<{ name: string }> } }> = [];
         const phases: string[] = [];
         try {
-            globalThis.fetch = (async (url, init) => {
+            globalThis.fetch = withModelConfig(async (url, init) => {
                 requests.push({ url: String(url), body: JSON.parse(String(init?.body)) });
                 return Response.json(requests.length === 1
                     ? { content: "我先查看早期版本", toolCalls: [inspectTool(["old-branch"])] }
                     : { content: "从旧版继续", toolCalls: [editTool("old-branch", "保留春日文字与20厘米版宽，只将花瓣改细", [], ["春日文字", "20厘米版宽"])] });
-            }) as typeof fetch;
+            });
             const plan = await requestCreativeChatPlan(config, history, user("回到图1改细花瓣"), { selectedImageId: "recent-7", onPhase: (phase) => phases.push(phase) });
             expect(requests.map((request) => request.url)).toEqual(["/api/chat/responses", "/api/chat/responses"]);
             expect(JSON.stringify(requests[0]!.body)).not.toContain("旧版本完整执行要求");
@@ -681,10 +687,10 @@ describe("creative chat bounded natural-conversation service", () => {
         const fixture = installImagePreviewFixture(image("preview").dataUrl);
         const requests: string[] = [];
         try {
-            globalThis.fetch = (async (url) => {
+            globalThis.fetch = withModelConfig(async (url) => {
                 requests.push(String(url));
                 return Response.json(requests.length === 1 ? { content: "", toolCalls: [inspectTool(["target"])] } : { content: "两图配色一致，先讨论即可。", toolCalls: [] });
-            }) as typeof fetch;
+            });
             expect(await requestCreativeChatPlan(config, [generated("target")], user("只看一下，不生成"))).toEqual({ kind: "discussion", content: "两图配色一致，先讨论即可。" });
             expect(requests).toEqual(["/api/chat/responses", "/api/chat/responses"]);
         } finally { fixture.restore(); }
@@ -694,13 +700,13 @@ describe("creative chat bounded natural-conversation service", () => {
         const fixture = installImagePreviewFixture(image("preview").dataUrl);
         const requests: string[] = [];
         try {
-            globalThis.fetch = (async (url) => {
+            globalThis.fetch = withModelConfig(async (url) => {
                 requests.push(String(url));
                 if (requests.length === 1) return Response.json({ content: "", toolCalls: [inspectTool(["target"])] });
                 if (failure === "network") throw new TypeError("fetch failed");
                 if (failure === "http") return Response.json({ message: "upstream failed" }, { status: 502 });
                 return Response.json({ content: "", toolCalls: failure === "repeat-inspection" ? [inspectTool(["target"])] : [editTool("target", "改色"), editTool("target", "改形状")] });
-            }) as typeof fetch;
+            });
             await expect(requestCreativeChatPlan(config, [generated("target")], user("查看旧图再改色"))).rejects.toThrow();
             expect(requests).toEqual(["/api/chat/responses", "/api/chat/responses"]);
         } finally { fixture.restore(); }
@@ -710,10 +716,10 @@ describe("creative chat bounded natural-conversation service", () => {
         const fixture = installImagePreviewFixture(image("preview").dataUrl);
         const requests: string[] = [];
         try {
-            globalThis.fetch = (async (url) => {
+            globalThis.fetch = withModelConfig(async (url) => {
                 requests.push(String(url));
                 return Response.json({ content: "", toolCalls: [editTool("old", "修改旧图")] });
-            }) as typeof fetch;
+            });
             await expect(requestCreativeChatPlan(config, [generated("old"), ...Array.from({ length: 6 }, (_, index) => generated(`new-${index}`))], user("修改旧图"))).rejects.toThrow("未经预览");
             expect(requests).toEqual(["/api/chat/responses"]);
         } finally { fixture.restore(); }
@@ -724,12 +730,12 @@ describe("creative chat bounded natural-conversation service", () => {
         const requests: string[] = [];
         try {
             let finalPayload = "";
-            globalThis.fetch = (async (url, init) => {
+            globalThis.fetch = withModelConfig(async (url, init) => {
                 requests.push(String(url));
                 if (requests.length === 1) return Response.json({ content: "", toolCalls: [inspectTool(["external"])] });
                 finalPayload = String(init?.body);
                 return Response.json({ content: "这张旧图的原件无法读取，请再发一下。", toolCalls: [] });
-            }) as typeof fetch;
+            });
             const history: CreativeChatMessage[] = [{ role: "assistant", content: "", generatedImages: [{ id: "external", dataUrl: "https://outside.test/source.png" }] }, ...Array.from({ length: 6 }, (_, index) => generated(`new-${index}`))];
             expect(await requestCreativeChatPlan(config, history, user("看旧图"))).toEqual({ kind: "discussion", content: "这张旧图的原件无法读取，请再发一下。" });
             expect(requests).toEqual(["/api/chat/responses", "/api/chat/responses"]);
@@ -744,11 +750,11 @@ describe("creative chat bounded natural-conversation service", () => {
         const controller = new AbortController();
         const requests: string[] = [];
         try {
-            globalThis.fetch = (async (url) => {
+            globalThis.fetch = withModelConfig(async (url) => {
                 requests.push(String(url));
                 controller.abort();
                 return Response.json({ content: "", toolCalls: [inspectTool(["target"])] });
-            }) as typeof fetch;
+            });
             await expect(requestCreativeChatPlan(config, [generated("target")], user("查看并编辑"), { signal: controller.signal })).rejects.toThrow();
             expect(requests).toEqual(["/api/chat/responses"]);
         } finally { fixture.restore(); }

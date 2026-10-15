@@ -1,6 +1,7 @@
 import { ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import type { ReferenceImage } from "@/types/image";
+import { useModuleEnabled } from "@/stores/use-module-store";
 import { addSceneColor, getSceneColorSelection, isSceneHexColor, removeSceneColor, setSceneColor, type SceneForm, type SceneSlot, type SceneSlotId } from "./scene-form-model";
 
 const StandardColorDialog = lazy(() => import("./standard-color-dialog"));
@@ -43,6 +44,7 @@ function colorPickerValue(color: string): string {
 
 export function SceneFields({ sceneId, form, onChange, disabled = false, sourceImage }: SceneFieldsProps) {
     const [colorSlot, setColorSlot] = useState<number | null>(null);
+    const colorLibraryEnabled = useModuleEnabled("standard-colors");
     const id = (name: string) => `cs-${sceneId}-${name}`;
     const update = <K extends keyof SceneForm>(key: K, value: SceneForm[K]) => onChange({ ...form, [key]: value });
     const choice = (key: keyof SceneForm, label: string, options: readonly (string | { value: string; label: string })[]) => <Choices
@@ -72,7 +74,7 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
                         <div className="cs-color-row">
                             <input type="color" className="cs-color-picker" aria-label={`选择颜色 ${index + 1}`} value={colorPickerValue(color)} disabled={disabled} onChange={(event) => onChange(setSceneColor(form, index, event.target.value.toUpperCase()))} />
                             <input id={id(`color-${index}`)} className="cs-input cs-color-input" aria-label={`颜色 ${index + 1} HEX 色值`} aria-invalid={!isSceneHexColor(color)} type="text" value={color} spellCheck={false} autoComplete="off" maxLength={7} disabled={disabled} placeholder="#RRGGBB" onChange={(event) => onChange(setSceneColor(form, index, event.target.value))} />
-                            {sceneId === "garment-colorway" && <button type="button" className="cs-color-library" aria-label={`从标准色库选择颜色 ${index + 1}`} title="从标准色库选择" disabled={disabled} onClick={() => setColorSlot(index)}><Palette size={14} aria-hidden="true" /><span>色库</span></button>}
+                            {colorLibraryEnabled && sceneId === "garment-colorway" && <button type="button" className="cs-color-library" aria-label={`从标准色库选择颜色 ${index + 1}`} title="从标准色库选择" disabled={disabled} onClick={() => setColorSlot(index)}><Palette size={14} aria-hidden="true" /><span>色库</span></button>}
                             <button type="button" className="cs-color-remove" aria-label={`删除颜色 ${index + 1}`} disabled={disabled} onClick={() => onChange(removeSceneColor(form, index))}><Trash2 size={14} aria-hidden="true" /></button>
                         </div>
                         {selected && <div className="cs-color-source"><span title={`${selected.library} · ${selected.name}`}>{selected.library} · {selected.name}</span><a href={selected.sourceUrl} target="_blank" rel="noreferrer" aria-label={`查看颜色 ${index + 1} 来源`}>来源</a></div>}
@@ -179,7 +181,7 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
             return null;
     }
     return <div className={`cs-fields cs-fields-${sceneId}`}>{fields}
-        {colorSlot !== null && sceneId === "garment-colorway" && form.colorMode === "specific" && !disabled && form.colors[colorSlot] !== undefined && <Suspense fallback={<p className="cs-help" role="status">正在打开标准色库…</p>}>
+        {colorLibraryEnabled && colorSlot !== null && sceneId === "garment-colorway" && form.colorMode === "specific" && !disabled && form.colors[colorSlot] !== undefined && <Suspense fallback={<p className="cs-help" role="status">正在打开标准色库…</p>}>
             <StandardColorDialog key={colorSlot} initialHex={form.colors[colorSlot]!} selection={getSceneColorSelection(form, colorSlot)} source={sourceImage} slotLabel={`颜色 ${colorSlot + 1}`} onClose={() => setColorSlot(null)} onSelect={selection => { onChange(setSceneColor(form, colorSlot, selection.hex, selection)); setColorSlot(null); }} />
         </Suspense>}
     </div>;

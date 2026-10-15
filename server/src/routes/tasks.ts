@@ -16,13 +16,15 @@ import {
   type TaskPriority,
 } from "../tasks";
 import type { AuthenticatedRequest } from "../types";
-import { assertModuleEnabled, moduleForOperation } from "../module-flags";
+import { resolveToolExecution } from "../tool-configuration";
+import { loadTaskPriceSnapshot } from "../billing";
 import { preflightStoredVideoTask } from "../stored-video-preflight";
 
 const base = z.object({
   requestId: z.string().min(8).max(200),
   projectId: z.string().min(1).max(200),
   operationType: z.string().min(1).max(80),
+  toolKey: z.string().min(1).max(100).optional(),
   modelConfigId: z.string().uuid().nullish(),
   prompt: z.string().max(20_000).default(""),
   parameters: z.record(z.string(), z.unknown()).default({}),
@@ -43,8 +45,8 @@ const batchSchema = base.extend({
 });
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
-const taskSelect = `t.id,t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
-const batchSelect = `b.id,b.request_id AS "requestId",b.user_id AS "userId",u.display_name AS "userName",b.department_id AS "departmentId",b.project_id AS "projectId",b.operation_type AS "operationType",m.name AS "modelName",b.priority,b.status,b.total_items AS "totalItems",b.completed_items AS "completedItems",b.failed_items AS "failedItems",stats.waiting_items AS "waitingItems",stats.processing_items AS "processingItems",stats.paused_items AS "pausedItems",stats.cancelled_items AS "cancelledItems",stats.planned_credits AS "plannedCredits",stats.consumed_credits AS "consumedCredits",stats.consumed_rmb_cost AS "consumedRmbCost",b.created_at AS "createdAt",b.updated_at AS "updatedAt"`;
+const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
+const batchSelect = `b.id,b.tool_key AS "toolKey",b.model_config_id AS "modelConfigId",b.request_id AS "requestId",b.user_id AS "userId",u.display_name AS "userName",b.department_id AS "departmentId",b.project_id AS "projectId",b.operation_type AS "operationType",m.name AS "modelName",b.priority,b.status,b.total_items AS "totalItems",b.completed_items AS "completedItems",b.failed_items AS "failedItems",stats.waiting_items AS "waitingItems",stats.processing_items AS "processingItems",stats.paused_items AS "pausedItems",stats.cancelled_items AS "cancelledItems",stats.planned_credits AS "plannedCredits",stats.consumed_credits AS "consumedCredits",stats.consumed_rmb_cost AS "consumedRmbCost",b.created_at AS "createdAt",b.updated_at AS "updatedAt"`;
 const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COUNT(*) FILTER (WHERE t.status='waiting')::int AS waiting_items,
   COUNT(*) FILTER (WHERE t.status='processing')::int AS processing_items,
@@ -65,9 +67,9 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
         response.status(400).json({ error: "UNSUPPORTED_OPERATION", message: "此预检入口仅支持视频任务" });
         return;
       }
-      await assertModuleEnabled(db, "video");
+      const execution = await resolveToolExecution(db, input);
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const preflight = await videoPreflight(db, { ...input, userId: actor.id });
+      const preflight = await videoPreflight(db, { ...input, modelConfigId: execution.modelConfigId, userId: actor.id });
       response.json({ ok: true, requestId: input.requestId, normalized: preflight.normalized });
     } catch (error) {
       if (error instanceof BillingError) { response.status(400).json({ error: error.code, message: error.message }); return; }
@@ -103,7 +105,6 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
   router.post("/", async (request, response, next) => {
     try {
       const input = singleSchema.parse(request.body);
-      await assertModuleEnabled(db, moduleForOperation(input.operationType, input.parameters));
       const actor = (request as unknown as AuthenticatedRequest).auth;
       if (input.priority === "urgent" && actor.role !== "super_admin") {
         response.status(403).json({
@@ -140,7 +141,11 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
   router.post("/batch", async (request, response, next) => {
     try {
       const input = batchSchema.parse(request.body);
-      await assertModuleEnabled(db, moduleForOperation(input.operationType, input.parameters));
+      const execution = await resolveToolExecution(db, input);
+      input.toolKey = execution.toolKey;
+      input.modelConfigId = execution.modelConfigId;
+      input.parameters = { ...input.parameters, tool: execution.toolKey };
+      const priceSnapshot = await loadTaskPriceSnapshot(db, { ...input, toolConfiguration: execution, quantity: 1, creditsEnabled });
       const actor = (request as unknown as AuthenticatedRequest).auth;
       if (input.priority !== "normal" && actor.role === "designer") {
         response
@@ -150,8 +155,8 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
       }
       const requestedBatchId = randomUUID();
       const insertedBatch = await db.query<{ id: string }>(
-        `INSERT INTO batch_tasks(id,request_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,priority,total_items)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        `INSERT INTO batch_tasks(id,request_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,priority,total_items,tool_key)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          ON CONFLICT(request_id) DO NOTHING
          RETURNING id`,
         [
@@ -165,6 +170,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
           input.prompt,
           input.priority,
           input.items.length,
+          execution.toolKey,
         ],
       );
       let batchId: string = requestedBatchId;
@@ -183,6 +189,8 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
         try {
           const task = await enqueueTask(db, cache, {
             ...input,
+            toolConfiguration: execution,
+            priceSnapshot,
             creditsEnabled,
             requestId: `${input.requestId}:${index}`,
             sourceUrls: item.sourceUrls,
@@ -207,8 +215,8 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
             );
           } else {
             await db.query(
-              `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,status,credits,rmb_cost,failure_reason,completed_at)
-               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'failed',0,0,$13,now())`,
+              `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,status,credits,rmb_cost,failure_reason,completed_at,tool_key)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'failed',0,0,$13,now(),$14)`,
               [
                 failedId,
                 itemRequestId,
@@ -223,6 +231,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
                 JSON.stringify(item.sourceUrls),
                 input.priority,
                 reason,
+                execution.toolKey,
               ],
             );
           }

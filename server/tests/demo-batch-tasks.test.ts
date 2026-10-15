@@ -18,7 +18,8 @@ test("turns every canvas batch-edit item into a supported image task", () => {
     {
       requestId: "batch-1:0",
       projectId: "canvas-1",
-      operationType: "inpaint",
+      operationType: "batch_image",
+      toolKey: "canvas-batch",
       modelConfigId: "model-1",
       prompt: "make the background white",
       parameters: { size: "1:1" },
@@ -28,7 +29,8 @@ test("turns every canvas batch-edit item into a supported image task", () => {
     {
       requestId: "batch-1:1",
       projectId: "canvas-1",
-      operationType: "inpaint",
+      operationType: "batch_image",
+      toolKey: "canvas-batch",
       modelConfigId: "model-1",
       prompt: "make the background white",
       parameters: { size: "1:1" },

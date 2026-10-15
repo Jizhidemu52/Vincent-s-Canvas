@@ -13,14 +13,21 @@ import { QueuedTaskPausedError } from "@/services/api/generation-tasks";
 import { serverAssetIdFromAsset, type AssetInput } from "@/stores/use-asset-store";
 import type { UploadedImage } from "@/services/image-storage";
 import type { UploadedFile } from "@/services/file-storage";
+import { moduleKeys, type ModuleKey } from "@/services/api/modules";
+import { isModuleAvailable } from "@/stores/use-module-store";
+import type { BusinessConfig } from "@/services/api/business-config";
+import * as toolRuntime from "@/services/api/tool-runtime";
 
 const requireModule = createRequire(new URL("../src/components/canvas/canvas-assistant-panel.tsx", import.meta.url));
 const source = readFileSync(new URL("../src/components/canvas/canvas-assistant-panel.tsx", import.meta.url), "utf8");
 const code = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
 }).outputText;
+const toolConfigCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use-tool-config.ts", import.meta.url), "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true },
+}).outputText;
 
-function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial<configModule.AiConfig>; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile }) {
+function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile }) {
     const states: unknown[] = [];
     const refs: unknown[] = [];
     const memos: Array<{ dependencies?: DependencyList; value: unknown }> = [];
@@ -35,6 +42,14 @@ function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial
     const imageUploads: string[] = [];
     const videoStores: unknown[] = [];
     const config = { ...configModule.defaultConfig, model: "text-model", textModel: "text-model", imageModel: "gpt-image-2", videoModel: "MiniMax-H3", size: "3:4", quality: "2k", canvasImageCount: "2", videoSeconds: "6", vquality: "1080P", videoGenerateAudio: "true", ...options.config };
+    const flags = { ...Object.fromEntries(moduleKeys.map(key => [key, true])), ...options.flags } as Record<ModuleKey, boolean>;
+    const business: BusinessConfig = {
+        models: [
+            { id: "text-model", name: config.textModel, modelId: config.textModel, capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
+            { id: "image-model", name: config.imageModel, modelId: config.imageModel, capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
+            { id: "video-model", name: config.videoModel, modelId: config.videoModel, capabilities: ["video"], creditCost: 0, rmbCost: 0 },
+        ], prices: [], tools: options.tools || [],
+    };
     const sessions = options.history ? [{ id: "history", title: "History", createdAt: "2026-09-06", updatedAt: "2026-09-06", messages: options.history }] : [];
     const onSessionsChange = () => undefined;
     const capabilityRequests: string[] = [];
@@ -84,6 +99,13 @@ function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial
         "@/stores/use-asset-store": { serverAssetIdFromAsset, useAssetStore: (selector: (state: unknown) => unknown) => selector({ cleanupImages: () => undefined, addAssets: (items: AssetInput[]) => { assets.push(...items); return items.map((_, index) => `asset-${index}`); } }) },
         "@/stores/canvas/use-canvas-agent-store": { useCanvasAgentStore: (selector: (state: unknown) => unknown) => selector({ confirmTools: options.confirmTools || false, setAgentState: () => undefined }) },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },
+        "@/stores/use-module-store": { isModuleAvailable, useModuleEnabled: (key: ModuleKey) => isModuleAvailable(flags, business.tools, key), useModuleStore: (selector: (state: unknown) => unknown) => selector({ flags, status: "ready" }) },
+        "@/stores/use-business-config-store": { useBusinessConfigStore: Object.assign((selector: (state: BusinessConfig) => unknown) => selector(business), { getState: () => business }) },
+        "@/services/api/tool-runtime": { ...toolRuntime, resolveToolConfig: async (config: configModule.AiConfig, operation: string, key?: string) => {
+            const toolKey = toolRuntime.requireToolKey(operation, key);
+            const resolved = toolRuntime.applyToolModel(config, business, toolKey);
+            return { toolKey, config: resolved, model: toolRuntime.resolveConfiguredToolModel(business, toolKey, resolved.model) };
+        } },
         "@/services/api/generation-tasks": {
             ...generationTasks,
             getImageGenerationModels: async () => {
@@ -108,6 +130,11 @@ function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial
         },
         "@/services/image-storage": { uploadImage: async (url: string) => { imageUploads.push(url); return options.storedImage || { url, storageKey: "", width: 1024, height: 1024, bytes: 100, mimeType: "image/png" }; }, imageToDataUrl: async (reference: any) => reference.dataUrl || reference.url },
     };
+    // Execute the real hook against this harness's React dispatcher and scoped stores.
+    // No global Zustand state or network configuration leaks into manual renders.
+    const toolConfigModule = { exports: {} as any };
+    new Function("require", "module", "exports", toolConfigCode)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), toolConfigModule, toolConfigModule.exports);
+    dependencies["@/hooks/use-tool-config"] = toolConfigModule.exports;
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
     const render = () => {
@@ -210,14 +237,30 @@ describe("canvas assistant submission", () => {
         expect(harness.requests).toHaveLength(0);
     });
 
-    test("loads capabilities once and normalizes the user's image preset before enabling submission", async () => {
+    test("loads capabilities once and normalizes image settings without blocking text conversation", async () => {
         const harness = panelHarness({ replies: [] });
-        expect(harness.composer().props.disabled).toBe(true);
-        await harness.ready();
         expect(harness.composer().props.disabled).toBe(false);
+        expect(harness.composer().props.generationControls.props.loading).toBe(true);
+        await waitFor(() => !harness.composer().props.generationControls.props.loading);
+        expect(harness.composer().props.disabled).toBe(false);
+        expect(harness.composer().props.generationControls.props.loading).toBe(false);
         expect(harness.capabilityRequests).toEqual(["image", "video"]);
-        expect(harness.composer().props.generationControls.props.settings).toMatchObject({ imageModel: "gpt-image-2", size: "1024x1024", quality: "auto", imageCount: "2" });
+        expect(harness.composer().props.generationControls.props.settings).toMatchObject({ imageModel: "gpt-image-2", size: "1152x1536", quality: "auto", imageCount: "2" });
         expect(harness.requests).toHaveLength(0);
+    });
+
+    test("disabled chat capability or canvas parent blocks stale submit handlers without media requests", async () => {
+        for (const unavailable of [
+            { flags: { canvas: false } },
+            { tools: [{ toolKey: "canvas-chat", modelConfigId: null, enabled: false, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }] },
+        ]) {
+            const harness = panelHarness({ replies: [tool("canvas_generate_image", { editIntent: "new", prompt: "must not submit" })], ...unavailable });
+            expect(harness.composer().props.disabled).toBe(true);
+            harness.composer().props.onPromptChange("不要穿过停用状态提交");
+            await harness.composer().props.onSubmit();
+            expect(harness.requests).toHaveLength(0);
+            expect(harness.snapshotRef.current.nodes).toEqual([]);
+        }
     });
 
     test("automatically sends unselected visible pixels and video frames, and the toggle disables only automatic media", async () => {
@@ -260,7 +303,7 @@ describe("canvas assistant submission", () => {
         finish([{ id: "generated-image", dataUrl: "/api/assets/result/content" }]);
         await submitted;
         expect(harness.requests.filter((request) => request.type === "agent")).toHaveLength(2);
-        expect(harness.requests.find((request) => request.type === "image")?.args[0]).toMatchObject({ model: "gpt-image-2", count: "2", size: "1024x1024", quality: "auto" });
+        expect(harness.requests.find((request) => request.type === "image")?.args[0]).toMatchObject({ model: "gpt-image-2", count: "2", size: "1152x1536", quality: "auto" });
         expect(harness.messages().flatMap((message) => message.attachments || [])).toContainEqual(expect.objectContaining({ id: "generated-image", url: "/api/assets/result/content", mediaType: "image", width: 1024, height: 1024 }));
         expect(harness.snapshotRef.current.nodes.find((node) => node.type === CanvasNodeType.Image && node.metadata?.content === "/api/assets/result/content")).toMatchObject({ width: 340, height: 340 });
     });
@@ -316,7 +359,7 @@ describe("canvas assistant submission", () => {
         const harness = panelHarness({ replies: [tool("canvas_generate_video", { prompt: "花瓶旋转", size: "16:9" })] });
         await harness.submit("生成宽幅花瓶旋转视频");
         expect(harness.requests.find((request) => request.type === "video")?.args[0].size).toBe("16:9");
-        expect(harness.composer().props.generationControls.props.settings.size).toBe("1024x1024");
+        expect(harness.composer().props.generationControls.props.settings.size).toBe("1152x1536");
     });
 
     test("freezes the default video ratio at submission while a tool awaits confirmation", async () => {
@@ -384,7 +427,7 @@ describe("canvas assistant submission", () => {
         const harness = panelHarness({ replies: [tool("canvas_generate_image", { editIntent: "new", model: "vcen-gpt2", prompt: "红色花瓶", count: 7, quality: "4k", size: "3:4" }), { content: "已完成", toolCalls: [] }] });
         await harness.submit("生成七张红色花瓶");
         expect(harness.requests.map((request) => request.type)).toEqual(["agent", "image", "agent"]);
-        expect(harness.requests[1].args[0]).toMatchObject({ model: "gpt-image-2", count: "7", quality: "auto", size: "1024x1024" });
+        expect(harness.requests[1].args[0]).toMatchObject({ model: "gpt-image-2", count: "7", quality: "auto", size: "1152x1536" });
         expect(harness.assets[0].metadata).toMatchObject({ model: "gpt-image-2" });
     });
 

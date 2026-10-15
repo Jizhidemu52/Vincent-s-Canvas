@@ -41,7 +41,7 @@ function respond(read: (path: string, init?: RequestInit) => unknown | Promise<u
 
 function respondToGeneration(onPoll: (init?: RequestInit) => unknown = () => ({ task: originalTask })) {
     respond((path, init) => {
-        if (path === "/api/models") return { models: [model] };
+        if (path === "/api/models") return { models: [model], tools: [], prices: [] };
         if (path === "/api/tasks" && init?.method === "POST") return { task: { id: originalTask.id } };
         if (path === `/api/tasks/${originalTask.id}`) return onPoll(init);
         if (path === `/api/tasks/${originalTask.id}/cancel`) return new Response(null, { status: 204 });

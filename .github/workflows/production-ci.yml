@@ -6,6 +6,7 @@ on:
     paths:
       - "server/**"
       - "web/**"
+      - "shared/**"
       - "ops/**"
       - "docker-compose.yml"
       - "Dockerfile"
@@ -16,6 +17,7 @@ on:
     paths:
       - "server/**"
       - "web/**"
+      - "shared/**"
       - "ops/**"
       - "docker-compose.yml"
       - "Dockerfile"

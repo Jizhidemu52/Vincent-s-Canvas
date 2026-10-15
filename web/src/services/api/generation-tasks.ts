@@ -5,10 +5,11 @@ import { createClientId } from "@/lib/client-id";
 import { uploadServerAsset } from "@/services/api/server-assets";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { imageToDataUrl } from "@/services/image-storage";
-import { modelOptionName } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import { fingerprintImage, type ArchivedReference, type GenerationDraftInput, type GenerationInputArchive } from "./generation-history";
+import { getBusinessConfig } from "./business-config";
+import { requireToolKey, resolveConfiguredToolModel } from "./tool-runtime";
 
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
@@ -33,7 +34,7 @@ export class QueuedTaskFailedError extends Error {
 }
 export type GenerationVideoCapability = { seconds: readonly [number, number]; resolutions: readonly string[]; sizes: readonly string[]; minImages: number; maxImages: number; firstFrameRequired: boolean; supportsAudio: boolean };
 export type GenerationCapabilityModel = { id: string; name: string; modelId: string; capability: GenerationVideoCapability };
-export type QueuedMediaInput = { modelId: string; prompt: string; operationType: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; sourceMetadata?: Record<string, unknown>[]; sourceOrder?: Array<{ kind: "file" | "url"; index: number }>; signal?: AbortSignal; onSubmitted?: (task: QueuedTask) => void };
+export type QueuedMediaInput = { modelId: string; resolvedModel?: PublicModel; prompt: string; operationType: string; toolKey?: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; sourceMetadata?: Record<string, unknown>[]; sourceOrder?: Array<{ kind: "file" | "url"; index: number }>; signal?: AbortSignal; onSubmitted?: (task: QueuedTask) => void };
 export type QueuedBatchItem = QueuedTask & { itemIndex: number };
 export type QueuedBatchFailure = { index: number; reason: string };
 export type QueuedBatchAction = "pause" | "resume" | "cancel";
@@ -52,6 +53,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function createImageTaskRequests(input: {
+    toolKey?: string;
     requestId: string;
     projectId: string;
     operationType: ImageOperationType;
@@ -65,6 +67,7 @@ export function createImageTaskRequests(input: {
         requestId: `${input.requestId}:${index}`,
         projectId: input.projectId,
         operationType: input.operationType,
+        toolKey: requireToolKey(input.operationType, input.toolKey),
         modelConfigId: input.modelConfigId,
         prompt: input.prompt,
         parameters: { ...input.parameters, count: 1 },
@@ -73,13 +76,16 @@ export function createImageTaskRequests(input: {
     }));
 }
 
-export async function requestQueuedImages(input: { modelId: string; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
+export async function requestQueuedImages(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
     input.signal?.throwIfAborted();
     const ownerId = useUserStore.getState().user?.id;
     if (!ownerId) throw new Error("当前账号不可用");
     const assertOwner = () => { if (useUserStore.getState().user?.id !== ownerId) throw new Error("员工会话已变化，已取消生成提交"); };
     input.signal?.throwIfAborted();
-    const model = await resolvePublicModel(input.modelId);
+    const toolKey = requireToolKey(input.operationType, input.tool);
+    // Keep the exact model snapshot used to normalize parameters. A concurrent
+    // admin rebind is rejected by the server, never silently renormalized here.
+    const model = input.resolvedModel || await resolvePublicModel(input.modelId, input.operationType, toolKey);
     assertOwner();
     input.signal?.throwIfAborted();
     const sourceUrls: string[] = [];
@@ -107,6 +113,7 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
         parameters: { ...input.parameters }, references: archivedReferences, maskReferenceIndex: input.draft.maskReferenceIndex,
     } : undefined;
     const taskRequests = createImageTaskRequests({
+        toolKey,
         requestId: rootRequestId,
         projectId,
         operationType: input.operationType,
@@ -149,8 +156,8 @@ export async function requestQueuedImages(input: { modelId: string; prompt: stri
     }
 }
 
-export async function requestQueuedImageBatch(input: { modelId: string; prompt: string; parameters?: Record<string, unknown>; files: Array<{ file: File; title: string }>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
-    const model = await resolvePublicModel(input.modelId);
+export async function requestQueuedImageBatch(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; parameters?: Record<string, unknown>; files: Array<{ file: File; title: string }>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+    const model = input.resolvedModel || await resolvePublicModel(input.modelId, "batch_image", "canvas-batch");
     const uploadedItems: Array<{ itemIndex: number; sourceUrl: string }> = [];
     const uploadFailures: QueuedBatchFailure[] = [];
     for (const [itemIndex, item] of input.files.entries()) {
@@ -173,9 +180,10 @@ export async function requestQueuedImageBatch(input: { modelId: string; prompt: 
             requestId: createClientId(),
             projectId: currentProjectId("canvas-batch-edit"),
             operationType: "batch_image",
+            toolKey: "canvas-batch",
             modelConfigId: model.id,
             prompt: input.prompt,
-            parameters: input.parameters || {},
+            parameters: { ...input.parameters, tool: "canvas-batch" },
             priority: "normal",
             items: uploadedItems.map((item) => ({ sourceUrls: [item.sourceUrl] })),
         }),
@@ -217,6 +225,7 @@ export function restoreBatchItemIndices(uploadedItems: Array<{ itemIndex: number
 }
 
 export function createQueuedMediaTaskPayloads(input: {
+    toolKey?: string;
     requestId: string;
     projectId: string;
     operationType: string;
@@ -229,6 +238,7 @@ export function createQueuedMediaTaskPayloads(input: {
         requestId: input.requestId,
         projectId: input.projectId,
         operationType: input.operationType,
+        toolKey: requireToolKey(input.operationType, input.toolKey),
         modelConfigId: input.modelConfigId,
         prompt: input.prompt,
         parameters: input.parameters || {},
@@ -239,7 +249,8 @@ export function createQueuedMediaTaskPayloads(input: {
 }
 
 export async function submitQueuedMediaTask(input: QueuedMediaInput) {
-    const model = await resolvePublicModel(input.modelId);
+    const toolKey = requireToolKey(input.operationType, input.toolKey);
+    const model = input.resolvedModel || await resolvePublicModel(input.modelId, input.operationType, toolKey);
     const sourceUrls = [...(input.sourceUrls || [])];
     const uploadedUrls: string[] = [];
     for (const [index, file] of (input.sourceFiles || []).entries()) {
@@ -248,12 +259,13 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
         sourceUrls.push(`/api/assets/${id}/content`);
     }
     const [preflightPayload, submitPayload] = createQueuedMediaTaskPayloads({
+        toolKey,
         requestId: createClientId(),
         projectId: currentProjectId(input.operationType === "audio_generation" ? "audio-workbench" : "video-workbench"),
         operationType: input.operationType,
         modelConfigId: model.id,
         prompt: input.prompt,
-        parameters: input.parameters || {},
+        parameters: { ...input.parameters, tool: toolKey },
         sourceUrls: input.sourceOrder ? input.sourceOrder.map((source) => source.kind === "file" ? uploadedUrls[source.index] : input.sourceUrls![source.index]) : sourceUrls,
     });
     if (input.operationType === "video_generation") {
@@ -297,8 +309,8 @@ export async function recoverQueuedTask(id: string) {
     return result.task;
 }
 
-export function getGenerationCapabilities() {
-    return request<{ models: GenerationCapabilityModel[] }>("/api/generation-capabilities");
+export function getGenerationCapabilities(toolKey: "video" | "canvas-video" = "video") {
+    return request<{ models: GenerationCapabilityModel[] }>(`/api/generation-capabilities?toolKey=${toolKey}`);
 }
 
 export function selectImageGenerationModels(models: ImageGenerationModel[]) {
@@ -341,12 +353,8 @@ async function waitForQueuedMedia(submitted: QueuedTask, signal?: AbortSignal) {
     }
 }
 
-async function resolvePublicModel(modelId: string) {
-    const result = await request<{ models: PublicModel[] }>("/api/models");
-    const normalized = modelOptionName(modelId);
-    const model = result.models.find((item) => item.id === modelId || item.modelId === normalized || item.name === modelId);
-    if (!model) throw new Error("所选模型暂不可用，请重新选择或联系管理员启用。");
-    return model;
+async function resolvePublicModel(modelId: string, operationType: string, toolKey?: string) {
+    return resolveConfiguredToolModel(await getBusinessConfig(), requireToolKey(operationType, toolKey), modelId);
 }
 
 async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks: QueuedTask[]) => void, haltOnPaused = false) {

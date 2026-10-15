@@ -13,7 +13,7 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
-import { useModuleStore } from "@/stores/use-module-store";
+import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import type { ModuleKey } from "@/services/api/modules";
 
 const groupLabels: Record<NavigationGroup, string> = {
@@ -54,10 +54,11 @@ function SidebarTool({ tool, active, badge }: { tool: (typeof navigationTools)[n
 
 function ToolGroup({ group, activeToolSlug, adminVisible, teamVisible, getToolBadge }: { group: NavigationGroup; activeToolSlug?: NavigationToolSlug; adminVisible: boolean; teamVisible: boolean; getToolBadge: (slug: NavigationToolSlug) => string | undefined }) {
     const flags = useModuleStore((state) => state.flags);
+    const bindings = useBusinessConfigStore(state => state.tools);
     const tools = navigationTools.filter((tool) => {
         if (tool.group !== group) return false;
         if (!deploymentFeatures.rolePortalsEnabled && tool.group === "admin") return false;
-        return (tool.slug === "creative" ? flags.image || flags["image-edit"] : tool.slug === "admin" || flags[navigationModuleKey(tool.slug) as ModuleKey])
+        return (tool.slug === "admin" || isModuleAvailable(flags, bindings, navigationModuleKey(tool.slug) as ModuleKey))
             && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible));
     });
     if (!tools.length) return null;

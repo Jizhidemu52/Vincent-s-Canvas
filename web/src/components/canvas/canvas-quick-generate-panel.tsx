@@ -14,6 +14,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { resolveCapabilityModel } from "@/lib/model-picker-options";
 import { imageModelProfile, imageModelSettingsError, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import type { ReferenceImage } from "@/types/image";
+import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 
 type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "embedded" | "config" | "references"> & {
     embedded?: boolean;
@@ -33,7 +34,10 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     const models = useBusinessConfigStore((state) => state.models);
     const modelStatus = useBusinessConfigStore((state) => state.status);
     const role = useUserStore((state) => state.user?.role);
-    const availableModel = modelStatus === "ready" ? resolveCapabilityModel(config, "image", models, model) : "";
+    const toolKey = references.length ? "canvas-edit" : "canvas-image";
+    const boundConfig = useToolConfig({ ...config, model: modelStatus === "ready" ? resolveCapabilityModel(config, "image", models, model) : "" }, toolKey);
+    const availableModel = boundConfig.model;
+    const toolEnabled = useToolEnabled(toolKey);
     useEffect(() => {
         if (!running && modelStatus === "ready" && model !== availableModel) onModelChange(availableModel);
     }, [availableModel, model, modelStatus, onModelChange, running]);
@@ -49,7 +53,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     }, [availableModel, running, size, quality, count, settings.size, settings.quality, settings.count, onSizeChange, onQualityChange, onCountChange]);
     if (!open) return null;
     const referenceValidation = validateImageReferences(modelOptionName(model), references);
-    const disabled = running || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(imageModelSettingsError(settings.size, profile));
+    const disabled = !toolEnabled || running || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(imageModelSettingsError(settings.size, profile));
     return (
         <div data-testid="canvas-quick-generate-panel" data-canvas-no-zoom
             className={embedded ? "cw-generator" : "cw-generator cw-generator-mobile cw-surface max-h-[calc(100dvh-144px)] overflow-y-auto"}
@@ -62,7 +66,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 {positioned ? <div className="mb-3 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span>下一次生成放在右键位置</span><button type="button" className="shrink-0 hover:underline" onClick={onClearPosition}>取消定位</button></div> : null}
                 <div className="cw-media-kind"><ImageIcon size={15} /><span>{references.length ? "编辑图像" : "图像"}</span>{profile.documentationUrl ? <a className="cw-model-info" href={profile.documentationUrl} target="_blank" rel="noreferrer" title={`${profile.tip} 点击查看接口文档`} aria-label="查看当前模型接口文档"><Info size={14} /></a> : <span className="cw-model-info" title={profile.tip}><Info size={14} /></span>}</div>
                 <div className="cw-model-row">
-                <ModelPicker config={config} value={availableModel} capability="image" modelsSource="server" disabled={running} fullWidth onChange={onModelChange}
+                <ModelPicker toolKey={toolKey} config={boundConfig} value={availableModel} capability="image" modelsSource="server" disabled={running} fullWidth onChange={onModelChange}
                     onMissingConfig={onMissingConfig} className="cw-model-picker" />
                 <button type="button" className="cw-reference-button" title="添加参考图" aria-label="添加参考图" disabled={running || references.length >= referenceValidation.maximum} onClick={onPickReferences}><Paperclip size={17} /></button>
                 </div>

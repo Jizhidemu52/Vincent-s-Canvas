@@ -1,4 +1,5 @@
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { getToolDefinition } from "../../../../shared/feature-catalog";
 
 export type PublicModel = {
     id: string;
@@ -21,10 +22,24 @@ export type PublicPrice = {
     version: number;
 };
 
+export type PublicToolConfiguration = {
+    toolKey: string;
+    modelConfigId: string | null;
+    enabled: boolean;
+    creditCostOverride: number | null;
+    rmbCostOverride: number | null;
+    configurationVersion: number;
+    label?: string;
+    group?: string;
+    parent?: string | null;
+    operationType?: string;
+    capabilities?: readonly string[];
+};
+
 export type BusinessConfig = {
     models: PublicModel[];
     prices: PublicPrice[];
-    tools: Array<{ toolKey: string; modelConfigId: string }>;
+    tools: PublicToolConfiguration[];
 };
 
 export type UsageEstimate = {
@@ -45,17 +60,39 @@ export async function getBusinessConfig(): Promise<BusinessConfig> {
 export function estimateServerUsage(config: BusinessConfig, input: { operationType: string; modelId?: string; toolKey?: string; quantity?: number }): UsageEstimate {
     const quantity = Math.max(1, Math.floor(input.quantity || 1));
     const price = config.prices.find((item) => item.operationType === input.operationType);
-    const boundModelId = input.toolKey ? config.tools.find((item) => item.toolKey === input.toolKey)?.modelConfigId : undefined;
-    const requestedModelId = input.modelId || boundModelId;
-    const model = requestedModelId ? config.models.find((item) => item.id === requestedModelId || item.modelId === requestedModelId || item.name === requestedModelId) : undefined;
+    const tool = input.toolKey ? config.tools.find((item) => item.toolKey === input.toolKey) : undefined;
+    const model = input.toolKey ? resolveToolModel(config, input.toolKey, input.modelId) : findModel(config, input.modelId);
+    const available = input.toolKey ? tool?.enabled !== false && Boolean(model) : !input.modelId || Boolean(model);
+    if (!available) return { credits: 0, rmbCost: 0, configured: false };
+    if (input.operationType === "chat") return { credits: 0, rmbCost: 0, configured: true };
+    const credits = tool?.creditCostOverride ?? ((price?.credits ?? 0) + (model?.creditCost ?? 0));
+    const rmbCost = tool?.rmbCostOverride ?? ((price?.rmbCost ?? 0) + (model?.rmbCost ?? 0));
     return {
-        credits: deploymentFeatures.creditsEnabled ? ((price?.credits || 0) + (model?.creditCost || 0)) * quantity : 0,
-        rmbCost: Math.round(((price?.rmbCost || 0) + (model?.rmbCost || 0)) * quantity * 10_000) / 10_000,
-        configured: Boolean((!deploymentFeatures.creditsEnabled || price) && (!input.toolKey || boundModelId) && (!requestedModelId || model)),
+        credits: deploymentFeatures.creditsEnabled ? credits * quantity : 0,
+        rmbCost: Math.round(rmbCost * quantity * 10_000) / 10_000,
+        configured: !deploymentFeatures.creditsEnabled || Boolean(price) || tool?.creditCostOverride != null,
     };
 }
 
-export function resolveToolModel(config: BusinessConfig, toolKey: string) {
-    const modelConfigId = config.tools.find((item) => item.toolKey === toolKey)?.modelConfigId;
-    return modelConfigId ? config.models.find((item) => item.id === modelConfigId) : undefined;
+function findModel(config: BusinessConfig, requestedModelId?: string | null) {
+    return requestedModelId ? config.models.find((item) => item.id === requestedModelId || item.modelId === requestedModelId || item.name === requestedModelId) : undefined;
+}
+
+/** A disabled or broken binding never falls back to a different model. */
+export function resolveToolModel(config: BusinessConfig, toolKey: string, requestedModelId?: string) {
+    const tool = config.tools.find((item) => item.toolKey === toolKey);
+    if (tool?.enabled === false) return undefined;
+    const definition = getToolDefinition(toolKey);
+    if (!tool && !definition) return undefined;
+    const capabilities = tool?.capabilities ?? definition?.capabilities;
+    const compatible = (model: PublicModel) => !capabilities?.length || capabilities.some((capability) => model.capabilities.includes(capability));
+    if (tool?.modelConfigId) {
+        const bound = config.models.find((item) => item.id === tool.modelConfigId);
+        return bound && compatible(bound) ? bound : undefined;
+    }
+    if (requestedModelId) {
+        const requested = findModel(config, requestedModelId);
+        return requested && compatible(requested) ? requested : undefined;
+    }
+    return config.models.find(compatible);
 }

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { writeAudit } from "../audit";
 import type { Database } from "../db";
 import { moduleKeys } from "../module-flags";
+import { moduleDefinitions } from "../../../shared/feature-catalog";
 import { requireRole } from "../rbac";
 import type { AuthenticatedRequest } from "../types";
 
@@ -16,7 +17,10 @@ export function createModuleFlagsRouter(db: Database) {
       const result = await db.query<{ moduleKey: string; enabled: boolean; updatedAt: string }>(
         `SELECT module_key AS "moduleKey",enabled,updated_at AS "updatedAt" FROM module_flags ORDER BY module_key`,
       );
-      response.json({ modules: result.rows });
+      response.json({ modules: moduleDefinitions.map(definition => ({
+        ...definition,
+        ...(result.rows.find(row => row.moduleKey === definition.moduleKey) ?? { enabled: false, updatedAt: null }),
+      })) });
     } catch (error) { next(error); }
   });
   return router;

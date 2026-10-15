@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { BillingError, reserveCredits, settleReservation } from "./billing";
+import { BillingError, reserveCredits, settleReservation, type PriceSnapshot } from "./billing";
 import type { Cache, Database } from "./db";
 import { withTransaction } from "./db-transaction";
 import { preflightStoredVideoTask } from "./stored-video-preflight";
+import { resolveToolExecution, type ToolConfiguration } from "./tool-configuration";
 
 export type TaskPriority = "normal" | "priority" | "urgent";
 export type QueueTaskAction = "pause" | "resume" | "cancel";
@@ -13,6 +14,10 @@ export type TaskInput = {
   departmentId: string | null;
   projectId: string;
   operationType: string;
+  toolKey?: string;
+  /** Trusted, server-resolved batch snapshot; never parsed from a request body. */
+  toolConfiguration?: ToolConfiguration & { modelConfigId: string };
+  priceSnapshot?: PriceSnapshot;
   modelConfigId?: string | null;
   prompt: string;
   parameters?: Record<string, unknown>;
@@ -95,7 +100,8 @@ export async function enqueueTask(
         input.departmentId,
         input.projectId,
         input.operationType,
-        input.modelConfigId ?? null,
+        // The authoritative binding is validated below, before assigning the FK.
+        null,
         input.prompt,
         input.parameters ?? {},
         JSON.stringify(input.sourceUrls),
@@ -122,6 +128,11 @@ export async function enqueueTask(
         queuePriority: existing.rows[0].priority,
       };
     }
+    const execution = input.toolConfiguration ?? await resolveToolExecution(client, input);
+    input.modelConfigId = execution.modelConfigId;
+    input.toolKey = execution.toolKey;
+    input.parameters = { ...input.parameters, tool: execution.toolKey };
+    await client.query("UPDATE tasks SET model_config_id=$1,tool_key=$2,parameters=$3 WHERE id=$4", [input.modelConfigId, input.toolKey, input.parameters, taskId]);
     if (input.operationType === "video_generation") {
       const checked = await preflightStoredVideoTask(client, input);
       input.parameters = { ...input.parameters, ...checked.normalized };
@@ -132,6 +143,8 @@ export async function enqueueTask(
       userId: input.userId,
       operationType: input.operationType,
       modelConfigId: input.modelConfigId,
+      toolConfiguration: execution,
+      priceSnapshot: input.priceSnapshot,
       quantity: 1,
       creditsEnabled: input.creditsEnabled,
     }, client);
@@ -144,6 +157,8 @@ export async function enqueueTask(
         id: taskId,
         requestId: input.requestId,
         status: "waiting",
+        toolKey: execution.toolKey,
+        modelConfigId: execution.modelConfigId,
         credits: reservation.credits,
         rmbCost: reservation.rmbCost,
       },

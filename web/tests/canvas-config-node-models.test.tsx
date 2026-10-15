@@ -4,6 +4,8 @@ import { CanvasConfigNodePanel } from "@/components/canvas/canvas-config-node-pa
 import { ModelPicker } from "@/components/model-picker";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { defaultConfig } from "@/stores/use-config-store";
+import { useModuleStore } from "@/stores/use-module-store";
+import { moduleKeys } from "@/services/api/modules";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 
 const models = [
@@ -13,10 +15,13 @@ const models = [
 ];
 type BusinessState = ReturnType<typeof useBusinessConfigStore.getState>;
 function withBusinessConfig<T>(patch: Partial<BusinessState>, run: () => T): T {
+    const moduleState = useModuleStore.getInitialState();
+    const savedModules = { ...moduleState };
+    Object.assign(moduleState, { status: "ready", flags: Object.fromEntries(moduleKeys.map(key => [key, true])) });
     const initialState = useBusinessConfigStore.getInitialState();
     const saved = { ...initialState };
     Object.assign(initialState, { models, status: "ready", ...patch });
-    try { return run(); } finally { Object.assign(initialState, saved); }
+    try { return run(); } finally { Object.assign(initialState, saved); Object.assign(moduleState, savedModules); }
 }
 
 function panel(metadata: CanvasNodeMetadata, state: Partial<BusinessState> = {}, isRunning = false) {
@@ -64,6 +69,17 @@ describe("configuration node model availability", () => {
         expect(markup).toContain("真实音频模型");
         expect(markup).toContain("Alloy");
         expect(actionButton(markup)).not.toContain('disabled=""');
+    });
+
+    test("a tool-bound model is displayed and usable without overwriting the saved selection", () => {
+        const tools = [{ toolKey: "canvas-image", modelConfigId: "image", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }];
+        const markup = panel({ generationMode: "image", model: "saved-old-model" }, { tools, models: models.map((model) => model.id === "image" ? { ...model, publicName: "绑定专用模型" } : model) });
+        expect(markup).toContain("后台指定");
+        expect(markup).toContain("绑定专用模型");
+        expect(markup).not.toContain("真实图片模型");
+        expect(actionButton(markup)).not.toContain('disabled=""');
+        const disabled = panel({ generationMode: "image", model: "gpt-image-2" }, { tools: [{ ...tools[0]!, enabled: false }] });
+        expect(actionButton(disabled)).toContain('disabled=""');
     });
 
     test("an existing run remains stoppable even if its model disappears", () => {

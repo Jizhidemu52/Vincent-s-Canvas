@@ -7,6 +7,9 @@ import { motion } from "motion/react";
 import { modelOptionName, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
 import { ModelPicker } from "@/components/model-picker";
+import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
+import { useModuleEnabled } from "@/stores/use-module-store";
+import { resolveToolConfig } from "@/services/api/tool-runtime";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
 import { requestEdit, requestGeneration, requestImageQuestion, requestToolResponse, toolResponseToInput, type AiTextMessage, type ClaudeAssistantContent, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall, type ToolResponseResult } from "@/services/api/image";
@@ -254,7 +257,10 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 }: CanvasAssistantPanelRenderState) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useUserStore((state) => state.user);
-    const effectiveConfig = useEffectiveConfig();
+    const baseConfig = useEffectiveConfig();
+    const effectiveConfig = useToolConfig({ ...baseConfig, model: baseConfig.textModel || baseConfig.model }, "canvas-chat");
+    const onlineEnabled = useToolEnabled("canvas-chat");
+    const localEnabled = useModuleEnabled("canvas-local-agent");
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
     const addAssets = useAssetStore((state) => state.addAssets);
     const isAiConfigReady = (..._args: unknown[]) => true;
@@ -339,7 +345,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const request = ++capabilitiesRequestRef.current;
         setCapabilitiesLoading(true);
         setCapabilityError(null);
-        const [images, videos] = await Promise.allSettled([getImageGenerationModels(), getGenerationCapabilities()]);
+        const [images, videos] = await Promise.allSettled([getImageGenerationModels(), getGenerationCapabilities("canvas-video")]);
         if (request !== capabilitiesRequestRef.current) return;
         const errors: string[] = [];
         if (images.status === "fulfilled") {
@@ -461,6 +467,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     };
 
     const sendMessage = async (text: string, history: CanvasAssistantMessage[], savedReferences?: CanvasAssistantReference[]) => {
+        if (!onlineEnabled) return;
         const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
         if (!isAiConfigReady(requestConfig, requestConfig.model)) {
             if (canManageConfig) {
@@ -521,7 +528,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                     streamed = text;
                     if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });
                 },
-                { webSearch: true },
+                { webSearch: true, tool: "canvas-chat" },
             );
             addOnlineLog("模型工具回复", { content: result.content, toolCalls: result.toolCalls, stopReason: result.stopReason });
             if (result.toolCalls.length) {
@@ -587,7 +594,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 streamed = text;
                 if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });
             },
-            { webSearch: true },
+            { webSearch: true, tool: "canvas-chat" },
         );
         addOnlineLog(`Agent Tool Loop ${step + 1} 回复`, { content: next.content, toolCalls: next.toolCalls, stopReason: next.stopReason });
         if (next.toolCalls.length) {
@@ -664,7 +671,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             const id = nanoid();
             const position = { x: node.position.x + node.width + 80, y: node.position.y };
             if (mode === "text") {
-                const content = await requestImageQuestion(config, buildNodeResponseMessages(await hydrateNodeGenerationContext(context)), () => undefined);
+                const content = await requestImageQuestion(config, buildNodeResponseMessages(await hydrateNodeGenerationContext(context)), () => undefined, { tool: "canvas-chat" });
                 executeOps([{ type: "add_node", id, nodeType: CanvasNodeType.Text, title: "生成文本", position, metadata: { content, prompt: context.prompt, model: config.model, status: "success" } }, { type: "connect_nodes", fromNodeId: node.id, toNodeId: id }, { type: "update_node", id: node.id, metadata: { status: "success" } }]);
                 appendMessage(sessionId, { id: nanoid(), role: "assistant", title: "生成文本", text: content });
                 return { ok: true as const, message: "文本已生成并放入画布。", data: { nodeIds: [id] } };
@@ -816,6 +823,10 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     };
 
     const runDirectGeneration = async (sessionId: string, text: string, settings: AgentGenerationSettings, references: ReferenceImage[], baseConfig: AiConfig, imageEdit?: CanvasImageEditLineage) => {
+        const operation = settings.mode === "video" ? "video_generation" : references.length ? "inpaint" : "image_generation";
+        const tool = settings.mode === "video" ? "canvas-video" : references.length ? "canvas-edit" : "canvas-image";
+        baseConfig = (await resolveToolConfig({ ...baseConfig, model: settings.mode === "video" ? settings.videoModel : settings.imageModel }, operation, tool)).config;
+        settings = { ...settings, ...(settings.mode === "video" ? { videoModel: baseConfig.model } : { imageModel: baseConfig.model }) };
         const plan = buildAgentGenerationPlan(settings, text, references);
         const activeReferences = plan.kind === "video" ? selectAgentVideoReferences(plan.model, references) : references;
         const progressId = nanoid();
@@ -826,7 +837,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         try {
             if (plan.kind === "image") {
                 const config = { ...baseConfig, model: plan.model, imageModel: plan.model, size: plan.size, quality: plan.quality, count: String(plan.count), canvasImageCount: String(plan.count), systemPrompt: "" };
-                const generated = references.length ? await requestEdit(config, prompt, references, undefined, { tool: "agent-direct" }) : await requestGeneration(config, prompt, { tool: "agent-direct" });
+                const generated = references.length ? await requestEdit(config, prompt, references, undefined, { tool: "canvas-edit" }) : await requestGeneration(config, prompt, { tool: "canvas-image" });
                 if (!generated.length) throw new Error("图片任务没有返回结果，尚未生成可见图片。");
                 const storedImages = await Promise.all(generated.map(async (item) => ({ item, image: await uploadImage(item.dataUrl) })));
                 const attachments: CanvasAssistantAttachment[] = storedImages.map(({ item, image }, index) => ({
@@ -852,7 +863,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             }
             const config = { ...baseConfig, model: plan.model, videoModel: plan.model, size: plan.size, videoSeconds: plan.seconds, vquality: plan.quality, videoGenerateAudio: settings.videoGenerateAudio ?? baseConfig.videoGenerateAudio };
             const videoPrompt = buildAgentVideoPrompt(prompt, plan.requiresReference);
-            const result = await requestVideoGeneration(config, videoPrompt, activeReferences, [], [], { onSubmitted: (task) => {
+            const result = await requestVideoGeneration(config, videoPrompt, activeReferences, [], [], { toolKey: "canvas-video", onSubmitted: (task) => {
                 submittedVideoTask = task;
                 upsertMessage(sessionId, { id: progressId, role: "assistant", text: `${strategy}，正在等待原任务结果…\n\n生成提示词：\n${videoPrompt}`, meta: modelOptionName(plan.model), detail: { kind: "agent_generation", status: "running", prompt: videoPrompt, settings, videoTask: task } });
             } });
@@ -892,7 +903,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 
     const submit = async () => {
         const text = prompt.trim();
-        if (!text || isRunning) return;
+        if (!onlineEnabled || !text || isRunning) return;
         await sendMessage(text, messages, [...selectedReferences, ...uploadedReferences]);
     };
 
@@ -1149,7 +1160,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         <button type="button" className="shrink-0 hover:underline" aria-pressed={autoContext} onClick={() => setAutoContext((current) => !current)}>{autoContext ? "关闭" : "开启"}</button>
                     </div>
                     <AgentChatComposer
-                        disabled={capabilitiesLoading || (generationSettings.mode === "image" ? !imageCapabilities.length : !videoCapabilities.length)}
+                        disabled={!onlineEnabled || !effectiveConfig.textModel}
                         prompt={prompt}
                         attachments={uploadedReferences.map((item) => ({ id: item.id, name: item.title, url: item.dataUrl || "", storageKey: item.storageKey, mediaType: "image" as const }))}
                         sending={isRunning}
@@ -1162,10 +1173,10 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         onSubmit={submit}
                         onAddFiles={addImagesToAgent}
                         onRemoveAttachment={(id) => setUploadedReferences((current) => current.filter((item) => item.id !== id))}
-                        generationControls={<AgentGenerationControls settings={generationSettings} config={effectiveConfig} imageCapabilities={imageCapabilities} videoCapabilities={videoCapabilities} theme={theme} onChange={updateGenerationSettings}
+                        generationControls={<AgentGenerationControls editing={generationReferences.length > 0} settings={generationSettings} config={effectiveConfig} imageCapabilities={imageCapabilities} videoCapabilities={videoCapabilities} theme={theme} onChange={updateGenerationSettings}
                             loading={capabilitiesLoading} error={capabilityError} onRetry={loadCapabilities}
                             extra={<div className="mt-3 grid gap-3 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
-                                <div className="flex items-center justify-between"><span>Agent</span><AgentModeSwitch value={agentMode} theme={theme} onChange={onAgentModeChange} /></div>
+                                <div className="flex items-center justify-between"><span>Agent</span><AgentModeSwitch value={agentMode} theme={theme} onChange={mode => { if (mode === "local" ? localEnabled : onlineEnabled) onAgentModeChange(mode); }} /></div>
                                 <label className="flex items-center justify-between">工具执行前确认<Switch size="small" checked={confirmTools} onChange={(confirmTools) => setAgentState({ confirmTools })} /></label>
                                 <CanvasPromptLibrary onSelect={setPrompt} />
                             </div>} />}
@@ -1225,13 +1236,13 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                             { key: "history", icon: <History className="size-4" />, label: "对话历史", onClick: () => { onAgentModeChange("online"); setView("history"); } },
                             { key: "log", label: "运行日志", onClick: () => { onAgentModeChange("online"); setView("log"); } },
                             { type: "divider" },
-                            { key: "online", label: `${agentMode === "online" ? "✓ " : ""}网站 Agent`, onClick: () => onAgentModeChange("online") },
-                            { key: "local", label: `${agentMode === "local" ? "✓ " : ""}本机 Agent`, onClick: () => onAgentModeChange("local") },
+                            { key: "online", disabled: !onlineEnabled, label: `${agentMode === "online" ? "✓ " : ""}网站 Agent`, onClick: () => onAgentModeChange("online") },
+                            { key: "local", disabled: !localEnabled, label: `${agentMode === "local" ? "✓ " : ""}本机 Agent`, onClick: () => onAgentModeChange("local") },
                             ...(canManageConfig ? [{ key: "config", label: "连接配置", onClick: () => { onAgentModeChange("online"); setView("setup"); } }] : []),
                         ] }}><button type="button" className="cw-icon" aria-label="对话选项"><MoreHorizontal className="size-4" /></button></Dropdown>
                     </div>
                 </header>
-                {agentMode === "local" ? <CanvasLocalAgentPanel embedded snapshotRef={snapshotRef} canUndoOps={canUndoOps} onApplyOps={onApplyOps} onUndoOps={onUndoOps} autoConnect={autoConnectLocal} /> : onlineContent}
+                {agentMode === "local" ? localEnabled ? <CanvasLocalAgentPanel embedded snapshotRef={snapshotRef} canUndoOps={canUndoOps} onApplyOps={onApplyOps} onUndoOps={onUndoOps} autoConnect={autoConnectLocal} /> : <p role="status" className="p-4 text-sm">本机 Agent 已停用，原有画布与对话仍保留。</p> : onlineContent}
             </motion.aside>
         </motion.div>
     );
@@ -1240,6 +1251,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 function AgentTextModelPicker({ config, value, onChange, disabled = false }: { config: AiConfig; value: string; onChange: (model: string) => void; disabled?: boolean }) {
     return (
         <ModelPicker
+            toolKey="canvas-chat"
             config={config}
             value={value}
             onChange={onChange}
@@ -1280,7 +1292,10 @@ function modelLabel(modelId: string, isImage: boolean, imageModels: ImageGenerat
     return videoModels.find((model) => model.modelId === modelId)?.name || modelOptionName(modelId);
 }
 
-function AgentGenerationControls({ settings, config: _config, imageCapabilities, videoCapabilities, theme, onChange, extra, loading, error, onRetry }: { settings: AgentGenerationSettings; config: AiConfig; imageCapabilities: ImageGenerationModel[]; videoCapabilities: GenerationCapabilityModel[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange: (patch: Partial<AgentGenerationSettings>) => void; extra?: import("react").ReactNode; loading: boolean; error: string | null; onRetry: () => void }) {
+function AgentGenerationControls({ settings: savedSettings, config: baseConfig, imageCapabilities, videoCapabilities, theme, onChange, extra, loading, error, onRetry, editing = false }: { settings: AgentGenerationSettings; config: AiConfig; imageCapabilities: ImageGenerationModel[]; videoCapabilities: GenerationCapabilityModel[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange: (patch: Partial<AgentGenerationSettings>) => void; extra?: import("react").ReactNode; loading: boolean; error: string | null; onRetry: () => void; editing?: boolean }) {
+    const toolKey = savedSettings.mode === "image" ? editing ? "canvas-edit" : "canvas-image" : "canvas-video";
+    const config = useToolConfig({ ...baseConfig, model: savedSettings.mode === "image" ? savedSettings.imageModel : savedSettings.videoModel }, toolKey);
+    const settings = { ...savedSettings, ...(savedSettings.mode === "image" ? { imageModel: config.model } : { videoModel: config.model }) };
     const isImage = settings.mode === "image";
     const imageProfile = useImageModelProfile(settings.imageModel);
     const imageSettings = normalizeAgentImageSettings(settings, imageProfile);
@@ -1297,17 +1312,7 @@ function AgentGenerationControls({ settings, config: _config, imageCapabilities,
         const capability = videoCapabilities.find((item) => item.modelId === model)?.capability;
         onChange(capability ? normalizeAgentVideoSettings({ ...settings, videoModel: model }, capability) : { videoModel: model });
     };
-    const modelPicker = (
-        <Select value={currentModel || undefined} onValueChange={changeModel} disabled={loading || !currentModels.length}>
-            <SelectTrigger hideChevron className="h-8 min-w-0 max-w-[165px] gap-1.5 border-0 bg-transparent px-1 text-xs shadow-none hover:bg-transparent focus-visible:ring-0 dark:bg-transparent" aria-label={isImage ? "图像模型" : "视频模型"}>
-                <AgentModelIcon model={currentModel} />
-                <span className="min-w-0 truncate">{loading ? "加载中" : currentModel ? modelLabel(currentModel, isImage, imageCapabilities, videoCapabilities) : "未配置模型"}</span>
-            </SelectTrigger>
-            <SelectContent data-canvas-no-zoom className="z-[1200] w-72" position="popper" align="start">
-                {currentModels.map((model) => <SelectItem key={model.modelId} value={model.modelId} textValue={model.name}><span className="flex items-center gap-2"><AgentModelIcon model={model.modelId} /><span>{model.name}</span></span></SelectItem>)}
-            </SelectContent>
-        </Select>
-    );
+    const modelPicker = <ModelPicker toolKey={toolKey} config={config} value={currentModel} capability={isImage ? "image" : "video"} onChange={changeModel} disabled={loading || !currentModels.length} className="h-8 min-w-0 max-w-[165px] rounded-md border-0 bg-transparent px-1 text-xs shadow-none" />;
     return (
         <>
             <div className="inline-flex shrink-0 gap-0.5" role="tablist" aria-label="生成类型">
@@ -2033,7 +2038,7 @@ async function refineAgentGenerationPrompt(config: AiConfig, settings: AgentGene
             ],
         },
     ];
-    return requestImageQuestion({ ...config, model: config.textModel || config.model, systemPrompt: "" }, messages, () => {});
+    return requestImageQuestion({ ...config, model: config.textModel || config.model, systemPrompt: "" }, messages, () => {}, { tool: "canvas-chat" });
 }
 
 function nodeToReference(node: CanvasNodeData): CanvasAssistantReference | null {

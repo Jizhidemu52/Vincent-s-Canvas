@@ -7,7 +7,7 @@ import * as clipboard from "@/lib/canvas/canvas-system-clipboard";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
-import { createCanvasSelectionPromptSync } from "@/lib/canvas/canvas-selection-prompt";
+import { createCanvasSelectionGenerationSync } from "@/lib/canvas/canvas-selection-prompt";
 import { CanvasNodeType, type CanvasNodeData, type CanvasConnection, type CanvasNodeGroup } from "@/types/canvas";
 
 // Execute the page's real keyboard/copy/paste/import callbacks, without mounting its unrelated editor UI.
@@ -23,7 +23,7 @@ function containsIdentifier(node: ts.Node, names: string[]): boolean {
 }
 function collect(node: ts.Node) {
     if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useEffect"
-        && containsIdentifier(node, ["syncSelectedPromptRef"])) selectionEffect = node;
+        && containsIdentifier(node, ["syncSelectedGenerationRef"])) selectionEffect = node;
     else if (ts.isVariableStatement(node) && node.declarationList.declarations.some(item => ts.isIdentifier(item.name) && callbackNames.has(item.name.text))) declarations.push(node);
     else if (ts.isFunctionDeclaration(node) && ["createCanvasNode", "imageMetadata"].includes(node.name?.text || "")) declarations.push(node);
     else if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useEffect"
@@ -54,12 +54,14 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const pending: Promise<unknown>[] = [];
     const disposers: Array<() => void> = [];
     const imageOperations = createCanvasImageOperationRunner();
-    const syncSelectedPromptRef = { current: createCanvasSelectionPromptSync() };
+    const syncSelectedGenerationRef = { current: createCanvasSelectionGenerationSync() };
     let prompt = "";
     function runSelectionEffect() {
-        const state = { useEffect: (effect: () => void) => effect(), syncSelectedPromptRef, selectedNodeIds: selectedNodeIdsRef.current,
+        const state = { useEffect: (effect: () => void) => effect(), syncSelectedGenerationRef, selectedNodeIds: selectedNodeIdsRef.current,
             assistantSelectedNodes: nodesRef.current.filter(node => selectedNodeIdsRef.current.has(node.id)), projectId: "clipboard-test",
-            setQuickGeneratePrompt: (value: string) => { prompt = value; } };
+            setQuickGeneratePrompt: (value: string) => { prompt = value; },
+            setQuickGenerateModel: () => {}, setQuickGenerateSize: () => {}, setQuickGenerateQuality: () => {},
+            setQuickGenerateCount: () => {}, setQuickGenerateImageOptions: () => {} };
         new Function("state", `const { ${Object.keys(state).join(",")} } = state; ${selectionCode}`)(state);
     }
     let nextId = 0;
@@ -71,7 +73,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
         useCallback: (callback: unknown) => callback,
         useEffect: (effect: () => (() => void) | void) => { const dispose = effect(); if (dispose) disposers.push(dispose); },
         nanoid: () => `fixture-${++nextId}`,
-        syncSelectedPromptRef, projectId: "clipboard-test",
+        syncSelectedGenerationRef, projectId: "clipboard-test",
         nodesRef, connectionsRef, groupsRef, selectedNodeIdsRef, clipboardRef: { current: null },
         getCanvasCenter: () => ({ x: 300, y: 200 }),
         setNodes: update(nodesRef), setConnections: update(connectionsRef), setGroups: update(groupsRef),

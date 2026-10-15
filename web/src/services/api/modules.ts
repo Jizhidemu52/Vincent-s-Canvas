@@ -1,9 +1,6 @@
-export const moduleKeys = [
-    "detail-enhance", "image-edit", "angle-control", "seamless-stitch", "image",
-    "video", "prompts", "assets", "gpt-chat", "canvas", "team", "performance",
-] as const;
-
-export type ModuleKey = (typeof moduleKeys)[number];
+import type { ModuleKey } from "../../../../shared/feature-catalog";
+export { moduleKeys, moduleDefinitions, nonAiDefinitions, toolDefinitions, moduleIsEnabled } from "../../../../shared/feature-catalog";
+export type { ModuleKey, ToolKey } from "../../../../shared/feature-catalog";
 export type ModuleFlag = { moduleKey: ModuleKey; enabled: boolean; updatedAt: string };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

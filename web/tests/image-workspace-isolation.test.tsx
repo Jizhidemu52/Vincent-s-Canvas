@@ -129,6 +129,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         "@/hooks/use-workbench-field": { useWorkbenchField: (_key: string, initialValue: unknown) => useState(initialValue) },
         "@/hooks/use-image-copy-editor": { useImageCopyEditor: () => ({ node: null }) },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },
+        "@/hooks/use-tool-config": { useToolConfig: (value: typeof config) => value },
         "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: false, oaLoginEnabled: false } },
         "@/lib/canvas-theme": { canvasThemes: { light: {} } },
         "@/lib/image-model-settings": { useImageModelProfile: () => ({ kind: "image", requiresPrompt: true }), normalizeImageModelSettings: (value: unknown) => value },

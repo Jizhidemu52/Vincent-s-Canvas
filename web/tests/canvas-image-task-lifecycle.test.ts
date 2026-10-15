@@ -39,6 +39,7 @@ function harness(options: {
     persist?: (save: Save, index: number) => Promise<void>;
     query?: (query: Query) => Promise<QueuedTask | null>;
     loadImage?: (url: string) => Promise<typeof image>;
+    imageRequest?: (toolKey: string | undefined, edit: boolean) => Promise<Array<{ id: string; dataUrl: string }>>;
 } = {}) {
     const nodes = { current: options.nodes ? structuredClone(options.nodes) : initialNodes(options.binding) };
     const refs: Array<{ current: unknown }> = [];
@@ -94,8 +95,8 @@ function harness(options: {
             getQueuedTaskByRequestId: (id: string, signal: AbortSignal) => query({ kind: "request", id, signal }),
         },
         "@/services/api/image": {
-            requestEdit: () => { throw new Error("Unexpected fresh image edit"); },
-            requestGeneration: () => { throw new Error("Unexpected fresh image generation"); },
+            requestEdit: (_config: unknown, _prompt: string, _references: unknown, _mask: unknown, requestOptions: { tool?: string }) => { if (options.imageRequest) return options.imageRequest(requestOptions.tool, true); throw new Error("Unexpected fresh image edit"); },
+            requestGeneration: (_config: unknown, _prompt: string, requestOptions: { tool?: string }) => { if (options.imageRequest) return options.imageRequest(requestOptions.tool, false); throw new Error("Unexpected fresh image generation"); },
         },
         "@/services/image-storage": {
             uploadImage: async (url: string) => { uploads.push(url); return options.loadImage ? options.loadImage(url) : image; },
@@ -167,6 +168,20 @@ function harness(options: {
 }
 
 describe("lazy canvas image task runtime", () => {
+    test.each([
+        { tool: undefined, edit: false, expected: "canvas-image" },
+        { tool: undefined, edit: true, expected: "canvas-edit" },
+        { tool: "canvas-mask-edit" as const, edit: true, expected: "canvas-mask-edit" },
+        { tool: "canvas-angle" as const, edit: true, expected: "canvas-angle" },
+    ])("forwards $expected from the page hook through the lazy runtime", async ({ tool, edit, expected }) => {
+        const requests: Array<{ toolKey?: string; edit: boolean }> = [];
+        const h = harness({ imageRequest: async (toolKey, editing) => { requests.push({ toolKey, edit: editing }); return [{ id: "generated", dataUrl: "blob:generated" }]; } });
+        const options = await h.action().createOptions("result-node", new AbortController(), undefined, tool);
+        await options.generate({} as never, "prompt", edit ? [{ id: "reference", name: "reference.png", dataUrl: "blob:reference" }] : undefined);
+        expect(requests).toEqual([{ toolKey: expected, edit }]);
+        h.unmount();
+    });
+
     test("rendering stays lazy and option creation loads the runtime without task I/O", async () => {
         const h = harness();
         const controller = new AbortController();

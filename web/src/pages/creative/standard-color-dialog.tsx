@@ -2,6 +2,7 @@ import { Button, Modal, Spin } from "antd";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { findStandardColors, loadStandardColorManifest, loadStandardColors, toStandardColorSelection, type StandardColor, type StandardColorSelection } from "@/lib/standard-colors";
 import { PhotoColorSampler } from "./photo-color-sampler";
+import { useModuleEnabled } from "@/stores/use-module-store";
 import { isSceneHexColor } from "./scene-form-model";
 import "./standard-color-dialog.css";
 
@@ -15,6 +16,7 @@ export default function StandardColorDialog({ initialHex, selection, source, slo
     onSelect: (selection: StandardColorSelection) => void;
     onClose: () => void;
 }) {
+    const photoColorPickerEnabled = useModuleEnabled("photo-color-picker");
     const [manifest, setManifest] = useState<Awaited<ReturnType<typeof loadStandardColorManifest>> | null>(null);
     const [library, setLibrary] = useState(selection?.library || "PANTONE TCX");
     const [colors, setColors] = useState<StandardColor[]>([]);
@@ -70,7 +72,7 @@ export default function StandardColorDialog({ initialHex, selection, source, slo
                 {effectiveSort === "nearest" && <span>按 ΔE2000 从小到大排列</span>}
             </div>
             {!validHex && <p className="sc-error" role="status">请输入 #RGB 或 #RRGGBB 格式的参考色。</p>}
-            {source && <details className="sc-photo"><summary>从已上传的款式图取色</summary><PhotoColorSampler src={source} onPick={pickHex} /></details>}
+            {photoColorPickerEnabled && source && <details className="sc-photo"><summary>从已上传的款式图取色</summary><PhotoColorSampler src={source} onPick={pickHex} /></details>}
             <div className="sc-status" aria-live="polite">{updating ? <><Spin size="small" /> 正在加载颜色…</> : error ? null : `${results.total.toLocaleString()} 个结果${effectiveSort === "nearest" ? " · 屏幕色值近似匹配" : ""}`}</div>
             {error ? <div className="sc-error" role="alert"><p>{error}</p><Button onClick={() => setRetry(value => value + 1)}>重新加载</Button></div> : <>
                 <div className="sc-grid" aria-label="标准色卡" aria-busy={updating}>

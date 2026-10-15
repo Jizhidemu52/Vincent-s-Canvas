@@ -30,7 +30,7 @@ test.each([false, true])("an image task paused after interruption stops waiting 
     globalThis.fetch = (async (url, init) => {
         const path = String(url);
         requests.push({ path, method: init?.method || "GET" });
-        if (path === "/api/models") return Response.json({ models: [{ id: "image-config", modelId: "gpt-image-2.5-flare", name: "GPT Image", capabilities: ["generate", "edit"], creditCost: 10, rmbCost: 1 }] });
+        if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [{ id: "image-config", modelId: "gpt-image-2.5-flare", name: "GPT Image", capabilities: ["generate", "edit"], creditCost: 10, rmbCost: 1 }] });
         if (path === "/api/tasks" && init?.method === "POST") return Response.json({ task: { id: "interrupted-image-task" } });
         if (path === "/api/tasks" || path === "/api/tasks/interrupted-image-task") {
             polls += 1;

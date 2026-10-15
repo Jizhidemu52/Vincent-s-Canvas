@@ -10,6 +10,7 @@ import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-dis
 import { modelOptionLabel, modelOptionName, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { filterServerModelsByCapability, getModelPickerOptions, modelCapabilityLabel, resolveModelPickerSource, resolveModelPickerValue, type ModelPickerSource } from "@/lib/model-picker-options";
+import type { ToolKey } from "../../../shared/feature-catalog";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -22,22 +23,25 @@ type ModelPickerProps = {
     onMissingConfig?: () => void;
     modelsSource?: ModelPickerSource;
     disabled?: boolean;
+    toolKey?: ToolKey;
 };
 
 export function shouldRefreshModelPickerConfig(capability: ModelCapability | undefined, status: "idle" | "loading" | "ready" | "error", source: ModelPickerSource = "server") {
     return source === "server" && Boolean(capability) && status === "idle";
 }
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, modelsSource, disabled = false }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, modelsSource, disabled = false, toolKey }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const canManageConfig = useCanManageConfig();
     const businessConfigStatus = useBusinessConfigStore((state) => state.status);
     const refreshBusinessConfig = useBusinessConfigStore((state) => state.refresh);
     const businessModels = useBusinessConfigStore((state) => state.models);
+    const binding = useBusinessConfigStore(state => state.tools.find(item => item.toolKey === toolKey));
+    const boundModel = binding?.modelConfigId ? businessModels.find(item => item.id === binding.modelConfigId) : undefined;
     const source = resolveModelPickerSource(config.channelMode, modelsSource ?? (capability ? "server" : undefined), standaloneEdition);
     const usesServerModels = source === "server" && Boolean(capability);
-    const serverModels = useMemo(() => usesServerModels && businessConfigStatus === "ready" ? filterServerModelsByCapability(businessModels, capability) : [], [businessConfigStatus, businessModels, capability, usesServerModels]);
+    const serverModels = useMemo(() => usesServerModels && businessConfigStatus === "ready" ? filterServerModelsByCapability(businessModels, capability).filter(item => !binding?.modelConfigId || item.id === binding.modelConfigId) : [], [businessConfigStatus, businessModels, capability, usesServerModels, binding?.modelConfigId]);
     useEffect(() => {
         if (!shouldRefreshModelPickerConfig(capability, businessConfigStatus, source)) return;
         void refreshBusinessConfig().catch(() => undefined);
@@ -46,13 +50,13 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         () => getModelPickerOptions(config, capability, serverModels, source, value),
         [capability, config, serverModels, source, value],
     );
-    const current = resolveModelPickerValue(value, options, source);
+    const current = boundModel?.modelId || resolveModelPickerValue(value, options, source);
     const emptyLabel = usesServerModels && businessConfigStatus !== "ready"
         ? businessConfigStatus === "error" ? "模型配置加载失败" : "正在加载模型…"
         : emptyModelLabel(config, capability, canManageConfig, source);
     const labelFor = (model: string) => imageModelIdentityHidden(model, businessModels) ? imageModelDisplayName(model, businessModels)
         : serverModels.find(item => item.modelId === model)?.name || modelOptionLabel(config, model);
-    const currentLabel = current ? labelFor(current) : options.length ? placeholder : emptyLabel;
+    const currentLabel = binding?.enabled === false ? "此板块已停用" : binding?.modelConfigId && !boundModel ? "绑定模型不可用" : current ? `${labelFor(current)}${boundModel ? " · 后台指定" : ""}` : options.length ? placeholder : emptyLabel;
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {
@@ -66,7 +70,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         <Select
             open={open}
             value={current}
-            disabled={disabled}
+            disabled={disabled || binding?.enabled === false || Boolean(binding?.modelConfigId)}
             onOpenChange={(nextOpen) => {
                 if (nextOpen && !options.length && source === "local" && canManageConfig) onMissingConfig?.();
                 if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));

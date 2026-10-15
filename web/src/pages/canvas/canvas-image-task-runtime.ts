@@ -8,6 +8,7 @@ import { uploadImage } from "@/services/image-storage";
 import { flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
+import type { ToolKey } from "../../../../shared/feature-catalog";
 
 export type CanvasImageTaskScope = { projectId: string; mounted: boolean; recoveries: Map<string, AbortController> };
 type RecoveryOutput = { nodeId: string; status: "success" | "failed"; url?: string; storageKey?: string; error?: string };
@@ -73,7 +74,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
     };
 
     const runtime = {
-        createOptions(nodeId: string, controller: AbortController, requestId: string, onSubmitted?: () => void) {
+        createOptions(nodeId: string, controller: AbortController, requestId: string, onSubmitted?: () => void, toolKey?: ToolKey) {
             if (!ownerId) throw new Error("当前账号不可用");
             const binding: CanvasImageTaskBinding = { ownerId, projectId: scope.projectId, requestId: `${requestId}:0`, resultIndex: 0 };
             let prepared = false;
@@ -89,9 +90,10 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 assertCurrent,
                 async generate(config: Parameters<typeof requestGeneration>[0], prompt: string, references?: Parameters<typeof requestEdit>[2], mask?: Parameters<typeof requestEdit>[3], edit = Boolean(references?.length || mask)) {
                     assertCurrent();
+                    const requestOptions = { ...options, tool: toolKey || (edit ? "canvas-edit" : "canvas-image") };
                     return options.receiveResult(edit
-                        ? requestEdit(config, prompt, references || [], mask, options)
-                        : requestGeneration(config, prompt, options, references));
+                        ? requestEdit(config, prompt, references || [], mask, requestOptions)
+                        : requestGeneration(config, prompt, requestOptions, references));
                 },
                 async receiveResult<T extends { dataUrl: string; sourceTaskId?: string }>(request: Promise<T[]>) {
                     try {

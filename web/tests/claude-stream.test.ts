@@ -5,6 +5,12 @@ import { defaultConfig } from "../src/stores/use-config-store";
 
 const originalFetch = globalThis.fetch;
 
+function withModelConfig(handler: (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): typeof fetch {
+    return ((url, init) => String(url) === "/api/models"
+        ? Promise.resolve(Response.json({ models: ["claude-opus-5", "claude-sonnet-5"].map(model => ({ id: model, modelId: model, name: model, capabilities: ["chat"], creditCost: 0, rmbCost: 0 })), tools: [], prices: [] }))
+        : handler(url, init)) as typeof fetch;
+}
+
 afterEach(() => {
     globalThis.fetch = originalFetch;
 });
@@ -55,7 +61,7 @@ test("reads a compatible SSE text block that carries its text at block start", a
 test("reports tool activity before its arguments finish without exposing or executing partial JSON", async () => {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     const response = new Response(new ReadableStream<Uint8Array>({ start(value) { controller = value; } }), { headers: { "content-type": "text/event-stream" } });
-    globalThis.fetch = mock(async () => response) as typeof fetch;
+    globalThis.fetch = withModelConfig(mock(async () => response));
     const deltas: string[] = [];
     const names: string[] = [];
     let settled = false;
@@ -98,7 +104,7 @@ test("retries a zero-text Claude response that stopped at max_tokens with a larg
     const fetchMock = mock(async () => new Response(fetchMock.mock.calls.length === 1 ? exhausted : completed, {
         headers: { "content-type": "text/event-stream" },
     }));
-    globalThis.fetch = fetchMock as typeof fetch;
+    globalThis.fetch = withModelConfig(fetchMock);
 
     const answer = await requestImageQuestion(
         { ...defaultConfig, model: "claude-sonnet-5", textModel: "claude-sonnet-5", claudeMaxTokens: "2048" },
@@ -114,7 +120,7 @@ test("retries a zero-text Claude response that stopped at max_tokens with a larg
 test("does not replay an empty Claude response when the configured budget is already at the maximum", async () => {
     const exhausted = 'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"max_tokens"}}\n\n';
     const fetchMock = mock(async () => new Response(exhausted, { headers: { "content-type": "text/event-stream" } }));
-    globalThis.fetch = fetchMock as typeof fetch;
+    globalThis.fetch = withModelConfig(fetchMock);
 
     await expect(requestImageQuestion(
         { ...defaultConfig, model: "claude-sonnet-5", textModel: "claude-sonnet-5", claudeMaxTokens: "16384" },

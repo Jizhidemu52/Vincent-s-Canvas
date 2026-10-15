@@ -20,6 +20,9 @@ import type { ReferenceImage } from "@/types/image";
 import { buildScenePrompt, cloneSceneForm, createSceneForm, getSceneSlots, validateSceneForm, type SceneForm, type SceneSlotId } from "./scene-form-model";
 import { compositeSelectedImage, createSelectionGuide } from "./image-processing-browser";
 import { preferredSelectionSize, selectionPrompt, selectionSizeMatches } from "./image-processing";
+import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
+import { useModuleEnabled } from "@/stores/use-module-store";
+import type { ToolKey } from "../../../../shared/feature-catalog";
 
 export type SceneImage = ReferenceImage & {
     inputSha256?: string;
@@ -134,7 +137,11 @@ export function useSceneWorkspace(sceneId: string) {
     const [startedAt, setStartedAt] = useState(0);
     const [error, setError] = useState<string | null>(null);
     const loading = loadedScope !== scope || restoring;
-    const model = parameters.imageModel || parameters.model || effectiveConfig.imageModel || effectiveConfig.model;
+    const toolKey = `creative-${sceneId}` as ToolKey;
+    const toolEnabled = useToolEnabled(toolKey);
+    const selectionEnabled = useModuleEnabled("creative-selection");
+    const selectedConfig = useToolConfig({ ...effectiveConfig, ...parameters, model: parameters.imageModel || parameters.model || effectiveConfig.imageModel || effectiveConfig.model }, toolKey);
+    const model = selectedConfig.model;
     const profile = useImageModelProfile(model);
     const normalized = normalizeImageModelSettings(parameters, profile);
     const config = useMemo(() => ({ ...effectiveConfig, ...parameters, ...normalized, model, imageModel: model, systemPrompt: systemPromptOverride ?? effectiveConfig.systemPrompt }),
@@ -145,10 +152,12 @@ export function useSceneWorkspace(sceneId: string) {
     const editing = sceneSlots.length > 0;
     const operationType = editing ? "inpaint" as const : "image_generation" as const;
     const selectedModel = models.find(item => item.id === model || item.modelId === modelOptionName(model) || item.name === model);
-    const estimateValue = estimate({ modelId: modelOptionName(model), operationType, quantity: count });
+    const estimateValue = estimate({ toolKey, modelId: modelOptionName(model), operationType, quantity: count });
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimateValue.configured && user.creditBalance < estimateValue.credits);
     const referenceValidation = validateImageReferences(model, references);
     const validation = loading ? "正在读取当前板块的数据"
+        : !toolEnabled ? "当前创意场景已停用，原有草稿和结果仍保留"
+        : selection && !selectionEnabled ? "选区绘制已停用，请清除选区后再生成"
         : uploadCount ? "图片正在保存，请稍候"
         : !user || user.status !== "active" ? "当前设计师账号不可用"
         : businessStatus === "error" ? "模型配置加载失败，请刷新页面重试"

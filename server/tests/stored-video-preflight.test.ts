@@ -13,7 +13,10 @@ function database(model: string, asset: Record<string, unknown> | null) {
       sql.push(statement);
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(statement)) return { rows: [] };
       if (statement.includes("INSERT INTO tasks")) return { rows: [{ id: "pending-task" }] };
-      if (statement.includes("FROM model_configs")) return { rows: [{ modelId: model }] };
+      if (statement.includes("FROM module_flags")) return { rows: [{ enabled: true }] };
+      if (statement.includes("FROM tool_api_configurations")) return { rows: [] };
+      if (statement.startsWith("UPDATE tasks SET model_config_id")) return { rows: [] };
+      if (statement.includes("FROM model_configs")) return { rows: [{ id: "model", modelId: model, enabled: true, providerEnabled: true, capabilities: ["video"], workflowConfigId: null }] };
       if (statement.includes("FROM assets")) {
         expect(parameters).toEqual([assetId, "owner"]);
         expect(statement).toContain("owner_user_id=$2");

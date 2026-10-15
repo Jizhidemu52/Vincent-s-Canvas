@@ -1,6 +1,7 @@
 import type { Database } from "./db";
 import type { PoolClient } from "pg";
 import { withTransaction } from "./db-transaction";
+import type { ToolConfiguration } from "./tool-configuration";
 import { ensureGroupCreditPeriod } from "./group-credits";
 import {
   ensureMonthlyCreditPeriod,
@@ -10,6 +11,10 @@ import {
 export { ensureMonthlyCreditPeriod, refreshMonthlyCreditPeriod };
 
 export type PriceSnapshot = {
+  toolKey?: string;
+  configurationVersion?: number;
+  creditCostOverride?: number | null;
+  rmbCostOverride?: number | null;
   operationType: string;
   operationCredits: number;
   operationRmb: number;
@@ -28,10 +33,10 @@ export function calculatePrice(
   return {
     ...input,
     totalCredits:
-      (input.operationCredits + input.modelCredits) * input.quantity,
+      (input.creditCostOverride ?? (input.operationCredits + input.modelCredits)) * input.quantity,
     totalRmb:
       Math.round(
-        (input.operationRmb + input.modelRmb) * input.quantity * 10_000,
+        (input.rmbCostOverride ?? (input.operationRmb + input.modelRmb)) * input.quantity * 10_000,
       ) / 10_000,
   };
 }
@@ -45,6 +50,7 @@ const operationCapabilities: Record<string, string[]> = {
   inpaint: ["edit"],
   batch_image: ["batch", "edit"],
   seamless_stitch: ["edit"],
+  chat: ["chat"],
 };
 
 export function modelSupportsOperation(
@@ -61,6 +67,50 @@ export function modelSupportsOperation(
 export function splitCreditSources(personalBalance: number, totalCredits: number) {
   const personalCredits = Math.min(Math.max(0, personalBalance), totalCredits);
   return { personalCredits, groupCredits: totalCredits - personalCredits };
+}
+
+type TaskPricingInput = {
+  operationType: string;
+  modelConfigId?: string | null;
+  toolConfiguration?: ToolConfiguration;
+  quantity: number;
+  creditsEnabled?: boolean;
+};
+
+/** Capture once for a batch. Later configuration edits cannot change its per-item total. */
+export async function loadTaskPriceSnapshot(client: Pick<Database, "query">, input: TaskPricingInput): Promise<PriceSnapshot> {
+  const priceResult = await client.query<{ credits: number; rmb_cost: string; version: number }>(
+    "SELECT credits,rmb_cost,version FROM pricing_rule_versions WHERE operation_type=$1 AND status='published'", [input.operationType],
+  );
+  const creditsEnabled = input.creditsEnabled !== false;
+  const overrides = input.toolConfiguration;
+  const price = priceResult.rows[0] ?? (!creditsEnabled || (overrides?.creditCostOverride != null && overrides?.rmbCostOverride != null) ? { credits: 0, rmb_cost: "0", version: 0 } : undefined);
+  if (!price) throw new BillingError("PRICE_NOT_CONFIGURED", "管理员尚未发布该操作的价格");
+  const modelResult = input.modelConfigId ? await client.query<{
+    id: string; credit_cost: number; rmb_cost: string; capabilities: string[];
+  }>(`SELECT m.id,m.credit_cost,m.rmb_cost,m.capabilities
+       FROM model_configs m JOIN providers p ON p.id=m.provider_id
+       LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id
+       WHERE m.id=$1 AND m.enabled=true AND p.enabled=true AND (m.workflow_config_id IS NULL OR w.enabled=true)`, [input.modelConfigId]) : null;
+  const model = modelResult?.rows[0];
+  if (input.modelConfigId && !model) throw new BillingError("MODEL_DISABLED", "模型不存在或未启用");
+  if (model && !modelSupportsOperation(input.operationType, model.capabilities)) throw new BillingError("MODEL_CAPABILITY_MISMATCH", "所选模型不支持当前操作");
+  const snapshot = calculatePrice({
+    toolKey: overrides?.toolKey,
+    configurationVersion: overrides?.configurationVersion,
+    creditCostOverride: overrides?.creditCostOverride,
+    rmbCostOverride: overrides?.rmbCostOverride,
+    operationType: input.operationType,
+    operationCredits: price.credits,
+    operationRmb: Number(price.rmb_cost),
+    modelId: model?.id ?? null,
+    modelCredits: model?.credit_cost ?? 0,
+    modelRmb: Number(model?.rmb_cost ?? 0),
+    quantity: input.quantity,
+    priceVersion: price.version,
+  });
+  if (!creditsEnabled) snapshot.totalCredits = 0;
+  return snapshot;
 }
 
 export async function adjustCredits(
@@ -99,8 +149,10 @@ export async function reserveCredits(
     userId: string;
     operationType: string;
     modelConfigId?: string | null;
+    toolConfiguration?: ToolConfiguration;
     quantity: number;
     creditsEnabled?: boolean;
+    priceSnapshot?: PriceSnapshot;
   },
   transactionClient?: PoolClient,
 ) {
@@ -121,56 +173,8 @@ export async function reserveCredits(
         snapshot: existing.rows[0].price_snapshot,
         duplicate: true,
       };
-    const priceResult = await client.query<{
-      credits: number;
-      rmb_cost: string;
-      version: number;
-    }>(
-      "SELECT credits,rmb_cost,version FROM pricing_rule_versions WHERE operation_type=$1 AND status='published'",
-      [input.operationType],
-    );
     const creditsEnabled = input.creditsEnabled !== false;
-    const price = priceResult.rows[0] ?? (!creditsEnabled ? { credits: 0, rmb_cost: "0", version: 0 } : undefined);
-    if (!price)
-      throw new BillingError(
-        "PRICE_NOT_CONFIGURED",
-        "管理员尚未发布该操作的价格",
-      );
-    const modelResult = input.modelConfigId
-      ? await client.query<{
-          id: string;
-          credit_cost: number;
-          rmb_cost: string;
-          capabilities: string[];
-        }>(
-          `SELECT m.id,m.credit_cost,m.rmb_cost,m.capabilities
-            FROM model_configs m JOIN providers p ON p.id=m.provider_id
-            WHERE m.id=$1 AND m.enabled=true AND p.enabled=true`,
-          [input.modelConfigId],
-        )
-      : null;
-    if (input.modelConfigId && !modelResult?.rows[0])
-      throw new BillingError("MODEL_DISABLED", "模型不存在或未启用");
-    const model = modelResult?.rows[0];
-    if (
-      model &&
-      !modelSupportsOperation(input.operationType, model.capabilities)
-    ) {
-      throw new BillingError(
-        "MODEL_CAPABILITY_MISMATCH",
-        "所选模型不支持当前操作",
-      );
-    }
-    const snapshot = calculatePrice({
-      operationType: input.operationType,
-      operationCredits: creditsEnabled ? price.credits : 0,
-      operationRmb: Number(price.rmb_cost),
-      modelId: model?.id ?? null,
-      modelCredits: creditsEnabled ? model?.credit_cost ?? 0 : 0,
-      modelRmb: Number(model?.rmb_cost ?? 0),
-      quantity: input.quantity,
-      priceVersion: price.version,
-    });
+    const snapshot = input.priceSnapshot ?? await loadTaskPriceSnapshot(client, input);
     const identityResult = await client.query<{ department_id: string | null }>(
       "SELECT department_id FROM users WHERE id=$1 AND status='active'",
       [input.userId],
@@ -182,7 +186,7 @@ export async function reserveCredits(
       await client.query(
         `INSERT INTO credit_reservations(request_id,user_id,operation_type,model_config_id,quantity,credits,rmb_cost,price_snapshot)
          VALUES($1,$2,$3,$4,$5,0,$6,$7)`,
-        [input.requestId, input.userId, input.operationType, model?.id ?? null, input.quantity, snapshot.totalRmb, { ...snapshot, billingDisabled: true }],
+        [input.requestId, input.userId, input.operationType, snapshot.modelId, input.quantity, snapshot.totalRmb, { ...snapshot, billingDisabled: true }],
       );
       return { status: "held", credits: 0, rmbCost: snapshot.totalRmb, snapshot, duplicate: false };
     }
@@ -266,7 +270,7 @@ export async function reserveCredits(
         input.userId,
         user.department_id,
         input.operationType,
-        model?.id ?? null,
+        snapshot.modelId,
         input.quantity,
         snapshot.totalCredits,
         departmentBalance === null ? 0 : snapshot.totalCredits,

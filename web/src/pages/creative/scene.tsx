@@ -9,7 +9,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { creativePresets, getCreativePreset, type CreativePreset } from "@/lib/creative-presets";
-import { useModuleStore } from "@/stores/use-module-store";
+import { useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { SceneFields, SceneUploads } from "./scene-form";
@@ -20,6 +20,8 @@ import { RecolorDialog } from "./recolor-dialog";
 import { VectorTraceDialog } from "./vector-trace-dialog";
 import { selectionPrompt } from "./image-processing";
 import "./scene.css";
+import { moduleIsEnabled, type ModuleKey } from "@/services/api/modules";
+import type { ToolKey } from "../../../../shared/feature-catalog";
 
 export default function CreativeScenePage() {
     const { presetId } = useParams<{ presetId: string }>();
@@ -30,13 +32,16 @@ export default function CreativeScenePage() {
         <p>请返回创意设计选择其他场景。</p>
         <Link to="/creative" className="wb-primary-link">返回创意设计</Link>
     </main>;
-    return <ModuleGate moduleKey={preset.tool === "image-generation" ? "image" : "image-edit"}>
+    return <ModuleGate moduleKey={`creative-${preset.id}` as ModuleKey}>
         <CreativeSceneWorkspace key={`${ownerId}:${preset.id}`} preset={preset} />
     </ModuleGate>;
 }
 
 function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
     const ws = useSceneWorkspace(preset.id);
+    const selectionEnabled = useModuleEnabled("creative-selection");
+    const recolorEnabled = useModuleEnabled("pattern-recolor");
+    const traceEnabled = useModuleEnabled("svg-trace");
     const navigate = useNavigate();
     const flags = useModuleStore(state => state.flags);
     const theme = canvasThemes[useThemeStore(state => state.theme)];
@@ -46,7 +51,7 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
     const [promptOpen, setPromptOpen] = useState(false);
     const summary = sceneSummaries[preset.id]!;
     const slots = getSceneSlots(preset.id, ws.form);
-    const available = creativePresets.filter(item => flags[item.tool === "image-generation" ? "image" : "image-edit"]);
+    const available = creativePresets.filter(item => moduleIsEnabled(flags, `creative-${item.id}` as ModuleKey));
     const submit = () => { setView("results"); void ws.generate(); };
 
     return <main className="wb-page cs-page">
@@ -65,15 +70,15 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                 <div className="cs-form-heading"><span className="cs-eyebrow">DESIGN WORKSPACE</span><h1>{preset.title}</h1><p>{preset.description}</p></div>
                 {ws.loading ? <div className="cs-loading"><LoaderCircle size={18} className="animate-spin" />正在恢复场景草稿…</div> : <fieldset disabled={ws.running} className="cs-form-body">
                     {!!slots.length && <section className="cs-upload-section"><h2 className="cs-section-label"><span>01</span>{preset.id === "accessory-design" ? "上传辅料与图案" : preset.id.startsWith("pattern-") ? "上传图案素材" : "上传款式图"}</h2><SceneUploads slots={slots} images={ws.images} onImage={(id, file) => { void ws.setImage(id, file); }} disabled={ws.running} />
-                        {preset.id === "local-restyle" && <div className="cs-local-tool"><button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTool("selection")}>{ws.selection ? "编辑修改选区" : "涂选修改区域"}<ArrowRight size={14} /></button>
+                        {preset.id === "local-restyle" && (selectionEnabled || ws.selection) && <div className="cs-local-tool">{selectionEnabled && <button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTool("selection")}>{ws.selection ? "编辑修改选区" : "涂选修改区域"}<ArrowRight size={14} /></button>}
                             <p className="cs-help">{ws.selection ? "已开启选区合成：选区外保留原图。修改处的结构和衔接仍需检查。" : "未涂选时由 AI 修改整张图，不能保证其他部位不变。"}</p>
                             {ws.selection && <button type="button" className="cs-help" onClick={ws.clearSelection}>清除选区，使用整图 AI 修改</button>}</div>}
-                        {preset.id === "pattern-colorway" && <div className="cs-local-tool"><button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTool("recolor")}>精确换色<small>本地 · 不调用 AI</small><ArrowRight size={14} /></button><p className="cs-help">平面花型可按原色→目标色直接替换；下方保留 AI 配色拓展。</p></div>}
-                        {preset.id === "style-to-sketch" && <div className="cs-local-tool"><button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTraceImage(ws.images.primary!)}>已有线稿转 SVG<ArrowRight size={14} /></button><p className="cs-help">也可先生成线稿，再从结果卡导出矢量路径。</p></div>}
+                        {recolorEnabled && preset.id === "pattern-colorway" && <div className="cs-local-tool"><button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTool("recolor")}>精确换色<small>本地 · 不调用 AI</small><ArrowRight size={14} /></button><p className="cs-help">平面花型可按原色→目标色直接替换；下方保留 AI 配色拓展。</p></div>}
+                        {traceEnabled && preset.id === "style-to-sketch" && <div className="cs-local-tool"><button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTraceImage(ws.images.primary!)}>已有线稿转 SVG<ArrowRight size={14} /></button><p className="cs-help">也可先生成线稿，再从结果卡导出矢量路径。</p></div>}
                     </section>}
                     <section className="cs-business-section"><h2 className="cs-section-label"><span>{slots.length ? "02" : "01"}</span>{preset.id.includes("colorway") ? "选择配色方式" : preset.id === "pattern-craft" ? "选择工艺效果" : preset.id === "text-to-style" ? "描述你的设计" : preset.id === "style-to-sketch" ? "线稿要求" : preset.id === "local-restyle" ? "指定修改部位" : preset.id === "back-design" ? "构思背面结构" : preset.id === "accessory-design" ? "定义辅料外观" : "提取要求"}</h2><SceneFields sceneId={preset.id} form={ws.form} onChange={ws.setForm} disabled={ws.running} sourceImage={ws.images.primary?.dataUrl} /></section>
                     <details className="cs-output-settings"><summary><span>出图设置</span><span>{imageSizeLabel(ws.config.size)} · {imageQualityLabel(ws.config.quality)} · {ws.count} 张<ChevronDown size={13} /></span></summary>
-                        <label className="cs-label">生成模型</label><ModelPicker config={ws.config} value={ws.model} onChange={value => ws.updateConfig("imageModel", value)} capability="image" fullWidth disabled={ws.running} />
+                        <label className="cs-label">生成模型</label><ModelPicker toolKey={`creative-${preset.id}` as ToolKey} config={ws.config} value={ws.model} onChange={value => ws.updateConfig("imageModel", value)} capability="image" fullWidth disabled={ws.running} />
                         <ImageSettingsPanel config={ws.config} onConfigChange={ws.updateConfig} theme={theme} showTitle={false} />
                     </details>
                     <details className="cs-prompt-preview" open={promptOpen} onToggle={event => setPromptOpen(event.currentTarget.open)}><summary>{ws.selectedPrompt !== null ? "所选结果的原始提示词" : "查看本次设计指令"}<ChevronDown size={12} /></summary><pre aria-label="设计提示词">{ws.selectedPrompt ?? `${buildScenePrompt(preset.id, ws.form)}${ws.selection ? `\n\n${selectionPrompt}` : ""}`}</pre>{ws.selectedPrompt !== null && <p className="cs-help">仅显示原提示词，未改变当前设计要求、模型或参考图。</p>}</details>
@@ -105,14 +110,14 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                     {ws.previewing && <p className="cs-help" role="status">正在读取所选结果…</p>}
                     {ws.activeLog?.operation === "recolor" && <p className="cs-help cs-operation-note">{ws.activeLog.prompt}</p>}
                     {!ws.results.length ? <div className="cs-empty"><Sparkles size={28} /><h3>让设计从这里开始</h3><p>在左侧完成{slots.length ? "素材和" : ""}设计要求，点击生成。</p><button type="button" onClick={() => setView("example")}><RotateCcw size={14} />看看功能示例</button></div> : <div className="cs-result-grid">{ws.results.map((result, index) => <article key={result.id} className="cs-result-card">
-                        {result.status === "success" && result.image ? <><Image src={result.image.dataUrl} alt={`${preset.title}结果 ${index + 1}`} onClick={() => { ws.selectResultPrompt(result); setPromptOpen(true); }} /><div className="cs-result-meta"><span>方案 {String(index + 1).padStart(2, "0")}</span><button type="button" onClick={() => { void ws.download(result.image!, index); }}><Download size={14} />下载原图</button>{preset.id === "style-to-sketch" && <button type="button" onClick={() => setTraceImage(result.image!)}>导出 SVG</button>}</div></> : result.status === "failed" ? <div className="cs-result-message"><span>方案 {index + 1} {result.uncompositedImage ? "合成未完成" : "生成失败"}</span><p>{result.error}</p>{result.uncompositedImage && <button type="button" className="cs-tool-entry" onClick={() => void ws.download(result.uncompositedImage!, index)}><Download size={14} />下载未合成图</button>}</div> : <div className="cs-result-message"><LoaderCircle className="animate-spin" size={25} /><span>正在生成方案 {index + 1}</span><small>请保留此页面，避免中断结果保存</small></div>}
+                        {result.status === "success" && result.image ? <><Image src={result.image.dataUrl} alt={`${preset.title}结果 ${index + 1}`} onClick={() => { ws.selectResultPrompt(result); setPromptOpen(true); }} /><div className="cs-result-meta"><span>方案 {String(index + 1).padStart(2, "0")}</span><button type="button" onClick={() => { void ws.download(result.image!, index); }}><Download size={14} />下载原图</button>{traceEnabled && preset.id === "style-to-sketch" && <button type="button" onClick={() => setTraceImage(result.image!)}>导出 SVG</button>}</div></> : result.status === "failed" ? <div className="cs-result-message"><span>方案 {index + 1} {result.uncompositedImage ? "合成未完成" : "生成失败"}</span><p>{result.error}</p>{result.uncompositedImage && <button type="button" className="cs-tool-entry" onClick={() => void ws.download(result.uncompositedImage!, index)}><Download size={14} />下载未合成图</button>}</div> : <div className="cs-result-message"><LoaderCircle className="animate-spin" size={25} /><span>正在生成方案 {index + 1}</span><small>请保留此页面，避免中断结果保存</small></div>}
                     </article>)}</div>}
                     {!!ws.results.length && <p className="cs-result-limit">{summary.limit}</p>}
                 </div>}
             </section>
         </div>
-        {tool === "selection" && ws.images.primary && <RegionSelectionDialog source={ws.images.primary} initialMask={ws.selection?.mask.dataUrl} onClose={() => setTool(null)} onSave={blob => ws.saveSelection(ws.images.primary!.id, blob)} />}
-        {tool === "recolor" && ws.images.primary && <RecolorDialog source={ws.images.primary} onClose={() => setTool(null)} onSave={async (blob, description) => { await ws.saveLocalResult(ws.images.primary!.id, blob, description); setView("results"); }} />}
-        {traceImage && <VectorTraceDialog source={traceImage} onClose={() => setTraceImage(null)} />}
+        {selectionEnabled && tool === "selection" && ws.images.primary && <RegionSelectionDialog source={ws.images.primary} initialMask={ws.selection?.mask.dataUrl} onClose={() => setTool(null)} onSave={blob => ws.saveSelection(ws.images.primary!.id, blob)} />}
+        {recolorEnabled && tool === "recolor" && ws.images.primary && <RecolorDialog source={ws.images.primary} onClose={() => setTool(null)} onSave={async (blob, description) => { await ws.saveLocalResult(ws.images.primary!.id, blob, description); setView("results"); }} />}
+        {traceEnabled && traceImage && <VectorTraceDialog source={traceImage} onClose={() => setTraceImage(null)} />}
     </main>;
 }

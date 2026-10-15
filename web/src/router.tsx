@@ -17,6 +17,9 @@ const DesignLibraryPage = lazy(() => import("@/pages/design-library"));
 const ChatPage = lazy(() => import("@/pages/chat"));
 const CreativePage = lazy(() => import("@/pages/creative"));
 const CreativeScenePage = lazy(() => import("@/pages/creative/scene"));
+const PatternPlacementPage = lazy(() => import("@/pages/design-workbench/placement"));
+const PatternRepeatPage = lazy(() => import("@/pages/design-workbench/repeat"));
+const SeriesRecipePage = lazy(() => import("@/pages/design-workbench/recipe"));
 const ChangePasswordPage = lazy(() => import("@/pages/change-password"));
 const HomePage = lazy(() => import("@/pages/home"));
 const ImagePage = lazy(() => import("@/pages/image"));
@@ -70,17 +73,20 @@ export const router = createBrowserRouter([
         ),
         children: [
             { path: "/", element: protectedRoute(HomePage) },
-            { path: "/creative", element: protectedRoute(CreativePage) },
+            { path: "/creative", element: moduleRoute(CreativePage, "creative") },
+            { path: "/creative/pattern-placement", element: moduleRoute(PatternPlacementPage, "pattern-placement") },
+            { path: "/creative/pattern-repeat", element: moduleRoute(PatternRepeatPage, "pattern-repeat") },
+            { path: "/creative/series-recipe", element: moduleRoute(SeriesRecipePage, "series-recipe") },
             { path: "/creative/:presetId", element: protectedRoute(CreativeScenePage) },
             { path: "/login", element: <Navigate to="/" replace /> },
             { path: "/image", element: moduleRoute(ImagePage, imageModule) },
             { path: "/video", element: moduleRoute(VideoPage, "video") },
             { path: "/assets", element: moduleRoute(AssetsPage, "assets") },
-            { path: "/reference-import", element: moduleRoute(ReferenceImportPage, "assets") },
+            { path: "/reference-import", element: moduleRoute(ReferenceImportPage, "reference-import") },
             { path: "/team", element: moduleRoute(TeamPage, "team") },
             { path: "/prompts", element: moduleRoute(PromptsPage, "prompts") },
             { path: "/my-prompts", element: moduleRoute(MyPromptsPage, "prompts") },
-            { path: "/design-library", element: moduleRoute(DesignLibraryPage, "canvas") },
+            { path: "/design-library", element: moduleRoute(DesignLibraryPage, "design-library") },
             ...(!standaloneEdition ? [
                 { path: "/admin", element: protectedRoute(AdminPage, true) },
                 { path: "/admin/design-library", element: protectedRoute(DesignLibraryPage, true) },

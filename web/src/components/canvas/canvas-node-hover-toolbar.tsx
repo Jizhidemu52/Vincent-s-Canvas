@@ -6,6 +6,9 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { canvasActionModules } from "@/lib/canvas/tool-availability";
 import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "@/types/canvas";
 import { ImageToolSettingsModal, type ImageToolbarSettingsTool } from "./canvas-image-toolbar-settings-modal";
 import { IMAGE_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, compactImageQuickToolIds, defaultImageQuickToolIds, readImageQuickToolsConfig, type ImageQuickToolId } from "./canvas-image-toolbar-tools";
@@ -82,6 +85,8 @@ export function CanvasNodeHoverToolbar({
     onDelete,
 }: CanvasNodeHoverToolbarProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const flags = useModuleStore(state => state.flags);
+    const bindings = useBusinessConfigStore(state => state.tools);
     const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
     const [showImageToolLabels, setShowImageToolLabels] = useState(true);
     const [draftImageToolIds, setDraftImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
@@ -185,7 +190,10 @@ export function CanvasNodeHoverToolbar({
         ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick })) : []),
     ];
-    const allToolbarTools = [...baseToolbarTools, ...nodeToolbarTools];
+    const allToolbarTools = [...baseToolbarTools, ...nodeToolbarTools].filter(tool => {
+        const moduleKey = tool.id === "edit" && hasImage ? "canvas-edit" : canvasActionModules[tool.id];
+        return !moduleKey || isModuleAvailable(flags, bindings, moduleKey);
+    });
     const toolbarTools = hasImage ? visibleImageToolIds.flatMap((id) => allToolbarTools.find((tool) => tool.id === id) || []) : allToolbarTools;
     const overflowTools = allToolbarTools.filter((tool) => !toolbarTools.some((visible) => visible.id === tool.id));
     const selectableImageToolbarTools = allToolbarTools.filter((tool) => !["retry", "info", "delete"].includes(tool.id)) as ImageToolbarSettingsTool[];

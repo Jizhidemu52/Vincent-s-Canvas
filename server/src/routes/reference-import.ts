@@ -68,7 +68,7 @@ export function createReferenceImportRouter(db: Database, service: ImportService
             if (!ownerId) throw new ReferenceImportRequestError("请先登录后再采集网页图片", 401);
             assertCanvasOwner(request.get("X-Canvas-Owner-Id"), ownerId);
             if (!request.is("application/json")) throw new ReferenceImportRequestError("采集请求必须使用 JSON", 415);
-            await assertModuleEnabled(db, "assets");
+            await assertModuleEnabled(db, "reference-import");
             const data = await runReferenceImportAction(ownerId, request.get("X-Canvas-Owner-Id"), request.path.replace(/\/$/, "") === "/scan" ? "scan" : "image", request.body, controller.signal, service);
             if (!controller.signal.aborted) response.json({ code: 0, data, msg: "" });
         } catch (error) {

@@ -91,6 +91,7 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
     options.signal?.throwIfAborted();
     const context = { catalog, selectedImageId };
     const requestOptions = {
+        tool: "gpt-chat",
         signal: options.signal,
         onToolCallStart: (name: string) => {
             if (name === "create_image") options.onPhase?.("正在整理图片修改要求…");

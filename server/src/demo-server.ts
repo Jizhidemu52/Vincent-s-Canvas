@@ -37,60 +37,15 @@ import { fileURLToPath } from "node:url";
 import { DemoOaStore } from "./demo-oa-store";
 import { verifyOaToken, OaError, OA_SESSION_TTL_SECONDS } from "./oa";
 import { readReferenceImportBody, referenceImportFailure, runReferenceImportAction } from "./routes/reference-import";
+import { moduleKeys, moduleIsEnabled, toolDefinitions, type ToolKey } from "../../shared/feature-catalog";
+import { DemoToolConfigurationError, resolveDemoToolConfiguration } from "./demo-tool-configuration";
 
 const sessions = new Map<string, string>();
-const modules = [
-  "detail-enhance",
-  "image-edit",
-  "angle-control",
-  "seamless-stitch",
-  "image",
-  "video",
-  "prompts",
-  "assets",
-  "gpt-chat",
-  "canvas",
-  "team",
-  "performance",
-];
-const toolDefinitions = [
-  {
-    toolKey: "detail-enhance",
-    label: "细节增强",
-    operationType: "upscale",
-    capabilities: ["upscale", "edit"],
-  },
-  {
-    toolKey: "image-edit",
-    label: "图片编辑",
-    operationType: "inpaint",
-    capabilities: ["edit"],
-  },
-  {
-    toolKey: "angle-control",
-    label: "角度控制",
-    operationType: "inpaint",
-    capabilities: ["edit"],
-  },
-  {
-    toolKey: "seamless-stitch",
-    label: "无缝拼接",
-    operationType: "seamless_stitch",
-    capabilities: ["edit"],
-  },
-  {
-    toolKey: "image",
-    label: "文生图",
-    operationType: "image_generation",
-    capabilities: ["generate"],
-  },
-  {
-    toolKey: "video",
-    label: "视频创作",
-    operationType: "video_generation",
-    capabilities: ["video"],
-  },
-] as const;
+const modules = moduleKeys;
+const demoModuleFlags = Object.fromEntries(modules.map(key => [key, true]));
+// Preserve existing mock model IDs; adding a formal board must not renumber models.
+const legacyDemoTools = ["detail-enhance", "image-edit", "angle-control", "seamless-stitch", "image", "video"]
+  .map(key => toolDefinitions.find(item => item.toolKey === key)!);
 const apiMartBaseUrl = (
   process.env.APIMART_BASE_URL || process.env.GPT_IMAGE_2_BASE_URL || "https://api.apimart.ai/v1"
 ).replace(/\/$/, "");
@@ -128,7 +83,7 @@ const demoProviders: Array<Record<string, unknown>> = [
     updatedAt: new Date().toISOString(),
   },
 ];
-const demoModels: Array<Record<string, unknown>> = toolDefinitions.map(
+const demoModels: Array<Record<string, unknown>> = legacyDemoTools.map(
   (tool, index) => ({
     id: `40000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
     providerId: demoProviders[0]!.id,
@@ -391,7 +346,7 @@ for (const modelId of supportedVideoModelIds) {
 }
 assignDemoPublicModelNumbers(demoModels);
 const demoPrices: Array<Record<string, unknown>> = Array.from(
-  new Map(toolDefinitions.map((tool) => [tool.operationType, tool])).values(),
+  new Map(toolDefinitions.filter(tool => tool.operationType !== "chat").map((tool) => [tool.operationType, tool])).values(),
 ).map((tool, index) => ({
   id: `50000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
   operationType: tool.operationType,
@@ -402,17 +357,15 @@ const demoPrices: Array<Record<string, unknown>> = Array.from(
   status: "published",
   publishedAt: new Date().toISOString(),
 }));
-const demoToolConfigurations = toolDefinitions.map((tool, index) => ({
+const demoToolConfigurations: Array<{ toolKey: ToolKey; modelConfigId: string | null; enabled: boolean; creditCostOverride: number | null; rmbCostOverride: number | null; configurationVersion: number }> = toolDefinitions.map((tool) => ({
   toolKey: tool.toolKey,
-  modelConfigId:
-    tool.toolKey === "video" && apiMartApiKey
-      ? videoModelConfigIds["happyhorse-1.1"]
-      : ["image", "image-edit", "angle-control"].includes(tool.toolKey) && hasOpenToken
-        ? openTokenGptImage2ModelId
-        : tool.toolKey === "image" && hasApiMart
-        ? gptImage2ModelId
-        : demoModels[index]!.id as string,
+  // Demo has no admin maintenance login. Retain model choice rather than creating
+  // mandatory mock bindings that hide the server-configured real providers.
+  modelConfigId: tool.toolKey === "seamless-stitch" ? String(demoModels[3]!.id) : null,
   enabled: true,
+  creditCostOverride: null,
+  rmbCostOverride: null,
+  configurationVersion: 0,
 }));
 type DemoAsset = {
   /** Set only from a provider result by this server, never from upload metadata. */
@@ -714,6 +667,8 @@ Bun.serve({
   hostname: demoHost,
   idleTimeout: DEMO_STREAM_IDLE_TIMEOUT_SECONDS,
   error(error) {
+    if (error instanceof DemoToolConfigurationError)
+      return json({ error: error.code, message: error.message }, error.status);
     if (error instanceof DemoStorageError)
       return json({ error: "LOCAL_STORAGE_UNAVAILABLE", message: "本地数据未能保存，请检查磁盘空间与写入权限后重试。" }, 503);
     console.error("Local demo request failed", error);
@@ -961,11 +916,12 @@ Bun.serve({
             rmbCost,
             version,
           })),
-        tools: demoToolConfigurations.filter((tool) => tool.enabled && listAvailableDemoModels(demoModels, demoProviders).some((model) => model.id === tool.modelConfigId)),
+        tools: demoToolConfigurations,
       });
     if (path === "/api/chat/responses" && request.method === "POST") {
       const input = (await request.json()) as {
         modelId?: string;
+        toolKey?: string;
         input?: DemoResponseInput[];
         tools?: DemoResponseTool[];
         toolChoice?: unknown;
@@ -973,7 +929,8 @@ Bun.serve({
         gemini?: { maxOutputTokens: number };
         claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
       };
-      const selectedModel = String(input.modelId || "");
+      const chatTool = resolveDemoToolConfiguration({ operationType: "chat", toolKey: input.toolKey, modelConfigId: input.modelId }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
+      const selectedModel = String(demoModels.find(model => model.id === chatTool.modelConfigId)?.modelId || "");
       const parsedTools = chatFunctionToolsSchema.safeParse(input.tools);
       if (!parsedTools.success) return json({ error: "INVALID_TOOLS", message: "对话只允许已声明的 function 工具；图片生成必须通过图像任务入口" }, 400);
       input.tools = parsedTools.data;
@@ -1116,9 +1073,16 @@ Bun.serve({
         );
       return publicDemoAssetResponse(asset);
     }
-    if (path === "/api/generation-capabilities" && request.method === "GET")
+    if (path === "/api/generation-capabilities" && request.method === "GET") {
+      const capabilityTool = url.searchParams.get("toolKey") || "video";
+      if ((capabilityTool !== "video" && capabilityTool !== "canvas-video") || url.searchParams.getAll("toolKey").length > 1)
+        return json({ error: "INVALID_TOOL_KEY", message: "视频能力来源板块无效" }, 400);
+      const binding = demoToolConfigurations.find(item => item.toolKey === capabilityTool);
+      if (!moduleIsEnabled(demoModuleFlags, capabilityTool) || binding?.enabled === false)
+        return json({ error: "MODULE_DISABLED", message: "该功能板块已关闭" }, 403);
       return json({
         models: listAvailableDemoModels(demoModels, demoProviders)
+          .filter(model => !binding?.modelConfigId || model.id === binding.modelConfigId)
           .filter((model) => isSupportedVideoModelId(model.modelId))
           .map((model) => {
             const modelId = model.modelId as SupportedVideoModelId;
@@ -1130,11 +1094,13 @@ Bun.serve({
             };
           }),
       });
+    }
     if (path === "/api/tasks/batch" && request.method === "POST") {
       const input = (await request.json().catch(() => null)) as {
         requestId?: string;
         projectId?: string;
         operationType?: string;
+        toolKey?: string;
         modelConfigId?: string;
         prompt?: string;
         parameters?: Record<string, unknown>;
@@ -1143,6 +1109,7 @@ Bun.serve({
       } | null;
       if (!input?.requestId || !input.projectId || !input.operationType || !input.modelConfigId || !Array.isArray(input.items) || !input.items.length)
         return json({ error: "INVALID_BATCH", message: "Batch task details are incomplete" }, 400);
+      const batchTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
       const batchId = crypto.randomUUID();
       const cookie = request.headers.get("cookie") || "";
       const tasks: Array<Record<string, unknown> & { itemIndex: number }> = [];
@@ -1153,7 +1120,8 @@ Bun.serve({
         operationType: input.operationType,
         modelConfigId: input.modelConfigId,
         prompt: input.prompt || "",
-        parameters: input.parameters,
+        parameters: { ...input.parameters, tool: batchTool.toolKey },
+        toolKey: batchTool.toolKey,
         priority: input.priority,
         items: input.items.map((item) => ({ sourceUrls: item.sourceUrls || [] })),
       });
@@ -1173,6 +1141,7 @@ Bun.serve({
       const input = (await request.clone().json().catch(() => ({}))) as {
         requestId?: string;
         operationType?: string;
+        toolKey?: string;
         modelConfigId?: string;
         prompt?: string;
         parameters?: Record<string, unknown>;
@@ -1180,6 +1149,8 @@ Bun.serve({
       };
       if (input.operationType !== "video_generation")
         return json({ error: "UNSUPPORTED_OPERATION", message: "Only video preflight is supported" }, 400);
+      const preflightTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
+      input.modelConfigId = preflightTool.modelConfigId;
       if (!apiMartApiKey)
         return json({ error: "PROVIDER_NOT_CONFIGURED", message: "Video generation provider is not configured" }, 503);
       const model = demoModels.find(
@@ -1210,6 +1181,7 @@ Bun.serve({
         requestId?: string;
         projectId?: string;
         operationType?: string;
+        toolKey?: string;
         modelConfigId?: string;
         prompt?: string;
         parameters?: Record<string, unknown>;
@@ -1221,6 +1193,9 @@ Bun.serve({
         return existingTask.ownerUserId === user.id
           ? json({ task: existingTask })
           : json({ error: "DUPLICATE_REQUEST", message: "任务请求标识已被使用" }, 400);
+      const taskTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType || "" }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
+      input.modelConfigId = taskTool.modelConfigId;
+      input.parameters = { ...input.parameters, tool: taskTool.toolKey };
       if (input.operationType === "video_generation") {
         if (!apiMartApiKey)
           return json(
@@ -1325,7 +1300,7 @@ Bun.serve({
         return json({ task }, 201);
       }
       if (
-        ["image_generation", "inpaint", "upscale"].includes(
+        ["image_generation", "inpaint", "upscale", "batch_image"].includes(
           input.operationType || "",
         )
       ) {
@@ -1977,18 +1952,21 @@ Bun.serve({
     ) {
       const selectedTool = path.split("/").at(-1)!;
       const input = (await request.json()) as {
-        modelConfigId: string;
+        modelConfigId: string | null;
         enabled: boolean;
+        creditCostOverride: number | null;
+        rmbCostOverride: number | null;
       };
       const existing = demoToolConfigurations.find(
         (item) => item.toolKey === selectedTool,
       );
-      if (existing) Object.assign(existing, input);
+      if (existing) Object.assign(existing, input, { configurationVersion: existing.configurationVersion + 1 });
       else
         demoToolConfigurations.push({
           toolKey:
             selectedTool as (typeof demoToolConfigurations)[number]["toolKey"],
           ...input,
+          configurationVersion: 1,
         });
       return json({
         tool: { toolKey: selectedTool, ...input, updatedAt: now() },

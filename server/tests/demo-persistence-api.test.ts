@@ -232,7 +232,9 @@ test("restart pauses stored paid work, deduplicates before provider checks and i
     expect(await demo.json<{ task: ApiTask }>("/api/tasks", "POST", duplicateBody)).toEqual(recovered);
     expect((await demo.json<{ tasks: ApiTask[] }>("/api/tasks")).tasks).toHaveLength(1);
     expect((await demo.json<{ user: { creditBalance: number } }>("/api/auth/session")).user.creditBalance).toBe(user.creditBalance);
-    expect((await demo.request("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...duplicateBody, requestId: "new-disabled-request" }) })).status).toBe(503);
+    const invalidNew = await demo.request("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...duplicateBody, requestId: "new-disabled-request" }) });
+    expect(invalidNew.status).toBe(400);
+    expect(await invalidNew.json()).toMatchObject({ error: "MODEL_DISABLED" });
     // The existing video polling loop waits two seconds before its first GET.
     await Bun.sleep(2_200);
     expect(demo.providerRequests).toEqual([]);

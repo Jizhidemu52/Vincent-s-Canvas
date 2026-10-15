@@ -22,7 +22,7 @@ beforeEach(() => {
         requests.push({ path, method });
         if (changeOwnerAt === path) useUserStore.setState({ user: { id: "employee-b" } as never });
         if (responseStatus !== 200 && path.startsWith("/api/tasks/")) return new Response("", { status: responseStatus });
-        if (path === "/api/models") return Response.json({ models: [{ id: "model-uuid", modelId: "gpt-image-2", name: "GPT" }] });
+        if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [{ id: "model-uuid", modelId: "gpt-image-2", name: "GPT" }] });
         if (path === "/api/assets/upload-request") { const id = `asset-${assets.size}`; assets.set(id, new Blob()); return Response.json({ assetId: id, uploadUrl: `/upload/${id}` }); }
         if (path.startsWith("/upload/")) { assets.set(path.split("/").pop()!, init!.body as Blob); return new Response(null, { status: 204 }); }
         if (path === "/api/tasks") { task = { ...JSON.parse(String(init!.body)), id: "task-1", userId: "employee-a", status: "success", resultUrls: ["/result.png"] }; return Response.json({ task }); }

@@ -2,6 +2,7 @@ export function createDemoBatchTaskInputs(input: {
   requestId: string;
   projectId: string;
   operationType: string;
+  toolKey?: string;
   modelConfigId: string;
   prompt: string;
   parameters?: Record<string, unknown>;
@@ -11,7 +12,8 @@ export function createDemoBatchTaskInputs(input: {
   return input.items.map((item, index) => ({
     requestId: `${input.requestId}:${index}`,
     projectId: input.projectId,
-    operationType: input.operationType === "batch_image" ? "inpaint" : input.operationType,
+    operationType: input.operationType,
+    toolKey: input.toolKey || "canvas-batch",
     modelConfigId: input.modelConfigId,
     prompt: input.prompt,
     parameters: input.parameters || {},

@@ -36,7 +36,7 @@ test("media polling stops on paused and preserves the original server task ID", 
   let savedTask = "";
   respond((url, method) => {
     calls.push(`${method}:${url}`);
-    if (url === "/api/models") return { models: [{ id: "model", modelId: "wan2.7", name: "Wan" }] };
+    if (url === "/api/models") return { models: [{ id: "model", modelId: "wan2.7", name: "Wan", capabilities: ["video"], creditCost: 0, rmbCost: 0 }], tools: [], prices: [] };
     if (url === "/api/tasks/preflight") return { ok: true, normalized: {} };
     if (url === "/api/tasks" && method === "POST") return { task: { ...task, status: "waiting" } };
     if (url === "/api/tasks/original-task") return { task };

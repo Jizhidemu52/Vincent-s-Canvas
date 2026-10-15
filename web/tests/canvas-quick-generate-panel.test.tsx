@@ -3,12 +3,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CanvasQuickGeneratePanel } from "@/components/canvas/canvas-quick-generate-panel";
 import { defaultConfig } from "@/stores/use-config-store";
 import { useUserStore, type LocalUser } from "@/stores/use-user-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { useModuleStore } from "@/stores/use-module-store";
 
 const noop = () => undefined;
-function render(count: number, running = false) {
-    return renderToStaticMarkup(<CanvasQuickGeneratePanel embedded open prompt="修改花瓶颜色" model="gpt-image-2" size="1:1" quality="auto" onQualityChange={noop} count={1} imageOptions="" onImageOptionsChange={noop} running={running} config={defaultConfig} estimateCredits={0} estimateRmb={0}
+function render(count: number, running = false, enabled = true) {
+    const business = useBusinessConfigStore.getInitialState(), modules = useModuleStore.getInitialState();
+    const savedBusiness = { ...business }, savedFlags = modules.flags;
+    Object.assign(business, { models: [{ id: "gpt-image-2", name: "gpt-image-2", modelId: "gpt-image-2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 }], tools: [], status: "ready" });
+    modules.flags = { ...savedFlags, canvas: true, "canvas-image": enabled, "canvas-edit": enabled };
+    try { return renderToStaticMarkup(<CanvasQuickGeneratePanel embedded open prompt="修改花瓶颜色" model="gpt-image-2" size="1:1" quality="auto" onQualityChange={noop} count={1} imageOptions="" onImageOptionsChange={noop} running={running} config={defaultConfig} estimateCredits={0} estimateRmb={0}
         references={Array.from({ length: count }, (_, index) => ({ id: String(index), name: `reference-${index}`, type: "image/png", dataUrl: `data:image/png;base64,${index}` }))}
-        onClose={noop} onPromptChange={noop} onModelChange={noop} onSizeChange={noop} onCountChange={noop} onPickReferences={noop} onRemoveReference={noop} onClearReferences={noop} onMoveReference={noop} onMissingConfig={noop} onGenerate={noop} />);
+        onClose={noop} onPromptChange={noop} onModelChange={noop} onSizeChange={noop} onCountChange={noop} onPickReferences={noop} onRemoveReference={noop} onClearReferences={noop} onMoveReference={noop} onMissingConfig={noop} onGenerate={noop} />); }
+    finally { Object.assign(business, savedBusiness); modules.flags = savedFlags; }
 }
 test("the same composer switches between creation and editing with numbered references", () => {
     expect(render(0)).toContain("点击或框选画布图片");
@@ -29,6 +36,14 @@ test("uploading and submitting locks reference changes and duplicate submission"
     expect(markup).toMatch(/aria-label="移除参考图 1" disabled=""/);
     expect(markup).toMatch(/class="cw-generate-button" disabled=""/);
     expect(markup).toContain("提交中…");
+});
+
+test("an administratively disabled canvas tool keeps inputs visible but disables submission", () => {
+    expect(render(2)).toMatch(/class="cw-generate-button"(?! disabled)/);
+    const markup = render(2, false, false);
+    expect(markup).toMatch(/class="cw-generate-button" disabled=""/);
+    expect(markup).toContain("修改花瓶颜色");
+    expect(markup).toContain("参考图 2：reference-1");
 });
 
 test("designer guidance omits provider documentation while administrator guidance retains it", () => {

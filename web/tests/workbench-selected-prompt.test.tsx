@@ -36,6 +36,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     const effects: Array<{ deps?: readonly unknown[]; cleanup?: (() => void) | void }> = [];
     const pendingEffects: Array<() => void> = [];
     let stateIndex = 0, refIndex = 0, effectIndex = 0, prompt = "当前草稿";
+    let toolEnabled = true;
     const currentConfig = { ...config };
     const reads: string[] = [], writes: unknown[] = [], submissions: unknown[] = [];
     const draft = { form: { ...createSceneForm("style-to-sketch"), description: "当前草稿" }, images: { primary: image }, config: currentConfig };
@@ -58,6 +59,11 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
         }) },
         "@/hooks/use-workbench-field": { useWorkbenchField: () => [prompt, (next: string) => { prompt = next; }] },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },
+        "@/hooks/use-tool-config": {
+            useToolConfig: (value: typeof currentConfig) => value,
+            useToolEnabled: (key: string) => toolEnabled && ["video", "creative-style-to-sketch"].includes(key),
+        },
+        "@/stores/use-module-store": { useModuleEnabled: (key: string) => key === "creative-selection" },
         "@/stores/use-config-store": { ...requireModule("@/stores/use-config-store"), useEffectiveConfig: () => currentConfig, useConfigStore: (select: Function) => select({ config: currentConfig, updateConfig: (key: string, value: unknown) => { (currentConfig as any)[key] = value; } }) },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ status: "ready", models: [{ id: "gpt-image-2", modelId: "gpt-image-2", capabilities: ["generate", "edit"] }], estimate: () => ({ credits: 0, configured: true }) }) },
         "@/stores/use-user-store": { useUserStore: (select: Function) => select({ user: { id: "owner", status: "active", creditBalance: 100 } }) },
@@ -80,7 +86,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
         pendingEffects.splice(0).forEach(effect => effect());
         return output;
     };
-    return { render, reads, writes, submissions, currentConfig, get prompt() { return prompt; }, setPrompt: (value: string) => { prompt = value; }, unmount: () => effects.forEach(effect => effect.cleanup?.()) };
+    return { render, reads, writes, submissions, currentConfig, get prompt() { return prompt; }, setPrompt: (value: string) => { prompt = value; }, setToolEnabled: (value: boolean) => { toolEnabled = value; }, unmount: () => effects.forEach(effect => effect.cleanup?.()) };
 }
 
 function elements(node: unknown): ReactElement<any>[] {
@@ -192,6 +198,20 @@ test("creative result selection only accepts an explicit result of this owner an
     app.render().setForm({ ...workspace.form, description: "新草稿" });
     app.render().selectResultPrompt({ ...sceneLog.results[0], id: "unrelated", image: { ...image, id: "unrelated" } });
     expect(app.render().selectedPrompt).toBeNull();
+    expect(app.submissions).toHaveLength(0);
+    app.unmount();
+});
+
+test("disabling a creative tool preserves archived preview and current draft but prevents generation", async () => {
+    const app = harness("creative");
+    app.render(); await settle();
+    const before = app.render();
+    app.setToolEnabled(false);
+    expect(app.render().validation).toBe("当前创意场景已停用，原有草稿和结果仍保留");
+    await app.render().generate();
+    await app.render().previewLog(sceneLog);
+    expect(app.render().form).toEqual(before.form);
+    expect(app.render().selectedPrompt).toBe(sceneLog.prompt);
     expect(app.submissions).toHaveLength(0);
     app.unmount();
 });

@@ -9,6 +9,7 @@ import { createVideoGenerationTask } from "@/services/api/video";
 import { buildVideoProviderRequest, supportedVideoModelIds, videoModelCapabilities } from "../../server/src/video-models";
 
 const configFor = (model: string) => ({ ...defaultConfig, model, videoModel: model });
+const businessConfigFor = (...modelIds: string[]) => ({ models: modelIds.map(modelId => ({ id: `configured-${modelId}`, modelId, name: modelId, capabilities: ["video"], creditCost: 0, rmbCost: 0 })), tools: [], prices: [] });
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
 afterEach(() => { globalThis.fetch = originalFetch; globalThis.window = originalWindow; });
@@ -87,7 +88,11 @@ describe("video model parameter contract", () => {
 
     test("reference limits and unsupported modes fail before uploads, preflight or paid submission", async () => {
         let requests = 0;
-        globalThis.fetch = (async () => { requests++; throw new Error("No request should be sent"); }) as typeof fetch;
+        globalThis.fetch = (async url => {
+            if (String(url) === "/api/models") return Response.json(businessConfigFor(...supportedVideoModelIds));
+            requests++;
+            throw new Error("No upload, preflight or paid request should be sent");
+        }) as typeof fetch;
         for (const model of supportedVideoModelIds) {
             const spec = getVideoModelParameterSpec(model)!;
             await expect(createVideoGenerationTask(configFor(model), "test", Array.from({ length: spec.maxImages + 1 }, (_, index) => ({ id: String(index) })) as any)).rejects.toThrow("最多支持");
@@ -106,7 +111,7 @@ describe("video model parameter contract", () => {
         const payloads: Array<Record<string, any>> = [];
         globalThis.fetch = (async (input, init) => {
             const url = String(input);
-            if (url === "/api/models") return Response.json({ models: [{ id: "configured-model", modelId: "happyhorse-1.1", name: "happyhorse-1.1" }] });
+            if (url === "/api/models") return Response.json(businessConfigFor("happyhorse-1.1"));
             if (url === "/api/auth/session") return Response.json({ user: null });
             if (url === "/api/assets/upload-request") return Response.json({ assetId: "reference-image", uploadUrl: null });
             if (url === "/api/tasks/preflight" || url === "/api/tasks") {
@@ -130,7 +135,7 @@ describe("video model parameter contract", () => {
             const payloads: Array<Record<string, unknown>> = [];
             globalThis.fetch = (async (input, init) => {
                 const url = String(input);
-                if (url === "/api/models") return Response.json({ models: [{ id: "configured-model", modelId: model, name: model }] });
+                if (url === "/api/models") return Response.json(businessConfigFor(model));
                 if (url === "/api/auth/session") return Response.json({ user: null });
                 if (url === "/api/tasks/preflight" || url === "/api/tasks") {
                     payloads.push(JSON.parse(String(init?.body)));
@@ -140,7 +145,7 @@ describe("video model parameter contract", () => {
             }) as typeof fetch;
             await expect(createVideoGenerationTask(config, "mocked contract test")).resolves.toMatchObject({ id: "contract-task", model });
             expect(payloads).toHaveLength(2);
-            for (const payload of payloads) expect(payload.parameters).toEqual(videoModelRequestParameters(config));
+            for (const payload of payloads) expect(payload.parameters).toEqual({ tool: "video", ...videoModelRequestParameters(config) });
         }
     });
 });

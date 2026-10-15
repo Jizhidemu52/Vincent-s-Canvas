@@ -21,7 +21,8 @@ test("open demo supports configured chat and streaming without login, network or
   Object.assign(process.env, testEnv);
   let demoFetch: DemoFetch | undefined;
   const serve = spyOn(Bun, "serve").mockImplementation((options) => {
-    demoFetch = (options as { fetch: DemoFetch }).fetch;
+    const handler = options as unknown as { fetch: DemoFetch; error: (error: Error) => Response };
+    demoFetch = async request => { try { return await handler.fetch(request); } catch (error) { return handler.error(error as Error); } };
     return {} as never;
   });
   const originalFetch = globalThis.fetch;

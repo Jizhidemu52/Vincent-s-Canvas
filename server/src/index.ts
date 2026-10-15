@@ -33,7 +33,8 @@ import { createIntegrationsRouter } from "./routes/integrations";
 import { createInternalAiConfigurationRouter } from "./routes/internal-ai-configuration";
 import { createGroupsRouter, createTeamRouter } from "./routes/groups";
 import { createAdminModuleFlagsRouter, createModuleFlagsRouter } from "./routes/module-flags";
-import { ModuleDisabledError } from "./module-flags";
+import { assertModuleEnabled, ModuleDisabledError } from "./module-flags";
+import { ToolConfigurationError } from "./tool-configuration";
 import {
   createAdminGroupCreditsRouter,
   createGroupCreditsRouter,
@@ -91,7 +92,9 @@ app.use("/api/auth", createAuthRouter(db, cache, config));
 const requireSession = sessionMiddleware(db, cache, config);
 const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
 const designLibrary = new DesignLibraryService(new PostgresDesignLibraryRepository(db), designLibraryObjectStorage(storage));
-app.use("/api/design-library", requireSession, requireAccountReady, createDesignLibraryRouter(designLibrary));
+app.use("/api/design-library", requireSession, requireAccountReady, async (_request, _response, next) => {
+  try { await assertModuleEnabled(db, "design-library"); next(); } catch (error) { next(error); }
+}, createDesignLibraryRouter(designLibrary));
 app.use("/api/admin/design-library", requireAdminSession, requireAccountReady, createDesignLibraryRouter(designLibrary, { admin: true }));
 const protectModelIdentity = designerModelPrivacy(db);
 app.use("/api/canvas-documents", requireSession, requireAccountReady, protectModelIdentity, createCanvasDocumentsRouter(db));
@@ -288,6 +291,10 @@ const errorHandler: ErrorRequestHandler = (
       message: "提交内容不符合要求",
       issues: error.issues,
     });
+    return;
+  }
+  if (error instanceof ToolConfigurationError) {
+    response.status(error.status).json({ error: error.code, message: error.message });
     return;
   }
   if (error instanceof ModuleDisabledError) {

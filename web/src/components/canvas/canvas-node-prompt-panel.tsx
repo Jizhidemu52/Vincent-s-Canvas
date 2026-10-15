@@ -28,6 +28,7 @@ import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
 import { uploadImage } from "@/services/image-storage";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
@@ -52,7 +53,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = defaultMode(node.type);
-    const config = buildNodeConfig(globalConfig, node, mode);
+    const toolKey = canvasToolKey(mode, mode === "image" && resolveCanvasNodeImageReferences(node, canvasNodes, canvasConnections).length > 0);
+    const config = useToolConfig(buildNodeConfig(globalConfig, node, mode), toolKey);
+    const toolEnabled = useToolEnabled(toolKey);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
@@ -79,7 +82,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const videoContext = mode === "video" ? buildNodeGenerationContext(node.id, canvasNodes, canvasConnections, prompt) : null;
     const videoConfig = mode === "video" ? { ...config, ...normalizeVideoModelConfig(config) } : config;
     const videoValidation = videoContext ? videoReferenceError(videoConfig, videoContext.referenceImages, videoContext.referenceVideos, videoContext.referenceAudios) : "";
-    const usage = estimate({ operationType: operationTypeForMode(mode, hasImageContent), modelId: modelOptionName(config.model), quantity: mode === "image" ? Number(config.count) || 1 : 1 });
+    const usage = estimate({ operationType: operationTypeForMode(mode, toolKey === "canvas-edit"), toolKey, modelId: modelOptionName(config.model), quantity: mode === "image" ? Number(config.count) || 1 : 1 });
     const credits = usage.configured ? usage.credits : 0;
 
     useEffect(() => {
@@ -97,7 +100,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const submit = () => {
         const text = prompt.trim();
-        if (!text || isRunning || !referenceValidation.valid || videoValidation) return;
+        if (!toolEnabled || !text || isRunning || !referenceValidation.valid || videoValidation) return;
         promptDraftRef.current?.flush();
         onGenerate(node.id, mode, text);
         setPrompt("");
@@ -166,7 +169,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     <CanvasPromptLibrary onSelect={updatePrompt} />
                     {mode === "image" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker toolKey={toolKey} config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasImageSettingsPopover
                                 config={config}
                                 placement="topLeft"
@@ -178,16 +181,16 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker toolKey={toolKey} config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasVideoSettingsPopover config={config} referenceCount={videoContext?.imageCount} imageMode={videoContext ? resolveVideoMode(videoConfig, videoContext.imageCount, videoContext.videoCount, videoContext.audioCount) : undefined} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                         </>
                     ) : mode === "audio" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker toolKey={toolKey} config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasAudioSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
                     ) : (
-                        <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
+                        <ModelPicker toolKey={toolKey} config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
                     )}
                 </div>
                 <Button
@@ -195,7 +198,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
                     danger={isRunning}
                     style={isRunning ? undefined : { background: theme.toolbar.primary, borderColor: theme.toolbar.primary }}
-                    disabled={!isRunning && (!prompt.trim() || !referenceValidation.valid || Boolean(videoValidation))}
+                    disabled={!isRunning && (!toolEnabled || !prompt.trim() || !referenceValidation.valid || Boolean(videoValidation))}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={isRunning ? "停止生成" : "生成"}
                 >

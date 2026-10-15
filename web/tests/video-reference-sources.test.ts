@@ -31,7 +31,7 @@ test("uploads and existing asset URLs retain source order through preflight and 
     const uploads: any[] = [];
     globalThis.fetch = (async (input, init) => {
         const path = String(input);
-        if (path === "/api/models") return Response.json({ models: [{ id: "seedance", modelId: "doubao-seedance-2.5" }] });
+        if (path === "/api/models") return Response.json({ models: [{ id: "seedance", modelId: "doubao-seedance-2.5", name: "Seedance", capabilities: ["video"], creditCost: 0, rmbCost: 0 }], tools: [], prices: [] });
         if (path === "/api/auth/session") return Response.json({ user: null });
         if (path === "/api/assets/upload-request") {
             uploads.push(JSON.parse(String(init?.body)));
@@ -46,7 +46,7 @@ test("uploads and existing asset URLs retain source order through preflight and 
     await submitQueuedMediaTask({ modelId: "doubao-seedance-2.5", operationType: "video_generation", prompt: "edit background", parameters: { videoMode: "edit", seconds: -1 }, sourceFiles: [new File(["first"], "a.mp4", { type: "video/mp4" }), new File(["third"], "c.wav", { type: "audio/wav" })], sourceUrls: ["/api/assets/second/content"], sourceMetadata: [{ durationMs: 4000, fps: 24 }, { durationMs: 2000 }], sourceOrder: [{ kind: "file", index: 0 }, { kind: "url", index: 0 }, { kind: "file", index: 1 }] });
     expect(payloads).toHaveLength(2);
     for (const payload of payloads) expect(payload.sourceUrls).toEqual(["/api/assets/upload-1/content", "/api/assets/second/content", "/api/assets/upload-2/content"]);
-    expect(payloads[1].parameters).toEqual({ videoMode: "edit", seconds: -1, size: "adaptive" });
+    expect(payloads[1].parameters).toEqual({ tool: "video", videoMode: "edit", seconds: -1, size: "adaptive" });
     expect(uploads[0].metadata).toMatchObject({ durationMs: 4000, fps: 24 });
 });
 

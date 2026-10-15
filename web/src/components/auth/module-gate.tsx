@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 
 import type { ModuleKey } from "@/services/api/modules";
-import { useModuleStore } from "@/stores/use-module-store";
+import { useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
 import { standaloneEdition } from "@/lib/standalone-edition";
 import { shouldBypassStandaloneModuleGate } from "@/lib/standalone-access";
 
@@ -14,7 +14,7 @@ export function ModuleGate({ children, moduleKey }: { children: ReactNode; modul
     const status = useModuleStore((state) => state.status);
     const refresh = useModuleStore((state) => state.refresh);
     const resolvedKey = typeof moduleKey === "function" ? moduleKey(location.search) : moduleKey;
-    const enabled = useModuleStore((state) => state.flags[resolvedKey]);
+    const enabled = useModuleEnabled(resolvedKey);
 
     useEffect(() => { if (status === "idle") void refresh().catch(() => undefined); }, [refresh, status]);
 

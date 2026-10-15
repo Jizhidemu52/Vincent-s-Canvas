@@ -4,7 +4,7 @@ import { z } from "zod";
 import { writeAudit } from "../audit";
 import type { AppConfig } from "../config";
 import type { Database } from "../db";
-import { assertModuleEnabled } from "../module-flags";
+import { resolveToolExecution } from "../tool-configuration";
 import { decryptSecret } from "../security";
 import { fetchProviderSubmission } from "../provider-submission-transport";
 import type { AuthenticatedRequest } from "../types";
@@ -31,7 +31,8 @@ export const chatFunctionToolsSchema = z.array(z.object({
 }).strict()).max(100).default([]);
 
 const schema = z.object({
-    modelId: z.string().min(1).max(200),
+    modelId: z.string().min(1).max(200).optional(),
+    toolKey: z.string().min(1).max(100).optional(),
     input: z.array(z.unknown()).max(200),
     tools: chatFunctionToolsSchema,
     toolChoice: z.unknown().optional(),
@@ -50,7 +51,8 @@ export function createChatRouter(db: Database, config: AppConfig) {
     router.post("/responses", async (request, response, next) => {
         try {
             const input = schema.parse(request.body) as {
-                modelId: string;
+                modelId?: string;
+                toolKey?: string;
                 input: ResponseInput[];
                 tools: ResponseTool[];
                 toolChoice?: unknown;
@@ -58,7 +60,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 gemini?: { maxOutputTokens: number };
                 claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
             };
-            await assertModuleEnabled(db, "gpt-chat");
+            const execution = await resolveToolExecution(db, { ...input, operationType: "chat" });
 
             const actor = (request as unknown as AuthenticatedRequest).auth;
             const result = await db.query<ChatModel>(
@@ -67,7 +69,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
                  WHERE (m.id::text=$1 OR m.model_id=$1)
                    AND m.enabled=true AND p.enabled=true AND 'chat'=ANY(m.capabilities)
                  LIMIT 1`,
-                [input.modelId],
+                [execution.modelConfigId],
             );
             const model = result.rows[0];
             if (!model) {
@@ -92,9 +94,9 @@ export function createChatRouter(db: Database, config: AppConfig) {
                     actor,
                     action: "chat.completed",
                     targetType: "model",
-                    targetId: input.modelId,
+                    targetId: execution.modelConfigId,
                     result: "success",
-                    detail: { protocol: model.protocol, streaming: true },
+                    detail: { protocol: model.protocol, streaming: true, toolKey: execution.toolKey, configurationVersion: execution.configurationVersion },
                     ip: request.ip,
                 });
                 response.end();
@@ -106,9 +108,9 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 actor,
                 action: "chat.completed",
                 targetType: "model",
-                targetId: input.modelId,
+                targetId: execution.modelConfigId,
                 result: "success",
-                detail: { protocol: model.protocol, toolCallCount: resultPayload.toolCalls.length },
+                detail: { protocol: model.protocol, toolCallCount: resultPayload.toolCalls.length, toolKey: execution.toolKey, configurationVersion: execution.configurationVersion },
                 ip: request.ip,
             });
             response.json(resultPayload);

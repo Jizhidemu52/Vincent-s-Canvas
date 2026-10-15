@@ -1,13 +1,23 @@
 import { ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { buildCreativePresetHref, creativePresetGroups, creativePresets } from "@/lib/creative-presets";
-import { useModuleStore } from "@/stores/use-module-store";
+import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import type { ModuleKey } from "@/services/api/modules";
 import { sceneSummaries } from "./scene-form-model";
 import "./creative.css";
 
+const workbenches = [
+    { key: "pattern-placement", title: "图案定位", description: "把图案放到指定产品位置，调整比例、图层和构图，保存工程或导出合成图。", mode: "本地编辑 · 无需 API" },
+    { key: "pattern-repeat", title: "花型循环", description: "直排、半落与镜像循环，按物理尺寸设置画布，导出花型与完整工程。", mode: "本地编辑 · 无需 API" },
+    { key: "series-recipe", title: "系列配方", description: "组合参考、配色和设计约束，冻结配方后生成系列候选，分支重试与保存。", mode: "AI 生成 · 独立模型配置" },
+] as const;
+
 export default function CreativePage() {
     const flags = useModuleStore((state) => state.flags);
-    const presets = creativePresets.filter((preset) => flags[preset.tool === "image-generation" ? "image" : "image-edit"]);
+    const tools = useBusinessConfigStore(state => state.tools);
+    const presets = creativePresets.filter((preset) => isModuleAvailable(flags, tools, `creative-${preset.id}` as ModuleKey));
+    const availableWorkbenches = workbenches.filter(item => isModuleAvailable(flags, tools, item.key));
 
     return <main className="wb-page creative-page h-full overflow-y-auto">
         <div className="creative-content">
@@ -29,7 +39,13 @@ export default function CreativePage() {
                     </div>
                 </section> : null;
             })}
-            {!presets.length ? <div className="wb-empty"><strong>暂无可用的设计场景</strong><p>图片生成或图片编辑功能启用后，相关场景会显示在这里。</p></div> : <p className="creative-note">封面为 AI 制作的功能示意，不是模型实测结果。进入后按场景填写，点击生成才会提交任务。</p>}
+            {availableWorkbenches.length ? <section className="creative-section" aria-labelledby="creative-workbenches">
+                <h2 id="creative-workbenches">设计工作台<span>{String(availableWorkbenches.length).padStart(2, "0")}</span></h2>
+                <div className="creative-grid">{availableWorkbenches.map(item => <Link key={item.key} to={`/creative/${item.key}`} className="creative-card">
+                    <div className="creative-card-copy"><p>{item.mode}</p><h3>{item.title}<ArrowRight size={16} strokeWidth={1.5} /></h3><p>{item.description}</p></div>
+                </Link>)}</div>
+            </section> : null}
+            {!presets.length && !availableWorkbenches.length ? <div className="wb-empty"><strong>暂无可用的设计场景</strong><p>管理员启用对应创意板块后，场景会显示在这里。</p></div> : <p className="creative-note">场景封面为 AI 制作的功能示意，不是模型实测结果。AI 工作台点击生成才会提交任务，本地工作台不调用模型。</p>}
         </div>
     </main>;
 }

@@ -11,7 +11,7 @@ describe("module availability", () => {
     expect(moduleForOperation("inpaint")).toBe("image-edit");
     expect(moduleForOperation("inpaint", { tool: "angle-control" })).toBe("angle-control");
     expect(moduleForOperation("seamless_stitch")).toBe("seamless-stitch");
-    expect(moduleForOperation("batch_image")).toBe("canvas");
+    expect(moduleForOperation("batch_image")).toBe("canvas-batch");
     expect(moduleForOperation("unknown")).toBeNull();
   });
 

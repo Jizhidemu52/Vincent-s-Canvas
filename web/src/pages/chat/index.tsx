@@ -13,6 +13,8 @@ import { createChatStreamBuffer } from "./chat-stream-buffer";
 import { chatSessionStorage } from "./chat-session-storage";
 import { chatImageQualitySettings, preferredChatImageModel, resolveChatImageQuality } from "./image-quality";
 import { useImageModelProfile } from "@/lib/image-model-settings";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { useModuleEnabled } from "@/stores/use-module-store";
 import { isClaudeModel, requestEdit, requestGeneration } from "@/services/api/image";
 import { requestCreativeChatPlan } from "@/services/api/creative-chat";
 import { recoverChatImageTask, type PendingChatImageTask } from "@/services/api/chat-image-recovery";
@@ -22,7 +24,6 @@ import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType } from "@/types/canvas";
 
-type ChatModel = { modelId: string; name: string; creditCost: number; capabilities: string[] };
 type ChatAttachment = Omit<ParsedChatAttachment, "kind"> & { id: string; kind?: ParsedChatAttachment["kind"] };
 type ChatGeneratedImage = { id: string; dataUrl: string; prompt?: string; modelId?: string; quality?: string; lineage?: CreativeImageLineage };
 type ChatMessage = { id: string; parentMessageId?: string; editTargetImageId?: string; role: "user" | "assistant" | "error"; content: string; attachments?: ChatAttachment[]; generatedImages?: ChatGeneratedImage[]; pendingImageTask?: PendingChatImageTask; createdAt: string };
@@ -59,10 +60,11 @@ export default function ChatPage() {
     const config = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const storageKey = `${storagePrefix}${user?.id || "anonymous"}`;
-    const [models, setModels] = useState<ChatModel[]>([]);
-    const [modelsLoading, setModelsLoading] = useState(true);
-    const [modelError, setModelError] = useState("");
-    const [modelReload, setModelReload] = useState(0);
+    // Model options and tool bindings must come from the same refresh snapshot.
+    const businessConfig = useBusinessConfigStore();
+    const { models, tools: toolBindings, status: modelsStatus, refresh: refreshModels } = businessConfig;
+    const modelsLoading = modelsStatus === "idle" || modelsStatus === "loading";
+    const modelError = modelsStatus === "error" ? businessConfig.error || "模型列表暂时无法读取，请重试。" : "";
     const [selectedModel, setSelectedModel] = useState("");
     const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches);
     const [sessions, setSessionsState] = useState<ChatSession[]>([]);
@@ -164,19 +166,8 @@ export default function ChatPage() {
     }, [isSending, loadedStorageKey, persistence, sessions, storageKey]);
 
     useEffect(() => {
-        let active = true;
-        setModelsLoading(true);
-        setModelError("");
-        fetch("/api/models", { credentials: "include" })
-            .then((response) => response.ok ? response.json() : Promise.reject(new Error("无法加载对话模型")))
-            .then((data: { models: ChatModel[] }) => {
-                if (!active) return;
-                setModels(data.models);
-            })
-            .catch(() => { if (active) { setModels([]); setModelError("模型列表暂时无法读取，请重试。"); } })
-            .finally(() => { if (active) setModelsLoading(false); });
-        return () => { active = false; };
-    }, [modelReload]);
+        if (modelsStatus === "idle") void refreshModels().catch(() => undefined);
+    }, [modelsStatus, refreshModels]);
 
     useEffect(() => {
         followBottomRef.current = true;
@@ -193,10 +184,13 @@ export default function ChatPage() {
 
     const activeSession = useMemo(() => sessions.find((item) => item.id === activeSessionId) || sessions[0], [activeSessionId, sessions]);
     const pendingImageMessage = activeSession?.messages.find((item) => item.pendingImageTask);
-    const chatModels = useMemo(() => models.filter((item) => item.capabilities.includes("chat")), [models]);
+    const chatBinding = toolBindings.find(item => item.toolKey === "gpt-chat");
+    const imageBinding = toolBindings.find(item => item.toolKey === "gpt-chat-image");
+    const chatImageEnabled = useModuleEnabled("gpt-chat-image");
+    const chatModels = useMemo(() => modelsStatus === "ready" ? models.filter((item) => item.capabilities.includes("chat") && chatBinding?.enabled !== false && (!chatBinding?.modelConfigId || item.id === chatBinding.modelConfigId)) : [], [models, modelsStatus, chatBinding]);
     // The conversation chooses whether an image task is needed. Demo-only
     // models must never be picked for a real provider task.
-    const imageModels = useMemo(() => models.filter((item) => !item.modelId.startsWith("demo-") && item.capabilities.some((capability) => ["generate", "edit"].includes(capability))), [models]);
+    const imageModels = useMemo(() => modelsStatus === "ready" ? models.filter((item) => chatImageEnabled && imageBinding?.enabled !== false && (!imageBinding?.modelConfigId || item.id === imageBinding.modelConfigId) && !item.modelId.startsWith("demo-") && item.capabilities.some((capability) => ["generate", "edit"].includes(capability))) : [], [models, modelsStatus, imageBinding, chatImageEnabled]);
     const preferredImageModel = preferredChatImageModel(imageModels, [activeSession?.imageModelId, config.imageModel, config.model]);
     const qualityProfile = useImageModelProfile(preferredImageModel?.modelId || "");
     const imageQualitySettings = chatImageQualitySettings(qualityProfile, activeSession?.imageQuality);
@@ -420,8 +414,8 @@ export default function ChatPage() {
                 await persistSessions(sessionsRef.current);
             };
             const generated = action === "edit"
-                ? await requestEdit(imageConfig, imagePrompt, references, undefined, { operationType: "inpaint", tool: "gpt-chat", requestId: pendingImageTask.requestId, signal, onSubmissionStarted, onSubmitted })
-                : await requestGeneration(imageConfig, imagePrompt, { operationType: "image_generation", tool: "gpt-chat", requestId: pendingImageTask.requestId, signal, onSubmissionStarted, onSubmitted });
+                ? await requestEdit(imageConfig, imagePrompt, references, undefined, { operationType: "inpaint", tool: "gpt-chat-image", requestId: pendingImageTask.requestId, signal, onSubmissionStarted, onSubmitted })
+                : await requestGeneration(imageConfig, imagePrompt, { operationType: "image_generation", tool: "gpt-chat-image", requestId: pendingImageTask.requestId, signal, onSubmissionStarted, onSubmitted });
             if (!generated.length) throw new Error("图像模型没有返回图片");
             const savedImages = await Promise.all(generated.map(async (item, index) => ({ id: item.sourceTaskId ? `${item.sourceTaskId}:${index}` : item.id, dataUrl: await imageToDataUrl(item).catch(() => item.dataUrl), prompt: imagePrompt, modelId: imageModelId, quality, lineage })));
             updateSession(sessionId, (session) => ({
@@ -520,7 +514,7 @@ export default function ChatPage() {
                             <div className="relative min-w-0"><select aria-label="对话模型" disabled={isSending || modelsLoading || !availableModels.length} value={selectedModel} onChange={(event) => { const modelId = event.target.value; setSelectedModel(modelId); if (activeSession) updateSession(activeSession.id, (session) => ({ ...session, chatModelId: modelId })); }} className="h-10 max-w-[240px] appearance-none rounded-xl bg-transparent py-0 pl-3 pr-9 text-sm text-foreground outline-none hover:bg-muted disabled:opacity-50">{!selectedModel ? <option value="">{modelsLoading ? "正在读取模型" : "暂无可用模型"}</option> : null}{availableModels.map((item) => <option key={item.modelId} value={item.modelId}>{item.name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-3 size-4 text-muted-foreground" /></div>
                         </div>
                     </header>
-                    {modelError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{modelError}</span><Button onClick={() => setModelReload((value) => value + 1)}>重试加载</Button></div> : null}
+                    {modelError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{modelError}</span><Button onClick={() => void refreshModels().catch(() => undefined)}>重试加载</Button></div> : null}
                     {!sessionsReady ? <div role={sessionLoadError ? "alert" : "status"} className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{sessionLoadError || "正在读取本地聊天记录…"}</span>{sessionLoadError ? <Button onClick={() => setSessionReload((value) => value + 1)}>重试读取记录</Button> : null}</div> : null}
                     {sessionSaveError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{sessionSaveError}</span><Button onClick={() => { if (sessionsReady && !preparingMessageRef.current) { persistence.clear(); void persistSessions(sessionsRef.current).catch(() => undefined); } }}>重试保存记录</Button></div> : null}
 

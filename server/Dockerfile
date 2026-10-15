@@ -5,5 +5,6 @@ RUN apk add --no-cache ffmpeg nodejs ca-certificates \
 COPY server/package.json server/bun.lock* ./
 RUN bun install --frozen-lockfile
 COPY server ./
+COPY shared /shared
 EXPOSE 3100
 CMD ["sh", "-c", "bun src/migrate.ts && bun src/bootstrap.ts && bun src/index.ts"]

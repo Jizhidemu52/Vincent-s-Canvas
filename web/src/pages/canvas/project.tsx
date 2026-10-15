@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronDown, Bot, Download, Globe, Home, ImageIcon, Images, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Share2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 
 import { requestBatchEdit, requestImageQuestion } from "@/services/api/image";
+import { canvasToolKey, currentToolConfig, useToolConfig } from "@/hooks/use-tool-config";
 import { useCanvasImageTasks } from "./use-canvas-image-tasks";
 import { controlQueuedBatch, QueuedTaskFailedError, QueuedTaskPausedError, type QueuedBatchAction } from "@/services/api/generation-tasks";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
@@ -40,12 +41,10 @@ import type { CanvasImageMaskEditPayload } from "@/components/canvas/canvas-node
 import type { CanvasImageSplitParams } from "@/components/canvas/canvas-node-split-dialog";
 import type { CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
 import { buildNodeGenerationContext, buildNodeResponseMessages, createConfigGenerationInputIndex, hydrateNodeGenerationContext, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
-import { CanvasPerformancePanel } from "@/components/canvas/canvas-performance-panel";
 import { CanvasConnectionLayer, type CanvasConnectionLayerHandle } from "@/components/canvas/canvas-connection-layer";
 import { CanvasOverviewLayer, type CanvasOverviewLayerHandle } from "@/components/canvas/canvas-overview-layer";
 import { CanvasSelectionOverlay, type CanvasSelectionOverlayHandle } from "@/components/canvas/canvas-selection-overlay";
 import { WirelessCanvas, type WirelessCanvasHandle } from "@/components/canvas/wireless-canvas";
-import { Minimap } from "@/components/canvas/canvas-mini-map";
 import { CanvasNode } from "@/components/canvas/canvas-node";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
@@ -152,6 +151,8 @@ const CanvasDesignActions = lazy(() => import("@/components/canvas/canvas-design
 const CanvasInlineImageCompare = lazy(() => import("@/components/canvas/canvas-inline-image-compare").then(module => ({ default: module.CanvasInlineImageCompare })));
 const CanvasGroupLayer = lazy(() => import("@/components/canvas/canvas-group-layer").then(module => ({ default: module.CanvasGroupLayer })));
 const CanvasGroupNameDialog = lazy(() => import("@/components/canvas/canvas-group-name-dialog").then(module => ({ default: module.CanvasGroupNameDialog })));
+const CanvasPerformancePanel = lazy(() => import("@/components/canvas/canvas-performance-panel").then(module => ({ default: module.CanvasPerformancePanel })));
+const Minimap = lazy(() => import("@/components/canvas/canvas-mini-map").then(module => ({ default: module.Minimap })));
 const CanvasLocalAgentPanel = lazy(loadCanvasLocalAgentPanel);
 const CanvasNodeAngleDialog = lazy(loadCanvasNodeAngleDialog);
 const CanvasNodeCropDialog = lazy(loadCanvasNodeCropDialog);
@@ -383,6 +384,10 @@ function WirelessCanvasPage() {
     const localAgentConnected = useCanvasAgentStore((state) => state.connected);
     const localAgentActivity = useCanvasAgentStore((state) => state.activity);
     const localAgentEnabled = useCanvasAgentStore((state) => state.enabled);
+    const localAgentModuleEnabled = useModuleEnabled("canvas-local-agent");
+    const localToolsEnabled = useModuleEnabled("canvas-local-tools");
+    const maskEditEnabled = useModuleEnabled("canvas-mask-edit");
+    const angleEditEnabled = useModuleEnabled("canvas-angle");
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const quickReferenceInputRef = useRef<HTMLInputElement>(null);
@@ -585,8 +590,8 @@ function WirelessCanvasPage() {
         });
     }
 
-    const selectedMaskEditModel = maskEditModel || effectiveConfig.imageModel || effectiveConfig.model;
-    const maskEditEstimate = useMemo(() => estimateUsage({ operationType: "inpaint", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }), [estimateUsage, selectedMaskEditModel]);
+    const selectedMaskEditModel = useToolConfig({ ...effectiveConfig, model: maskEditModel || effectiveConfig.imageModel || effectiveConfig.model }, "canvas-mask-edit").model;
+    const maskEditEstimate = useMemo(() => estimateUsage({ operationType: "inpaint", toolKey: "canvas-mask-edit", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }), [estimateUsage, selectedMaskEditModel]);
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
@@ -631,6 +636,7 @@ function WirelessCanvasPage() {
         () =>
             estimateUsage({
                 operationType: quickGenerateReferences.length ? "inpaint" : "image_generation",
+                toolKey: quickGenerateReferences.length ? "canvas-edit" : "canvas-image",
                 modelId: modelOptionName(quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model),
                 quantity: quickGenerateCount,
             }),
@@ -1671,6 +1677,7 @@ function WirelessCanvasPage() {
     );
 
     const createSelectedGroup = useCallback(() => {
+        if (!localToolsEnabled) return;
         const memberIds = canvasGroupMemberIds(selectedNodeIdsRef.current, nodeById);
         if (memberIds.size < 2) { message.info("请先框选至少两个节点，再创建款式组"); return; }
         let number = groupsRef.current.length + 1;
@@ -1682,7 +1689,7 @@ function WirelessCanvasPage() {
         setContextMenu(null);
         setDialogNodeId(null);
         setRenameGroup({ id: group.id, name: group.title });
-    }, [commitSelectedNodeIds, message, nodeById]);
+    }, [commitSelectedNodeIds, localToolsEnabled, message, nodeById]);
 
     const selectGroup = useCallback((id: string) => {
         const group = groupIndex.groups.find(item => item.group.id === id);
@@ -2701,12 +2708,14 @@ function WirelessCanvasPage() {
     };
 
     const openImageCompare = useCallback((node?: CanvasNodeData) => {
+        if (!localToolsEnabled) return;
         const selected = Array.from(selectedNodeIdsRef.current);
         setCompareImageIds(node ? [node.id, ...selected.filter(id => id !== node.id)] : selected);
         setContextMenu(null);
-    }, []);
+    }, [localToolsEnabled]);
 
     const applyDesignTemplate = async (id: import("@/lib/canvas/canvas-design-templates").CanvasDesignTemplateId, steps: import("@/lib/canvas/canvas-design-templates").CanvasDesignTemplateSteps, title?: string) => {
+        if (!localToolsEnabled) return;
         const sourceId = templateSourceId;
         const { createCanvasDesignTemplate } = await import("@/lib/canvas/canvas-design-templates");
         if (designProjectIdRef.current !== projectId) return;
@@ -2727,6 +2736,7 @@ function WirelessCanvasPage() {
     };
 
     const arrangeNodes = async (mode: import("@/lib/canvas/canvas-node-arrange").CanvasArrangeMode) => {
+        if (!localToolsEnabled) return;
         const { arrangeCanvasNodes } = await import("@/lib/canvas/canvas-node-arrange");
         if (designProjectIdRef.current !== projectId) return;
         const next = arrangeCanvasNodes(nodesRef.current, groupsRef.current, selectedNodeIdsRef.current, mode);
@@ -2883,8 +2893,8 @@ function WirelessCanvasPage() {
     const maskEditImageNode = useCallback(
         async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
-            const selectedModel = payload.model || effectiveConfig.imageModel || effectiveConfig.model;
-            const usage = estimateUsage({ operationType: "inpaint", modelId: modelOptionName(selectedModel), quantity: 1 });
+            const selectedModel = currentToolConfig({ ...effectiveConfig, model: payload.model || effectiveConfig.imageModel || effectiveConfig.model }, "canvas-mask-edit").model;
+            const usage = estimateUsage({ operationType: "inpaint", toolKey: "canvas-mask-edit", modelId: modelOptionName(selectedModel), quantity: 1 });
             const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), model: selectedModel, imageModel: selectedModel, count: "1", size: node.metadata?.size || "auto" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
@@ -2927,7 +2937,7 @@ function WirelessCanvasPage() {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const imageTask = await createOptions(childId, controller);
+                const imageTask = await createOptions(childId, controller, undefined, "canvas-mask-edit");
                 const { metadata, uploaded } = await imageTask.generate(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl });
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...metadata, prompt, ...generationMetadata } } : item)));
@@ -2999,7 +3009,7 @@ function WirelessCanvasPage() {
     const generateAngleNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
             if (!node.metadata?.content) return;
-            const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1" };
+            const generationConfig = currentToolConfig({ ...buildGenerationConfig(effectiveConfig, node, "image"), ...(params.model ? { model: params.model } : {}), count: "1" }, "canvas-angle");
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
                 return;
@@ -3030,7 +3040,7 @@ function WirelessCanvasPage() {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const imageTask = await createOptions(childId, controller);
+                const imageTask = await createOptions(childId, controller, undefined, "canvas-angle");
                 const { metadata, uploaded } = await imageTask.generate(
                     generationConfig,
                     prompt,
@@ -3220,7 +3230,7 @@ function WirelessCanvasPage() {
     const runQuickCanvasGeneration = useCallback(async () => {
         if (quickSubmissionRef.current) return;
         const prompt = quickGeneratePrompt.trim();
-        const model = quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model;
+        const model = currentToolConfig({ ...effectiveConfig, model: quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model }, quickGenerateReferences.length ? "canvas-edit" : "canvas-image").model;
         const modelId = modelOptionName(model);
         const profile = imageModelProfile(model);
         const settings = normalizeImageModelSettings({ size: quickGenerateSize, quality: quickGenerateQuality, count: String(quickGenerateCount) }, profile);
@@ -3237,7 +3247,7 @@ function WirelessCanvasPage() {
             count: "1",
             canvasImageCount: String(count),
         };
-        const usage = estimateUsage({ operationType, modelId, quantity: count });
+        const usage = estimateUsage({ operationType, toolKey: references.length ? "canvas-edit" : "canvas-image", modelId, quantity: count });
 
         if (!prompt && profile.requiresPrompt) {
             message.error("请输入生图提示词");
@@ -3474,9 +3484,9 @@ function WirelessCanvasPage() {
     const runBatchImageEdit = useCallback(async () => {
         const prompt = batchEditPrompt.trim();
         const items = batchEditItems;
-        const model = effectiveConfig.imageModel || effectiveConfig.model;
+        const model = currentToolConfig({ ...effectiveConfig, model: effectiveConfig.imageModel || effectiveConfig.model }, "canvas-batch").model;
         const modelId = modelOptionName(model);
-        const usage = estimateUsage({ operationType: "batch_image", modelId, quantity: items.length });
+        const usage = estimateUsage({ operationType: "batch_image", toolKey: "canvas-batch", modelId, quantity: items.length });
 
         if (!items.length) {
             message.error("请先上传文件夹或选择多张图片");
@@ -3848,7 +3858,7 @@ function WirelessCanvasPage() {
                 return;
             }
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
-            const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
+            let generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
                 reportResult([{ nodeId, status: "failed", error: "模型配置不可用" }]);
@@ -3882,12 +3892,13 @@ function WirelessCanvasPage() {
 
             try {
                 if (mode === "image") {
-                    const count = getGenerationCount(generationConfig.count);
                     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
                     const isImageNode = sourceNode?.type === CanvasNodeType.Image;
                     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;
                     const savedReferences = sourceNode ? resolveCanvasNodeImageReferences(sourceNode, nodesRef.current, connectionsRef.current) : [];
                     const referenceImages = savedReferences.length ? savedReferences : generationContext.referenceImages;
+                    generationConfig = currentToolConfig(generationConfig, canvasToolKey(mode, referenceImages.length > 0));
+                    const count = getGenerationCount(generationConfig.count);
                     const referenceValidation = validateImageReferences(modelOptionName(generationConfig.model), referenceImages);
                     if (!referenceValidation.valid) {
                         message.error(referenceValidation.message);
@@ -4080,6 +4091,7 @@ function WirelessCanvasPage() {
                     return;
                 }
 
+                generationConfig = currentToolConfig(generationConfig, canvasToolKey(mode));
                 if (mode === "video") {
                     const spec = nodeSizeFromRatio(generationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
@@ -4116,6 +4128,7 @@ function WirelessCanvasPage() {
                     try {
                         const video = await storeGeneratedVideo(
                             await requestVideoGeneration(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, {
+                                toolKey: "canvas-video",
                                 signal: controller.signal,
                                 onSubmitted: (task) => setNodes((prev) => prev.map((node) => node.id === videoId ? { ...node, metadata: { ...node.metadata, videoTaskId: task.id, videoTaskCanRecover: true } } : node)),
                             }),
@@ -4224,7 +4237,7 @@ function WirelessCanvasPage() {
                                 if (isConfigNode) return;
                                 textStreamBufferRef.current?.push({ nodeId: targetNodeId, content: text });
                             },
-                            { signal: controller.signal },
+                            { signal: controller.signal, tool: "canvas-chat" },
                         )
                             .then((answer) => ({ nodeId: targetNodeId, content: answer || localStreamed }))
                             .finally(() => finishGenerationRequest(targetNodeId, controller));
@@ -4412,7 +4425,7 @@ function WirelessCanvasPage() {
             const batchRoot = node.metadata?.batchRootId ? nodesRef.current.find((item) => item.id === node.metadata?.batchRootId) : null;
             const savedImageMetadata = node.type === CanvasNodeType.Image ? { ...batchRoot?.metadata, ...node.metadata } : undefined;
             const hasSavedImageMetadata = Boolean(savedImageMetadata?.generationType);
-            const generationConfig =
+            let generationConfig =
                 hasSavedImageMetadata && savedImageMetadata
                     ? {
                           ...effectiveConfig,
@@ -4444,6 +4457,7 @@ function WirelessCanvasPage() {
                 return;
             }
             const retryImages = retryReferenceImages || [];
+            generationConfig = currentToolConfig(generationConfig, canvasToolKey(node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image", useReferenceImages));
 
             setRunningNodeId(node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
@@ -4460,7 +4474,7 @@ function WirelessCanvasPage() {
                             streamed = text;
                             textStreamBufferRef.current?.push({ nodeId: node.id, content: text });
                         },
-                        { signal: controller.signal },
+                        { signal: controller.signal, tool: "canvas-chat" },
                     );
                     textStreamBufferRef.current?.clear(node.id);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: answer || streamed, prompt, status: NODE_STATUS_SUCCESS } } : item)));
@@ -4468,6 +4482,7 @@ function WirelessCanvasPage() {
                 }
                 if (node.type === CanvasNodeType.Video) {
                     const video = await storeGeneratedVideo(await requestVideoGeneration(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], {
+                        toolKey: "canvas-video",
                         signal: controller.signal,
                         onSubmitted: (task) => setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, videoTaskId: task.id, videoTaskCanRecover: true } } : item)),
                     }));
@@ -5037,11 +5052,11 @@ function WirelessCanvasPage() {
                         );
                     })}
 
-                    {!isNodeDragging && !isNodeResizing && !isSelecting && !connectingParams && singleSelectedNode?.type === CanvasNodeType.Image && renderedNodes.some(node => node.id === singleSelectedNode.id) ? <Suspense fallback={null}><CanvasInlineImageCompare key={singleSelectedNode.id} node={singleSelectedNode} scale={viewport.k} showImageInfo={showImageInfo} onAdvanced={() => openImageCompare(singleSelectedNode)} /></Suspense> : null}
+                    {localToolsEnabled && !isNodeDragging && !isNodeResizing && !isSelecting && !connectingParams && singleSelectedNode?.type === CanvasNodeType.Image && renderedNodes.some(node => node.id === singleSelectedNode.id) ? <Suspense fallback={null}><CanvasInlineImageCompare key={singleSelectedNode.id} node={singleSelectedNode} scale={viewport.k} showImageInfo={showImageInfo} onAdvanced={() => openImageCompare(singleSelectedNode)} /></Suspense> : null}
                     <CanvasSelectionOverlay ref={selectionOverlayRef} borderColor={theme.canvas.selectionStroke} background={theme.canvas.selectionFill} />
                     {pendingConnectionCreate ? <ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /> : null}
                 </WirelessCanvas>
-                {performanceModeEnabled ? <CanvasPerformancePanel metrics={performanceMetrics} /> : null}
+                {performanceModeEnabled ? <Suspense fallback={null}><CanvasPerformancePanel metrics={performanceMetrics} /></Suspense> : null}
 
                 {!isNodeDragging && !nodeImageSettingsOpen && !(quickGenerateOpen && !isCanvasDesktopLayout && !assistantOpen) && toolbarNode ? (
                     <Suspense fallback={null}>
@@ -5104,20 +5119,20 @@ function WirelessCanvasPage() {
                     onOpenMyAssets={openAssetsFromToolbar}
                     onGroupSelection={createSelectedGroup}
                 >
-                    <Suspense fallback={null}><CanvasDesignActions selectedCount={selectedNodeIds.size} selectedImages={Array.from(selectedNodeIds).filter(id => nodeById.get(id)?.type === CanvasNodeType.Image && Boolean(nodeById.get(id)?.metadata?.content)).length} onCompare={openImageCompare} onTemplate={() => setTemplateSourceId(null)} onArrange={arrangeNodes} /></Suspense>
+                    {localToolsEnabled && <Suspense fallback={null}><CanvasDesignActions selectedCount={selectedNodeIds.size} selectedImages={Array.from(selectedNodeIds).filter(id => nodeById.get(id)?.type === CanvasNodeType.Image && Boolean(nodeById.get(id)?.metadata?.content)).length} onCompare={openImageCompare} onTemplate={() => setTemplateSourceId(null)} onArrange={arrangeNodes} /></Suspense>}
                     <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onScalePreview={previewZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={toggleMiniMap} />
                 </CanvasToolbar>
 
-                {isMiniMapOpen ? <Minimap nodes={minimapNodes} viewport={viewport} viewportSize={size} onViewportPreview={previewMinimapViewport} onViewportChange={commitViewport} /> : null}
-                {compareImageIds ? <Suspense fallback={null}><CanvasImageCompareDialog nodes={nodes} initialIds={compareImageIds} onClose={() => setCompareImageIds(null)} /></Suspense> : null}
-                {templateSourceId !== undefined ? <Suspense fallback={null}><CanvasDesignTemplateDialog hasReference={Boolean(templateSourceId)} onApply={applyDesignTemplate} onClose={() => setTemplateSourceId(undefined)} /></Suspense> : null}
+                {isMiniMapOpen ? <Suspense fallback={null}><Minimap nodes={minimapNodes} viewport={viewport} viewportSize={size} onViewportPreview={previewMinimapViewport} onViewportChange={commitViewport} /></Suspense> : null}
+                {localToolsEnabled && compareImageIds ? <Suspense fallback={null}><CanvasImageCompareDialog nodes={nodes} initialIds={compareImageIds} onClose={() => setCompareImageIds(null)} /></Suspense> : null}
+                {localToolsEnabled && templateSourceId !== undefined ? <Suspense fallback={null}><CanvasDesignTemplateDialog hasReference={Boolean(templateSourceId)} onApply={applyDesignTemplate} onClose={() => setTemplateSourceId(undefined)} /></Suspense> : null}
 
 
                 {contextMenu ? (
                     <Suspense fallback={null}>
                     <CanvasNodeContextMenu
                         menu={contextMenu}
-                        onGroup={selectedNodeIds.size >= 2 && (contextMenu.type === "canvas" || (contextMenu.type === "node" && selectedNodeIds.has(contextMenu.nodeId))) ? createSelectedGroup : undefined}
+                        onGroup={localToolsEnabled && selectedNodeIds.size >= 2 && (contextMenu.type === "canvas" || (contextMenu.type === "node" && selectedNodeIds.has(contextMenu.nodeId))) ? createSelectedGroup : undefined}
                         onClose={() => setContextMenu(null)}
                         onGenerate={() => {
                             if (contextMenu.type !== "canvas") return;
@@ -5167,19 +5182,19 @@ function WirelessCanvasPage() {
                     </Suspense>
                 ) : null}
 
-                {manualEditNode?.metadata?.content ? (
+                {localToolsEnabled && manualEditNode?.metadata?.content ? (
                     <Suspense fallback={null}>
                         <CanvasImageEditorDialog key={`${projectId}:${manualEditNode.id}`} node={manualEditNode} onClose={() => setManualEditNode(null)} onConfirm={saveManualImageEdit} />
                     </Suspense>
                 ) : null}
 
-                {cropNode?.metadata?.content ? (
+                {localToolsEnabled && cropNode?.metadata?.content ? (
                     <Suspense fallback={null}>
                         <CanvasNodeCropDialog dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={(crop) => void cropImageNode(cropNode!, crop)} />
                     </Suspense>
                 ) : null}
 
-                {maskEditNode?.metadata?.content ? (
+                {maskEditEnabled && maskEditNode?.metadata?.content ? (
                     <Suspense fallback={null}>
                         <CanvasNodeMaskEditDialog
                             dataUrl={maskEditNode.metadata.content}
@@ -5194,13 +5209,13 @@ function WirelessCanvasPage() {
                     </Suspense>
                 ) : null}
 
-                {splitNode?.metadata?.content ? (
+                {localToolsEnabled && splitNode?.metadata?.content ? (
                     <Suspense fallback={null}>
                         <CanvasNodeSplitDialog dataUrl={splitNode.metadata.content} open={Boolean(splitNode)} onClose={() => setSplitNodeId(null)} onConfirm={(params) => void splitImageNode(splitNode!, params)} />
                     </Suspense>
                 ) : null}
 
-                {upscaleNode?.metadata?.content ? (
+                {localToolsEnabled && upscaleNode?.metadata?.content ? (
                     <Suspense fallback={null}>
                         <CanvasNodeUpscaleDialog dataUrl={upscaleNode.metadata.content} open={Boolean(upscaleNode)} onClose={() => setUpscaleNodeId(null)} onConfirm={(params) => void upscaleImageNode(upscaleNode!, params)} />
                     </Suspense>
@@ -5210,7 +5225,7 @@ function WirelessCanvasPage() {
                     <div className="py-8 text-center text-base font-medium">暂未实现</div>
                 </Modal>
 
-                {angleNode?.metadata?.content ? (
+                {angleEditEnabled && angleNode?.metadata?.content ? (
                     <Suspense fallback={null}>
                         <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} />
                     </Suspense>
@@ -5345,7 +5360,7 @@ function WirelessCanvasPage() {
                 </Modal>
                 <input ref={batchFolderInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBatchFolderInputChange} {...{ webkitdirectory: "", directory: "" }} />
                 <input ref={batchFilesInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBatchFolderInputChange} />
-                {codexCompactAgent && !assistantMounted ? (
+                {localAgentModuleEnabled && codexCompactAgent && !assistantMounted ? (
                     <Suspense fallback={null}>
                         <CanvasLocalAgentPanel headless snapshotRef={agentSnapshotRef} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} autoConnect={codexAutoConnect} />
                     </Suspense>
@@ -5422,7 +5437,7 @@ const CanvasTopBar = memo(function CanvasTopBar({
 }: CanvasTopBarRenderState) {
     const navigate = useNavigate();
     const { id: canvasId } = useParams<{ id: string }>();
-    const canImportReferences = useModuleEnabled("assets");
+    const canImportReferences = useModuleEnabled("reference-import");
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
     const titleRef = useRef<HTMLDivElement>(null);

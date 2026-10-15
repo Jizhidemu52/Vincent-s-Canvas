@@ -15,6 +15,8 @@ import { canvasImageDownloadFileName, canvasImageReferenceIdentity } from "@/lib
 import { workbenchSubmissions } from "@/lib/submission-gate";
 import { ReferenceImageTray } from "@/components/reference-images/reference-image-tray";
 import { ModelPicker } from "@/components/model-picker";
+import { useToolConfig } from "@/hooks/use-tool-config";
+import { requireToolKey } from "@/services/api/tool-runtime";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -174,7 +176,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const restoreBusy = useRef(false);
     const [restoringHistory, setRestoringHistory] = useState(false);
     const config = useConfigStore((state) => state.config);
-    const effectiveConfig = useEffectiveConfig();
+    const baseConfig = useEffectiveConfig();
+    const toolKey = requireToolKey(historyTool === "detail-enhance" ? "upscale" : historyTool === "image-generation" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool);
+    const effectiveConfig = useToolConfig({ ...baseConfig, model: baseConfig.imageModel || baseConfig.model }, toolKey);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const updateInputConfig: UpdateAiConfig = (key, value) => { inputRevision.current += 1; updateConfig(key, value); };
     const isAiConfigReady = (..._args: unknown[]) => true;
@@ -240,7 +244,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const selectedModelProfile = useImageModelProfile(adminModelId);
     const generationCount = Number(normalizeImageModelSettings(config, selectedModelProfile).count);
     const referenceValidation = validateImageReferences(adminModelId, references);
-    const estimatedUsage = estimate({ operationType, modelId: adminModelId, quantity: generationCount });
+    const estimatedUsage = estimate({ operationType, toolKey, modelId: adminModelId, quantity: generationCount });
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const missingReference = toolModeConfig.requiresReference && references.length === 0;
     const invalidBlendReferences = selectedModelProfile.kind === "midjourney-blend" && (references.length < 2 || references.length > 4);
@@ -769,7 +773,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
+                                <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
                             </div>
                         </div>
 
@@ -845,7 +849,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             </Drawer>
             <Drawer title="参数" placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={replacePrompt} />
@@ -876,7 +880,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+function GenerationSettings({ config, model, updateConfig, openConfigDialog, toolKey }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void; toolKey: ReturnType<typeof requireToolKey> }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const profile = useImageModelProfile(model);
 
@@ -884,7 +888,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
         <>
             <label className="col-span-2 block min-w-0">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" modelsSource="server" fullWidth className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker toolKey={toolKey} config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" modelsSource="server" fullWidth className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
                 {profile.verified ? <span className="mt-2 block text-xs leading-5" style={{ color: "var(--wb-muted)" }}>{profile.tip}</span> : null}
             </label>
             <div className="col-span-2">
