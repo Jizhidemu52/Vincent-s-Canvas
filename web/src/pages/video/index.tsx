@@ -21,7 +21,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
-import { isHappyHorseVideoConfig, type HappyHorseMode } from "@/lib/happyhorse-video";
+import { type HappyHorseMode } from "@/lib/happyhorse-video";
 import { getVideoModelParameterSpec, normalizeVideoModelConfig, resolveVideoMode, videoReferenceError } from "@/lib/video-model-parameters";
 import { readReferenceMediaFile } from "@/lib/video-reference-files";
 import { createLatestVideoPreview, hydrateVideoLogMedia } from "./video-log-media";
@@ -137,7 +137,6 @@ export default function VideoPage() {
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const videoConfig = buildVideoConfig(effectiveConfig, model);
-    const isHappyHorse = isHappyHorseVideoConfig({ ...effectiveConfig, model, videoModel: model });
     const modelSpec = getVideoModelParameterSpec(model);
     const maxImageReferences = videoConfig.videoMode === "first-frame" || videoConfig.videoMode === "last-frame" ? 1 : videoConfig.videoMode === "first-last-frame" ? 2 : modelSpec?.maxImages || 0;
     const optionalReferenceCount = references.length + videoReferences.length + audioReferences.length;
@@ -146,7 +145,7 @@ export default function VideoPage() {
     useEffect(() => { if (optionalReferenceCount) setReferencesOpen(true); }, [optionalReferenceCount]);
     const estimatedUsage = estimate({ operationType: "video_generation", toolKey: "video", modelId: modelOptionName(model), quantity: 1 });
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
-    const canGenerate = Boolean(prompt.trim() || (isHappyHorse && currentMode === "first-frame")) && !quotaBlocked && !validationError;
+    const canGenerate = Boolean(prompt.trim()) && !quotaBlocked && !validationError;
 
     const handleMissingModelConfig = () => {
         if (canManageConfig) {
@@ -158,7 +157,7 @@ export default function VideoPage() {
     };
 
     useEffect(() => {
-        const happyHorse = configuredModels.find((item) => item.modelId === "happyhorse-1.1");
+        const happyHorse = configuredModels.find((item) => (item.parameterModelId || item.modelId) === "happyhorse-1.1");
         const currentEnabled = configuredModels.some((item) => item.modelId === model);
         if (happyHorse && !currentEnabled) updateConfig("videoModel", happyHorse.modelId);
     }, [configuredModels, model, updateConfig]);
@@ -320,7 +319,7 @@ export default function VideoPage() {
 
     const buildRequestSnapshot = () => {
         const text = prompt.trim();
-        if (!text && !(isHappyHorse && currentMode === "first-frame")) {
+        if (!text) {
             message.error("请输入视频提示词");
             return null;
         }

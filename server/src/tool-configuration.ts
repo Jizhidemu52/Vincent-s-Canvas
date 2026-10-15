@@ -66,6 +66,9 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   if (configuration.modelConfigId && requested && requested !== model.id && requested !== model.modelId) {
     throw new ToolConfigurationError("TOOL_MODEL_CHANGED", "管理员已更改该板块模型，请刷新模型配置和参数后重试", 409);
   }
+  if (toolKey === "midjourney-blend" && model.modelId !== "midjourney-blend") {
+    throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "MJ 多图融合板块仅支持 Midjourney Blend 模型");
+  }
   const definition = getToolDefinition(toolKey)!;
   if (!definition.capabilities.some((capability) => model.capabilities.includes(capability)) || !modelSupportsOperation(input.operationType, model.capabilities)) {
     throw new ToolConfigurationError("MODEL_CAPABILITY_MISMATCH", `所选模型不支持${definition.label}`);

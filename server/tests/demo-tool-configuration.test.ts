@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { moduleKeys, toolDefinitions } from "../../shared/feature-catalog";
 import { resolveDemoToolConfiguration } from "../src/demo-tool-configuration";
+import { MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
 
 const flags = Object.fromEntries(moduleKeys.map(key => [key, true]));
 const models = [{ id: "model-a", modelId: "image-a", providerId: "provider", enabled: true, capabilities: ["generate", "edit"] }, { id: "model-b", modelId: "image-b", providerId: "provider", enabled: true, capabilities: ["generate", "edit"] }];
@@ -9,8 +10,9 @@ const binding = { toolKey: "creative-garment-colorway" as const, modelConfigId: 
 
 describe("demo formal tool configuration", () => {
   test("catalog includes formal AI slots, promoted design tools and no unfinished placeholders", () => {
-    expect(toolDefinitions).toHaveLength(26);
-    expect(new Set(moduleKeys).size).toBe(43);
+    expect(toolDefinitions).toHaveLength(27);
+    expect(new Set(moduleKeys).size).toBe(44);
+    expect(moduleKeys).toContain("midjourney-blend");
     expect(moduleKeys).toContain("standard-colors");
     expect(moduleKeys).not.toContain("canvas-ai-upscale");
   });
@@ -28,5 +30,15 @@ describe("demo formal tool configuration", () => {
     expect(resolveDemoToolConfiguration({ operationType: "inpaint", toolKey: "canvas-edit", modelConfigId: "model-b" }, [], models, providers, flags).modelConfigId).toBe("model-b");
     expect(() => resolveDemoToolConfiguration({ operationType: "inpaint", toolKey: "canvas-video", modelConfigId: "model-b" }, [], models, providers, flags)).toThrow("操作类型");
     expect(() => resolveDemoToolConfiguration({ operationType: "inpaint", toolKey: "canvas-edit", modelConfigId: "model-b" }, [], models, [{ id: "provider", enabled: false }], flags)).toThrow("未启用");
+  });
+  test("Blend accepts only its model but remains available in the canvas generation slot", () => {
+    const preset = MARK_PLATFORM_MODELS.find(model => model.modelId === "midjourney-blend")!;
+    const blendModels = [...models, { id: "blend", modelId: preset.modelId, providerId: "provider", enabled: true, capabilities: [...preset.capabilities] }];
+    const input = { operationType: "image_generation", toolKey: "midjourney-blend", modelConfigId: "model-a" };
+    expect(() => resolveDemoToolConfiguration(input, [], blendModels, providers, flags)).toThrow("仅支持 Midjourney Blend");
+    expect(() => resolveDemoToolConfiguration({ ...input, modelConfigId: undefined }, [{ toolKey: "midjourney-blend", modelConfigId: "model-a", enabled: true }], blendModels, providers, flags)).toThrow("仅支持 Midjourney Blend");
+    expect(resolveDemoToolConfiguration({ ...input, modelConfigId: "blend" }, [], blendModels, providers, flags).modelConfigId).toBe("blend");
+    expect(resolveDemoToolConfiguration({ ...input, toolKey: "canvas-image", modelConfigId: "blend" }, [], blendModels, providers, flags).modelConfigId).toBe("blend");
+    expect(() => resolveDemoToolConfiguration({ operationType: "inpaint", toolKey: "canvas-edit", modelConfigId: "blend" }, [], blendModels, providers, flags)).toThrow("不支持");
   });
 });

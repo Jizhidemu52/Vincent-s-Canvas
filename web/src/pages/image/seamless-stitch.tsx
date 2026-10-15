@@ -6,15 +6,24 @@ import { nanoid } from "nanoid";
 import { useSearchParams } from "react-router-dom";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
+import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { ModelPicker } from "@/components/model-picker";
+import { useToolConfig } from "@/hooks/use-tool-config";
+import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { imageModelProfile } from "@/lib/image-model-settings";
+import { resolveCapabilityModel } from "@/lib/model-picker-options";
 import { resolveToolModel } from "@/services/api/business-config";
 import { DEFAULT_SEAMLESS_STITCH_PARAMETERS, requestSeamlessStitch, type SeamlessStitchParameters } from "@/services/api/internal-ai";
 import { listQueuedTasks, type QueuedTask } from "@/services/api/generation-tasks";
 import { fetchServerAssetContent } from "@/services/api/server-assets";
 import { hydratePromptReuse } from "@/services/api/prompts";
+import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 import { uploadImage, type UploadedImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
@@ -44,6 +53,12 @@ export function SeamlessStitchPage() {
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const models = useBusinessConfigStore((state) => state.models);
     const tools = useBusinessConfigStore((state) => state.tools);
+    const baseConfig = useEffectiveConfig();
+    const updateConfig = useConfigStore((state) => state.updateConfig);
+    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const selectedModel = resolveCapabilityModel(baseConfig, "image", models, baseConfig.imageModel || baseConfig.model);
+    const config = useToolConfig({ ...baseConfig, model: selectedModel, imageModel: selectedModel, count: "1" }, "seamless-stitch");
     const addAsset = useAssetStore((state) => state.addAsset);
     const [source, setSource] = useState<ReferenceImage | null>(null);
     const [preset, setPreset] = useState<StitchPreset>(() => searchParams.get("preset") === "small" ? "small" : "large");
@@ -55,8 +70,10 @@ export function SeamlessStitchPage() {
     const [historyLoading, setHistoryLoading] = useState(true);
     const [historyError, setHistoryError] = useState("");
     const [previewLoading, setPreviewLoading] = useState(false);
-    const seamlessModel = resolveToolModel({ models, tools, prices: [] }, "seamless-stitch");
-    const estimatedUsage = estimate({ operationType: "seamless_stitch", toolKey: "seamless-stitch", quantity: 1 });
+    const seamlessModel = resolveToolModel({ models, tools, prices: [] }, "seamless-stitch", config.model);
+    const modelProfile = imageModelProfile(config.model, models);
+    const usesImageSettings = typeof seamlessModel?.imageSupportsMask === "boolean" || modelProfile.kind === "quality-resolution" || modelProfile.kind === "resolution-1k";
+    const estimatedUsage = estimate({ operationType: "seamless_stitch", toolKey: "seamless-stitch", modelId: config.model, quantity: 1 });
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
 
     const refreshHistory = useCallback(async () => {
@@ -185,13 +202,21 @@ export function SeamlessStitchPage() {
             return;
         }
 
-        const prompt = `无缝拼接：切割 ${parameters.cutWidth}，重绘 ${parameters.redrawWidth}，羽化 ${parameters.blurAmount}，强度 ${parameters.redrawStrength}，步数 ${parameters.steps}`;
         const startedAt = performance.now();
         ++previewSequenceRef.current;
         setPreviewLoading(false);
         setResult({ status: "pending" });
-            const response = await requestSeamlessStitch(activeSource, parameters, seamlessModel.id);
+            const response = await requestSeamlessStitch(activeSource, parameters, config);
             const uploaded = await uploadImage(response.dataUrl);
+            const recreateParameters = new URLSearchParams({ tool: "seamless-stitch", model: response.model.modelId });
+            if (response.usesImageSettings) {
+                recreateParameters.set("size", response.config.size);
+                recreateParameters.set("quality", response.config.quality);
+                recreateParameters.set("imageOptions", response.config.imageOptions || "");
+            } else {
+                recreateParameters.set("preset", preset);
+                Object.entries(parameters).forEach(([key, value]) => recreateParameters.set(key, String(value)));
+            }
             addAsset({
                 kind: "image",
                 title: `${activeSource.name.replace(/\.[^.]+$/, "")} 无缝拼接`,
@@ -206,13 +231,13 @@ export function SeamlessStitchPage() {
                     operationType: "seamless_stitch",
                     projectId: "tool-seamless-stitch",
                     designerId: currentUser?.id,
-                    prompt,
-                    model: seamlessModel.name,
-                    modelId: seamlessModel.modelId,
+                    prompt: response.usesImageSettings ? response.prompt : `无缝拼接：切割 ${parameters.cutWidth}，重绘 ${parameters.redrawWidth}，羽化 ${parameters.blurAmount}，强度 ${parameters.redrawStrength}，步数 ${parameters.steps}`,
+                    model: response.model.name,
+                    modelId: response.model.modelId,
                     sourceFile: activeSource.name,
                     sourceImage: activeSource.storageKey || activeSource.url || activeSource.dataUrl,
-                    ...parameters,
-                    recreatePath: `/image?tool=seamless-stitch&preset=${preset}&cutWidth=${parameters.cutWidth}&redrawWidth=${parameters.redrawWidth}&blurAmount=${parameters.blurAmount}&redrawStrength=${parameters.redrawStrength}&steps=${parameters.steps}`,
+                    ...response.parameters,
+                    recreatePath: `/image?${recreateParameters.toString()}`,
                 },
             });
             setResult({ status: "success", image: uploaded, durationMs: performance.now() - startedAt });
@@ -230,11 +255,24 @@ export function SeamlessStitchPage() {
     runStitchRef.current = runStitch;
 
     useEffect(() => {
+        const model = searchParams.get("model");
+        if (model) updateConfig("imageModel", model);
+        for (const key of ["size", "quality", "imageOptions"] as const) {
+            const value = searchParams.get(key);
+            if (value !== null) updateConfig(key, value);
+        }
+    }, [searchParams, updateConfig]);
+
+    useEffect(() => {
         const token = searchParams.get("reuseToken");
         if (!token || loadedReuseTokenRef.current.has(token)) return;
         loadedReuseTokenRef.current.add(token);
         void hydratePromptReuse(token).then(async (payload) => {
             const parameters = payload.template.parameters;
+            const selectedModel = payload.pricing.selectedModel;
+            if (selectedModel) updateConfig("imageModel", selectedModel.modelId);
+            const settings = promptImageSettings(parameters, selectedModel?.modelId || config.model);
+            for (const key of ["size", "quality", "imageOptions"] as const) updateConfig(key, settings[key]);
             const reusedParameters = readTemplateParameters(parameters);
             if (reusedParameters) {
                 setParameters(reusedParameters);
@@ -252,7 +290,7 @@ export function SeamlessStitchPage() {
             loadedReuseTokenRef.current.delete(token);
             message.error(error instanceof Error ? error.message : "模板复用失败");
         });
-    }, [estimatedUsage.credits, message, modal, searchParams]);
+    }, [estimatedUsage.credits, message, modal, searchParams, updateConfig, config.model]);
 
     return (
         <div className="wb-page flex h-full min-h-0 flex-col overflow-hidden">
@@ -306,6 +344,13 @@ export function SeamlessStitchPage() {
                     </div>
 
                     <div className="mt-5">
+                        <span className="mb-2 block text-sm font-semibold">处理模型</span>
+                        <ModelPicker toolKey="seamless-stitch" config={config} value={config.model} onChange={(value) => updateConfig("imageModel", value)} capability="image" modelsSource="server" fullWidth disabled={running} className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
+                    </div>
+                    {usesImageSettings ? <fieldset disabled={running} className="mt-4 min-w-0 border-0 p-0">
+                        <ImageSettingsPanel config={config} referenceCount={source ? 1 : 0} onConfigChange={updateConfig} theme={theme} maxCount={1} showTitle={false} className="space-y-4" />
+                        <p className="mt-3 text-xs leading-5" style={{ color: theme.node.muted }}>按参考图生成四方连续平铺的花型单元，保留原图元素、配色与风格。此模式不使用内部工作流的切割、重绘或步数参数；生成后请检查平铺接缝。</p>
+                    </fieldset> : <><div className="mt-5">
                         <span className="mb-2 block text-sm font-semibold">花型预设</span>
                         <Segmented
                             block
@@ -326,7 +371,7 @@ export function SeamlessStitchPage() {
                         <ParameterField label="重绘强度" value={parameters.redrawStrength} disabled={running} min={0} max={1} step={0.1} onChange={(value) => updateParameter(setParameters, setPreset, "redrawStrength", value)} />
                         <ParameterField label="步数" value={parameters.steps} disabled={running} max={100} onChange={(value) => updateParameter(setParameters, setPreset, "steps", value)} />
                     </div>
-                    <div className="mt-2 text-xs leading-5 text-stone-400">小花推荐 100 / 100 / 50 / 0.5；大花推荐 200 / 200 / 100 / 1。参数由真实内部工作流处理。</div>
+                    <div className="mt-2 text-xs leading-5 text-stone-400">小花推荐 100 / 100 / 50 / 0.5；大花推荐 200 / 200 / 100 / 1。参数由真实内部工作流处理。</div></>}
 
                     <div className="mt-auto pt-6">
                         <div className="mb-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs dark:border-stone-800 dark:bg-stone-950">
@@ -390,7 +435,7 @@ export function SeamlessStitchPage() {
                     ) : (
                         <div className="flex min-h-[520px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 dark:border-stone-700">
                             <Grid2x2 className="mb-4 size-12 text-stone-300" />
-                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先上传花纹图片，选择预设，再点击开始无缝拼接" />
+                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先上传花纹图片，选择模型并调整参数，再点击开始无缝拼接" />
                         </div>
                     )}
                 </section>

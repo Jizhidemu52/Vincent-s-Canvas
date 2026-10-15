@@ -48,7 +48,7 @@ export function createRecipeForm(): RecipeForm {
         series: "我的新系列",
         constraints: "保持参考款的廓形、裁片、缝线、辅料和背景不变",
         prompt: "同一款式的协调配色系列，保留真实面料纹理和光影。",
-        count: 3,
+        count: 1,
         palette: [
             { name: "雾青", hex: "#91a8a1" },
             { name: "沙杏", hex: "#cfb799" },
@@ -83,7 +83,7 @@ export function buildRecipePrompt(form: RecipeForm, index: number, hasMotif: boo
 
 export function createRecipeRun(ownerId: string, form: RecipeForm, references: ReferenceImage[], config: Partial<AiConfig>): RecipeRun {
     if (!references[0]) throw new Error("请先上传参考底图");
-    const frozenForm = copy(form),
+    const frozenForm = { ...copy(form), count: 1 },
         frozenRefs = copy(form.kind === "pattern" ? references : references.slice(0, 1));
     return {
         id: crypto.randomUUID(),
@@ -92,7 +92,7 @@ export function createRecipeRun(ownerId: string, form: RecipeForm, references: R
         form: frozenForm,
         references: frozenRefs,
         settings: recipeSettings(config),
-        branches: Array.from({ length: form.count }, (_, index) => ({
+        branches: Array.from({ length: 1 }, (_, index) => ({
             id: `variant-${index + 1}`,
             index,
             prompt: buildRecipePrompt(frozenForm, index, frozenRefs.length > 1),
@@ -209,6 +209,9 @@ export class SeriesRecipeRunner {
                     branch.error = message(error);
                 }
                 await this.emit();
+                // Old imported projects may contain multiple waiting branches. Each
+                // explicit start/retry schedules at most one; other branches stay intact.
+                break;
             }
         } finally {
             if (this.controller.signal.aborted)
@@ -301,7 +304,7 @@ export function parseRecipeProject(value: unknown, ownerId: string, portable = f
     const input = record(value);
     if (input.version !== 1 || input.kind !== "series-recipe") throw new Error("不是受支持的系列配方项目");
     if (!portable && input.ownerId !== ownerId) throw new Error("项目不属于当前员工");
-    const project: RecipeProject = { version: 1, kind: "series-recipe", ownerId, form: parseForm(input.form), references: parseImages(input.references, portable), settings: recipeSettings(record(input.settings)) };
+    const project: RecipeProject = { version: 1, kind: "series-recipe", ownerId, form: { ...parseForm(input.form), count: 1 }, references: parseImages(input.references, portable), settings: recipeSettings(record(input.settings)) };
     if (project.references.length > 2) throw new Error("参考图最多两张");
     if (input.run) {
         const saved = record(input.run),

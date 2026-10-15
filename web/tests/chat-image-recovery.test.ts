@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { recoverChatImageTask, type PendingChatImageTask } from "../src/services/api/chat-image-recovery";
-import type { QueuedTask } from "../src/services/api/generation-tasks";
+import { QueuedTaskPausedError, type QueuedTask } from "../src/services/api/generation-tasks";
 
 const originalFetch = globalThis.fetch;
 let calls: Array<{ url: string; method: string }> = [];
@@ -11,7 +11,6 @@ beforeEach(() => {
 });
 afterEach(() => {
     globalThis.fetch = originalFetch;
-    expect(calls.every((call) => call.method === "GET")).toBe(true);
 });
 
 const pending: PendingChatImageTask = {
@@ -40,6 +39,14 @@ function respond(read: (url: string, init?: RequestInit) => unknown | Promise<un
 }
 
 describe("read-only chat image recovery", () => {
+    afterEach(() => { expect(calls.every((call) => call.method === "GET")).toBe(true); });
+
+    test("an upstream ID alone never authorizes resuming a paused task", async () => {
+        respond(() => ({ task: { ...originalTask, status: "paused", upstreamTaskId: "upstream-original" } }));
+        expect(await recoverChatImageTask(pending)).toMatchObject({ kind: "needs_attention" });
+        expect(calls).toEqual([{ url: "/api/tasks/original-task", method: "GET" }]);
+    });
+
     test("returns the original completed image with one direct GET, including older tasks", async () => {
         const saved: QueuedTask[] = [];
         respond((url) => {
@@ -196,5 +203,78 @@ describe("read-only chat image recovery", () => {
         await expect(result).rejects.toMatchObject({ name: "AbortError" });
         await new Promise((resolve) => setTimeout(resolve, 1_050));
         expect(calls).toEqual([{ url: "/api/tasks/original-task", method: "GET" }]);
+    });
+});
+
+describe("explicit chat image original-task resume", () => {
+    const pausedTask = { ...originalTask, status: "paused", upstreamTaskId: "upstream-original", resultUrls: [] };
+
+    test("resumes a verified paused original task once, then returns its existing result", async () => {
+        const controller = new AbortController();
+        respond((url, init) => {
+            expect(init?.signal).toBe(controller.signal);
+            if (init?.method === "POST") {
+                expect(url).toBe("/api/tasks/original-task/recover");
+                return { task: originalTask, recovered: true };
+            }
+            return { task: pausedTask };
+        });
+        expect(await recoverChatImageTask(pending, { resumePaused: true, signal: controller.signal })).toMatchObject({ kind: "success", task: { id: originalTask.id } });
+        expect(calls).toEqual([
+            { url: "/api/tasks/original-task", method: "GET" },
+            { url: "/api/tasks/original-task/recover", method: "POST" },
+        ]);
+        expect(new QueuedTaskPausedError(pausedTask).canRecover).toBe(true);
+    });
+
+    test.each([
+        { upstreamTaskId: null },
+        { upstreamTaskId: "" },
+        { id: "another-task" },
+        { requestId: "another-request:0" },
+    ])("does not resume an unverified or unsubmitted task: %j", async (change) => {
+        respond(() => ({ task: { ...pausedTask, ...change } }));
+        expect(await recoverChatImageTask(pending, { resumePaused: true })).toMatchObject({ kind: "needs_attention" });
+        expect(calls).toEqual([{ url: "/api/tasks/original-task", method: "GET" }]);
+    });
+
+    test("validates the recovered response identity before using its result", async () => {
+        respond((_url, init) => ({ task: init?.method === "POST" ? { ...originalTask, requestId: "another-request:0" } : pausedTask }));
+        expect(await recoverChatImageTask(pending, { resumePaused: true })).toMatchObject({ kind: "needs_attention" });
+        expect(calls).toHaveLength(2);
+    });
+
+    test("never resumes twice when polling the original task pauses again", async () => {
+        respond((_url, init) => ({ task: init?.method === "POST" ? { ...pausedTask, status: "waiting" } : pausedTask }));
+        expect(await recoverChatImageTask(pending, { resumePaused: true })).toMatchObject({ kind: "needs_attention" });
+        expect(calls).toEqual([
+            { url: "/api/tasks/original-task", method: "GET" },
+            { url: "/api/tasks/original-task/recover", method: "POST" },
+            { url: "/api/tasks/original-task", method: "GET" },
+        ]);
+    });
+
+    test("an abort while saving the original identity prevents the recovery POST", async () => {
+        const controller = new AbortController();
+        respond(() => ({ task: pausedTask }));
+        await expect(recoverChatImageTask(pending, { resumePaused: true, signal: controller.signal, onTask: () => { controller.abort(); } })).rejects.toMatchObject({ name: "AbortError" });
+        expect(calls).toEqual([{ url: "/api/tasks/original-task", method: "GET" }]);
+    });
+
+    test("an in-flight resume is abortable and never retries or cancels the original task", async () => {
+        const controller = new AbortController();
+        respond((_url, init) => {
+            if (init?.method !== "POST") return { task: pausedTask };
+            expect(init.signal).toBe(controller.signal);
+            return new Promise((_resolve, reject) => {
+                init.signal!.addEventListener("abort", () => reject(new DOMException("请求已取消", "AbortError")), { once: true });
+                controller.abort();
+            });
+        });
+        await expect(recoverChatImageTask(pending, { resumePaused: true, signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+        expect(calls).toEqual([
+            { url: "/api/tasks/original-task", method: "GET" },
+            { url: "/api/tasks/original-task/recover", method: "POST" },
+        ]);
     });
 });

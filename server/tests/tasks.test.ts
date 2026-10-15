@@ -42,6 +42,22 @@ describe("task queue priority", () => {
     expect(queueScore("normal", 100)).toBeLessThan(queueScore("normal", 200));
   });
 
+  test("known asynchronous image tasks can resume by original ID, without a new reservation", async () => {
+    const task = { id: "mark-image", request_id: "request-mark", batch_id: null, status: "paused", priority: "normal", operation_type: "image_generation", attempts: 1, upstream_task_id: "upstream-mark" };
+    const writes: string[] = [], queued: string[] = [];
+    const database = { query: async (sql: string) => {
+      if (sql.startsWith("SELECT id,request_id")) return { rows: [task] };
+      writes.push(sql);
+      return { rows: [{ id: task.id }] };
+    } };
+    const cache = { zAdd: async (_key: string, value: { value: string }) => (queued.push(value.value), 1) };
+    expect(await transitionTask(database as never, cache as never, task.id, "resume")).not.toBeNull();
+    expect(queued).toEqual([task.id]);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toContain("upstream_task_id IS NOT NULL");
+    expect(writes[0]).not.toContain("INSERT");
+  });
+
   test("restores database-backed waiting work after a worker restart", async () => {
     const writes: Array<{ score: number; value: string }> = [];
     const database = {

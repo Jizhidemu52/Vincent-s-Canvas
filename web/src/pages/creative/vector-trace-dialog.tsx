@@ -39,7 +39,7 @@ export function VectorTraceDialog({ source, onClose }: { source: SceneImage; onC
         const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })); setPreview(url);
         return () => URL.revokeObjectURL(url);
     }, [svg]);
-    return <Modal open title="线稿矢量化 · SVG 路径" width={900} onCancel={onClose}
+    return <Modal open modalRender={modal => <div data-usage-board="svg-trace">{modal}</div>} title="线稿矢量化 · SVG 路径" width={900} onCancel={onClose}
         footer={<><Button onClick={onClose}>关闭</Button><Button type="primary" disabled={!svg || !preview || busy} href={preview || undefined} download={`${(source.originalFileName || source.name || "线稿").replace(/\.[^.]+$/, "")}-矢量.svg`}>下载 SVG</Button></>}>
         <div className="cs-tool-dialog"><p className="cs-help">本地黑白描摹，导出可编辑轮廓路径，不嵌入位图。建议先用 AI 生成干净线稿；照片直接描摹可能包含阴影。最长边按 2048 像素处理，不是服装纸样或单线中心线。</p>
             <div className="cs-trace-controls"><label>黑白阈值 {options.threshold}<Slider min={1} max={254} value={options.threshold} onChange={threshold => setOptions(current => ({ ...current, threshold }))} /></label>

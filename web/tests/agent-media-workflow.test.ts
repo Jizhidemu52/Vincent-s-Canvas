@@ -301,7 +301,7 @@ test("maps certificate failures to the current stage without losing the selected
     expect(completeAgentMediaWorkflowStage(workflow, "video", { status: "failed", error: "certificate verify failed" })).toMatchObject({
         imageModel: "gpt-image-2",
         videoModel: "happyhorse-1.0",
-        imageCount: 3,
+        imageCount: 1,
         videoSeconds: "6",
         aspectRatio: "1:1",
         referenceNodeIds: [],
@@ -619,7 +619,7 @@ test("restores a factory-built failed workflow from an assistant session", () =>
         prompt: "走秀",
         imageModel: "gpt-image-2",
         videoModel: "happyhorse-1.0",
-        imageCount: 3,
+        imageCount: 1,
         videoSeconds: "6",
         aspectRatio: "1:1",
         referenceNodeIds: [],
@@ -715,7 +715,7 @@ test("normalizes older persisted workflows that predate media controls", () => {
         videoStatus: "idle",
     } as unknown as ReturnType<typeof createAgentMediaWorkflow>;
 
-    expect(restoreAgentMediaWorkflow(legacyWorkflow, [])).toMatchObject({ imageCount: 3, videoSeconds: "6", aspectRatio: "1:1", referenceNodeIds: [] });
+    expect(restoreAgentMediaWorkflow(legacyWorkflow, [])).toMatchObject({ imageCount: 1, videoSeconds: "6", aspectRatio: "1:1", referenceNodeIds: [] });
 });
 
 test("persists initial image references and rebuilds them only for the image stage", () => {
@@ -754,11 +754,11 @@ test("writes serializable stage settings and generation mode into workflow Confi
     const imageConfig = imageStage.ops.find((op) => op.type === "add_node" && op.id === imageStage.configId);
     const videoConfig = videoStage.ops.find((op) => op.type === "add_node" && op.id === videoStage.configId);
 
-    expect(imageConfig?.metadata).toMatchObject({ generationMode: "image", model: "image-model", count: 5, size: "9:16" });
+    expect(imageConfig?.metadata).toMatchObject({ generationMode: "image", model: "image-model", count: 1, size: "9:16" });
     expect(videoConfig?.metadata).toMatchObject({ generationMode: "video", model: "video-model", seconds: "8", size: "9:16" });
     const persistedVideoSnapshot = applyCanvasAgentOps(emptyAgentSnapshot, videoStage.ops.filter((op) => op.type !== "select_nodes"));
     expect(onlineToolToOps("canvas_run_generation", { nodeId: videoStage.configId }, persistedVideoSnapshot, defaultConfig)).toEqual([{ type: "run_generation", nodeId: videoStage.configId, mode: "video", prompt: "" }]);
-    expect(JSON.parse(JSON.stringify(workflow))).toMatchObject({ imageCount: 5, videoSeconds: "8", aspectRatio: "9:16" });
+    expect(JSON.parse(JSON.stringify(workflow))).toMatchObject({ imageCount: 1, videoSeconds: "8", aspectRatio: "9:16" });
 });
 
 test("restores interrupted workflow stages as retryable failures and hydrates candidate/result URLs from canvas nodes", () => {
@@ -822,7 +822,7 @@ test("card exposes image count, video duration, ratio, selected-image summary, a
     });
 
     expect(card).toMatchObject({
-        imageCount: 4,
+        imageCount: 1,
         videoSeconds: "10",
         aspectRatio: "16:9",
         selectedCandidateSummary: "候选图 1 · image-2",
@@ -872,7 +872,7 @@ test("online execution persists reference IDs and media settings into the staged
         kind: "workflow",
         workflow: {
             referenceNodeIds: ["reference-1", "reference-2"],
-            imageCount: 5,
+            imageCount: 1,
             videoSeconds: "8",
             aspectRatio: "9:16",
             imageModel: defaultConfig.imageModel,

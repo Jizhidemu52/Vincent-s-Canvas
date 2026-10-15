@@ -7,13 +7,19 @@ import { imageModelDisplayName } from "@/lib/model-display";
 import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import type { CanvasAgentMediaWorkflow } from "@/types/canvas";
+import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
+import { defaultConfig } from "@/stores/use-config-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 
 type CanvasAgentMediaWorkflowCardProps = {
     workflow: CanvasAgentMediaWorkflow;
     imageModels: string[];
     videoModels: string[];
+    theme?: CanvasTheme;
     onImageModelChange?: (model: string) => void;
     onImageCountChange?: (count: number) => void;
+    onImageSettingsChange?: (key: "quality" | "imageOptions", value: string) => void;
     onGenerateImages?: () => void;
     onSelectCandidate?: (nodeId: string) => void;
     onVideoModelChange?: (model: string) => void;
@@ -106,8 +112,10 @@ export function CanvasAgentMediaWorkflowCard({
     workflow,
     imageModels,
     videoModels,
+    theme = canvasThemes.light,
     onImageModelChange,
     onImageCountChange,
+    onImageSettingsChange,
     onGenerateImages,
     onSelectCandidate,
     onVideoModelChange,
@@ -149,7 +157,19 @@ export function CanvasAgentMediaWorkflowCard({
                         </div>
                     ) : null}
                     <ModelSelect ariaLabel="选择图片模型" emptyLabel="暂无图片模型" models={imageModels} value={card.imageModelSelect.value} disabled={card.imageModelSelect.disabled} onChange={onImageModelChange} />
-                    <label className="flex items-center justify-between gap-3 text-xs"><span className="opacity-65">图片数量</span><input aria-label="图片数量" type="number" min={1} max={15} value={card.imageCount} disabled={!onImageCountChange} onChange={(event) => onImageCountChange?.(Number(event.target.value))} className="h-8 w-20 rounded-md border border-black/10 bg-transparent px-2 dark:border-white/15" /></label>
+                    {onImageSettingsChange ? <fieldset disabled={workflow.imageStatus === "running"} className="min-w-0 disabled:opacity-60">
+                        <ImageSettingsPanel
+                            config={{ ...defaultConfig, model: workflow.imageModel, imageModel: workflow.imageModel, size: workflow.aspectRatio, count: String(workflow.imageCount), quality: workflow.imageQuality || "", imageOptions: workflow.imageOptions || "" }}
+                            theme={theme}
+                            referenceCount={workflow.referenceNodeIds.length}
+                            showTitle={false}
+                            onConfigChange={(key, value) => {
+                                if (key === "size") onAspectRatioChange?.(value);
+                                else if (key === "count") onImageCountChange?.(Number(value));
+                                else onImageSettingsChange(key, value);
+                            }}
+                        />
+                    </fieldset> : <p className="text-xs opacity-65">每次生成 1 张图片</p>}
                     <Button block type="primary" disabled={card.imageGenerateButton.disabled} icon={workflow.imageStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImageIcon className="size-3.5" />} onClick={onGenerateImages}>
                         {workflow.imageStatus === "running" ? "正在生成候选图" : "生成候选图"}
                     </Button>
@@ -207,13 +227,15 @@ function WorkflowValueSelect({ ariaLabel, value, values, suffix = "", disabled, 
 }
 
 function ModelSelect({ ariaLabel, emptyLabel, models, value, disabled, onChange }: { ariaLabel: string; emptyLabel: string; models: string[]; value?: string; disabled: boolean; onChange?: (model: string) => void }) {
+    const businessModels = useBusinessConfigStore((state) => state.models);
+    const labelFor = (model: string) => businessModels.find((item) => item.id === model || item.modelId === model)?.name || imageModelDisplayName(model);
     return (
         <Select value={value} disabled={disabled} onValueChange={onChange}>
             <SelectTrigger aria-label={ariaLabel} className="h-9 w-full text-sm">
-                <span className="truncate">{value ? imageModelDisplayName(value) : ariaLabel}</span>
+                <span className="truncate">{value ? labelFor(value) : ariaLabel}</span>
             </SelectTrigger>
-            <SelectContent>
-                {models.length ? models.map((model) => <SelectItem key={model} value={model}>{imageModelDisplayName(model)}</SelectItem>) : <SelectItem value="__empty_model__" disabled>{emptyLabel}</SelectItem>}
+            <SelectContent position="popper" align="start" className="z-[1200]">
+                {models.length ? models.map((model) => <SelectItem key={model} value={model}>{labelFor(model)}</SelectItem>) : <SelectItem value="__empty_model__" disabled>{emptyLabel}</SelectItem>}
             </SelectContent>
         </Select>
     );

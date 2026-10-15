@@ -55,7 +55,7 @@ export default function StandardColorDialog({ initialHex, selection, source, slo
     const currentHex = isSceneHexColor(initialHex) ? initialHex : "transparent";
     const pickHex = (value: string) => { setHex(value); setSort("nearest"); setPage(0); };
 
-    return <Modal open title={`从标准色库选择 · ${slotLabel}`} width={920} onCancel={onClose}
+    return <Modal open modalRender={modal => <div data-usage-board="standard-colors">{modal}</div>} title={`从标准色库选择 · ${slotLabel}`} width={920} onCancel={onClose}
         footer={<div className="sc-footer"><span>仅填写目标色，点击「生成」后才调用 AI。</span><div><Button onClick={onClose}>取消</Button><Button type="primary" disabled={!chosen} onClick={() => { if (chosen) onSelect(chosen); }}>应用到{slotLabel}</Button></div></div>}>
         <div className="sc-dialog">
             <div className="sc-intro"><p>搜索色号，或从原图取色寻找相近颜色。</p><span>{manifest ? `${manifest.total.toLocaleString()} 色 · ${manifest.libraries.length} 个色库 / 分组` : "正在读取色库目录…"}</span></div>

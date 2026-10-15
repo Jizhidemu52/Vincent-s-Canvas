@@ -17,6 +17,7 @@ import { moduleKeys, type ModuleKey } from "@/services/api/modules";
 import { isModuleAvailable } from "@/stores/use-module-store";
 import type { BusinessConfig } from "@/services/api/business-config";
 import * as toolRuntime from "@/services/api/tool-runtime";
+import { createAgentMediaWorkflow } from "@/lib/canvas/agent-media-workflow";
 
 const requireModule = createRequire(new URL("../src/components/canvas/canvas-assistant-panel.tsx", import.meta.url));
 const source = readFileSync(new URL("../src/components/canvas/canvas-assistant-panel.tsx", import.meta.url), "utf8");
@@ -27,7 +28,7 @@ const toolConfigCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use
     compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true },
 }).outputText;
 
-function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile }) {
+function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; models?: BusinessConfig["models"]; standalone?: boolean; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile }) {
     const states: unknown[] = [];
     const refs: unknown[] = [];
     const memos: Array<{ dependencies?: DependencyList; value: unknown }> = [];
@@ -44,7 +45,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial
     const config = { ...configModule.defaultConfig, model: "text-model", textModel: "text-model", imageModel: "gpt-image-2", videoModel: "MiniMax-H3", size: "3:4", quality: "2k", canvasImageCount: "2", videoSeconds: "6", vquality: "1080P", videoGenerateAudio: "true", ...options.config };
     const flags = { ...Object.fromEntries(moduleKeys.map(key => [key, true])), ...options.flags } as Record<ModuleKey, boolean>;
     const business: BusinessConfig = {
-        models: [
+        models: options.models || [
             { id: "text-model", name: config.textModel, modelId: config.textModel, capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
             { id: "image-model", name: config.imageModel, modelId: config.imageModel, capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
             { id: "video-model", name: config.videoModel, modelId: config.videoModel, capabilities: ["video"], creditCost: 0, rmbCost: 0 },
@@ -94,6 +95,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial
             },
         },
         "@/stores/use-config-store": { ...configModule, useEffectiveConfig: () => config, useConfigStore: (selector: (state: unknown) => unknown) => selector({ openConfigDialog: () => undefined, updateConfig: () => undefined }) },
+        "@/lib/standalone-edition": { standaloneEdition: options.standalone || false },
         "@/stores/use-theme-store": { useThemeStore: (selector: (state: unknown) => unknown) => selector({ theme: "light" }) },
         "@/stores/use-user-store": { useUserStore: (selector: (state: unknown) => unknown) => selector({ user: null }) },
         "@/stores/use-asset-store": { serverAssetIdFromAsset, useAssetStore: (selector: (state: unknown) => unknown) => selector({ cleanupImages: () => undefined, addAssets: (items: AssetInput[]) => { assets.push(...items); return items.map((_, index) => `asset-${index}`); } }) },
@@ -153,6 +155,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial
     const messages = (): CanvasAssistantMessage[] => states.flatMap((value) => Array.isArray(value) ? value.flatMap((item) => item?.messages || []) : []);
     return {
         requests, config, snapshotRef, composer, messages, assets, imageUploads, videoStores, capabilityRequests,
+        workflowCards: () => findElements(render()).filter((element) => typeof element.type === "function" && element.type.name === "CanvasAgentMediaWorkflowCard").map((element) => element.props),
         select(nodes: CanvasNodeData[]) {
             options.selected = nodes;
             snapshotRef.current = { ...snapshotRef.current, selectedNodeIds: nodes.map((node) => node.id) };
@@ -202,6 +205,31 @@ function tool(name: string, args: Record<string, unknown>): ToolResponseResult {
 }
 
 describe("canvas assistant submission", () => {
+    test("workflow cards use server capability identities and binding restrictions, not stale local models", () => {
+        const imageId = "d5000000-0000-4000-8000-000000000001";
+        const videoId = "d5000000-0000-4000-8000-000000000005";
+        const models = [
+            { id: imageId, modelId: imageId, name: "aplmart-gpt2.5-flare", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
+            { id: "second-image", modelId: "second-image", name: "Second image", capabilities: ["generate"], creditCost: 0, rmbCost: 0 },
+            { id: videoId, modelId: videoId, name: "aplmart-happyhorse1.1", capabilities: ["video"], creditCost: 0, rmbCost: 0 },
+            { id: "mark-chat", modelId: "mark-chat", name: "aplmart-gpt6-astra", capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
+        ];
+        const workflow = createAgentMediaWorkflow({ intent: "image_to_video", prompt: "workflow", imageModel: imageId, videoModel: videoId, imageCount: 1, aspectRatio: "1:1" });
+        const history: CanvasAssistantMessage[] = [{ id: "workflow", role: "assistant", text: "workflow", detail: { mediaWorkflow: workflow } }];
+        const available = panelHarness({ replies: [], models, history }).workflowCards()[0];
+        expect(available.imageModels).toEqual([imageId, "second-image"]);
+        expect(available.videoModels).toEqual([videoId]);
+        const restricted = panelHarness({ replies: [], models, history, tools: [
+            { toolKey: "canvas-image", modelConfigId: imageId, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 },
+            { toolKey: "canvas-video", modelConfigId: null, enabled: false, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 },
+        ] }).workflowCards()[0];
+        expect(restricted.imageModels).toEqual([imageId]);
+        expect(restricted.videoModels).toEqual([]);
+        const empty = panelHarness({ replies: [], models: [], history }).workflowCards()[0];
+        expect(empty.imageModels).toEqual([]);
+        expect(empty.videoModels).toEqual([]);
+    });
+
     test("recalls selected image prompts without submitting, changing presets, or replacing a same-image edit", async () => {
         const first: CanvasNodeData = { id: "first", type: CanvasNodeType.Image, title: "第一张", position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { content: "blob:first", prompt: "第一张原始提示词", model: "unrelated-model" } };
         const second = { ...first, id: "second", metadata: { content: "blob:second", prompt: "第二张原始提示词" } };
@@ -245,7 +273,7 @@ describe("canvas assistant submission", () => {
         expect(harness.composer().props.disabled).toBe(false);
         expect(harness.composer().props.generationControls.props.loading).toBe(false);
         expect(harness.capabilityRequests).toEqual(["image", "video"]);
-        expect(harness.composer().props.generationControls.props.settings).toMatchObject({ imageModel: "gpt-image-2", size: "1152x1536", quality: "auto", imageCount: "2" });
+        expect(harness.composer().props.generationControls.props.settings).toMatchObject({ imageModel: "gpt-image-2", size: "1152x1536", quality: "auto", imageCount: "1" });
         expect(harness.requests).toHaveLength(0);
     });
 
@@ -303,7 +331,7 @@ describe("canvas assistant submission", () => {
         finish([{ id: "generated-image", dataUrl: "/api/assets/result/content" }]);
         await submitted;
         expect(harness.requests.filter((request) => request.type === "agent")).toHaveLength(2);
-        expect(harness.requests.find((request) => request.type === "image")?.args[0]).toMatchObject({ model: "gpt-image-2", count: "2", size: "1152x1536", quality: "auto" });
+        expect(harness.requests.find((request) => request.type === "image")?.args[0]).toMatchObject({ model: "gpt-image-2", count: "1", size: "1152x1536", quality: "auto" });
         expect(harness.messages().flatMap((message) => message.attachments || [])).toContainEqual(expect.objectContaining({ id: "generated-image", url: "/api/assets/result/content", mediaType: "image", width: 1024, height: 1024 }));
         expect(harness.snapshotRef.current.nodes.find((node) => node.type === CanvasNodeType.Image && node.metadata?.content === "/api/assets/result/content")).toMatchObject({ width: 340, height: 340 });
     });
@@ -397,6 +425,49 @@ describe("canvas assistant submission", () => {
         expect(harness.snapshotRef.current.nodes).toEqual([expect.objectContaining({ type: CanvasNodeType.Text, title: "说明", metadata: expect.objectContaining({ content: "项目说明" }) })]);
     });
 
+    test.each([false, true])("preserves complete Responses output through automatic or confirmed multi-step tools (confirm=%s)", async (confirmTools) => {
+        const response = (turn: number, titles: string[]): ToolResponseResult => {
+            const calls = titles.map((title, index) => ({ id: `call-${turn}-${index}`, type: "function" as const, function: { name: "canvas_create_text_node", arguments: JSON.stringify({ text: title, title }) } }));
+            return {
+                content: `第 ${turn} 轮`,
+                toolCalls: calls,
+                responsesOutputItems: [
+                    { type: "reasoning", id: `rs-${turn}`, status: "completed", summary: [], encrypted_content: `opaque-reasoning-${turn}` },
+                    ...calls.map((call, index) => ({ type: "function_call", id: `fc-${turn}-${index}`, call_id: call.id, name: call.function.name, arguments: call.function.arguments, status: "completed" })),
+                ],
+            };
+        };
+        const first = response(1, ["第一项", "第二项"]);
+        const second = response(2, ["第三项"]);
+        const harness = panelHarness({ confirmTools, replies: [first, second, { content: "三项完成", toolCalls: [] }] });
+        await harness.submit("在画布创建三项文本说明");
+        if (confirmTools) {
+            const firstPending = harness.messages().find((message) => message.detail?.status === "pending")!;
+            expect(firstPending).toBeDefined();
+            expect(harness.snapshotRef.current.nodes).toHaveLength(0);
+            harness.approve(firstPending.id);
+            await waitFor(() => harness.messages().some((message) => message.id !== firstPending.id && message.detail?.status === "pending"));
+            const secondPending = harness.messages().find((message) => message.id !== firstPending.id && message.detail?.status === "pending")!;
+            harness.approve(secondPending.id);
+            await waitFor(() => harness.requests.filter((request) => request.type === "agent").length === 3);
+        }
+        const requests = harness.requests.filter((request) => request.type === "agent");
+        expect(harness.requests.map((request) => request.type)).toEqual(["agent", "agent", "agent"]);
+        expect(requests[1].args[1].slice(0, requests[0].args[1].length)).toEqual(requests[0].args[1]);
+        expect(requests[1].args[1].slice(-3)).toEqual([
+            { type: "responses_assistant", output: first.responsesOutputItems },
+            expect.objectContaining({ role: "tool", tool_call_id: "call-1-0" }),
+            expect.objectContaining({ role: "tool", tool_call_id: "call-1-1" }),
+        ]);
+        expect(requests[2].args[1].slice(0, requests[1].args[1].length)).toEqual(requests[1].args[1]);
+        expect(requests[2].args[1].slice(-2)).toEqual([
+            { type: "responses_assistant", output: second.responsesOutputItems },
+            expect.objectContaining({ role: "tool", tool_call_id: "call-2-0" }),
+        ]);
+        expect(harness.snapshotRef.current.nodes).toHaveLength(3);
+        expect(JSON.stringify(harness.messages())).not.toContain("opaque-reasoning-");
+    });
+
     test("executes explicit run_generation operations once and waits for real outputs", async () => {
         const harness = panelHarness({ replies: [tool("canvas_apply_ops", { ops: [{ type: "add_node", id: "image-config", nodeType: "config", metadata: { generationMode: "image", prompt: "红色花瓶", count: 1, size: "1:1", quality: "1k" } }, { type: "run_generation", nodeId: "image-config", mode: "image", prompt: "红色花瓶" }] }), { content: "生成已完成", toolCalls: [] }] });
         await harness.submit("创建图片生成节点并立即执行");
@@ -417,17 +488,18 @@ describe("canvas assistant submission", () => {
         expect(harness.videoStores).toHaveLength(0);
     });
 
-    test("Agent sends seven images instead of silently capping a configured GPT adapter at four", async () => {
+    test("Agent constrains a planner's legacy seven-image request to one independent output", async () => {
         const harness = panelHarness({ config: { imageModel: "vcen-gpt2" }, replies: [tool("canvas_generate_image", { editIntent: "new", prompt: "红色花瓶七种构图", count: 7, quality: "4k", size: "3:4" })] });
         await harness.submit("生成七张红色花瓶构图");
-        expect(harness.requests.find((request) => request.type === "image")?.args[0]).toMatchObject({ model: "vcen-gpt2", count: "7", quality: "4k", size: "3:4" });
+        expect(harness.requests.filter((request) => request.type === "image")).toHaveLength(1);
+        expect(harness.requests.find((request) => request.type === "image")?.args[0]).toMatchObject({ model: "vcen-gpt2", count: "1", canvasImageCount: "1", quality: "4k", size: "3:4" });
     });
 
     test("keeps the user's image model when the planner asks to switch providers", async () => {
         const harness = panelHarness({ replies: [tool("canvas_generate_image", { editIntent: "new", model: "vcen-gpt2", prompt: "红色花瓶", count: 7, quality: "4k", size: "3:4" }), { content: "已完成", toolCalls: [] }] });
         await harness.submit("生成七张红色花瓶");
         expect(harness.requests.map((request) => request.type)).toEqual(["agent", "image", "agent"]);
-        expect(harness.requests[1].args[0]).toMatchObject({ model: "gpt-image-2", count: "7", quality: "auto", size: "1152x1536" });
+        expect(harness.requests[1].args[0]).toMatchObject({ model: "gpt-image-2", count: "1", quality: "auto", size: "1152x1536" });
         expect(harness.assets[0].metadata).toMatchObject({ model: "gpt-image-2" });
     });
 
@@ -457,10 +529,13 @@ describe("canvas assistant submission", () => {
         const harness = panelHarness({ config: { imageModel: "midjourney-blend" }, selected: [selected], replies: [tool("canvas_generate_image", { editIntent: "new", count: 8, quality: "turbo" })] });
         await harness.uploadReference();
         await harness.submit("用 Blend 合成这两张图");
-        const edit = harness.requests.find((request) => request.type === "edit");
-        expect(edit?.args[0]).toMatchObject({ model: "midjourney-blend", count: "1", quality: "turbo" });
-        expect(edit?.args[1]).toBe("");
-        expect(edit?.args[2]).toHaveLength(2);
+        expect(harness.requests.filter((request) => request.type === "edit")).toHaveLength(0);
+        const images = harness.requests.filter((request) => request.type === "image");
+        expect(images).toHaveLength(1);
+        expect(images[0]?.args[0]).toMatchObject({ model: "midjourney-blend", count: "1", quality: "turbo" });
+        expect(images[0]?.args[1]).toBe("");
+        expect(images[0]?.args[2]).toMatchObject({ tool: "canvas-image" });
+        expect(images[0]?.args[3]).toHaveLength(2);
     });
 
     test("adds completed images to assets using the same local media and original server identity", async () => {

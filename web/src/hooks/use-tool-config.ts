@@ -5,8 +5,8 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
 
-export function canvasToolKey(mode: string, editing = false): ToolKey {
-    return mode === "text" ? "canvas-chat" : mode === "video" ? "canvas-video" : mode === "audio" ? "canvas-audio" : editing ? "canvas-edit" : "canvas-image";
+export function canvasToolKey(mode: string, editing = false, imageProfile?: string): ToolKey {
+    return mode === "text" ? "canvas-chat" : mode === "video" ? "canvas-video" : mode === "audio" ? "canvas-audio" : editing && imageProfile !== "midjourney-blend" ? "canvas-edit" : "canvas-image";
 }
 
 export function useToolEnabled(toolKey: ToolKey) {

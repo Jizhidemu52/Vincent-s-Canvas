@@ -13,6 +13,9 @@ export type ImageReferenceValidation = {
 export function referencePolicyForModel(modelId: string, profile = imageModelProfile(modelId)): Omit<ImageReferenceValidation, "valid" | "message"> & { label: string } {
     const normalized = modelId.trim().toLowerCase();
     const label = (name: string) => isAdminRole(useUserStore.getState().user?.role) ? name : "当前模型";
+    if (profile.kind === "quality-resolution") return { label: label("当前出图模型"), minimum: 0, maximum: 16, supportsReferences: true };
+    if (profile.kind === "resolution-1k") return { label: "当前工作台（应用限制，并非渠道固定上限）", minimum: 0, maximum: 16, supportsReferences: true };
+    if (profile.kind === "grok-image") return { label: label("Grok Image 2"), minimum: 0, maximum: 3, supportsReferences: true };
     if (profile.kind === "midjourney-blend") return { label: label("Midjourney Blend"), minimum: 2, maximum: 4, supportsReferences: true };
     if (profile.kind === "midjourney") return { label: label("当前工作台的 Midjourney 参考图"), minimum: 0, maximum: 16, supportsReferences: true };
     if (profile.kind === "gpt") return { label: label("APIMart GPT-Image-2"), minimum: 0, maximum: 15, supportsReferences: true };
@@ -27,6 +30,17 @@ export function validateImageReferences(modelId: string, references: ReferenceIm
     if (references.length < policy.minimum || references.length > policy.maximum) {
         const range = policy.minimum === policy.maximum ? `${policy.maximum}` : `${policy.minimum} 至 ${policy.maximum}`;
         return { ...policy, valid: false, message: `${policy.label} 需要 ${range} 张参考图。` };
+    }
+    const kind = (profile || imageModelProfile(modelId)).kind;
+    if (kind === "grok-image" || kind === "gemini" || kind === "midjourney-blend") {
+        const maximumBytes = (kind === "midjourney-blend" ? 12 : 10) * 1024 * 1024;
+        for (const reference of references) {
+            const dataMatch = /^data:([^;,]+);base64,(.*)$/s.exec(reference.dataUrl || "");
+            const bytes = reference.bytes ?? (dataMatch ? Math.floor(dataMatch[2]!.length * 3 / 4) - (dataMatch[2]!.endsWith("==") ? 2 : dataMatch[2]!.endsWith("=") ? 1 : 0) : undefined);
+            if (bytes !== undefined && bytes > maximumBytes) return { ...policy, valid: false, message: `参考图 ${reference.name} 超过单张 ${maximumBytes / 1024 / 1024} MiB 上限。` };
+            const mime = reference.type || dataMatch?.[1];
+            if (kind !== "midjourney-blend" && mime && !["image/jpeg", "image/png", "image/webp"].includes(mime.toLowerCase())) return { ...policy, valid: false, message: `参考图 ${reference.name} 格式不支持，请使用 JPEG、PNG 或 WebP。` };
+        }
     }
     return { ...policy, valid: true };
 }

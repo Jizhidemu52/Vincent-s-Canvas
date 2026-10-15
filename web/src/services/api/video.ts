@@ -1,5 +1,5 @@
 import { dataUrlToFile } from "@/lib/image-utils";
-import { videoModelRequestParameters, videoReferenceError } from "@/lib/video-model-parameters";
+import { videoModelRequestParameters, videoParameterModelId, videoReferenceError } from "@/lib/video-model-parameters";
 import { getQueuedTask, QueuedTaskPausedError, recoverQueuedMedia, requestQueuedMedia, submitQueuedMediaTask } from "@/services/api/generation-tasks";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
@@ -65,11 +65,13 @@ async function queuedVideoInput(config: AiConfig, prompt: string, references: Re
     const resolved = await resolveToolConfig(config, "video_generation", options?.toolKey || "video");
     config = resolved.config;
     const modelId = modelOptionName(config.model || config.videoModel);
+    // Fresh server resolution is authoritative; a stale UI cache must never supply a protocol hint.
+    const parameterModelId = resolved.model.parameterModelId ?? null;
     // Preserve the legacy HappyHorse mode when callers still carry the default auto mode.
     const requestConfig = happyHorseMode && (!config.videoMode || config.videoMode === "auto") ? { ...config, videoMode: happyHorseMode } : config;
-    const error = videoReferenceError(requestConfig, references, videoReferences, audioReferences);
+    const error = videoReferenceError(requestConfig, references, videoReferences, audioReferences, undefined, false, parameterModelId);
     if (error) throw new Error(error);
-    const parameters = { ...videoModelRequestParameters(requestConfig), ...(modelId === "happyhorse-1.1" && happyHorseMode ? { happyHorseMode } : {}) };
+    const parameters = { ...videoModelRequestParameters(requestConfig, parameterModelId), ...(videoParameterModelId(requestConfig, parameterModelId) === "happyhorse-1.1" && happyHorseMode ? { happyHorseMode } : {}) };
     const sourceFiles: File[] = [];
     const sourceUrls: string[] = [];
     const sourceMetadata: Record<string, unknown>[] = [];
@@ -97,7 +99,7 @@ async function queuedVideoInput(config: AiConfig, prompt: string, references: Re
             else { sourceOrder.push({ kind: "url", index: sourceUrls.length }); sourceUrls.push(source); }
         }
     }
-    const resolvedError = videoReferenceError(requestConfig, resolvedImages, resolvedVideos, resolvedAudios);
+    const resolvedError = videoReferenceError(requestConfig, resolvedImages, resolvedVideos, resolvedAudios, undefined, false, parameterModelId);
     if (resolvedError) throw new Error(resolvedError);
     return {
         modelId,

@@ -19,7 +19,7 @@ import {
 } from "./media-runtime";
 import { recordAssetEvent } from "./asset-events";
 import { classifyDesignDirection } from "./design-direction";
-import { runApiMartImageTask } from "./apimart-image";
+import { ApiMartImageProviderFailure, runApiMartImageTask } from "./apimart-image";
 import { videoSourceMetadata, type ProviderVideoSource } from "./video-models";
 import { probeMediaBytes } from "./media-probe";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
@@ -90,8 +90,8 @@ async function runTask(taskId: string) {
     [taskId],
   );
   const task = details.rows[0]!;
-  const semaphoreKey = task.model_id
-    ? `model:${task.model_id}:running`
+  const semaphoreKey = task.model_config_id
+    ? `model:${task.model_config_id}:running`
     : "model:none:running";
   const running = await cache.incr(semaphoreKey);
   await cache.expire(semaphoreKey, 600);
@@ -155,11 +155,11 @@ async function runTask(taskId: string) {
         [`${reason}；上游已返回结果，不能直接恢复或重新生成，请先检查已保存素材。`, task.id],
       );
       outcome = "paused";
-    } else if (task.operation_type === "video_generation" && task.upstream_submission_started_at && !(error instanceof VideoProviderFailure)) {
+    } else if (task.upstream_submission_started_at && !(error instanceof VideoProviderFailure) && !(error instanceof ApiMartImageProviderFailure)) {
       // Keep the original reservation while upstream work may still exist. Recovery only polls its persisted ID.
       await db.query(
         "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND status='processing'",
-        [task.upstream_task_id ? `${reason}；已暂停，可恢复查询原视频任务，不会重新生成` : `${reason}；提交状态待核实，不会自动重新生成`, task.id],
+        [task.upstream_task_id ? `${reason}；已暂停，可恢复查询原任务，不会重新生成` : `${reason}；提交状态待核实，不会自动重新生成`, task.id],
       );
       outcome = "paused";
     } else if (canAutomaticallyRetryTask(task.operation_type, task.upstream_submission_started_at, task.attempts)) {
@@ -203,6 +203,12 @@ import { openAiImageParameters } from "./openai-image-parameters";
 import { OPENAI_IMAGE_TIMEOUT_MS } from "./opentoken-image";
 
 async function executeProvider(task: WorkRow, timing: GenerationTiming) {
+  // Existing async image submissions must never fall through to a newly edited
+  // synchronous provider/workflow configuration and create another paid job.
+  if (task.operation_type !== "video_generation" && (task.upstream_task_id || task.upstream_submission_started_at)
+    && (task.protocol !== "apimart" || task.workflow_config_id)) {
+    throw new Error("原图片任务已提交，但模型渠道配置已变更；请恢复原 APIMart 渠道后查询，不能重新提交生成");
+  }
   if (!task.protocol || !task.base_url || !task.model_id)
     throw new Error("任务模型或 Provider 未配置");
   assertImageEditMaskSupport(task.parameters, { protocol: task.protocol, modelId: task.model_id, operationType: task.operation_type, workflow: Boolean(task.workflow_config_id) }, task.source_urls.length);
@@ -310,14 +316,30 @@ async function executeApiMartImage(
   task: WorkRow,
   credentials: Record<string, string>,
 ) {
-  const sourceAssets = await loadSourceAssets(task.source_urls, task.user_id);
+  const sourceAssets = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id);
+  const editInput = sourceAssets.length ? await prepareImageEditInput(sourceAssets, task.parameters, {
+    protocol: "apimart", modelId: task.model_id!, operationType: task.operation_type,
+  }) : { references: sourceAssets };
   const outputUrls = await runApiMartImageTask({
     baseUrl: task.base_url!,
     apiKey: credentials.apiKey || "",
     modelId: task.model_id!,
+    submissionKey: task.id,
     prompt: task.prompt,
     parameters: task.parameters,
-    sourceDataUrls: sourceAssets.map((asset) => `data:${asset.mimeType};base64,${Buffer.from(asset.bytes).toString("base64")}`),
+    sourceDataUrls: editInput.references.map((asset) => `data:${asset.mimeType};base64,${Buffer.from(asset.bytes).toString("base64")}`),
+    ...(editInput.mask ? { maskDataUrl: `data:image/png;base64,${Buffer.from(editInput.mask.bytes).toString("base64")}` } : {}),
+    upstreamTaskId: task.upstream_task_id,
+    submissionStarted: Boolean(task.upstream_submission_started_at),
+    beforeSubmit: async () => {
+      const claimed = await db.query("UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id", [task.id]);
+      if (!claimed.rows[0]) throw new VideoSubmissionClaimLost();
+      task.upstream_submission_started_at = new Date().toISOString();
+    },
+    onSubmitted: async (id) => {
+      task.upstream_task_id = id;
+      await db.query("UPDATE tasks SET upstream_task_id=$1,updated_at=now() WHERE id=$2", [id, task.id]);
+    },
   });
   return Promise.all(outputUrls.map(url => fetchProviderResult(url)));
 }
@@ -437,8 +459,10 @@ async function executeWorkflow(
     workflowId: task.workflow_id,
     modelId: task.model_id,
     ...credentials,
+    // User JSON prompts and credential/template variables cannot override image cardinality.
+    ...(isImageWorkflowTask(task) ? { n: 1, count: 1, quantity: 1 } : {}),
   };
-  const body = renderTemplate(task.request_template ?? {}, variables);
+  const body = singleImageWorkflowRequestBody(task, renderTemplate(task.request_template ?? {}, variables));
   const headers: Record<string, string> = {
     "content-type": "application/json",
   };
@@ -501,6 +525,67 @@ async function executeWorkflow(
       throw new Error("工作流已完成但没有返回结果地址");
   }
   throw new Error("工作流执行超时");
+}
+
+function isImageWorkflowTask(task: Pick<WorkRow, "operation_type">) {
+  return ["image_generation", "inpaint", "upscale", "batch_image", "seamless_stitch"].includes(task.operation_type);
+}
+
+function isBuiltinSingleImageWorkflow(task: WorkRow) {
+  // This company protocol processes one input_image and has no output-count parameter.
+  // Match the complete shipped template, not just a spoofable model name.
+  const expected: Record<string, unknown> = {
+    model_code: "sflxjj", task_id: "$taskId", app_key: "$appKey", input_image: "$sourceBase64",
+    cut_width: "$cutWidth", redraw_width: "$redrawWidth", blur_amount: "$blurAmount",
+    redraw_strength: "$redrawStrength", steps: "$steps",
+  };
+  const template = task.request_template;
+  return task.operation_type === "seamless_stitch" && task.model_id === "sflxjj" && task.protocol === "custom"
+    && task.output_path === "data.data.list" && template !== null && typeof template === "object" && !Array.isArray(template)
+    && Object.keys(template).length === Object.keys(expected).length
+    && Object.entries(expected).every(([key, value]) => (template as Record<string, unknown>)[key] === value);
+}
+
+function singleImageWorkflowRequestBody(task: WorkRow, rendered: unknown): unknown {
+  if (!isImageWorkflowTask(task)) return rendered;
+  const unsafe = () => new Error("图片工作流未满足单张输出契约，尚未提交生成；请管理员将模板设为明确的 n/count/quantity=1，并移除多图、重复或无法确认输出数量的工作流配置");
+  if (!rendered || typeof rendered !== "object" || Array.isArray(rendered)) throw unsafe();
+  if (isBuiltinSingleImageWorkflow(task)) return rendered;
+  if (task.model_id === "sflxjj") throw unsafe();
+  const body = { ...rendered } as Record<string, unknown>;
+  const counters = ["n", "count", "quantity"];
+  const positiveInteger = (value: unknown) => typeof value === "number" ? Number.isSafeInteger(value) && value >= 1
+    : typeof value === "string" && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value));
+  if (!counters.some(key => Object.hasOwn(body, key))) throw unsafe();
+  for (const key of counters) {
+    if (!Object.hasOwn(body, key)) continue;
+    if (!positiveInteger(body[key])) throw unsafe();
+    body[key] = typeof body[key] === "string" ? "1" : 1;
+  }
+  // Opaque graphs can branch into several generation nodes even with a root n=1.
+  // They need a verified single-image adapter, not a guessed count rewrite.
+  for (const key of ["workflowId", "workflow_id", "workflow", "graph", "nodes", "nodeInfoList", "node_info_list"]) {
+    if (body[key] !== undefined && body[key] !== null && body[key] !== "") throw unsafe();
+  }
+  const outputCounters = new Set(["n", "count", "quantity", "numimages", "numoutputs", "outputcount", "imagecount", "batchsize", "batchcount"]);
+  const check = (value: unknown): void => {
+    if (Array.isArray(value)) { for (const item of value) check(item); return; }
+    if (!value || typeof value !== "object") return;
+    for (const [key, item] of Object.entries(value)) {
+      const normalized = key.replace(/[_-]/g, "").toLowerCase();
+      // These are descriptive/algorithm settings, not output cardinality.
+      if (["metadata", "seed", "seeds", "steps"].includes(normalized)) continue;
+      if (outputCounters.has(normalized) && (!positiveInteger(item) || Number(item) !== 1)) throw unsafe();
+      if (normalized === "repeat" && item !== 1 && item !== "1") throw unsafe();
+      if (["requests", "tasks", "jobs", "batch"].includes(normalized) && Array.isArray(item) && item.length > 1) throw unsafe();
+      if (["prompt", "extra"].includes(normalized)) {
+        if (typeof item !== "string" || /--(?:repeat|r)(?=$|[\s=:\d])/i.test(item)) throw unsafe();
+      }
+      check(item);
+    }
+  };
+  check(body);
+  return body;
 }
 
 function joinUrl(base: string, path: string) {

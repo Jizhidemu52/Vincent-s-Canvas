@@ -12,7 +12,7 @@ import { OA_SESSION_TTL_SECONDS } from "./oa";
 
 const GUEST_SESSION_TTL_SECONDS = 365 * 24 * 60 * 60;
 
-export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig, options: { allowGuest?: boolean; allowAdminSession?: boolean } = {}) {
+export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig, options: { allowGuest?: boolean; allowAdminSession?: boolean; unauthenticatedStatus?: 401 | 403 } = {}) {
     const features = deploymentFeatures(config);
     const allowGuest = !features.oaLoginEnabled && !features.authenticationEnabled && options.allowGuest !== false;
     const acceptsProvider = (row: UserRow & { auth_provider: string }) => !features.oaLoginEnabled
@@ -29,7 +29,7 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
                 catch (error) { next(error); }
                 return;
             }
-            response.status(401).json({ error: "UNAUTHENTICATED", message: "请先登录" });
+            response.status(options.unauthenticatedStatus ?? 401).json({ error: "UNAUTHENTICATED", message: "请先登录" });
             return;
         }
 
@@ -53,7 +53,7 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
                     next();
                     return;
                 }
-                response.status(401).json({ error: "SESSION_EXPIRED", message: "登录已失效，请重新登录" });
+                response.status(options.unauthenticatedStatus ?? 401).json({ error: "SESSION_EXPIRED", message: "登录已失效，请重新登录" });
                 return;
             }
             if (features.creditsEnabled) await refreshMonthlyCreditPeriod(db, row.id);
@@ -66,7 +66,7 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
             if (!row || (row.is_guest && !allowGuest) || !acceptsProvider(row)) {
                 await cache.del(cacheKey);
                 response.clearCookie(config.SESSION_COOKIE_NAME, { path: "/" });
-                response.status(401).json({ error: "SESSION_EXPIRED", message: "登录已失效，请重新登录" });
+                response.status(options.unauthenticatedStatus ?? 401).json({ error: "SESSION_EXPIRED", message: "登录已失效，请重新登录" });
                 return;
             }
             await cache.set(cacheKey, row.session_id, { EX: row.auth_provider === "oa" ? OA_SESSION_TTL_SECONDS : config.SESSION_TTL_SECONDS });

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { singleImageTaskParameters } from "./image-task-policy";
 import { BillingError, reserveCredits, settleReservation, type PriceSnapshot } from "./billing";
 import type { Cache, Database } from "./db";
 import { withTransaction } from "./db-transaction";
@@ -43,8 +44,8 @@ const priorityBand: Record<TaskPriority, number> = {
 export const TASK_LEASE_SECONDS = 180;
 
 export function canAutomaticallyRetryTask(operationType: string, submissionStartedAt: string | null, attempts: number) {
-  // Non-video adapters do not persist an upstream ID that could safely resume
-  // an interrupted paid request. Only video pre-submission work can be retried.
+  // Only video pre-submission preparation is automatically retried. Async images
+  // with a persisted ID recover by polling that ID, never by repeating this work.
   return operationType === "video_generation" && !submissionStartedAt && attempts < 3;
 }
 
@@ -55,14 +56,14 @@ export function queueScore(priority: TaskPriority, timestamp = Date.now()) {
 /**
  * Redis is an acceleration layer, not the task source of truth. Rebuild its
  * waiting members from Postgres after a worker restart, and return only
- * expired video leases to waiting for their existing submission-state guards.
+ * expired video/known upstream leases to waiting for their submission-state guards.
  * Other interrupted work is paused because its upstream outcome is unknown.
  */
 export async function restoreWaitingTasksToQueue(db: Database, cache: Cache) {
   await db.query(
     `UPDATE tasks
-        SET status=CASE WHEN operation_type='video_generation' THEN 'waiting' ELSE 'paused' END,
-            failure_reason=CASE WHEN operation_type='video_generation' THEN failure_reason
+        SET status=CASE WHEN operation_type='video_generation' OR upstream_task_id IS NOT NULL THEN 'waiting' ELSE 'paused' END,
+            failure_reason=CASE WHEN operation_type='video_generation' OR upstream_task_id IS NOT NULL THEN failure_reason
               ELSE '执行中断，原上游提交状态待核实；已暂停，不能直接恢复或自动重新生成' END,
             lease_expires_at=NULL,updated_at=now()
       WHERE status='processing' AND (lease_expires_at IS NULL OR lease_expires_at <= now())`,
@@ -86,6 +87,7 @@ export async function enqueueTask(
   cache: Cache,
   input: TaskInput,
 ) {
+  input.parameters = singleImageTaskParameters(input.operationType, input.parameters);
   const taskId = randomUUID();
   const task = await withTransaction(db, async (client) => {
     const inserted = await client.query<{ id: string }>(
@@ -220,15 +222,16 @@ export async function transitionTask(
     priority: TaskPriority;
     operation_type: string;
     attempts: number;
+    upstream_task_id: string | null;
   }>(
-    "SELECT id,request_id,batch_id,status,priority,operation_type,attempts FROM tasks WHERE id=$1 AND status IN ('waiting','paused')",
+    "SELECT id,request_id,batch_id,status,priority,operation_type,attempts,upstream_task_id FROM tasks WHERE id=$1 AND status IN ('waiting','paused')",
     [taskId],
   );
   const task = current.rows[0];
   if (
     !task ||
     (action === "pause" && task.status !== "waiting") ||
-    (action === "resume" && (task.status !== "paused" || (task.operation_type !== "video_generation" && task.attempts > 0)))
+    (action === "resume" && (task.status !== "paused" || (task.operation_type !== "video_generation" && !task.upstream_task_id && task.attempts > 0)))
   )
     return null;
 
@@ -241,7 +244,7 @@ export async function transitionTask(
     await cache.zRem("tasks:queue", taskId);
   } else if (action === "resume") {
     const changed = await db.query(
-      "UPDATE tasks SET status='waiting',queued_at=now(),updated_at=now() WHERE id=$1 AND status='paused' AND (operation_type='video_generation' OR attempts=0) RETURNING id",
+      "UPDATE tasks SET status='waiting',queued_at=now(),updated_at=now() WHERE id=$1 AND status='paused' AND (operation_type='video_generation' OR upstream_task_id IS NOT NULL OR attempts=0) RETURNING id",
       [taskId],
     );
     if (!changed.rows[0]) return null;

@@ -5,6 +5,7 @@ import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
 import { useCopyText } from "@/hooks/use-copy-text";
+import { canvasUsageControl } from "@/lib/usage-event-policy";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -197,7 +198,7 @@ export function CanvasNodeHoverToolbar({
     const toolbarTools = hasImage ? visibleImageToolIds.flatMap((id) => allToolbarTools.find((tool) => tool.id === id) || []) : allToolbarTools;
     const overflowTools = allToolbarTools.filter((tool) => !toolbarTools.some((visible) => visible.id === tool.id));
     const selectableImageToolbarTools = allToolbarTools.filter((tool) => !["retry", "info", "delete"].includes(tool.id)) as ImageToolbarSettingsTool[];
-    const menuTool = (tool: ToolbarTool) => ({ key: tool.id, label: tool.label, title: tool.title, icon: <span className="[&_svg]:size-[18px]">{tool.icon}</span>, danger: tool.danger });
+    const menuTool = (tool: ToolbarTool) => ({ key: tool.id, label: <span data-usage-control={canvasUsageControl(tool.id)}>{tool.label}</span>, title: tool.title, icon: <span className="[&_svg]:size-[18px]">{tool.icon}</span>, danger: tool.danger });
     const moreMenu: MenuProps = {
         style: { background: theme.toolbar.panel, color: theme.node.text, boxShadow: "none" },
         items: [
@@ -205,7 +206,7 @@ export function CanvasNodeHoverToolbar({
             { type: "divider" },
             ...overflowTools.filter((tool) => ["info", "delete"].includes(tool.id)).map(menuTool),
             { type: "divider" },
-            { key: "customize", label: "自定义工具", icon: <Settings2 className="size-[18px]" /> },
+            { key: "customize", label: <span data-usage-control="canvas-tool.customize">自定义工具</span>, icon: <Settings2 className="size-[18px]" /> },
         ],
         onClick: ({ key, domEvent }) => {
             domEvent.stopPropagation();
@@ -276,7 +277,7 @@ export function CanvasNodeHoverToolbar({
                             </div>
                         )}
                     >
-                        <button type="button" aria-label="更多图片工具" aria-haspopup="menu" aria-expanded={moreToolsOpen} className={`ml-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 transition hover:bg-[var(--node-tool-hover)] focus-visible:outline-2 focus-visible:outline-offset-1 ${moreToolsOpen ? "bg-[var(--node-tool-hover)]" : ""}`}>
+                        <button data-usage-control="canvas-tool.more" type="button" aria-label="更多图片工具" aria-haspopup="menu" aria-expanded={moreToolsOpen} className={`ml-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 transition hover:bg-[var(--node-tool-hover)] focus-visible:outline-2 focus-visible:outline-offset-1 ${moreToolsOpen ? "bg-[var(--node-tool-hover)]" : ""}`}>
                             <Ellipsis className="size-[18px]" />
                             {showImageToolLabels ? <span>更多</span> : null}
                         </button>
@@ -378,12 +379,12 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
     );
 }
 
-function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false, highResolution = false }: ToolbarTool & { showLabel: boolean; highResolution?: boolean }) {
+function ToolbarAction({ id, title, label, icon, onClick, showLabel, active = false, danger = false, highResolution = false }: ToolbarTool & { showLabel: boolean; highResolution?: boolean }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const hasText = showLabel && Boolean(label);
     return (
         <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color={theme.node.panel} styles={{ container: { color: theme.node.text, fontSize: 12 } }}>
-            <button type="button" className={`group relative flex h-9 shrink-0 items-center whitespace-nowrap rounded-lg px-0.5 focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-[#a1a1aa] ${danger ? "text-[#ef4444]" : ""}`} style={highResolution && !danger ? { color: theme.toolbar.highResolution } : undefined} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick(); }} aria-label={title}>
+            <button data-usage-control={canvasUsageControl(id)} type="button" className={`group relative flex h-9 shrink-0 items-center whitespace-nowrap rounded-lg px-0.5 focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-[#a1a1aa] ${danger ? "text-[#ef4444]" : ""}`} style={highResolution && !danger ? { color: theme.toolbar.highResolution } : undefined} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick(); }} aria-label={title}>
                 <span className={`flex h-8 items-center ${hasText ? "gap-1.5 px-2" : "justify-center px-2"} rounded-md transition group-hover:bg-[var(--node-tool-hover)] [&_svg]:size-4 ${active ? "bg-[var(--node-tool-hover)]" : ""}`}>
                     {icon}
                     {hasText ? <span>{label}</span> : null}

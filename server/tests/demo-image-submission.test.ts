@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import ts from "typescript";
-import { buildApiMartImageRequest } from "../src/apimart-image";
+import { ApiMartImageProviderFailure, apiMartImageModel, buildApiMartImageRequest } from "../src/apimart-image";
+import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { DemoStateStore, DemoStorageError } from "../src/demo-state-store";
 import { ImageResultPersistenceError } from "../src/image-result-storage";
 
@@ -28,7 +29,7 @@ const productionCode = ts.transpileModule([
   ]),
   await declarations("../src/apimart-image.ts", [
     "runApiMartImageTask", "readTaskId", "readStatus", "readOutputUrls", "readFailureMessage", "providerMessage", "object", "string",
-    "IMAGE_STATUSES", "IMAGE_FAILURE_STATUSES",
+    "IMAGE_STATUSES", "IMAGE_FAILURE_STATUSES", "isMarkImageModel", "MARK_IMAGE_MODELS",
   ]),
 ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
 
@@ -51,7 +52,8 @@ function createHarness(failurePhase?: FailurePhase) {
     demoState, DemoStorageError, ImageResultPersistenceError, demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
     apiMartBaseUrl: "https://apimart.invalid/v1",
     apiMartApiKey: "mock-model-key",
-    buildApiMartImageRequest,
+    gptImage2ProviderId: "legacy-apimart", MARK_IMAGE_PROVIDER_ID,
+    buildApiMartImageRequest, apiMartImageModel, ApiMartImageProviderFailure,
     Bun: { sleep: async () => {} },
     sleep: async () => {},
     completeDemoImageTask: async () => { completed++; },

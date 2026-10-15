@@ -1,6 +1,6 @@
-import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "react";
 import { ConfigProvider } from "antd";
-import { ChevronDown, Minus, Plus, Ratio, Layers2 } from "lucide-react";
+import { ChevronDown, Ratio, Layers2 } from "lucide-react";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
 import { imageModelSettingsError, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
@@ -14,19 +14,28 @@ type ImageSettingsPanelProps = {
     showTitle?: boolean;
     className?: string;
     maxCount?: number;
+    profile?: ReturnType<typeof useImageModelProfile>;
+    referenceCount?: number;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "", maxCount: maximum }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0 }: ImageSettingsPanelProps) {
     const [snapToStep, setSnapToStep] = useState(false);
-    const profile = useImageModelProfile(config.model || config.imageModel);
+    const cachedProfile = useImageModelProfile(config.model || config.imageModel);
+    const profile = suppliedProfile || cachedProfile;
     const normalized = normalizeImageModelSettings(config, profile);
     const maxCount = Math.min(maximum || profile.maxCount, profile.maxCount);
     const count = Math.min(maxCount, Number(normalized.count));
     const custom = !profile.sizes.includes(normalized.size);
     const dimensions = /^\d+x\d+$/.test(normalized.size) ? normalized.size.split("x").map(Number) : [1024, 1024];
     const sizeError = imageModelSettingsError(normalized.size, profile);
-    const fields = imageOptionFields(profile);
+    const fields = imageOptionFields(profile).filter(field => field.key !== "resolution" && !(profile.kind === "midjourney-blend" && field.key === "dimensions"));
+    const referenceQualityDisabled = profile.kind === "grok-image" && referenceCount > 0;
     const options = readImageOptions(config.imageOptions);
+    const resolution = profile.resolutions.includes(options.resolution || "") ? options.resolution! : "1k";
+    // Preserve intentional pixel sizes (including saved values inherited from another model).
+    // The provider gives exact pixels precedence, so do not imply its resolution tier is active.
+    const exactPixelsOverrideResolution = profile.resolutions.length > 0 && /^[1-9]\d*x[1-9]\d*$/.test(normalized.size);
+    const resolutionNoticeId = useId();
     const updateOption = (key: string, value: string) => {
         const next = { ...options, [key]: value };
         if (!value) delete next[key];
@@ -37,10 +46,16 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     };
     useEffect(() => {
         for (const key of ["size", "quality", "count"] as const) {
+            // Quality is inactive with Grok references. Preserve the text-only preference
+            // without fighting parent normalizers; request serialization omits it.
+            if (key === "quality" && referenceQualityDisabled) continue;
             const value = key === "count" ? String(count) : normalized[key];
             if (config[key] !== value) onConfigChange(key, value);
         }
-    }, [config.size, config.quality, config.count, normalized.size, normalized.quality, count, onConfigChange]);
+    }, [config.size, config.quality, config.count, normalized.size, normalized.quality, count, referenceQualityDisabled, onConfigChange]);
+    useEffect(() => {
+        if (profile.resolutions.length && options.resolution !== resolution) onConfigChange("imageOptions", JSON.stringify({ ...options, resolution }));
+    }, [config.imageOptions, profile.resolutions.length, resolution, onConfigChange]);
     const commitDimension = (index: number, input: HTMLInputElement) => {
         const candidate = Math.round(Number(input.value));
         const value = Number.isSafeInteger(candidate) && candidate > 0 ? candidate : dimensions[index] || 1024;
@@ -53,10 +68,18 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
         <div className={`image-parameters ${className}`} style={{ "--ip-text": theme.node.text, "--ip-muted": theme.node.muted, "--ip-border": theme.node.stroke, "--ip-soft": theme.node.fill, "--ip-panel": theme.toolbar.panel } as CSSProperties}
             onMouseDown={event => event.stopPropagation()}>
             {showTitle ? <div className="ip-title">图像设置</div> : null}
+            {profile.kind === "midjourney-blend" ? <>
+                <div className="ip-row"><span className="ip-label">比例预设</span><label className="ip-select">
+                    <select aria-label="比例预设" value={options.dimensions || "SQUARE"} onChange={event => updateOption("dimensions", event.target.value)}>
+                        <option value="SQUARE">方形 1:1</option><option value="PORTRAIT">竖向 2:3</option><option value="LANDSCAPE">横向 3:2</option>
+                    </select><ChevronDown size={13} aria-hidden />
+                </label></div>
+                <p className="text-xs leading-5" style={{ color: theme.node.muted }}>选择预设会同步宽高比；实际提交的 size 优先于 dimensions，可在下方改为自由比例。</p>
+            </> : null}
             {profile.verified ? <><div className="ip-row">
                 <span className="ip-label"><Ratio size={15} />宽高比</span>
                 <label className="ip-select">
-                    <select aria-label="宽高比" value={normalized.size} onChange={event => onConfigChange("size", event.target.value)}>
+                    <select data-usage-control="size" aria-label="宽高比" value={normalized.size} onChange={event => onConfigChange("size", event.target.value)}>
                         {profile.sizes.map(value => <option key={value} value={value}>{imageSizeLabel(value)}{value.includes("x") ? ` · ${value.replace("x", " × ")}` : ""}</option>)}
                         {custom ? <option value={normalized.size}>自定义 · {normalized.size.replace("x", " × ")}</option> : null}
                     </select>
@@ -64,23 +87,31 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 </label>
             </div>
             <p className="text-xs leading-5" style={{ color: theme.node.muted }}>仅影响下次 AI 生成，不改变已有图片。{profile.tip} 高画质、大尺寸可能增加费用与耗时。</p>
-            <div className="ip-row">
+            {profile.resolutions.length ? <div className="ip-row">
+                <span className="ip-label">清晰度 / 分辨率</span>
+                <label className="ip-select">
+                    <select data-usage-control="resolution" aria-label="清晰度 / 分辨率" disabled={exactPixelsOverrideResolution} aria-describedby={exactPixelsOverrideResolution ? resolutionNoticeId : undefined} className={exactPixelsOverrideResolution ? "cursor-not-allowed opacity-60" : undefined} value={resolution} onChange={event => updateOption("resolution", event.target.value)}>
+                        {profile.resolutions.map(value => <option key={value} value={value}>{value.toUpperCase()}</option>)}
+                    </select>
+                    <ChevronDown size={13} aria-hidden />
+                </label>
+            </div> : null}
+            {exactPixelsOverrideResolution ? <p id={resolutionNoticeId} role="status" className="text-xs leading-5" style={{ color: theme.node.muted }}>当前精确像素 {normalized.size.replace("x", " × ")} 优先，分辨率档位暂不生效；改选上方宽高比或自适应后启用。图片质量仍独立生效。</p> : null}
+            {referenceQualityDisabled ? <p role="status" className="text-xs leading-5" style={{ color: theme.node.muted }}>参考图模式不提交 quality；移除全部参考图后可设置图片质量。</p> : <div className="ip-row">
                 <span className="ip-label">{profile.qualityLabel}</span>
-                <div className="ip-segments" role="group" aria-label={profile.qualityLabel}>
-                    {profile.qualities.map(value => <button key={value} type="button" aria-pressed={normalized.quality === value} onClick={() => onConfigChange("quality", value)}>{imageQualityLabel(value)}</button>)}
-                </div>
-            </div>
+                {profile.kind === "quality-resolution" || profile.kind === "resolution-1k" || profile.kind === "grok-image" ? <label className="ip-select">
+                    <select data-usage-control={profile.kind === "resolution-1k" ? "resolution" : "quality"} aria-label={profile.qualityLabel} value={normalized.quality} onChange={event => onConfigChange("quality", event.target.value)}>
+                        {profile.qualities.map(value => <option key={value} value={value}>{imageQualityLabel(value)}</option>)}
+                    </select>
+                    <ChevronDown size={13} aria-hidden />
+                </label> : <div className="ip-segments" role="group" aria-label={profile.qualityLabel}>
+                    {profile.qualities.map(value => <button key={value} data-usage-control={profile.kind === "gemini" ? "resolution" : "quality"} data-usage-value={value} type="button" aria-pressed={normalized.quality === value} onClick={() => onConfigChange("quality", value)}>{imageQualityLabel(value)}</button>)}
+                </div>}
+            </div>}
             </> : <p className="py-2 text-xs leading-5 opacity-60">{profile.tip}</p>}
             <div className="ip-row">
-                <span className="ip-label" title="多张会拆分为多个独立任务；每个上游请求只生成一张，并分别计费。"><Layers2 size={15} />{maxCount > 1 ? "批量张数" : "任务数"}</span>
-                {maxCount > 1 ? <div className="ip-count">
-                    <input type="range" min={1} max={maxCount} step={1} value={count} aria-label="生成张数" onChange={event => onConfigChange("count", event.target.value)} />
-                    <div className="ip-stepper">
-                        <button type="button" aria-label="减少生成张数" disabled={count <= 1} onClick={() => onConfigChange("count", String(count - 1))}><Minus size={12} /></button>
-                        <output aria-live="polite">{count}</output>
-                        <button type="button" aria-label="增加生成张数" disabled={count >= maxCount} onClick={() => onConfigChange("count", String(count + 1))}><Plus size={12} /></button>
-                    </div>
-                </div> : <span className="ip-fixed-count">1 个任务</span>}
+                <span className="ip-label" title="每次提交生成 1 张图片；可连续提交多个独立任务。"><Layers2 size={15} />任务数</span>
+                <span className="ip-fixed-count">1 个任务</span>
             </div>
             {profile.customSize ? <details className="ip-details">
                 <summary>自定义像素<ChevronDown size={13} /></summary>

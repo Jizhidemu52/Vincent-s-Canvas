@@ -5,10 +5,14 @@ export type PublicModel = {
     id: string;
     name: string;
     modelId: string;
+    /** Protocol parameter identity only; never use this value to select a provider. */
+    parameterModelId?: string;
     publicName?: string;
     publicDescription?: string;
     modelIdentityHidden?: boolean;
     imageParameterProfile?: import("@/lib/image-model-settings").ImageParameterProfile;
+    imageSupportsMask?: boolean;
+    imageSupportsOfficialFallback?: boolean;
     capabilities: string[];
     creditCost: number;
     rmbCost: number;

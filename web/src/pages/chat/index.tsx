@@ -11,8 +11,9 @@ import { buildCreativeImageCatalog, type CreativeImageLineage } from "@/lib/crea
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
 import { createChatStreamBuffer } from "./chat-stream-buffer";
 import { chatSessionStorage } from "./chat-session-storage";
-import { chatImageQualitySettings, preferredChatImageModel, resolveChatImageQuality } from "./image-quality";
+import { chatImageQualitySettings, chatImageRequestOptions, preferredChatImageModel, resolveChatImageQuality } from "./image-quality";
 import { useImageModelProfile } from "@/lib/image-model-settings";
+import { modelLabelWithUsage } from "@/lib/model-picker-options";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { isClaudeModel, requestEdit, requestGeneration } from "@/services/api/image";
@@ -25,9 +26,9 @@ import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType } from "@/types/canvas";
 
 type ChatAttachment = Omit<ParsedChatAttachment, "kind"> & { id: string; kind?: ParsedChatAttachment["kind"] };
-type ChatGeneratedImage = { id: string; dataUrl: string; prompt?: string; modelId?: string; quality?: string; lineage?: CreativeImageLineage };
+type ChatGeneratedImage = { id: string; dataUrl: string; prompt?: string; modelId?: string; quality?: string; resolution?: string; lineage?: CreativeImageLineage };
 type ChatMessage = { id: string; parentMessageId?: string; editTargetImageId?: string; role: "user" | "assistant" | "error"; content: string; attachments?: ChatAttachment[]; generatedImages?: ChatGeneratedImage[]; pendingImageTask?: PendingChatImageTask; createdAt: string };
-type ChatSession = { id: string; title: string; messages: ChatMessage[]; updatedAt: string; chatModelId?: string; imageModelId?: string; imageQuality?: string; editTargetImageId?: string; canvasProjectId?: string };
+type ChatSession = { id: string; title: string; messages: ChatMessage[]; updatedAt: string; chatModelId?: string; imageModelId?: string; imageQuality?: string; imageResolution?: string; editTargetImageId?: string; canvasProjectId?: string };
 
 const storagePrefix = "wireless-canvas:llm-chat:";
 function createSession(): ChatSession {
@@ -92,6 +93,7 @@ export default function ChatPage() {
     const [placingImage, setPlacingImage] = useState(false);
     const placingImageRef = useRef(false);
     const [imageRecoveryReload, setImageRecoveryReload] = useState(0);
+    const imageRecoveryRequestRef = useRef<{ storageKey: string; sessionId: string; messageId: string; requestId: string; taskId?: string } | null>(null);
     const [recoveringImageTask, setRecoveringImageTask] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
     const followBottomRef = useRef(true);
@@ -193,7 +195,7 @@ export default function ChatPage() {
     const imageModels = useMemo(() => modelsStatus === "ready" ? models.filter((item) => chatImageEnabled && imageBinding?.enabled !== false && (!imageBinding?.modelConfigId || item.id === imageBinding.modelConfigId) && !item.modelId.startsWith("demo-") && item.capabilities.some((capability) => ["generate", "edit"].includes(capability))) : [], [models, modelsStatus, imageBinding, chatImageEnabled]);
     const preferredImageModel = preferredChatImageModel(imageModels, [activeSession?.imageModelId, config.imageModel, config.model]);
     const qualityProfile = useImageModelProfile(preferredImageModel?.modelId || "");
-    const imageQualitySettings = chatImageQualitySettings(qualityProfile, activeSession?.imageQuality);
+    const imageQualitySettings = chatImageQualitySettings(qualityProfile, activeSession?.imageQuality, activeSession?.imageResolution);
     const availableModels = chatModels;
     const preferredModel = activeSession?.chatModelId;
     useEffect(() => {
@@ -213,12 +215,16 @@ export default function ChatPage() {
     };
 
     useEffect(() => {
+        const resumeRequest = imageRecoveryRequestRef.current;
+        imageRecoveryRequestRef.current = null;
         const pending = pendingImageMessage?.pendingImageTask;
         if (!sessionsReady || isSending || !activeSession || !pending || !pendingImageMessage) { setRecoveringImageTask(false); return; }
         const controller = new AbortController();
         const { signal } = controller;
         const sessionId = activeSession.id;
         const assistantId = pendingImageMessage.id;
+        const resumePaused = Boolean(resumeRequest && resumeRequest.storageKey === storageKey && resumeRequest.sessionId === sessionId
+            && resumeRequest.messageId === assistantId && resumeRequest.requestId === pending.requestId && resumeRequest.taskId === pending.taskId);
         const stillCurrent = () => !signal.aborted && loadedStorageKeyRef.current === storageKey;
         const saveUpdate = async (update: (item: ChatMessage) => ChatMessage, editTargetImageId?: string) => {
             if (!stillCurrent()) return;
@@ -231,11 +237,12 @@ export default function ChatPage() {
         void (async () => {
             const result = await recoverChatImageTask(pending, {
                 signal,
+                resumePaused,
                 onTask: (task) => saveUpdate((item) => ({ ...item, pendingImageTask: { ...pending, taskId: task.id }, content: `正在查询原图片任务 ${task.id}，不会重新生成或扣费。` })),
             });
             if (!stillCurrent()) return;
             if (result.kind === "success") {
-                const images = await Promise.all(result.resultUrls.map(async (url, index) => ({ id: `${result.task.id}:${index}`, dataUrl: await imageToDataUrl({ dataUrl: url }).catch(() => url), prompt: pending.prompt, modelId: pending.modelId, quality: pending.quality, lineage: pending.lineage })));
+                const images = await Promise.all(result.resultUrls.map(async (url, index) => ({ id: `${result.task.id}:${index}`, dataUrl: await imageToDataUrl({ dataUrl: url }).catch(() => url), prompt: pending.prompt, modelId: pending.modelId, quality: pending.quality, ...(pending.resolution ? { resolution: pending.resolution } : {}), lineage: pending.lineage })));
                 if (!stillCurrent()) return;
                 await saveUpdate((item) => {
                     const { pendingImageTask: _pending, ...saved } = item;
@@ -255,6 +262,13 @@ export default function ChatPage() {
         }).finally(() => { if (stillCurrent()) setRecoveringImageTask(false); });
         return () => controller.abort();
     }, [sessionsReady, isSending, activeSession?.id, pendingImageMessage?.id, pendingImageMessage?.pendingImageTask?.requestId, storageKey, imageRecoveryReload]);
+
+    const queryOriginalImageTask = () => {
+        const pending = pendingImageMessage?.pendingImageTask;
+        if (!sessionsReady || isSending || recoveringImageTask || imageRecoveryRequestRef.current || !activeSession || !pending || !pendingImageMessage) return;
+        imageRecoveryRequestRef.current = { storageKey, sessionId: activeSession.id, messageId: pendingImageMessage.id, requestId: pending.requestId, taskId: pending.taskId };
+        setImageRecoveryReload((value) => value + 1);
+    };
 
     const startSession = () => {
         if (!sessionsReady || sendingRef.current || placingImageRef.current) return;
@@ -292,7 +306,7 @@ export default function ChatPage() {
                 useCanvasStore.getState().updateProject(project.id, { nodes: [...project.nodes, {
                     id: nodeId, type: CanvasNodeType.Image, title: "对话创作", position: { x, y: 0 }, width,
                     height: width * stored.height / stored.width,
-                    metadata: { content: stored.url, storageKey: stored.storageKey, status: "success", naturalWidth: stored.width, naturalHeight: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, prompt: image.prompt, model: image.modelId, imageName: "对话创作", imageVersion: 1 },
+                    metadata: { content: stored.url, storageKey: stored.storageKey, status: "success", naturalWidth: stored.width, naturalHeight: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, prompt: image.prompt, model: image.modelId, quality: image.quality, imageOptions: image.resolution ? JSON.stringify({ resolution: image.resolution }) : "", imageName: "对话创作", imageVersion: 1 },
                 }] });
             }
             // Remember the target before asynchronous persistence, including a
@@ -341,6 +355,7 @@ export default function ChatPage() {
         const userMessage: ChatMessage = { id: createClientId(), parentMessageId: activeSession.messages.at(-1)?.id, editTargetImageId: activeSession.editTargetImageId, role: "user", content: text, attachments, createdAt: new Date().toISOString() };
         const assistantId = createClientId();
         const requestedImageQuality = activeSession.imageQuality;
+        const requestedImageResolution = activeSession.imageResolution;
 
         // Commit the full user turn before clearing its draft or making a model
         // request. A failed write must leave the user's attachments available.
@@ -391,16 +406,17 @@ export default function ChatPage() {
             const imageModel = preferredChatImageModel(imageModels, [activeSession.imageModelId, config.imageModel, config.model], action);
             if (!imageModel) throw new Error(`当前尚未配置可用的图片${action === "edit" ? "编辑" : "生成"}服务。可以继续讨论，图片处理需管理员启用。`);
             const imageModelId = imageModel.modelId;
-            const qualitySettings = resolveChatImageQuality(imageModelId, requestedImageQuality);
+            const qualitySettings = resolveChatImageQuality(imageModelId, requestedImageQuality, requestedImageResolution);
             if (!qualitySettings.supported) {
-                updateSession(sessionId, session => ({ ...session, imageModelId, imageQuality: qualitySettings.quality }));
-                throw new Error("本次图片操作所用模型不支持原清晰度档位，已更新可选档位。请在输入框下方调整清晰度后重新发送；图片任务尚未提交。");
+                updateSession(sessionId, session => ({ ...session, imageModelId, imageQuality: qualitySettings.quality, imageResolution: qualitySettings.resolution }));
+                throw new Error("本次图片操作所用模型不支持原清晰度或图片质量，已更新可选档位。请在输入框下方调整后重新发送；图片任务尚未提交。");
             }
             const quality = qualitySettings.quality;
+            const resolution = qualitySettings.resolution;
             setSendPhase(action === "edit" ? "正在按你的要求修改图片…" : "正在生成图片…");
-            const imageConfig = { ...config, model: imageModelId, imageModel: imageModelId, quality, systemPrompt: "", count: "1" };
-            const pendingImageTask: PendingChatImageTask = { requestId: createClientId(), prompt: imagePrompt, modelId: imageModelId, quality, action, parentMessageId: userMessage.id, lineage, explanation };
-            updateSession(sessionId, (session) => ({ ...session, imageModelId, imageQuality: quality, messages: [...session.messages.filter((item) => item.id !== assistantId), { id: assistantId, parentMessageId: userMessage.id, role: "assistant", content: `${explanation ? `${explanation}\n\n` : ""}正在准备图片…`, pendingImageTask, createdAt: new Date().toISOString() }], updatedAt: new Date().toISOString() }));
+            const imageConfig = { ...config, model: imageModelId, imageModel: imageModelId, quality, imageOptions: chatImageRequestOptions(config.imageOptions, resolution), systemPrompt: "", count: "1" };
+            const pendingImageTask: PendingChatImageTask = { requestId: createClientId(), prompt: imagePrompt, modelId: imageModelId, quality, ...(resolution ? { resolution } : {}), action, parentMessageId: userMessage.id, lineage, explanation };
+            updateSession(sessionId, (session) => ({ ...session, imageModelId, imageQuality: quality, imageResolution: resolution, messages: [...session.messages.filter((item) => item.id !== assistantId), { id: assistantId, parentMessageId: userMessage.id, role: "assistant", content: `${explanation ? `${explanation}\n\n` : ""}正在准备图片…`, pendingImageTask, createdAt: new Date().toISOString() }], updatedAt: new Date().toISOString() }));
             persistence.clear();
             await persistSessions(sessionsRef.current);
             signal.throwIfAborted();
@@ -417,7 +433,7 @@ export default function ChatPage() {
                 ? await requestEdit(imageConfig, imagePrompt, references, undefined, { operationType: "inpaint", tool: "gpt-chat-image", requestId: pendingImageTask.requestId, signal, onSubmissionStarted, onSubmitted })
                 : await requestGeneration(imageConfig, imagePrompt, { operationType: "image_generation", tool: "gpt-chat-image", requestId: pendingImageTask.requestId, signal, onSubmissionStarted, onSubmitted });
             if (!generated.length) throw new Error("图像模型没有返回图片");
-            const savedImages = await Promise.all(generated.map(async (item, index) => ({ id: item.sourceTaskId ? `${item.sourceTaskId}:${index}` : item.id, dataUrl: await imageToDataUrl(item).catch(() => item.dataUrl), prompt: imagePrompt, modelId: imageModelId, quality, lineage })));
+            const savedImages = await Promise.all(generated.map(async (item, index) => ({ id: item.sourceTaskId ? `${item.sourceTaskId}:${index}` : item.id, dataUrl: await imageToDataUrl(item).catch(() => item.dataUrl), prompt: imagePrompt, modelId: imageModelId, quality, ...(resolution ? { resolution } : {}), lineage })));
             updateSession(sessionId, (session) => ({
                 ...session,
                 editTargetImageId: savedImages[0]?.id,
@@ -511,7 +527,7 @@ export default function ChatPage() {
                         <div className="min-w-0 flex-1"><h1 className="wb-title">LLM 对话</h1><p className="mt-1 text-sm text-muted-foreground">直接发消息、图片或文件，接着聊、接着改。</p></div>
                         <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
                             {modelsLoading ? <LoaderCircle role="status" aria-label="正在读取模型" className="size-4 animate-spin text-muted-foreground" /> : null}
-                            <div className="relative min-w-0"><select aria-label="对话模型" disabled={isSending || modelsLoading || !availableModels.length} value={selectedModel} onChange={(event) => { const modelId = event.target.value; setSelectedModel(modelId); if (activeSession) updateSession(activeSession.id, (session) => ({ ...session, chatModelId: modelId })); }} className="h-10 max-w-[240px] appearance-none rounded-xl bg-transparent py-0 pl-3 pr-9 text-sm text-foreground outline-none hover:bg-muted disabled:opacity-50">{!selectedModel ? <option value="">{modelsLoading ? "正在读取模型" : "暂无可用模型"}</option> : null}{availableModels.map((item) => <option key={item.modelId} value={item.modelId}>{item.name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-3 size-4 text-muted-foreground" /></div>
+                            <div className="relative min-w-0"><select data-usage-control="model" aria-label="对话模型" disabled={isSending || modelsLoading || !availableModels.length} value={selectedModel} onChange={(event) => { const modelId = event.target.value; setSelectedModel(modelId); if (activeSession) updateSession(activeSession.id, (session) => ({ ...session, chatModelId: modelId })); }} className="h-10 max-w-[240px] appearance-none rounded-xl bg-transparent py-0 pl-3 pr-9 text-sm text-foreground outline-none hover:bg-muted disabled:opacity-50">{!selectedModel ? <option value="">{modelsLoading ? "正在读取模型" : "暂无可用模型"}</option> : null}{availableModels.map((item) => <option key={item.modelId} value={item.modelId}>{modelLabelWithUsage(item.name, item.publicDescription)}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-3 size-4 text-muted-foreground" /></div>
                         </div>
                     </header>
                     {modelError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{modelError}</span><Button onClick={() => void refreshModels().catch(() => undefined)}>重试加载</Button></div> : null}
@@ -530,7 +546,7 @@ export default function ChatPage() {
 
                     <div className="border-t border-border bg-card px-4 py-4 md:px-[8%]">
                         <div className="mx-auto max-w-3xl">
-                            {pendingImageMessage && !isSending ? <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground"><span>{recoveringImageTask ? "正在查询原图片任务，不会重新生成…" : "本会话有图片任务尚未核实；确认结果前不能继续发送。"}</span><Button size="small" disabled={recoveringImageTask} onClick={() => setImageRecoveryReload((value) => value + 1)}>查询原任务</Button></div> : null}
+                            {pendingImageMessage && !isSending ? <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground"><span>{recoveringImageTask ? "正在查询原图片任务，不会重新生成…" : "本会话有图片任务尚未核实；确认结果前不能继续发送。"}</span><Button size="small" disabled={recoveringImageTask} onClick={queryOriginalImageTask}>查询原任务</Button></div> : null}
                             <div className="rounded-2xl border border-input bg-background p-3 focus-within:border-orange-400">
                                 {attachments.length ? <div className="flex flex-wrap gap-2 pb-3">{attachments.map((item) => <div key={item.id} className="group relative flex h-14 max-w-[180px] items-center gap-2 rounded-xl border border-border bg-card p-1.5">{item.dataUrl ? <img src={item.dataUrl} alt="" className="size-10 rounded-lg object-cover" /> : <span className="grid size-10 place-items-center rounded-lg bg-muted text-muted-foreground"><FileText className="size-5" /></span>}<span className="min-w-0 flex-1 truncate text-xs font-medium">{item.name}</span><button type="button" aria-label={"移除 " + item.name} onClick={() => setAttachments((current) => current.filter((attachment) => attachment.id !== item.id))} className="absolute -right-1.5 -top-1.5 grid size-6 place-items-center rounded-full border border-border bg-card text-muted-foreground hover:text-red-600"><X className="size-3.5" /></button></div>)}</div> : null}
                                 {readingAttachments ? <div role="status" className="mb-2 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在读取附件，请稍候…</div> : null}
@@ -539,7 +555,9 @@ export default function ChatPage() {
                                     <div className="flex min-w-0 flex-wrap items-center gap-1">
                                         <Tooltip title="上传图片、PDF、Word、表格或文本"><button type="button" disabled={!sessionsReady || readingAttachments || attachments.length >= 5} onClick={() => openChatAttachmentPicker(fileInputRef.current)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label="上传文件"><Paperclip className="size-5" /></button></Tooltip>
                                         <Tooltip title="上传图片"><button type="button" disabled={!sessionsReady || readingAttachments || attachments.length >= 5} onClick={() => openChatAttachmentPicker(fileInputRef.current, true)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label="上传图片"><ImagePlus className="size-5" /></button></Tooltip>
-                                        <label className="flex min-w-0 items-center gap-1.5 pl-1 text-xs text-muted-foreground" title={imageQualitySettings.adjustable ? "仅影响本会话出图和改图，画质不等于固定像素尺寸" : "当前模型没有独立画质档位，使用模型默认设置"}>清晰度<select aria-label="图片清晰度" value={imageQualitySettings.quality} disabled={!sessionsReady || modelsLoading || isSending || Boolean(pendingImageMessage) || !preferredImageModel || !imageQualitySettings.adjustable} onChange={event => { if (activeSession && preferredImageModel) updateSession(activeSession.id, session => ({ ...session, imageModelId: preferredImageModel.modelId, imageQuality: event.target.value })); }} className="h-8 max-w-[110px] rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">{imageQualitySettings.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                                        <label className="flex min-w-0 items-center gap-1.5 pl-1 text-xs text-muted-foreground" title={imageBinding?.modelConfigId ? "当前出图模型由后台指定" : "仅影响本会话出图和改图"}>出图模型<select data-usage-control="model" aria-label="出图模型" value={preferredImageModel?.modelId || ""} disabled={!sessionsReady || modelsLoading || isSending || Boolean(pendingImageMessage) || !imageModels.length || Boolean(imageBinding?.modelConfigId)} onChange={event => { const modelId = event.target.value; if (activeSession && imageModels.some(model => model.modelId === modelId)) updateSession(activeSession.id, session => { const settings = resolveChatImageQuality(modelId, session.imageQuality, session.imageResolution); return { ...session, imageModelId: modelId, imageQuality: settings.quality, imageResolution: settings.resolution }; }); }} className="h-8 max-w-[200px] rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">{!preferredImageModel ? <option value="">{modelsLoading ? "正在读取模型" : "暂无可用模型"}</option> : null}{imageModels.map(model => <option key={model.id} value={model.modelId}>{modelLabelWithUsage(model.name, model.publicDescription)}</option>)}</select></label>
+                                        {imageQualitySettings.independentResolution ? <label className="flex min-w-0 items-center gap-1.5 pl-1 text-xs text-muted-foreground" title="本会话的图片清晰度，与图片质量独立设置">清晰度<select data-usage-control="resolution" aria-label="图片分辨率" data-testid="chat-image-resolution" value={imageQualitySettings.resolution} disabled={!sessionsReady || modelsLoading || isSending || Boolean(pendingImageMessage) || !preferredImageModel} onChange={event => { if (activeSession && preferredImageModel) updateSession(activeSession.id, session => ({ ...session, imageModelId: preferredImageModel.modelId, imageResolution: event.target.value })); }} className="h-8 max-w-[110px] rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">{imageQualitySettings.resolutionOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label> : null}
+                                        <label className="flex min-w-0 items-center gap-1.5 pl-1 text-xs text-muted-foreground" title={imageQualitySettings.adjustable ? "仅影响本会话出图和改图；图片质量与清晰度为不同参数" : "当前模型没有可调档位，使用模型默认设置"}>{imageQualitySettings.label}<select data-usage-control={imageQualitySettings.independentResolution ? "quality" : "resolution"} aria-label={imageQualitySettings.independentResolution ? "图片质量" : "图片清晰度"} data-testid="chat-image-quality" value={imageQualitySettings.quality} disabled={!sessionsReady || modelsLoading || isSending || Boolean(pendingImageMessage) || !preferredImageModel || !imageQualitySettings.adjustable} onChange={event => { if (activeSession && preferredImageModel) updateSession(activeSession.id, session => ({ ...session, imageModelId: preferredImageModel.modelId, imageQuality: event.target.value })); }} className="h-8 max-w-[110px] rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">{imageQualitySettings.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                                     </div>
                                     <Button type="primary" disabled={!sessionsReady || (!draft.trim() && !attachments.length) || isSending || placingImage || Boolean(pendingImageMessage) || readingAttachments || !selectedModel} loading={isSending} onClick={() => void send()} icon={<Send className="size-4" />} className="!h-10 !px-4">发送</Button>
                                 </div>

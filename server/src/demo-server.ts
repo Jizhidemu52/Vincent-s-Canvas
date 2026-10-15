@@ -1,5 +1,7 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
+import { singleImageTaskParameters } from "./image-task-policy";
 import { assetMetadataSchema } from "./asset-metadata";
+import { appendDemoDownloadReceipt, demoDownloadProjection, demoDownloadReceiptSchema, type DemoDownloadReceipt } from "./demo-asset-receipts";
 import { assignDemoPublicModelNumbers, isSelectableCreativeModel, presentAdminModel, presentPublicModel } from "./model-presentation";
 import { redactDesignerModelData } from "./model-privacy";
 import { openAiImageParameters } from "./openai-image-parameters";
@@ -7,7 +9,9 @@ import { ImageEditInputError, prepareImageEditInput, type ImageEditInput } from 
 import { deploymentFeatures } from "./deployment-features";
 import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
 import { resolveStandaloneStaticPath } from "./demo-standalone-web";
-import { apiMartImageModel, runApiMartImageTask } from "./apimart-image";
+import { ApiMartImageProviderFailure, apiMartImageModel, runApiMartImageTask } from "./apimart-image";
+import { createDemoMarkProvider } from "./demo-mark-provider";
+import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { listAvailableDemoModels, resolveDemoExternalProviders, videoModelConfigIds } from "./demo-provider-configuration";
 import { applyDemoProviderCredentials } from "./demo-provider-credentials";
 import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
@@ -32,6 +36,7 @@ import { DemoStateStore, DemoStorageError } from "./demo-state-store";
 import { DemoDesignLibraryStore, handleDemoDesignLibrary } from "./demo-design-library";
 import { DesignLibraryService } from "./design-library";
 import { DemoCanvasDocumentStore } from "./demo-canvas-documents";
+import { DemoPromptTemplateStore, handleDemoPromptTemplates } from "./demo-prompt-templates";
 import { assertCanvasOwner, CanvasDocumentError } from "./canvas-document";
 import { fileURLToPath } from "node:url";
 import { DemoOaStore } from "./demo-oa-store";
@@ -55,6 +60,7 @@ const gptImage2ProviderId = "30000000-0000-4000-8000-000000000002";
 const openTokenProviderId = "30000000-0000-4000-8000-000000000005";
 const openTokenBaseUrl = (process.env.OPENTOKEN_BASE_URL || "https://cn2.gw.opentoken.io/v1").replace(/\/$/, "");
 let openTokenApiKey = process.env.OPENTOKEN_API_KEY?.trim() || "";
+const markImageProvider = createDemoMarkProvider({ apiKey: process.env.MARK_IMAGE_API_KEY, baseUrl: process.env.MARK_IMAGE_BASE_URL });
 const demoProviderApiKeys = new Map<string, string>();
 const externalProviders = resolveDemoExternalProviders({ openTokenApiKey, apiMartApiKey });
 const { hasOpenToken, hasApiMart, openTokenGptImage2ModelId, openTokenGptImage2ApiModelId, openTokenGptImage2DisplayName, openTokenGptImage25Models, openTokenGptChatModel, openTokenClaudeModel, officialNanoBanana2ModelId, openTokenGeminiDisplayName, officialNanoBanana2Capabilities, apiMartGptImage2ModelId, apiMartGptImage2PublicModelId, claudeModelIds } = externalProviders;
@@ -63,6 +69,7 @@ const geminiProviderId = "30000000-0000-4000-8000-000000000003";
 const claudeProviderId = "30000000-0000-4000-8000-000000000006";
 const openTokenClaudeProviderId = "30000000-0000-4000-8000-000000000007";
 function demoChatProviderApiKey(providerId: string) {
+  if (providerId === MARK_IMAGE_PROVIDER_ID) return markImageProvider.apiKey;
   if ([openTokenProviderId, openTokenClaudeProviderId].includes(providerId)) return openTokenApiKey;
   return demoProviderApiKeys.get(providerId)
     || ([gptImage2ProviderId, geminiProviderId, claudeProviderId].includes(providerId) ? apiMartApiKey : "");
@@ -344,6 +351,8 @@ for (const modelId of supportedVideoModelIds) {
     enabled: true,
   });
 }
+demoProviders.push(markImageProvider.provider);
+demoModels.push(...markImageProvider.models);
 assignDemoPublicModelNumbers(demoModels);
 const demoPrices: Array<Record<string, unknown>> = Array.from(
   new Map(toolDefinitions.filter(tool => tool.operationType !== "chat").map((tool) => [tool.operationType, tool])).values(),
@@ -361,13 +370,14 @@ const demoToolConfigurations: Array<{ toolKey: ToolKey; modelConfigId: string | 
   toolKey: tool.toolKey,
   // Demo has no admin maintenance login. Retain model choice rather than creating
   // mandatory mock bindings that hide the server-configured real providers.
-  modelConfigId: tool.toolKey === "seamless-stitch" ? String(demoModels[3]!.id) : null,
+  modelConfigId: tool.toolKey === "seamless-stitch" && !markImageProvider.apiKey ? String(demoModels[3]!.id) : null,
   enabled: true,
   creditCostOverride: null,
   rmbCostOverride: null,
   configurationVersion: 0,
 }));
 type DemoAsset = {
+  downloadReceipts?: DemoDownloadReceipt[];
   /** Set only from a provider result by this server, never from upload metadata. */
   upstreamUrl?: string;
   byteSize?: number;
@@ -420,6 +430,7 @@ const demoTasks = new Map<string, DemoTask>();
 const demoStatePath = process.env.DEMO_STATE_PATH?.trim() || fileURLToPath(new URL("../.data/local-demo.sqlite", import.meta.url));
 const demoState = new DemoStateStore<DemoAsset, DemoTask>(demoStatePath);
 const canvasDocuments = new DemoCanvasDocumentStore(demoStatePath);
+const promptTemplates = new DemoPromptTemplateStore(demoStatePath);
 const oaStore = features.oaLoginEnabled ? new DemoOaStore(demoStatePath) : null;
 const demoDesignLibrary = oaStore ? new DemoDesignLibraryStore(demoStatePath, (asset) => demoAssets.set(asset.id, asset)) : null;
 const designLibraryService = demoDesignLibrary ? new DesignLibraryService(demoDesignLibrary, demoDesignLibrary) : null;
@@ -486,6 +497,7 @@ type DemoResponseContent = { type: "input_text"; text: string } | { type: "input
 type DemoResponseInput =
   | { role: "system" | "user" | "assistant"; content: string | DemoResponseContent[] }
   | { type: "claude_assistant"; content: Array<Record<string, unknown>> }
+  | { type: "responses_assistant"; output: Array<Record<string, unknown>> }
   | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string }
   | { type: "function_call_output"; call_id: string; output: string };
 
@@ -930,26 +942,27 @@ Bun.serve({
         claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
       };
       const chatTool = resolveDemoToolConfiguration({ operationType: "chat", toolKey: input.toolKey, modelConfigId: input.modelId }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
-      const selectedModel = String(demoModels.find(model => model.id === chatTool.modelConfigId)?.modelId || "");
+      const selectedConfig = demoModels.find(model => model.id === chatTool.modelConfigId);
+      const selectedModel = String(selectedConfig?.modelId || "");
       const parsedTools = chatFunctionToolsSchema.safeParse(input.tools);
       if (!parsedTools.success) return json({ error: "INVALID_TOOLS", message: "对话只允许已声明的 function 工具；图片生成必须通过图像任务入口" }, 400);
       input.tools = parsedTools.data;
-      const openTokenChatModel = demoModels.find((model) =>
-        [openTokenGptChatModel.id, openTokenClaudeModel.id].includes(String(model.id)) &&
-        (model.id === selectedModel || model.modelId === selectedModel),
-      );
-      if (openTokenChatModel) {
-        const provider = demoProviders.find((item) => item.id === openTokenChatModel.providerId && item.enabled === true);
-        if (!provider || openTokenChatModel.enabled !== true || !(openTokenChatModel.capabilities as string[]).includes("chat"))
+      // Select by the resolved configuration UUID: Mark and OpenToken share upstream model IDs.
+      const configuredChatModel = selectedConfig && (selectedConfig.providerId === MARK_IMAGE_PROVIDER_ID
+        || [openTokenGptChatModel.id, openTokenClaudeModel.id].includes(String(selectedConfig.id))) ? selectedConfig : undefined;
+      if (configuredChatModel) {
+        const provider = demoProviders.find((item) => item.id === configuredChatModel.providerId && item.enabled === true);
+        if (!provider || configuredChatModel.enabled !== true || !(configuredChatModel.capabilities as string[]).includes("chat"))
           return json({ error: "MODEL_DISABLED", message: "管理员尚未启用该对话模型" }, 400);
-        const protocols = openTokenChatModel.id === openTokenClaudeModel.id ? ["anthropic"] : ["openai", "openai-chat"];
+        const protocols = configuredChatModel.providerId === MARK_IMAGE_PROVIDER_ID ? ["apimart"]
+          : configuredChatModel.id === openTokenClaudeModel.id ? ["anthropic"] : ["openai", "openai-chat"];
         if (!protocols.includes(String(provider.protocol)))
           return json({ error: "MODEL_PROTOCOL_MISMATCH", message: "所选 API 协议与当前对话模型不匹配" }, 400);
         const apiKey = demoChatProviderApiKey(String(provider.id));
         if (!provider.hasCredentials || !apiKey)
           return json({ error: "PROVIDER_NOT_CONFIGURED", message: "所选对话 API 服务尚未配置服务端密钥" }, 503);
         const model = {
-          model_id: String(openTokenChatModel.modelId),
+          model_id: String(configuredChatModel.modelId),
           base_url: String(provider.baseUrl),
           protocol: String(provider.protocol),
           encrypted_credentials: null,
@@ -974,7 +987,7 @@ Bun.serve({
           }
           return json(await requestChatCompletion(model, { apiKey }, chatInput));
         } catch (error) {
-          return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "OpenToken request failed" }, 502);
+          return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "Chat provider request failed" }, 502);
         }
       }
       if (selectedModel !== "gemini-3.1-pro-preview" && !claudeModelIds.includes(selectedModel as (typeof claudeModelIds)[number]))
@@ -991,8 +1004,15 @@ Bun.serve({
         return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "Gemini request failed" }, 502);
       }
     }
-    if (path === "/api/prompt-templates" && request.method === "GET")
-      return json({ templates: [], total: 0, page: 1, pageSize: 24 });
+    if (path === "/api/prompt-templates" || path.startsWith("/api/prompt-templates/")) {
+      const response = await handleDemoPromptTemplates(request, promptTemplates, user, {
+        models: demoModels, providers: demoProviders, prices: demoPrices, tools: demoToolConfigurations,
+        creditsEnabled: features.creditsEnabled,
+        moduleEnabled: key => moduleIsEnabled(demoModuleFlags, key as ToolKey),
+        asset: id => demoAssets.get(id), task: id => demoTasks.get(id), assets: () => [...demoAssets.values()],
+      });
+      if (response) return response;
+    }
 
     if (path === "/api/assets/upload-request" && request.method === "POST") {
       const input = (await request.json()) as {
@@ -1109,6 +1129,7 @@ Bun.serve({
       } | null;
       if (!input?.requestId || !input.projectId || !input.operationType || !input.modelConfigId || !Array.isArray(input.items) || !input.items.length)
         return json({ error: "INVALID_BATCH", message: "Batch task details are incomplete" }, 400);
+      if (input.items.length !== 1) return json({ error: "SINGLE_IMAGE_ONLY", message: "每次只能生成 1 张图片，请分别发起独立任务" }, 400);
       const batchTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
       const batchId = crypto.randomUUID();
       const cookie = request.headers.get("cookie") || "";
@@ -1120,7 +1141,7 @@ Bun.serve({
         operationType: input.operationType,
         modelConfigId: input.modelConfigId,
         prompt: input.prompt || "",
-        parameters: { ...input.parameters, tool: batchTool.toolKey },
+        parameters: singleImageTaskParameters(input.operationType, { ...input.parameters, tool: batchTool.toolKey }),
         toolKey: batchTool.toolKey,
         priority: input.priority,
         items: input.items.map((item) => ({ sourceUrls: item.sourceUrls || [] })),
@@ -1151,13 +1172,13 @@ Bun.serve({
         return json({ error: "UNSUPPORTED_OPERATION", message: "Only video preflight is supported" }, 400);
       const preflightTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
       input.modelConfigId = preflightTool.modelConfigId;
-      if (!apiMartApiKey)
-        return json({ error: "PROVIDER_NOT_CONFIGURED", message: "Video generation provider is not configured" }, 503);
       const model = demoModels.find(
         (item) => item.id === input.modelConfigId && isSupportedVideoModelId(item.modelId) && item.enabled,
       );
       if (!model)
         return json({ error: "MODEL_DISABLED", message: "The selected video model is not enabled" }, 400);
+      if (!resolveDemoVideoProvider(String(model.id), model.modelId as SupportedVideoModelId))
+        return json({ error: "PROVIDER_NOT_CONFIGURED", message: "The selected video provider is not configured" }, 503);
       const sources = resolveOwnedVideoSources(input.sourceUrls || [], user);
       if (sources instanceof Response) return sources;
       const modelId = model.modelId as SupportedVideoModelId;
@@ -1195,16 +1216,8 @@ Bun.serve({
           : json({ error: "DUPLICATE_REQUEST", message: "任务请求标识已被使用" }, 400);
       const taskTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType || "" }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
       input.modelConfigId = taskTool.modelConfigId;
-      input.parameters = { ...input.parameters, tool: taskTool.toolKey };
+      input.parameters = singleImageTaskParameters(input.operationType || "", { ...input.parameters, tool: taskTool.toolKey });
       if (input.operationType === "video_generation") {
-        if (!apiMartApiKey)
-          return json(
-            {
-              error: "PROVIDER_NOT_CONFIGURED",
-              message: "APIMart server credential is not configured",
-            },
-            503,
-          );
         const duplicate = input.requestId
           ? Array.from(demoTasks.values()).find(
               (task) => task.requestId === input.requestId,
@@ -1234,6 +1247,8 @@ Bun.serve({
             },
             400,
           );
+        if (!resolveDemoVideoProvider(String(model.id), model.modelId as SupportedVideoModelId))
+          return json({ error: "PROVIDER_NOT_CONFIGURED", message: "The selected video provider is not configured" }, 503);
         const sources = resolveOwnedVideoSources(input.sourceUrls || [], user);
         if (sources instanceof Response) return sources;
         const modelId = model.modelId as SupportedVideoModelId;
@@ -1302,9 +1317,10 @@ Bun.serve({
       if (
         ["image_generation", "inpaint", "upscale", "batch_image"].includes(
           input.operationType || "",
-        )
+        ) || (input.operationType === "seamless_stitch" && Boolean(markImageProvider.apiKey) &&
+          markImageProvider.models.some(model => model.id === input.modelConfigId))
       ) {
-        if (!openTokenApiKey && !apiMartApiKey)
+        if (!openTokenApiKey && !apiMartApiKey && !markImageProvider.apiKey)
           return json(
             {
               error: "PROVIDER_NOT_CONFIGURED",
@@ -1337,7 +1353,10 @@ Bun.serve({
               isOpenTokenImageModel(item.modelId)) ||
               (Boolean(apiMartApiKey) &&
                 item.providerId === gptImage2ProviderId &&
-                apiMartImageModel(item.modelId))) &&
+                apiMartImageModel(item.modelId)) ||
+              (Boolean(markImageProvider.apiKey) &&
+                item.providerId === MARK_IMAGE_PROVIDER_ID &&
+                markImageProvider.models.some(markModel => markModel.modelId === item.modelId))) &&
             item.enabled,
         );
         if (!model)
@@ -1380,11 +1399,16 @@ Bun.serve({
           return json({ error: "MODEL_CAPABILITY_MISMATCH", message: "Midjourney 当前只支持文生图，请选择 GPT-Image-2 或 Gemini 图片模型进行编辑" }, 400);
         const apiMartModel = model.providerId === openTokenProviderId ? null : apiMartImageModel(imageModelId);
         const isGptImage2 = imageModelId.startsWith("gpt-image-2") || apiMartModel === "gpt-image-2";
-        if (editInput.references.length > (isGptImage2 ? 16 : imageModelId === "midjourney" ? 0 : imageModelId === "midjourney-blend" ? 4 : 14))
+        const maximumReferences = imageModelId === "midjourney-blend" ? 4
+          : imageModelId === "grok-imagine-image-2.0" ? 3
+          : apiMartModel === "gpt-image-2" ? 15
+          : isGptImage2 || imageModelId === "gemini-nano-banana-2.1" ? 16
+          : imageModelId === "midjourney" ? 0 : 14;
+        if (editInput.references.length > maximumReferences)
           return json(
             {
               error: "TOO_MANY_REFERENCES",
-              message: isGptImage2 ? "GPT-Image-2 最多支持 16 张参考图" : imageModelId === "midjourney" ? "Midjourney 文生图不支持上传参考图" : "Gemini 3.1 Flash 最多支持 14 张参考图",
+              message: maximumReferences === 0 ? "Midjourney 文生图不支持上传参考图" : `所选图片模型最多支持 ${maximumReferences} 张参考图`,
             },
             400,
           );
@@ -1443,6 +1467,8 @@ Bun.serve({
             input.prompt || "",
             input.parameters || {},
             sources,
+            String(model.providerId),
+            editInput,
           );
         return json({ task }, 201);
       }
@@ -1566,6 +1592,28 @@ Bun.serve({
         return json({ task, recovered: false, message: "Task has already completed" });
       if (task.status === "failed")
         return json({ task, recovered: false, message: "Task has already failed; no repeated query or refund was performed" });
+      const markModel = demoModels.find(model => model.id === task.modelConfigId && model.providerId === MARK_IMAGE_PROVIDER_ID);
+      if (markModel && task.operationType !== "video_generation") {
+        if (task.status === "processing")
+          return json({ task, recovered: false, message: "Mark 图片任务正在查询，不会重复启动查询或生成" });
+        if (!task.upstreamTaskId?.trim()) {
+          updateDemoTask(task, { status: "paused", errorCode: "MARK_IMAGE_SUBMISSION_UNKNOWN", failureReason: "Mark 图片任务缺少已确认的上游任务 ID，保持暂停；为避免重复收费，不会重新提交生成。", updatedAt: now() });
+          return json({ task, recovered: false, message: task.failureReason });
+        }
+        if (!markImageProvider.apiKey)
+          return json({ task, recovered: false, message: "Mark 服务端凭据未配置，保留原任务，未重新提交生成" });
+        const sources = (task.sourceUrls || []).map(sourceUrl => {
+          const assetId = sourceUrl.match(/^\/api\/assets\/([0-9a-f-]+)\/content$/i)?.[1];
+          return assetId ? demoAssets.get(assetId) : undefined;
+        });
+        if (sources.some(source => !source || source.ownerUserId !== task.ownerUserId || !source.bytes.byteLength)) {
+          updateDemoTask(task, { status: "paused", errorCode: "MARK_IMAGE_INPUT_UNAVAILABLE", failureReason: "原任务的参考图或蒙版已不可用，无法安全恢复结果保存；保留原上游任务，不会重新生成。", updatedAt: now() });
+          return json({ task, recovered: false, message: task.failureReason });
+        }
+        updateDemoTask(task, { status: "processing", stage: "polling", errorCode: null, failureReason: null, updatedAt: now() });
+        void runApiMartImageTaskForDemo(task, user, String(markModel.modelId), task.prompt || "", task.parameters || {}, sources as DemoAsset[], MARK_IMAGE_PROVIDER_ID);
+        return json({ task, recovered: true, message: "正在查询原 Mark 上游任务并恢复结果保存；不会重新提交生成" });
+      }
       if (!task.upstreamTaskId || !task.providerModel)
         return json({ task, recovered: false, message: "No upstream task is available to query" });
       if (task.status === "processing")
@@ -1573,6 +1621,18 @@ Bun.serve({
       updateDemoTask(task, { status: "processing", stage: "polling", errorCode: null, failureReason: null, updatedAt: now() });
       void recoverVideoTask(task, task.providerModel, task.upstreamTaskId);
       return json({ task, recovered: true, message: "Task status is being queried without a new generation submission" });
+    }
+
+    if (/^\/api\/assets\/[^/]+\/download-receipts$/.test(path) && request.method === "POST") {
+      const asset = demoAssets.get(path.split("/")[3]!);
+      if (!asset || asset.ownerUserId !== user.id || !asset.bytes.byteLength) return json({ error: "NOT_FOUND", message: "素材不存在或无权访问" }, 404);
+      const parsed = demoDownloadReceiptSchema.safeParse(await request.json().catch(() => null));
+      if (!parsed.success) return json({ error: "INVALID_INPUT", message: "下载记录格式不正确" }, 400);
+      const current = demoAssets.get(asset.id);
+      if (!current || current.ownerUserId !== user.id) return json({ error: "NOT_FOUND", message: "素材不存在或无权访问" }, 404);
+      const receipt = appendDemoDownloadReceipt(current, parsed.data);
+      if (!receipt.duplicate) saveDemoAsset(receipt.asset);
+      return json({ eventId: receipt.eventId, projection: receipt.projection }, 201);
     }
 
     if (/^\/api\/assets\/[^/]+\/metadata$/.test(path) && request.method === "PATCH") {
@@ -1598,7 +1658,7 @@ Bun.serve({
           filename: asset.filename, mimeType: asset.mimeType, byteSize: asset.bytes.byteLength, kind: asset.mimeType.startsWith("image/") ? "image" : asset.mimeType.startsWith("video/") ? "video" : asset.mimeType.startsWith("text/") ? "text" : "other",
           source: task ? "generation" : "upload", operationType: task?.operationType || null, prompt: task?.prompt || null,
           modelName: demoModels.find((model) => model.id === task?.modelConfigId)?.name || null, status: "ready", visibilityScope: "private",
-          metadata: asset.metadata || {}, createdAt: asset.createdAt, resultStatus: "unused", usabilityScore: 0, downloadCount: 0, firstDownloadedAt: null, eventCount: 0 };
+          metadata: asset.metadata || {}, createdAt: asset.createdAt, ...demoDownloadProjection(asset) };
       }).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) });
     }
     if (path === "/api/history" && request.method === "GET") {
@@ -2009,11 +2069,28 @@ async function runApiMartImageTaskForDemo(
   prompt: string,
   parameters: Record<string, unknown>,
   sources: DemoAsset[],
+  providerId = gptImage2ProviderId,
+  preparedInput?: ImageEditInput<DemoAsset>,
 ) {
+  const isMarkImage = providerId === MARK_IMAGE_PROVIDER_ID;
   try {
-    updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
-    await completeDemoImageTask(task, user.id, await callApiMartImage(modelId, prompt, parameters, sources));
+    const editInput = isMarkImage ? preparedInput || await prepareImageEditInput(sources, parameters, { protocol: "apimart", modelId, operationType: task.operationType }) : undefined;
+    if (!isMarkImage) updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
+    await completeDemoImageTask(task, user.id, await callApiMartImage(modelId, prompt, parameters, sources, providerId, editInput, isMarkImage ? task : undefined), editInput);
   } catch (error) {
+    if (isMarkImage) {
+      const paused = Boolean(task.submissionStartedAt || task.upstreamTaskId) && !(error instanceof ApiMartImageProviderFailure);
+      finishDemoTaskFailure(task, error, {
+        status: paused ? "paused" : "failed", stage: "failed",
+        errorCode: paused ? "MARK_IMAGE_STATUS_UNCERTAIN" : "MARK_IMAGE_FAILED",
+        failureReason: paused
+          ? "Mark 图片提交后的状态或结果保存尚未确认，任务已暂停；不会重新生成或自动退款，请核查原上游任务。"
+          : error instanceof ApiMartImageProviderFailure
+            ? "Mark 图片服务明确返回任务失败；本次积分已退还。"
+            : "Mark 图片参数、参考图或上传准备失败；尚未提交生成，请检查输入与服务端配置。",
+      }, user);
+      return;
+    }
     finishDemoTaskFailure(task, error, { status: "failed", failureReason: isProviderNetworkError(error)
       ? "无法与图像服务建立安全连接。请检查服务器外网、TLS 证书策略或稍后重试；本次积分已自动退还。"
       : error instanceof Error ? error.message : "APIMart 图片任务失败" }, user);
@@ -2055,14 +2132,31 @@ async function callApiMartImage(
   prompt: string,
   parameters: Record<string, unknown>,
   sources: DemoAsset[],
+  providerId = gptImage2ProviderId,
+  preparedInput?: ImageEditInput<DemoAsset>,
+  task?: DemoTask,
 ) {
+  const isMarkImage = providerId === MARK_IMAGE_PROVIDER_ID;
+  const references = isMarkImage && preparedInput ? preparedInput.references : sources;
+  const toDataUrl = (source: DemoAsset) => `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`;
   const urls = await runApiMartImageTask({
-    baseUrl: apiMartBaseUrl,
-    apiKey: apiMartApiKey,
+    baseUrl: isMarkImage ? markImageProvider.baseUrl : apiMartBaseUrl,
+    apiKey: isMarkImage ? markImageProvider.apiKey : apiMartApiKey,
     modelId,
     prompt,
     parameters,
-    sourceDataUrls: sources.map((source) => `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`),
+    sourceDataUrls: references.map(toDataUrl),
+    ...(isMarkImage && preparedInput?.mask ? { maskDataUrl: toDataUrl(preparedInput.mask) } : {}),
+    ...(isMarkImage && task ? {
+      submissionKey: task.id,
+      upstreamTaskId: task.upstreamTaskId,
+      submissionStarted: Boolean(task.submissionStartedAt),
+      beforeSubmit: () => { updateDemoTask(task, { submissionStartedAt: now(), stage: "submitted", updatedAt: now() }); },
+      onSubmitted: (upstreamTaskId: string) => {
+        try { updateDemoTask(task, { upstreamTaskId, stage: "polling", updatedAt: now() }); }
+        catch (error) { task.upstreamTaskId = upstreamTaskId; throw error; }
+      },
+    } : {}),
   });
   const first = urls[0];
   if (!first) throw new Error("APIMart 图片任务完成但没有结果图片");
@@ -2087,7 +2181,9 @@ async function runVideoTask(
 ) {
   try {
     updateDemoTask(task, { stage: "polling", updatedAt: now() });
-    const outputUrl = await callVideoProvider(model, prompt, parameters, sources, (upstreamTaskId) => {
+    const provider = resolveDemoVideoProvider(task.modelConfigId, model);
+    if (!provider) throw new Error("The selected video provider is unavailable; generation was not submitted");
+    const outputUrl = await callVideoProvider(model, prompt, parameters, sources, provider, (upstreamTaskId) => {
       // Retain the returned ID in memory even if the following durable write fails.
       try { updateDemoTask(task, { upstreamTaskId, updatedAt: now() }); }
       catch (error) { task.upstreamTaskId = upstreamTaskId; throw error; }
@@ -2108,7 +2204,9 @@ async function recoverVideoTask(
   upstreamTaskId: string,
 ) {
   try {
-    const outputUrl = await pollVideoProviderTask(model, upstreamTaskId);
+    const provider = resolveDemoVideoProvider(task.modelConfigId, model);
+    if (!provider) throw new Error("The original video provider is unavailable; the existing task remains paused and will not be resubmitted");
+    const outputUrl = await pollVideoProviderTask(model, upstreamTaskId, provider);
     updateDemoTask(task, { stage: "downloading", updatedAt: now() });
     const asset = await downloadDemoVideoResult(task, outputUrl);
     updateDemoTask(task, { resultUrls: [`/api/assets/${asset.id}/content`], status: "success", stage: "succeeded", updatedAt: now() }, [asset]);
@@ -2133,23 +2231,37 @@ function classifyVideoTaskError(error: unknown) {
   return "PROVIDER_FAILURE";
 }
 
+type DemoVideoProvider = { baseUrl: string; apiKey: string };
+
+function resolveDemoVideoProvider(modelConfigId: string | undefined, expectedModel: SupportedVideoModelId): DemoVideoProvider | null {
+  // Legacy persisted video jobs predate modelConfigId; their fixed legacy UUID is unambiguous.
+  const selectedId = modelConfigId || videoModelConfigIds[expectedModel];
+  const model = demoModels.find(item => item.id === selectedId && item.modelId === expectedModel && item.enabled === true);
+  const provider = model && demoProviders.find(item => item.id === model.providerId && item.enabled === true && item.protocol === "apimart");
+  if (!model || !(model.capabilities as string[]).includes("video") || !provider || !provider.hasCredentials) return null;
+  const apiKey = demoChatProviderApiKey(String(provider.id));
+  const baseUrl = String(provider.baseUrl || "").replace(/\/+$/, "");
+  return apiKey && baseUrl ? { apiKey, baseUrl } : null;
+}
+
 async function callVideoProvider(
   model: SupportedVideoModelId,
   prompt: string,
   parameters: VideoProviderParameters,
   sources: DemoAsset[],
+  provider: DemoVideoProvider,
   onSubmitted?: (upstreamTaskId: string) => void,
   onSubmissionStarting?: () => void,
 ) {
   const resolved = await createProviderVideoSources(model, sources);
   try {
-  const uploadedSources = await prepareVideoProviderSources({ model, prompt, parameters, sources: resolved.sources, baseUrl: apiMartBaseUrl, apiKey: apiMartApiKey });
+  const uploadedSources = await prepareVideoProviderSources({ model, prompt, parameters, sources: resolved.sources, ...provider });
   const { body } = buildVideoProviderRequest(model, prompt, parameters, uploadedSources);
   onSubmissionStarting?.();
-  const submitted = await fetch(`${apiMartBaseUrl}/videos/generations`, {
+  const submitted = await fetch(`${provider.baseUrl}/videos/generations`, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${apiMartApiKey}`,
+      authorization: `Bearer ${provider.apiKey}`,
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
@@ -2165,7 +2277,7 @@ async function callVideoProvider(
   const taskId = created.data?.[0]?.task_id;
   if (!taskId) throw new Error(`${model} did not return a task ID`);
   onSubmitted?.(taskId);
-  return await pollVideoProviderTask(model, taskId);
+  return await pollVideoProviderTask(model, taskId, provider);
   } finally {
     revokeProviderVideoSources(resolved.accessTokens);
   }
@@ -2182,14 +2294,14 @@ async function downloadDemoVideoResult(task: DemoTask, url: string): Promise<Dem
   return { id, ownerUserId: task.ownerUserId, filename: `video-${task.id}.mp4`, mimeType: "video/mp4", bytes, createdAt: now(), projectId: task.projectId, taskId: task.id, upstreamUrl: isPublicHttpsUrl(url) ? url : undefined };
 }
 
-async function pollVideoProviderTask(model: SupportedVideoModelId, taskId: string) {
+async function pollVideoProviderTask(model: SupportedVideoModelId, taskId: string, provider: DemoVideoProvider) {
   const deadline = Date.now() + 20 * 60_000;
   while (Date.now() < deadline) {
     await Bun.sleep(2_000);
     const statusResponse = await fetch(
-      `${apiMartBaseUrl}${videoTaskStatusPath(taskId)}`,
+      `${provider.baseUrl}${videoTaskStatusPath(taskId)}`,
       {
-        headers: { authorization: `Bearer ${apiMartApiKey}` },
+        headers: { authorization: `Bearer ${provider.apiKey}` },
         signal: AbortSignal.timeout(60_000),
       },
     );

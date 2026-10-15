@@ -1,4 +1,4 @@
-import { getQueuedTask, listQueuedTasks, type QueuedTask } from "@/services/api/generation-tasks";
+import { getQueuedTask, listQueuedTasks, recoverQueuedTask, type QueuedTask } from "@/services/api/generation-tasks";
 import type { CreativeImageLineage } from "@/lib/creative-chat";
 
 export type PendingChatImageTask = {
@@ -6,6 +6,7 @@ export type PendingChatImageTask = {
     prompt: string;
     modelId: string;
     quality?: string;
+    resolution?: string;
     action: "generate" | "edit";
     taskId?: string;
     parentMessageId?: string;
@@ -18,12 +19,13 @@ export type ChatImageRecoveryResult =
     | { kind: "failed"; task: QueuedTask; content: string }
     | { kind: "needs_attention"; task?: QueuedTask; content: string };
 
-/** Observe a submitted chat image task; recovery never changes or resubmits it. */
+/** Read-only by default; an explicit user action may resume polling the verified original task once. */
 export async function recoverChatImageTask(
     pending: PendingChatImageTask,
-    options: { signal?: AbortSignal; onTask?: (task: QueuedTask) => void | Promise<void> } = {},
+    options: { signal?: AbortSignal; resumePaused?: boolean; onTask?: (task: QueuedTask) => void | Promise<void> } = {},
 ): Promise<ChatImageRecoveryResult> {
     const { signal, onTask } = options;
+    let resumePaused = options.resumePaused === true;
     signal?.throwIfAborted();
     const requestId = `${pending.requestId}:0`;
     let task = pending.taskId
@@ -66,6 +68,11 @@ export async function recoverChatImageTask(
             case "cancelled":
                 return { kind: "failed", task, content: task.failureReason || (task.status === "cancelled" ? "原图片任务已取消" : "原图片任务生成失败") };
             case "paused":
+                if (resumePaused && task.upstreamTaskId?.trim()) {
+                    resumePaused = false;
+                    task = await recoverQueuedTask(task.id, signal);
+                    continue;
+                }
                 return {
                     kind: "needs_attention",
                     task,
@@ -73,6 +80,8 @@ export async function recoverChatImageTask(
                 };
             case "waiting":
             case "processing":
+                // An explicit click is not permission to retry a later polling failure.
+                resumePaused = false;
                 await waitForNextQuery(signal);
                 signal?.throwIfAborted();
                 task = await getQueuedTask(task.id, signal);

@@ -77,7 +77,7 @@ export function RecolorDialog({ source, onClose, onSave }: {
         } catch (caught) { if (!controller.signal.aborted) setSaveError(caught instanceof Error ? caught.message : "换色保存失败"); }
         finally { if (!controller.signal.aborted) setBusy(false); if (saveController.current === controller) saveController.current = null; }
     };
-    return <Modal open title="精确换色 · 本地处理" width={940} onCancel={onClose} closable={!busy} mask={{ closable: !busy }} keyboard={!busy}
+    return <Modal open modalRender={modal => <div data-usage-board="pattern-recolor">{modal}</div>} title="精确换色 · 本地处理" width={940} onCancel={onClose} closable={!busy} mask={{ closable: !busy }} keyboard={!busy}
         footer={<><Button onClick={onClose} disabled={busy}>取消</Button><Button type="primary" loading={busy} disabled={!small} onClick={() => void save()}>保存换色结果</Button></>}>
         <div className="cs-tool-dialog">
             <p className="cs-help">不调用 AI、不消耗生成积分。按 RGB 颜色替换，保留图案位置、原始尺寸与透明度。适合平面花型；相近颜色和抗锯齿边缘通过容差纳入，照片光影不会自动保留。</p>

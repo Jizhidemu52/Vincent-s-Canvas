@@ -8,7 +8,7 @@ import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
-type GeneratedImage = { id: string; dataUrl: string; prompt?: string; modelId?: string };
+type GeneratedImage = { id: string; dataUrl: string; prompt?: string; modelId?: string; quality?: string; resolution?: string };
 type Session = { id: string; title: string; messages: unknown[]; canvasProjectId?: string };
 
 // Execute the page handler itself. Only browser IO/navigation and the storage
@@ -30,6 +30,8 @@ const image: GeneratedImage = {
     dataUrl: "/api/assets/original-result/content",
     prompt: "保留中文“春日”和 20cm 宽度，只将花瓣改细。",
     modelId: "gpt-image-2.5-flare",
+    quality: "xhigh",
+    resolution: "4k",
 };
 
 function canvasProject(id: string, nodes: CanvasNodeData[] = []): CanvasProject {
@@ -247,7 +249,7 @@ describe("actual chat-to-canvas transfer", () => {
             content: "blob:local-1", storageKey: "image:stored-1", status: "success",
             naturalWidth: dimensions.width, naturalHeight: dimensions.height,
             bytes: originalBytes.byteLength, mimeType: "image/png", prompt: image.prompt,
-            model: "gpt-image-2.5-flare", imageVersion: 1,
+            model: "gpt-image-2.5-flare", quality: "xhigh", imageOptions: '{"resolution":"4k"}', imageVersion: 1,
         });
     });
 

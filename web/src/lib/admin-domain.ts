@@ -7,7 +7,7 @@ export type AdminProviderProtocol = "openai" | "gemini" | "volcengine" | "runnin
 export type AdminProviderModelType = "image" | "chat" | "video";
 export type AdminWorkflowProviderProtocol = Extract<AdminProviderProtocol, "runninghub" | "custom">;
 export type AdminWorkflowCapability = Extract<AdminModelCapability, "generate" | "edit" | "upscale" | "batch">;
-export type AdminToolMode = "image-generation" | "detail-enhance" | "image-edit" | "angle-control" | "batch-image-edit" | "seamless-stitch" | "gpt-chat";
+export type AdminToolMode = "image-generation" | "midjourney-blend" | "detail-enhance" | "image-edit" | "angle-control" | "batch-image-edit" | "seamless-stitch" | "gpt-chat";
 
 export type DesignerAccount = {
     id: string;

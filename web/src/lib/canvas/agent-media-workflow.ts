@@ -4,7 +4,7 @@ export type { CanvasAgentMediaIntent, CanvasAgentMediaWorkflow, CanvasAgentMedia
 
 export type AgentMediaIntent = CanvasAgentMediaIntent;
 
-export type AgentMediaWorkflowModels = Pick<CanvasAgentMediaWorkflow, "imageModel" | "videoModel"> & Partial<Pick<CanvasAgentMediaWorkflow, "imageCount" | "videoSeconds" | "aspectRatio" | "referenceNodeIds">>;
+export type AgentMediaWorkflowModels = Pick<CanvasAgentMediaWorkflow, "imageModel" | "videoModel"> & Partial<Pick<CanvasAgentMediaWorkflow, "imageCount" | "imageQuality" | "imageOptions" | "videoSeconds" | "aspectRatio" | "referenceNodeIds">>;
 export type AgentMediaToolDispatchInput = {
     userPrompt: string;
     toolName: string;
@@ -55,7 +55,9 @@ export function createAgentMediaWorkflow(input: CreateAgentMediaWorkflowInput): 
         prompt: input.prompt,
         imageModel: input.imageModel,
         videoModel: input.videoModel,
-        imageCount: Math.max(1, Math.min(15, Math.floor(input.imageCount || 3))),
+        imageCount: 1,
+        ...(input.imageQuality !== undefined ? { imageQuality: input.imageQuality } : {}),
+        ...(input.imageOptions !== undefined ? { imageOptions: input.imageOptions } : {}),
         videoSeconds: input.videoSeconds || "6",
         aspectRatio: input.aspectRatio || "1:1",
         referenceNodeIds: Array.from(new Set(input.referenceNodeIds || [])),
@@ -135,7 +137,7 @@ export function restoreAgentMediaWorkflow(workflow: CanvasAgentMediaWorkflow, no
     const interruptedStage = workflow.imageStatus === "running" ? "image" : workflow.videoStatus === "running" ? "video" : undefined;
     return {
         ...workflow,
-        imageCount: Math.max(1, Math.min(15, Math.floor(workflow.imageCount || 3))),
+        imageCount: 1,
         videoSeconds: workflow.videoSeconds || "6",
         aspectRatio: workflow.aspectRatio || "1:1",
         referenceNodeIds: Array.from(new Set(workflow.referenceNodeIds || [])),

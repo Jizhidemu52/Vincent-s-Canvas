@@ -32,6 +32,7 @@ function harness(options: { path?: string; process?: Parameters<typeof storeImag
     now: () => new Date().toISOString(), console: { error() {} },
     demoAccounts: [{ user }], demoOwner: (id: string) => id === user.id ? user : undefined, DemoVideoTerminalError,
     internalAiConfig: { seamlessUrl: "http://seamless.invalid/generate", appKey: "test-only" },
+    resolveDemoVideoProvider: () => ({ baseUrl: "https://video-fixture.invalid/v1", apiKey: "fixture-only" }),
     fetch: async (url: string) => {
       if (url === "http://seamless.invalid/generate") return Response.json({ data: { data: { list: ["https://result.invalid/temporary.png"] } } });
       if (url === "https://result.invalid/temporary.png") {
@@ -40,7 +41,8 @@ function harness(options: { path?: string; process?: Parameters<typeof storeImag
       }
       throw new Error("Unexpected network request");
     },
-    callVideoProvider: async (_model: unknown, _prompt: unknown, _parameters: unknown, _sources: unknown, submitted: (id: string) => void, starting: () => void) => {
+    callVideoProvider: async (_model: unknown, _prompt: unknown, _parameters: unknown, _sources: unknown, provider: unknown, submitted: (id: string) => void, starting: () => void) => {
+      expect(provider).toEqual({ baseUrl: "https://video-fixture.invalid/v1", apiKey: "fixture-only" });
       starting(); submissions++; submitted("upstream-existing"); throw new Error("status check failed");
     },
     pollVideoProviderTask: async () => { throw new DemoVideoTerminalError("provider terminal failure"); },

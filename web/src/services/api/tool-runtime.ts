@@ -20,6 +20,7 @@ export function resolveConfiguredToolModel(business: BusinessConfig, toolKey: To
     const normalized = modelOptionName(requested);
     const model = business.models.find(item => binding?.modelConfigId ? item.id === binding.modelConfigId : item.id === requested || item.modelId === normalized || item.name === requested);
     if (!model) throw new Error(binding?.modelConfigId ? "此板块绑定的模型暂不可用，请联系管理员。" : "所选模型暂不可用，请重新选择或联系管理员启用。");
+    if (toolKey === "midjourney-blend" && model.imageParameterProfile !== "blend" && model.imageParameterProfile !== "midjourney-blend" && model.modelId !== "midjourney-blend") throw new Error("MJ 多图融合板块仅支持 Blend 模型，请管理员检查绑定。");
     return model;
 }
 

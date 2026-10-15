@@ -1,5 +1,6 @@
 import { Drawer } from "antd";
 import { Link } from "react-router-dom";
+import { FrequentNavigation, UsageCollectionNotice } from "@/components/layout/frequent-navigation";
 
 import { navigationModuleKey, navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { cn } from "@/lib/utils";
@@ -43,6 +44,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
     return (
         <Drawer title="功能模块" placement="left" size={300} open={open} onClose={onClose} className="md:hidden">
             <div className="space-y-6">
+                <FrequentNavigation onNavigate={onClose} />
                 {(["local", "online", "admin"] as const).map((group) => {
                     const tools = navigationTools.filter((tool) => tool.group === group && (deploymentFeatures.rolePortalsEnabled || tool.group !== "admin") && (tool.slug === "admin" || isModuleAvailable(flags, bindings, navigationModuleKey(tool.slug) as ModuleKey)) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
                     if (!tools.length) return null;
@@ -71,6 +73,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                         </section>
                     );
                 })}
+                <UsageCollectionNotice />
             </div>
         </Drawer>
     );

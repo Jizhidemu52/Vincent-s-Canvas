@@ -46,6 +46,13 @@ export const navigationTools = [
         group: "local",
     },
     {
+        slug: "midjourney-blend",
+        path: "/image?tool=midjourney-blend",
+        label: "MJ 多图融合",
+        icon: Images,
+        group: "local",
+    },
+    {
         slug: "video",
         path: "/video",
         label: "视频创作",
@@ -123,5 +130,6 @@ export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operati
     "image-edit": { operationType: "inpaint", toolKey: "image-edit" },
     "angle-control": { operationType: "inpaint", toolKey: "angle-control" },
     "seamless-stitch": { operationType: "seamless_stitch", toolKey: "seamless-stitch" },
+    "midjourney-blend": { operationType: "image_generation", toolKey: "midjourney-blend" },
     video: { operationType: "video_generation", toolKey: "video" },
 };

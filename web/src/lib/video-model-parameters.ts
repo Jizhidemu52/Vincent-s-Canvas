@@ -1,4 +1,5 @@
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -81,21 +82,29 @@ const specifications: Record<string, VideoModelParameterSpec> = {
     },
 };
 
-export function getVideoModelParameterSpec(config: Pick<AiConfig, "model" | "videoModel"> | string): VideoModelParameterSpec | undefined {
-    const model = modelOptionName(typeof config === "string" ? config : config.model || config.videoModel);
+/** Undefined uses the UI cache. Null explicitly disables cache fallback for fresh requests. */
+export function videoParameterModelId(config: Pick<AiConfig, "model" | "videoModel"> | string, freshParameterModelId?: string | null): string {
+    const selected = modelOptionName(typeof config === "string" ? config : config.model || config.videoModel);
+    if (freshParameterModelId !== undefined) return freshParameterModelId || selected;
+    const configured = useBusinessConfigStore.getState().models.find(item => item.id === selected || item.modelId === selected);
+    return configured?.parameterModelId || selected;
+}
+
+export function getVideoModelParameterSpec(config: Pick<AiConfig, "model" | "videoModel"> | string, freshParameterModelId?: string | null): VideoModelParameterSpec | undefined {
+    const model = videoParameterModelId(config, freshParameterModelId);
     return specifications[model];
 }
 
 export function videoAspectRatioFollowsImage(config: Pick<AiConfig, "model" | "videoModel"> | string, referenceCount = 0, imageMode?: string) {
-    const model = modelOptionName(typeof config === "string" ? config : config.model || config.videoModel);
+    const model = videoParameterModelId(config);
     if (model === "MiniMax-H3") return imageMode === "reference" || imageMode === "text" ? false : imageMode && imageMode !== "auto" ? imageMode.includes("frame") : referenceCount === 1;
     if (model === "wan2.7") return referenceCount > 0 || imageMode === "extend";
     return model === "happyhorse-1.1" && referenceCount === 1 && imageMode !== "reference" && imageMode !== "text";
 }
 
-export function normalizeVideoModelConfig(config: VideoConfig): Pick<AiConfig, VideoModelParameterKey> {
+export function normalizeVideoModelConfig(config: VideoConfig, freshParameterModelId?: string | null): Pick<AiConfig, VideoModelParameterKey> {
     const current = { size: config.size, vquality: config.vquality, videoSeconds: config.videoSeconds, videoMode: config.videoMode || "auto", videoGenerateAudio: config.videoGenerateAudio, videoWatermark: config.videoWatermark };
-    const spec = getVideoModelParameterSpec(config);
+    const spec = getVideoModelParameterSpec(config, freshParameterModelId);
     if (!spec) return current;
 
     const seconds = Number(config.videoSeconds);
@@ -103,8 +112,8 @@ export function normalizeVideoModelConfig(config: VideoConfig): Pick<AiConfig, V
     const resolution = String(config.vquality || "").trim().replace(/^(\d+)$/, "$1P").toUpperCase();
     const size = config.size === "auto" ? "adaptive" : config.size;
     const videoMode = spec.modes.includes(config.videoMode as VideoMode) ? config.videoMode : "auto";
-    const lockRatio = videoModeLocksRatio({ ...config, videoMode });
-    const edit = modelOptionName(config.model || config.videoModel) === "doubao-seedance-2.5" && videoMode === "edit";
+    const lockRatio = videoModeLocksRatio({ ...config, videoMode }, freshParameterModelId);
+    const edit = videoParameterModelId(config, freshParameterModelId) === "doubao-seedance-2.5" && videoMode === "edit";
     return {
         videoMode,
         size: lockRatio ? "adaptive" : spec.sizes.includes(size) ? size : spec.defaultSize,
@@ -115,10 +124,10 @@ export function normalizeVideoModelConfig(config: VideoConfig): Pick<AiConfig, V
     };
 }
 
-export function videoModelRequestParameters(config: VideoConfig): Record<string, unknown> {
-    const spec = getVideoModelParameterSpec(config);
+export function videoModelRequestParameters(config: VideoConfig, freshParameterModelId?: string | null): Record<string, unknown> {
+    const spec = getVideoModelParameterSpec(config, freshParameterModelId);
     if (!spec) throw new Error("当前视频模型尚未提供参数规格，请选择已配置的视频模型");
-    const normalized = normalizeVideoModelConfig(config);
+    const normalized = normalizeVideoModelConfig(config, freshParameterModelId);
     return {
         videoMode: normalized.videoMode,
         seconds: Number(normalized.videoSeconds),
@@ -129,12 +138,12 @@ export function videoModelRequestParameters(config: VideoConfig): Record<string,
     };
 }
 
-export function videoModeLocksRatio(config: Pick<AiConfig, "model" | "videoModel" | "videoMode">) {
-    return modelOptionName(config.model || config.videoModel) === "doubao-seedance-2.5" && ["first-frame", "last-frame", "first-last-frame", "edit", "extend"].includes(config.videoMode);
+export function videoModeLocksRatio(config: Pick<AiConfig, "model" | "videoModel" | "videoMode">, freshParameterModelId?: string | null) {
+    return videoParameterModelId(config, freshParameterModelId) === "doubao-seedance-2.5" && ["first-frame", "last-frame", "first-last-frame", "edit", "extend"].includes(config.videoMode);
 }
 
-export function resolveVideoMode(config: Pick<AiConfig, "model" | "videoModel" | "videoMode">, images = 0, videos = 0, audios = 0, legacyMode?: string): VideoMode {
-    const model = modelOptionName(config.model || config.videoModel);
+export function resolveVideoMode(config: Pick<AiConfig, "model" | "videoModel" | "videoMode">, images = 0, videos = 0, audios = 0, legacyMode?: string, freshParameterModelId?: string | null): VideoMode {
+    const model = videoParameterModelId(config, freshParameterModelId);
     const requested = config.videoMode || legacyMode || "auto";
     if (requested !== "auto") return requested as VideoMode;
     if (model === "wan2.7") return videos ? "extend" : images > 1 ? "first-last-frame" : images ? "first-frame" : "text";
@@ -143,13 +152,13 @@ export function resolveVideoMode(config: Pick<AiConfig, "model" | "videoModel" |
 }
 
 /** Pure validation runs before local/remote uploads. Unknown metadata is left to server probing. */
-export function videoReferenceError(config: Pick<AiConfig, "model" | "videoModel" | "videoMode"> & Partial<Pick<AiConfig, "videoSeconds">>, images: ReferenceImage[] = [], videos: ReferenceVideo[] = [], audios: ReferenceAudio[] = [], legacyMode?: string, allowIncomplete = false): string {
-    const spec = getVideoModelParameterSpec(config);
+export function videoReferenceError(config: Pick<AiConfig, "model" | "videoModel" | "videoMode"> & Partial<Pick<AiConfig, "videoSeconds">>, images: ReferenceImage[] = [], videos: ReferenceVideo[] = [], audios: ReferenceAudio[] = [], legacyMode?: string, allowIncomplete = false, freshParameterModelId?: string | null): string {
+    const spec = getVideoModelParameterSpec(config, freshParameterModelId);
     if (!spec) return "当前视频模型尚未提供参数规格";
-    const model = modelOptionName(config.model || config.videoModel);
+    const model = videoParameterModelId(config, freshParameterModelId);
     const requested = config.videoMode || legacyMode || "auto";
     if (!spec.modes.includes(requested as VideoMode)) return `当前模型不支持${videoModeLabels[requested as VideoMode] || requested}模式`;
-    const mode = resolveVideoMode(config, images.length, videos.length, audios.length, legacyMode);
+    const mode = resolveVideoMode(config, images.length, videos.length, audios.length, legacyMode, freshParameterModelId);
     if (images.length > spec.maxImages) return `当前视频模型最多支持 ${spec.maxImages} 张参考图`;
     if (videos.length > spec.maxVideos) return spec.maxVideos ? `当前视频模型最多支持 ${spec.maxVideos} 段视频` : "当前视频模型不支持视频参考";
     if (audios.length > spec.maxAudios) return spec.maxAudios ? `当前视频模型最多支持 ${spec.maxAudios} 段音频` : "当前视频模型不支持音频参考";

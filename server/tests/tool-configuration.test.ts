@@ -88,6 +88,22 @@ async function serve(state = fixture()) {
 const post = (url: string, body: unknown, method = "POST") => fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 describe("formal catalog configuration", () => {
+  test("Blend binding accepts only the Blend model while canvas-image keeps that choice", async () => {
+    const state = fixture();
+    state.models[0]!.modelId = "midjourney-blend";
+    state.models[0]!.capabilities = ["generate"];
+    const { url } = await serve(state);
+    const values = { modelConfigId: secondModelId, enabled: true, creditCostOverride: null, rmbCostOverride: null };
+    const rejected = await post(`${url}/admin/tool-configurations/midjourney-blend`, values, "PUT");
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json()).error).toBe("TOOL_MODEL_MISMATCH");
+    expect(state.configurations.has("midjourney-blend")).toBe(false);
+    const accepted = await post(`${url}/admin/tool-configurations/midjourney-blend`, { ...values, modelConfigId: modelId }, "PUT");
+    expect(accepted.status).toBe(200);
+    expect((await accepted.json()).tool.modelConfigId).toBe(modelId);
+    expect((await post(`${url}/admin/tool-configurations/canvas-image`, { ...values, modelConfigId: modelId }, "PUT")).status).toBe(200);
+  });
+
   test("admin/public expose every catalog tool including disabled and unbound, and retain explicitly bound uncurated models", async () => {
     const state = fixture();
     state.models[0]!.capabilities = ["generate", "edit"];
@@ -126,23 +142,40 @@ describe("formal catalog configuration", () => {
   });
 
   test("migration constraints and non-destructive seeds exactly cover the shared catalog", () => {
-    const migration = readFileSync(new URL("../src/migrations/026_formal_module_configuration.sql", import.meta.url), "utf8");
+    const original = readFileSync(new URL("../src/migrations/026_formal_module_configuration.sql", import.meta.url), "utf8");
+    const migration = readFileSync(new URL("../src/migrations/027_midjourney_blend_module.sql", import.meta.url), "utf8");
     const keys = (value: string) => [...value.matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
     const toolCheck = /CHECK \(tool_key IN \(([\s\S]*?)\)\)/.exec(migration)![1]!;
     const moduleCheck = /CHECK \(module_key IN \(([\s\S]*?)\)\)/.exec(migration)![1]!;
-    const arrays = [...migration.matchAll(/unnest\(ARRAY\[([\s\S]*?)\]\)/g)];
+    const arrays = [...original.matchAll(/unnest\(ARRAY\[([\s\S]*?)\]\)/g)];
     expect(keys(toolCheck)).toEqual(toolDefinitions.map(tool => tool.toolKey).sort());
     expect(keys(moduleCheck)).toEqual([...moduleKeys].sort());
-    expect(keys(arrays[0]![1]!)).toEqual([...moduleKeys].sort());
-    expect(keys(arrays[1]![1]!)).toEqual(toolDefinitions.map(tool => tool.toolKey).sort());
+    expect(keys(arrays[0]![1]!)).toEqual(moduleKeys.filter(key => key !== "midjourney-blend").sort());
+    expect(keys(arrays[1]![1]!)).toEqual(toolDefinitions.map(tool => tool.toolKey).filter(key => key !== "midjourney-blend").sort());
     expect(migration).toContain("ON CONFLICT(module_key) DO NOTHING");
     expect(migration).toContain("ON CONFLICT(tool_key) DO NOTHING");
-    expect(migration).toContain("ALTER COLUMN model_config_id DROP NOT NULL");
-    expect(migration).not.toMatch(/UPDATE\s+(?:model_configs|pricing_rule_versions)/);
+    expect(original).toContain("ALTER COLUMN model_config_id DROP NOT NULL");
+    expect(original).not.toMatch(/UPDATE\s+(?:model_configs|pricing_rule_versions)/);
   });
 });
 
 describe("authoritative scoped execution", () => {
+  test("Blend rejects wrong chosen or bound models before task reservation and permits canvas-image", async () => {
+    const state = fixture();
+    state.models[0]!.modelId = "midjourney-blend";
+    state.models[0]!.capabilities = ["generate"];
+    const input = { operationType: "image_generation", toolKey: "midjourney-blend", modelConfigId: secondModelId };
+    await expect(resolveToolExecution(state.db, input)).rejects.toMatchObject({ code: "TOOL_MODEL_MISMATCH" });
+    expect(await resolveToolExecution(state.db, { ...input, modelConfigId: modelId })).toMatchObject({ modelConfigId: modelId });
+    expect(await resolveToolExecution(state.db, { ...input, toolKey: "canvas-image", modelConfigId: modelId })).toMatchObject({ modelConfigId: modelId });
+    state.bind("midjourney-blend", { modelConfigId: secondModelId });
+    await expect(resolveToolExecution(state.db, { operationType: "image_generation", toolKey: "midjourney-blend" })).rejects.toMatchObject({ code: "TOOL_MODEL_MISMATCH" });
+    const { url } = await serve(state);
+    const rejected = await post(`${url}/tasks`, { ...input, requestId: "blend-wrong-model", projectId: "canvas", prompt: "Blend", sourceUrls: ["first", "second"] });
+    expect(rejected.status).toBe(400); expect((await rejected.json()).error).toBe("TOOL_MODEL_MISMATCH");
+    expect(state.queues).toBe(0); expect(state.reservations).toHaveLength(0);
+  });
+
   test("normalizes only known legacy sources and rejects explicit unknown/mismatched operations", () => {
     expect(normalizeTaskTool({ operationType: "image_generation", parameters: { tool: "image-generation" } })).toBe("image");
     expect(normalizeTaskTool({ operationType: "inpaint", parameters: { tool: "agent-direct" } })).toBe("canvas-edit");
@@ -222,13 +255,13 @@ describe("authoritative scoped execution", () => {
   test("batch uses one binding and price snapshot, recording source on each task", async () => {
     const state = fixture(); state.bind("canvas-batch", { creditCostOverride: 10, rmbCostOverride: 0, configurationVersion: 2 });
     const { url } = await serve(state);
-    const response = await post(`${url}/tasks/batch`, { requestId: "batch-123456", projectId: "canvas", toolKey: "canvas-batch", operationType: "batch_image", prompt: "edit", items: [{ sourceUrls: ["one"] }, { sourceUrls: ["two"] }] });
+    const response = await post(`${url}/tasks/batch`, { requestId: "batch-123456", projectId: "canvas", toolKey: "canvas-batch", operationType: "batch_image", prompt: "edit", items: [{ sourceUrls: ["one"] }] });
     expect(response.status).toBe(201);
     const result = await response.json();
-    expect(result.failures).toEqual([]); expect(result.tasks).toHaveLength(2);
+    expect(result.failures).toEqual([]); expect(result.tasks).toHaveLength(1);
     expect(result.tasks.every((task: { toolKey: string; credits: number; rmbCost: number }) => task.toolKey === "canvas-batch" && task.credits === 0 && task.rmbCost === 0)).toBe(true);
     expect(state.statements.filter(({ sql }) => sql.includes("FROM pricing_rule_versions"))).toHaveLength(1);
-    expect(state.reservations.map(values => values[6])).toEqual([expect.objectContaining({ toolKey: "canvas-batch", configurationVersion: 2 }), expect.objectContaining({ toolKey: "canvas-batch", configurationVersion: 2 })]);
+    expect(state.reservations.map(values => values[6])).toEqual([expect.objectContaining({ toolKey: "canvas-batch", configurationVersion: 2 })]);
   });
 
   test("prompt estimates honor known source binding and overrides instead of shared model/global price", async () => {

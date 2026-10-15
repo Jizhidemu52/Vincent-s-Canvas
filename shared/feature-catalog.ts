@@ -5,6 +5,7 @@ export const toolDefinitions = [
   { toolKey: "image-edit", label: "图片编辑", group: "AI 工作台", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: null },
   { toolKey: "angle-control", label: "角度控制", group: "AI 工作台", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: null },
   { toolKey: "seamless-stitch", label: "无缝拼接", group: "AI 工作台", operationType: "seamless_stitch", operations: ["seamless_stitch"], capabilities: ["edit"], parent: null },
+  { toolKey: "midjourney-blend", label: "MJ 多图融合", group: "AI 工作台", operationType: "image_generation", operations: ["image_generation"], capabilities: ["generate"], parent: null },
   { toolKey: "video", label: "视频创作", group: "AI 工作台", operationType: "video_generation", operations: ["video_generation"], capabilities: ["video"], parent: null },
   { toolKey: "creative-text-to-style", label: "以文生款", group: "创意工具", operationType: "image_generation", operations: ["image_generation", "inpaint"], capabilities: ["generate"], parent: "creative" },
   { toolKey: "creative-style-to-sketch", label: "款生线稿", group: "创意工具", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: "creative" },

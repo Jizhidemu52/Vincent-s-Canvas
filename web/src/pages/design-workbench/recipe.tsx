@@ -81,7 +81,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     const profile = useImageModelProfile(config.model);
     const selectedModel = business.models.find((model) => model.id === config.model || model.modelId === modelOptionName(config.model) || model.name === config.model);
     const refs = project.form.kind === "pattern" ? project.references : project.references.slice(0, 1);
-    const estimate = business.estimate({ toolKey: "series-recipe", operationType: "inpaint", modelId: modelOptionName(config.model), quantity: project.form.count });
+    const estimate = business.estimate({ toolKey: "series-recipe", operationType: "inpaint", modelId: modelOptionName(config.model), quantity: 1 });
     const refsValidation = validateImageReferences(modelOptionName(config.model), refs);
     const quotaBlocked = deploymentFeatures.creditsEnabled && !!user && estimate.configured && user.creditBalance < estimate.credits;
     const validation = !ready
@@ -462,16 +462,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                             设计方向
                             <textarea aria-label="设计方向" value={project.form.prompt} maxLength={3000} rows={3} onChange={(event) => updateForm({ prompt: event.target.value })} />
                         </label>
-                        <label className="sr-field">
-                            候选数量
-                            <select aria-label="候选数量" value={project.form.count} onChange={(event) => updateForm({ count: Number(event.target.value) })}>
-                                {[1, 2, 3, 4, 5, 6].map((value) => (
-                                    <option key={value} value={value}>
-                                        {value} 个候选 · 每个独立生成 1 张
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
+                        <p className="sr-help">每次仅生成 1 个候选；可修改方向后再次发起独立任务。历史候选保留。</p>
                         {project.form.kind === "structure" ? (
                             <section className="sr-palette" aria-label="系列配色">
                                 <h3>系列配色</h3>
@@ -543,7 +534,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         <details className="sr-details">
                             <summary>模型与出图设置</summary>
                             <ModelPicker toolKey="series-recipe" config={config} value={config.model} onChange={(value) => updateSettings("imageModel", value)} capability="image" fullWidth disabled={locked} />
-                            <ImageSettingsPanel config={config} onConfigChange={updateSettings} theme={theme} maxCount={1} showTitle={false} />
+                            <ImageSettingsPanel config={config} referenceCount={refs.length} onConfigChange={updateSettings} theme={theme} maxCount={1} showTitle={false} />
                         </details>
                         <details className="sr-details">
                             <summary>预览候选 1 的设计指令</summary>

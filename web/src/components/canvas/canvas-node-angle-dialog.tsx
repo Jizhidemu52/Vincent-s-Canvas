@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import { Button, Modal, Segmented, Slider } from "antd";
 import { RotateCcw, WandSparkles } from "lucide-react";
 import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
-import { useEffectiveConfig } from "@/stores/use-config-store";
+import { useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { ModelPicker } from "@/components/model-picker";
+import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { canvasThemes } from "@/lib/canvas-theme";
+import { useThemeStore } from "@/stores/use-theme-store";
 
 export type CanvasImageAngleParams = {
     horizontalAngle: number;
@@ -11,6 +14,7 @@ export type CanvasImageAngleParams = {
     cameraDistance: number;
     wideAngle: boolean;
     model?: string;
+    imageSettings?: Pick<AiConfig, "size" | "quality" | "imageOptions">;
 };
 
 const defaultParams: CanvasImageAngleParams = {
@@ -22,12 +26,14 @@ const defaultParams: CanvasImageAngleParams = {
 
 export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageAngleParams) => void }) {
     const [params, setParams] = useState(defaultParams);
+    const [imageSettings, setImageSettings] = useState<Partial<AiConfig>>({});
+    const theme = canvasThemes[useThemeStore(state => state.theme)];
     const baseConfig = useEffectiveConfig();
-    const config = useToolConfig({ ...baseConfig, model: params.model || baseConfig.imageModel || baseConfig.model }, "canvas-angle");
+    const config = useToolConfig({ ...baseConfig, ...imageSettings, count: "1", model: params.model || baseConfig.imageModel || baseConfig.model }, "canvas-angle");
     const toolEnabled = useToolEnabled("canvas-angle");
 
     useEffect(() => {
-        if (open) setParams(defaultParams);
+        if (open) { setParams(defaultParams); setImageSettings({}); }
     }, [dataUrl, open]);
 
     const update = <Key extends keyof CanvasImageAngleParams>(key: Key, value: CanvasImageAngleParams[Key]) => setParams((current) => ({ ...current, [key]: value }));
@@ -69,9 +75,10 @@ export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { d
                         </div>
                     </div>
                 </div>
+                <ImageSettingsPanel config={config} theme={theme} maxCount={1} onConfigChange={(key, value) => setImageSettings(current => ({ ...current, [key]: value }))} />
                 <div className="flex justify-end">
                     <ModelPicker toolKey="canvas-angle" config={config} value={config.model} onChange={model => update("model", model)} capability="image" />
-                    <Button type="primary" size="large" disabled={!toolEnabled || !config.model} icon={<WandSparkles className="size-4" />} onClick={() => onConfirm({ ...params, model: config.model })}>
+                    <Button type="primary" size="large" disabled={!toolEnabled || !config.model} icon={<WandSparkles className="size-4" />} onClick={() => onConfirm({ ...params, model: config.model, imageSettings: { size: config.size, quality: config.quality, imageOptions: config.imageOptions } })}>
                         AI 生成
                     </Button>
                 </div>

@@ -53,6 +53,16 @@ describe("formal admin catalog and isolated board saves", () => {
         expect(compatibleToolModels(tool(), [{ ...model, workflowConfigId: "missing" }], [provider], [])).toEqual([]);
     });
 
+    test("the independent Blend board cannot bind another image model, but canvas generation can bind Blend", () => {
+        const blend = { ...model, id: "blend-model", modelId: "midjourney-blend", capabilities: ["generate"] as ServerModel["capabilities"] };
+        const tools = completeToolConfigurations([]);
+        const blendTool = tools.find(item => item.toolKey === "midjourney-blend")!;
+        const canvasTool = tools.find(item => item.toolKey === "canvas-image")!;
+        expect(compatibleToolModels(blendTool, [model, blend], [provider], []).map(item => item.id)).toEqual(["blend-model"]);
+        expect(compatibleToolModels(canvasTool, [model, blend], [provider], []).map(item => item.id)).toEqual(["model", "blend-model"]);
+        expect(toolConfigurationState({ ...blendTool, modelConfigId: model.id }, compatibleToolModels(blendTool, [model, blend], [provider], [])).ready).toBe(false);
+    });
+
     test("never mislabels unbound-disabled or unavailable bindings as configured", () => {
         expect(toolConfigurationState({ ...tool(), enabled: false }, [model]).label).toBe("已停用");
         expect(toolConfigurationState(tool(), [model]).label).toBe("继承 / 用户选择");

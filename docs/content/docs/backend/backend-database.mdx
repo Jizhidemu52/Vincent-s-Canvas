@@ -9,7 +9,7 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 
 | 存储 | 负责内容 |
 | --- | --- |
-| PostgreSQL | 用户、部门、项目、员工画布文档、公司设计灵感库及使用收据、任务、额度账本、历史、审计、Provider 配置与素材元数据 |
+| PostgreSQL | 用户、部门、项目、员工画布文档、公司设计灵感库及使用收据、任务、使用统计事件与分析预览、额度账本、历史、审计、Provider 配置与素材元数据 |
 | Redis | 会话、任务队列、限流和并发控制 |
 | S3 / MinIO | 上传文件及生成结果的文件内容、灵感库独立原图快照及复用后的私有原件 |
 | 浏览器 IndexedDB | 企业画布的员工缓存、待同步改动和媒体；试用画布本地持久化；独立聊天与创意草稿仍为本地员工分区 |
@@ -42,7 +42,7 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 
 ## 正式模块独立配置
 
-`shared/feature-catalog.ts` 是正式功能目录：26 个 AI 板块与 17 个入口、本地工具或服务模块，包含正式图案定位、花型循环和系列配方。`026_formal_module_configuration.sql` 扩展 `tool_api_configurations.tool_key` 和 `module_flags.module_key` 的检查约束，补齐目录记录，`ON CONFLICT DO NOTHING` 保留现有开关和绑定。应用新后端前须运行正常迁移流程；本地测试不会代替目标 PostgreSQL 环境验收。
+`shared/feature-catalog.ts` 是正式功能目录：27 个 AI 板块与 17 个入口、本地工具或服务模块，包含 MJ 多图融合、正式图案定位、花型循环和系列配方。`026_formal_module_configuration.sql` 与 `027_midjourney_blend_module.sql` 扩展 `tool_api_configurations.tool_key` 和 `module_flags.module_key` 的检查约束，补齐目录记录，`ON CONFLICT DO NOTHING` 保留现有开关和绑定；027 仅纠正固定 APIMart 平台 Blend 的生成能力。应用新后端前须运行正常迁移流程；本地测试不会代替目标 PostgreSQL 环境验收。
 
 | 字段 | 类型与语义 |
 | --- | --- |
@@ -53,7 +53,7 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 | `configuration_version` | 正整数，每次保存独立配置递增，不修改共享模型或全局操作价格 |
 | `tasks.tool_key` / `batch_tasks.tool_key` | 可空文本外键，保存正式来源板块；历史任务保留原数据 |
 
-管理员工具列表始终返回全部 26 项，公开模型接口同样保留禁用和未绑定项，但不公开 Provider 凭据。显式绑定的启用模型不会被默认精选列表过滤；已禁用模型或 Provider、工作流不能执行。任务、批量任务、视频预检及聊天入口先校验来源与操作匹配、自身和父模块开关，再校验绑定。客户端携带旧模型时返回 `TOOL_MODEL_CHANGED`，要求刷新模型参数，不静默换模型。未提供工具配置的旧调用只规范化已知来源名；显式未知键拒绝。
+管理员工具列表始终返回全部 27 项，公开模型接口同样保留禁用和未绑定项，但不公开 Provider 凭据。显式绑定的启用模型不会被默认精选列表过滤；已禁用模型或 Provider、工作流不能执行。任务、批量任务、视频预检及聊天入口先校验来源与操作匹配、自身和父模块开关，再校验绑定。客户端携带旧模型时返回 `TOOL_MODEL_CHANGED`，要求刷新模型参数，不静默换模型。MJ 多图融合仅可绑定、执行 Blend；画布生图仍可选择其余生成模型。未提供工具配置的旧调用只规范化已知来源名；显式未知键拒绝。
 
 `credit_reservations.price_snapshot` 记录 `toolKey`、`configurationVersion`、两项可空覆盖价与最终总价，批量任务在本次提交中共用同一份单项快照。源板块已知时提示词价格估算应用相同覆盖规则。此变更不重新启用部署已关闭的积分；独立对话与画布聊天分别配置且仍不新增聊天计费。`module_flags` 的总入口关闭也阻止子模块；本地工具没有服务端 AI 计费接口。
 
@@ -110,6 +110,23 @@ SQLite 适配器在同一事务保存快照、分享、收据及接收人的 `de
 `019_optional_access.sql` 为 `users` 新增 `is_guest boolean NOT NULL DEFAULT false`。数据库约束 `guest_is_unprivileged` 要求访客只能是 `designer`，不得有密码散列或首次改密要求。
 
 完整后端在 `OA_LOGIN_ENABLED=false` 试用模式仍为浏览器分配独立访客身份和会话，访客不是管理员，不能通过密码登录或企业微信绑定绕过限制。开启企业 OA 模式后，普通创作不接受访客会话。演示服务的固定试用身份不能用于验证这种隔离。
+
+## 员工使用统计与分析
+
+`028_usage_analytics.sql` 新增以下四表；仅正式 OA 企业模式开放采集及人员分析，单机试用不提供该能力。
+
+| 表 | 关键字段与约束 |
+| --- | --- |
+| `usage_collection_metadata` | 单行 `singleton` 与 `started_at`，标记实际采集起点，不冒称旧点击已经存在 |
+| `usage_events` | `id`、`event_id`、`user_id`、`board_key`、`action`、`control_key`、白名单 `parameters`、`occurred_at`、`received_at`；`(user_id,event_id)` 唯一，重传不重复计数；员工／板块时间索引支持查询 |
+| `usage_chat_requests` | 请求 ID、员工、模型配置 UUID、来源板块、完整脱敏的本次用户 `prompt`、`prompt_redacted`、状态和时间；不复制 system、历史消息、工具输出或媒体内容 |
+| `usage_analysis_previews` | 发起管理员、冻结内容与 SHA-256、筛选、是否带提示词片段／片段数、有效期、消费时间、明确选择的模型 UUID、执行状态与结果；一次性原子领取防止重复调用 |
+
+生成次数和原始提示词直接查询既有 `tasks`，不复制任务、不重写历史；恢复或改变执行次数不会增加请求数。文字从启用后开始记录，客户端事件的员工身份取自服务端会话，拒绝自报其他员工 ID。读取与导出会再次隐藏凭据样式文本，模型分析只取得预览内的匿名聚合和显式选择的有限片段。
+
+管理员人员详情、导出和模型分析均校验 `super_admin`；部门管理员也被拒绝。导出使用只读、可重复读事务与游标分批流式输出，完整结束标记确认记录总数，断连不继续取后续批次。访问、导出、分析写入现有审计，但审计不复制提示词或密钥。
+
+分析预览有效 15 分钟，成功消费后不可再次调用；这是确认授权期限，不是数据删除时间。本次不自动删除历史事件、聊天提交或分析结果，也不新增定时清理机制。企业运维应按公司留存与访问制度管理数据库、备份和获准导出的文件。
 
 ## 更新和备份
 

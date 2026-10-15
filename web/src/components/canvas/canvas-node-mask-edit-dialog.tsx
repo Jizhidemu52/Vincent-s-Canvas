@@ -2,16 +2,21 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { Button, Input, Modal, Slider } from "antd";
 import { Brush, Eraser, RotateCcw, WandSparkles, X } from "lucide-react";
 
-import { readImageMeta } from "@/lib/image-utils";
 import { ModelPicker } from "@/components/model-picker";
 import type { AiConfig } from "@/stores/use-config-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
+import { imageQualityLabel } from "@/components/image-settings-panel";
+import { canvasThemes } from "@/lib/canvas-theme";
+import { useThemeStore } from "@/stores/use-theme-store";
+import { imageModelSettingsError, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
+import { imageOptionFields, readImageOptions } from "@/lib/image-advanced-settings";
 
 export type CanvasImageMaskEditPayload = {
     prompt: string;
     maskDataUrl: string;
     model: string;
+    imageSettings?: Pick<AiConfig, "quality" | "imageOptions">;
 };
 
 type DrawMode = "paint" | "erase";
@@ -19,6 +24,36 @@ type DrawMode = "paint" | "erase";
 const defaultBrushSize = 100;
 const maskFillColor = "rgba(37, 99, 235, .38)";
 const maskBorderColor = "rgba(255, 255, 255, .72)";
+
+/** A strict mask must use decoded source pixels, never the shared reader's fallback dimensions. */
+export async function readCanvasMaskImageSize(dataUrl: string) {
+    const image = new Image();
+    image.src = dataUrl;
+    try { await image.decode(); }
+    catch { throw new Error("无法读取原图或蒙版的真实像素尺寸；尚未提交生成，请重新打开图片后重试。"); }
+    const width = image.naturalWidth, height = image.naturalHeight;
+    if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1)
+        throw new Error("原图或蒙版的真实像素尺寸无效；尚未提交生成。");
+    return { width, height };
+}
+
+/** Lock the mask coordinate system before either UI confirmation or the actual task submission. */
+export function canvasMaskEditImageSettings(config: Pick<AiConfig, "size" | "quality" | "imageOptions">, image: { width: number; height: number }, profile: ReturnType<typeof useImageModelProfile>) {
+    const { width, height } = image;
+    const size = `${width}x${height}`;
+    if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1)
+        throw new Error("无法确认原图像素尺寸；尚未提交生成。");
+    if (!profile.verified || !profile.supportsMask || (!profile.customSize && !profile.sizes.includes(size)))
+        throw new Error(`当前模型不能按原图 ${width} × ${height}px 进行严格蒙版编辑，请选择支持该像素尺寸的模型；尚未提交生成。`);
+    const sizeError = imageModelSettingsError(size, profile);
+    if (sizeError) throw new Error(`原图 ${width} × ${height}px 不符合当前模型的尺寸要求：${sizeError} 尚未提交，不会自动缩放原图或蒙版。`);
+    const options = readImageOptions(config.imageOptions);
+    const safeKeys = new Set(["background", "output_format", "output_compression", "moderation"]);
+    const safeOptions = Object.fromEntries(imageOptionFields(profile).filter(field => safeKeys.has(field.key) && options[field.key] !== undefined).map(field => [field.key, options[field.key]]));
+    // Mark's documented contract ignores resolution when size is exact pixels. Do not inherit its global selector.
+    const quality = normalizeImageModelSettings({ size, quality: config.quality, count: "1" }, profile).quality;
+    return { size, quality, imageOptions: JSON.stringify(safeOptions) };
+}
 
 export function CanvasNodeMaskEditDialog({
     dataUrl,
@@ -39,7 +74,10 @@ export function CanvasNodeMaskEditDialog({
     onClose: () => void;
     onConfirm: (payload: CanvasImageMaskEditPayload) => void;
 }) {
-    const effectiveConfig = useToolConfig({ ...config, model }, "canvas-mask-edit");
+    const [imageSettings, setImageSettings] = useState<Partial<AiConfig>>({});
+    const effectiveConfig = useToolConfig({ ...config, ...imageSettings, count: "1", model }, "canvas-mask-edit");
+    const profile = useImageModelProfile(effectiveConfig.model);
+    const theme = canvasThemes[useThemeStore(state => state.theme)];
     const toolEnabled = useToolEnabled("canvas-mask-edit");
     const maskCanvasRef = useRef<HTMLCanvasElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -49,6 +87,19 @@ export function CanvasNodeMaskEditDialog({
     const [brushSize, setBrushSize] = useState(defaultBrushSize);
     const [mode, setMode] = useState<DrawMode>("paint");
     const [error, setError] = useState("");
+    let settingsError = "";
+    let lockedSettings: ReturnType<typeof canvasMaskEditImageSettings> | undefined;
+    try { if (image) lockedSettings = canvasMaskEditImageSettings(effectiveConfig, image, profile); }
+    catch (reason) { settingsError = reason instanceof Error ? reason.message : "原图尺寸不可用于当前模型的严格蒙版编辑"; }
+    const outputOptions = readImageOptions(lockedSettings?.imageOptions);
+    const outputFields = imageOptionFields(profile).filter(field => ["background", "output_format", "output_compression", "moderation"].includes(field.key));
+    const setOutputOption = (key: string, value: string) => {
+        const next = { ...outputOptions, [key]: value };
+        if (!value) delete next[key];
+        if (key === "background" && value === "transparent" && next.output_format === "jpeg") next.output_format = "png";
+        if (key === "output_format" && value === "jpeg" && next.background === "transparent") next.background = "opaque";
+        setImageSettings(current => ({ ...current, imageOptions: JSON.stringify(next) }));
+    };
 
     useEffect(() => {
         if (!open) return;
@@ -56,7 +107,11 @@ export function CanvasNodeMaskEditDialog({
         setBrushSize(defaultBrushSize);
         setMode("paint");
         setError("");
-        void readImageMeta(dataUrl).then(setImage);
+        setImageSettings({});
+        setImage(null);
+        let active = true;
+        void readCanvasMaskImageSize(dataUrl).then(size => { if (active) setImage(size); }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : "原图读取失败"); });
+        return () => { active = false; };
     }, [dataUrl, open]);
 
     useEffect(() => {
@@ -115,14 +170,15 @@ export function CanvasNodeMaskEditDialog({
     };
 
     const submit = () => {
-        if (!toolEnabled) return;
+        if (!toolEnabled || !profile.supportsMask) return;
         const nextPrompt = prompt.trim();
         const canvas = maskCanvasRef.current;
         if (!nextPrompt) return setError("请输入修改要求");
         if (!canvas) return;
         if (!canvasHasPaint(canvas)) return setError("请先涂抹局部区域");
         if (!effectiveConfig.model) return setError("请选择用于局部编辑的模型");
-        onConfirm({ prompt: nextPrompt, maskDataUrl: buildEditMask(canvas), model: effectiveConfig.model });
+        if (!image || !lockedSettings) return setError(settingsError || "尚未确认原图像素尺寸，请稍后重试");
+        onConfirm({ prompt: nextPrompt, maskDataUrl: buildEditMask(canvas), model: effectiveConfig.model, imageSettings: { quality: lockedSettings.quality, imageOptions: lockedSettings.imageOptions } });
     };
 
     return (
@@ -152,7 +208,7 @@ export function CanvasNodeMaskEditDialog({
                 <div className="flex min-h-[360px] flex-col gap-5">
                     <div>
                         <h2 className="text-xl font-semibold">局部遮罩编辑</h2>
-                        <div className="mt-2 text-sm opacity-60">{image ? `${image.width} x ${image.height}px` : "读取中"}</div>
+                        <div className="mt-2 text-sm opacity-60">{image ? `输出尺寸锁定为原图 ${image.width} × ${image.height}px` : "读取真实像素尺寸中"}</div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
@@ -178,6 +234,25 @@ export function CanvasNodeMaskEditDialog({
                             {deploymentFeatures.creditsEnabled && typeof estimatedCredits === "number" ? <span className="shrink-0 text-xs font-medium text-orange-600">预计 {estimatedCredits} 积分</span> : null}
                         </div>
                         <ModelPicker toolKey="canvas-mask-edit" config={effectiveConfig} value={effectiveConfig.model} onChange={onModelChange} capability="image" fullWidth placeholder="选择局部编辑模型" />
+                        {!profile.supportsMask ? <p role="alert" className="text-xs text-destructive">当前模型不支持蒙版，请切换支持蒙版的出图模型。</p> : null}
+                    </div>
+
+                    <div className="space-y-3">
+                        <p className="text-xs leading-5" style={{ color: theme.node.muted }}>蒙版坐标与原图像素一一对应，不调整比例、尺寸或分辨率，也不会自动拉伸原图或蒙版。</p>
+                        {profile.kind === "standard" || profile.kind === "quality-resolution" ? <label className="flex flex-col gap-1 text-xs">
+                            <span>图片质量</span>
+                            <select aria-label="图片质量" className="rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} value={lockedSettings?.quality || effectiveConfig.quality} onChange={event => setImageSettings(current => ({ ...current, quality: event.target.value }))}>
+                                {profile.qualities.map(value => <option key={value} value={value}>{imageQualityLabel(value)}</option>)}
+                            </select>
+                        </label> : null}
+                        {outputFields.map(field => <label key={field.key} className="flex flex-col gap-1 text-xs">
+                            <span>{field.label}</span>
+                            {field.options ? <select aria-label={field.label} value={outputOptions[field.key] || ""} className="rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => setOutputOption(field.key, event.target.value)}>
+                                <option value="">渠道默认</option>
+                                {field.options.map(value => <option key={value} value={value}>{value}</option>)}
+                            </select> : <input aria-label={field.label} type="number" min={field.min} max={field.max} step={field.step} value={outputOptions[field.key] || ""} placeholder="渠道默认" disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(outputOptions.output_format || "png")} className="rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => setOutputOption(field.key, event.target.value)} />}
+                            {field.tip ? <span className="leading-5" style={{ color: theme.node.muted }}>{field.tip}</span> : null}
+                        </label>)}
                     </div>
 
                     <div className="space-y-2">
@@ -192,7 +267,7 @@ export function CanvasNodeMaskEditDialog({
                                 setError("");
                             }}
                         />
-                        {error ? <div className="text-xs font-medium text-[#ef4444]">{error}</div> : null}
+                        {error || settingsError ? <div role="alert" className="text-xs font-medium text-destructive">{error || settingsError}</div> : null}
                     </div>
 
                     <div className="mt-auto flex items-center justify-between gap-2">
@@ -203,7 +278,7 @@ export function CanvasNodeMaskEditDialog({
                             <Button icon={<X className="size-4" />} onClick={onClose}>
                                 取消
                             </Button>
-                            <Button type="primary" disabled={!toolEnabled || !effectiveConfig.model} icon={<WandSparkles className="size-4" />} onClick={submit}>
+                            <Button type="primary" disabled={!toolEnabled || !effectiveConfig.model || !profile.supportsMask || !lockedSettings} icon={<WandSparkles className="size-4" />} onClick={submit}>
                                 AI 修改
                             </Button>
                         </div>

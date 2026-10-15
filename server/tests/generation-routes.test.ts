@@ -74,6 +74,14 @@ async function post(url: string, body?: unknown) {
 }
 
 describe("production generation routes", () => {
+  test("new image batch submissions reject multiple inputs before writes or queueing", async () => {
+    const deps = dependencies();
+    const url = await serve(createTasksRouter(deps.database as never, deps.cache as never));
+    const response = await post(`${url}/batch`, { ...videoInput(), operationType: "batch_image", toolKey: "canvas-batch", items: [{ sourceUrls: ["/first"] }, { sourceUrls: ["/second"] }] });
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("每次只能生成 1 张");
+    expect(deps.reads).toHaveLength(0); expect(deps.writes).toHaveLength(0); expect(deps.queued).toHaveLength(0);
+  });
   test("reads an owned older task by ID without a recent-history limit", async () => {
     const deps = dependencies({ task: { id: taskId, requestId: "old-request", status: "success", resultUrls: ["/api/assets/result/content"] } });
     const url = await serve(createTasksRouter(deps.database as never, deps.cache as never));
@@ -240,7 +248,9 @@ describe("production generation routes", () => {
     expect(deps.queued[0]).toMatchObject({ member: { value: taskId } });
     expect(deps.writes).toHaveLength(1);
     expect(deps.writes[0]).toContain("UPDATE tasks SET status='waiting'");
-    expect(deps.writes.some((sql) => /credit|upstream_task_id|INSERT INTO tasks/.test(sql))).toBe(false);
+    expect(deps.writes.some((sql) => /credit|INSERT INTO tasks/i.test(sql))).toBe(false);
+    const assignments = deps.writes[0]!.split(/\bSET\b/i)[1]!.split(/\bWHERE\b/i)[0]!;
+    expect(assignments).not.toMatch(/upstream_task_id/i);
   });
 
   test("an unknown video submission cannot be reset through recovery", async () => {

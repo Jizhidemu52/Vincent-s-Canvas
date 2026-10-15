@@ -58,7 +58,7 @@ export function RegionSelectionDialog({ source, initialMask, onClose, onSave }: 
         } catch (caught) { setError(caught instanceof Error ? caught.message : "选区保存失败"); }
         finally { setSaving(false); }
     };
-    return <Modal open title="涂选修改区域" onCancel={onClose} width={820} closable={!saving} mask={{ closable: !saving }} keyboard={!saving}
+    return <Modal open modalRender={modal => <div data-usage-board="creative-selection">{modal}</div>} title="涂选修改区域" onCancel={onClose} width={820} closable={!saving} mask={{ closable: !saving }} keyboard={!saving}
         footer={<><Button onClick={onClose} disabled={saving}>取消</Button><Button type="primary" onClick={() => void save()} loading={saving} disabled={!ready}>保存选区</Button></>}>
         <div className="cs-tool-dialog">
             <p className="cs-help">蓝色区域交给 AI 修改，选区外在最终合成时保留原图像素。请覆盖完整待改部位并留出衔接空间；它不是模型原生蒙版，选区内的结构与接缝仍需检查。</p>

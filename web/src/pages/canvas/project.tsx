@@ -4,6 +4,8 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronDown, Bot, Download, Globe, Home, ImageIcon, Images, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Share2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 
 import { requestBatchEdit, requestImageQuestion } from "@/services/api/image";
+import { ModelPicker } from "@/components/model-picker";
+import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { canvasToolKey, currentToolConfig, useToolConfig } from "@/hooks/use-tool-config";
 import { useCanvasImageTasks } from "./use-canvas-image-tasks";
 import { controlQueuedBatch, QueuedTaskFailedError, QueuedTaskPausedError, type QueuedBatchAction } from "@/services/api/generation-tasks";
@@ -11,6 +13,7 @@ import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audi
 import { recoverVideoGenerationTask, requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { fetchServerAssetContent, type ServerAssetVariants } from "@/services/api/server-assets";
 import { hydratePromptReuse } from "@/services/api/prompts";
+import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 import { defaultConfig, modelOptionName, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { releaseUnusedImageObjectUrls, resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { releaseUnusedMediaObjectUrls, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
@@ -23,6 +26,7 @@ import { useAssetStore, type AssetInput } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { loadCanvasImageTools } from "@/lib/canvas/canvas-image-tool-loader";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
+import { canvasImageUsageInput } from "@/lib/canvas/canvas-image-usage";
 import { bindCanvasClipboardEvents } from "@/lib/canvas/canvas-system-clipboard";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
@@ -391,7 +395,6 @@ function WirelessCanvasPage() {
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const quickReferenceInputRef = useRef<HTMLInputElement>(null);
-    const batchFolderInputRef = useRef<HTMLInputElement>(null);
     const batchFilesInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
     const clipboardRef = useRef<CanvasClipboard | null>(null);
@@ -532,6 +535,7 @@ function WirelessCanvasPage() {
     const quickSubmissionRef = useRef<symbol | null>(null);
     const [batchEditOpen, setBatchEditOpen] = useState(false);
     const [batchEditPrompt, setBatchEditPrompt] = useState("");
+    const [batchImageSettings, setBatchImageSettings] = useState<Partial<AiConfig>>({});
     const [batchEditItems, setBatchEditItems] = useState<BatchEditFileItem[]>([]);
     const [batchEditRunning, setBatchEditRunning] = useState(false);
     const [batchEditServerId, setBatchEditServerId] = useState<string | null>(null);
@@ -591,6 +595,7 @@ function WirelessCanvasPage() {
     }
 
     const selectedMaskEditModel = useToolConfig({ ...effectiveConfig, model: maskEditModel || effectiveConfig.imageModel || effectiveConfig.model }, "canvas-mask-edit").model;
+    const batchGenerationConfig = useToolConfig({ ...effectiveConfig, ...batchImageSettings, model: batchImageSettings.model || effectiveConfig.imageModel || effectiveConfig.model, count: "1" }, "canvas-batch");
     const maskEditEstimate = useMemo(() => estimateUsage({ operationType: "inpaint", toolKey: "canvas-mask-edit", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }), [estimateUsage, selectedMaskEditModel]);
 
     const nodesRef = useRef(nodes);
@@ -633,14 +638,8 @@ function WirelessCanvasPage() {
     }, [canManageConfig, message, openConfigDialog]);
 
     const quickGenerateEstimate = useMemo(
-        () =>
-            estimateUsage({
-                operationType: quickGenerateReferences.length ? "inpaint" : "image_generation",
-                toolKey: quickGenerateReferences.length ? "canvas-edit" : "canvas-image",
-                modelId: modelOptionName(quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model),
-                quantity: quickGenerateCount,
-            }),
-        [effectiveConfig.imageModel, effectiveConfig.model, estimateUsage, quickGenerateCount, quickGenerateModel, quickGenerateReferences.length],
+        () => estimateUsage(canvasImageUsageInput(quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model, quickGenerateReferences.length)),
+        [effectiveConfig.imageModel, effectiveConfig.model, estimateUsage, quickGenerateModel, quickGenerateReferences.length],
     );
 
     const createHistoryEntry = useCallback(
@@ -1170,7 +1169,7 @@ function WirelessCanvasPage() {
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
-            const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
+            const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: 1 } : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
             if (!connection) {
@@ -1614,7 +1613,7 @@ function WirelessCanvasPage() {
                     ? {
                           model: effectiveConfig.imageModel || effectiveConfig.model,
                           size: effectiveConfig.size,
-                          count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
+                          count: 1,
                       }
                     : undefined;
             const newNode = createCanvasNode(type, targetPosition, configMetadata);
@@ -2895,7 +2894,17 @@ function WirelessCanvasPage() {
             if (!node.metadata?.content) return;
             const selectedModel = currentToolConfig({ ...effectiveConfig, model: payload.model || effectiveConfig.imageModel || effectiveConfig.model }, "canvas-mask-edit").model;
             const usage = estimateUsage({ operationType: "inpaint", toolKey: "canvas-mask-edit", modelId: modelOptionName(selectedModel), quantity: 1 });
-            const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), model: selectedModel, imageModel: selectedModel, count: "1", size: node.metadata?.size || "auto" };
+            let generationConfig: AiConfig;
+            try {
+                const { canvasMaskEditImageSettings, readCanvasMaskImageSize } = await import("@/components/canvas/canvas-node-mask-edit-dialog");
+                const [sourceSize, maskSize] = await Promise.all([readCanvasMaskImageSize(node.metadata.content), readCanvasMaskImageSize(payload.maskDataUrl)]);
+                if (sourceSize.width !== maskSize.width || sourceSize.height !== maskSize.height) throw new Error("蒙版尺寸与当前原图不一致，请重新绘制；尚未提交生成，不会自动拉伸。");
+                const baseConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), ...payload.imageSettings };
+                generationConfig = { ...baseConfig, ...canvasMaskEditImageSettings(baseConfig, sourceSize, imageModelProfile(selectedModel)), model: selectedModel, imageModel: selectedModel, count: "1" };
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "无法确认原图与蒙版尺寸，尚未提交生成");
+                return;
+            }
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
                 return;
@@ -3009,7 +3018,7 @@ function WirelessCanvasPage() {
     const generateAngleNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
             if (!node.metadata?.content) return;
-            const generationConfig = currentToolConfig({ ...buildGenerationConfig(effectiveConfig, node, "image"), ...(params.model ? { model: params.model } : {}), count: "1" }, "canvas-angle");
+            const generationConfig = currentToolConfig({ ...buildGenerationConfig(effectiveConfig, node, "image"), ...params.imageSettings, ...(params.model ? { model: params.model } : {}), count: "1" }, "canvas-angle");
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
                 return;
@@ -3229,15 +3238,17 @@ function WirelessCanvasPage() {
 
     const runQuickCanvasGeneration = useCallback(async () => {
         if (quickSubmissionRef.current) return;
-        const prompt = quickGeneratePrompt.trim();
-        const model = currentToolConfig({ ...effectiveConfig, model: quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model }, quickGenerateReferences.length ? "canvas-edit" : "canvas-image").model;
+        const selectedModel = quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model;
+        const toolKey = canvasToolKey("image", quickGenerateReferences.length > 0, imageModelProfile(selectedModel).kind);
+        const model = currentToolConfig({ ...effectiveConfig, model: selectedModel }, toolKey).model;
         const modelId = modelOptionName(model);
         const profile = imageModelProfile(model);
+        const prompt = profile.requiresPrompt ? quickGeneratePrompt.trim() : "";
         const settings = normalizeImageModelSettings({ size: quickGenerateSize, quality: quickGenerateQuality, count: String(quickGenerateCount) }, profile);
         const count = Number(settings.count);
         const references = [...quickGenerateReferences];
         const operationType = references.length && profile.kind !== "midjourney-blend" ? "inpaint" : "image_generation";
-        const toolMode = references.length ? "image-edit" : "image-generation";
+        const toolMode = operationType === "inpaint" ? "image-edit" : "image-generation";
         const generationConfig: AiConfig = {
             ...effectiveConfig,
             model,
@@ -3247,13 +3258,13 @@ function WirelessCanvasPage() {
             count: "1",
             canvasImageCount: String(count),
         };
-        const usage = estimateUsage({ operationType, toolKey: references.length ? "canvas-edit" : "canvas-image", modelId, quantity: count });
+        const usage = estimateUsage({ operationType, toolKey, modelId, quantity: count });
 
         if (!prompt && profile.requiresPrompt) {
             message.error("请输入生图提示词");
             return;
         }
-        const referenceValidation = validateImageReferences(modelId, references);
+        const referenceValidation = validateImageReferences(modelId, references, profile);
         if (!referenceValidation.valid) {
             message.error(referenceValidation.message);
             return;
@@ -3283,7 +3294,7 @@ function WirelessCanvasPage() {
             height: rows * nodeSize.height + (rows - 1) * gap,
         }, origin, gap, quickGeneratePosition);
         const targetIds = Array.from({ length: count }, () => `quick-image-${nanoid()}`);
-        const generationType: CanvasImageGenerationType = references.length ? "edit" : "generation";
+        const generationType: CanvasImageGenerationType = operationType === "inpaint" ? "edit" : "generation";
         const placeholders: CanvasNodeData[] = targetIds.map((id, index) => ({
             id,
             type: CanvasNodeType.Image,
@@ -3327,7 +3338,7 @@ function WirelessCanvasPage() {
         await Promise.all(
             targetIds.map(async (targetId, index) => {
                 try {
-                    const options = await createOptions(targetId, controller, () => finishSubmission(targetId));
+                    const options = await createOptions(targetId, controller, () => finishSubmission(targetId), toolKey);
                     const { metadata, uploaded } = await options.generate(generationConfig, prompt, references, undefined, operationType === "inpaint");
                     const resultSize = fitNodeSize(uploaded.width, uploaded.height, nodeSize.width, nodeSize.height);
                     setNodes((current) =>
@@ -3425,15 +3436,19 @@ function WirelessCanvasPage() {
             .then(async (payload) => {
                 const parameters = payload.template.parameters;
                 const isBatch = payload.template.targetTool === "batch-edit" || searchParams.get("promptTool") === "batch-edit";
+                const selectedModel = payload.pricing.selectedModel?.modelId || effectiveConfig.imageModel || effectiveConfig.model;
+                const settings = promptImageSettings(parameters, selectedModel);
                 if (isBatch) {
                     setBatchEditPrompt(payload.template.prompt);
+                    setBatchImageSettings({ model: selectedModel, imageModel: selectedModel, ...settings });
                     setBatchEditOpen(true);
                 } else {
                     setQuickGeneratePrompt(payload.template.prompt);
-                    if (payload.pricing.selectedModel?.modelId) setQuickGenerateModel(payload.pricing.selectedModel.modelId);
-                    if (typeof parameters.size === "string") setQuickGenerateSize(parameters.size);
-                    const quantity = typeof parameters.quantity === "number" ? parameters.quantity : typeof parameters.count === "number" ? parameters.count : 1;
-                    setQuickGenerateCount(Math.min(4, Math.max(1, quantity)));
+                    setQuickGenerateModel(selectedModel);
+                    setQuickGenerateSize(settings.size);
+                    setQuickGenerateQuality(settings.quality);
+                    setQuickGenerateImageOptions(settings.imageOptions);
+                    setQuickGenerateCount(Math.min(4, Number(settings.count)));
                     const nextReferences = await Promise.all(
                         payload.template.referenceAssetIds.map(async (assetId) => {
                             const blob = await fetchServerAssetContent(assetId);
@@ -3463,6 +3478,10 @@ function WirelessCanvasPage() {
         const imageFiles = Array.from(files || [])
             .filter((file) => file.type.startsWith("image/"))
             .sort((a, b) => batchFilePath(a).localeCompare(batchFilePath(b), "zh-Hans-CN", { numeric: true }));
+        if (imageFiles.length > 1) {
+            message.warning("每次只能处理 1 张图片，请重新选择 1 张；原列表未改变。");
+            return;
+        }
         setBatchEditItems(
             imageFiles.map((file) => ({
                 id: nanoid(),
@@ -3471,7 +3490,7 @@ function WirelessCanvasPage() {
                 status: "waiting",
             })),
         );
-    }, []);
+    }, [message]);
 
     const handleBatchFolderInputChange = useCallback(
         (event: ReactChangeEvent<HTMLInputElement>) => {
@@ -3484,19 +3503,19 @@ function WirelessCanvasPage() {
     const runBatchImageEdit = useCallback(async () => {
         const prompt = batchEditPrompt.trim();
         const items = batchEditItems;
-        const model = currentToolConfig({ ...effectiveConfig, model: effectiveConfig.imageModel || effectiveConfig.model }, "canvas-batch").model;
+        const model = batchGenerationConfig.model;
         const modelId = modelOptionName(model);
         const usage = estimateUsage({ operationType: "batch_image", toolKey: "canvas-batch", modelId, quantity: items.length });
 
-        if (!items.length) {
-            message.error("请先上传文件夹或选择多张图片");
+        if (items.length !== 1) {
+            message.error("每次只能处理 1 张图片，请选择 1 张图片；已有多图列表请先清空后重新选择。");
             return;
         }
         if (!prompt) {
             message.error("请输入批量改图提示词");
             return;
         }
-        if (!isAiConfigReady(effectiveConfig, model)) {
+        if (!isAiConfigReady(batchGenerationConfig, model)) {
             handleMissingModelConfig();
             return;
         }
@@ -3565,8 +3584,9 @@ function WirelessCanvasPage() {
                             status: NODE_STATUS_LOADING,
                             generationType: "edit",
                             model,
-                            size: effectiveConfig.size,
-                            quality: effectiveConfig.quality,
+                            size: batchGenerationConfig.size,
+                            quality: batchGenerationConfig.quality,
+                            imageOptions: batchGenerationConfig.imageOptions,
                             count: 1,
                             references: [uploadedSource.storageKey || uploadedSource.url],
                             batchRootId: localBatchId,
@@ -3597,7 +3617,7 @@ function WirelessCanvasPage() {
         let cancelledCount = 0;
         try {
             const result = await requestBatchEdit(
-                { ...effectiveConfig, model, count: "1" },
+                { ...batchGenerationConfig, model, count: "1" },
                 prompt,
                 prepared.map((entry) => ({ file: entry.item.file, title: entry.item.relativePath })),
                 {
@@ -3689,8 +3709,9 @@ function WirelessCanvasPage() {
                                           prompt,
                                           generationType: "edit",
                                           model,
-                                          size: effectiveConfig.size,
-                                          quality: effectiveConfig.quality,
+                                          size: batchGenerationConfig.size,
+                                          quality: batchGenerationConfig.quality,
+                                          imageOptions: batchGenerationConfig.imageOptions,
                                           count: 1,
                                           references: [entry.uploadedSource.storageKey || entry.uploadedSource.url],
                                       },
@@ -3773,7 +3794,7 @@ function WirelessCanvasPage() {
         } else {
             message.success(`批量改图完成：${selectedResults.length} 张`);
         }
-    }, [addAssets, batchEditItems, batchEditPrompt, effectiveConfig, estimateUsage, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, message, projectId, user]);
+    }, [addAssets, batchEditItems, batchEditPrompt, batchGenerationConfig, estimateUsage, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, message, projectId, user]);
 
     const controlActiveBatchEdit = useCallback(
         async (action: QueuedBatchAction) => {
@@ -3897,9 +3918,13 @@ function WirelessCanvasPage() {
                     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;
                     const savedReferences = sourceNode ? resolveCanvasNodeImageReferences(sourceNode, nodesRef.current, connectionsRef.current) : [];
                     const referenceImages = savedReferences.length ? savedReferences : generationContext.referenceImages;
-                    generationConfig = currentToolConfig(generationConfig, canvasToolKey(mode, referenceImages.length > 0));
-                    const count = getGenerationCount(generationConfig.count);
-                    const referenceValidation = validateImageReferences(modelOptionName(generationConfig.model), referenceImages);
+                    const toolKey = canvasToolKey(mode, referenceImages.length > 0, imageModelProfile(generationConfig.model).kind);
+                    generationConfig = currentToolConfig(generationConfig, toolKey);
+                    const profile = imageModelProfile(generationConfig.model);
+                    const effectivePrompt = profile.requiresPrompt ? generationContext.prompt.trim() : "";
+                    generationConfig = { ...generationConfig, ...normalizeImageModelSettings(generationConfig, profile), canvasImageCount: "1" };
+                    const count = 1;
+                    const referenceValidation = validateImageReferences(modelOptionName(generationConfig.model), referenceImages, profile);
                     if (!referenceValidation.valid) {
                         message.error(referenceValidation.message);
                         finishGenerationRequest(nodeId, runController);
@@ -3907,7 +3932,7 @@ function WirelessCanvasPage() {
                         reportResult([{ nodeId, status: "failed", error: referenceValidation.message }]);
                         return;
                     }
-                    const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
+                    const generationType = referenceImages.length && profile.kind !== "midjourney-blend" ? ("edit" as const) : ("generation" as const);
                     const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages);
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
@@ -4001,8 +4026,8 @@ function WirelessCanvasPage() {
                     await Promise.all(
                         targetIds.map(async (targetId) => {
                             try {
-                                const imageTask = await createOptions(targetId, controller);
-                                const { metadata, uploaded } = await imageTask.generate({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages.length ? referenceImages : undefined);
+                                const imageTask = await createOptions(targetId, controller, undefined, toolKey);
+                                const { metadata, uploaded } = await imageTask.generate({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages.length ? referenceImages : undefined, undefined, generationType === "edit");
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 setNodes((prev) => {
                                     const root = prev.find((node) => node.id === rootId);
@@ -4366,7 +4391,11 @@ function WirelessCanvasPage() {
                 return;
             }
             if (action.type === "image_count_change") {
-                updateMediaWorkflow(action.messageId, (current) => ({ ...current, imageCount: Math.max(1, Math.min(15, Math.floor(action.count) || 1)) }));
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, imageCount: 1 }));
+                return;
+            }
+            if (action.type === "image_settings_change") {
+                updateMediaWorkflow(action.messageId, (current) => ({ ...current, [action.key === "quality" ? "imageQuality" : "imageOptions"]: action.value }));
                 return;
             }
             if (action.type === "video_seconds_change") {
@@ -4442,13 +4471,14 @@ function WirelessCanvasPage() {
             }
 
             const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
-            const prompt = (savedImageMetadata?.prompt || context?.prompt || "").trim();
-            if (!prompt) {
+            const blend = node.type === CanvasNodeType.Image && imageModelProfile(generationConfig.model).kind === "midjourney-blend";
+            const prompt = blend ? "" : (savedImageMetadata?.prompt || context?.prompt || "").trim();
+            if (!prompt && !blend) {
                 message.warning("找不到提示词，无法重试");
                 return;
             }
             const generationType = savedImageMetadata?.generationType;
-            const useReferenceImages = generationType ? generationType === "edit" : Boolean(context?.referenceImages.length);
+            const useReferenceImages = blend || (generationType ? generationType === "edit" : Boolean(context?.referenceImages.length));
             const retryReferenceImages =
                 hasSavedImageMetadata && savedImageMetadata ? await resolveMetadataReferences(savedImageMetadata) : useReferenceImages ? (context?.referenceImages.length ? context.referenceImages : sourceNodeReferenceImages(batchRoot || sourceNode)) : [];
             if (useReferenceImages && !retryReferenceImages) {
@@ -4457,7 +4487,7 @@ function WirelessCanvasPage() {
                 return;
             }
             const retryImages = retryReferenceImages || [];
-            generationConfig = currentToolConfig(generationConfig, canvasToolKey(node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image", useReferenceImages));
+            generationConfig = currentToolConfig(generationConfig, canvasToolKey(node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image", useReferenceImages, imageModelProfile(generationConfig.model).kind));
 
             setRunningNodeId(node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
@@ -4520,11 +4550,11 @@ function WirelessCanvasPage() {
                 }
 
                 const imageTask = await createOptions(node.id, controller);
-                const { metadata, uploaded: uploadedImage } = await imageTask.generate(generationConfig, prompt, useReferenceImages ? retryImages : undefined, undefined, useReferenceImages);
+                const { metadata, uploaded: uploadedImage } = await imageTask.generate(generationConfig, prompt, useReferenceImages ? retryImages : undefined, undefined, useReferenceImages && !blend);
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
                 const generationMetadata = savedImageMetadata?.generationType
-                    ? { generationType: savedImageMetadata.generationType, model: generationConfig.model, size: generationConfig.size, quality: generationConfig.quality, count: savedImageMetadata.count || 1, references: savedImageMetadata.references, compareSources: retryImages.map(canvasCompareSource) }
+                    ? { generationType: savedImageMetadata.generationType, model: generationConfig.model, size: generationConfig.size, quality: generationConfig.quality, count: 1, references: savedImageMetadata.references, compareSources: retryImages.map(canvasCompareSource) }
                     : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, 1, retryImages);
                 setNodes((prev) =>
                     prev.map((item) =>
@@ -4573,7 +4603,7 @@ function WirelessCanvasPage() {
                     prompt: "",
                     model: effectiveConfig.imageModel || effectiveConfig.model,
                     size: effectiveConfig.size,
-                    count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
+                    count: 1,
                 },
             );
             const connection = { id: nanoid(), fromNodeId: sourceNode.id, toNodeId: configNode.id };
@@ -4744,7 +4774,7 @@ function WirelessCanvasPage() {
 
     const renderCanvasNodePanel = useCallback(
         (panelNode: CanvasNodeData) =>
-            panelNode.type === CanvasNodeType.Config ? (
+            panelNode.type === CanvasNodeType.Config ? (panelNode.metadata?.generationMode !== "video" && panelNode.metadata?.generationMode !== "text" && panelNode.metadata?.generationMode !== "audio" && imageModelProfile(panelNode.metadata?.model || effectiveConfig.imageModel).kind === "midjourney-blend" ? null :
                 <Suspense fallback={<CanvasNodePanelLoading />}>
                     <CanvasConfigComposer
                         value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
@@ -4772,7 +4802,7 @@ function WirelessCanvasPage() {
                     />
                 </Suspense>
             ),
-        [configGenerationInputIndex, confirmStopGeneration, connections, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferenceIndex, nodes, runningNodeId],
+        [configGenerationInputIndex, confirmStopGeneration, connections, effectiveConfig.imageModel, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferenceIndex, nodes, runningNodeId],
     );
 
     const configNodeActionsRef = useRef<{
@@ -5284,13 +5314,16 @@ function WirelessCanvasPage() {
                     }
                 >
                     <div className="space-y-4">
-                        <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-900">上传一个文件夹或多张图片，下面写统一提示词。点击生图后会按文件名顺序逐张编辑，原图和结果会成对出现在当前画布旁边。</div>
+                        <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-900">每次选择 1 张图片并生成 1 张结果，原图保留。可连续发起多个独立任务，并发队列不变。</div>
+                        <fieldset disabled={batchEditRunning} className="space-y-2 border-0 p-0">
+                            <ModelPicker toolKey="canvas-batch" config={batchGenerationConfig} value={batchGenerationConfig.model} capability="image" fullWidth disabled={batchEditRunning}
+                                onChange={model => setBatchImageSettings(current => ({ ...current, model, imageModel: model }))} />
+                            <ImageSettingsPanel config={batchGenerationConfig} referenceCount={batchEditItems.length} theme={theme} maxCount={1} showTitle={false}
+                                onConfigChange={(key, value) => setBatchImageSettings(current => ({ ...current, [key]: value }))} />
+                        </fieldset>
                         <div className="flex flex-wrap gap-2">
-                            <Button onClick={() => batchFolderInputRef.current?.click()} disabled={batchEditRunning}>
-                                上传文件夹
-                            </Button>
                             <Button onClick={() => batchFilesInputRef.current?.click()} disabled={batchEditRunning}>
-                                选择多张图片
+                                选择 1 张图片
                             </Button>
                             <Button
                                 disabled={batchEditRunning || !batchEditItems.length}
@@ -5358,8 +5391,7 @@ function WirelessCanvasPage() {
                         </div>
                     </div>
                 </Modal>
-                <input ref={batchFolderInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBatchFolderInputChange} {...{ webkitdirectory: "", directory: "" }} />
-                <input ref={batchFilesInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBatchFolderInputChange} />
+                <input ref={batchFilesInputRef} type="file" accept="image/*" className="hidden" onChange={handleBatchFolderInputChange} />
                 {localAgentModuleEnabled && codexCompactAgent && !assistantMounted ? (
                     <Suspense fallback={null}>
                         <CanvasLocalAgentPanel headless snapshotRef={agentSnapshotRef} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} autoConnect={codexAutoConnect} />
@@ -5858,7 +5890,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         audioFormat: node?.metadata?.audioFormat || config.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
         audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
-        count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
+        count: mode === "image" ? "1" : String(node?.metadata?.count || config.count || defaultConfig.count),
     };
 }
 

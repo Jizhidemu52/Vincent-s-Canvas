@@ -39,7 +39,7 @@ describe("canvas batch item mapping", () => {
         ]);
     });
 
-    test("submits every multi-image request through the supported single-task endpoint", () => {
+    test("legacy multi-image counts produce exactly one task and one upstream image", () => {
         expect(createImageTaskRequests({
             requestId: "agent-request",
             projectId: "canvas-1",
@@ -57,29 +57,7 @@ describe("canvas batch item mapping", () => {
                 toolKey: "image",
                 modelConfigId: "model-1",
                 prompt: "a product photo",
-                parameters: { size: "1:1", count: 1 },
-                sourceUrls: [],
-                priority: "normal",
-            },
-            {
-                requestId: "agent-request:1",
-                projectId: "canvas-1",
-                operationType: "image_generation",
-                toolKey: "image",
-                modelConfigId: "model-1",
-                prompt: "a product photo",
-                parameters: { size: "1:1", count: 1 },
-                sourceUrls: [],
-                priority: "normal",
-            },
-            {
-                requestId: "agent-request:2",
-                projectId: "canvas-1",
-                operationType: "image_generation",
-                toolKey: "image",
-                modelConfigId: "model-1",
-                prompt: "a product photo",
-                parameters: { size: "1:1", count: 1 },
+                parameters: { size: "1:1", count: 1, n: 1 },
                 sourceUrls: [],
                 priority: "normal",
             },

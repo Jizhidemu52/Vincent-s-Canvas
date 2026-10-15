@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 
 export const APIMART_VIDEO_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+export const APIMART_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const extensions: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
 
 export function isApiMartImageMimeType(mimeType: string) {
@@ -12,6 +13,11 @@ export function validateApiMartVideoImage(source: { bytes: Uint8Array; mimeType:
   if (!source.bytes.byteLength || source.bytes.byteLength > APIMART_VIDEO_IMAGE_MAX_BYTES) throw new Error("视频参考图必须非空且不超过 10MB");
 }
 
+export function validateApiMartGenerationImage(source: { bytes: Uint8Array; mimeType: string }) {
+  if (!isApiMartImageMimeType(source.mimeType)) throw new Error("图片参考图仅支持 JPEG、PNG、WebP 或 GIF 格式");
+  if (!source.bytes.byteLength || source.bytes.byteLength > APIMART_IMAGE_MAX_BYTES) throw new Error("图片参考图必须非空且不超过 20MB");
+}
+
 /** Upload bytes to the configured APIMart service; never forward private storage URLs. */
 export async function uploadApiMartImage(input: {
   baseUrl: string;
@@ -19,9 +25,12 @@ export async function uploadApiMartImage(input: {
   bytes: Uint8Array;
   mimeType: string;
   filename?: string;
+  purpose?: "image" | "video";
 }, runtime: { fetch?: (url: string, init?: RequestInit) => Promise<Response> } = {}): Promise<string> {
-  if (!input.apiKey.trim()) throw new Error("APIMart 视频服务端凭据未配置");
-  validateApiMartVideoImage(input);
+  const purposeName = input.purpose === "image" ? "图片" : "视频";
+  if (!input.apiKey.trim()) throw new Error(`APIMart ${purposeName}服务端凭据未配置`);
+  if (input.purpose === "image") validateApiMartGenerationImage(input);
+  else validateApiMartVideoImage(input);
   const file = new Blob([new Uint8Array(input.bytes)], { type: input.mimeType });
   const filename = input.filename?.split(/[\\/]/).pop()?.replace(/[\u0000-\u001f\u007f]/g, "") || `reference.${extensions[input.mimeType]}`;
   const form = new FormData();
@@ -30,10 +39,22 @@ export async function uploadApiMartImage(input: {
     method: "POST", headers: { authorization: `Bearer ${input.apiKey}` }, body: form,
     redirect: "error", signal: AbortSignal.timeout(180_000),
   });
-  if (!response.ok) throw new Error(`APIMart 参考图上传失败（${response.status}），尚未提交视频生成`);
+  if (!response.ok) throw new Error(`APIMart 参考图上传失败（${response.status}），尚未提交${purposeName}生成`);
   const result = await response.json().catch(() => null) as { url?: unknown } | null;
-  if (typeof result?.url !== "string" || !isPublicHttpsUrl(result.url)) throw new Error("APIMart 参考图上传未返回公开 HTTPS 地址，尚未提交视频生成");
+  if (typeof result?.url !== "string" || !isPublicHttpsUrl(result.url)) throw new Error(`APIMart 参考图上传未返回公开 HTTPS 地址，尚未提交${purposeName}生成`);
   return result.url;
+}
+
+/** Generation accepts public HTTP(S); uploads themselves still require HTTPS. */
+export function isPublicHttpUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    url.protocol = "https:";
+    return isPublicHttpsUrl(url.toString());
+  } catch {
+    return false;
+  }
 }
 
 export function isPublicHttpsUrl(value: string) {

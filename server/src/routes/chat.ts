@@ -8,17 +8,21 @@ import { resolveToolExecution } from "../tool-configuration";
 import { decryptSecret } from "../security";
 import { fetchProviderSubmission } from "../provider-submission-transport";
 import type { AuthenticatedRequest } from "../types";
+import { beginUsageChat, finishUsageChat } from "../usage-analytics";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInput =
     | { role: "system" | "user" | "assistant"; content: string | ResponseContent[] }
     | { type: "claude_assistant"; content: Array<Record<string, unknown>> }
+    | { type: "responses_assistant"; output: Array<Record<string, unknown>> }
     | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string }
     | { type: "function_call_output"; call_id: string; output: string };
 type ResponseTool = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string }; thoughtSignature?: string };
-type ChatCompletionResult = { content: string; toolCalls: ToolCall[]; stopReason?: string; claudeAssistantContent?: Array<Record<string, unknown>> };
+type ChatCompletionResult = { content: string; toolCalls: ToolCall[]; stopReason?: string; claudeAssistantContent?: Array<Record<string, unknown>>; responsesOutputItems?: Array<Record<string, unknown>> };
 type ChatModel = { model_id: string; base_url: string; protocol: string; encrypted_credentials: string | null };
+/** Shared by explicit administrator analysis selection and the execution adapter. */
+export const CHAT_COMPLETION_PROTOCOLS = ["openai", "custom", "apimart", "gemini", "anthropic", "openai-chat"] as const;
 
 // This endpoint returns client-side function plans only. Hosted tools (notably
 // image_generation) must not bypass authorized image tasks and their billing.
@@ -49,6 +53,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
     const router = Router();
 
     router.post("/responses", async (request, response, next) => {
+        let usageRequestId: string | undefined;
         try {
             const input = schema.parse(request.body) as {
                 modelId?: string;
@@ -82,6 +87,9 @@ export function createChatRouter(db: Database, config: AppConfig) {
             }
 
             const credentials = JSON.parse(decryptSecret(model.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as Record<string, string>;
+            if (config.OA_LOGIN_ENABLED === "true" && !(request as AuthenticatedRequest).allowsAnonymousCreation) {
+                usageRequestId = await beginUsageChat(db, { userId: actor.id, modelConfigId: execution.modelConfigId, boardKey: execution.toolKey, input: input.input });
+            }
             if (model.protocol === "anthropic" && input.claude?.stream) {
                 const upstream = await requestClaudeStream(model, credentials, input);
                 response.setHeader("content-type", "text/event-stream; charset=utf-8");
@@ -90,6 +98,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
                     if (response.destroyed) break;
                     response.write(chunk);
                 }
+                if (usageRequestId) await finishUsageChat(db, usageRequestId, response.destroyed ? "interrupted" : "success");
                 if (!response.destroyed) await writeAudit(db, {
                     actor,
                     action: "chat.completed",
@@ -103,6 +112,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 return;
             }
             const resultPayload = await requestChatCompletion(model, credentials, input);
+            if (usageRequestId) await finishUsageChat(db, usageRequestId, response.destroyed ? "interrupted" : "success");
 
             await writeAudit(db, {
                 actor,
@@ -115,6 +125,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
             });
             response.json(resultPayload);
         } catch (error) {
+            if (usageRequestId) await finishUsageChat(db, usageRequestId, response.destroyed ? "interrupted" : "failed").catch(() => undefined);
             if (response.headersSent) {
                 if (!response.destroyed) response.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "对话流已中断，请重试。" } })}\n\n`);
                 return;
@@ -131,9 +142,15 @@ export async function requestChatCompletion(
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number }; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
 ): Promise<ChatCompletionResult> {
+    if (!(CHAT_COMPLETION_PROTOCOLS as readonly string[]).includes(model.protocol)) throw new ChatProtocolError("PROTOCOL_NOT_SUPPORTED", "当前对话入口暂不支持该 Provider 协议");
+    const usesResponses = model.protocol === "openai" || model.protocol === "custom" || (model.protocol === "apimart" && model.model_id === "gpt-6-astra");
+    if (!usesResponses && input.input.some(item => "type" in item && item.type === "responses_assistant"))
+        throw new ChatProtocolError("CHAT_HISTORY_PROTOCOL_MISMATCH", "该会话包含 Responses 原生工具记录，请新建对话后切换接口协议。");
+    // GPT-6 Astra function tools require Responses on Mark. Choose before submission; never retry another endpoint.
+    if (model.protocol === "apimart" && model.model_id === "gpt-6-astra") return requestOpenAiCompletion(model, credentials, input);
     if (model.protocol === "gemini") return requestGeminiCompletion(model, credentials, input);
     if (model.protocol === "anthropic") return requestClaudeCompletion(model, credentials, input);
-    if (model.protocol === "openai-chat") return requestOpenAiChatCompletion(model, credentials, input);
+    if (model.protocol === "openai-chat" || model.protocol === "apimart") return requestOpenAiChatCompletion(model, credentials, input);
     if (model.protocol === "openai" || model.protocol === "custom") return requestOpenAiCompletion(model, credentials, input);
     throw new ChatProtocolError("PROTOCOL_NOT_SUPPORTED", "当前对话入口暂不支持该 Provider 协议");
 }
@@ -214,6 +231,7 @@ export function buildClaudeMessagesRequest(
             messages.push({ role: "assistant", content: [{ type: "tool_use", id: item.call_id, name: item.name, input: parseJsonObject(item.arguments) }] });
             continue;
         }
+        if (item.type === "responses_assistant") throw new ChatProtocolError("CHAT_HISTORY_PROTOCOL_MISMATCH", "该会话包含 Responses 原生工具记录，请新建对话后切换接口协议。");
         const name = calls.get(item.call_id);
         if (name) messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: item.call_id, content: item.output }] });
     }
@@ -284,20 +302,30 @@ async function requestOpenAiCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean },
-) {
+): Promise<ChatCompletionResult> {
+    const responseInput = input.input.flatMap((item): Array<Record<string, unknown>> => {
+        if (!("type" in item)) return [item];
+        if (item.type === "claude_assistant") throw new ChatProtocolError("CHAT_HISTORY_PROTOCOL_MISMATCH", "该会话包含 Claude 原生工具记录，请新建对话后切换接口协议。");
+        if (item.type !== "responses_assistant") return [item];
+        const checked = z.array(z.record(z.string(), z.unknown())).safeParse(item.output);
+        if (!checked.success) throw new ChatProtocolError("CHAT_HISTORY_PROTOCOL_MISMATCH", "Responses 原生工具记录无效，请新建对话。");
+        return checked.data;
+    });
     const upstream = await fetchProviderSubmission(`${model.base_url.replace(/\/$/, "")}/responses`, {
         method: "POST",
         headers: requestHeaders(credentials),
         body: JSON.stringify({
             model: model.model_id,
-            input: input.input,
+            input: responseInput,
             tools: input.tools,
             tool_choice: input.toolChoice ?? "auto",
             parallel_tool_calls: false,
+            ...(model.protocol === "apimart" ? { stream: false, ...(input.tools.length ? { include: ["reasoning.encrypted_content"] } : {}) } : {}),
         }),
         signal: AbortSignal.timeout(180000),
     });
-    if (!upstream.ok) throw await upstreamError("对话 Provider", upstream);
+    if (!upstream.ok) throw await upstreamError("对话 Provider", upstream, model.protocol === "apimart");
+    if (model.protocol === "apimart") return readApiMartResponses(await readApiMartChatPayload(upstream));
 
     const body = await upstream.json() as {
         output_text?: string;
@@ -315,6 +343,75 @@ async function requestOpenAiCompletion(
             ...(item.thoughtSignature ? { thoughtSignature: item.thoughtSignature } : {}),
         }));
     return { content, toolCalls };
+}
+
+function invalidApiMartChatResponse() {
+    return new ChatProtocolError("APIMART_CHAT_INVALID_RESPONSE", "Mark 对话服务未返回有效回复；本次请求不会重新提交。");
+}
+
+async function readApiMartChatPayload(upstream: Response): Promise<Record<string, unknown>> {
+    if (upstream.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
+        await upstream.body?.cancel().catch(() => {});
+        throw new ChatProtocolError("APIMART_CHAT_UNEXPECTED_STREAM", "Mark 对话服务未遵循非流式请求；本次请求不会重新提交。");
+    }
+    let received: unknown;
+    try { received = await upstream.json(); } catch { throw invalidApiMartChatResponse(); }
+    if (!received || typeof received !== "object" || Array.isArray(received)) throw invalidApiMartChatResponse();
+    const envelope = received as Record<string, unknown>;
+    if (envelope.error || (envelope.code !== undefined && envelope.code !== 200)) throw invalidApiMartChatResponse();
+    const body = envelope.data ?? envelope;
+    if (!body || typeof body !== "object" || Array.isArray(body) || (body as Record<string, unknown>).error) throw invalidApiMartChatResponse();
+    return body as Record<string, unknown>;
+}
+
+function readApiMartChatChoices(body: Record<string, unknown>): ChatCompletionResult {
+    const checked = z.object({ choices: z.array(z.object({
+        message: z.object({
+            content: z.string().nullable().optional(),
+            tool_calls: z.array(z.object({
+                id: z.string().min(1), type: z.literal("function"),
+                function: z.object({ name: z.string().min(1), arguments: z.string() }),
+            })).optional(),
+        }),
+        finish_reason: z.string().optional(),
+    })).min(1) }).safeParse(body);
+    if (!checked.success) throw invalidApiMartChatResponse();
+    const choice = checked.data.choices[0]!;
+    const content = choice.message.content || "";
+    const toolCalls = choice.message.tool_calls || [];
+    if (!content.trim() && !toolCalls.length) throw invalidApiMartChatResponse();
+    return { content, toolCalls, ...(choice.finish_reason ? { stopReason: choice.finish_reason } : {}) };
+}
+
+function readApiMartResponses(body: Record<string, unknown>): ChatCompletionResult {
+    if (body.status !== undefined && body.status !== "completed") throw invalidApiMartChatResponse();
+    // The provider documents a choices envelope even for /responses. Parse it without making another request.
+    if (body.output === undefined && body.output_text === undefined && body.choices !== undefined) return readApiMartChatChoices(body);
+    const checked = z.object({ output: z.array(z.record(z.string(), z.unknown())).optional(), output_text: z.string().optional() }).safeParse(body);
+    if (!checked.success) throw invalidApiMartChatResponse();
+    const toolCalls: ToolCall[] = [];
+    const text: string[] = [];
+    for (const item of checked.data.output || []) {
+        if (item.status !== undefined && item.status !== "completed") throw invalidApiMartChatResponse();
+        if (item.type === "reasoning") continue;
+        if (item.type === "function_call") {
+            const call = z.object({ call_id: z.string().min(1), name: z.string().min(1), arguments: z.string() }).safeParse(item);
+            if (!call.success) throw invalidApiMartChatResponse();
+            toolCalls.push({ id: call.data.call_id, type: "function", function: { name: call.data.name, arguments: call.data.arguments } });
+        } else if (item.type === "message") {
+            const message = z.object({ content: z.array(z.discriminatedUnion("type", [
+                z.object({ type: z.literal("output_text"), text: z.string() }),
+                z.object({ type: z.literal("refusal"), refusal: z.string() }),
+            ])) }).safeParse(item);
+            if (!message.success) throw invalidApiMartChatResponse();
+            text.push(...message.data.content.map(part => part.type === "output_text" ? part.text : part.refusal));
+        } else throw invalidApiMartChatResponse();
+    }
+    const content = checked.data.output_text || text.join("");
+    if (!content.trim() && !toolCalls.length) throw invalidApiMartChatResponse();
+    return { content, toolCalls, stopReason: toolCalls.length ? "tool_calls" : "stop",
+        ...(toolCalls.length && checked.data.output ? { responsesOutputItems: checked.data.output } : {}),
+    };
 }
 
 async function requestOpenAiChatCompletion(
@@ -348,6 +445,8 @@ async function requestOpenAiChatCompletion(
         body: JSON.stringify({
             model: model.model_id,
             messages,
+            // APIMart documents stream=true by default. This endpoint returns one JSON result.
+            ...(model.protocol === "apimart" ? { stream: false } : {}),
             ...(input.tools.length ? {
                 tools: input.tools.map(({ type, ...definition }) => ({ type, function: definition })),
                 tool_choice: toolChoice,
@@ -356,7 +455,8 @@ async function requestOpenAiChatCompletion(
         }),
         signal: AbortSignal.timeout(180000),
     });
-    if (!upstream.ok) throw await upstreamError("Chat Completions Provider", upstream);
+    if (!upstream.ok) throw await upstreamError("Chat Completions Provider", upstream, model.protocol === "apimart");
+    if (model.protocol === "apimart") return readApiMartChatChoices(await readApiMartChatPayload(upstream));
     const body = await upstream.json() as { choices?: Array<{ message?: { content?: string | null; tool_calls?: ToolCall[] }; finish_reason?: string }> };
     const choice = body.choices?.[0];
     return { content: choice?.message?.content || "", toolCalls: choice?.message?.tool_calls || [], ...(choice?.finish_reason ? { stopReason: choice.finish_reason } : {}) };
@@ -483,7 +583,13 @@ function requestHeaders(credentials: Record<string, string>) {
     return headers;
 }
 
-async function upstreamError(label: string, upstream: Response) {
+async function upstreamError(label: string, upstream: Response, suppressProviderBody = false) {
+    // Mark can echo request headers in an error body. Retain its HTTP status,
+    // never expose that body to clients, and never submit a fallback request.
+    if (suppressProviderBody) {
+        await upstream.body?.cancel().catch(() => {});
+        return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", `${label} ${upstream.status}: 上游服务拒绝了请求；本次请求不会重新提交。`);
+    }
     const detail = (await upstream.text()).slice(0, 500);
     return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", `${label} ${upstream.status}: ${detail}`);
 }

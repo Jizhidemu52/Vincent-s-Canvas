@@ -47,6 +47,7 @@ import "./image-workbench.css";
 const SeamlessStitchPage = lazy(() => import("@/pages/image/seamless-stitch").then(module => ({ default: module.SeamlessStitchPage })));
 const CanvasImageEditorDialog = lazy(() => import("@/components/canvas/canvas-image-editor-dialog").then(module => ({ default: module.CanvasImageEditorDialog })));
 import { hydratePromptReuse, savePromptFromTask } from "@/services/api/prompts";
+import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 
 type GeneratedImage = {
     id: string;
@@ -109,6 +110,14 @@ const imageLogListeners = new Set<(log: GenerationLog) => void>();
 type GenerationToolMode = Exclude<AdminToolMode, "gpt-chat" | "batch-image-edit" | "seamless-stitch">;
 
 const imageToolModes: Record<GenerationToolMode, { title: string; description: string; placeholder: string; button: string; projectId: string; requiresReference: boolean }> = {
+    "midjourney-blend": {
+        title: "MJ 多图融合",
+        description: "上传 2–4 张参考图进行融合，不使用提示词。可独立调整生成速度、布局与自由比例。",
+        placeholder: "",
+        button: "开始融合",
+        projectId: "tool-midjourney-blend",
+        requiresReference: true,
+    },
     "image-generation": {
         title: "文生图",
         description: "用提示词生成新图片，生成记录会进入后台历史与额度账本。",
@@ -144,7 +153,7 @@ const imageToolModes: Record<GenerationToolMode, { title: string; description: s
 };
 
 function resolveImageToolMode(value: string | null): GenerationToolMode {
-    if (value === "detail-enhance" || value === "image-edit" || value === "angle-control") return value;
+    if (value === "detail-enhance" || value === "image-edit" || value === "angle-control" || value === "midjourney-blend") return value;
     return "image-generation";
 }
 
@@ -177,8 +186,14 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const [restoringHistory, setRestoringHistory] = useState(false);
     const config = useConfigStore((state) => state.config);
     const baseConfig = useEffectiveConfig();
-    const toolKey = requireToolKey(historyTool === "detail-enhance" ? "upscale" : historyTool === "image-generation" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool);
-    const effectiveConfig = useToolConfig({ ...baseConfig, model: baseConfig.imageModel || baseConfig.model }, toolKey);
+    const toolKey = requireToolKey(historyTool === "detail-enhance" ? "upscale" : historyTool === "image-generation" || historyTool === "midjourney-blend" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool);
+    const businessModels = useBusinessConfigStore(state => state.models);
+    const blendModels = businessModels.filter(item => item.imageParameterProfile === "blend" || item.imageParameterProfile === "midjourney-blend" || item.modelId === "midjourney-blend");
+    const baseImageModel = baseConfig.imageModel || baseConfig.model;
+    const selectedImageModel = historyTool === "midjourney-blend"
+        ? (blendModels.find(item => item.modelId === baseImageModel || item.id === baseImageModel) || blendModels[0])?.modelId || ""
+        : baseImageModel;
+    const effectiveConfig = useToolConfig({ ...baseConfig, model: selectedImageModel, imageModel: selectedImageModel }, toolKey);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const updateInputConfig: UpdateAiConfig = (key, value) => { inputRevision.current += 1; updateConfig(key, value); };
     const isAiConfigReady = (..._args: unknown[]) => true;
@@ -362,10 +377,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             const parameters = payload.template.parameters;
             const selectedModel = payload.pricing.selectedModel?.modelId;
             if (selectedModel) updateConfig("imageModel", selectedModel);
-            if (typeof parameters.size === "string") updateConfig("size", parameters.size);
-            if (typeof parameters.quality === "string") updateConfig("quality", parameters.quality);
-            const quantity = typeof parameters.quantity === "number" ? parameters.quantity : typeof parameters.count === "number" ? parameters.count : null;
-            if (quantity) updateConfig("count", String(Math.min(10, Math.max(1, quantity))));
+            const settings = promptImageSettings(parameters, selectedModel || effectiveConfig.model);
+            for (const key of ["size", "quality", "count", "imageOptions"] as const) updateConfig(key, settings[key]);
             payload.warnings.forEach((warning) => message.warning(warning));
             if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请先选择管理员当前启用的模型");
             const cost = !deploymentFeatures.creditsEnabled ? "不计积分" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
@@ -739,7 +752,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
                         <div className="mt-6 space-y-5">
                             {initialGarmentScenario ? <GarmentRecipePanel key={garmentScope} references={references} disabled={running || !selectedModelProfile.requiresPrompt} initialScenario={initialGarmentScenario} onApply={applyGarmentRecipe} onDraftChange={handleGarmentDraftChange} /> : null}
-                            <div>
+                            {selectedModelProfile.requiresPrompt && historyTool !== "midjourney-blend" ? <div>
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                                     <span className="text-base font-semibold">提示词</span>
                                     <div className="flex flex-wrap gap-2">
@@ -752,7 +765,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     </div>
                                 </div>
                                 <Input.TextArea aria-label="图像提示词" value={prompt} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} rows={6} disabled={running || !selectedModelProfile.requiresPrompt} placeholder={selectedModelProfile.requiresPrompt ? toolModeConfig.placeholder : "这个模型直接合成参考图，不需要填写文字"} />
-                            </div>
+                            </div> : <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。</p>}
 
                             <ReferenceImageTray
                                 references={references}
@@ -773,7 +786,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
+                                <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} referenceCount={references.length} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
                             </div>
                         </div>
 
@@ -818,7 +831,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         ) : (
                             <div className="wb-empty lg:min-h-[480px]">
                                 <ImagePlus size={42} strokeWidth={1.2} />
-                                <strong>第一张作品，从一句描述开始</strong><p>在左侧写下画面内容，选择模型和参数，点击「{toolModeConfig.button}」。结果会出现在这里。</p>
+                                <strong>{selectedModelProfile.requiresPrompt ? "第一张作品，从一句描述开始" : "上传参考图，开始多图融合"}</strong><p>{selectedModelProfile.requiresPrompt ? "在左侧写下画面内容，选择模型和参数" : "在左侧上传 2–4 张参考图，选择融合参数"}，点击「{toolModeConfig.button}」。结果会出现在这里。</p>
                             </div>
                         )}
                     </div>
@@ -849,7 +862,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             </Drawer>
             <Drawer title="参数" placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} referenceCount={references.length} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={replacePrompt} />
@@ -880,7 +893,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog, toolKey }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void; toolKey: ReturnType<typeof requireToolKey> }) {
+function GenerationSettings({ config, model, referenceCount, updateConfig, openConfigDialog, toolKey }: { config: AiConfig; model: string; referenceCount: number; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void; toolKey: ReturnType<typeof requireToolKey> }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const profile = useImageModelProfile(model);
 
@@ -892,7 +905,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog, too
                 {profile.verified ? <span className="mt-2 block text-xs leading-5" style={{ color: "var(--wb-muted)" }}>{profile.tip}</span> : null}
             </label>
             <div className="col-span-2">
-                <ImageSettingsPanel config={{ ...config, model, imageModel: model }} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
+                <ImageSettingsPanel config={{ ...config, model, imageModel: model }} referenceCount={referenceCount} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
             </div>
         </>
     );

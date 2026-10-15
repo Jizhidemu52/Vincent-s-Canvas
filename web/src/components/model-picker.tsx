@@ -7,10 +7,11 @@ import { cn } from "@/lib/utils";
 import { standaloneEdition } from "@/lib/standalone-edition";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
+import { emitModelUsage } from "@/lib/usage-control-events";
 import { modelOptionLabel, modelOptionName, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
-import { filterServerModelsByCapability, getModelPickerOptions, modelCapabilityLabel, resolveModelPickerSource, resolveModelPickerValue, type ModelPickerSource } from "@/lib/model-picker-options";
-import type { ToolKey } from "../../../shared/feature-catalog";
+import { filterServerModelsByCapability, getModelPickerOptions, modelCapabilityLabel, modelLabelWithUsage, resolveModelPickerSource, resolveModelPickerValue, type ModelPickerSource } from "@/lib/model-picker-options";
+import { getToolDefinition, type ToolKey } from "../../../shared/feature-catalog";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -41,7 +42,10 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const boundModel = binding?.modelConfigId ? businessModels.find(item => item.id === binding.modelConfigId) : undefined;
     const source = resolveModelPickerSource(config.channelMode, modelsSource ?? (capability ? "server" : undefined), standaloneEdition);
     const usesServerModels = source === "server" && Boolean(capability);
-    const serverModels = useMemo(() => usesServerModels && businessConfigStatus === "ready" ? filterServerModelsByCapability(businessModels, capability).filter(item => !binding?.modelConfigId || item.id === binding.modelConfigId) : [], [businessConfigStatus, businessModels, capability, usesServerModels, binding?.modelConfigId]);
+    const serverModels = useMemo(() => usesServerModels && businessConfigStatus === "ready" ? filterServerModelsByCapability(businessModels, capability)
+        .filter(item => !binding?.modelConfigId || item.id === binding.modelConfigId)
+        .filter(item => !toolKey || !getToolDefinition(toolKey)?.capabilities.length || getToolDefinition(toolKey)!.capabilities.some(capability => item.capabilities.includes(capability)))
+        .filter(item => toolKey !== "midjourney-blend" || item.imageParameterProfile === "blend" || item.imageParameterProfile === "midjourney-blend" || item.modelId === "midjourney-blend") : [], [businessConfigStatus, businessModels, capability, usesServerModels, binding?.modelConfigId, toolKey]);
     useEffect(() => {
         if (!shouldRefreshModelPickerConfig(capability, businessConfigStatus, source)) return;
         void refreshBusinessConfig().catch(() => undefined);
@@ -54,8 +58,12 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const emptyLabel = usesServerModels && businessConfigStatus !== "ready"
         ? businessConfigStatus === "error" ? "模型配置加载失败" : "正在加载模型…"
         : emptyModelLabel(config, capability, canManageConfig, source);
-    const labelFor = (model: string) => imageModelIdentityHidden(model, businessModels) ? imageModelDisplayName(model, businessModels)
-        : serverModels.find(item => item.modelId === model)?.name || modelOptionLabel(config, model);
+    const labelFor = (model: string) => {
+        const serverModel = serverModels.find(item => item.modelId === model);
+        const name = imageModelIdentityHidden(model, businessModels) ? imageModelDisplayName(model, businessModels)
+            : serverModel?.name || modelOptionLabel(config, model);
+        return modelLabelWithUsage(name, serverModel?.publicDescription);
+    };
     const currentLabel = binding?.enabled === false ? "此板块已停用" : binding?.modelConfigId && !boundModel ? "绑定模型不可用" : current ? `${labelFor(current)}${boundModel ? " · 后台指定" : ""}` : options.length ? placeholder : emptyLabel;
 
     useEffect(() => {
@@ -72,13 +80,15 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             value={current}
             disabled={disabled || binding?.enabled === false || Boolean(binding?.modelConfigId)}
             onOpenChange={(nextOpen) => {
+                if (nextOpen) emitModelUsage("open");
                 if (nextOpen && !options.length && source === "local" && canManageConfig) onMissingConfig?.();
                 if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
                 setOpen(nextOpen);
             }}
-            onValueChange={(model) => { if (options.includes(model)) onChange(model); }}
+            onValueChange={(model) => { if (options.includes(model)) { onChange(model); emitModelUsage("change", serverModels.find(item => item.modelId === model)?.id); } }}
         >
             <SelectTrigger
+                data-usage-control="model"
                 className={cn(
                     "canvas-composer-model-picker h-8 w-fit max-w-full gap-2 rounded-full border border-input bg-transparent px-3 text-sm font-normal shadow-sm transition-colors",
                     fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start",
@@ -104,8 +114,8 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             >
                 {options.length ? (
                     options.map((model) => (
-                        <SelectItem key={model} value={model} textValue={labelFor(model)}>
-                            <ModelLabel config={config} model={model} serverModel={serverModels.find((item)=>item.modelId===model)} />
+                        <SelectItem key={model} value={model} textValue={labelFor(model)} data-usage-control="model" data-usage-value={serverModels.find(item => item.modelId === model)?.id}>
+                            <ModelLabel model={model} label={labelFor(model)} serverModel={serverModels.find((item)=>item.modelId===model)} />
                         </SelectItem>
                     ))
                 ) : (
@@ -126,14 +136,12 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability, canMana
     return config.models.length ? `暂无匹配的${label}模型` : "请先到配置里添加渠道和模型";
 }
 
-function ModelLabel({ config, model, serverModel }: { config: AiConfig; model: string; serverModel?: {name:string;creditCost:number;publicDescription?:string} }) {
-    const label = imageModelIdentityHidden(model) ? imageModelDisplayName(model) : serverModel?.name || modelOptionLabel(config, model);
+function ModelLabel({ model, label, serverModel }: { model: string; label: string; serverModel?: { creditCost: number } }) {
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
             <span className="flex min-w-0 flex-col py-1">
-                <span className="truncate">{serverModel && deploymentFeatures.creditsEnabled ? `${label} · 模型 ${serverModel.creditCost} 积分` : label}</span>
-                {serverModel?.publicDescription && <span className="mt-0.5 whitespace-normal text-xs text-muted-foreground">{serverModel.publicDescription}</span>}
+                <span className="whitespace-normal">{serverModel && deploymentFeatures.creditsEnabled ? `${label} · 模型 ${serverModel.creditCost} 积分` : label}</span>
             </span>
         </span>
     );

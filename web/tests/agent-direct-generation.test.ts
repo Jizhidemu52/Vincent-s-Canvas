@@ -17,15 +17,15 @@ import { CanvasNodeType } from "../src/types/canvas";
 
 const imageSettings = (imageModel = "vcen-gpt2"): AgentGenerationSettings => ({ mode: "image", imageModel, videoModel: "wan2.7", size: "3:4", quality: "2k", imageCount: "7", videoSeconds: "5", videoQuality: "1080P", afterImage: "images_only" });
 
-test("Agent image requests and brief retain all seven requested outputs when the model supports them", () => {
-    expect(buildAgentGenerationPlan(imageSettings(), "红色花瓶", [])).toMatchObject({ size: "3:4", quality: "2k", count: 7, requiresPrompt: true });
-    expect(buildAgentGenerationBrief(imageSettings(), "红色花瓶", false)).toContain("数量：7");
-    expect(normalizeAgentImageSettings({ ...imageSettings(), imageCount: "20" }).imageCount).toBe("10");
+test("Agent image requests and brief constrain legacy multi-output settings to one independent task", () => {
+    expect(buildAgentGenerationPlan(imageSettings(), "红色花瓶", [])).toMatchObject({ size: "3:4", quality: "2k", count: 1, requiresPrompt: true });
+    expect(buildAgentGenerationBrief(imageSettings(), "红色花瓶", false)).toContain("数量：1");
+    expect(normalizeAgentImageSettings({ ...imageSettings(), imageCount: "20" }).imageCount).toBe("1");
 });
 
 test("Agent uses actual standard, Gemini and Midjourney parameter profiles", () => {
-    expect(normalizeAgentImageSettings(imageSettings("gpt-image-2"))).toMatchObject({ size: "1152x1536", quality: "auto", imageCount: "7" });
-    expect(normalizeAgentImageSettings({ ...imageSettings("nano-banana-2"), quality: "0.5k" })).toMatchObject({ size: "3:4", quality: "0.5k", imageCount: "7" });
+    expect(normalizeAgentImageSettings(imageSettings("gpt-image-2"))).toMatchObject({ size: "1152x1536", quality: "auto", imageCount: "1" });
+    expect(normalizeAgentImageSettings({ ...imageSettings("nano-banana-2"), quality: "0.5k" })).toMatchObject({ size: "3:4", quality: "0.5k", imageCount: "1" });
     expect(normalizeAgentImageSettings(imageSettings("midjourney-v7"))).toMatchObject({ size: "3:4", quality: "relax", imageCount: "1" });
 });
 
@@ -132,6 +132,17 @@ test("keeps Agent media storage keys on the canvas node for reload-safe previews
         type: "add_node",
         metadata: { content: "blob:local-image", storageKey: "image:durable", mimeType: "image/png" },
     });
+});
+
+test("retains actual image generation settings and references on result nodes without leaking them to video", () => {
+    const imageMetadata = { generationType: "edit" as const, size: "3:4", quality: "max", imageOptions: '{"resolution":"2k"}', count: 1, references: ["image:original"] };
+    const ops = buildAgentGeneratedMediaOps([
+        { id: "image-result", name: "image", url: "blob:image", mediaType: "image" },
+        { id: "video-result", name: "video", url: "blob:video", mediaType: "video" },
+    ], { prompt: "preserve knit", model: "mark-model-id", x: 0, y: 0, imageMetadata });
+    expect(ops[0]).toMatchObject({ metadata: { ...imageMetadata, model: "mark-model-id", prompt: "preserve knit" } });
+    expect(ops[1]).not.toHaveProperty("metadata.imageOptions");
+    expect(ops[1]).not.toHaveProperty("metadata.generationType");
 });
 
 test("fits Agent media nodes to the real square and portrait image dimensions", () => {

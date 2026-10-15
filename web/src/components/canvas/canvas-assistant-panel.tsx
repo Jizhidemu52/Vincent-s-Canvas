@@ -7,7 +7,11 @@ import { motion } from "motion/react";
 import { modelOptionName, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
 import { ModelPicker } from "@/components/model-picker";
-import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
+import { getModelPickerOptions, resolveModelPickerSource } from "@/lib/model-picker-options";
+import { standaloneEdition } from "@/lib/standalone-edition";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { resolveToolConfig } from "@/services/api/tool-runtime";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -49,6 +53,7 @@ import { buildCanvasConversationHistory } from "@/lib/canvas/canvas-assistant-hi
 import { CANVAS_ASSISTANT_SYSTEM_PROMPT } from "@/lib/canvas/canvas-assistant-prompt";
 import { createCanvasSelectionPromptSync } from "@/lib/canvas/canvas-selection-prompt";
 import { canvasImageEditContext, imageEditContextDescription, IMAGE_EDIT_TOOL_PROPERTIES, resolveCanvasImageEdit, type CanvasImageEditContext, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
+import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
 
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
 const ONLINE_AGENT_MAX_STEPS = 4;
@@ -61,6 +66,7 @@ const GENERATION_OPTION_PROPERTIES = {
     model: { type: "string" },
     size: { type: "string" },
     quality: { type: "string" },
+    imageOptions: { type: "string", description: "图像高级参数 JSON 字符串；resolution 与 quality 独立，仅使用当前模型支持的参数" },
     count: { type: "number" },
     seconds: { type: "string" },
     vquality: { type: "string" },
@@ -216,7 +222,7 @@ type OnlineLoopContext = { step: number };
 type OnlineTurnContext = { userPrompt: string; references: CanvasAssistantReference[]; historyReferences?: CanvasAssistantReference[]; imageEditContext?: CanvasImageEditContext; settings: AgentGenerationSettings; videoSize: string; config: AiConfig; canvasSnapshot: CanvasAgentSnapshot; autoContext: boolean };
 type OnlineToolResult = { ok: true; message: string; data?: unknown; mediaWorkflow?: CanvasAgentMediaWorkflow } | { ok: false; message: string; data?: unknown };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
-type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; claudeAssistantContent?: ClaudeAssistantContent; assistantId: string; step: number; turn: OnlineTurnContext };
+type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: ToolResponseResult["responsesOutputItems"]; assistantId: string; step: number; turn: OnlineTurnContext };
 
 function mediaWorkflowFromResults(results: OnlineExecutedToolCall[]) {
     for (const item of results) {
@@ -259,6 +265,13 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const user = useUserStore((state) => state.user);
     const baseConfig = useEffectiveConfig();
     const effectiveConfig = useToolConfig({ ...baseConfig, model: baseConfig.textModel || baseConfig.model }, "canvas-chat");
+    const businessModels = useBusinessConfigStore((state) => state.models);
+    const businessTools = useBusinessConfigStore((state) => state.tools);
+    const businessConfigStatus = useBusinessConfigStore((state) => state.status);
+    const refreshBusinessConfig = useBusinessConfigStore((state) => state.refresh);
+    useEffect(() => {
+        if (businessConfigStatus === "idle") void refreshBusinessConfig().catch(() => undefined);
+    }, [businessConfigStatus, refreshBusinessConfig]);
     const onlineEnabled = useToolEnabled("canvas-chat");
     const localEnabled = useModuleEnabled("canvas-local-agent");
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
@@ -287,6 +300,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         videoModel: effectiveConfig.videoModel || effectiveConfig.model,
         size: effectiveConfig.size || "1:1",
         quality: effectiveConfig.quality || "1k",
+        imageOptions: effectiveConfig.imageOptions,
         imageCount: effectiveConfig.canvasImageCount || "3",
         videoSeconds: effectiveConfig.videoSeconds || "5",
         videoQuality: effectiveConfig.vquality || "1080P",
@@ -389,8 +403,16 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const renderedMessages = useMemo(() => messages.slice(renderedMessageWindow.start), [messages, renderedMessageWindow.start]);
     const hasMessages = messages.length > 0;
     const activeModel = effectiveConfig.textModel || effectiveConfig.model;
-    const mediaWorkflowImageModels = useMemo(() => selectableModelsByCapability(effectiveConfig, "image"), [effectiveConfig]);
-    const mediaWorkflowVideoModels = useMemo(() => selectableModelsByCapability(effectiveConfig, "video"), [effectiveConfig]);
+    const mediaWorkflowModels = useMemo(() => {
+        const source = businessModels.length ? "server" : resolveModelPickerSource(effectiveConfig.channelMode, undefined, standaloneEdition);
+        const availableModels = (capability: "image" | "video", toolKey: "canvas-image" | "canvas-video") => {
+            const binding = businessTools.find((item) => item.toolKey === toolKey);
+            if (binding?.enabled === false) return [];
+            const models = businessModels.filter((item) => !binding?.modelConfigId || item.id === binding.modelConfigId);
+            return getModelPickerOptions(effectiveConfig, capability, models, source);
+        };
+        return { image: availableModels("image", "canvas-image"), video: availableModels("video", "canvas-video") };
+    }, [businessModels, businessTools, effectiveConfig]);
     const selectedNodeKey = useMemo(() => Array.from(selectedNodeIds).sort().join(","), [selectedNodeIds]);
     const syncSelectedPromptRef = useRef(createCanvasSelectionPromptSync());
     useEffect(() => {
@@ -536,7 +558,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 if (confirmTools && writableCalls.length) {
                     upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "准备执行工具，等待确认。" });
                     const toolMessageId = nanoid();
-                    pendingToolContextRef.current.set(toolMessageId, { messages, toolCalls: result.toolCalls, claudeAssistantContent: result.claudeAssistantContent, assistantId, step: loop.step, turn });
+                    pendingToolContextRef.current.set(toolMessageId, { messages, toolCalls: result.toolCalls, claudeAssistantContent: result.claudeAssistantContent, responsesOutputItems: result.responsesOutputItems, assistantId, step: loop.step, turn });
                     const toolMessage: CanvasAssistantMessage = { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(result.toolCalls), detail: { status: "pending", step: loop.step, toolCalls: result.toolCalls, generationSettings: turn.settings, referenceImages: turn.references.map(({ id, title }) => ({ id, title })) } };
                     appendMessage(sessionId, toolMessage);
                     addOnlineLog("等待用户确认", result.toolCalls);
@@ -568,11 +590,11 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             text: toolResults.map((item) => toolResultText(item.result)).join("\n"),
             detail: { status: toolResults.every((item) => item.result.ok) ? "completed" : "failed", step, toolCalls: result.toolCalls, results: toolResults, ...(mediaWorkflow ? { mediaWorkflow } : {}) },
         });
-        await continueOnlineToolLoopAfterResults(sessionId, assistantId, messages, result.toolCalls, toolResults, step, turn, result.claudeAssistantContent);
+        await continueOnlineToolLoopAfterResults(sessionId, assistantId, messages, result.toolCalls, toolResults, step, turn, result.claudeAssistantContent, result.responsesOutputItems);
     };
 
-    const continueOnlineToolLoopAfterResults = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], toolCalls: ResponseToolCall[], toolResults: OnlineExecutedToolCall[], step: number, turn: OnlineTurnContext, claudeAssistantContent?: ClaudeAssistantContent) => {
-        const assistantTurn = toolResponseToInput({ toolCalls, claudeAssistantContent });
+    const continueOnlineToolLoopAfterResults = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], toolCalls: ResponseToolCall[], toolResults: OnlineExecutedToolCall[], step: number, turn: OnlineTurnContext, claudeAssistantContent?: ClaudeAssistantContent, responsesOutputItems?: ToolResponseResult["responsesOutputItems"]) => {
+        const assistantTurn = toolResponseToInput({ toolCalls, claudeAssistantContent, responsesOutputItems });
         const nextMessages: ResponseInputMessage[] = [...messages, ...assistantTurn, ...toolResults.map((item) => ({ role: "tool" as const, tool_call_id: item.toolCallId, content: JSON.stringify(item.result) }))];
         if (toolResults.some((item) => !item.result.ok)) {
             upsertMessage(sessionId, { id: assistantId, role: "assistant", text: toolResults.map((item) => toolResultText(item.result)).join("\n") });
@@ -602,7 +624,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             if (confirmTools && writableCalls.length) {
                 upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || "准备执行工具，等待确认。" });
                 const toolMessageId = nanoid();
-                pendingToolContextRef.current.set(toolMessageId, { messages: nextMessages, toolCalls: next.toolCalls, claudeAssistantContent: next.claudeAssistantContent, assistantId, step: step + 1, turn });
+                pendingToolContextRef.current.set(toolMessageId, { messages: nextMessages, toolCalls: next.toolCalls, claudeAssistantContent: next.claudeAssistantContent, responsesOutputItems: next.responsesOutputItems, assistantId, step: step + 1, turn });
                 appendMessage(sessionId, { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(next.toolCalls), detail: { status: "pending", step: step + 1, toolCalls: next.toolCalls, generationSettings: turn.settings, referenceImages: turn.references.map(({ id, title }) => ({ id, title })) } });
                 addOnlineLog("等待用户确认", next.toolCalls);
                 return;
@@ -652,6 +674,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const config: AiConfig = {
             ...turn.config, model: metadata.model || defaultGenerationModel(turn.config, mode),
             size: metadata.size || (mode === "video" ? turn.videoSize : turn.config.size), quality: metadata.quality || turn.config.quality,
+            imageOptions: metadata.imageOptions ?? turn.config.imageOptions,
             count: String(metadata.count ?? turn.config.count), canvasImageCount: String(metadata.count ?? turn.config.canvasImageCount),
             videoSeconds: metadata.seconds || turn.config.videoSeconds, vquality: metadata.vquality || turn.config.vquality,
             videoGenerateAudio: metadata.generateAudio ?? turn.config.videoGenerateAudio,
@@ -663,7 +686,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         executeOps([{ type: "update_node", id: node.id, metadata: { status: "loading", errorDetails: undefined } }]);
         try {
             if (mode === "image" || mode === "video") {
-                const settings = onlineAgentMediaSettings(turn.settings, mode, { model: config.model, size: config.size, quality: config.quality, count: Number(config.count), seconds: config.videoSeconds, vquality: config.vquality, generateAudio: config.videoGenerateAudio });
+                const settings = onlineAgentMediaSettings(turn.settings, mode, { model: config.model, size: config.size, quality: config.quality, imageOptions: config.imageOptions, count: Number(config.count), seconds: config.videoSeconds, vquality: config.vquality, generateAudio: config.videoGenerateAudio });
                 const result = await runDirectGeneration(sessionId, context.prompt, settings, context.referenceImages, config);
                 executeOps([{ type: "update_node", id: node.id, metadata: { status: "success" } }, ...result.data.nodeIds.map((id): CanvasAgentOp => ({ type: "connect_nodes", fromNodeId: node.id, toNodeId: id }))]);
                 return result;
@@ -786,7 +809,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 detail: { ...detail, results, status: results.every((item) => item.result.ok) ? "completed" : "failed", ...(mediaWorkflow ? { mediaWorkflow } : {}) },
             });
             pendingToolContextRef.current.delete(messageId);
-            await continueOnlineToolLoopAfterResults(session.id, assistantId, previousMessages, toolCalls, results, pendingContext.step, pendingContext.turn, pendingContext.claudeAssistantContent);
+            await continueOnlineToolLoopAfterResults(session.id, assistantId, previousMessages, toolCalls, results, pendingContext.step, pendingContext.turn, pendingContext.claudeAssistantContent, pendingContext.responsesOutputItems);
         } catch (error) {
             addOnlineLog("工具续跑失败", error instanceof Error ? error.message : error);
             appendMessage(session.id, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
@@ -816,6 +839,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         if (patch.videoModel) updateConfig("videoModel", patch.videoModel);
         if (patch.size) updateConfig("size", patch.size);
         if (patch.quality) updateConfig("quality", patch.quality);
+        if (patch.imageOptions !== undefined) updateConfig("imageOptions", patch.imageOptions);
         if (patch.videoSeconds) updateConfig("videoSeconds", patch.videoSeconds);
         if (patch.videoQuality) updateConfig("vquality", patch.videoQuality);
         if (patch.videoGenerateAudio !== undefined) updateConfig("videoGenerateAudio", patch.videoGenerateAudio);
@@ -823,11 +847,13 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     };
 
     const runDirectGeneration = async (sessionId: string, text: string, settings: AgentGenerationSettings, references: ReferenceImage[], baseConfig: AiConfig, imageEdit?: CanvasImageEditLineage) => {
-        const operation = settings.mode === "video" ? "video_generation" : references.length ? "inpaint" : "image_generation";
-        const tool = settings.mode === "video" ? "canvas-video" : references.length ? "canvas-edit" : "canvas-image";
-        baseConfig = (await resolveToolConfig({ ...baseConfig, model: settings.mode === "video" ? settings.videoModel : settings.imageModel }, operation, tool)).config;
+        const blend = settings.mode === "image" && imageModelProfile(settings.imageModel).kind === "midjourney-blend";
+        const operation = settings.mode === "video" ? "video_generation" : references.length && !blend ? "inpaint" : "image_generation";
+        const tool = canvasToolKey(settings.mode, references.length > 0, imageModelProfile(settings.imageModel).kind);
+        const resolved = await resolveToolConfig({ ...baseConfig, model: settings.mode === "video" ? settings.videoModel : settings.imageModel }, operation, tool);
+        baseConfig = resolved.config;
         settings = { ...settings, ...(settings.mode === "video" ? { videoModel: baseConfig.model } : { imageModel: baseConfig.model }) };
-        const plan = buildAgentGenerationPlan(settings, text, references);
+        const plan = buildAgentGenerationPlan(settings, text, references, imageModelProfile(resolved.model.modelId, [resolved.model]));
         const activeReferences = plan.kind === "video" ? selectAgentVideoReferences(plan.model, references) : references;
         const progressId = nanoid();
         const prompt = plan.kind === "image" && !plan.requiresPrompt ? "" : text.trim();
@@ -836,15 +862,23 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         let submittedVideoTask: VideoGenerationTask | undefined;
         try {
             if (plan.kind === "image") {
-                const config = { ...baseConfig, model: plan.model, imageModel: plan.model, size: plan.size, quality: plan.quality, count: String(plan.count), canvasImageCount: String(plan.count), systemPrompt: "" };
-                const generated = references.length ? await requestEdit(config, prompt, references, undefined, { tool: "canvas-edit" }) : await requestGeneration(config, prompt, { tool: "canvas-image" });
+                const config = { ...baseConfig, model: plan.model, imageModel: plan.model, size: plan.size, quality: plan.quality, imageOptions: plan.imageOptions ?? baseConfig.imageOptions, count: String(plan.count), canvasImageCount: String(plan.count), systemPrompt: "" };
+                const generated = references.length && plan.requiresPrompt ? await requestEdit(config, prompt, references, undefined, { tool: "canvas-edit" }) : await requestGeneration(config, prompt, { tool: "canvas-image" }, references);
                 if (!generated.length) throw new Error("图片任务没有返回结果，尚未生成可见图片。");
                 const storedImages = await Promise.all(generated.map(async (item) => ({ item, image: await uploadImage(item.dataUrl) })));
                 const attachments: CanvasAssistantAttachment[] = storedImages.map(({ item, image }, index) => ({
                     id: item.id, name: `生成图片 ${index + 1}`, url: image.url, storageKey: image.storageKey, width: image.width, height: image.height, mediaType: "image",
                     serverAssetId: serverAssetIdFromAsset({ kind: "image", data: { ...image, dataUrl: item.dataUrl } }),
                 }));
-                executeOps(buildAgentGeneratedMediaOps(attachments, { prompt, model: plan.model, ...resolveAgentGeneratedMediaPosition(snapshotRef.current) }));
+                executeOps(buildAgentGeneratedMediaOps(attachments, {
+                    prompt, model: plan.model, ...resolveAgentGeneratedMediaPosition(snapshotRef.current),
+                    imageMetadata: {
+                        generationType: references.length && plan.requiresPrompt ? "edit" : "generation",
+                        size: config.size, quality: config.quality, imageOptions: config.imageOptions || "", count: plan.count,
+                        references: references.map((reference) => reference.storageKey || reference.url || reference.dataUrl).filter(Boolean),
+                        compareSources: references.map(canvasCompareSource),
+                    },
+                }));
                 addAssets(storedImages.map(({ image }, index) => ({
                     kind: "image" as const,
                     title: prompt.slice(0, 24) || attachments[index].name,
@@ -1073,8 +1107,10 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                                     {message.detail?.mediaWorkflow ? (
                                         <CanvasAgentMediaWorkflowCard
                                             workflow={message.detail.mediaWorkflow}
-                                            imageModels={mediaWorkflowImageModels}
-                                            videoModels={mediaWorkflowVideoModels}
+                                            imageModels={mediaWorkflowModels.image}
+                                            videoModels={mediaWorkflowModels.video}
+                                            theme={theme}
+                                            onImageSettingsChange={onMediaWorkflowAction ? (key, value) => onMediaWorkflowAction({ type: "image_settings_change", messageId: message.id, key, value }) : undefined}
                                             onImageModelChange={
                                                 onMediaWorkflowAction
                                                     ? (model) => {
@@ -1293,7 +1329,8 @@ function modelLabel(modelId: string, isImage: boolean, imageModels: ImageGenerat
 }
 
 function AgentGenerationControls({ settings: savedSettings, config: baseConfig, imageCapabilities, videoCapabilities, theme, onChange, extra, loading, error, onRetry, editing = false }: { settings: AgentGenerationSettings; config: AiConfig; imageCapabilities: ImageGenerationModel[]; videoCapabilities: GenerationCapabilityModel[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange: (patch: Partial<AgentGenerationSettings>) => void; extra?: import("react").ReactNode; loading: boolean; error: string | null; onRetry: () => void; editing?: boolean }) {
-    const toolKey = savedSettings.mode === "image" ? editing ? "canvas-edit" : "canvas-image" : "canvas-video";
+    const savedProfile = useImageModelProfile(savedSettings.imageModel);
+    const toolKey = canvasToolKey(savedSettings.mode, editing, savedProfile.kind);
     const config = useToolConfig({ ...baseConfig, model: savedSettings.mode === "image" ? savedSettings.imageModel : savedSettings.videoModel }, toolKey);
     const settings = { ...savedSettings, ...(savedSettings.mode === "image" ? { imageModel: config.model } : { videoModel: config.model }) };
     const isImage = settings.mode === "image";
@@ -1326,12 +1363,8 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
                     {loading ? <p className="mb-3" role="status">正在加载模型与参数…</p> : error ? <div className="mb-3 space-y-2" role="alert"><p>{error}</p><Button size="small" onClick={onRetry}>重新加载</Button></div> : !currentModels.length ? <p className="mb-3" role="status">尚未配置可用的{isImage ? "图像" : "视频"}模型，请在后台启用模型后重新加载。</p> : null}
                     <div className="grid gap-2">
                         {!isImage ? <div className="flex min-h-9 items-center justify-between gap-3"><span className="opacity-60">模型</span>{modelPicker}</div> : null}
-                        {isImage ? <>
-                            {imageProfile.verified ? <AgentParameterSelect label={imageProfile.kind === "standard" ? "尺寸" : "宽高比"} value={imageSettings.size} values={[...imageProfile.sizes, ...(!imageProfile.sizes.includes(imageSettings.size) ? [imageSettings.size] : [])]} onChange={(size) => onChange({ size })} /> : null}
-                            {imageProfile.maxCount > 1 ? <AgentParameterSelect label="数量" value={imageSettings.imageCount} values={Array.from({ length: imageProfile.maxCount }, (_, index) => String(index + 1))} suffix=" 张" onChange={(imageCount) => onChange({ imageCount })} /> : null}
-                            {imageProfile.verified ? <AgentParameterSelect label={imageProfile.qualityLabel} value={imageSettings.quality} values={imageProfile.qualities} onChange={(quality) => onChange({ quality })} /> : null}
-                            <p className="mt-1 leading-5 opacity-55">{imageProfile.tip}</p>
-                        </> : <>
+                        {isImage ? <ImageSettingsPanel config={{ ...config, model: settings.imageModel, imageModel: settings.imageModel, size: imageSettings.size, quality: imageSettings.quality, count: imageSettings.imageCount, imageOptions: imageSettings.imageOptions }} profile={imageProfile} referenceCount={editing ? 1 : 0} theme={theme} showTitle={false}
+                            onConfigChange={(key, value) => onChange({ [key === "count" ? "imageCount" : key]: value })} /> : <>
                             <AgentParameterSelect label="时长" value={settings.videoSeconds} values={videoCapability ? [...(videoSpec?.supportsAutoDuration ? ["-1"] : []), ...Array.from({ length: videoCapability.seconds[1] - videoCapability.seconds[0] + 1 }, (_, index) => String(videoCapability.seconds[0] + index))] : []} suffix=" 秒" onChange={(videoSeconds) => onChange({ videoSeconds })} />
                             <AgentParameterSelect label="宽高比" value={settings.size} values={videoCapability?.sizes.map((size) => size === "adaptive" ? "auto" : size) || []} onChange={(size) => onChange({ size })} />
                             <AgentParameterSelect label="分辨率" value={settings.videoQuality} values={[...videoCapability?.resolutions || []]} onChange={(videoQuality) => onChange({ videoQuality })} />
@@ -1677,6 +1710,8 @@ export function resolveOnlineToolExecution(name: string, input: Record<string, u
             imageModel: imageModels.includes(config.imageModel) ? config.imageModel : imageModels[0] || defaultGenerationModel(config, "image"),
             videoModel: videoModels.includes(config.videoModel) ? config.videoModel : videoModels[0] || defaultGenerationModel(config, "video"),
             imageCount: generationCount(config.canvasImageCount || config.count),
+            imageQuality: config.quality,
+            imageOptions: config.imageOptions,
             videoSeconds: config.videoSeconds,
             aspectRatio: config.size,
         },
@@ -1783,6 +1818,7 @@ function configNodeOp(id: string, input: Record<string, unknown>, x: number, y: 
             model: resolveGenerationModel(config, mode, stringOptional(input.model)),
             size: stringOptional(input.size) || config.size,
             quality: stringOptional(input.quality) || config.quality,
+            imageOptions: stringOptional(input.imageOptions) ?? config.imageOptions,
             count: numberOptional(input.count) ?? generationCount(mode === "image" ? config.canvasImageCount || config.count : config.count),
             seconds: stringOptional(input.seconds) || config.videoSeconds,
             vquality: stringOptional(input.vquality) || config.vquality,

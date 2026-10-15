@@ -24,6 +24,7 @@ export function resolveDemoToolConfiguration(
   const model = binding?.modelConfigId ? models.find(item => item.id === binding.modelConfigId) : requested;
   const provider = model && providers.find(item => item.id === model.providerId);
   if (!model || model.enabled !== true || provider?.enabled !== true) throw new DemoToolConfigurationError("MODEL_DISABLED", "所选模型或 API 服务未启用");
+  if (toolKey === "midjourney-blend" && model.modelId !== "midjourney-blend") throw new DemoToolConfigurationError("TOOL_MODEL_MISMATCH", "MJ 多图融合板块仅支持 Midjourney Blend 模型");
   const required: Record<string, string[]> = { image_generation: ["generate"], inpaint: ["edit"], upscale: ["upscale", "edit"], seamless_stitch: ["edit"], batch_image: ["batch", "edit"], video_generation: ["video"], audio_generation: ["audio"], chat: ["chat"] };
   if (!(required[input.operationType] || []).some(capability => (model.capabilities as string[]).includes(capability))) throw new DemoToolConfigurationError("MODEL_CAPABILITY_MISMATCH", "所选模型不支持该板块的操作类型");
   return { toolKey, modelConfigId: String(model.id) };

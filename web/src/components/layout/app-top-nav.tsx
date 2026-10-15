@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
 
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
+import { FrequentNavigation, UsageCollectionNotice } from "@/components/layout/frequent-navigation";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { navigationModuleKey, navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
@@ -165,6 +166,7 @@ export function AppTopNav() {
                             </button>
                         </div>
                         <nav className="hide-scrollbar mt-6 min-h-0 flex-1 space-y-5 overflow-y-auto pb-6">
+                            <FrequentNavigation />
                             <Link
                                 to="/"
                                 aria-current={pathname === "/" ? "page" : undefined}
@@ -178,6 +180,7 @@ export function AppTopNav() {
                             <ToolGroup group="admin" activeToolSlug={activeToolSlug} adminVisible={adminVisible} teamVisible={teamVisible} getToolBadge={getToolBadge} />
                         </nav>
                         <SidebarFooter adminVisible={configVisible} />
+                        <UsageCollectionNotice />
                     </aside>
 
                     <header className="wb-sidebar fixed inset-x-0 top-0 z-20 flex h-14 items-center justify-between border-b px-4 md:hidden">

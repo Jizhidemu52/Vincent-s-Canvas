@@ -180,10 +180,11 @@ test("editing creative parameters while a preview loads cancels the spinner and 
     app.render(); await settle(); app.render();
     slow = true;
     const pending = app.render().previewLog(sceneLog);
-    app.render().updateConfig("count", "3");
+    app.render().updateConfig("size", "1536x1024");
     expect(app.render().previewing).toBe(false);
     finish("blob:older"); await pending;
-    expect(app.render().config.count).toBe("3");
+    expect(app.render().config.size).toBe("1536x1024");
+    expect(app.render().config.count).toBe("1");
     expect(app.render().results).toEqual([]);
     app.unmount();
 });

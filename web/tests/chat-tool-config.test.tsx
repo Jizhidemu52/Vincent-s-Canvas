@@ -112,3 +112,71 @@ test("chat disables stale models on shared loading/error and retry refreshes the
         expect(page.counts()).toEqual({ refreshes: 1, directModelReads: 0 });
     } finally { page.dispose(); }
 });
+
+test("mounted chat model pickers show trimmed usage descriptions while preserving model IDs and selection", async () => {
+    const page = chatPageHarness({ models: [
+        { ...model("chat-primary-config", "chat"), modelId: "chat-primary", name: "通用对话", publicDescription: "  日常问答与推理  " },
+        { ...model("chat-secondary-config", "chat"), modelId: "chat-secondary", name: "长文对话" },
+        { ...model("image-primary-config", "generate"), modelId: "image-primary", name: "快速出图", publicDescription: "  适合草稿探索  " },
+        { ...model("image-secondary-config", "generate"), modelId: "image-secondary", name: "精细出图", publicDescription: "   " },
+    ], tools: [], prices: [] });
+    try {
+        const initial = await page.settle();
+        const chat = select(initial, "对话模型");
+        const image = select(initial, "出图模型");
+        expect(elements(chat).filter(element => element.type === "option").map(element => ({ value: element.props.value, label: element.props.children }))).toEqual([
+            { value: "chat-primary", label: "通用对话 · 日常问答与推理" },
+            { value: "chat-secondary", label: "长文对话" },
+        ]);
+        expect(elements(image).filter(element => element.type === "option").map(element => ({ value: element.props.value, label: element.props.children }))).toEqual([
+            { value: "image-primary", label: "快速出图 · 适合草稿探索" },
+            { value: "image-secondary", label: "精细出图" },
+        ]);
+        expect(chat.props.value).toBe("chat-primary");
+        expect(image.props.value).toBe("image-primary");
+        chat.props.onChange({ target: { value: "chat-secondary" } });
+        image.props.onChange({ target: { value: "image-secondary" } });
+        const changed = await page.settle();
+        expect(select(changed, "对话模型").props.value).toBe("chat-secondary");
+        expect(select(changed, "出图模型").props.value).toBe("image-secondary");
+    } finally { page.dispose(); }
+});
+
+test("switching the mounted chat image picker updates GPT, Nano2.1, and official Nano2 controls without changing the text model", async () => {
+    const markGpt = { ...model("mark-gpt-uuid", "generate"), name: "aplmart-gpt2.5-flare", imageParameterProfile: "quality-resolution" };
+    const markNano = { ...model("mark-nano-uuid", "generate"), name: "aplmart-nano2.1", imageParameterProfile: "resolution-1k" };
+    const markNanoOfficial = { ...model("mark-nano-official-uuid", "generate"), name: "aplmart-nano2", imageParameterProfile: "resolution", imageSupportsMask: false, imageSupportsOfficialFallback: false };
+    const page = chatPageHarness({ models: [model("chat", "chat"), markGpt, markNano, markNanoOfficial], tools: [], prices: [] });
+    try {
+        const initial = await page.settle();
+        expect(select(initial, "出图模型").props.value).toBe("mark-gpt-uuid");
+        expect(select(initial, "图片分辨率").props.value).toBe("1k");
+        expect(select(initial, "图片质量").props.value).toBe("auto");
+        select(initial, "图片分辨率").props.onChange({ target: { value: "4k" } });
+        select(initial, "图片质量").props.onChange({ target: { value: "max" } });
+        const changed = await page.settle();
+        expect(select(changed, "图片分辨率").props.value).toBe("4k");
+        expect(select(changed, "图片质量").props.value).toBe("max");
+        select(changed, "出图模型").props.onChange({ target: { value: "mark-nano-uuid" } });
+        const nano = await page.settle();
+        expect(select(nano, "对话模型").props.value).toBe("chat");
+        expect(select(nano, "出图模型").props.value).toBe("mark-nano-uuid");
+        expect(select(nano, "图片分辨率")).toBeUndefined();
+        expect(select(nano, "图片质量")).toBeUndefined();
+        expect(select(nano, "图片清晰度").props.value).toBe("1k");
+        expect(elements(select(nano, "图片清晰度")).filter(element => element.type === "option").map(element => element.props.value)).toEqual(["1k", "2k", "4k"]);
+        select(nano, "出图模型").props.onChange({ target: { value: "mark-nano-official-uuid" } });
+        const nanoOfficial = await page.settle();
+        expect(select(nanoOfficial, "对话模型").props.value).toBe("chat");
+        expect(select(nanoOfficial, "出图模型").props.value).toBe("mark-nano-official-uuid");
+        expect(select(nanoOfficial, "图片分辨率")).toBeUndefined();
+        expect(select(nanoOfficial, "图片质量")).toBeUndefined();
+        const quality = select(nanoOfficial, "图片清晰度");
+        expect(quality.props.value).toBe("1k");
+        expect(elements(quality).filter(element => element.type === "option").map(element => element.props.value)).toEqual(["0.5k", "1k", "2k", "4k"]);
+        quality.props.onChange({ target: { value: "0.5k" } });
+        const halfK = await page.settle();
+        expect(select(halfK, "图片清晰度").props.value).toBe("0.5k");
+        expect(select(halfK, "出图模型").props.value).toBe("mark-nano-official-uuid");
+    } finally { page.dispose(); }
+});

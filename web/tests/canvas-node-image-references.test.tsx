@@ -39,6 +39,7 @@ function loadComponent<T = (props: any) => ReactElement<any>>(path: string, name
         "@/stores/use-config-store": { ...requireModule("@/stores/use-config-store"), useEffectiveConfig: () => defaultConfig, useConfigStore: (select: Function) => select({ openConfigDialog: noop }) },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ estimate: () => ({ configured: true, credits: 0 }) }) },
         "@/stores/use-theme-store": { useThemeStore: (select: Function) => select({ theme: "light" }) },
+        "@/lib/image-model-settings": { ...requireModule("@/lib/image-model-settings"), useImageModelProfile: requireModule("@/lib/image-model-settings").imageModelProfile },
         "@/hooks/use-tool-config": {
             ...requireModule("@/hooks/use-tool-config"),
             useToolConfig: (config: typeof defaultConfig) => config,

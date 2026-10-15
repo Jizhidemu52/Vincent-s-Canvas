@@ -29,6 +29,7 @@ import { uploadImage } from "@/services/image-storage";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
+import { useImageModelProfile } from "@/lib/image-model-settings";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
@@ -53,8 +54,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = defaultMode(node.type);
-    const toolKey = canvasToolKey(mode, mode === "image" && resolveCanvasNodeImageReferences(node, canvasNodes, canvasConnections).length > 0);
-    const config = useToolConfig(buildNodeConfig(globalConfig, node, mode), toolKey);
+    const baseConfig = buildNodeConfig(globalConfig, node, mode);
+    const baseProfile = useImageModelProfile(baseConfig.model);
+    const toolKey = canvasToolKey(mode, mode === "image" && resolveCanvasNodeImageReferences(node, canvasNodes, canvasConnections).length > 0, baseProfile.kind);
+    const config = useToolConfig(baseConfig, toolKey);
+    const profile = useImageModelProfile(config.model);
+    const requiresPrompt = mode !== "image" || profile.requiresPrompt;
     const toolEnabled = useToolEnabled(toolKey);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
@@ -78,11 +83,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         ...canvasImageReferenceMentions(imageReferences),
         ...mentionReferences.filter(reference => reference.kind !== "image"),
     ] : mentionReferences;
-    const referenceValidation = validateImageReferences(modelOptionName(config.model), imageReferences);
+    const referenceValidation = mode === "image" ? validateImageReferences(modelOptionName(config.model), imageReferences, profile) : { valid: true, minimum: 0, maximum: 16, supportsReferences: true };
     const videoContext = mode === "video" ? buildNodeGenerationContext(node.id, canvasNodes, canvasConnections, prompt) : null;
     const videoConfig = mode === "video" ? { ...config, ...normalizeVideoModelConfig(config) } : config;
     const videoValidation = videoContext ? videoReferenceError(videoConfig, videoContext.referenceImages, videoContext.referenceVideos, videoContext.referenceAudios) : "";
-    const usage = estimate({ operationType: operationTypeForMode(mode, toolKey === "canvas-edit"), toolKey, modelId: modelOptionName(config.model), quantity: mode === "image" ? Number(config.count) || 1 : 1 });
+    const usage = estimate({ operationType: operationTypeForMode(mode, toolKey === "canvas-edit"), toolKey, modelId: modelOptionName(config.model), quantity: 1 });
     const credits = usage.configured ? usage.credits : 0;
 
     useEffect(() => {
@@ -100,9 +105,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const submit = () => {
         const text = prompt.trim();
-        if (!toolEnabled || !text || isRunning || !referenceValidation.valid || videoValidation) return;
+        if (!toolEnabled || (requiresPrompt && !text) || isRunning || !referenceValidation.valid || videoValidation) return;
         promptDraftRef.current?.flush();
-        onGenerate(node.id, mode, text);
+        onGenerate(node.id, mode, requiresPrompt ? text : "");
+        if (!requiresPrompt) return;
         setPrompt("");
         promptDraftRef.current?.reset("");
         onPromptChange(node.id, "");
@@ -151,7 +157,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
-            <CanvasResourceMentionTextarea
+            {requiresPrompt ? <CanvasResourceMentionTextarea
                 value={prompt}
                 references={promptReferences}
                 onChange={updatePrompt}
@@ -159,19 +165,20 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 className="thin-scrollbar h-24 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-5 outline-none"
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
-            />
+            /> : <p role="status" className="text-xs leading-5">多图融合需要 2–4 张参考图，不使用提示词。原有描述会保留。</p>}
 
             {mode === "image" ? <div className="mt-2"><ReferenceImageTray references={imageReferences} fixedReferenceKey={fixedReferenceKey} validation={referenceValidation} onChange={saveReferences} onRequestUpload={() => uploadInputRef.current?.click()} onRequestAssets={() => setAssetPickerOpen(true)} onRequestCanvas={() => setCanvasPickerOpen(true)} /></div> : null}
             {videoValidation ? <p role="alert" className="mt-2 text-xs text-destructive">{videoValidation}。已连接素材会保留。</p> : null}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                    <CanvasPromptLibrary onSelect={updatePrompt} />
+                    {requiresPrompt ? <CanvasPromptLibrary onSelect={updatePrompt} /> : null}
                     {mode === "image" ? (
                         <>
                             <ModelPicker toolKey={toolKey} config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasImageSettingsPopover
                                 config={config}
+                                referenceCount={imageReferences.length}
                                 placement="topLeft"
                                 buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3"
                                 onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
@@ -198,7 +205,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
                     danger={isRunning}
                     style={isRunning ? undefined : { background: theme.toolbar.primary, borderColor: theme.toolbar.primary }}
-                    disabled={!isRunning && (!toolEnabled || !prompt.trim() || !referenceValidation.valid || Boolean(videoValidation))}
+                    disabled={!isRunning && (!toolEnabled || (requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(videoValidation))}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={isRunning ? "停止生成" : "生成"}
                 >
@@ -248,7 +255,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     return {
         ...globalConfig,
         model: node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
-        quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
+        quality: node.metadata?.quality ?? globalConfig.quality ?? defaultConfig.quality,
         imageOptions: node.metadata?.imageOptions ?? globalConfig.imageOptions,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
         videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,

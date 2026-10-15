@@ -52,6 +52,7 @@ import { createReferenceImportRouter, referenceImportBodyErrors } from "./routes
 import { DesignLibraryService } from "./design-library";
 import { PostgresDesignLibraryRepository, designLibraryObjectStorage } from "./design-library-postgres";
 import { createDesignLibraryRouter, designLibraryBodyErrors, designLibraryBoundary } from "./routes/design-library";
+import { createAdminUsageRouter, createUsageRouter, usageErrors } from "./routes/usage-analytics";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
@@ -65,6 +66,7 @@ app.disable("x-powered-by");
 app.use(helmet());
 app.use(["/api/design-library", "/api/admin/design-library"], designLibraryBoundary(features.oaLoginEnabled), express.json({ limit: "128kb" }), designLibraryBodyErrors);
 app.use("/api/reference-import", express.json({ limit: "16kb" }), referenceImportBodyErrors);
+app.use(["/api/usage", "/api/admin/usage"], express.json({ limit: "128kb" }), usageErrors);
 app.use("/api/chat", express.json({ limit: "12mb" }));
 app.use("/api/canvas-documents", express.json({ limit: "20mb" }));
 const canvasBodyError: ErrorRequestHandler = (error, _request, response, next) => {
@@ -91,6 +93,9 @@ app.get("/api/health", async (_request, response, next) => {
 app.use("/api/auth", createAuthRouter(db, cache, config));
 const requireSession = sessionMiddleware(db, cache, config);
 const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
+const requireUsageSession = sessionMiddleware(db, cache, config, { allowGuest: false, allowAdminSession: true, unauthenticatedStatus: 403 });
+app.use("/api/usage", requireUsageSession, requireAccountReady, createUsageRouter(db, { enabled: features.oaLoginEnabled }));
+app.use("/api/admin/usage", requireUsageSession, requireAccountReady, createAdminUsageRouter(db, config, { enabled: features.oaLoginEnabled }));
 const designLibrary = new DesignLibraryService(new PostgresDesignLibraryRepository(db), designLibraryObjectStorage(storage));
 app.use("/api/design-library", requireSession, requireAccountReady, async (_request, _response, next) => {
   try { await assertModuleEnabled(db, "design-library"); next(); } catch (error) { next(error); }

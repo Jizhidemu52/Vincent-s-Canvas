@@ -9,6 +9,7 @@ import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 import { useModuleStore } from "@/stores/use-module-store";
+import { canvasToolKey } from "@/hooks/use-tool-config";
 
 type Props = ComponentProps<typeof CanvasQuickGeneratePanel>;
 const noop = () => undefined;
@@ -16,7 +17,7 @@ const models = ["gpt-image-2", "vcen-gpt2", "nano-banana-2", "midjourney-v7", "g
     id: modelId, name: modelId, modelId, capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0,
 }));
 const initialProps: Props = {
-    embedded: true, open: true, prompt: "将花瓶改成绿色", model: "gpt-image-2", size: "1536x1024", quality: "high", count: 3,
+    embedded: true, open: true, prompt: "将花瓶改成绿色", model: "gpt-image-2", size: "1536x1024", quality: "high", count: 1,
     imageOptions: "", onImageOptionsChange: noop,
     references: [{ id: "ref-1", name: "花瓶", type: "image/png", dataUrl: "data:image/png;base64,example" }],
     running: false, config: defaultConfig, estimateCredits: 0, estimateRmb: 0,
@@ -61,12 +62,12 @@ test("generation settings start collapsed with a connected accessible toggle whi
 
 test("collapsed summary reflects normalized pixels, adapter quality labels and actual task count", () => {
     const cases: { patch: Partial<Props>; summary: string }[] = [
-        { patch: {}, summary: "1536 × 1024 · 画质高 high · 3 张" },
-        { patch: { size: "auto", quality: "auto", count: 1 }, summary: "自适应 · 画质自动 auto · 1 张" },
-        { patch: { model: "vcen-gpt2", size: "728x90", quality: "2k", count: 5 }, summary: "728 × 90 · 分辨率2K · 5 张" },
-        { patch: { model: "nano-banana-2", size: "16:9", quality: "0.5k", count: 10 }, summary: "16:9 · 分辨率0.5K · 10 张" },
+        { patch: {}, summary: "1536 × 1024 · 画质高 high · 1 个任务" },
+        { patch: { size: "auto", quality: "auto", count: 1 }, summary: "自适应 · 画质自动 auto · 1 个任务" },
+        { patch: { model: "vcen-gpt2", size: "728x90", quality: "2k", count: 5 }, summary: "728 × 90 · 分辨率2K · 1 个任务" },
+        { patch: { model: "nano-banana-2", size: "16:9", quality: "0.5k", count: 10 }, summary: "16:9 · 分辨率0.5K · 1 个任务" },
         { patch: { model: "midjourney-v7", size: "3:2", quality: "turbo", count: 9 }, summary: "3:2 · 生成速度极速 · 1 个任务" },
-        { patch: { model: "gemini-3.1-flash-image", size: "16:9", quality: "4k" }, summary: "渠道默认参数 · 3 张" },
+        { patch: { model: "gemini-3.1-flash-image", size: "16:9", quality: "4k" }, summary: "渠道默认参数 · 1 个任务" },
     ];
     for (const { patch, summary } of cases) {
         const html = markup(patch);
@@ -113,6 +114,7 @@ function controls(patch: Partial<Props> = {}, toolEnabled = true) {
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: (state: object) => unknown) => select({ models, status: "ready" }) },
         "@/stores/use-user-store": { useUserStore: (select: (state: object) => unknown) => select({ user: { role: "designer" } }) },
         "@/hooks/use-tool-config": {
+            canvasToolKey,
             // This harness has no administrator model binding; retain the supplied composer config.
             useToolConfig: (config: Props["config"]) => config,
             useToolEnabled: (key: string) => toolEnabled && ["canvas-image", "canvas-edit"].includes(key),
@@ -140,15 +142,15 @@ test("opening, editing and reclosing settings retains latest values without clea
     const opened = render();
     expect(opened.toggle.props["aria-expanded"]).toBe(true);
     expect(opened.fieldset.props.hidden).toBe(false);
-    expect(opened.settings.props.config).toMatchObject({ size: "1536x1024", quality: "high", count: "3" });
+    expect(opened.settings.props.config).toMatchObject({ size: "1536x1024", quality: "high", count: "1" });
     expect(changes).toEqual([]);
     opened.settings.props.onConfigChange("quality", "medium");
     expect(changes).toEqual([["quality", "medium"]]);
     opened.toggle.props.onClick();
     const reclosed = render({ quality: "medium" });
     expect(reclosed.fieldset.props.hidden).toBe(true);
-    expect(reclosed.settings.props.config).toMatchObject({ size: "1536x1024", quality: "medium", count: "3" });
-    expect(renderToStaticMarkup(reclosed.toggle)).toContain("1536 × 1024 · 画质中 medium · 3 张");
+    expect(reclosed.settings.props.config).toMatchObject({ size: "1536x1024", quality: "medium", count: "1" });
+    expect(renderToStaticMarkup(reclosed.toggle)).toContain("1536 × 1024 · 画质中 medium · 1 个任务");
     expect(reclosed.tree.find(element => element.type === "textarea")!.props.value).toBe(initialProps.prompt);
     expect(reclosed.tree.find(element => element.props.references)?.props.references).toBe(initialProps.references);
     expect(changes).toEqual([["quality", "medium"]]);

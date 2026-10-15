@@ -15,6 +15,7 @@ import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
+import { imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
 
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
@@ -33,20 +34,22 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const businessModels = useBusinessConfigStore((state) => state.models);
     const businessConfigStatus = useBusinessConfigStore((state) => state.status);
     const mode = node.metadata?.generationMode || "image";
-    const toolKey = canvasToolKey(mode, inputSummary.imageCount > 0);
-    const boundModelId = useBusinessConfigStore(state => state.tools.find(item => item.toolKey === toolKey)?.modelConfigId);
     const selectedModel = businessConfigStatus === "ready" ? resolveCapabilityModel(globalConfig, mode, businessModels, node.metadata?.model) : "";
+    const toolKey = canvasToolKey(mode, inputSummary.imageCount > 0, imageModelProfile(selectedModel, businessModels).kind);
+    const boundModelId = useBusinessConfigStore(state => state.tools.find(item => item.toolKey === toolKey)?.modelConfigId);
     const config = useToolConfig(buildNodeConfig(globalConfig, node, mode, selectedModel), toolKey);
     const model = config.model;
+    const profile = useImageModelProfile(model);
+    const blend = mode === "image" && !profile.requiresPrompt;
     const toolEnabled = useToolEnabled(toolKey);
     const hasAvailableModel = Boolean(model);
-    const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const count = 1;
     const credits = requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? count : 1 });
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
     const modelIsSynced = Boolean(boundModelId) || node.metadata?.model === model;
-    const canGenerate = toolEnabled && hasAvailableModel && modelIsSynced && (hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput));
+    const canGenerate = toolEnabled && hasAvailableModel && modelIsSynced && (blend ? inputSummary.imageCount >= 2 && inputSummary.imageCount <= 4 : hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput));
 
     useEffect(() => {
         if (!boundModelId && !isRunning && businessConfigStatus === "ready" && (node.metadata?.model || "") !== model) onConfigChange(node.id, { model });
@@ -110,14 +113,14 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
             </div>
 
             <div className="mb-2 flex flex-wrap gap-1.5">
-                <InputChip label="提示词" value={`${inputSummary.textCount} 个`} style={chipStyle} />
+                {!blend ? <InputChip label="提示词" value={`${inputSummary.textCount} 个`} style={chipStyle} /> : null}
                 <InputChip label="参考图" value={`${inputSummary.imageCount} 张`} style={chipStyle} />
                 <InputChip label="参考视频" value={`${inputSummary.videoCount} 个`} style={chipStyle} />
                 <InputChip label="参考音频" value={`${inputSummary.audioCount} 个`} style={chipStyle} />
-                <button type="button" className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2 text-[11px]" style={chipStyle} onMouseDown={(event) => event.stopPropagation()} onClick={onComposerToggle}>
+                {!blend ? <button type="button" className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2 text-[11px]" style={chipStyle} onMouseDown={(event) => event.stopPropagation()} onClick={onComposerToggle}>
                     <Settings2 className="size-3.5" />
                     组装提示词
-                </button>
+                </button> : <span role="status" className="text-xs">融合 2–4 张参考图，不使用提示词。</span>}
             </div>
 
             <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${hasAvailableModel && mode !== "text" ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
@@ -125,7 +128,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 {hasAvailableModel && mode === "video" ? (
                     <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                 ) : hasAvailableModel && mode === "image" ? (
-                    <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
+                    <CanvasImageSettingsPopover config={config} referenceCount={inputSummary.imageCount} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
                 ) : hasAvailableModel && mode === "audio" ? (
                     <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                 ) : null}
@@ -175,7 +178,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     return {
         ...globalConfig,
         model,
-        quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
+        quality: node.metadata?.quality ?? globalConfig.quality ?? defaultConfig.quality,
         imageOptions: node.metadata?.imageOptions ?? globalConfig.imageOptions,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
         videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,

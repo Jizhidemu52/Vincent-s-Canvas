@@ -155,6 +155,8 @@ export type CanvasAgentMediaWorkflow = {
     imageModel: string;
     videoModel: string;
     imageCount: number;
+    imageQuality?: string;
+    imageOptions?: string;
     videoSeconds: string;
     aspectRatio: string;
     referenceNodeIds: string[];

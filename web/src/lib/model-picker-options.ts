@@ -3,6 +3,12 @@ import { modelOptionName, selectableModelsByCapability, type AiConfig, type Mode
 export type ModelPickerSource = "server" | "local";
 type CapabilityModel = { id?: string; modelId: string; name?: string; publicName?: string; capabilities: readonly string[] };
 
+/** Presentation only: descriptions never become model names or request identifiers. */
+export function modelLabelWithUsage(name: string, description?: string) {
+    const usage = description?.trim();
+    return usage ? `${name} · ${usage}` : name;
+}
+
 export function resolveModelPickerSource(channelMode: AiConfig["channelMode"], source: ModelPickerSource | undefined, standalone: boolean): ModelPickerSource {
     // Existing company-edition callers use server APIs even though their effective config says "local".
     return source || (channelMode === "remote" || !standalone ? "server" : "local");

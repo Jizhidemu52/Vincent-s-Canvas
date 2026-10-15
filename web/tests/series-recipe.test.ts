@@ -3,7 +3,13 @@ import { createRecipeForm, createRecipeRun, buildRecipePrompt, parseRecipeProjec
 import { defaultConfig } from "../src/stores/use-config-store";
 
 const reference = { id: "source", name: "garment.png", type: "image/png", dataUrl: "data:image/png;base64,AAAA" };
-const makeRun = (count = 3) => createRecipeRun("owner", { ...createRecipeForm(), count }, [reference], defaultConfig);
+// Legacy imported runs keep all prior branches; each explicit start must schedule only one.
+const makeRun = (count = 3) => {
+    const run = createRecipeRun("owner", createRecipeForm(), [reference], defaultConfig);
+    run.form.count = count;
+    run.branches = Array.from({ length: count }, (_, index) => ({ ...structuredClone(run.branches[0]!), id: `variant-${index + 1}`, index, prompt: buildRecipePrompt(run.form, index, false) }));
+    return run;
+};
 const dependencies = (generate: RecipeDependencies["generate"]): RecipeDependencies => ({
     generate,
     query: async () => null,
@@ -16,6 +22,15 @@ const dependencies = (generate: RecipeDependencies["generate"]): RecipeDependenc
 });
 
 describe("formal series recipe", () => {
+    test("new runs and legacy form counts create one candidate without mutating original form", () => {
+        expect(createRecipeForm().count).toBe(1);
+        const form = { ...createRecipeForm(), count: 6 };
+        const run = createRecipeRun("owner", form, [reference], { ...defaultConfig, count: "10" });
+        expect(run.branches).toHaveLength(1);
+        expect(run.form.count).toBe(1);
+        expect(run.settings.count).toBe("1");
+        expect(form.count).toBe(6);
+    });
     test("builds distinct reference-aware prompts without inventing a motif", () => {
         const form = { ...createRecipeForm(), kind: "pattern" as const, constraints: "纽扣不变", prompt: "只在指定部位调整" };
         expect(buildRecipePrompt(form, 0, false)).toContain("底图中已有的图案");
@@ -44,6 +59,11 @@ describe("formal series recipe", () => {
             }),
         );
         await runner.start();
+        expect(calls.length).toBe(1);
+        expect(runner.snapshot().branches.map((branch) => branch.status)).toEqual(["success", "waiting", "waiting"]);
+        await runner.start();
+        expect(calls.length).toBe(2);
+        await runner.start();
         expect(runner.snapshot().branches.map((branch) => branch.status)).toEqual(["success", "failed", "success"]);
         const original = runner.snapshot().branches[0]!.images[0]!.dataUrl;
         await runner.start("failed");
@@ -54,7 +74,7 @@ describe("formal series recipe", () => {
         expect(runner.snapshot().branches.map((branch) => branch.attempts)).toEqual([1, 2, 1]);
     });
 
-    test("pause completes the accepted branch but prevents the next submission until resume", async () => {
+    test("pause/resume never submits another legacy branch without another explicit start", async () => {
         let release!: () => void;
         let began!: () => void;
         const started = new Promise<void>((resolve) => {
@@ -85,6 +105,8 @@ describe("formal series recipe", () => {
         expect(runner.snapshot().branches[0]!.status).toBe("success");
         runner.resume();
         await running;
+        expect(calls).toBe(1);
+        await runner.start();
         expect(calls).toBe(2);
     });
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type DependencyList, type EffectCallback, type ReactElement } from "react";
 import ts from "typescript";
+import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 
 const pageUrl = new URL("../src/pages/image/index.tsx", import.meta.url);
 const requireModule = createRequire(pageUrl);
@@ -124,7 +125,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         },
         "@/stores/use-user-store": { useUserStore: Object.assign((select: Function) => select(userState()), { getState: userState }) },
         "@/stores/use-theme-store": { useThemeStore: (select: Function) => select({ theme: "light" }) },
-        "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ estimate: () => ({ configured: true, credits: 0 }) }) },
+        "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ models: [{ id: "test-model", modelId: "test-model", capabilities: ["generate", "edit"] }], estimate: () => ({ configured: true, credits: 0 }) }) },
         "@/stores/use-asset-store": { useAssetStore: (select: Function) => select({ addAsset() {} }) },
         "@/hooks/use-workbench-field": { useWorkbenchField: (_key: string, initialValue: unknown) => useState(initialValue) },
         "@/hooks/use-image-copy-editor": { useImageCopyEditor: () => ({ node: null }) },
@@ -132,7 +133,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         "@/hooks/use-tool-config": { useToolConfig: (value: typeof config) => value },
         "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: false, oaLoginEnabled: false } },
         "@/lib/canvas-theme": { canvasThemes: { light: {} } },
-        "@/lib/image-model-settings": { useImageModelProfile: () => ({ kind: "image", requiresPrompt: true }), normalizeImageModelSettings: (value: unknown) => value },
+        "@/lib/image-model-settings": { useImageModelProfile: (model: string) => imageModelProfile(model, [], "designer"), normalizeImageModelSettings },
         "@/lib/submission-gate": { workbenchSubmissions: { acquire: () => () => undefined } },
         "@/services/api/image": { requestGeneration: (...args: any[]) => request("generate", args), requestEdit: (...args: any[]) => request("edit", args) },
         "@/services/image-storage": {
@@ -187,6 +188,15 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         navigate(tool: string, query = "") { params = new URLSearchParams(`tool=${tool}${query ? `&${query}` : ""}`); },
         setOwner(value: string) { ownerId = value; },
         setCreative(value?: object) { creativePreset = value; },
+        restoreLegacyFailedSlot(error: string) {
+            // An already-open legacy workspace can contain both successful and failed slots.
+            // Seed only that old in-memory UI state; never manufacture it by bypassing today's
+            // one-image normalization or by issuing several requests from a new action.
+            const imageIds = new Set(elements(render()).filter(item => typeof item.type === "function" && item.type.name === "ResultImageCard").map(item => item.props.image.id));
+            const index = workspace.values.findIndex(value => Array.isArray(value) && value.some(item => item?.status === "success" && imageIds.has(item.image?.id)));
+            if (index < 0) throw new Error("Legacy fixture requires a visible successful result");
+            workspace.values[index] = [...workspace.values[index], { id: "legacy-failed-slot", status: "failed", error }];
+        },
         delayMedia(key: string) { const pending = deferred<string>(); delayedMedia.set(key, pending.promise); return pending; },
         async settle() { for (let turn = 0; turn < 30; turn++) { render(); await Promise.resolve(); } return render(); },
         panels() { return elements(render()).filter(item => typeof item.type === "function" && item.type.name === "LogPanel").map(item => item.props); },
@@ -408,26 +418,48 @@ describe("image workspace isolation", () => {
         expect(page.errors).toEqual([]);
     });
 
-    test("a failed slot retry preserves the other successful image from the current batch", async () => {
-        let calls = 0;
-        const page = pageHarness([], async () => {
-            calls++;
-            if (calls === 2) throw new Error("Simulated second-slot failure");
-            return [{ id: calls === 1 ? "first-slot" : "retried-slot", dataUrl: "data:image/png;base64,YQ==" }];
-        });
+    for (const legacyCount of ["2", "10"]) test(`legacy count ${legacyCount} submits one image without deleting multi-image history`, async () => {
+        const legacy = storedLog("image-generation", "legacy-multi", 10);
+        legacy.config.count = legacyCount;
+        legacy.images.push({ ...legacy.images[0]!, id: "second-old-image", storageKey: "second-old-stored" });
+        legacy.successCount = legacy.imageCount = 2;
+        const page = pageHarness([legacy], async () => [{ id: "single-new-image", dataUrl: "data:image/png;base64,YQ==" }]);
         await page.settle();
-        page.config.count = "2";
-        page.prompt().onChange({ target: { value: "two image batch" } });
+        expect(page.images().map(image => image.id)).toEqual(["legacy-multi-image", "second-old-image"]);
+        page.config.count = legacyCount;
+        page.prompt().onChange({ target: { value: "one new image from legacy settings" } });
         page.generate().onClick();
         await page.settle();
-        expect(page.images().map(image => image.id)).toEqual(["first-slot"]);
+        expect(page.images().map(image => image.id)).toEqual(["single-new-image"]);
+        expect(page.requests).toHaveLength(1);
+        expect(page.requests[0]!.args[0].count).toBe("1");
+        expect(page.stored.get("legacy-multi")).toEqual(legacy);
+        const created = page.panels()[0].logs.find((log: StoredLog) => log.id !== "legacy-multi");
+        expect(created).toMatchObject({ imageCount: 1, successCount: 1, failCount: 0, config: { count: "1" } });
+        expect(page.failedCards()).toEqual([]);
+        expect(page.errors).toEqual([]);
+    });
+
+    test("retrying one failed slot from a legacy mixed batch preserves its successful image", async () => {
+        const legacy = storedLog("image-generation", "legacy-partial", 10);
+        legacy.config.count = "2";
+        legacy.imageCount = 2;
+        legacy.failCount = 1;
+        const page = pageHarness([legacy], async () => [{ id: "retried-slot", dataUrl: "data:image/png;base64,YQ==" }]);
+        await page.settle();
+        const successfulImage = structuredClone(page.images()[0]);
+        page.restoreLegacyFailedSlot("Legacy second-slot failure");
+        page.prompt().onChange({ target: { value: "retry only the failed legacy slot" } });
         expect(page.failedCards()).toHaveLength(1);
         await page.failedCards()[0]!.props.onRetry();
         await page.settle();
-        expect(page.images().map(image => image.id)).toEqual(["first-slot", "retried-slot"]);
+        expect(page.images().map(image => image.id)).toEqual(["legacy-partial-image", "retried-slot"]);
+        expect(page.images()[0]).toEqual(successfulImage);
         expect(page.failedCards()).toEqual([]);
         expect(page.panels()[0].logs).toHaveLength(2);
-        expect(page.requests).toHaveLength(3);
+        expect(page.stored.get("legacy-partial")).toEqual(legacy);
+        expect(page.requests).toHaveLength(1);
+        expect(page.requests[0]!.args[0].count).toBe("1");
         expect(page.errors).toEqual([]);
     });
 });

@@ -8,6 +8,7 @@ import { defaultConfig } from "../src/stores/use-config-store";
 import { useUserStore } from "../src/stores/use-user-store";
 import { useBusinessConfigStore } from "../src/stores/use-business-config-store";
 import type { BusinessConfig, PublicToolConfiguration } from "../src/services/api/business-config";
+import { toolDefinitions } from "../../shared/feature-catalog";
 
 const image = { id: "bound-image", modelId: "gpt-image-2", name: "绑定图片模型", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 };
 const text = { id: "bound-text", modelId: "claude-fable-5-1", name: "绑定对话模型", capabilities: ["chat"], creditCost: 0, rmbCost: 0 };
@@ -41,7 +42,8 @@ function mockServer(config: BusinessConfig, taskError = false) {
         const task = { id: "task-1", status: "success", resultUrls: ["/api/assets/result/content"], failureReason: null };
         if (path === "/api/tasks/task-1") return Response.json({ task });
         if (path === "/api/tasks") return Response.json({ tasks: [task] });
-        if (path === "/api/auth/session") return Response.json({}, { status: 401 });
+        // Successful generations refresh balances; a stable session permits consecutive requests.
+        if (path === "/api/auth/session") return Response.json({ user: { id: "employee-a", status: "active", role: "designer" } });
         if (path === "/api/chat/responses") return Response.json({ content: "已完成", toolCalls: [] });
         if (path === "/api/assets/result/content") return new Response("audio bytes", { headers: { "content-type": "audio/mpeg" } });
         throw new Error(`Unexpected request ${path}`);
@@ -50,6 +52,41 @@ function mockServer(config: BusinessConfig, taskError = false) {
 }
 
 describe("formal tool model consumption", () => {
+    const imageTools = toolDefinitions.filter(tool => tool.toolKey !== "midjourney-blend" && ["image_generation", "inpaint", "upscale"].includes(tool.operationType));
+    test("the dedicated Blend board rejects unrelated models but accepts its opaque public profile", () => {
+        expect(() => resolveConfiguredToolModel(business(), "midjourney-blend", image.modelId)).toThrow("仅支持 Blend");
+        const blend = { ...image, id: "blend-id", modelId: "blend-id", imageParameterProfile: "blend" as const, capabilities: ["generate"] };
+        const fixture = { models: [image, blend], prices: [], tools: [] };
+        expect(resolveConfiguredToolModel(fixture, "midjourney-blend", blend.id)).toBe(blend);
+        expect(resolveConfiguredToolModel(fixture, "canvas-image", blend.id)).toBe(blend);
+        expect(() => resolveConfiguredToolModel({ ...fixture, tools: [binding("midjourney-blend", image.id)] }, "midjourney-blend", blend.id)).toThrow("仅支持 Blend");
+    });
+    test.each(imageTools)("$toolKey forwards the selected Mark model and independent parameters from fresh configuration", async tool => {
+        for (const [id, profile] of [["mark-flare", "quality-resolution"], ["mark-sunburst", "quality-resolution"], ["mark-nano", "resolution-1k"]] as const) {
+            const model = { ...image, id, modelId: id, imageParameterProfile: profile };
+            const requests = mockServer({ models: [image, model], prices: [], tools: [] });
+            const config = { ...defaultConfig, model: id, size: "4:3", quality: profile === "quality-resolution" ? "max" : "4k", count: "1", imageOptions: '{"resolution":"2k","output_format":"webp","output_compression":"88"}' };
+            const options = { tool: tool.toolKey, operationType: tool.operationType as "image_generation" | "inpaint" | "upscale" };
+            if (tool.operationType === "image_generation") await requestGeneration(config, "flower", options);
+            else await requestEdit(config, "flower", [], undefined, options);
+            const post = requests.find(item => item.path === "/api/tasks" && item.body)?.body;
+            expect(post).toMatchObject({ toolKey: tool.toolKey, modelConfigId: id, parameters: profile === "quality-resolution" ? { size: "4:3", quality: "max", resolution: "2k", output_format: "webp", output_compression: 88 } : { size: "4:3", resolution: "4k" } });
+            if (profile === "resolution-1k") for (const key of ["quality", "output_format", "output_compression", "background"]) expect(post?.parameters[key]).toBeUndefined();
+        }
+    });
+
+    test("Mark batch requests keep quality and resolution separate and Nano mask rejects before upload", async () => {
+        const model = { ...image, id: "mark-flare", modelId: "mark-flare", imageParameterProfile: "quality-resolution" as const };
+        const requests = mockServer({ models: [model], prices: [], tools: [] });
+        await requestBatchEdit({ ...defaultConfig, model: model.id, quality: "xhigh", size: "16:9", imageOptions: '{"resolution":"4k"}' }, "flower", [{ file: new File(["source"], "source.png", { type: "image/png" }), title: "source" }]);
+        expect(requests.find(item => item.path === "/api/tasks/batch")?.body).toMatchObject({ modelConfigId: model.id, parameters: { size: "16:9", quality: "xhigh", resolution: "4k" } });
+        const nano = { ...model, id: "mark-nano", modelId: "mark-nano", imageParameterProfile: "resolution-1k" as const };
+        const nanoRequests = mockServer({ models: [nano], prices: [], tools: [] });
+        const reference = { id: "source", name: "source.png", dataUrl: "missing:source" };
+        await expect(requestEdit({ ...defaultConfig, model: nano.id }, "flower", [reference], reference, { tool: "canvas-mask-edit" })).rejects.toThrow("不支持蒙版");
+        expect(nanoRequests.map(item => item.path)).toEqual(["/api/models"]);
+    });
+
     test("a binding wins over the selected model without mutating the saved config", () => {
         const config = { ...defaultConfig, model: "nano-banana-2", imageModel: "nano-banana-2" };
         expect(applyToolModel(config, business(binding("canvas-image", image.id)), "canvas-image").model).toBe(image.modelId);

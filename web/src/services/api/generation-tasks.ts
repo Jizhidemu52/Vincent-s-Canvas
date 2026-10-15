@@ -19,7 +19,7 @@ export class QueuedTaskPausedError extends Error {
     readonly taskId: string;
     readonly canRecover: boolean;
     constructor(readonly task: QueuedTask, message?: string) {
-        const canRecover = task.operationType === "video_generation" && Boolean(task.upstreamTaskId);
+        const canRecover = Boolean(task.upstreamTaskId?.trim());
         super(`${message || task.failureReason || "任务查询已暂停"}（任务 ${task.id}）。${canRecover ? "可恢复查询原任务，不会重新生成。" : "提交状态待核查，请勿重复生成。"}`);
         this.name = "QueuedTaskPausedError";
         this.taskId = task.id;
@@ -63,14 +63,14 @@ export function createImageTaskRequests(input: {
     sourceUrls: string[];
     count: number;
 }) {
-    return Array.from({ length: input.count }, (_, index) => ({
+    return Array.from({ length: 1 }, (_, index) => ({
         requestId: `${input.requestId}:${index}`,
         projectId: input.projectId,
         operationType: input.operationType,
         toolKey: requireToolKey(input.operationType, input.toolKey),
         modelConfigId: input.modelConfigId,
         prompt: input.prompt,
-        parameters: { ...input.parameters, count: 1 },
+        parameters: { ...input.parameters, count: 1, n: 1 },
         sourceUrls: input.sourceUrls,
         priority: "normal" as const,
     }));
@@ -109,7 +109,7 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
     const projectId = currentProjectId("image-workbench");
     const archive: GenerationInputArchive | undefined = input.draft ? {
         version: 1, ownerId, modelConfigId: model.id, modelId: model.modelId,
-        prompt: input.draft.prompt, effectivePrompt: input.prompt, config: { ...input.draft.config, model: model.id, imageModel: model.id },
+        prompt: input.draft.prompt, effectivePrompt: input.prompt, config: { ...input.draft.config, model: model.id, imageModel: model.id, count: "1" },
         parameters: { ...input.parameters }, references: archivedReferences, maskReferenceIndex: input.draft.maskReferenceIndex,
     } : undefined;
     const taskRequests = createImageTaskRequests({
@@ -157,6 +157,7 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
 }
 
 export async function requestQueuedImageBatch(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; parameters?: Record<string, unknown>; files: Array<{ file: File; title: string }>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+    if (input.files.length !== 1) throw new Error("每次只能选择 1 张图片生成；可分别发起多个独立任务。");
     const model = input.resolvedModel || await resolvePublicModel(input.modelId, "batch_image", "canvas-batch");
     const uploadedItems: Array<{ itemIndex: number; sourceUrl: string }> = [];
     const uploadFailures: QueuedBatchFailure[] = [];
@@ -183,7 +184,7 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
             toolKey: "canvas-batch",
             modelConfigId: model.id,
             prompt: input.prompt,
-            parameters: { ...input.parameters, tool: "canvas-batch" },
+            parameters: { ...input.parameters, tool: "canvas-batch", count: 1, n: 1 },
             priority: "normal",
             items: uploadedItems.map((item) => ({ sourceUrls: [item.sourceUrl] })),
         }),
@@ -303,8 +304,10 @@ async function queryQueuedTask(path: string, signal?: AbortSignal) {
     return result.task;
 }
 
-export async function recoverQueuedTask(id: string) {
-    const result = await request<{ task: QueuedTask; recovered?: boolean; message?: string }>(`/api/tasks/${id}/recover`, { method: "POST" });
+export async function recoverQueuedTask(id: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const result = await request<{ task: QueuedTask; recovered?: boolean; message?: string }>(`/api/tasks/${id}/recover`, { method: "POST", signal });
+    signal?.throwIfAborted();
     if (result.task.status === "paused") throw new QueuedTaskPausedError(result.task, result.message);
     return result.task;
 }

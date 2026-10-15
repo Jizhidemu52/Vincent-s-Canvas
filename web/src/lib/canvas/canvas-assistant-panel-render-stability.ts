@@ -5,6 +5,7 @@ import type { CanvasAssistantSession, CanvasNodeData } from "@/types/canvas";
 export type CanvasMediaWorkflowAction =
     | { type: "image_model_change"; messageId: string; model: string }
     | { type: "image_count_change"; messageId: string; count: number }
+    | { type: "image_settings_change"; messageId: string; key: "quality" | "imageOptions"; value: string }
     | { type: "generate_images"; messageId: string }
     | { type: "select_candidate"; messageId: string; nodeId: string }
     | { type: "video_model_change"; messageId: string; model: string }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { loadAdminOverview, resolveAdminTab } from "@/pages/admin/admin-overview";
+import { loadAdminOverview, markPlatformAdminTabLabel, resolveAdminTab } from "@/pages/admin/admin-overview";
 import { loadTeamOverview } from "@/pages/team/team-overview";
 
 const originalFetch = globalThis.fetch;
@@ -28,11 +28,14 @@ describe("admin and team overview loading", () => {
     });
 
     test("department admins cannot select super-admin tabs through URL parameters", () => {
-        for (const tab of ["modules", "pricing", "api", "history", "projects", "batch", "audit", "integrations", "models", "providers", "workflows", "not-a-tab"]) expect(resolveAdminTab(tab, false, true)).toBe("accounts");
+        for (const tab of ["modules", "pricing", "api", "usage-analysis", "mark-images", "history", "projects", "batch", "audit", "integrations", "models", "providers", "workflows", "not-a-tab"]) expect(resolveAdminTab(tab, false, true)).toBe("accounts");
         expect(resolveAdminTab("groups", false, true)).toBe("groups");
         expect(resolveAdminTab("performance", false, true)).toBe("performance");
         expect(resolveAdminTab("performance", true, false)).toBe("accounts");
         expect(resolveAdminTab("models", true, true)).toBe("api");
+        expect(resolveAdminTab("mark-images", true, true)).toBe("mark-images");
+        expect(resolveAdminTab("usage-analysis", true, true)).toBe("usage-analysis");
+        expect(markPlatformAdminTabLabel).toBe("APIMart 平台");
     });
 
     test("ordinary members request only personal group credits, never leader-only data", async () => {

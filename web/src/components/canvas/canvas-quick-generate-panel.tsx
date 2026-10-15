@@ -14,7 +14,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { resolveCapabilityModel } from "@/lib/model-picker-options";
 import { imageModelProfile, imageModelSettingsError, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import type { ReferenceImage } from "@/types/image";
-import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
+import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 
 type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "embedded" | "config" | "references"> & {
     embedded?: boolean;
@@ -34,8 +34,9 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     const models = useBusinessConfigStore((state) => state.models);
     const modelStatus = useBusinessConfigStore((state) => state.status);
     const role = useUserStore((state) => state.user?.role);
-    const toolKey = references.length ? "canvas-edit" : "canvas-image";
-    const boundConfig = useToolConfig({ ...config, model: modelStatus === "ready" ? resolveCapabilityModel(config, "image", models, model) : "" }, toolKey);
+    const selectedModel = modelStatus === "ready" ? resolveCapabilityModel(config, "image", models, model) : "";
+    const toolKey = canvasToolKey("image", references.length > 0, imageModelProfile(selectedModel || model, models, role).kind);
+    const boundConfig = useToolConfig({ ...config, model: selectedModel }, toolKey);
     const availableModel = boundConfig.model;
     const toolEnabled = useToolEnabled(toolKey);
     useEffect(() => {
@@ -43,16 +44,18 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     }, [availableModel, model, modelStatus, onModelChange, running]);
     const profile = imageModelProfile(availableModel || model, models, role);
     const settings = normalizeImageModelSettings({ size, quality, count: String(count) }, profile);
+    const referenceQualityDisabled = profile.kind === "grok-image" && references.length > 0;
+    const activeQuality = settings.quality;
     const sizeSummary = settings.size.includes("x") ? settings.size.replace("x", " × ") : imageSizeLabel(settings.size);
-    const settingsSummary = `${profile.verified ? `${sizeSummary} · ${profile.qualityLabel}${imageQualityLabel(settings.quality)}` : "渠道默认参数"} · ${settings.count}${profile.maxCount > 1 ? " 张" : " 个任务"}`;
+    const settingsSummary = `${profile.verified ? `${sizeSummary}${referenceQualityDisabled ? " · 参考图模式" : ` · ${profile.qualityLabel}${imageQualityLabel(settings.quality)}`}` : "渠道默认参数"} · ${settings.count}${profile.maxCount > 1 ? " 张" : " 个任务"}`;
     useEffect(() => {
         if (running || !availableModel) return;
         if (size !== settings.size) onSizeChange(settings.size);
-        if (quality !== settings.quality) onQualityChange(settings.quality);
+        if (quality !== activeQuality) onQualityChange(activeQuality);
         if (count !== Number(settings.count)) onCountChange(Number(settings.count));
-    }, [availableModel, running, size, quality, count, settings.size, settings.quality, settings.count, onSizeChange, onQualityChange, onCountChange]);
+    }, [availableModel, running, size, quality, count, settings.size, activeQuality, settings.count, onSizeChange, onQualityChange, onCountChange]);
     if (!open) return null;
-    const referenceValidation = validateImageReferences(modelOptionName(model), references);
+    const referenceValidation = validateImageReferences(modelOptionName(availableModel || model), references, profile);
     const disabled = !toolEnabled || running || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(imageModelSettingsError(settings.size, profile));
     return (
         <div data-testid="canvas-quick-generate-panel" data-canvas-no-zoom
@@ -64,20 +67,20 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
             {!embedded ? <div className="cw-tabs"><span>创建</span><button className="cw-icon" style={{ marginLeft: "auto" }} aria-label="关闭画布生图" onClick={onClose}><X size={16} /></button></div> : null}
             <div className="cw-generator-body">
                 {positioned ? <div className="mb-3 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span>下一次生成放在右键位置</span><button type="button" className="shrink-0 hover:underline" onClick={onClearPosition}>取消定位</button></div> : null}
-                <div className="cw-media-kind"><ImageIcon size={15} /><span>{references.length ? "编辑图像" : "图像"}</span>{profile.documentationUrl ? <a className="cw-model-info" href={profile.documentationUrl} target="_blank" rel="noreferrer" title={`${profile.tip} 点击查看接口文档`} aria-label="查看当前模型接口文档"><Info size={14} /></a> : <span className="cw-model-info" title={profile.tip}><Info size={14} /></span>}</div>
+                <div className="cw-media-kind"><ImageIcon size={15} /><span>{!profile.requiresPrompt ? "多图融合" : references.length ? "编辑图像" : "图像"}</span>{profile.documentationUrl ? <a className="cw-model-info" href={profile.documentationUrl} target="_blank" rel="noreferrer" title={`${profile.tip} 点击查看接口文档`} aria-label="查看当前模型接口文档"><Info size={14} /></a> : <span className="cw-model-info" title={profile.tip}><Info size={14} /></span>}</div>
                 <div className="cw-model-row">
                 <ModelPicker toolKey={toolKey} config={boundConfig} value={availableModel} capability="image" modelsSource="server" disabled={running} fullWidth onChange={onModelChange}
                     onMissingConfig={onMissingConfig} className="cw-model-picker" />
                 <button type="button" className="cw-reference-button" title="添加参考图" aria-label="添加参考图" disabled={running || references.length >= referenceValidation.maximum} onClick={onPickReferences}><Paperclip size={17} /></button>
                 </div>
-                <textarea className="cw-prompt" data-canvas-image-paste aria-label="描述图像" placeholder={!profile.requiresPrompt ? "添加 2–4 张参考图，直接生成合成图，无需描述。" : references.length ? "描述想如何修改，可用「图1」「图2」指定参考图…" : "描述你想创作的图像…"}
-                    value={prompt} maxLength={2000} disabled={running || !profile.requiresPrompt} title="Enter 生成，Shift+Enter 换行"
+                {profile.requiresPrompt ? <textarea className="cw-prompt" data-canvas-image-paste aria-label="描述图像" placeholder={references.length ? "描述想如何修改，可用「图1」「图2」指定参考图…" : "描述你想创作的图像…"}
+                    value={prompt} maxLength={profile.kind === "grok-image" ? 8000 : 2000} disabled={running} title="Enter 生成，Shift+Enter 换行"
                     onChange={(event) => onPromptChange(event.target.value)}
                     onKeyDown={(event) => {
                         if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
                         event.preventDefault();
                         if (!disabled && !event.repeat) onGenerate();
-                    }} />
+                    }} /> : <p className="my-3 text-xs leading-5" role="status">添加 2–4 张参考图，直接融合，不使用提示词。原有描述会保留，切换模型后可继续编辑。</p>}
                 <CanvasQuickReferenceTray references={references} disabled={running} onMove={onMoveReference} onRemove={onRemoveReference} onClear={onClearReferences} />
                 <details className="cw-selection-hint">
                     <summary className="cursor-pointer py-1"><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Info size={12} aria-hidden /><span>{references.length ? "参考图说明" : "点击或框选画布图片添加参考图"}</span></span></summary>
@@ -93,7 +96,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                         <ChevronDown size={14} aria-hidden className={`shrink-0 ${settingsExpanded ? "rotate-180" : ""}`} />
                     </button>
                     <fieldset id={settingsId} hidden={!settingsExpanded} aria-labelledby={`${settingsId}-toggle`} disabled={running || !availableModel} className="max-h-[min(36dvh,320px)] min-w-0 overflow-y-auto border-0 p-0">
-                        <ImageSettingsPanel config={{ ...config, model, imageModel: model, ...settings, imageOptions }} theme={theme} showTitle={false} onConfigChange={(key, value) => {
+                        <ImageSettingsPanel config={{ ...config, model, imageModel: model, ...settings, quality: activeQuality, imageOptions }} profile={profile} referenceCount={references.length} theme={theme} showTitle={false} onConfigChange={(key, value) => {
                             if (key === "size") onSizeChange(value);
                             if (key === "quality") onQualityChange(value);
                             if (key === "count") onCountChange(Number(value));
@@ -102,9 +105,9 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                     </fieldset>
                 <div className={`cw-generate-action ${disabled ? "is-disabled" : ""}`}>
                     <button type="button" className="cw-generate-button" disabled={disabled} onClick={onGenerate}>
-                        {running ? <><LoaderCircle size={16} className="animate-spin" />提交中…</> : references.length ? "生成修改图" : "生成"}
+                        {running ? <><LoaderCircle size={16} className="animate-spin" />提交中…</> : !profile.requiresPrompt ? "开始融合" : references.length ? "生成修改图" : "生成"}
                     </button>
-                    {deploymentFeatures.creditsEnabled ? <span className="cw-estimate" title={`预计 ¥${estimateRmb.toFixed(2)}，剩余 ${remainingCredits ?? "-"} 积分`}>{estimateCredits} 积分</span> : <span className="cw-shortcut" aria-hidden>Enter ↵</span>}
+                    {deploymentFeatures.creditsEnabled ? <span className="cw-estimate" title={`预计 ¥${estimateRmb.toFixed(2)}，剩余 ${remainingCredits ?? "-"} 积分`}>{estimateCredits} 积分</span> : profile.requiresPrompt ? <span className="cw-shortcut" aria-hidden>Enter ↵</span> : null}
                 </div>
             </div>
         </div>

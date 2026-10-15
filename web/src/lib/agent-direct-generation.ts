@@ -1,10 +1,11 @@
-import { CanvasNodeType, type CanvasAssistantAttachment } from "@/types/canvas";
+import { CanvasNodeType, type CanvasAssistantAttachment, type CanvasNodeMetadata } from "@/types/canvas";
 import type { CanvasAgentOp, CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { imageModelDisplayName } from "@/lib/model-display";
 import { referencePolicyForModel } from "@/lib/image-reference-policy";
 import { getVideoModelParameterSpec } from "@/lib/video-model-parameters";
+import { readImageOptions } from "@/lib/image-advanced-settings";
 
 export type AgentGenerationMode = "image" | "video";
 export type AgentImageAfterAction = "images_only" | "select_then_video" | "auto_first_image_video";
@@ -15,6 +16,7 @@ export type AgentGenerationSettings = {
     videoModel: string;
     size: string;
     quality: string;
+    imageOptions?: string;
     imageCount: string;
     videoSeconds: string;
     videoQuality: string;
@@ -39,7 +41,10 @@ type ReferenceLike = { id: string };
 
 export function normalizeAgentImageSettings(settings: AgentGenerationSettings, profile = imageModelProfile(settings.imageModel)): AgentGenerationSettings {
     const normalized = normalizeImageModelSettings({ size: settings.size, quality: settings.quality, count: settings.imageCount }, profile);
-    return { ...settings, size: normalized.size, quality: normalized.quality, imageCount: normalized.count };
+    const options = readImageOptions(settings.imageOptions);
+    const resolution = profile.resolutions.includes(options.resolution || "") ? options.resolution : "1k";
+    return { ...settings, size: normalized.size, quality: normalized.quality, imageCount: normalized.count,
+        ...(profile.resolutions.length ? { imageOptions: JSON.stringify({ ...options, resolution }) } : {}) };
 }
 
 export function createAgentVideoConfirmation(
@@ -78,7 +83,7 @@ export function normalizeAgentVideoSettings(
 
 export function buildAgentGeneratedMediaOps(
     attachments: CanvasAssistantAttachment[],
-    context: { prompt: string; model: string; x: number; y: number },
+    context: { prompt: string; model: string; x: number; y: number; imageMetadata?: Pick<CanvasNodeMetadata, "generationType" | "size" | "quality" | "imageOptions" | "count" | "references" | "compareSources"> },
 ): CanvasAgentOp[] {
     const mediaOps = attachments.map((attachment, index): CanvasAgentOp => ({
         type: "add_node",
@@ -90,6 +95,7 @@ export function buildAgentGeneratedMediaOps(
             ? fitNodeSize(attachment.width!, attachment.height!, 340, 340)
             : {}),
         metadata: {
+            ...(attachment.mediaType !== "video" ? context.imageMetadata : {}),
             content: attachment.url,
             ...(attachment.storageKey ? { storageKey: attachment.storageKey } : {}),
             prompt: context.prompt,
@@ -132,6 +138,7 @@ export type AgentImageGenerationPlan = {
     model: string;
     size: string;
     quality: string;
+    imageOptions?: string;
     count: number;
     afterImage: AgentImageAfterAction;
     requiresPrompt: boolean;
@@ -146,11 +153,11 @@ export type AgentVideoGenerationPlan = {
     requiresReference: boolean;
 };
 
-export function buildAgentGenerationPlan(settings: AgentGenerationSettings, prompt: string, references: ReferenceLike[]): AgentImageGenerationPlan | AgentVideoGenerationPlan {
+export function buildAgentGenerationPlan(settings: AgentGenerationSettings, prompt: string, references: ReferenceLike[], resolvedProfile?: ReturnType<typeof imageModelProfile>): AgentImageGenerationPlan | AgentVideoGenerationPlan {
     if (settings.mode === "image") {
-        const profile = imageModelProfile(settings.imageModel);
+        const profile = resolvedProfile || imageModelProfile(settings.imageModel);
         if (profile.requiresPrompt && !prompt.trim()) throw new Error("请输入生成需求");
-        const policy = referencePolicyForModel(settings.imageModel);
+        const policy = referencePolicyForModel(settings.imageModel, profile);
         if (!policy.supportsReferences && references.length) throw new Error("当前模型不支持参考图，请移除参考图或切换模型。");
         if (references.length < policy.minimum || references.length > policy.maximum) throw new Error(`${policy.label} 需要 ${policy.minimum} 至 ${policy.maximum} 张参考图。`);
         const normalized = normalizeAgentImageSettings(settings, profile);
@@ -159,6 +166,7 @@ export function buildAgentGenerationPlan(settings: AgentGenerationSettings, prom
             model: settings.imageModel,
             size: normalized.size,
             quality: normalized.quality,
+            ...(normalized.imageOptions !== undefined ? { imageOptions: normalized.imageOptions } : {}),
             count: Number(normalized.imageCount),
             afterImage: settings.afterImage,
             requiresPrompt: profile.requiresPrompt,
@@ -191,8 +199,9 @@ export function agentQuickstartPreset(kind: "video" | "lookbook" | "illustration
 
 export function buildAgentGenerationBrief(settings: AgentGenerationSettings, prompt: string, hasReference: boolean) {
     const imageSettings = normalizeAgentImageSettings(settings);
+    const resolution = imageModelProfile(settings.imageModel).resolutions.length ? `；清晰度：${readImageOptions(imageSettings.imageOptions).resolution}` : "";
     const preset = settings.mode === "image"
-        ? `图片模型：${imageModelDisplayName(settings.imageModel)}；数量：${imageSettings.imageCount}；${imageModelProfile(settings.imageModel).qualityLabel}：${imageSettings.quality}；尺寸：${imageSettings.size}`
+        ? `图片模型：${imageModelDisplayName(settings.imageModel)}；数量：${imageSettings.imageCount}；${imageModelProfile(settings.imageModel).qualityLabel}：${imageSettings.quality}${resolution}；尺寸：${imageSettings.size}`
         : `视频模型：${settings.videoModel}；时长：${settings.videoSeconds} 秒；清晰度：${settings.videoQuality}；画幅：${settings.size}`;
     return `任务类型：${settings.mode === "image" ? "图片生成" : "视频生成"}\n${preset}\n已有参考图：${hasReference ? "是" : "否"}\n用户需求：${prompt.trim()}`;
 }

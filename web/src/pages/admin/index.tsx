@@ -7,13 +7,15 @@ import Papa from "papaparse";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, resetAccountPassword, updateAccount, type AccountInput, type AuditLog, type Department } from "@/services/api/admin-accounts";
-import { loadAdminOverview, resolveAdminTab } from "./admin-overview";
+import { loadAdminOverview, markPlatformAdminTabLabel, resolveAdminTab } from "./admin-overview";
 import type { ApiUser, ApiUserRole } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import { useModuleStore } from "@/stores/use-module-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
 
 const ApiConfigurationHub = lazy(() => import("./components/api-configuration-hub").then((module) => ({ default: module.ApiConfigurationHub })));
+const MarkImageProviderPanel = lazy(() => import("./components/mark-image-provider-panel").then((module) => ({ default: module.MarkImageProviderPanel })));
+const UsageAnalyticsPanel = lazy(() => import("./components/usage-analytics-panel").then((module) => ({ default: module.UsageAnalyticsPanel })));
 const ModelPricingPanel = lazy(() => import("./components/model-pricing-panel").then((module) => ({ default: module.ModelPricingPanel })));
 const HistoryManagementPanel = lazy(() => import("./components/task-history-panels").then((module) => ({ default: module.HistoryManagementPanel })));
 const TaskManagementPanel = lazy(() => import("./components/task-history-panels").then((module) => ({ default: module.TaskManagementPanel })));
@@ -131,6 +133,8 @@ export default function AdminPage() {
         { key: "modules", label: "模块开关" },
         { key: "pricing", label: "积分价格" },
         { key: "api", label: "板块 API 配置" },
+        { key: "usage-analysis", label: "使用分析" },
+        { key: "mark-images", label: markPlatformAdminTabLabel },
         { key: "history", label: "历史记录" },
         { key: "projects", label: "项目素材" },
         { key: "batch", label: "批量任务" },
@@ -470,6 +474,16 @@ export default function AdminPage() {
                                 key: "api",
                                 label: "板块 API 配置",
                                 children: <ApiConfigurationHub isAdmin={isAdmin} />,
+                            },
+                            {
+                                key: "usage-analysis",
+                                label: "使用分析",
+                                children: isAdmin ? <UsageAnalyticsPanel /> : null,
+                            },
+                            {
+                                key: "mark-images",
+                                label: markPlatformAdminTabLabel,
+                                children: isAdmin ? <MarkImageProviderPanel /> : null,
                             },
                             {
                                 key: "history",

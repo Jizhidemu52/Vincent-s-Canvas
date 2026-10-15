@@ -96,7 +96,7 @@ test("only administrators receive branded guidance and model documentation", () 
 
 test("changing models resets unsupported quality, dimensions and output counts", () => {
     const initial = { ...defaultConfig, quality: "0.5k", size: "21:9", count: "10" };
-    expect(normalizeImageModelSettings(initial, imageModelProfile("gpt-image-2", []))).toEqual({ quality: "auto", size: "1024x1024", count: "10" });
+    expect(normalizeImageModelSettings(initial, imageModelProfile("gpt-image-2", []))).toEqual({ quality: "auto", size: "1024x1024", count: "1" });
     expect(normalizeImageModelSettings(initial, imageModelProfile("midjourney-blend", []))).toEqual({ quality: "relax", size: "21:9", count: "1" });
 });
 
@@ -129,7 +129,7 @@ test("flexible image profiles retain legal custom sizes and extended quality wit
     expect(flare.outputFormats).toEqual(["png", "jpeg", "webp"]);
     expect(flare.backgrounds).toEqual(["auto", "opaque", "transparent"]);
     expect(flare.outputCompression).toBe(true);
-    expect(normalizeImageModelSettings({ size: "1536x864", quality: "max", count: "2" }, flare)).toEqual({ size: "1536x864", quality: "max", count: "2" });
+    expect(normalizeImageModelSettings({ size: "1536x864", quality: "max", count: "2" }, flare)).toEqual({ size: "1536x864", quality: "max", count: "1" });
     expect(imageModelProfile("gpt-image-2", []).qualities).not.toContain("xhigh");
     expect(imageModelProfile("gpt-image-1", []).customSize).toBe(false);
     expect(imageModelProfile("gemini-3.1-flash-image", []).outputFormats).toEqual([]);

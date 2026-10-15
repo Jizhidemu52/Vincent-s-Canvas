@@ -15,7 +15,7 @@ test("designer sees four model-ID-named OpenToken images while UUID submission s
     env: { ...process.env, DEMO_STATE_PATH: ":memory:", DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1",
       OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "true", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "false", ROLE_PORTALS_ENABLED: "true", STANDALONE_WEB_DIR: "",
       OPENTOKEN_BASE_URL: `http://127.0.0.1:${provider.port}/v1`, OPENTOKEN_API_KEY: "fake-key-no-paid-network",
-      APIMART_BASE_URL: `http://127.0.0.1:${provider.port}/v1`, APIMART_API_KEY: "fake-key-no-paid-network", GPT_IMAGE_2_API_KEY: "" },
+      APIMART_BASE_URL: `http://127.0.0.1:${provider.port}/v1`, APIMART_API_KEY: "fake-key-no-paid-network", GPT_IMAGE_2_API_KEY: "", MARK_IMAGE_API_KEY: "" },
   });
   const base = `http://127.0.0.1:${port}`;
   const request = (path: string, cookie = "", method = "GET", body?: unknown) => fetch(base + path, {

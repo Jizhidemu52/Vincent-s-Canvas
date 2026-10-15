@@ -8,6 +8,7 @@ import ts from "typescript";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { defaultConfig } from "@/stores/use-config-store";
+import { canvasToolKey } from "@/hooks/use-tool-config";
 import type { AgentGenerationSettings } from "@/lib/agent-direct-generation";
 import { videoModelCapabilities, type SupportedVideoModelId } from "../../server/src/video-models";
 
@@ -21,7 +22,7 @@ function controls(patch: Partial<AgentGenerationSettings> = {}) {
     const dependencies: Record<string, unknown> = {
         react: { ...React, useEffect: (effect: () => void) => effects.push(effect) },
         "@/lib/image-model-settings": { imageModelProfile, useImageModelProfile: (model: string) => imageModelProfile(model, []) },
-        "@/hooks/use-tool-config": { useToolConfig: (config: unknown) => config },
+        "@/hooks/use-tool-config": { canvasToolKey, useToolConfig: (config: unknown) => config },
     };
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code + "\nexports.controls = AgentGenerationControls;")((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
@@ -40,25 +41,27 @@ function findElements(value: unknown): ReactElement<any>[] {
 
 test("Agent parameters reflect standard pixel sizes and quality instead of fabricated resolution", () => {
     const result = controls({ imageModel: "gpt-image-2" });
-    expect(result.markup).toContain('aria-label="尺寸"');
+    expect(result.markup).toContain('aria-label="宽高比"');
     expect(result.markup).toContain('value="1536x1024"');
     expect(result.markup).toContain('aria-label="画质"');
     expect(result.markup).not.toContain('value="4k"');
     result.effects.forEach((effect) => effect());
-    expect(result.changes).toContainEqual({ size: "1152x1536", quality: "auto", imageCount: "7" });
+    expect(result.changes).toContainEqual({ size: "1152x1536", quality: "auto", imageCount: "1" });
 });
 
-test("Agent exposes 0.5K for Gemini and ten images for supported adapters", () => {
-    expect(controls({ imageModel: "nano-banana-2" }).markup).toContain('value="0.5k"');
+test("Agent preserves Gemini 0.5K resolution but fixes every adapter to one task", () => {
+    expect(controls({ imageModel: "nano-banana-2" }).markup).toContain(">0.5K</button>");
     const markup = controls().markup;
-    expect(markup).toContain('value="10"');
-    expect(markup).toContain('value="4k"');
+    expect(markup).toContain("1 个任务");
+    expect(markup).not.toContain('aria-label="生成张数"');
+    expect(markup).not.toContain('type="range"');
+    expect(markup).toContain(">4K</button>");
 });
 
 test("Midjourney shows speed and reference policy, not resolution or a useless output count selector", () => {
     const markup = controls({ imageModel: "midjourney-v7" }).markup;
     expect(markup).toContain('aria-label="生成速度"');
-    expect(markup).toContain('value="turbo"');
+    expect(markup).toContain(">极速</button>");
     expect(markup).not.toContain('aria-label="数量"');
     expect(markup).not.toContain('aria-label="分辨率"');
     expect(markup).toContain("参考图引导");

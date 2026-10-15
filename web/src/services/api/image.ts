@@ -22,19 +22,19 @@ export type ResponseToolCall = {
 };
 
 export type ClaudeAssistantContent = Array<Record<string, unknown>>;
-export type ResponseInputMessage = AiTextMessage | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { role: "tool"; tool_call_id: string; content: string };
+export type ResponseInputMessage = AiTextMessage | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "responses_assistant"; output: Array<Record<string, unknown>> } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { role: "tool"; tool_call_id: string; content: string };
 
 export type ResponseFunctionTool = {
     type: "function";
     function: { name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 };
 
-export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent };
+export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: Array<Record<string, unknown>> };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
 type RequestOptions = { requestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; webSearch?: boolean; onToolCallStart?: (name: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
-type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
+type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "responses_assistant"; output: Array<Record<string, unknown>> } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 
 const CLAUDE_EMPTY_RESPONSE_RETRY_TOKENS = 8192;
@@ -54,15 +54,17 @@ function requestResolvedGeneration(resolved: Awaited<ReturnType<typeof resolveTo
     const count = Number(normalized.count);
     const validation = validateImageReferences(resolved.model.modelId, references || [], profile);
     if (!validation.valid) throw new Error(validation.message);
+    const actualPrompt = profile.requiresPrompt ? withSystemPrompt(config, prompt) : "";
+    validateImagePrompt(actualPrompt, profile);
     return requestQueuedImages({
         resolvedModel: resolved.model,
         modelId: modelOptionName(config.model || config.imageModel),
-        prompt: withSystemPrompt(config, prompt),
+        prompt: actualPrompt,
         count,
         operationType: options?.operationType || "image_generation",
         tool: options?.tool,
-        parameters: imageTaskParameters(config, profile),
-        draft: generationDraftInput({ ...config, ...normalized }, prompt),
+        parameters: imageTaskParameters(config, profile, { referenceCount: references?.length || 0 }),
+        draft: generationDraftInput({ ...config, ...normalized }, profile.requiresPrompt ? prompt : ""),
         references,
         requestId: options?.requestId,
         signal: options?.signal,
@@ -74,11 +76,15 @@ function requestResolvedGeneration(resolved: Awaited<ReturnType<typeof resolveTo
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     options?.signal?.throwIfAborted();
+    if (!mask && imageModelProfile(config.model || config.imageModel).kind === "midjourney-blend") {
+        return requestGeneration(config, "", { ...options, operationType: "image_generation", tool: options?.tool === "canvas-edit" ? "canvas-image" : options?.tool }, references);
+    }
     const resolved = await resolveToolConfig(config, options?.operationType || "inpaint", options?.tool);
     options?.signal?.throwIfAborted();
     config = resolved.config;
     options = { ...options, tool: resolved.toolKey };
     const profile = imageModelProfile(resolved.model.modelId, [resolved.model]);
+    if (mask && !profile.supportsMask) throw new Error("当前模型不支持蒙版，请使用支持蒙版的图像编辑模型");
     if (profile.kind === "midjourney-blend") {
         if (mask) throw new Error("当前合成模型不支持蒙版编辑");
         return requestResolvedGeneration(resolved, "", { ...options, operationType: "image_generation" }, references);
@@ -89,20 +95,22 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
     const validation = validateImageReferences(resolved.model.modelId, references, profile);
     if (!validation.valid) throw new Error(validation.message);
+    const actualPrompt = withSystemPrompt(config, buildImageReferencePromptText(prompt, references));
+    validateImagePrompt(actualPrompt, profile);
     const count = Number(normalizeImageModelSettings(config, profile).count);
     const imageOptions = readImageOptions(config.imageOptions);
-    const transparent = profile.kind === "standard" && references.length === 1 && !mask
+    const transparent = (profile.kind === "standard" || profile.kind === "quality-resolution") && references.length === 1 && !mask
         && !imageOptions.background && !imageOptions.output_format
         && await import("@/lib/image-alpha").then(module => module.imageHasTransparency(references[0]!));
     options?.signal?.throwIfAborted();
     return requestQueuedImages({
         resolvedModel: resolved.model,
         modelId: modelOptionName(config.model || config.imageModel),
-        prompt: withSystemPrompt(config, buildImageReferencePromptText(prompt, references)),
+        prompt: actualPrompt,
         count,
         operationType: options?.operationType || "inpaint",
         tool: options?.tool,
-        parameters: { ...imageTaskParameters(config, profile), ...(transparent ? { background: "transparent", output_format: "png" } : {}) },
+        parameters: { ...imageTaskParameters(config, profile, { mask: Boolean(mask), referenceCount: references.length }), ...(transparent ? { background: "transparent", output_format: "png" } : {}) },
         draft: { ...generationDraftInput({ ...config, ...normalizeImageModelSettings(config, profile) }, prompt), ...(mask ? { maskReferenceIndex: references.length } : {}) },
         references: [...references, ...(mask ? [mask] : [])],
         requestId: options?.requestId,
@@ -113,31 +121,49 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     });
 }
 
-export function imageTaskParameters(config: AiConfig, profile = imageModelProfile(config.model || config.imageModel)) {
+export function imageTaskParameters(config: AiConfig, profile = imageModelProfile(config.model || config.imageModel), options: { mask?: boolean; referenceCount?: number } = {}) {
     if (!profile.verified) return {};
     const error = imageModelSettingsError(config.size, profile);
     if (error) throw new Error(error);
     const { size, quality } = normalizeImageModelSettings(config, profile);
     const advanced = imageAdvancedParameters(config.imageOptions, profile);
+    if (profile.kind === "grok-image") return { size, resolution: "1k", ...advanced, ...(options.referenceCount ? {} : { quality }) };
+    if (profile.kind === "quality-resolution") {
+        const parameters: Record<string, unknown> = { size, quality, resolution: "1k", ...advanced };
+        // A mask is defined in the source image's pixel grid; do not reintroduce a global/default resolution.
+        if (options.mask && /^[1-9]\d*x[1-9]\d*$/.test(size)) delete parameters.resolution;
+        return parameters;
+    }
     if (profile.kind === "standard") return { size, quality, ...advanced };
     if (profile.kind === "midjourney" || profile.kind === "midjourney-blend") return { size, midjourneySpeed: quality, ...advanced };
     return { size, resolution: quality, ...advanced };
 }
 
 export async function requestBatchEdit(config: AiConfig, prompt: string, files: Array<{ file: File; title: string }>, options?: { signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+    if (files.length !== 1) throw new Error("每次只能处理 1 张图片，请重新选择 1 张后提交。");
     const resolved = await resolveToolConfig(config, "batch_image", "canvas-batch");
     config = resolved.config;
     const profile = imageModelProfile(resolved.model.modelId, [resolved.model]);
+    const actualPrompt = withSystemPrompt(config, prompt);
+    validateImagePrompt(actualPrompt, profile);
+    for (const { file, title } of files) {
+        const validation = validateImageReferences(resolved.model.modelId, [{ id: title, name: title, dataUrl: "", bytes: file.size, type: file.type }], profile);
+        if (!validation.valid) throw new Error(validation.message);
+    }
     return requestQueuedImageBatch({
         resolvedModel: resolved.model,
         modelId: modelOptionName(config.model || config.imageModel),
-        prompt: withSystemPrompt(config, prompt),
-        parameters: imageTaskParameters(config, profile),
+        prompt: actualPrompt,
+        parameters: imageTaskParameters(config, profile, { referenceCount: 1 }),
         files,
         signal: options?.signal,
         onSubmitted: options?.onSubmitted,
         onProgress: options?.onProgress,
     });
+}
+
+function validateImagePrompt(prompt: string, profile: ReturnType<typeof imageModelProfile>) {
+    if (profile.kind === "grok-image" && (!prompt.trim() || Array.from(prompt.trim()).length > 8000)) throw new Error("当前模型的提示词不能为空，且最多 8000 字符（包括系统提示词与参考图说明）。");
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
@@ -197,7 +223,8 @@ function normalizeClaudeMaxTokens(value: string | undefined) {
     return Number.isFinite(parsed) ? Math.max(256, Math.min(16_384, parsed)) : 2048;
 }
 
-export function toolResponseToInput(result: Pick<ToolResponseResult, "toolCalls" | "claudeAssistantContent">): ResponseInputMessage[] {
+export function toolResponseToInput(result: Pick<ToolResponseResult, "toolCalls" | "claudeAssistantContent" | "responsesOutputItems">): ResponseInputMessage[] {
+    if (result.responsesOutputItems) return [{ type: "responses_assistant", output: result.responsesOutputItems }];
     if (result.claudeAssistantContent) return [{ type: "claude_assistant", content: result.claudeAssistantContent }];
     return result.toolCalls.map((call) => ({ type: "function_call", call_id: call.id, name: call.function.name, arguments: call.function.arguments, ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {}) }));
 }
@@ -281,6 +308,7 @@ function withSystemMessage<T extends ResponseInputMessage>(config: AiConfig, mes
 
 function toResponseInput(messages: ResponseInputMessage[]): ResponseInputItem[] {
     return messages.flatMap((message): ResponseInputItem[] => {
+        if ("type" in message && message.type === "responses_assistant") return [message];
         if ("type" in message && message.type === "claude_assistant") return [{ type: "claude_assistant", content: message.content }];
         if ("type" in message) return [{ type: "function_call", call_id: message.call_id, name: message.name, arguments: message.arguments, ...(message.thoughtSignature ? { thoughtSignature: message.thoughtSignature } : {}) }];
         if (message.role === "tool") return [{ type: "function_call_output", call_id: message.tool_call_id, output: message.content }];

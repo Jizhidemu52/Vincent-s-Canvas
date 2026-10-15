@@ -14,7 +14,8 @@ export function compatibleToolModels(tool: ToolApiConfiguration, models: ServerM
     return models.filter((model) => {
         const provider = providers.find((item) => item.id === model.providerId);
         const workflow = model.workflowConfigId ? workflows.find((item) => item.id === model.workflowConfigId) : undefined;
-        return model.enabled && tool.capabilities.some((capability) => model.capabilities.includes(capability))
+        return model.enabled && (tool.toolKey !== "midjourney-blend" || model.modelId === "midjourney-blend")
+            && tool.capabilities.some((capability) => model.capabilities.includes(capability))
             && provider?.enabled && (provider.hasCredentials || provider.protocol === "comfyui" || provider.protocol === "custom")
             && (!model.workflowConfigId || workflow?.enabled);
     });

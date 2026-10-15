@@ -6,6 +6,8 @@ import { observeCanvasImageTask, type CanvasImageTaskBinding } from "@/lib/canva
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { QueuedTaskFailedError, QueuedTaskPausedError, type QueuedTask } from "@/services/api/generation-tasks";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { imageModelProfile } from "@/lib/image-model-settings";
+import { defaultConfig } from "@/stores/use-config-store";
 
 // Execute the actual page hook with explicit React/store/I/O boundaries, without a DOM
 // or global module mocks. The production task observer and sizing logic stay real.
@@ -89,6 +91,7 @@ function harness(options: {
         "@/types/canvas": { CanvasNodeType },
         "@/lib/canvas/canvas-image-task-recovery": { observeCanvasImageTask },
         "@/lib/canvas/canvas-node-size": { fitNodeSize },
+        "@/lib/image-model-settings": { imageModelProfile },
         "@/services/api/generation-tasks": {
             QueuedTaskFailedError, QueuedTaskPausedError,
             getQueuedTask: (id: string, signal: AbortSignal) => query({ kind: "task", id, signal }),
@@ -177,7 +180,7 @@ describe("lazy canvas image task runtime", () => {
         const requests: Array<{ toolKey?: string; edit: boolean }> = [];
         const h = harness({ imageRequest: async (toolKey, editing) => { requests.push({ toolKey, edit: editing }); return [{ id: "generated", dataUrl: "blob:generated" }]; } });
         const options = await h.action().createOptions("result-node", new AbortController(), undefined, tool);
-        await options.generate({} as never, "prompt", edit ? [{ id: "reference", name: "reference.png", dataUrl: "blob:reference" }] : undefined);
+        await options.generate(defaultConfig, "prompt", edit ? [{ id: "reference", name: "reference.png", type: "image/png", dataUrl: "blob:reference" }] : undefined);
         expect(requests).toEqual([{ toolKey: expected, edit }]);
         h.unmount();
     });

@@ -82,7 +82,7 @@ export function PhotoColorSampler({ src, onPick, disabled = false }: {
         setMessage("");
     };
 
-    return <div className="cs-photo-sampler" aria-busy={!ready && !error}>
+    return <div data-usage-board="photo-color-picker" className="cs-photo-sampler" aria-busy={!ready && !error}>
         <div className="cs-photo-sampler-heading">从衣服照片取色</div>
         {ready && canvas && <button type="button" className="cs-photo-sampler-image" disabled={disabled}
             aria-label="衣服照片取色" aria-describedby={helpId} onClick={click} onKeyDown={move}>

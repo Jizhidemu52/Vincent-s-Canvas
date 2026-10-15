@@ -72,6 +72,17 @@ async function expectMaskMultipart(body: RequestInit["body"]) {
 }
 
 describe("image edit mask wire contract", () => {
+  test("resuming an async image cannot dispatch a new paid request after provider or workflow changes", async () => {
+    for (const patch of [
+      { protocol: "openai", upstream_task_id: "already-paid", upstream_submission_started_at: "started" },
+      { protocol: "openai", upstream_task_id: null, upstream_submission_started_at: "unknown" },
+      { protocol: "apimart", workflow_config_id: "new-workflow", upstream_task_id: "already-paid", upstream_submission_started_at: "started" },
+    ]) {
+      const { api, submissions } = harness();
+      await expect(api.executeProvider({ ...workerTask, ...patch }, timing)).rejects.toThrow("渠道配置已变更");
+      expect(submissions).toHaveLength(0);
+    }
+  });
   test("image_generation carrying references uses edits in Worker just as in demo", async () => {
     const actualSources = sources.slice(0, 2);
     const { api, submissions } = harness({ loadSourceAssets: async () => actualSources });

@@ -41,7 +41,7 @@ const batchSchema = base.extend({
       }),
     )
     .min(1)
-    .max(200),
+    .max(1, "每次只能生成 1 张图片，请分别发起独立任务"),
 });
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
@@ -89,12 +89,12 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
         response.status(404).json({ error: "NOT_FOUND", message: "任务不存在" });
         return;
       }
-      const canPollOriginalVideo = task.operationType === "video_generation" && Boolean(task.upstreamTaskId);
+      const canPollOriginalTask = Boolean(task.upstreamTaskId);
       let recovered = false;
-      if (task.status === "waiting" && ((!task.submissionStartedAt && task.attempts === 0) || canPollOriginalVideo)) {
+      if (task.status === "waiting" && ((!task.submissionStartedAt && task.attempts === 0) || canPollOriginalTask)) {
         await cache.zAdd("tasks:queue", { score: queueScore(task.priority, new Date(task.queuedAt).getTime()), value: task.id });
         recovered = true;
-      } else if (task.status === "paused" && canPollOriginalVideo) {
+      } else if (task.status === "paused" && canPollOriginalTask) {
         recovered = Boolean(await transitionTask(db, cache, task.id, "resume", false));
         if (recovered) task.status = "waiting";
       }

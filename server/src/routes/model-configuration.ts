@@ -10,6 +10,7 @@ import { assertValidModelReplacement } from "../prompt-templates";
 import type { AuthenticatedRequest } from "../types";
 import { presentAdminModel, presentPublicModel, selectCreativeModels } from "../model-presentation";
 import { toolDefinitions } from "../../../shared/feature-catalog";
+import { createMarkImageProviderRouter } from "./mark-image-provider";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
@@ -27,6 +28,7 @@ const modelSelect = `m.id,m.public_number AS "publicNumber",m.provider_id AS "pr
 export function createModelConfigurationRouter(db: Database, config: AppConfig) {
     const router = Router();
     router.use(requireRole("super_admin"));
+    router.use("/mark-images", createMarkImageProviderRouter(db, config));
 
     router.get("/providers", async (_request, response, next) => {
         try { response.json({ providers: (await db.query(`SELECT ${providerSelect} FROM providers ORDER BY name`)).rows }); }
@@ -115,8 +117,11 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
             const input = toolConfigurationInput.parse(request.body);
             const definition = toolDefinitions.find((item) => item.toolKey === selectedTool)!;
             if (input.modelConfigId) {
-                const model = await db.query<{ capabilities: string[] }>(`SELECT m.capabilities FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [input.modelConfigId]);
+                const model = await db.query<{ modelId: string; capabilities: string[] }>(`SELECT m.model_id AS "modelId",m.capabilities FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [input.modelConfigId]);
                 if (!model.rows[0]) { response.status(400).json({ error: "MODEL_NOT_FOUND", message: "所选模型不存在" }); return; }
+                if (selectedTool === "midjourney-blend" && model.rows[0].modelId !== "midjourney-blend") {
+                    response.status(400).json({ error: "TOOL_MODEL_MISMATCH", message: "MJ 多图融合板块仅支持 Midjourney Blend 模型" }); return;
+                }
                 if (!definition.capabilities.some((capability) => model.rows[0]!.capabilities.includes(capability))) {
                     response.status(400).json({ error: "MODEL_CAPABILITY_MISMATCH", message: `所选模型不支持${definition.label}` }); return;
                 }
@@ -180,7 +185,7 @@ export function createPublicModelRouter(db: Database) {
     router.get("/", async (request, response, next) => {
         try {
             const [models, prices, tools] = await Promise.all([
-                db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.protocol,p.name AS "providerName",p.base_url AS "providerBaseUrl" FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.enabled=true AND p.enabled=true AND (m.workflow_config_id IS NULL OR w.enabled=true) ORDER BY m.public_number NULLS LAST,m.name`),
+                db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.id AS "providerId",p.protocol,p.name AS "providerName",p.base_url AS "providerBaseUrl" FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.enabled=true AND p.enabled=true AND (m.workflow_config_id IS NULL OR w.enabled=true) ORDER BY m.public_number NULLS LAST,m.name`),
                 db.query(`SELECT operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version FROM pricing_rule_versions WHERE status='published' ORDER BY operation_type`),
                 db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.enabled,
                     t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion"

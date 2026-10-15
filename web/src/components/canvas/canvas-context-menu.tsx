@@ -39,7 +39,7 @@ function MenuButton({ icon, label, onClick, danger = false }: { icon: ReactNode;
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
-        <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:opacity-80" style={{ color: danger ? "#f87171" : theme.node.text }} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick?.(); }}>
+        <button data-usage-control={`canvas-tool.${({ Duplicate: "duplicate", Delete: "delete", "重命名": "rename", "创建款式组": "group", "生成": "generate" } as Record<string, string>)[label] || "more"}`} type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:opacity-80" style={{ color: danger ? "#f87171" : theme.node.text }} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick?.(); }}>
             {icon}
             <span>{label}</span>
         </button>

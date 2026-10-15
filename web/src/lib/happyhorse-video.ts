@@ -1,4 +1,5 @@
-import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { videoParameterModelId } from "@/lib/video-model-parameters";
 
 export type HappyHorseMode = "text" | "first-frame" | "reference" | "edit";
 
@@ -13,7 +14,7 @@ export const happyHorseRatios = ["16:9", "9:16", "1:1", "4:3", "3:4"] as const;
 
 export function isHappyHorseVideoConfig(config: AiConfig | Pick<AiConfig, "model" | "videoModel" | "baseUrl">) {
     const requestConfig = "channels" in config ? resolveModelRequestConfig(config, config.model || config.videoModel) : config;
-    return modelOptionName(requestConfig.model || requestConfig.videoModel).toLowerCase() === "happyhorse-1.1";
+    return videoParameterModelId(requestConfig).toLowerCase() === "happyhorse-1.1";
 }
 
 export function normalizeHappyHorseRatio(value: string) {

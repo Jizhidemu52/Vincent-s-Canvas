@@ -1,7 +1,9 @@
 import { listAccounts, listAuditLogs, listDepartments } from "@/services/api/admin-accounts";
 import { listAdminHistory } from "@/services/api/task-history";
 
-const adminTabs = ["accounts", "groups", "performance", "modules", "pricing", "api", "history", "projects", "batch", "audit", "integrations"];
+export const markPlatformAdminTabLabel = "APIMart 平台";
+
+const adminTabs = ["accounts", "groups", "performance", "modules", "pricing", "api", "usage-analysis", "mark-images", "history", "projects", "batch", "audit", "integrations"];
 
 export function resolveAdminTab(value: string | null, isSuperAdmin: boolean, performanceEnabled: boolean) {
     const tab = ["providers", "workflows", "models"].includes(value || "") ? "api" : value || "accounts";

@@ -9,6 +9,7 @@ import { flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canv
 import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import type { ToolKey } from "../../../../shared/feature-catalog";
+import { imageModelProfile } from "@/lib/image-model-settings";
 
 export type CanvasImageTaskScope = { projectId: string; mounted: boolean; recoveries: Map<string, AbortController> };
 type RecoveryOutput = { nodeId: string; status: "success" | "failed"; url?: string; storageKey?: string; error?: string };
@@ -90,6 +91,8 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 assertCurrent,
                 async generate(config: Parameters<typeof requestGeneration>[0], prompt: string, references?: Parameters<typeof requestEdit>[2], mask?: Parameters<typeof requestEdit>[3], edit = Boolean(references?.length || mask)) {
                     assertCurrent();
+                    if (!mask && imageModelProfile(config.model || config.imageModel).kind === "midjourney-blend") { edit = false; prompt = ""; }
+                    config = { ...config, count: "1", canvasImageCount: "1" };
                     const requestOptions = { ...options, tool: toolKey || (edit ? "canvas-edit" : "canvas-image") };
                     return options.receiveResult(edit
                         ? requestEdit(config, prompt, references || [], mask, requestOptions)

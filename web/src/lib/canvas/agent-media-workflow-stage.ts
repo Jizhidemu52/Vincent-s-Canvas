@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import type { CanvasAgentOp } from "@/lib/canvas/canvas-agent-ops";
+import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { CanvasNodeType, type CanvasAgentMediaWorkflow, type CanvasNodeData } from "@/types/canvas";
 
 export function buildAgentMediaWorkflowStageOps(workflow: CanvasAgentMediaWorkflow, stage: "image" | "video", nodes: CanvasNodeData[], selectedReferenceNodeId?: string) {
@@ -11,6 +12,7 @@ export function buildAgentMediaWorkflowStageOps(workflow: CanvasAgentMediaWorkfl
     const textSize = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
     const configSize = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
     const model = stage === "image" ? workflow.imageModel : workflow.videoModel;
+    const imageSettings = stage === "image" ? normalizeImageModelSettings({ size: workflow.aspectRatio, quality: workflow.imageQuality || "", count: String(workflow.imageCount) }, imageModelProfile(model)) : undefined;
     const referenceNodeIds =
         stage === "image"
             ? workflow.referenceNodeIds.filter((nodeId) => nodes.some((node) => node.id === nodeId && node.type === CanvasNodeType.Image && Boolean(node.metadata?.content)))
@@ -42,7 +44,7 @@ export function buildAgentMediaWorkflowStageOps(workflow: CanvasAgentMediaWorkfl
                 model,
                 status: "idle",
                 size: workflow.aspectRatio,
-                ...(stage === "image" ? { count: workflow.imageCount } : { seconds: workflow.videoSeconds }),
+                ...(stage === "image" ? { count: 1, quality: workflow.imageQuality || imageSettings!.quality, imageOptions: workflow.imageOptions || "" } : { seconds: workflow.videoSeconds }),
             },
         },
         { type: "connect_nodes", fromNodeId: textId, toNodeId: configId },

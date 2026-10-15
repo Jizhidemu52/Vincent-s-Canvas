@@ -4,7 +4,7 @@ import ts from "typescript";
 
 import { buildChatRequestMessages, type ChatHistoryMessage } from "@/lib/chat-context";
 import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
-import { preferredChatImageModel, resolveChatImageQuality } from "@/pages/chat/image-quality";
+import { chatImageRequestOptions, preferredChatImageModel, resolveChatImageQuality } from "@/pages/chat/image-quality";
 
 function memoryStore() {
     const values = new Map<string, unknown>();
@@ -120,7 +120,7 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
     };
     const bindings = {
         sessionsReady: ready, draft: memory.draft, attachments: memory.attachments, isSending: false, readingAttachments: false,
-        activeSession: session, selectedModel: creativeModelId, selected: creativeModelId ? { modelId: creativeModelId, capabilities: ["chat"] } : undefined, imageModels, preferredChatImageModel, resolveChatImageQuality, config: {} as Record<string, string>,
+        activeSession: session, selectedModel: creativeModelId, selected: creativeModelId ? { modelId: creativeModelId, capabilities: ["chat"] } : undefined, imageModels, preferredChatImageModel, resolveChatImageQuality, chatImageRequestOptions, config: {} as Record<string, string>,
         creativeChat, creativeModelId, sendingRef: { current: false }, placingImageRef: { current: false }, activeSendRef: { current: null as { controller: AbortController; submitted: boolean } | null },
         createClientId: () => `message-${++ids}`, buildChatRequestMessages, sessionsRef,
         preparingMessageRef: { current: false }, loadedStorageKeyRef: { current: "user-a" }, storageKey: "user-a",

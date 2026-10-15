@@ -45,7 +45,22 @@ test("APIMart Gemini, GPT and MJ options remain typed and image search implies t
 });
 
 test("invalid numeric, boolean and metadata input is rejected instead of silently discarded", () => {
-    for (const value of [{ seed: "-1" }, { chaos: "101" }, { repeat: "1" }, { tile: "yes" }, { metadata: "[]" }, { metadata: "no" }]) expect(() => imageAdvancedParameters(options(value), { kind: "midjourney" })).toThrow();
+    for (const value of [{ seed: "-1" }, { chaos: "101" }, { stop: "9" }, { tile: "yes" }, { metadata: "[]" }, { metadata: "no" }]) expect(() => imageAdvancedParameters(options(value), { kind: "midjourney" })).toThrow();
+});
+
+test("MJ single-image settings omit repeat while retaining every other advanced field", () => {
+    const profile = imageModelProfile("midjourney", []);
+    expect(imageOptionFields(profile).map(field => field.key)).toEqual([
+        "nsfw_check", "quality", "version", "style", "seed", "negative_prompt", "stylize", "chaos", "weird",
+        "tile", "niji", "raw", "draft", "hd", "iw", "cw", "sw", "cref", "sref", "dref", "dw", "stop", "extra", "metadata",
+    ]);
+    const imageOptions = options({ repeat: "40", seed: "42", stop: "50", metadata: '{"job":"cloth"}' });
+    expect(imageAdvancedParameters(imageOptions, profile)).toEqual({ seed: 42, stop: 50, metadata: { job: "cloth" } });
+    const html = renderToStaticMarkup(<ImageSettingsPanel profile={profile} config={{ ...defaultConfig, model: "midjourney", count: "9", imageOptions }} theme={canvasThemes.light} onConfigChange={() => {}} />);
+    expect(html).not.toContain("repeat");
+    expect(html).not.toContain("重复生成");
+    expect(html).toContain("1 个任务");
+    for (const label of ["随机种子", "提前停止 --stop", "其他原生参数", "任务附加信息 JSON"]) expect(html).toContain(label);
 });
 
 test("shared settings renders real quality names and all documented advanced fields", () => {

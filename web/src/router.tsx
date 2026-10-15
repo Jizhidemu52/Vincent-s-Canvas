@@ -57,7 +57,7 @@ function moduleRoute(Page: RoutePage, moduleKey: ModuleKey | ((search: string) =
 
 function imageModule(search: string): ModuleKey {
     const tool = new URLSearchParams(search).get("tool");
-    return tool === "detail-enhance" || tool === "image-edit" || tool === "angle-control" || tool === "seamless-stitch" ? tool : "image";
+    return tool === "detail-enhance" || tool === "image-edit" || tool === "angle-control" || tool === "seamless-stitch" || tool === "midjourney-blend" ? tool : "image";
 }
 
 function canvasModule(search: string): ModuleKey {

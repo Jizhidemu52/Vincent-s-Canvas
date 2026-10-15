@@ -3,9 +3,12 @@ import { readFileSync } from "node:fs";
 import React from "react";
 import ts from "typescript";
 import { imageModelProfile } from "@/lib/image-model-settings";
-import { chatImageQualitySettings, preferredChatImageModel, resolveChatImageQuality } from "@/pages/chat/image-quality";
+import { modelLabelWithUsage } from "@/lib/model-picker-options";
+import { chatImageQualitySettings, chatImageRequestOptions, preferredChatImageModel, resolveChatImageQuality } from "@/pages/chat/image-quality";
 import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { defaultConfig } from "@/stores/use-config-store";
+import { imageTaskParameters } from "@/services/api/image";
 
 const originalModels = useBusinessConfigStore.getState().models;
 afterEach(() => useBusinessConfigStore.setState({ models: originalModels }));
@@ -14,14 +17,26 @@ const models = [
     { id: "pixel-model", modelId: "pixel-model", name: "像素模型", imageParameterProfile: "pixel", capabilities: ["generate", "edit"] },
     { id: "resolution-model", modelId: "resolution-model", name: "分辨率模型", imageParameterProfile: "resolution", capabilities: ["generate", "edit"] },
     { id: "speed-model", modelId: "speed-model", name: "速度模型", imageParameterProfile: "speed", capabilities: ["generate"] },
+    { id: "mark-flare-id", modelId: "mark-flare-id", name: "aplmart-gpt2.5-flare", imageParameterProfile: "quality-resolution", capabilities: ["generate", "edit"] },
+    { id: "mark-sunburst-id", modelId: "mark-sunburst-id", name: "aplmart-gpt2.5-sunburst", imageParameterProfile: "quality-resolution", capabilities: ["generate", "edit"] },
+    { id: "mark-nano-id", modelId: "mark-nano-id", name: "aplmart-nano2.1", imageParameterProfile: "resolution-1k", capabilities: ["generate", "edit"] },
 ] as any[];
 const source = readFileSync(new URL("../src/pages/chat/index.tsx", import.meta.url), "utf8");
 const ast = ts.createSourceFile("chat.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let sendExpression: ts.Expression | undefined;
 let selectExpression: ts.JsxElement | undefined;
+let resolutionExpression: ts.JsxElement | undefined;
+let modelExpression: ts.JsxElement | undefined;
 function visit(node: ts.Node) {
     if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "send") sendExpression = node.initializer;
-    if (ts.isJsxElement(node) && node.openingElement.tagName.getText(ast) === "select" && node.openingElement.attributes.properties.some(attr => ts.isJsxAttribute(attr) && attr.name.getText(ast) === "aria-label" && attr.initializer && ts.isStringLiteral(attr.initializer) && attr.initializer.text === "图片清晰度")) selectExpression = node;
+    if (ts.isJsxElement(node) && node.openingElement.tagName.getText(ast) === "select") {
+        for (const attr of node.openingElement.attributes.properties) {
+            if (!ts.isJsxAttribute(attr) || !attr.initializer || !ts.isStringLiteral(attr.initializer)) continue;
+            if (attr.name.getText(ast) === "data-testid" && attr.initializer.text === "chat-image-quality") selectExpression = node;
+            if (attr.name.getText(ast) === "data-testid" && attr.initializer.text === "chat-image-resolution") resolutionExpression = node;
+            if (attr.name.getText(ast) === "aria-label" && attr.initializer.text === "出图模型") modelExpression = node;
+        }
+    }
     ts.forEachChild(node, visit);
 }
 visit(ast);
@@ -37,17 +52,17 @@ test("public standard models expose actual quality tiers, not invented K resolut
     expect(speed.options).toEqual([{ value: "relax", label: "模型默认" }]);
 });
 
-function sendHarness({ action = "generate", quality = "high", imageModels = models.slice(0, 1), discussion = false, planGate = Promise.resolve() } = {}) {
+function sendHarness({ action = "generate", quality = "high", resolution = undefined as string | undefined, imageModels = models.slice(0, 1), discussion = false, planGate = Promise.resolve() } = {}) {
     useBusinessConfigStore.setState({ models });
     if (!sendExpression) throw new Error("Actual send handler not found");
-    const initial = { id: "session-a", title: "会话A", imageModelId: models[0].modelId, imageQuality: quality, messages: [] as any[] };
+    const initial = { id: "session-a", title: "会话A", imageModelId: models[0].modelId, imageQuality: quality, imageResolution: resolution, messages: [] as any[] };
     const sessionsRef = { current: [initial] };
     const snapshots: any[] = [];
     const calls: any[] = [];
-    const config = { model: "chat-model", imageModel: models[0].modelId, quality: "4k" };
+    const config = { model: "chat-model", imageModel: models[0].modelId, quality: "4k", imageOptions: '{"resolution":"2k","output_format":"webp"}' };
     const bindings = {
         sessionsReady: true, draft: "只改花瓣", attachments: [], readingAttachments: false, sendingRef: { current: false }, placingImageRef: { current: false }, activeSession: initial,
-        selectedModel: "chat-model", selected: { modelId: "chat-model" }, creativeModelId: "chat-model", config, imageModels, preferredChatImageModel, resolveChatImageQuality,
+        selectedModel: "chat-model", selected: { modelId: "chat-model" }, creativeModelId: "chat-model", config, imageModels, preferredChatImageModel, resolveChatImageQuality, chatImageRequestOptions,
         activeSendRef: { current: null }, preparingMessageRef: { current: false }, loadedStorageKeyRef: { current: "user-a" }, storageKey: "user-a", sessionsRef,
         createClientId: (() => { let count = 0; return () => `message-${++count}`; })(),
         persistSessions: async (value: any[]) => { snapshots.push(structuredClone(value)); }, persistence: { clear() {} }, setIsSending() {}, setSendPhase() {}, setDraft() {}, setAttachments() {},
@@ -110,15 +125,17 @@ test("quality and image-model availability do not block a discussion", async () 
     expect(page.config.quality).toBe("4k");
 });
 
-function qualitySelect({ ready = true, sending = false, modelsLoading = false, model = models[0], pending = false } = {}) {
-    if (!selectExpression) throw new Error("Actual quality select not found");
-    const sessions = [{ id: "a", imageQuality: "high" }, { id: "b", imageQuality: "low" }];
+function qualitySelect({ ready = true, sending = false, modelsLoading = false, model = models[0], pending = false, control = "quality", bound = false, quality = "high", resolution = undefined as string | undefined } = {}) {
+    const expression = control === "resolution" ? resolutionExpression : control === "model" ? modelExpression : selectExpression;
+    if (!expression) throw new Error("Actual image select not found");
+    const sessions: any[] = [{ id: "a", imageQuality: quality, ...(resolution ? { imageResolution: resolution } : {}) }, { id: "b", imageQuality: "low" }];
     const bindings = {
-        React, imageQualitySettings: chatImageQualitySettings(imageModelProfile(model?.modelId || "", models), sessions[0]!.imageQuality),
+        React, imageQualitySettings: chatImageQualitySettings(imageModelProfile(model?.modelId || "", models), sessions[0]!.imageQuality, sessions[0]!.imageResolution),
+        imageModels: models, imageBinding: bound ? { modelConfigId: model?.id } : undefined, resolveChatImageQuality, modelLabelWithUsage,
         sessionsReady: ready, modelsLoading, isSending: sending, pendingImageMessage: pending, preferredImageModel: model,
         activeSession: sessions[0], updateSession: (id: string, update: (value: any) => any) => { const index = sessions.findIndex(value => value.id === id); sessions[index] = update(sessions[index]); },
     };
-    const code = ts.transpileModule(`exports.select = ${selectExpression.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React } }).outputText;
+    const code = ts.transpileModule(`exports.select = ${expression.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React } }).outputText;
     const exports = {} as { select: React.ReactElement<any> };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
     return { select: exports.select, sessions };
@@ -140,4 +157,80 @@ test("the actual quality selector changes only the active session and persists d
 test("the selector is disabled before hydration, while sending or recovering, with no image model, or for speed-only models", () => {
     expect(qualitySelect().select.props.disabled).toBe(false);
     for (const options of [{ ready: false }, { sending: true }, { modelsLoading: true }, { pending: true }, { model: null }, { model: models[3] }]) expect(qualitySelect(options).select.props.disabled).toBe(true);
+});
+
+test("Mark GPT exposes independent quality and resolution while Nano exposes only 1K / 2K / 4K", () => {
+    for (const model of models.slice(4, 6)) {
+        const settings = chatImageQualitySettings(imageModelProfile(model.modelId, models), "xhigh", "4k");
+        expect(settings).toMatchObject({ quality: "xhigh", resolution: "4k", independentResolution: true, label: "图片质量" });
+        expect(settings.options.map(option => option.value)).toEqual(["auto", "low", "medium", "high", "xhigh", "max"]);
+        expect(settings.resolutionOptions.map(option => option.value)).toEqual(["1k", "2k", "4k"]);
+    }
+    const nano = chatImageQualitySettings(imageModelProfile(models[6].modelId, models), "2k", "4k");
+    expect(nano).toMatchObject({ quality: "2k", resolution: undefined, independentResolution: false, label: "清晰度" });
+    expect(nano.options.map(option => option.value)).toEqual(["1k", "2k", "4k"]);
+    expect(nano.resolutionOptions).toEqual([]);
+});
+
+test.each(["generate", "edit"])("Mark GPT %s snapshots both session parameters into the actual task builder", async action => {
+    const page = sendHarness({ action, quality: "xhigh", resolution: "4k", imageModels: [models[4]] });
+    await page.send();
+    expect(page.calls).toHaveLength(1);
+    expect(JSON.parse(page.calls[0].imageOptions)).toEqual({ resolution: "4k", output_format: "webp" });
+    expect(imageTaskParameters({ ...defaultConfig, ...page.calls[0] })).toMatchObject({ quality: "xhigh", resolution: "4k" });
+    expect(page.config.imageOptions).toBe('{"resolution":"2k","output_format":"webp"}');
+    expect(page.snapshots[1][0]).toMatchObject({ imageQuality: "xhigh", imageResolution: "4k" });
+    expect(page.snapshots[1][0].messages.at(-1).pendingImageTask).toMatchObject({ quality: "xhigh", resolution: "4k" });
+    expect(page.sessionsRef.current[0]!.messages.at(-1).generatedImages[0]).toMatchObject({ quality: "xhigh", resolution: "4k" });
+});
+
+test("Nano resolution remains the primary setting and independent GPT resolution never leaks to another model", async () => {
+    const nano = sendHarness({ quality: "2k", resolution: "4k", imageModels: [models[6]] });
+    await nano.send();
+    expect(nano.calls).toHaveLength(1);
+    expect(JSON.parse(nano.calls[0].imageOptions)).not.toHaveProperty("resolution");
+    const nanoParameters = imageTaskParameters({ ...defaultConfig, ...nano.calls[0] });
+    expect(nanoParameters).toMatchObject({ resolution: "2k" });
+    expect(nanoParameters).not.toHaveProperty("quality");
+    expect(nano.sessionsRef.current[0].imageResolution).toBeUndefined();
+
+    const standard = sendHarness({ quality: "high", resolution: "4k" });
+    await standard.send();
+    expect(JSON.parse(standard.calls[0].imageOptions)).not.toHaveProperty("resolution");
+    expect(imageTaskParameters({ ...defaultConfig, ...standard.calls[0] })).not.toHaveProperty("resolution");
+});
+
+test("resolution uses the send snapshot, not a later session mutation during planning", async () => {
+    const gate = Promise.withResolvers<void>();
+    const page = sendHarness({ quality: "high", resolution: "4k", imageModels: [models[5]], planGate: gate.promise });
+    const pending = page.send();
+    await Promise.resolve();
+    page.sessionsRef.current[0] = { ...page.sessionsRef.current[0]!, imageResolution: "1k" };
+    gate.resolve();
+    await pending;
+    expect(JSON.parse(page.calls[0].imageOptions).resolution).toBe("4k");
+});
+
+test("the actual Mark resolution selector changes only this session and survives storage reload", async () => {
+    const page = qualitySelect({ model: models[4], control: "resolution", resolution: "2k" });
+    expect(page.select.props.value).toBe("2k");
+    page.select.props.onChange({ target: { value: "4k" } });
+    expect(page.sessions[0]).toMatchObject({ imageModelId: models[4].modelId, imageQuality: "high", imageResolution: "4k" });
+    expect(page.sessions[1]).toEqual({ id: "b", imageQuality: "low" });
+    const data = new Map<string, any>();
+    const storage = createChatSessionStorage({ getItem: async <T,>(key: string) => structuredClone(data.get(key)) as T | null, setItem: async <T,>(key: string, value: T) => { data.set(key, structuredClone(value)); return value; } });
+    await storage.save("owner", page.sessions);
+    expect(await storage.load("owner", () => null)).toEqual(page.sessions);
+});
+
+test("the actual image-model picker resets incompatible settings and respects backend binding", () => {
+    useBusinessConfigStore.setState({ models });
+    const page = qualitySelect({ model: models[4], control: "model", resolution: "4k" });
+    page.select.props.onChange({ target: { value: models[6].modelId } });
+    expect(page.sessions[0]).toMatchObject({ imageModelId: models[6].modelId, imageQuality: "1k", imageResolution: undefined });
+    expect(page.sessions[1]).toEqual({ id: "b", imageQuality: "low" });
+    expect(qualitySelect({ control: "model", bound: true }).select.props.disabled).toBe(true);
+    expect(qualitySelect({ control: "model", bound: false }).select.props.disabled).toBe(false);
+    expect(qualitySelect({ model: models[4] }).select.props["aria-label"]).toBe("图片质量");
+    expect(qualitySelect({ model: models[6] }).select.props["aria-label"]).toBe("图片清晰度");
 });
