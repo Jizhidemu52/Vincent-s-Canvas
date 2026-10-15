@@ -1,0 +1,36 @@
+.sc-dialog { color: var(--foreground); }
+.sc-intro { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 15px; margin: 15px 0; font-size: 12px; color: var(--muted-foreground); }
+.sc-intro p { margin: 0; }
+.sc-filters { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr); gap: 12px; }
+.sc-filters label { display: grid; gap: 6px; font-size: 12px; }
+.sc-match-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 14px 0; }
+.sc-match-controls label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.sc-match-controls input { width: 102px; font-variant-numeric: tabular-nums; }
+.sc-match-controls > div { display: flex; gap: 6px; }
+.sc-match-controls > span { font-size: 11px; color: var(--muted-foreground); padding-bottom: 8px; }
+.sc-dialog button:disabled { opacity: .45; cursor: not-allowed; }
+.sc-dialog button:focus-visible, .sc-dialog input:focus-visible, .sc-dialog select:focus-visible { outline: 2px solid var(--wb-accent, var(--foreground)); outline-offset: 2px; }
+.sc-photo { border-top: 1px solid var(--border); padding-top: 10px; margin: 12px 0; font-size: 12px; }
+.sc-photo summary { cursor: pointer; color: var(--muted-foreground); }
+.sc-status { min-height: 27px; display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--muted-foreground); }
+.sc-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 9px; max-height: 340px; overflow-y: auto; padding: 3px; min-height: 150px; scrollbar-width: thin; }
+.sc-card { display: flex; flex-direction: column; text-align: left; min-width: 0; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; padding: 0 0 7px; background: var(--card); cursor: pointer; color: var(--foreground); }
+.sc-card:hover { border-color: var(--muted-foreground); }
+.sc-card[aria-pressed=true] { outline: 2px solid var(--foreground); outline-offset: 0; }
+.sc-swatch { height: 59px; width: 100%; display: block; border-bottom: 1px solid var(--border); margin-bottom: 7px; flex-shrink: 0; }
+.sc-card-name { padding: 0 7px; font-size: 11px; font-weight: 600; width: 100%; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.sc-card-library { padding: 1px 7px; font-size: 9px; color: var(--muted-foreground); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; width: 100%; }
+.sc-card-values { display: flex; flex-wrap: wrap; gap: 3px 6px; padding: 0 7px; font-size: 9px; font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+.sc-pagination { display: flex; justify-content: center; align-items: center; gap: 15px; padding: 12px 0; font-size: 11px; color: var(--muted-foreground); }
+.sc-empty { grid-column: 1 / -1; padding: 40px 10px; text-align: center; font-size: 12px; color: var(--muted-foreground); }
+.sc-selection { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 13px 0; display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.sc-comparison { display: block; width: 36px; height: 36px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 6px; }
+.sc-selection > div { display: flex; flex-wrap: wrap; gap: 3px 12px; align-items: center; }
+.sc-selection > div span { color: var(--muted-foreground); }
+.sc-selection a { font-size: 11px; text-decoration: underline; color: var(--foreground); }
+.sc-note { color: var(--muted-foreground); font-size: 11px; line-height: 1.7; margin: 10px 0 0; }
+.sc-error { color: var(--destructive); font-size: 12px; }
+.sc-footer { display: flex; justify-content: space-between; gap: 12px; align-items: center; text-align: left; }
+.sc-footer > span { color: var(--muted-foreground); font-size: 11px; }
+.sc-footer > div { display: flex; gap: 8px; flex-shrink: 0; }
+@media (max-width: 600px) { .sc-filters { grid-template-columns: 1fr; } .sc-grid { grid-template-columns: repeat(3, minmax(0,1fr)); max-height: 280px; } .sc-footer { flex-direction: column; align-items: stretch; } .sc-footer > div { justify-content: flex-end; } .sc-selection { flex-wrap: wrap; } }

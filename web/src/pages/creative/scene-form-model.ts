@@ -1,4 +1,5 @@
 import type { ReferenceImage } from "@/types/image";
+import type { StandardColorSelection } from "@/lib/standard-colors";
 
 export type SceneSlotId = "primary" | "secondary";
 export type SceneSlot = { id: SceneSlotId; label: string; hint: string; required: boolean };
@@ -16,6 +17,7 @@ export type SceneForm = {
     preserve: string;
     colorMode: "smart" | "specific" | "reference";
     colors: string[];
+    colorSelections?: Array<StandardColorSelection | null>;
     colorRegion: string;
     colorMood: string;
     backStructure: string;
@@ -137,6 +139,56 @@ export function isSceneHexColor(value: string): boolean {
     return /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(value.trim());
 }
 
+function normalizedSceneHex(value: string): string | null {
+    if (!isSceneHexColor(value)) return null;
+    const hex = value.trim().toUpperCase();
+    return hex.length === 4 ? `#${hex.slice(1).split("").map(part => part + part).join("")}` : hex;
+}
+
+/** A manual HEX edit must not keep claiming the identity of a previously chosen standard. */
+export function getSceneColorSelection(form: SceneForm, index: number): StandardColorSelection | null {
+    const selection = form.colorSelections?.[index];
+    const color = form.colors[index];
+    if (!selection || typeof color !== "string" || typeof selection.hex !== "string") return null;
+    const hex = normalizedSceneHex(color);
+    if (!hex || normalizedSceneHex(selection.hex) !== hex) return null;
+    if (![selection.id, selection.name, selection.library, selection.sourceUrl, selection.source, selection.datasetVersion].every(value => typeof value === "string")) return null;
+    return selection.id.trim() && selection.name.trim() && selection.library.trim() ? selection : null;
+}
+
+export function setSceneColor(form: SceneForm, index: number, hex: string, selection?: StandardColorSelection): SceneForm {
+    if (!Number.isInteger(index) || index < 0 || index >= form.colors.length) return form;
+    const colors = form.colors.map((color, at) => at === index ? hex : color);
+    const colorSelections = form.colors.map((_, at) => at === index ? selection ? { ...selection } : null : getSceneColorSelection(form, at));
+    const next = { ...form, colors, colorSelections };
+    colorSelections[index] = getSceneColorSelection(next, index);
+    return next;
+}
+
+export function removeSceneColor(form: SceneForm, index: number): SceneForm {
+    if (!Number.isInteger(index) || index < 0 || index >= form.colors.length) return form;
+    return {
+        ...form,
+        colors: form.colors.filter((_, at) => at !== index),
+        colorSelections: form.colors.map((_, at) => getSceneColorSelection(form, at)).filter((_, at) => at !== index),
+    };
+}
+
+export function addSceneColor(form: SceneForm, hex = "#808080"): SceneForm {
+    if (form.colors.length >= 6) return form;
+    return { ...form, colors: [...form.colors, hex], colorSelections: [...form.colors.map((_, at) => getSceneColorSelection(form, at)), null] };
+}
+
+/** Capture the palette and source labels independently for queued writes and generation history. */
+export function cloneSceneForm(form: SceneForm): SceneForm {
+    return { ...form, colors: [...form.colors], ...(form.colorSelections ? {
+        colorSelections: form.colors.map((_, index) => {
+            const selection = getSceneColorSelection(form, index);
+            return selection ? { ...selection } : null;
+        }),
+    } : {}) };
+}
+
 export function validateSceneForm(sceneId: string, form: SceneForm, images: Partial<Record<SceneSlotId, ReferenceImage>>): string | null {
     if (!Object.hasOwn(sceneSummaries, sceneId)) return "暂不支持这个设计场景。";
     for (const slot of getSceneSlots(sceneId, form)) {
@@ -157,12 +209,19 @@ export function validateSceneForm(sceneId: string, form: SceneForm, images: Part
     return null;
 }
 
-function colorDirection(form: SceneForm): string {
+function colorDirection(form: SceneForm, garment = false): string {
     if (form.colorMode === "reference") {
         return "图片2是配色参考图，仅提取其中的主要色彩及搭配关系，应用到图片1；不复制图片2的图案、款式、材质、人物或背景。";
     }
     if (form.colorMode === "specific") {
-        return `目标色板：${form.colors.map((color) => color.trim().toUpperCase()).join("、")}。在指定改色区域内使用这 ${form.colors.length} 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。`;
+        const palette = `目标色板：${form.colors.map((color) => color.trim().toUpperCase()).join("、")}。在指定改色区域内使用这 ${form.colors.length} 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。`;
+        if (!garment) return palette;
+        const targets = form.colors.map((color, index) => {
+            const selection = getSceneColorSelection(form, index);
+            const identity = selection ? `色库「${selection.library.replace(/\s+/g, " ").trim()}」，色号「${selection.name.replace(/\s+/g, " ").trim()}」，` : "";
+            return `第${index + 1}目标色：${identity}HEX ${normalizedSceneHex(color) || color.trim().toUpperCase()}。`;
+        });
+        return [palette, ...targets].join("\n");
     }
     return `智能配色方向：${form.colorMood}。依据图片1的原有色块关系与主体特征，设计一套协调且有区别的配色。`;
 }
@@ -223,12 +282,13 @@ export function buildScenePrompt(sceneId: string, form: SceneForm): string {
             const garment = sceneId === "garment-colorway";
             lines = [
                 `任务：图片1是${garment ? "服装主图" : "图案主图"}，只调整颜色，输出一套配色效果。`,
-                colorDirection(form),
+                colorDirection(form, garment),
                 `改色范围：${form.colorRegion.trim() || (garment ? "服装主体的现有色块区域" : "图案及其现有底色区域")}。范围之外的颜色保持原样。`,
                 garment
-                    ? "保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。颜色自然融入织纹和褶皱，不变成平面色块。"
+                    ? "保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。"
                     : "保留图片1图案的元素形状、线条粗细、大小比例、色块边界、排列关系、条纹宽窄和重复节奏；只改变指定颜色，不新增或删减图案，不扭曲文字和轮廓。",
                 extra,
+                garment ? "照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。" : "",
                 "色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
             ];
             break;

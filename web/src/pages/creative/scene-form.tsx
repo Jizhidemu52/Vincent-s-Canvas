@@ -1,12 +1,16 @@
-import { ImagePlus, Plus, Trash2, Upload } from "lucide-react";
+import { ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-react";
+import { lazy, Suspense, useState } from "react";
 import type { ReferenceImage } from "@/types/image";
-import { isSceneHexColor, type SceneForm, type SceneSlot, type SceneSlotId } from "./scene-form-model";
+import { addSceneColor, getSceneColorSelection, isSceneHexColor, removeSceneColor, setSceneColor, type SceneForm, type SceneSlot, type SceneSlotId } from "./scene-form-model";
+
+const StandardColorDialog = lazy(() => import("./standard-color-dialog"));
 
 type SceneFieldsProps = {
     sceneId: string;
     form: SceneForm;
     onChange: (next: SceneForm) => void;
     disabled?: boolean;
+    sourceImage?: string;
 };
 
 function Choices({ id, label, value, options, onChange, disabled }: {
@@ -37,7 +41,8 @@ function colorPickerValue(color: string): string {
     return value.length === 4 ? `#${value.slice(1).split("").map((part) => part + part).join("")}` : value;
 }
 
-export function SceneFields({ sceneId, form, onChange, disabled = false }: SceneFieldsProps) {
+export function SceneFields({ sceneId, form, onChange, disabled = false, sourceImage }: SceneFieldsProps) {
+    const [colorSlot, setColorSlot] = useState<number | null>(null);
     const id = (name: string) => `cs-${sceneId}-${name}`;
     const update = <K extends keyof SceneForm>(key: K, value: SceneForm[K]) => onChange({ ...form, [key]: value });
     const choice = (key: keyof SceneForm, label: string, options: readonly (string | { value: string; label: string })[]) => <Choices
@@ -61,12 +66,19 @@ export function SceneFields({ sceneId, form, onChange, disabled = false }: Scene
         {form.colorMode === "specific" && <div className="cs-field">
             <div className="cs-label" id={id("palette-label")}>目标色板 <span className="cs-help">{form.colors.length} / 6 色</span></div>
             <div className="cs-palette" role="group" aria-labelledby={id("palette-label")}>
-                {form.colors.map((color, index) => <div className="cs-color-row" key={index}>
-                    <input type="color" className="cs-color-picker" aria-label={`选择颜色 ${index + 1}`} value={colorPickerValue(color)} disabled={disabled} onChange={(event) => update("colors", form.colors.map((item, at) => at === index ? event.target.value.toUpperCase() : item))} />
-                    <input id={id(`color-${index}`)} className="cs-input cs-color-input" aria-label={`颜色 ${index + 1} HEX 色值`} aria-invalid={!isSceneHexColor(color)} type="text" value={color} spellCheck={false} autoComplete="off" maxLength={7} disabled={disabled} placeholder="#RRGGBB" onChange={(event) => update("colors", form.colors.map((item, at) => at === index ? event.target.value : item))} />
-                    <button type="button" className="cs-color-remove" aria-label={`删除颜色 ${index + 1}`} disabled={disabled} onClick={() => update("colors", form.colors.filter((_, at) => at !== index))}><Trash2 size={14} aria-hidden="true" /></button>
-                </div>)}
-                <button type="button" className="cs-add-color" disabled={disabled || form.colors.length >= 6} onClick={() => update("colors", [...form.colors, "#808080"])}><Plus size={14} aria-hidden="true" />添加颜色</button>
+                {form.colors.map((color, index) => {
+                    const selected = getSceneColorSelection(form, index);
+                    return <div className="cs-color-entry" key={index}>
+                        <div className="cs-color-row">
+                            <input type="color" className="cs-color-picker" aria-label={`选择颜色 ${index + 1}`} value={colorPickerValue(color)} disabled={disabled} onChange={(event) => onChange(setSceneColor(form, index, event.target.value.toUpperCase()))} />
+                            <input id={id(`color-${index}`)} className="cs-input cs-color-input" aria-label={`颜色 ${index + 1} HEX 色值`} aria-invalid={!isSceneHexColor(color)} type="text" value={color} spellCheck={false} autoComplete="off" maxLength={7} disabled={disabled} placeholder="#RRGGBB" onChange={(event) => onChange(setSceneColor(form, index, event.target.value))} />
+                            {sceneId === "garment-colorway" && <button type="button" className="cs-color-library" aria-label={`从标准色库选择颜色 ${index + 1}`} title="从标准色库选择" disabled={disabled} onClick={() => setColorSlot(index)}><Palette size={14} aria-hidden="true" /><span>色库</span></button>}
+                            <button type="button" className="cs-color-remove" aria-label={`删除颜色 ${index + 1}`} disabled={disabled} onClick={() => onChange(removeSceneColor(form, index))}><Trash2 size={14} aria-hidden="true" /></button>
+                        </div>
+                        {selected && <div className="cs-color-source"><span title={`${selected.library} · ${selected.name}`}>{selected.library} · {selected.name}</span><a href={selected.sourceUrl} target="_blank" rel="noreferrer" aria-label={`查看颜色 ${index + 1} 来源`}>来源</a></div>}
+                    </div>;
+                })}
+                <button type="button" className="cs-add-color" disabled={disabled || form.colors.length >= 6} onClick={() => onChange(addSceneColor(form))}><Plus size={14} aria-hidden="true" />添加颜色</button>
             </div>
             <p className="cs-help">点击色块选色，或填写 #RGB / #RRGGBB。生成颜色为近似效果。</p>
         </div>}
@@ -166,7 +178,11 @@ export function SceneFields({ sceneId, form, onChange, disabled = false }: Scene
         default:
             return null;
     }
-    return <div className={`cs-fields cs-fields-${sceneId}`}>{fields}</div>;
+    return <div className={`cs-fields cs-fields-${sceneId}`}>{fields}
+        {colorSlot !== null && sceneId === "garment-colorway" && form.colorMode === "specific" && !disabled && form.colors[colorSlot] !== undefined && <Suspense fallback={<p className="cs-help" role="status">正在打开标准色库…</p>}>
+            <StandardColorDialog key={colorSlot} initialHex={form.colors[colorSlot]!} selection={getSceneColorSelection(form, colorSlot)} source={sourceImage} slotLabel={`颜色 ${colorSlot + 1}`} onClose={() => setColorSlot(null)} onSelect={selection => { onChange(setSceneColor(form, colorSlot, selection.hex, selection)); setColorSlot(null); }} />
+        </Suspense>}
+    </div>;
 }
 
 export function SceneUploads({ slots, images, onImage, disabled = false }: {

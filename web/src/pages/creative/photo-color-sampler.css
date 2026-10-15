@@ -1,0 +1,9 @@
+.cs-photo-sampler { display: grid; justify-items: start; gap: 7px; min-width: 0; color: var(--foreground); }
+.cs-photo-sampler-heading { font-size: 12px; font-weight: 600; }
+.cs-photo-sampler-image { position: relative; display: block; max-width: 100%; padding: 0; border: 0; border-radius: 5px; background: var(--muted); line-height: 0; cursor: crosshair; }
+.cs-photo-sampler-image > img { display: block; width: auto; height: auto; max-width: 100%; max-height: 180px; border-radius: inherit; }
+.cs-photo-sampler-image:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.cs-photo-sampler-image:disabled { opacity: .55; cursor: default; }
+.cs-photo-sampler-point { position: absolute; width: 10px; height: 10px; border: 2px solid var(--background); outline: 1px solid var(--foreground); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+.cs-photo-sampler-help, .cs-photo-sampler-status { margin: 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; }
+.cs-photo-sampler-status[role="alert"] { color: var(--destructive); }

@@ -17,7 +17,7 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { modelOptionName, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
-import { buildScenePrompt, createSceneForm, getSceneSlots, validateSceneForm, type SceneForm, type SceneSlotId } from "./scene-form-model";
+import { buildScenePrompt, cloneSceneForm, createSceneForm, getSceneSlots, validateSceneForm, type SceneForm, type SceneSlotId } from "./scene-form-model";
 import { compositeSelectedImage, createSelectionGuide } from "./image-processing-browser";
 import { preferredSelectionSize, selectionPrompt, selectionSizeMatches } from "./image-processing";
 
@@ -58,13 +58,13 @@ function mapImages(images: SceneImages, map: (image: SceneImage) => SceneImage):
 }
 
 export function serializeSceneDraft(draft: SceneDraft): SceneDraft {
-    return { form: { ...draft.form }, images: mapImages(draft.images, storedImage), config: sceneParameters(draft.config), systemPromptOverride: draft.systemPromptOverride,
+    return { form: cloneSceneForm(draft.form), images: mapImages(draft.images, storedImage), config: sceneParameters(draft.config), systemPromptOverride: draft.systemPromptOverride,
         selection: draft.selection ? { ...draft.selection, mask: storedImage(draft.selection.mask) } : null };
 }
 
 export function serializeSceneLog(log: SceneLog): SceneLog {
     return {
-        ...log, form: { ...log.form }, config: sceneParameters(log.config),
+        ...log, form: cloneSceneForm(log.form), config: sceneParameters(log.config),
         referenceImages: mapImages(log.referenceImages, storedImage),
         images: log.images.map(storedImage),
         selection: log.selection ? { ...log.selection, mask: storedImage(log.selection.mask) } : null,
@@ -187,7 +187,7 @@ export function useSceneWorkspace(sceneId: string) {
                 setLogs(restoredHistory);
                 if (draft) {
                     setSystemPromptOverride(draft.systemPromptOverride);
-                    setForm({ ...createSceneForm(sceneId), ...draft.form }); setParameters(sceneParameters(draft.config)); setImages(draft.images); setSelection(draft.selection || null);
+                    setForm(cloneSceneForm({ ...createSceneForm(sceneId), ...draft.form })); setParameters(sceneParameters(draft.config)); setImages(draft.images); setSelection(draft.selection || null);
                     try {
                         const restoredImages = await hydrateImages(draft.images);
                         if (revision === epoch.current) setImages(restoredImages);
@@ -280,7 +280,7 @@ export function useSceneWorkspace(sceneId: string) {
             if (restoredSelection && !selectionMatchesSource(restoredSelection, restoredImages.primary)) throw new Error("历史选区与原图不匹配");
             const restored = await hydrateLog(log);
             if (revision !== epoch.current || viewRevision !== viewEpoch.current) return;
-            setForm({ ...createSceneForm(sceneId), ...log.form }); setImages(restoredImages); setParameters(sceneParameters(draft ? { ...draft.config, count: log.config.count } : log.config));
+            setForm(cloneSceneForm({ ...createSceneForm(sceneId), ...log.form })); setImages(restoredImages); setParameters(sceneParameters(draft ? { ...draft.config, count: log.config.count } : log.config));
             setSystemPromptOverride(draft?.config.systemPrompt);
             setSelection(restoredSelection);
             setActiveLog(restored); setSelectedPrompt(log.prompt); setResults(restored.results); setStartedAt(0);
@@ -310,7 +310,7 @@ export function useSceneWorkspace(sceneId: string) {
             const image: SceneImage = { ...stored, id: nanoid(), name: "精确换色结果.png", dataUrl: stored.url, type: stored.mimeType, ...canvasImageReferenceIdentity(images.primary) };
             const result: SceneResult = { id: nanoid(), status: "success", image };
             const log: SceneLog = { id: nanoid(), ownerId: user.id, sceneId, createdAt: Date.now(), prompt: description,
-                form: { ...form }, referenceImages: { primary: original }, config: sceneParameters(config), operation: "recolor", inputArchiveVersion: 1,
+                form: cloneSceneForm(form), referenceImages: { primary: original }, config: sceneParameters(config), operation: "recolor", inputArchiveVersion: 1,
                 results: [result], images: [image], durationMs: performance.now() - start, successCount: 1, failCount: 0 };
             if (revision === epoch.current) { setResults([result]); setLogs(current => [log, ...current]); setActiveLog(log); }
             try {
@@ -329,7 +329,7 @@ export function useSceneWorkspace(sceneId: string) {
         if (!release) { setError("图片任务正在处理，请勿重复提交"); return; }
         const revision = epoch.current;
         const requestConfig = { ...config, count: "1" };
-        const snapshot: SceneDraft = { form: { ...form }, images: { ...images }, config: sceneParameters(config), selection };
+        const snapshot: SceneDraft = { form: cloneSceneForm(form), images: { ...images }, config: sceneParameters(config), selection };
         const pending: SceneResult[] = Array.from({ length: count }, () => ({ id: nanoid(), status: "pending" }));
         const start = performance.now();
         const storageWarnings: string[] = [];

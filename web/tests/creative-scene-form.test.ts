@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SceneFields, SceneUploads } from "@/pages/creative/scene-form";
-import { buildScenePrompt, createSceneForm, getSceneSlots, sceneSummaries, validateSceneForm, type SceneForm } from "@/pages/creative/scene-form-model";
+import { addSceneColor, buildScenePrompt, cloneSceneForm, createSceneForm, getSceneColorSelection, getSceneSlots, removeSceneColor, sceneSummaries, setSceneColor, validateSceneForm, type SceneForm } from "@/pages/creative/scene-form-model";
+import type { StandardColorSelection } from "@/lib/standard-colors";
 import type { ReferenceImage } from "@/types/image";
 
 const primary: ReferenceImage = { id: "main", name: "主体.png", type: "image/png", dataUrl: "data:image/png;base64,cHJpbWFyeQ==" };
@@ -17,6 +18,79 @@ function formFor(sceneId: string, patch: Partial<SceneForm> = {}): SceneForm {
 function fields(sceneId: string, patch: Partial<SceneForm> = {}, disabled = false): string {
     return renderToStaticMarkup(createElement(SceneFields, { sceneId, form: formFor(sceneId, patch), disabled, onChange: () => { throw new Error("Rendering must not mutate the form"); } }));
 }
+
+const standardColor: StandardColorSelection = {
+    id: "qtc-4206", name: "11-0605TCX", hex: "#EDE6DE", library: "PANTONE TCX",
+    sourceUrl: "https://example.invalid/colors/4206", source: "公开色库记录", datasetVersion: "color-snapshot-1",
+};
+
+describe("standard color selections for clothing photos", () => {
+    test("old drafts without selection metadata keep their palette and can receive a standard", () => {
+        const original = formFor("garment-colorway", { colorMode: "specific", colors: ["#abc", "#102030"] });
+        expect(original.colorSelections).toBeUndefined();
+        expect(validateSceneForm("garment-colorway", original, images)).toBeNull();
+        expect(cloneSceneForm(original)).toEqual(original);
+        const selected = setSceneColor(original, 1, standardColor.hex, standardColor);
+        expect(selected.colors).toEqual(["#abc", standardColor.hex]);
+        expect(selected.colorSelections).toEqual([null, standardColor]);
+        expect(original.colors).toEqual(["#abc", "#102030"]);
+        expect(getSceneColorSelection(selected, 1)).not.toBe(standardColor);
+    });
+
+    test("manual edits clear identity even when the HEX stays the same, and distinct IDs remain distinct", () => {
+        const original = setSceneColor(formFor("garment-colorway"), 0, standardColor.hex, standardColor);
+        const alternate = { ...standardColor, id: "different-source", name: "Different standard", library: "Other library" };
+        const chosen = setSceneColor(original, 0, alternate.hex, alternate);
+        expect(getSceneColorSelection(chosen, 0)?.id).toBe(alternate.id);
+        expect(getSceneColorSelection(original, 0)?.id).toBe(standardColor.id);
+        const manual = setSceneColor(chosen, 0, alternate.hex);
+        expect(manual.colorSelections?.[0]).toBeNull();
+        expect(manual.colors[0]).toBe(alternate.hex);
+        expect(getSceneColorSelection(setSceneColor(chosen, 0, "#12"), 0)).toBeNull();
+    });
+
+    test("deletion keeps metadata aligned and adding stops at six", () => {
+        const other = { ...standardColor, id: "qtc-other", name: "Second standard", hex: "#123456" };
+        let form = formFor("garment-colorway", { colors: ["#000000", "#FFFFFF", "#808080"] });
+        form = setSceneColor(setSceneColor(form, 0, standardColor.hex, standardColor), 2, other.hex, other);
+        const removed = removeSceneColor(form, 1);
+        expect(removed.colors).toEqual([standardColor.hex, other.hex]);
+        expect(removed.colorSelections?.map(color => color?.id)).toEqual([standardColor.id, other.id]);
+        expect(form.colors).toHaveLength(3);
+        const added = addSceneColor(removed);
+        expect(added.colors).toEqual([standardColor.hex, other.hex, "#808080"]);
+        expect(added.colorSelections).toEqual([standardColor, other, null]);
+        let six = added;
+        while (six.colors.length < 6) six = addSceneColor(six);
+        expect(addSceneColor(six)).toBe(six);
+        expect(removeSceneColor(form, -1)).toBe(form);
+        expect(setSceneColor(form, 9, "#000000")).toBe(form);
+    });
+
+    test("photo prompts include ordered standard identities but never source URLs", () => {
+        const form = setSceneColor(formFor("garment-colorway", { colorMode: "specific", colors: ["#000000", "#abc"], colorRegion: "只改大身，保留袖口原色" }), 0, standardColor.hex, standardColor);
+        const prompt = buildScenePrompt("garment-colorway", form);
+        expect(prompt).toContain(`第1目标色：色库「${standardColor.library}」，色号「${standardColor.name}」，HEX ${standardColor.hex}`);
+        expect(prompt).toContain("第2目标色：HEX #AABBCC");
+        expect(prompt).toContain("只改大身，保留袖口原色");
+        expect(prompt).not.toContain(standardColor.sourceUrl);
+        expect(prompt).not.toContain(standardColor.datasetVersion);
+        for (const text of ["织纹和褶皱", "高光、阴影", "人像身份、肤色", "光影与背景", "近似视觉效果", "不要求每个像素等于该 HEX", "不是物理染色模拟"]) expect(prompt).toContain(text);
+        expect(buildScenePrompt("garment-colorway", { ...form, colorMode: "smart" })).not.toContain(standardColor.name);
+        expect(buildScenePrompt("garment-colorway", { ...form, colorMode: "reference" })).not.toContain(standardColor.name);
+        expect(buildScenePrompt("pattern-colorway", form)).not.toContain("人像身份");
+    });
+
+    test("stale metadata cannot attach the wrong identity to a new HEX and matching short HEX remains valid", () => {
+        const form = formFor("garment-colorway", { colorMode: "specific", colors: ["#123456"], colorSelections: [standardColor] });
+        expect(getSceneColorSelection(form, 0)).toBeNull();
+        expect(buildScenePrompt("garment-colorway", form)).not.toContain(standardColor.name);
+        expect(buildScenePrompt("garment-colorway", form)).toContain("第1目标色：HEX #123456");
+        expect(cloneSceneForm(form).colorSelections).toEqual([null]);
+        const short = { ...form, colors: ["#abc"], colorSelections: [{ ...standardColor, hex: "#AABBCC" }] };
+        expect(getSceneColorSelection(short, 0)?.id).toBe(standardColor.id);
+    });
+});
 
 describe("creative scene input roles", () => {
     test("offers nine scene summaries and independent editable defaults", () => {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { createSceneForm } from "@/pages/creative/scene-form-model";
+import { buildScenePrompt, cloneSceneForm, createSceneForm, setSceneColor } from "@/pages/creative/scene-form-model";
+import type { StandardColorSelection } from "@/lib/standard-colors";
 import { sceneParameters, serializeSceneDraft, serializeSceneLog, type SceneImage, type SceneLog } from "@/pages/creative/use-scene-workspace";
 
 const config = { model: "image-model", imageModel: "image-model", size: "1024x1024", quality: "auto", count: "2" };
@@ -7,6 +8,27 @@ const primary: SceneImage = { id: "garment", name: "服装.png", type: "image/pn
 const secondary: SceneImage = { ...primary, id: "palette", name: "色彩.jpg", type: "image/jpeg", mimeType: "image/jpeg", dataUrl: "blob:palette", storageKey: "image:palette" };
 
 describe("creative workspace persistence", () => {
+    test("standard color identity survives draft and history serialization independently of live edits", () => {
+        const selection: StandardColorSelection = { id: "color-a", name: "17-1234 TCX", hex: "#123456", library: "PANTONE TCX", source: "公开色库", sourceUrl: "https://example.invalid/color-a", datasetVersion: "snapshot-1" };
+        const form = setSceneColor({ ...createSceneForm("garment-colorway"), colorMode: "specific" as const }, 0, selection.hex, selection);
+        const draft = serializeSceneDraft({ form, images: { primary }, config });
+        const log: SceneLog = { id: "log-color", ownerId: "designer-1", sceneId: "garment-colorway", createdAt: 123, prompt: buildScenePrompt("garment-colorway", form), form: cloneSceneForm(form), referenceImages: { primary }, config, images: [], results: [], durationMs: 0, successCount: 0, failCount: 0 };
+        const stored = serializeSceneLog(log);
+        form.colors[0] = "#ABCDEF";
+        form.colorSelections![0]!.name = "CHANGED";
+        expect(draft.form.colors[0]).toBe(selection.hex);
+        expect(draft.form.colorSelections?.[0]).toEqual(selection);
+        expect(stored.form.colorSelections?.[0]).toEqual(selection);
+        expect(stored.form.colorSelections?.[0]).not.toBe(log.form.colorSelections?.[0]);
+        const restored = { ...createSceneForm("garment-colorway"), ...JSON.parse(JSON.stringify(draft)).form };
+        expect(buildScenePrompt("garment-colorway", restored)).toBe(stored.prompt);
+        expect(stored).toMatchObject({ ownerId: "designer-1", sceneId: "garment-colorway" });
+        const secondOwner = serializeSceneLog({ ...log, ownerId: "designer-2", sceneId: "pattern-colorway", form: createSceneForm("pattern-colorway") });
+        expect(secondOwner.ownerId).toBe("designer-2");
+        expect(secondOwner.form.colorSelections).toBeUndefined();
+        expect(stored.form.colorSelections?.[0]?.id).toBe(selection.id);
+    });
+
     test("only the five image parameters persist; provider credentials never enter the record", () => {
         const source = { ...config, apiKey: "SECRET", channels: [{ apiKey: "CHANNEL_SECRET" }], baseUrl: "https://private.example", systemPrompt: "private system text" };
         expect(sceneParameters(source)).toEqual(config);

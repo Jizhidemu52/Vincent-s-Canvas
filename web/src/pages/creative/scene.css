@@ -53,6 +53,13 @@
 .cs-color-row { display: flex; gap: 8px; align-items: center; }
 .cs-color-picker { width: 33px; height: 34px; border: 1px solid var(--border); background: var(--card); padding: 3px; border-radius: 6px; flex-shrink: 0; cursor: pointer; }
 .cs-color-input { min-width: 0; flex: 1; }
+.cs-color-entry { min-width: 0; }
+.cs-color-library { display: flex; align-items: center; gap: 4px; flex-shrink: 0; padding: 7px 5px; color: var(--muted-foreground); font-size: 11px; border-radius: 5px; }
+.cs-color-library:hover { color: var(--foreground); background: var(--muted); }
+.cs-color-library:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 2px; }
+.cs-color-source { display: flex; justify-content: space-between; gap: 8px; padding: 4px 4px 0 41px; font-size: 10px; color: var(--muted-foreground); }
+.cs-color-source > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cs-color-source > a { flex-shrink: 0; color: var(--foreground); text-decoration: underline; }
 .cs-choice-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .cs-choice:focus-within { outline: 2px solid var(--wb-accent); outline-offset: 2px; }
 .cs-choice { position: relative; }
