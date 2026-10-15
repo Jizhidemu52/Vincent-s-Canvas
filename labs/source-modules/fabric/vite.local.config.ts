@@ -24,9 +24,9 @@ export default defineConfig(({ mode }) => ({
     vue(),
     autoImports({ imports: ['vue'], dts: false, eslintrc: { enabled: false } }),
     (typeof vueSetupExtend === 'function' ? vueSetupExtend : vueSetupExtend.default)(), vueJsx(),
-    createHtmlPlugin({ inject: { data: { title: '快图编辑器 · 原源码离线实测' } } }),
+    createHtmlPlugin({ inject: { data: { title: '图案编辑实验 · 离线验证' } } }),
     svgLoader(),
-    { name: 'local-qa-boundary-notice', transformIndexHtml: () => [{ tag: 'div', attrs: { id: 'local-qa-boundary', style: 'position:fixed;top:7px;left:50%;transform:translateX(-50%);z-index:1200;padding:5px 12px;border:1px solid #d6dfcf;background:#f3f7ef;color:#506147;border-radius:6px;font:12px sans-serif;pointer-events:none' }, children: '原项目离线实测 · 外网已禁用 · 在线模板/字体不可用', injectTo: 'body' }] },
+    { name: 'local-qa-boundary-notice', transformIndexHtml: () => [{ tag: 'div', attrs: { id: 'local-qa-boundary', style: 'position:fixed;top:7px;left:50%;transform:translateX(-50%);z-index:1200;padding:5px 12px;border:1px solid #d6dfcf;background:#f3f7ef;color:#506147;border-radius:6px;font:12px sans-serif;pointer-events:none' }, children: '图案编辑实验 · 外网已禁用 · 在线模板/字体不可用', injectTo: 'body' }] },
   ],
   resolve: {
     alias: [

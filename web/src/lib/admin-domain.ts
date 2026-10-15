@@ -745,7 +745,7 @@ function createDefaultWorkflowTemplates(): AdminWorkflowTemplate[] {
             creditCost: 12,
             rmbCost: 1.2,
             entryCount: 4,
-            description: "承接参考项目里的 RunningHub 工作流能力，用于放大、修复和增强图片。",
+            description: "通过 RunningHub 工作流放大、修复和增强图片。",
         },
         {
             id: "comfyui-edit",
