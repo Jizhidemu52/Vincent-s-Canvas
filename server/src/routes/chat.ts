@@ -9,6 +9,9 @@ import { decryptSecret } from "../security";
 import { fetchProviderSubmission } from "../provider-submission-transport";
 import type { AuthenticatedRequest } from "../types";
 import { beginUsageChat, finishUsageChat } from "../usage-analytics";
+import { beginChatBilling, ChatStreamOutcome, finishChatBilling } from "../chat-billing";
+import { getCreditsEnabled } from "../credit-policy";
+import { deploymentFeatures } from "../deployment-features";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInput =
@@ -39,6 +42,8 @@ export const chatFunctionToolsSchema = z.array(z.object({
 }).strict()).max(100).default([]);
 
 const schema = z.object({
+    // createClientId also supports non-secure LAN HTTP where randomUUID is absent.
+    requestId: z.string().min(8).max(160).regex(/^[a-zA-Z0-9:_-]+$/).optional(),
     modelId: z.string().min(1).max(200).optional(),
     toolKey: z.string().min(1).max(100).optional(),
     input: z.array(z.unknown()).max(200),
@@ -55,11 +60,14 @@ const schema = z.object({
 
 export function createChatRouter(db: Database, config: AppConfig) {
     const router = Router();
+    const features = deploymentFeatures(config);
 
     router.post("/responses", async (request, response, next) => {
         let usageRequestId: string | undefined;
+        let billingReservationId: string | null = null;
         try {
             const input = schema.parse(request.body) as {
+                requestId?: string;
                 modelId?: string;
                 toolKey?: string;
                 input: ResponseInput[];
@@ -91,17 +99,25 @@ export function createChatRouter(db: Database, config: AppConfig) {
             }
 
             const credentials = JSON.parse(decryptSecret(model.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as Record<string, string>;
-            if (config.OA_LOGIN_ENABLED === "true" && !(request as AuthenticatedRequest).allowsAnonymousCreation) {
+            billingReservationId = await beginChatBilling(db, {
+                requestId: input.requestId, userId: actor.id,
+                anonymous: (request as AuthenticatedRequest).allowsAnonymousCreation,
+                enabled: features.authenticationEnabled && await getCreditsEnabled(db, features.creditsEnabled), execution,
+            });
+            if (features.oaLoginEnabled && !(request as AuthenticatedRequest).allowsAnonymousCreation) {
                 usageRequestId = await beginUsageChat(db, { userId: actor.id, modelConfigId: execution.modelConfigId, boardKey: execution.toolKey, input: input.input });
             }
             if (isClaudeMessagesModel(model) && input.claude?.stream) {
                 const upstream = await requestClaudeStream(model, credentials, input);
                 response.setHeader("content-type", "text/event-stream; charset=utf-8");
                 response.setHeader("cache-control", "no-cache");
+                const streamOutcome = new ChatStreamOutcome();
                 for await (const chunk of upstream.body!) {
                     if (response.destroyed) break;
+                    streamOutcome.push(chunk);
                     response.write(chunk);
                 }
+                if (!response.destroyed && !streamOutcome.successful) throw new ChatProtocolError("CHAT_STREAM_INCOMPLETE", "对话流未完整返回有效回复，本次不扣积分");
                 if (usageRequestId) await finishUsageChat(db, usageRequestId, response.destroyed ? "interrupted" : "success");
                 if (!response.destroyed) await writeAudit(db, {
                     actor,
@@ -112,10 +128,13 @@ export function createChatRouter(db: Database, config: AppConfig) {
                     detail: { protocol: model.protocol, streaming: true, toolKey: execution.toolKey, configurationVersion: execution.configurationVersion },
                     ip: request.ip,
                 });
+                await finishChatBilling(db, billingReservationId, !response.destroyed && streamOutcome.successful);
+                billingReservationId = null;
                 response.end();
                 return;
             }
             const resultPayload = await requestChatCompletion(model, credentials, input);
+            if (!resultPayload.content.trim() && !resultPayload.toolCalls.length) throw new ChatProtocolError("CHAT_RESPONSE_EMPTY", "模型未返回有效回复，本次不扣积分");
             if (usageRequestId) await finishUsageChat(db, usageRequestId, response.destroyed ? "interrupted" : "success");
 
             await writeAudit(db, {
@@ -127,8 +146,13 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 detail: { protocol: model.protocol, toolCallCount: resultPayload.toolCalls.length, toolKey: execution.toolKey, configurationVersion: execution.configurationVersion },
                 ip: request.ip,
             });
+            // Capture only after required bookkeeping succeeds. A failed audit or
+            // usage write must still follow the held-reservation refund path.
+            await finishChatBilling(db, billingReservationId, !response.destroyed);
+            billingReservationId = null;
             response.json(resultPayload);
         } catch (error) {
+            if (billingReservationId) await finishChatBilling(db, billingReservationId, false).catch((releaseError) => console.error("Chat credit release failed", { reservationId: billingReservationId, code: releaseError?.code }));
             if (usageRequestId) await finishUsageChat(db, usageRequestId, response.destroyed ? "interrupted" : "failed").catch(() => undefined);
             if (response.headersSent) {
                 if (!response.destroyed) response.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "对话流已中断，请重试。" } })}\n\n`);

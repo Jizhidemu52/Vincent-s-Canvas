@@ -9,6 +9,7 @@ import { refreshMonthlyCreditPeriod } from "./billing";
 import { withTransaction } from "./db-transaction";
 import { deploymentFeatures } from "./deployment-features";
 import { OA_SESSION_TTL_SECONDS } from "./oa";
+import { getCreditsEnabled } from "./credit-policy";
 
 const GUEST_SESSION_TTL_SECONDS = 365 * 24 * 60 * 60;
 
@@ -56,7 +57,7 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
                 response.status(options.unauthenticatedStatus ?? 401).json({ error: "SESSION_EXPIRED", message: "登录已失效，请重新登录" });
                 return;
             }
-            if (features.creditsEnabled) await refreshMonthlyCreditPeriod(db, row.id);
+            if (features.authenticationEnabled && await getCreditsEnabled(db, features.creditsEnabled)) await refreshMonthlyCreditPeriod(db, row.id);
             const refreshed = await db.query<UserRow & { session_id: string; auth_provider: string }>(
                 `SELECT ${userSelect}, s.id AS session_id, s.auth_provider
                  FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN departments d ON d.id=u.department_id
@@ -71,7 +72,7 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
             }
             await cache.set(cacheKey, row.session_id, { EX: row.auth_provider === "oa" ? OA_SESSION_TTL_SECONDS : config.SESSION_TTL_SECONDS });
             const expectedOwnerId = request.get("X-Canvas-Owner-Id");
-            if (features.oaLoginEnabled && row.role === "designer" && expectedOwnerId !== undefined && expectedOwnerId !== row.id) {
+            if (features.authenticationEnabled && row.role === "designer" && expectedOwnerId !== undefined && expectedOwnerId !== row.id) {
                 response.status(403).json({ error: "CANVAS_OWNER_MISMATCH", message: "当前员工身份已变化，请重新打开画布后再试。" });
                 return;
             }

@@ -17,6 +17,7 @@ import { deploymentFeatures } from "../deployment-features";
 import { OA_SESSION_TTL_SECONDS, OaError, verifyOaToken } from "../oa";
 import { resolveOaUser } from "../oa-identity";
 import { withTransaction } from "../db-transaction";
+import { getCreditsEnabled } from "../credit-policy";
 
 const loginSchema = z.object({
     identifier: z.string().trim().min(1).max(200),
@@ -124,7 +125,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             }
             await cache.set(`session:${hashToken(session.token)}`, session.id, { EX: config.SESSION_TTL_SECONDS });
             setSessionCookie(response, config, session.token);
-            if (features.creditsEnabled) await refreshMonthlyCreditPeriod(db, row.id);
+            if (features.authenticationEnabled && await getCreditsEnabled(db, features.creditsEnabled)) await refreshMonthlyCreditPeriod(db, row.id);
             const refreshed = await db.query<UserRow>(
                 `SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`, [row.id],
             );

@@ -195,10 +195,11 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     return router;
 }
 
-export function createPublicModelRouter(db: Database) {
+export function createPublicModelRouter(db: Database, creditPolicy: boolean | (() => Promise<boolean>) = true) {
     const router = Router();
     router.get("/", async (request, response, next) => {
         try {
+            const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
             const [models, prices, tools, featuredIds] = await Promise.all([
                 db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.id AS "providerId",p.protocol,p.name AS "providerName",p.base_url AS "providerBaseUrl" FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.enabled=true AND p.enabled=true AND (m.workflow_config_id IS NULL OR w.enabled=true) ORDER BY m.public_number NULLS LAST,m.name`),
                 db.query(`SELECT operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version FROM pricing_rule_versions WHERE status='published' ORDER BY operation_type`),
@@ -214,9 +215,10 @@ export function createPublicModelRouter(db: Database) {
             const boundIds = new Set(tools.rows.filter(tool => tool.enabled && tool.modelConfigId).map(tool => tool.modelConfigId));
             selectedModels.push(...presentedModels.filter(model => boundIds.has(model.id) && !selectedIds.has(model.id)
                 && !(Array.isArray(model.capabilities) && model.capabilities.includes("chat"))));
-            response.json({ models: selectedModels.map((model) => presentPublicModel(model, role)), prices: prices.rows, tools: toolDefinitions.map(definition => ({
+            response.json({ models: selectedModels.map((model) => presentPublicModel({ ...model, creditCost: creditsEnabled ? model.creditCost : 0 }, role)), prices: prices.rows.map(price => ({ ...price, credits: creditsEnabled ? price.credits : 0 })), tools: toolDefinitions.map(definition => ({
                 ...definition,
                 ...(tools.rows.find(tool => tool.toolKey === definition.toolKey) ?? { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 }),
+                ...(!creditsEnabled ? { creditCostOverride: 0 } : {}),
             })) });
         } catch (error) { next(error); }
     });

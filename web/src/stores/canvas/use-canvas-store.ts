@@ -47,14 +47,14 @@ type CanvasStore = {
 };
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
-const initialUser = useUserStore.getState().user;
-const oaCanvasOwnerId = deploymentFeatures.oaLoginEnabled && initialUser?.role === "designer" ? initialUser.id : null;
-const CANVAS_STORE_KEY = deploymentFeatures.oaLoginEnabled
-    ? `wireless-canvas:canvas_store:oa:user:${encodeURIComponent(oaCanvasOwnerId || "")}`
+const initialSession = useUserStore.getState();
+const canvasOwnerId = deploymentFeatures.authenticationEnabled && initialSession.status === "authenticated" && initialSession.user?.role === "designer" ? initialSession.user.id : null;
+const CANVAS_STORE_KEY = deploymentFeatures.authenticationEnabled
+    ? `wireless-canvas:canvas_store:oa:user:${encodeURIComponent(canvasOwnerId || "")}`
     : "wireless-canvas:canvas_store";
-let canvasOwnerValid = !deploymentFeatures.oaLoginEnabled || Boolean(oaCanvasOwnerId);
-const isCanvasOwnerValid = () => canvasOwnerValid && (!oaCanvasOwnerId || useUserStore.getState().user?.id === oaCanvasOwnerId);
-const cloudPersistence = oaCanvasOwnerId ? createCloudCanvasPersistence(oaCanvasOwnerId, CANVAS_STORE_KEY, {
+let canvasOwnerValid = !deploymentFeatures.authenticationEnabled || Boolean(canvasOwnerId);
+const isCanvasOwnerValid = () => canvasOwnerValid && (!canvasOwnerId || (useUserStore.getState().status === "authenticated" && useUserStore.getState().user?.id === canvasOwnerId && useUserStore.getState().user?.role === "designer"));
+const cloudPersistence = canvasOwnerId ? createCloudCanvasPersistence(canvasOwnerId, CANVAS_STORE_KEY, {
     valid: isCanvasOwnerValid,
     status: (cloudStatus, cloudError = "") => { if (isCanvasOwnerValid() && !lastPersistError) useCanvasStore.setState({ cloudStatus, cloudError }); },
     copy: (copy) => { if (isCanvasOwnerValid()) useCanvasStore.setState(state => ({ projects: [copy, ...state.projects.filter(project => project.id !== copy.id)], unloadedProjects: state.unloadedProjects.filter(project => project.id !== copy.id) })); },
@@ -144,9 +144,10 @@ if (typeof window !== "undefined") {
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
+        if (!isCanvasOwnerValid()) return null;
         const local = await readCanvasProjects(name);
-        const projects = canvasOwnerValid && cloudPersistence ? await cloudPersistence.hydrate(local) : local;
-        const parsed = { version: 0, state: { projects: canvasOwnerValid ? projects : [] } } as StorageValue<CanvasStore>;
+        const projects = isCanvasOwnerValid() && cloudPersistence ? await cloudPersistence.hydrate(local) : local;
+        const parsed = { version: 0, state: { projects: isCanvasOwnerValid() ? projects : [] } } as StorageValue<CanvasStore>;
         queuedPersistState = parsed.state as PersistedCanvasState;
         return parsed;
     },
@@ -160,6 +161,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         persistQueue.schedule({ name, value, changes: new Map(pendingProjectChanges) });
     },
     removeItem: (name) => {
+        if (!isCanvasOwnerValid()) return;
         persistQueue.clear();
         pendingProjectChanges.clear();
         persistWriteChain = persistWriteChain
@@ -259,10 +261,10 @@ export const useCanvasStore = create<CanvasStore>()(
     ),
 );
 
-if (deploymentFeatures.oaLoginEnabled && oaCanvasOwnerId) {
+if (deploymentFeatures.authenticationEnabled && canvasOwnerId) {
     let restartingForOwner = false;
     useUserStore.subscribe((state) => {
-        if (restartingForOwner || (state.user?.id || null) === oaCanvasOwnerId) return;
+        if (restartingForOwner || (state.status === "authenticated" && state.user?.id === canvasOwnerId && state.user.role === "designer")) return;
         // A cookie may change in another tab. Never reuse a live editor or its
         // debounce/retry buffers for a different employee. Drain the old owner's
         // immutable storage key, hide the workspace, then bootstrap a fresh one.

@@ -23,7 +23,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (authStatus !== "authenticated" || !ownerId) return;
-        if (deploymentFeatures.oaLoginEnabled && useUserStore.getState().user?.role !== "designer") return;
+        if (deploymentFeatures.authenticationEnabled && useUserStore.getState().user?.role !== "designer") return;
         let disposed = false;
         const projectSync = createCanvasProjectMetadataSync({
             ownerId,
@@ -31,7 +31,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             isCurrentOwner: () => {
                 const session = useUserStore.getState();
                 return session.status === "authenticated" && session.user?.id === ownerId && useCanvasStore.getState().hydrated
-                    && (!deploymentFeatures.oaLoginEnabled || session.user.role === "designer");
+                    && (!deploymentFeatures.authenticationEnabled || session.user.role === "designer");
             },
             isVisible: () => document.visibilityState === "visible",
             submit: syncProjectMetadata,

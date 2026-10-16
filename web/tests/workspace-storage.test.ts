@@ -6,8 +6,8 @@ import { createStorageAccess } from "@/lib/storage-access";
 const code = ts.transpileModule(readFileSync(new URL("../src/lib/workspace-storage.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
 
 function workspace(browser = true) {
-    const state: { user: { id: string; role: string } | null } = { user: null };
-    const features = { oaLoginEnabled: false };
+    const state: { user: { id: string; role: string } | null; status: string } = { user: null, status: "authenticated" };
+    const features = { oaLoginEnabled: false, authenticationEnabled: false };
     const databases = new Map<string, Map<string, unknown>>();
     const opened: string[] = [];
     let delay: Promise<void> | undefined;
@@ -34,11 +34,12 @@ function workspace(browser = true) {
 }
 
 test("employee photo, history, chat and creative caches never hydrate anonymous or another employee's partition", async () => {
+    for (const oaMode of [false, true]) {
     for (const storeName of ["image_files", "media_files", "app_state", "image_generation_logs", "video_generation_logs", "creative_scene_workspaces"]) {
         const w = workspace();
         const trial = w.create(storeName);
         await trial.setItem("same-key", "anonymous draft");
-        w.features.oaLoginEnabled = true;
+        w.features.oaLoginEnabled = oaMode; w.features.authenticationEnabled = true;
         w.state.user = { id: "employee/A", role: "designer" };
         const a = w.create(storeName);
         expect(await a.getItem("same-key")).toBeNull();
@@ -55,11 +56,12 @@ test("employee photo, history, chat and creative caches never hydrate anonymous 
         expect(await trial.getItem("same-key")).toBe("anonymous draft");
         expect(w.opened).toContain(`wireless-canvas:oa:user:employee%2FA/${storeName}`);
     }
+    }
 });
 
 test("unverified and administrator entry never opens a shared employee cache", async () => {
     for (const role of [null, "super_admin", "department_admin"]) {
-        const w = workspace(); w.features.oaLoginEnabled = true;
+        const w = workspace(); w.features.authenticationEnabled = true;
         if (role) w.state.user = { id: "operator", role };
         const storage = w.create("image_files");
         expect(storage.available).toBe(false);
@@ -79,7 +81,7 @@ test("server rendering and module-only tests do not initialize browser persisten
 });
 
 test("an in-flight read cannot publish old employee bytes after the identity changes", async () => {
-    const w = workspace(); w.features.oaLoginEnabled = true; w.state.user = { id: "a", role: "designer" };
+    const w = workspace(); w.features.authenticationEnabled = true; w.state.user = { id: "a", role: "designer" };
     const a = w.create("image_files"); await a.setItem("image", "private A image");
     const gate = Promise.withResolvers<void>(); w.delay(gate.promise);
     const reading = a.getItem("image"); w.state.user = { id: "b", role: "designer" };
@@ -87,10 +89,18 @@ test("an in-flight read cannot publish old employee bytes after the identity cha
 });
 
 test("a write waiting for initialization rechecks identity before touching the employee store", async () => {
-    const w = workspace(); w.features.oaLoginEnabled = true; w.state.user = { id: "a", role: "designer" };
+    const w = workspace(); w.features.authenticationEnabled = true; w.state.user = { id: "a", role: "designer" };
     const a = w.create("image_files");
     const writing = a.setItem("image", "must not be written after switch");
     w.state.user = { id: "b", role: "designer" };
     await expect(writing).rejects.toThrow("员工会话已变化");
     expect(w.databases.get("wireless-canvas:oa:user:a/image_files")?.has("image")).toBe(false);
+});
+
+test("an unverified password identity cannot initialize or read any personal cache", async () => {
+    const w = workspace(); w.features.authenticationEnabled = true;
+    w.state.user = { id: "not-yet-verified", role: "designer" }; w.state.status = "loading";
+    const storage = w.create("app_state");
+    expect(storage.available).toBe(false); expect(w.opened).toEqual([]);
+    await expect(storage.getItem("private-draft")).rejects.toThrow("员工会话已变化");
 });

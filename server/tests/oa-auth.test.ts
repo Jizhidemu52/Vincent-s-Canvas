@@ -17,7 +17,7 @@ async function serve(app: express.Express, run: (origin: string) => Promise<void
   finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
 }
 
-test("local trial keeps OA and QR routes disabled despite legacy authentication flags", async () => {
+test("password-login mode keeps OA and QR routes disabled when OA is not enabled", async () => {
   const db = { query: async () => { throw new Error("Unexpected database access"); } } as unknown as Database;
   const app = express().use(express.json()).use(cookieParser());
   app.use("/auth", createAuthRouter(db, cache, config));
@@ -31,7 +31,7 @@ test("local trial keeps OA and QR routes disabled despite legacy authentication 
 });
 
 test("existing designer sessions can enter creation without OA provider checks", async () => {
-  const db = { query: async () => ({ rows: [{ id: "designer", session_id: "session-id", auth_provider: "local", role: "designer", is_guest: false, status: "active" }] }) } as unknown as Database;
+  const db = { query: async (sql: string) => ({ rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [{ id: "designer", session_id: "session-id", auth_provider: "local", role: "designer", is_guest: false, status: "active" }] }) } as unknown as Database;
   const app = express().use(cookieParser());
   app.get("/creation", sessionMiddleware(db, cache, config), (_req, res) => res.json({ accepted: true }));
   await serve(app, async (origin) => {
@@ -51,18 +51,24 @@ test("administrator and password-change endpoints still require a non-guest sess
   });
 });
 
-test("legacy onboarding flags never block open creation but remain enforced by administrator routes", async () => {
+test.each(["false", "true"] as const)("AUTH_ENABLED=%s only permits unfinished onboarding in the open trial; administrator routes always enforce it", async (authenticationEnabled) => {
+  const deployment = { ...config, AUTH_ENABLED: authenticationEnabled };
   for (const role of ["designer", "super_admin"]) {
     const storedUser = { id: "existing-user", session_id: "existing-session", auth_provider: "local", role, is_guest: false, status: "active", must_change_password: true };
     const statements: string[] = [];
-    const db = { query: async (sql: string) => { statements.push(sql); return { rows: [storedUser] }; } } as unknown as Database;
+    const db = { query: async (sql: string) => {
+      statements.push(sql);
+      return { rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [storedUser] };
+    } } as unknown as Database;
     const app = express().use(cookieParser());
-    app.get("/creation", sessionMiddleware(db, cache, config), requireAccountReady, (_req, res) => res.json({ accepted: true }));
-    app.get("/admin", sessionMiddleware(db, cache, config, { allowGuest: false }), requireAccountReady, (_req, res) => res.json({ accepted: true }));
-    app.use("/auth", createAuthRouter(db, cache, config));
+    app.get("/creation", sessionMiddleware(db, cache, deployment), requireAccountReady, (_req, res) => res.json({ accepted: true }));
+    app.get("/admin", sessionMiddleware(db, cache, deployment, { allowGuest: false }), requireAccountReady, (_req, res) => res.json({ accepted: true }));
+    app.use("/auth", createAuthRouter(db, cache, deployment));
     await serve(app, async (origin) => {
       const headers = { cookie: "session=existing-token" };
-      expect((await fetch(`${origin}/creation`, { headers })).status).toBe(200);
+      const creation = await fetch(`${origin}/creation`, { headers });
+      expect(creation.status).toBe(authenticationEnabled === "true" ? 403 : 200);
+      if (authenticationEnabled === "true") expect(await creation.json()).toMatchObject({ error: "PASSWORD_CHANGE_REQUIRED" });
       expect(await fetch(`${origin}/auth/session`, { headers }).then(result => result.json())).toMatchObject({ user: { mustChangePassword: true } });
       const admin = await fetch(`${origin}/admin`, { headers });
       expect(admin.status).toBe(403);
@@ -70,5 +76,6 @@ test("legacy onboarding flags never block open creation but remain enforced by a
     });
     expect(storedUser.must_change_password).toBe(true);
     expect(statements.every(sql => sql.trimStart().startsWith("SELECT"))).toBe(true);
+    expect(statements.some(sql => sql.includes("FROM credit_policy"))).toBe(authenticationEnabled === "true");
   }
 });

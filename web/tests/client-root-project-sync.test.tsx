@@ -11,7 +11,7 @@ const code = ts.transpileModule(readFileSync(source, "utf8"), {
 }).outputText;
 const settle = () => new Promise<void>(done => setTimeout(done, 0));
 
-function mountHarness() {
+function mountHarness(role = "designer", oaMode = true) {
     const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
     const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
     let interval: (() => void) | undefined;
@@ -24,7 +24,7 @@ function mountHarness() {
     Object.defineProperty(globalThis, "document", { configurable: true, value: document });
     const calls = { identity: 0, models: 0, modules: 0, projects: [] as Array<{ owner: string; id: string; title: string }> };
     let hydration: Promise<void> = Promise.resolve();
-    const state = { status: "authenticated", user: { id: "employee-a", role: "designer" }, hydrateSession: async () => { calls.identity++; await hydration; } };
+    const state = { status: "authenticated", user: { id: "employee-a", role }, hydrateSession: async () => { calls.identity++; await hydration; } };
     const canvas = { hydrated: true, projects: [{ id: "same-project", title: "初稿" }] };
     const effects: Array<() => void | (() => void)> = [];
     const module = { exports: {} as any };
@@ -34,7 +34,7 @@ function mountHarness() {
         "@/stores/canvas/use-canvas-store": { useCanvasStore: { getState: () => canvas } },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (selector: (value: unknown) => unknown) => selector({ refresh: async () => { calls.models++; } }) },
         "@/stores/use-module-store": { useModuleStore: (selector: (value: unknown) => unknown) => selector({ refresh: async () => { calls.modules++; } }) },
-        "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: true } },
+        "@/lib/deployment-features": { deploymentFeatures: { authenticationEnabled: true, oaLoginEnabled: oaMode } },
         "@/lib/canvas/canvas-project-metadata-sync": { createCanvasProjectMetadataSync },
         "@/services/api/projects": { syncProjectMetadata: async (owner: string, project: { id: string; title: string }) => { calls.projects.push({ owner, ...project }); } },
     };
@@ -77,6 +77,14 @@ test("root refresh retains identity/model/module polling but skips unchanged and
         harness.visibility(); await settle();
         expect(harness.calls.projects.at(-1)).toEqual({ owner: "employee-a", id: "same-project", title: "已改名" });
         expect(harness.calls.projects).toHaveLength(2);
+    } finally { harness.close(); }
+});
+
+test("password administrator pages never start employee project or workspace polling", async () => {
+    const harness = mountHarness("super_admin", false);
+    try {
+        await settle(); harness.refresh(); await settle();
+        expect(harness.calls).toEqual({ identity: 0, models: 0, modules: 0, projects: [] });
     } finally { harness.close(); }
 });
 

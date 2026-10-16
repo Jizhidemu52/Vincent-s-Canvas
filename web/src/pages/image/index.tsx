@@ -794,7 +794,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             <div className="mb-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <span>{!deploymentFeatures.creditsEnabled ? "不计积分" : `预计消耗 ${estimatedUsage.credits} 积分`}</span>
-                                    <span>{deploymentFeatures.oaLoginEnabled ? "公司工作区" : "本机试用"}</span>
+                                    <span>{deploymentFeatures.authenticationEnabled ? "个人工作区" : "本机试用"}</span>
                                 </div>
                                 {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{toolModeConfig.title}需要先添加至少一张参考图。</div> : null}
                                 {!referenceValidation.valid ? <div className="mt-1 text-red-500">{referenceValidation.message}</div> : null}

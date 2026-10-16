@@ -42,7 +42,7 @@ function registeredRoutes(features: Features, standalone = false): Route[] {
     return router.routes[0].children;
 }
 
-function gateResult(features: Features, user: LocalUser | null, admin: boolean) {
+function gateResult(features: Features, user: LocalUser | null, admin: boolean, passwordChange = false) {
     const state = { user, status: user ? "authenticated" : "guest", hydrateSession: async () => undefined };
     const { AuthGate } = evaluateModule("../src/components/auth/auth-gate.tsx", {
         react: { ...React, useEffect: () => undefined },
@@ -52,7 +52,7 @@ function gateResult(features: Features, user: LocalUser | null, admin: boolean) 
         "@/lib/standalone-access": { shouldBypassStandaloneAuthGate },
         "@/lib/deployment-features": { deploymentFeatures: features },
     });
-    return AuthGate({ admin, children: "protected content" }) as ReactElement<any>;
+    return AuthGate({ admin, passwordChange, children: "protected content" }) as ReactElement<any>;
 }
 
 const visitor: LocalUser = {
@@ -73,7 +73,7 @@ describe("optional authentication route wiring", () => {
             expect(route?.element?.props.replace).toBe(true);
         }
         expect(routes.find((route) => route.path === "/admin")?.element?.props.admin).toBe(true);
-        expect(routes.find((route) => route.path === "/change-password")?.element?.props.admin).toBe(true);
+        expect(routes.find((route) => route.path === "/change-password")?.element?.props.passwordChange).toBe(true);
     });
 
     for (const authenticationEnabled of [true, false]) {
@@ -89,8 +89,11 @@ describe("optional authentication route wiring", () => {
                     expect(password?.element?.type).toBe(AuthBoundary);
                     expect(routes.find((route) => route.path === "/admin")?.element?.props.admin).toBe(true);
                     const publicLogin = routes.find((route) => route.path === "/login")?.element;
-                    expect(publicLogin?.type).toBe(Navigate);
-                    expect(publicLogin?.props.to).toBe("/");
+                    if (authenticationEnabled) expect(publicLogin?.type).not.toBe(Navigate);
+                    else {
+                        expect(publicLogin?.type).toBe(Navigate);
+                        expect(publicLogin?.props.to).toBe("/");
+                    }
                 });
             }
         }
@@ -128,5 +131,16 @@ describe("optional authentication route wiring", () => {
         for (const path of ["/", "/canvas", "/canvas/:id", "/image", "/creative", "/creative/:presetId", "/chat", "/video"]) {
             expect(routes.find((route) => route.path === path)?.element?.type).toBe(AuthBoundary);
         }
+    });
+
+    test("password accounts require login, keep admin roles out of designer workspaces and permit both roles to change passwords", () => {
+        const features = { authenticationEnabled: true, oaLoginEnabled: false, creditsEnabled: false, rolePortalsEnabled: false };
+        expect(gateResult(features, null, false).props.to).toBe("/login");
+        expect(gateResult(features, { ...visitor, mustChangePassword: true }, false).props.to).toBe("/change-password");
+        expect(gateResult(features, visitor, false, true).props.children).toBe("protected content");
+        const administrator = { ...visitor, role: "super_admin" as const };
+        expect(gateResult(features, administrator, false).props.to).toBe("/admin");
+        expect(gateResult(features, administrator, false, true).props.children).toBe("protected content");
+        expect(gateResult(features, visitor, true).props.to).toBe("/admin/login");
     });
 });

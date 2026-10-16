@@ -23,6 +23,7 @@ export const createAccount = (input: AccountInput) => request<{ user: ApiUser }>
 export const updateAccount = (id: string, input: AccountUpdate) => request<{ user: ApiUser }>(`/api/admin/accounts/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const resetAccountPassword = (id: string, password: string) => request<void>(`/api/admin/accounts/${id}/reset-password`, { method: "POST", body: JSON.stringify({ password }) });
 export const adjustAccountCredits = (id: string, amount: number, reason: string) => request<{ user: ApiUser }>(`/api/admin/accounts/${id}/credits`, { method: "POST", body: JSON.stringify({ requestId: createClientId(), scope: "temporary", amount, reason }) });
+export const setAccountCredits = (id: string, balance: number, reason: string) => request<{ user: ApiUser }>(`/api/admin/accounts/${id}/credits`, { method: "PUT", body: JSON.stringify({ requestId: createClientId(), balance, reason }) });
 export const listDepartments = () => request<{ departments: Department[] }>("/api/admin/departments");
 export const createDepartment = (name: string, code: string) => request<{ department: Department }>("/api/admin/departments", { method: "POST", body: JSON.stringify({ name, code }) });
 export const listAuditLogs = () => request<{ auditLogs: AuditLog[] }>("/api/admin/audit-logs?limit=500");

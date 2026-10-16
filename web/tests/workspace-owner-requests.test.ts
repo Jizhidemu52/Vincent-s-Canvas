@@ -15,7 +15,8 @@ afterEach(() => {
 });
 
 test("task and chat HTTP requests bind the displayed employee instead of trusting only a shared cookie", async () => {
-    deploymentFeatures.oaLoginEnabled = true;
+    deploymentFeatures.authenticationEnabled = true;
+    deploymentFeatures.oaLoginEnabled = false;
     useUserStore.setState({ user: { id: "employee-a", role: "designer" } as never, status: "authenticated" });
     const requests: Array<{ path: string; owner: string | null }> = [];
     globalThis.fetch = (async (path, init) => {

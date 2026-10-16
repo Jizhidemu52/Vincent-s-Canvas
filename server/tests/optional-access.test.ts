@@ -21,11 +21,12 @@ describe("optional access and billing", () => {
         }
     });
 
-    test("keeps local creation open and requires OA only in the explicit employee mode", () => {
+    test("keeps local trial open while supporting separate password and OA modes", () => {
         const open = { oaLoginEnabled: false, authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false };
         expect(deploymentFeatures(config())).toEqual(open);
-        expect(deploymentFeatures(config({ AUTH_ENABLED: "true", CREDITS_ENABLED: "true", ROLE_PORTALS_ENABLED: "true" }))).toEqual(open);
-        expect(deploymentFeatures(config({ OA_LOGIN_ENABLED: "true", AUTH_ENABLED: "false", CREDITS_ENABLED: "true", ROLE_PORTALS_ENABLED: "true" }))).toEqual({ ...open, oaLoginEnabled: true, authenticationEnabled: true });
+        expect(deploymentFeatures(config({ AUTH_ENABLED: "true", CREDITS_ENABLED: "true", ROLE_PORTALS_ENABLED: "true" }))).toEqual({ ...open, authenticationEnabled: true, creditsEnabled: true, rolePortalsEnabled: true });
+        expect(deploymentFeatures(config({ OA_LOGIN_ENABLED: "true" }))).toEqual({ ...open, oaLoginEnabled: true, authenticationEnabled: true });
+        expect(deploymentFeatures(config({ CREDITS_ENABLED: "true" }))).toEqual(open);
         expect(config()).toMatchObject({ OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "false", CREDITS_ENABLED: "false", ROLE_PORTALS_ENABLED: "false" });
         expect(() => config({ WECOM_CORP_ID: "obsolete-partial-config" })).not.toThrow();
         expect(() => config({ AUTH_ENABLED: "off" })).toThrow();

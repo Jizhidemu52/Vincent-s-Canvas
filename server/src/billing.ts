@@ -84,7 +84,7 @@ export async function loadTaskPriceSnapshot(client: Pick<Database, "query">, inp
   );
   const creditsEnabled = input.creditsEnabled !== false;
   const overrides = input.toolConfiguration;
-  const price = priceResult.rows[0] ?? (!creditsEnabled || (overrides?.creditCostOverride != null && overrides?.rmbCostOverride != null) ? { credits: 0, rmb_cost: "0", version: 0 } : undefined);
+  const price = priceResult.rows[0] ?? (!creditsEnabled || input.operationType === "chat" || (overrides?.creditCostOverride != null && overrides?.rmbCostOverride != null) ? { credits: 0, rmb_cost: "0", version: 0 } : undefined);
   if (!price) throw new BillingError("PRICE_NOT_CONFIGURED", "管理员尚未发布该操作的价格");
   const modelResult = input.modelConfigId ? await client.query<{
     id: string; credit_cost: number; rmb_cost: string; capabilities: string[];
@@ -116,30 +116,70 @@ export async function loadTaskPriceSnapshot(client: Pick<Database, "query">, inp
 export async function adjustCredits(
   db: Database,
   input: { requestId: string; actorId: string; userId: string; amount: number; reason: string },
+  transactionClient?: PoolClient,
 ) {
-  return withTransaction(db, async (client) => {
-    const duplicate = await client.query<{ balance_after: number }>(
-      "SELECT balance_after FROM credit_ledger WHERE request_id=$1",
+  return changeCreditBalance(db, { ...input, mode: "add", value: input.amount }, transactionClient);
+}
+
+export async function setCreditBalance(
+  db: Database,
+  input: { requestId: string; actorId: string; userId: string; balance: number; reason: string },
+  transactionClient?: PoolClient,
+) {
+  return changeCreditBalance(db, { ...input, mode: "set", value: input.balance }, transactionClient);
+}
+
+async function changeCreditBalance(
+  db: Database,
+  input: { requestId: string; actorId: string; userId: string; mode: "add" | "set"; value: number; reason: string },
+  transactionClient?: PoolClient,
+) {
+  const change = async (client: PoolClient) => {
+    if (!Number.isSafeInteger(input.value) || Math.abs(input.value) > 2_147_483_647 || (input.mode === "set" && input.value < 0)) {
+      throw new BillingError("INVALID_CREDIT", "积分必须是有效范围内的整数，设置余额不能小于 0");
+    }
+    // Serialize reused request IDs even when callers target different users. The
+    // user's monthly balance is locked before checking or applying the adjustment.
+    const user = await ensureMonthlyCreditPeriod(client, input.userId, input.actorId);
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`account-credit:${input.requestId}`]);
+    const duplicate = await client.query<{
+      user_id: string | null; actor_user_id: string | null; entry_type: string;
+      balance_after: number; amount: number; reason: string;
+      metadata: { mode?: string; requestedValue?: number; balanceBefore?: number };
+    }>(
+      "SELECT user_id,actor_user_id,entry_type,balance_after,amount,reason,metadata FROM credit_ledger WHERE request_id=$1",
       [input.requestId],
     );
-    if (duplicate.rows[0]) return { balance: duplicate.rows[0].balance_after, duplicate: true };
-    const user = await ensureMonthlyCreditPeriod(client, input.userId, input.actorId);
-    const balance = user.credit_balance + input.amount;
+    const previous = duplicate.rows[0];
+    if (previous) {
+      if (previous.user_id !== input.userId || previous.actor_user_id !== input.actorId || previous.entry_type !== "adjustment"
+        || previous.metadata.mode !== input.mode || previous.metadata.requestedValue !== input.value || previous.reason !== input.reason) {
+        throw new BillingError("CREDIT_REQUEST_CONFLICT", "该请求编号已用于其他积分操作，请刷新后重试");
+      }
+      return { balance: previous.balance_after, balanceBefore: previous.metadata.balanceBefore!, amount: previous.amount, duplicate: true };
+    }
+    const balanceBefore = user.credit_balance;
+    const balance = input.mode === "set" ? input.value : balanceBefore + input.value;
     if (balance < 0) throw new BillingError("INVALID_CREDIT", "本月临时扣减不能使剩余积分低于 0");
+    const amount = balance - balanceBefore;
+    if (balance > 2_147_483_647 || Math.abs(user.temporary_credit_adjustment + amount) > 2_147_483_647) {
+      throw new BillingError("INVALID_CREDIT", "积分调整超过可保存范围");
+    }
     const creditLimit = Math.max(user.credit_limit, balance);
     await client.query(
       `UPDATE users SET credit_balance=$1,credit_limit=$2,
          temporary_credit_adjustment=temporary_credit_adjustment+$3,updated_at=now() WHERE id=$4`,
-      [balance, creditLimit, input.amount, input.userId],
+      [balance, creditLimit, amount, input.userId],
     );
     await client.query(
       `INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason,metadata)
        VALUES($1,$2,$3,'adjustment',$4,$5,'user',$6,$7,$8)`,
-      [input.requestId, input.userId, input.actorId, input.amount, balance, input.userId, input.reason,
-        JSON.stringify({ scope: "temporary", periodStart: user.credit_period_start })],
+      [input.requestId, input.userId, input.actorId, amount, balance, input.userId, input.reason,
+        JSON.stringify({ scope: "temporary", periodStart: user.credit_period_start, mode: input.mode, requestedValue: input.value, balanceBefore })],
     );
-    return { balance, duplicate: false };
-  });
+    return { balance, balanceBefore, amount, duplicate: false };
+  };
+  return transactionClient ? change(transactionClient) : withTransaction(db, change);
 }
 
 export async function reserveCredits(
@@ -157,22 +197,40 @@ export async function reserveCredits(
   transactionClient?: PoolClient,
 ) {
   const reserve = async (client: PoolClient) => {
+    // A reservation can also be submitted without a task row. Serialize its ID
+    // before lookup so concurrent retries cannot race the unique INSERT below.
+    // Existing department -> group -> user balance-lock ordering is unchanged.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`reservation:${input.requestId}`]);
     const existing = await client.query<{
+      user_id: string;
+      operation_type: string;
+      model_config_id: string | null;
+      quantity: number;
       status: string;
       credits: number;
       rmb_cost: string;
       price_snapshot: PriceSnapshot;
     }>(
-      "SELECT status,credits,rmb_cost,price_snapshot FROM credit_reservations WHERE request_id=$1",
+      "SELECT user_id,operation_type,model_config_id,quantity,status,credits,rmb_cost,price_snapshot FROM credit_reservations WHERE request_id=$1",
       [input.requestId],
     );
-    if (existing.rows[0])
+    const previous = existing.rows[0];
+    if (previous) {
+      if (previous.user_id !== input.userId) throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他账号占用");
+      if (previous.operation_type !== input.operationType || previous.model_config_id !== (input.modelConfigId ?? null)
+        || previous.quantity !== input.quantity || (previous.price_snapshot.toolKey ?? null) !== (input.toolConfiguration?.toolKey ?? null)) {
+        throw new BillingError("DUPLICATE_REQUEST", "请求编号已用于不同的积分冻结操作");
+      }
+      // Prices, configuration versions and the deployment's current credit switch
+      // may change after submission; identical retries retain their original hold.
       return {
-        ...existing.rows[0],
-        rmbCost: Number(existing.rows[0].rmb_cost),
-        snapshot: existing.rows[0].price_snapshot,
+        status: previous.status,
+        credits: previous.credits,
+        rmbCost: Number(previous.rmb_cost),
+        snapshot: previous.price_snapshot,
         duplicate: true,
       };
+    }
     const creditsEnabled = input.creditsEnabled !== false;
     const snapshot = input.priceSnapshot ?? await loadTaskPriceSnapshot(client, input);
     const identityResult = await client.query<{ department_id: string | null }>(

@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { changeOwnPassword, getCurrentSession } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
+import { deploymentFeatures } from "@/lib/deployment-features";
 
 type Values = { currentPassword: string; newPassword: string; confirmPassword: string };
 
@@ -22,7 +23,9 @@ export default function ChangePasswordPage() {
             const { user } = await getCurrentSession();
             updateUser(user);
             message.success("密码已更新");
-            navigate(isAdminRole(user.role) ? "/admin" : "/", { replace: true });
+            const destination = isAdminRole(user.role) ? "/admin" : "/";
+            if (deploymentFeatures.authenticationEnabled) window.location.assign(destination);
+            else navigate(destination, { replace: true });
         } catch (error) { message.error(error instanceof Error ? error.message : "密码修改失败"); }
         finally { setSubmitting(false); }
     };

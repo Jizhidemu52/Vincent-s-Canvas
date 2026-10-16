@@ -29,12 +29,14 @@ async function flushMicrotasks() {
     for (let index = 0; index < 12; index++) await Promise.resolve();
 }
 
-type Entry = "workspace" | "maintenance" | "maintenance-login" | "oa-required";
+type Entry = "workspace" | "maintenance" | "maintenance-login" | "password-login" | "password-change" | "oa-required";
 const providersPath = "@/components/layout/app-providers";
 const routerPath = "@/router";
 const adminPath = "@/pages/admin/login-entry";
+const loginPath = "@/pages/login/login-entry";
+const passwordPath = "@/pages/change-password/entry";
 
-function harness(owner: string | null = "employee-a") {
+function harness(owner: string | null = "employee-a", oaMode = true) {
     const events: string[] = [];
     const renders: ReactElement[] = [];
     const features = deferred<boolean>();
@@ -46,6 +48,8 @@ function harness(owner: string | null = "employee-a") {
     const CompanyOaEntry = () => null;
     const ServiceUnavailable = () => null;
     const AdminLoginEntry = () => null;
+    const PasswordLoginEntry = () => null;
+    const PasswordChangeEntry = () => null;
     const AppProviders = () => null;
     const RouterProvider = () => null;
     const state = {
@@ -62,7 +66,7 @@ function harness(owner: string | null = "employee-a") {
         "@/components/auth/service-unavailable": { ServiceUnavailable },
         "@/components/auth/company-oa-entry": { CompanyOaEntry },
         "@/lib/deployment-features": {
-            deploymentFeatures: { oaLoginEnabled: Boolean(owner) },
+            deploymentFeatures: { oaLoginEnabled: oaMode, authenticationEnabled: true },
             loadDeploymentFeatures: () => {
                 events.push("features");
                 return { then: (run: (loaded: boolean) => Promise<void>) => { startup = features.promise.then(run); return startup; } };
@@ -98,11 +102,12 @@ function harness(owner: string | null = "employee-a") {
     return {
         events, renders, features, entry, dynamicImports,
         done: () => startup,
-        CompanyOaEntry, ServiceUnavailable, AdminLoginEntry, AppProviders, RouterProvider,
+        CompanyOaEntry, ServiceUnavailable, AdminLoginEntry, PasswordLoginEntry, PasswordChangeEntry, AppProviders, RouterProvider,
         resolveImport: (name: string) => {
             const loading = modules.get(name);
             if (!loading) throw new Error(`Module was not requested: ${name}`);
-            loading.resolve(name === providersPath ? { AppProviders } : name === routerPath ? { router: "test-router" } : { default: AdminLoginEntry });
+            loading.resolve(name === providersPath ? { AppProviders } : name === routerPath ? { router: "test-router" }
+                : { default: name === loginPath ? PasswordLoginEntry : name === passwordPath ? PasswordChangeEntry : AdminLoginEntry });
         },
         changeUser: (id: string) => { state.user = { id, role: "designer" }; userChanged?.(state); },
     };
@@ -179,6 +184,33 @@ describe("workspace entry dynamic import boundary", () => {
         h.resolveImport(routerPath);
         await h.done();
         expect(h.renders.at(-1)?.type).toBe(h.CompanyOaEntry);
+        expect(h.renders.some(element => element.type === React.StrictMode)).toBe(false);
+    });
+
+    test("an unauthenticated password account imports only the login page, never router or business stores", async () => {
+        const h = harness(null, false);
+        h.features.resolve(true); h.entry.resolve("password-login");
+        await flushMicrotasks();
+        expect(h.dynamicImports).toEqual([loginPath]);
+        h.resolveImport(loginPath); await h.done();
+        expect(h.renders.at(-1)?.type).toBe(h.PasswordLoginEntry);
+    });
+
+    test("first-login password change has its own entry without initializing personal caches", async () => {
+        const h = harness("password-user", false);
+        h.features.resolve(true); h.entry.resolve("password-change");
+        await flushMicrotasks();
+        expect(h.dynamicImports).toEqual([passwordPath]);
+        h.resolveImport(passwordPath); await h.done();
+        expect(h.renders.at(-1)?.type).toBe(h.PasswordChangeEntry);
+    });
+
+    test("password identity changes during imports reload instead of mounting either account's workspace", async () => {
+        const h = harness("password-a", false);
+        h.features.resolve(true); h.entry.resolve("workspace");
+        await flushMicrotasks(); h.changeUser("password-b");
+        h.resolveImport(providersPath); h.resolveImport(routerPath); await h.done();
+        expect(h.events).toContain("reload");
         expect(h.renders.some(element => element.type === React.StrictMode)).toBe(false);
     });
 });

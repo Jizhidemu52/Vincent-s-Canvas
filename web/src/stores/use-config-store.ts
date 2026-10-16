@@ -56,7 +56,7 @@ export type AiConfig = {
 };
 
 export const CONFIG_STORE_KEY = "wireless-canvas:ai_config_store";
-const employeeConfigStorage = deploymentFeatures.oaLoginEnabled ? createWorkspaceStorage("app_state") : null;
+const employeeConfigStorage = deploymentFeatures.authenticationEnabled ? createWorkspaceStorage("app_state") : null;
 export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";

@@ -53,6 +53,9 @@ import { DesignLibraryService } from "./design-library";
 import { PostgresDesignLibraryRepository, designLibraryObjectStorage } from "./design-library-postgres";
 import { createDesignLibraryRouter, designLibraryBodyErrors, designLibraryBoundary } from "./routes/design-library";
 import { createAdminUsageRouter, createUsageRouter, usageErrors } from "./routes/usage-analytics";
+import { getCreditsEnabled } from "./credit-policy";
+import { createCreditPolicyRouter } from "./routes/credit-policy";
+import { BillingError } from "./billing";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
@@ -78,8 +81,10 @@ app.use("/api/canvas-documents", canvasBodyError);
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 app.use(requireSameOrigin);
-app.get("/api/deployment", (_request, response) => {
-  response.set("Cache-Control", "no-store").json(features);
+const readCreditsEnabled = async () => features.authenticationEnabled && await getCreditsEnabled(db, features.creditsEnabled);
+app.get("/api/deployment", async (_request, response, next) => {
+  try { response.set("Cache-Control", "no-store").json({ ...features, creditsEnabled: await readCreditsEnabled() }); }
+  catch (error) { next(error); }
 });
 
 app.get("/api/health", async (_request, response, next) => {
@@ -108,13 +113,13 @@ app.use(
   "/api/billing",
   requireSession,
   requireAccountReady,
-  createBillingRouter(db, features.creditsEnabled),
+  createBillingRouter(db, readCreditsEnabled),
 );
 app.use(
   "/api/models",
   requireSession,
   requireAccountReady,
-  createPublicModelRouter(db),
+  createPublicModelRouter(db, readCreditsEnabled),
 );
 app.use("/api/generation-capabilities", requireSession, requireAccountReady, createGenerationCapabilitiesRouter(db));
 app.use(
@@ -140,7 +145,7 @@ app.use(
   requireSession,
   requireAccountReady,
   protectModelIdentity,
-  createTasksRouter(db, cache, features.creditsEnabled),
+  createTasksRouter(db, cache, readCreditsEnabled),
 );
 app.use(
   "/api/admin/tasks",
@@ -198,6 +203,12 @@ app.use(
   requireSession,
   requireAccountReady,
   createChatRouter(db, config),
+);
+app.use(
+  "/api/admin/credit-policy",
+  requireAdminSession,
+  requireAccountReady,
+  createCreditPolicyRouter(db, { authenticationEnabled: features.authenticationEnabled, defaultEnabled: features.creditsEnabled }),
 );
 app.use(
   "/api/admin/accounts",
@@ -316,6 +327,11 @@ const errorHandler: ErrorRequestHandler = (
   }
   if (error instanceof ChatProtocolError) {
     const status = error.code === "UPSTREAM_REQUEST_FAILED" ? 502 : 400;
+    response.status(status).json({ error: error.code, message: error.message });
+    return;
+  }
+  if (error instanceof BillingError) {
+    const status = error.code === "CHAT_REQUEST_ALREADY_SUBMITTED" ? 409 : error.code === "LOGIN_REQUIRED" ? 401 : 400;
     response.status(status).json({ error: error.code, message: error.message });
     return;
   }

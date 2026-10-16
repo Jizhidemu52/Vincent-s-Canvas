@@ -11,9 +11,9 @@ type Mount = (root: HTMLElement, services: LocalWorkbenchServices) => (() => voi
 
 export function LocalDesignWorkbench({ moduleKey, title, description, mount }: { moduleKey: "pattern-placement" | "pattern-repeat"; title: string; description: string; mount: Mount }) {
     const host = useRef<HTMLDivElement>(null);
-    const ownerId = useUserStore((state) => state.user?.id || null);
+    const ownerId = useUserStore((state) => state.status === "authenticated" && state.user?.role === "designer" ? state.user.id : null);
     const enabled = useModuleEnabled(moduleKey);
-    const identityReady = !deploymentFeatures.oaLoginEnabled || Boolean(ownerId);
+    const identityReady = !deploymentFeatures.authenticationEnabled || Boolean(ownerId);
 
     useEffect(() => {
         const root = host.current;

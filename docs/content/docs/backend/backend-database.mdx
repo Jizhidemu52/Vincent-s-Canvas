@@ -121,7 +121,15 @@ SQLite 适配器在同一事务保存快照、分享、收据及接收人的 `de
 
 `019_optional_access.sql` 为 `users` 新增 `is_guest boolean NOT NULL DEFAULT false`。数据库约束 `guest_is_unprivileged` 要求访客只能是 `designer`，不得有密码散列或首次改密要求。
 
-完整后端在 `OA_LOGIN_ENABLED=false` 试用模式仍为浏览器分配独立访客身份和会话，访客不是管理员，不能通过密码登录或企业微信绑定绕过限制。开启企业 OA 模式后，普通创作不接受访客会话。演示服务的固定试用身份不能用于验证这种隔离。
+完整后端仅在 `OA_LOGIN_ENABLED=false` 且 `AUTH_ENABLED=false` 的试用模式为浏览器分配访客身份。开启 OA 或独立密码登录后，不接受访客会话；访客不能通过密码登录或企业微信绑定绕过限制。演示服务的固定试用身份不能用于验证这种隔离。
+
+## 积分计费策略
+
+`030_credit_policy.sql` 新增单行 `credit_policy`：`singleton` 主键限定为 true，`credits_enabled` 保存开关，`updated_by` 引用操作者，`updated_at` 记录保存时间。未保存时沿用部署 `CREDITS_ENABLED`（默认 false）；保存后数据库值优先，重启不丢失。只有启用独立身份认证才能开启计费，修改策略和审计在同一事务。
+
+个人绝对余额设置与加减分沿用 `credit_ledger`，metadata 记录 `mode`、`requestedValue`、`balanceBefore` 和当月周期；用户锁与请求编号锁保证幂等边界，余额、流水和审计同时提交。设置当月可用余额不改变每月固定额度，跨月仍按原规则重置。
+
+文字模型调用沿用 `credit_reservations`：每次模型请求独立冻结，成功结算，明确失败、空回复和不完整流返还；聊天请求编号按用户命名空间隔离。异常进程退出遗留的冻结暂无自动恢复机制，正式上线前需核验运维处理，不将隔离 SQL 测试视为崩溃恢复验收。
 
 ## 员工使用统计与分析
 

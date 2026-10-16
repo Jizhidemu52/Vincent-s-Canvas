@@ -52,7 +52,7 @@ export const nonAiDefinitions = [
 
 export const moduleDefinitions = [
   ...nonAiDefinitions,
-  ...toolDefinitions.map((tool) => ({ moduleKey: tool.toolKey, label: tool.label, group: tool.group, kind: "ai" as const, parent: tool.parent, description: tool.operationType === "chat" ? "对话模型绑定与开关；当前不计积分" : "独立模型绑定与开关；可设置本板块费用覆盖" })),
+  ...toolDefinitions.map((tool) => ({ moduleKey: tool.toolKey, label: tool.label, group: tool.group, kind: "ai" as const, parent: tool.parent, description: "独立模型绑定与开关；可设置本板块费用覆盖，积分总开关关闭时不扣分" })),
 ];
 export type ModuleKey = (typeof moduleDefinitions)[number]["moduleKey"];
 export const moduleKeys = moduleDefinitions.map((item) => item.moduleKey) as [ModuleKey, ...ModuleKey[]];

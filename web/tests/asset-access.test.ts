@@ -7,6 +7,7 @@ import type { Asset } from "@/stores/use-asset-store";
 import { useUserStore, type LocalUser } from "@/stores/use-user-store";
 
 const initialOaMode = deploymentFeatures.oaLoginEnabled;
+const initialAuthentication = deploymentFeatures.authenticationEnabled;
 const initialUser = useUserStore.getState().user;
 
 // Execute the real permission functions without booting browser-only canvas persistence.
@@ -39,6 +40,7 @@ const cachedAsset: Asset = {
 
 afterEach(() => {
     deploymentFeatures.oaLoginEnabled = initialOaMode;
+    deploymentFeatures.authenticationEnabled = initialAuthentication;
     useUserStore.setState({ user: initialUser });
 });
 
@@ -46,6 +48,7 @@ describe("employee asset isolation", () => {
     test("a saved server asset id is not permission to read another employee's local blob", () => {
         for (const oaMode of [false, true]) {
             deploymentFeatures.oaLoginEnabled = oaMode;
+            deploymentFeatures.authenticationEnabled = oaMode;
             expect(canUserAccessAsset(cachedAsset, employee)).toBe(false);
             expect(canUserAccessAsset(cachedAsset, { ...employee, id: "employee-a" })).toBe(true);
             expect(canUserAccessAsset(cachedAsset, null)).toBe(false);
@@ -60,14 +63,18 @@ describe("employee asset isolation", () => {
         expect(assetOwnerId({ ...ownerless, metadata: { designerId: "employee-a" } })).toBe("employee-a");
     });
 
-    test("OA users cannot use administrator roles to read another employee's local data", () => {
-        deploymentFeatures.oaLoginEnabled = true;
-        expect(canUserAccessAsset(cachedAsset, { ...employee, role: "super_admin" })).toBe(false);
-        expect(canUserAccessAsset(cachedAsset, { ...employee, role: "department_admin" })).toBe(false);
+    test("OA and password users cannot use administrator roles to read another employee's local data", () => {
+        for (const oaMode of [false, true]) {
+            deploymentFeatures.oaLoginEnabled = oaMode;
+            deploymentFeatures.authenticationEnabled = true;
+            expect(canUserAccessAsset(cachedAsset, { ...employee, role: "super_admin" })).toBe(false);
+            expect(canUserAccessAsset(cachedAsset, { ...employee, role: "department_admin" })).toBe(false);
+        }
     });
 
     test("non-OA administrator and department permissions remain available", () => {
         deploymentFeatures.oaLoginEnabled = false;
+        deploymentFeatures.authenticationEnabled = false;
         expect(canUserAccessAsset(cachedAsset, { ...employee, role: "super_admin" })).toBe(true);
         expect(canUserAccessAsset(cachedAsset, { ...employee, role: "department_admin" })).toBe(true);
         expect(canUserAccessAsset(cachedAsset, { ...employee, role: "department_admin", departmentId: "department-2" })).toBe(false);
@@ -76,9 +83,11 @@ describe("employee asset isolation", () => {
     test("only a current server-authorized response can grant non-OA sharing access", () => {
         const shared = { ...cachedAsset, metadata: {} };
         deploymentFeatures.oaLoginEnabled = false;
+        deploymentFeatures.authenticationEnabled = false;
         expect(canUserAccessAsset(shared, employee, true)).toBe(true);
         expect(canUserAccessAsset(shared, employee)).toBe(false);
         deploymentFeatures.oaLoginEnabled = true;
+        deploymentFeatures.authenticationEnabled = true;
         expect(canUserAccessAsset(shared, employee, true)).toBe(false);
     });
 });

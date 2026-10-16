@@ -4737,7 +4737,7 @@ function WirelessCanvasPage() {
     const shareCurrentCanvas = useCallback(async () => {
         try {
             await navigator.clipboard.writeText(window.location.href);
-            message.success(canvasLinkCopiedMessage[deploymentFeatures.oaLoginEnabled ? "cloud" : "local"]);
+            message.success(canvasLinkCopiedMessage[deploymentFeatures.authenticationEnabled ? "cloud" : "local"]);
         } catch {
             message.warning("无法复制链接，请从地址栏复制");
         }
@@ -5502,7 +5502,7 @@ const CanvasTopBar = memo(function CanvasTopBar({
                     <span className="cw-account-avatar" aria-hidden="true">{userName.slice(0, 1)}</span>
                     <span className="cw-account-name" title={userName}>{userName}</span>
                     {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} /> : null}
-                    <Popover trigger="click" placement="bottomRight" content={<div className="cw-workspace-notice"><strong>工作区与数据</strong><p>{deploymentFeatures.oaLoginEnabled ? "画布按当前员工身份保存，链接不等于公开分享。" : "本地试用：画布保存在当前浏览器。更换设备前请导出备份。"}</p><UsageCollectionNotice compact /></div>}><button type="button" className="cw-icon" aria-label="工作区与使用记录说明"><Info size={16} /></button></Popover>
+                    <Popover trigger="click" placement="bottomRight" content={<div className="cw-workspace-notice"><strong>工作区与数据</strong><p>{deploymentFeatures.authenticationEnabled ? "画布按当前账号身份保存，链接不等于公开分享。" : "本地试用：画布保存在当前浏览器。更换设备前请导出备份。"}</p><UsageCollectionNotice compact /></div>}><button type="button" className="cw-icon" aria-label="工作区与使用记录说明"><Info size={16} /></button></Popover>
                     <UserStatusActions variant="canvas" />
                 </div>
             </div>

@@ -4,7 +4,7 @@ import ts from "typescript";
 
 const code = ts.transpileModule(readFileSync(new URL("../src/lib/workspace-entry.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
 
-function entry(enterprise: boolean, role?: string) {
+function entry(enterprise: boolean, role?: string, authenticationEnabled = enterprise) {
     const calls: string[] = [];
     const state: any = {
         user: role ? { id: "verified", role } : null, status: role ? "authenticated" : "guest",
@@ -13,7 +13,7 @@ function entry(enterprise: boolean, role?: string) {
     };
     const module = { exports: {} as any };
     const dependencies: Record<string, unknown> = {
-        "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: enterprise } },
+        "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: enterprise, authenticationEnabled } },
         "@/stores/use-user-store": { useUserStore: { getState: () => state }, isAdminRole: (value: string) => value === "super_admin" || value === "department_admin" },
     };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name], module, module.exports);
@@ -47,8 +47,31 @@ test("invalid explicit credentials never fall back to a previous employee or mai
 test("a real administrator can maintain configuration but cannot initialize employee creative stores", async () => {
     const administrator = entry(true, "super_admin");
     expect(await administrator.prepare(null, "/admin")).toBe("maintenance");
-    expect(await administrator.prepare(null, "/change-password")).toBe("maintenance");
+    expect(await administrator.prepare(null, "/change-password")).toBe("password-change");
     expect(await administrator.prepare(null, "/canvas")).toBe("oa-required");
     expect(await entry(true).prepare(null, "/admin/login")).toBe("maintenance-login");
     expect(await entry(true, "designer").prepare(null, "/admin")).toBe("maintenance-login");
+});
+
+test("password mode verifies session first, ignores old OA tokens and never grants a guest workspace", async () => {
+    const guest = entry(false, undefined, true);
+    expect(await guest.prepare("old-oa-token", "/canvas/private")).toBe("password-login");
+    expect(guest.calls).toEqual(["session"]);
+    expect(await guest.prepare(null, "/admin")).toBe("maintenance-login");
+    const designer = entry(false, "designer", true);
+    expect(await designer.prepare(null, "/canvas/private")).toBe("workspace");
+    expect(designer.calls).toEqual(["session"]);
+    expect(await designer.prepare(null, "/admin")).toBe("maintenance-login");
+    expect(await designer.prepare(null, "/login")).toBe("password-login");
+    expect(await entry(false, "super_admin", true).prepare(null, "/admin/login")).toBe("maintenance-login");
+    expect(await entry(false, "super_admin", true).prepare(null, "/canvas/private")).toBe("maintenance");
+});
+
+test("first-login password changes for both designers and admins precede workspace imports", async () => {
+    for (const role of ["designer", "department_admin", "super_admin"]) {
+        const login = entry(false, role, true);
+        login.state.user.mustChangePassword = true;
+        expect(await login.prepare(null, "/")).toBe("password-change");
+        expect(await login.prepare(null, "/change-password")).toBe("password-change");
+    }
 });

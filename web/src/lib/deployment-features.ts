@@ -9,10 +9,11 @@ export type DeploymentFeatures = {
 
 export function normalizeDeploymentFeatures(value: Partial<DeploymentFeatures> = {}): DeploymentFeatures {
     const oaLoginEnabled = value.oaLoginEnabled === true;
+    const authenticationEnabled = oaLoginEnabled || value.authenticationEnabled === true;
     return {
-        authenticationEnabled: oaLoginEnabled,
-        creditsEnabled: false,
-        rolePortalsEnabled: false,
+        authenticationEnabled,
+        creditsEnabled: authenticationEnabled && value.creditsEnabled === true,
+        rolePortalsEnabled: authenticationEnabled && value.rolePortalsEnabled === true,
         oaLoginEnabled,
     };
 }
@@ -21,7 +22,7 @@ export const deploymentFeatures = normalizeDeploymentFeatures(standaloneEdition
     ? { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false }
     : {});
 
-// The server selects OA employee access or local trial mode; billing and role portals stay hidden.
+// The server selects password/OA access or trial mode and the persisted credit policy.
 export async function loadDeploymentFeatures() {
     if (standaloneEdition) return true;
     try {

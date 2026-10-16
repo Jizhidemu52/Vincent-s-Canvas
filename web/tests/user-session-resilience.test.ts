@@ -14,6 +14,7 @@ const response = (id: string) => Response.json({ user: employee(id) });
 // Run real API + store in isolated module instances, without global mocks leaking to other suites.
 function session() {
     const requests: { path: string; resolve: (value: Response) => void; reject: (error: Error) => void }[] = [];
+    const broadcasts: Array<string | null> = [];
     const api: any = {};
     new Function("exports", "fetch", apiCode)(api, (path: string) => {
         const pending = Promise.withResolvers<Response>();
@@ -21,9 +22,9 @@ function session() {
         return pending.promise;
     });
     const exports: any = {};
-    new Function("exports", "require", storeCode)(exports, (name: string) => name === "zustand" ? { create } : name === "@/lib/workspace-session-events" ? { broadcastWorkspaceIdentity() {} } : api);
+    new Function("exports", "require", storeCode)(exports, (name: string) => name === "zustand" ? { create } : name === "@/lib/workspace-session-events" ? { broadcastWorkspaceIdentity(owner: string | null) { broadcasts.push(owner); } } : api);
     const store = exports.useUserStore;
-    return { requests, store, api, state: () => store.getState() };
+    return { requests, broadcasts, store, api, state: () => store.getState() };
 }
 
 test("known identity survives network and 5xx outages without losing its working session", async () => {
@@ -105,4 +106,43 @@ test("auth API exposes response status and marks transport failures separately",
     s.requests[1].reject(new TypeError("offline"));
     const error = await offline;
     expect(error).toBeInstanceOf(s.api.AuthRequestError); expect(error.status).toBeNull();
+});
+
+test("logout reaches the server before identity-clearing subscribers can reload the page", async () => {
+    const s = session(); s.state().updateUser({ ...employee("admin"), role: "super_admin" });
+    const known = s.state().user;
+    let serverConfirmed = false;
+    const restarts: boolean[] = [];
+    s.store.subscribe((state: any) => { if (!state.user) restarts.push(serverConfirmed); });
+    const logout = s.state().clearSession();
+    expect(s.requests.map(request => request.path)).toEqual(["/api/auth/logout"]);
+    expect(s.state().user).toBe(known);
+    expect(restarts).toEqual([]); expect(s.broadcasts).toEqual([]);
+    await s.state().hydrateSession();
+    expect(s.requests).toHaveLength(1);
+    serverConfirmed = true;
+    s.requests[0].resolve(new Response(null, { status: 204 })); await logout;
+    expect(s.broadcasts).toEqual([null]); expect(restarts).toEqual([true]);
+    expect(s.state()).toMatchObject({ user: null, status: "guest" });
+});
+
+test("failed logout does not claim success or restart, and session verification can resume", async () => {
+    const s = session(); s.state().updateUser(employee("a"));
+    const known = s.state().user;
+    const logout = s.state().clearSession();
+    s.requests[0].reject(new TypeError("offline"));
+    await expect(logout).rejects.toThrow("暂时无法连接认证服务");
+    expect(s.state().user).toBe(known); expect(s.broadcasts).toEqual([]);
+    const verification = s.state().hydrateSession();
+    expect(s.requests[1].path).toBe("/api/auth/session");
+    s.requests[1].resolve(Response.json({}, { status: 401 })); await verification;
+    expect(s.state().user).toBeNull();
+});
+
+test("late logout acknowledgement cannot clear a newer verified identity", async () => {
+    const s = session(); s.state().updateUser(employee("a"));
+    const logout = s.state().clearSession();
+    s.state().updateUser(employee("b"));
+    s.requests[0].resolve(new Response(null, { status: 204 })); await logout;
+    expect(s.state().user.id).toBe("b"); expect(s.broadcasts).toEqual([]);
 });

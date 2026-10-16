@@ -116,7 +116,7 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                                         <div className="mt-3 flex-1 space-y-2 text-sm text-[var(--muted-foreground)]">
                                             <p>{state.reason}</p>
                                             {!moduleEnabled ? <Tag color="orange">模块入口或所属总入口已关闭</Tag> : null}
-                                            {tool.operationType === "chat" ? <Tag>不计积分</Tag> : <p className="text-xs">{tool.creditCostOverride == null ? "积分：继承操作与模型价格" : `积分：${tool.creditCostOverride} / 次（总额）`}<br />{tool.rmbCostOverride == null ? "成本：继承操作与模型价格" : `成本：￥${tool.rmbCostOverride.toFixed(4)} / 次（总额）`}</p>}
+                                            <p className="text-xs">{tool.creditCostOverride == null ? "积分：继承操作与模型价格" : `积分：${tool.creditCostOverride} / 次（总额）`}<br />{tool.rmbCostOverride == null ? "成本：继承操作与模型价格" : `成本：￥${tool.rmbCostOverride.toFixed(4)} / 次（总额）`}</p>
                                             {tool.workflowName ? <p className="text-xs">工作流：{tool.workflowName}</p> : null}
                                             <p className="text-xs">配置版本：{tool.configurationVersion}</p>
                                         </div>
@@ -140,13 +140,14 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                     {selectedTool?.modelConfigId && !selectedModels.some((model) => model.id === selectedTool.modelConfigId) ? <Alert className="mb-4" type="warning" showIcon title="当前绑定不可用" description="请重新选择可用模型或清空绑定；停用 API 不会自动改用其他模型。" /> : null}
                     {!selectedModels.length ? <Alert className="mb-4" type="warning" showIcon title="还没有兼容的可用模型" description="先配置 API 服务与密钥，再在模型高级页新增兼容模型。" /> : null}
                     <div className="mb-5 flex flex-wrap gap-2"><Button onClick={() => openAdvanced("providers")}>配置 / 新增 API 服务</Button><Button onClick={() => openAdvanced("models")}>新增 / 管理模型</Button></div>
-                    {selectedTool?.operationType === "chat" ? <Alert className="mb-4" type="info" showIcon title="不计积分" description="当前对话板块不计积分，不设置板块费用覆盖。" /> : <>
-                        <Alert className="mb-4" type="info" showIcon title="费用覆盖为每次调用总额" description="留空继承“操作价格 + 模型价格”；填写后替代该合计，仅当前板块生效。0 是有效值，不表示继承。" />
+                    <>
+                        <Alert className="mb-4" type="info" showIcon title="费用覆盖为每次调用总额" description="留空继承“操作价格 + 模型价格”；填写后替代该合计，仅当前板块生效。0 表示免费，不表示继承。积分总开关关闭时不扣分，费用配置仍会保留。" />
+                        {selectedTool?.operationType === "chat" ? <Alert className="mb-4" type="info" showIcon title="对话按模型调用次数计费" description="每次成功的模型请求计费一次，Agent 工具调用后的模型续答也算一次；生成图片等工具另按对应板块计费。失败或中断不扣分。" /> : null}
                         <div className="grid gap-3 sm:grid-cols-2">
                             <Form.Item name="creditCostOverride" label="积分总额 / 次（可选）"><InputNumber className="w-full" min={0} precision={0} placeholder="留空继承" /></Form.Item>
                             <Form.Item name="rmbCostOverride" label="人民币成本总额 / 次（可选）"><InputNumber className="w-full" min={0} precision={4} placeholder="留空继承" /></Form.Item>
                         </div>
-                    </>}
+                    </>
                     <Form.Item name="enabled" label="本板块 API 启用" valuePropName="checked" extra="与模块入口开关独立；关闭后禁止本板块调用，不回退到其他模型。"><Switch /></Form.Item>
                     <Button className="!h-10" type="primary" htmlType="submit" loading={saving} block>仅保存当前板块并同步</Button>
                 </Form>

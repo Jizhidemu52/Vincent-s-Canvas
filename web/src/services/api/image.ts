@@ -8,6 +8,7 @@ import type { ReferenceImage } from "@/types/image";
 import { generationDraftInput } from "./generation-history";
 import { imageAdvancedParameters, readImageOptions } from "@/lib/image-advanced-settings";
 import { resolveToolConfig } from "./tool-runtime";
+import { createClientId } from "@/lib/client-id";
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -32,7 +33,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: Array<Record<string, unknown>> };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { requestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
+type RequestOptions = { requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "responses_assistant"; output: Array<Record<string, unknown>> } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -203,7 +204,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json", ...workspaceOwnerHeaders() },
-        body: JSON.stringify({ toolKey: resolved.toolKey, modelId, input, tools, toolChoice, webSearch: options?.webSearch === true, ...(claude ? { claude } : {}) }),
+        body: JSON.stringify({ requestId: options?.chatRequestId || createClientId(), toolKey: resolved.toolKey, modelId, input, tools, toolChoice, webSearch: options?.webSearch === true, ...(claude ? { claude } : {}) }),
         signal: options?.signal,
     });
     if (!response.ok) {

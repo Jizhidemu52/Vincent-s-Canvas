@@ -6,7 +6,7 @@ import { saveAs } from "file-saver";
 import Papa from "papaparse";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
-import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, resetAccountPassword, updateAccount, type AccountInput, type AuditLog, type Department } from "@/services/api/admin-accounts";
+import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, resetAccountPassword, setAccountCredits, updateAccount, type AccountInput, type AuditLog, type Department } from "@/services/api/admin-accounts";
 import { loadAdminOverview, markPlatformAdminTabLabel, resolveAdminTab } from "./admin-overview";
 import type { ApiUser, ApiUserRole } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
@@ -23,6 +23,7 @@ const AdminAssetsPanel = lazy(() => import("./components/admin-assets-panel").th
 const IntegrationStatusPanel = lazy(() => import("./components/integration-status-panel").then((module) => ({ default: module.IntegrationStatusPanel })));
 const GroupManagementPanel = lazy(() => import("./components/group-management-panel").then((module) => ({ default: module.GroupManagementPanel })));
 const ModuleSwitchPanel = lazy(() => import("./components/module-switch-panel").then((module) => ({ default: module.ModuleSwitchPanel })));
+const CreditPolicyPanel = lazy(() => import("./components/credit-policy-panel").then((module) => ({ default: module.CreditPolicyPanel })));
 const PerformanceDashboard = lazy(() => import("@/pages/performance/dashboard").then((module) => ({ default: module.PerformanceDashboard })));
 
 type CreditFormValues = {
@@ -146,7 +147,7 @@ export default function AdminPage() {
         try {
             const result = await adjustAccountCredits(values.designerId, values.amount, values.reason || "管理员调整");
             if (result.user.id === signedInUser?.id) await hydrateSession();
-            message.success(result.user.id === signedInUser?.id ? "本月临时额度已调整，当前会话已同步" : "本月临时额度已调整");
+            message.success(result.user.id === signedInUser?.id ? "当前积分已追加或扣除，当前会话已同步" : "当前积分已追加或扣除");
             await refreshAccounts();
         }
         catch (error) { message.error(error instanceof Error ? error.message : "额度调整失败"); }
@@ -163,14 +164,13 @@ export default function AdminPage() {
                 const currentAccount = accounts.find((account) => account.id === editingAccountId);
                 if (!currentAccount) throw new Error("账号不存在或已更新，请刷新后重试");
                 await updateAccount(editingAccountId, { displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, role: values.role === "super_admin" ? undefined : values.role, status: values.status, monthlyCreditLimit: values.monthlyCreditLimit });
-                const creditDelta = values.quotaRemaining - currentAccount.creditBalance;
-                if (creditDelta) await adjustAccountCredits(editingAccountId, creditDelta, "管理员在账号编辑中调整本月余额");
+                if (values.quotaRemaining !== currentAccount.creditBalance) await setAccountCredits(editingAccountId, values.quotaRemaining, "管理员在账号编辑中设置当前积分余额");
                 if (values.password) await resetAccountPassword(editingAccountId, values.password);
                 if (editingAccountId === signedInUser?.id) await hydrateSession();
             } else {
                 await createAccount({ username: values.loginName, displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, password: values.password || "", role: values.role, creditBalance: values.quotaRemaining, creditLimit: Math.max(values.quotaRemaining, values.monthlyCreditLimit), monthlyCreditLimit: values.monthlyCreditLimit });
             }
-            message.success(editingAccountId ? "账号和当前额度已更新" : "账号已开通，首次登录必须修改密码");
+            message.success(editingAccountId ? "账号和当前积分余额已更新" : "账号已开通，首次登录必须修改密码");
             setEditingAccountId(null);
             accountForm.resetFields();
             accountForm.setFieldsValue({ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 });
@@ -325,7 +325,7 @@ export default function AdminPage() {
                                                 { title: "部门", dataIndex: "departmentName", render: (value: string | null) => value || "未分配" },
                                                 { title: "角色", render: (_, record: ApiUser) => <Tag color={record.role === "super_admin" ? "red" : record.role === "department_admin" ? "blue" : "default"}>{record.role === "super_admin" ? "超级管理员" : record.role === "department_admin" ? "部门管理员" : "设计师"}</Tag> },
                                                 { title: "状态", render: (_, record: ApiUser) => <Tag color={record.status === "active" ? "green" : "red"}>{record.status === "active" ? "启用" : record.status === "locked" ? "锁定" : "停用"}</Tag> },
-                                                 { title: "本月剩余", dataIndex: "creditBalance", sorter: (a: ApiUser, b: ApiUser) => a.creditBalance - b.creditBalance },
+                                                 { title: "当前积分余额", dataIndex: "creditBalance", sorter: (a: ApiUser, b: ApiUser) => a.creditBalance - b.creditBalance },
                                                  { title: "每月固定额度", dataIndex: "monthlyCreditLimit" },
                                                  { title: "本月临时调整", dataIndex: "temporaryCreditAdjustment", render: (value: number) => value > 0 ? `+${value}` : value },
                                                  { title: "下次重置", dataIndex: "creditResetAt" },
@@ -349,14 +349,15 @@ export default function AdminPage() {
                                                     <Button className="mt-3 !h-10" loading={pendingAction === "department"} disabled={Boolean(pendingAction) && pendingAction !== "department"} block onClick={submitDepartment}>新建部门</Button>
                                                 </Panel>
                                             ) : null}
-                                            <Panel title={editingAccountId ? "编辑账号权限" : "开通设计师账号"}>
+                                            <CreditPolicyPanel />
+                                            <Panel title={editingAccountId ? "编辑账号与积分" : "开通设计师账号"}>
                                                 <div className="mb-4 flex flex-wrap gap-2">
                                                     <Upload accept=".csv,text/csv" disabled={Boolean(pendingAction)} maxCount={1} showUploadList={false} beforeUpload={(file) => importAccountCsv(file as File)}>
                                                         <Button loading={pendingAction === "import"} disabled={Boolean(pendingAction) && pendingAction !== "import"} icon={<FileUp className="size-4" />}>批量导入 CSV</Button>
                                                     </Upload>
                                                     <Button icon={<Download className="size-4" />} onClick={downloadAccountTemplate}>下载模板</Button>
                                                 </div>
-                                                 <Form form={accountForm} layout="vertical" disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 }} onFinish={submitAccount}>
+                                                 <Form name="admin-account" form={accountForm} layout="vertical" disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 }} onFinish={submitAccount}>
                                                     <Form.Item name="loginName" label="登录账号" rules={[{ required: true, message: "请输入登录账号" }]}>
                                                         <Input placeholder="例如：张三 / zhangsan / 邮箱 / 工号" disabled={Boolean(editingAccountId)} />
                                                     </Form.Item>
@@ -370,11 +371,11 @@ export default function AdminPage() {
                                                         <Form.Item name="email" label="邮箱"><Input placeholder="可用于登录" /></Form.Item>
                                                         <Form.Item name="employeeNo" label="工号"><Input placeholder="可用于登录" /></Form.Item>
                                                      </div>
-                                                     <Form.Item name="monthlyCreditLimit" label="每月固定额度" rules={[{ required: true }]}>
-                                                         <InputNumber className="w-full" min={0} max={1000000} />
+                                                     <Form.Item name="monthlyCreditLimit" label="每月固定额度" extra="下月 1 日按此额度重置；不改变本月当前余额。" rules={[{ required: true }]}>
+                                                         <InputNumber className="w-full" min={0} max={1000000} precision={0} />
                                                      </Form.Item>
-                                                    <Form.Item name="departmentId" label="所属部门" rules={[{ required: true, message: "请选择部门" }]}>
-                                                        <Select options={departments.map((department) => ({ label: department.name, value: department.id }))} />
+                                                    <Form.Item name="departmentId" label="所属部门" dependencies={["role"]} extra={isAdmin ? "设计师可不分配部门；部门管理员必须指定部门。" : undefined} rules={[({ getFieldValue }) => ({ required: !isAdmin || getFieldValue("role") === "department_admin", message: "请选择部门" })]}>
+                                                        <Select allowClear={isAdmin} options={departments.map((department) => ({ label: department.name, value: department.id }))} />
                                                     </Form.Item>
                                                     <Form.Item name="role" label="角色" rules={[{ required: true }]}>
                                                         <Select
@@ -393,13 +394,13 @@ export default function AdminPage() {
                                                         />
                                                     </Form.Item>
                                                     <div className="grid grid-cols-2 gap-3">
-                                                        <Form.Item name="quotaRemaining" label="当前剩余额度" rules={[{ required: true }]}>
-                                                            <InputNumber className="w-full" min={0} max={1000000} />
+                                                        <Form.Item name="quotaRemaining" label="当前积分余额（设为）" extra="修改后将当前余额直接设为该数值，不是追加；下月仍按每月固定额度重置。" rules={[{ required: true }]}>
+                                                            <InputNumber className="w-full" min={0} max={1000000} precision={0} />
                                                         </Form.Item>
                                                     </div>
                                                     <Space className="w-full" orientation="vertical">
                                                         <Button className="!h-10" loading={pendingAction === "account"} type="primary" htmlType="submit" icon={<UserPlus className="size-4" />} block>
-                                                            {editingAccountId ? "保存账号权限" : "开通账号"}
+                                                            {editingAccountId ? "保存账号与积分" : "开通账号"}
                                                         </Button>
                                                         {editingAccountId ? (
                                                             <Button
@@ -417,13 +418,13 @@ export default function AdminPage() {
                                                 </Form>
                                                 <Typography.Paragraph className="!mb-0 !mt-3 text-xs !text-stone-500">登录账号支持中文或英文，邮箱和工号也可登录。新账号首次登录必须修改密码；停用和重置密码会使既有会话失效。</Typography.Paragraph>
                                             </Panel>
-                                             <Panel title="调整本月临时额度">
-                                                <Form form={creditForm} layout="vertical" disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ designerId: activeDesigner?.id, amount: 100, reason: "项目补充额度" }} onFinish={submitCreditChange}>
+                                             <Panel title="追加或扣除积分">
+                                                <Form name="admin-credit-adjustment" form={creditForm} layout="vertical" disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ designerId: activeDesigner?.id, amount: 100, reason: "项目补充额度" }} onFinish={submitCreditChange}>
                                                     <Form.Item name="designerId" label="设计师" rules={[{ required: true }]}>
                                                         <Select options={designerOptions.filter((item) => accounts.find((designer) => designer.id === item.value)?.role === "designer")} />
                                                     </Form.Item>
-                                                     <Form.Item name="amount" label="仅本月有效的积分变化" rules={[{ required: true }]}>
-                                                        <InputNumber className="w-full" min={-100000} max={100000} />
+                                                     <Form.Item name="amount" label="积分变化（正数追加，负数扣除）" extra="在当前余额上增加或扣除；本月临时调整月底到期，下月按每月固定额度重置。" rules={[{ required: true }]}>
+                                                        <InputNumber className="w-full" min={-100000} max={100000} precision={0} />
                                                     </Form.Item>
                                                     <Form.Item name="reason" label="原因">
                                                         <Input placeholder="例如：项目补充额度" />
@@ -434,12 +435,12 @@ export default function AdminPage() {
                                                 </Form>
                                             </Panel>
                                              <Panel title="设置每月固定额度">
-                                                 <Form form={limitForm} layout="vertical" disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ designerId: activeDesigner?.id, monthlyCreditLimit: activeDesigner?.monthlyCreditLimit || 500 }} onFinish={submitLimitChange}>
+                                                 <Form name="admin-monthly-credit" form={limitForm} layout="vertical" disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ designerId: activeDesigner?.id, monthlyCreditLimit: activeDesigner?.monthlyCreditLimit ?? 500 }} onFinish={submitLimitChange}>
                                                     <Form.Item name="designerId" label="设计师" rules={[{ required: true }]}>
-                                                        <Select options={designerOptions.filter((item) => accounts.find((designer) => designer.id === item.value)?.role === "designer")} />
+                                                        <Select options={designerOptions.filter((item) => accounts.find((designer) => designer.id === item.value)?.role === "designer")} onChange={(id: string) => limitForm.setFieldValue("monthlyCreditLimit", accounts.find((account) => account.id === id)?.monthlyCreditLimit)} />
                                                     </Form.Item>
-                                                     <Form.Item name="monthlyCreditLimit" label="每月 1 日重置后的积分" rules={[{ required: true }]}>
-                                                        <InputNumber className="w-full" min={0} max={1000000} />
+                                                     <Form.Item name="monthlyCreditLimit" label="每月 1 日重置后的积分" extra="仅改变下月起的固定额度，不立即增加或扣除当前余额。" rules={[{ required: true }]}>
+                                                        <InputNumber className="w-full" min={0} max={1000000} precision={0} />
                                                     </Form.Item>
                                                     <Button className="!h-10" loading={pendingAction === "limit"} htmlType="submit" block>
                                                          保存每月固定额度

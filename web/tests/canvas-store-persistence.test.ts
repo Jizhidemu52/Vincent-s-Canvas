@@ -60,14 +60,14 @@ function database() {
     };
 }
 
-async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | null, browser = true) {
+async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | null, browser = true, oaMode = true) {
     let ids = 0;
     let reloads = 0;
     const userStore = create<{ user: { id: string; role?: string } | null; status: string }>(() => ({ user: oaOwnerId ? { id: oaOwnerId, role: "designer" } : null, status: oaOwnerId ? "authenticated" : "guest" }));
     const errors: unknown[][] = [];
     const bindings = {
         create, persist, nanoid: () => `new-${++ids}`, collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, applyCanvasProjectPatch,
-        deploymentFeatures: { oaLoginEnabled: oaOwnerId !== undefined },
+        deploymentFeatures: { authenticationEnabled: oaOwnerId !== undefined, oaLoginEnabled: oaMode && oaOwnerId !== undefined },
         useUserStore: userStore,
         createCloudCanvasPersistence: () => ({ hydrate: async (projects: CanvasProject[]) => projects, schedule() {}, async flush() {} }),
         localForageStorage: io.adapter,
@@ -141,21 +141,22 @@ test("closing flushes the editor snapshot through the store queue without waitin
     expect(reopened.store.getState().projects[0]).toMatchObject({ title: "关闭前的最后一次编辑", nodes: project().nodes });
 });
 
-test("OA canvas persistence isolates employee keys and leaves old unscoped projects intact", async () => {
+for (const oaMode of [false, true]) {
+test(`${oaMode ? "OA" : "password"} canvas persistence isolates employee keys and leaves old unscoped projects intact`, async () => {
     const io = database();
-    const a = await openTab(io, "employee/A"), b = await openTab(io, "employee/B");
+    const a = await openTab(io, "employee/A", true, oaMode), b = await openTab(io, "employee/B", true, oaMode);
     expect(a.store.getState().projects).toEqual([]);
     expect(b.store.getState().projects).toEqual([]);
     a.store.getState().createProject("员工 A 的画布");
     b.store.getState().createProject("员工 B 的画布");
     await Promise.all([a.flush(), b.flush()]);
-    expect((await openTab(io, "employee/A")).store.getState().projects.map((item: CanvasProject) => item.title)).toEqual(["员工 A 的画布"]);
-    expect((await openTab(io, "employee/B")).store.getState().projects.map((item: CanvasProject) => item.title)).toEqual(["员工 B 的画布"]);
+    expect((await openTab(io, "employee/A", true, oaMode)).store.getState().projects.map((item: CanvasProject) => item.title)).toEqual(["员工 A 的画布"]);
+    expect((await openTab(io, "employee/B", true, oaMode)).store.getState().projects.map((item: CanvasProject) => item.title)).toEqual(["员工 B 的画布"]);
     expect(io.read()).toEqual([project()]);
 });
 
-test("OA owner changes flush the old immutable key, clear the live editor and restart authentication", async () => {
-    const io = database(), a = await openTab(io, "employee-A");
+test(`${oaMode ? "OA" : "password"} owner changes flush the old immutable key, clear the live editor and restart authentication`, async () => {
+    const io = database(), a = await openTab(io, "employee-A", true, oaMode);
     a.store.getState().createProject("旧员工未完成的自动保存");
     a.userStore.setState({ user: { id: "employee-B" } });
     expect(a.store.getState().projects).toEqual([]);
@@ -169,8 +170,8 @@ test("OA owner changes flush the old immutable key, clear the live editor and re
     expect(io.read()).toEqual([project()]);
 });
 
-test("OA guest bootstrap never hydrates or persists the legacy shared workspace", async () => {
-    const io = database(), guest = await openTab(io, null);
+test(`${oaMode ? "OA" : "password"} guest bootstrap never hydrates or persists the legacy shared workspace`, async () => {
+    const io = database(), guest = await openTab(io, null, true, oaMode);
     expect(guest.store.getState().projects).toEqual([]);
     expect(guest.store.persist.hasHydrated()).toBe(false);
     guest.store.getState().createProject("不应存储的访客草稿");
@@ -178,6 +179,7 @@ test("OA guest bootstrap never hydrates or persists the legacy shared workspace"
     expect(io.writes).toEqual([]);
     expect(io.read()).toEqual([project()]);
 });
+}
 
 test("two actual store instances saving concurrently cannot overwrite separate moves or additions", async () => {
     const io = database(), a = await openTab(io), b = await openTab(io);

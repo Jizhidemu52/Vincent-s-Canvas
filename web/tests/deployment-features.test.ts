@@ -10,12 +10,12 @@ describe("deployment switches", () => {
     test("opens creative workspaces without account or credit gates by default", () => {
         expect(normalizeDeploymentFeatures()).toEqual(openFeatures);
     });
-    test("explicit OA mode requires employee identity without restoring credits or role portals", () => {
-        expect(normalizeDeploymentFeatures({ authenticationEnabled: true, oaLoginEnabled: true, creditsEnabled: true, rolePortalsEnabled: true })).toEqual({ ...openFeatures, authenticationEnabled: true, oaLoginEnabled: true });
-        expect(normalizeDeploymentFeatures({ authenticationEnabled: true, creditsEnabled: true, rolePortalsEnabled: true })).toEqual(openFeatures);
+    test("password and OA authentication support explicit credit and portal settings", () => {
+        expect(normalizeDeploymentFeatures({ oaLoginEnabled: true })).toEqual({ ...openFeatures, authenticationEnabled: true, oaLoginEnabled: true });
+        expect(normalizeDeploymentFeatures({ authenticationEnabled: true, creditsEnabled: true, rolePortalsEnabled: true })).toEqual({ ...openFeatures, authenticationEnabled: true, creditsEnabled: true, rolePortalsEnabled: true });
     });
     test("does not show credit quotas for anonymous use", () => {
-        expect(normalizeDeploymentFeatures({ authenticationEnabled: false })).toMatchObject({ authenticationEnabled: false, creditsEnabled: false });
+        expect(normalizeDeploymentFeatures({ authenticationEnabled: false, creditsEnabled: true, rolePortalsEnabled: true })).toMatchObject({ authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false });
     });
     test("startup still fails closed on missing or invalid deployment responses", async () => {
         for (const response of [new Response("offline", { status: 503 }), Response.json({}), Response.json(null), Response.json({ ...openFeatures, authenticationEnabled: "false" })]) {

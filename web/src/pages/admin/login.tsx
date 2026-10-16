@@ -1,6 +1,6 @@
 import { LockKeyhole, ShieldCheck, UserRound } from "lucide-react";
 import { App, Button, Input } from "antd";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
@@ -13,18 +13,20 @@ export default function AdminLoginPage() {
     const [loginName, setLoginName] = useState("");
     const [password, setPassword] = useState("");
     const [submitting, setSubmitting] = useState(false);
+    const submittingRef = useRef(false);
 
     const submit = async () => {
+        if (submittingRef.current) return;
         if (!loginName.trim() || !password) { message.warning("请输入管理员账号和密码"); return; }
-        setSubmitting(true);
+        submittingRef.current = true; setSubmitting(true);
         try {
             const user = await login(loginName, password, "admin");
             message.success("登录成功");
             const destination = user.mustChangePassword ? "/change-password" : isAdminRole(user.role) ? "/admin" : "/";
-            if (deploymentFeatures.oaLoginEnabled) window.location.assign(destination);
+            if (deploymentFeatures.authenticationEnabled) window.location.assign(destination);
             else navigate(destination, { replace: true });
         } catch (error) { message.error(error instanceof Error ? error.message : "登录失败"); }
-        finally { setSubmitting(false); }
+        finally { submittingRef.current = false; setSubmitting(false); }
     };
 
     return (
@@ -37,7 +39,7 @@ export default function AdminLoginPage() {
                     <div>
                         <div className="text-xs font-medium text-orange-600">管理员维护</div>
                         <h1 className="text-xl font-semibold">进入后台管理</h1>
-                        <p className="mt-1 text-xs text-stone-500">此入口仅用于受保护的系统配置；员工请从公司 OA 进入创作工作台。</p>
+                        <p className="mt-1 text-xs text-stone-500">此入口仅用于受保护的系统配置；{deploymentFeatures.oaLoginEnabled ? "员工请从公司 OA 进入创作工作台。" : "设计师请使用个人账号登录工作台。"}</p>
                     </div>
                 </div>
 
@@ -49,7 +51,7 @@ export default function AdminLoginPage() {
                     <Button type="primary" size="large" block loading={submitting} icon={<LockKeyhole className="size-4" />} onClick={submit}>
                         登录后台
                     </Button>
-                    <Button size="large" block icon={<UserRound className="size-4" />} onClick={() => deploymentFeatures.oaLoginEnabled ? window.location.assign("/") : navigate("/")}>
+                    <Button size="large" block icon={<UserRound className="size-4" />} onClick={() => deploymentFeatures.authenticationEnabled ? window.location.assign(deploymentFeatures.oaLoginEnabled ? "/" : "/login") : navigate("/")}>
                         返回工作台
                     </Button>
                 </div>

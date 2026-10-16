@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { Router } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
 
 import { writeAudit } from "../audit";
-import { adjustCredits, BillingError, refreshMonthlyCreditPeriod } from "../billing";
+import { adjustCredits, BillingError, refreshMonthlyCreditPeriod, setCreditBalance } from "../billing";
 import type { Database } from "../db";
+import { withTransaction } from "../db-transaction";
 import { canManageUser, requireRole } from "../rbac";
 import { hashPassword, validatePassword } from "../security";
 import type { AuthenticatedRequest, UserRole } from "../types";
@@ -27,6 +28,7 @@ const updateSchema = z.object({
 });
 const resetSchema = z.object({ password: z.string().min(1) });
 const creditSchema = z.object({ requestId: z.string().min(8).max(200), scope: z.literal("temporary").default("temporary"), amount: z.number().int().min(-1_000_000).max(1_000_000).refine((value) => value !== 0), reason: z.string().trim().min(2).max(300) });
+const setCreditSchema = z.object({ requestId: z.string().min(8).max(200), balance: z.number().int().min(0).max(2_147_483_647), reason: z.string().trim().min(2).max(300) });
 
 export function createAccountsRouter(db: Database) {
     const router = Router();
@@ -144,24 +146,38 @@ export function createAccountsRouter(db: Database) {
         } catch (error) { next(error); }
     });
 
-    router.post("/:id/credits", async (request, response, next) => {
+    router.route("/:id/credits").post(changeCredits).put(changeCredits);
+
+    async function changeCredits(request: Request, response: Response, next: NextFunction) {
         const actor = (request as unknown as AuthenticatedRequest).auth;
         try {
-            const input = creditSchema.parse(request.body);
-            const targetResult = await db.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`, [request.params.id]);
-            const target = targetResult.rows[0] && mapUser(targetResult.rows[0]);
-            if (!target) { response.status(404).json({ error: "NOT_FOUND", message: "账号不存在" }); return; }
-            if (!canManageUser(actor, target)) { response.status(403).json({ error: "FORBIDDEN", message: "不能调整该账号额度" }); return; }
-            const adjustment = await adjustCredits(db, { requestId: input.requestId, actorId: actor.id, userId: target.id, amount: input.amount, reason: input.reason });
-            const updated = await db.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`, [target.id]);
-            const user = mapUser(updated.rows[0]);
-            await writeAudit(db, { actor, action: "account.credits_adjusted", targetType: "user", targetId: user.id, departmentId: user.departmentId, result: "success", detail: { requestId: input.requestId, amount: input.amount, reason: input.reason, balance: adjustment.balance, duplicate: adjustment.duplicate }, ip: request.ip });
+            const input = request.method === "PUT" ? setCreditSchema.parse(request.body) : creditSchema.parse(request.body);
+            const user = await withTransaction(db, async client => {
+                const targetResult = await client.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1 FOR NO KEY UPDATE OF u`, [request.params.id]);
+                const target = targetResult.rows[0] && mapUser(targetResult.rows[0]);
+                if (!target) throw new BillingError("NOT_FOUND", "账号不存在");
+                if (!canManageUser(actor, target)) throw new BillingError("FORBIDDEN", "不能调整该账号额度");
+                const context = { requestId: input.requestId, actorId: actor.id, userId: target.id, reason: input.reason };
+                const adjustment = "balance" in input
+                    ? await setCreditBalance(db, { ...context, balance: input.balance }, client)
+                    : await adjustCredits(db, { ...context, amount: input.amount }, client);
+                const updated = await client.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`, [target.id]);
+                const result = mapUser(updated.rows[0]);
+                if (!adjustment.duplicate) await writeAudit(client, {
+                    actor, action: "balance" in input ? "account.credits_set" : "account.credits_adjusted", targetType: "user", targetId: result.id,
+                    departmentId: result.departmentId, result: "success", detail: { requestId: input.requestId, mode: "balance" in input ? "set" : "add", amount: adjustment.amount, reason: input.reason, balanceBefore: adjustment.balanceBefore, balance: adjustment.balance }, ip: request.ip,
+                });
+                return result;
+            });
             response.json({ user });
         } catch (error) {
-            if (error instanceof BillingError) { response.status(400).json({ error: error.code, message: error.message }); return; }
+            if (error instanceof BillingError) {
+                const status = error.code === "NOT_FOUND" ? 404 : error.code === "FORBIDDEN" ? 403 : error.code === "CREDIT_REQUEST_CONFLICT" ? 409 : 400;
+                response.status(status).json({ error: error.code, message: error.message }); return;
+            }
             next(error);
         }
-    });
+    }
 
     router.post("/bulk", async (request, response, next) => {
         const actor = (request as unknown as AuthenticatedRequest).auth;

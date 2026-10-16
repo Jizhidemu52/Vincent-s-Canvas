@@ -103,7 +103,7 @@ async function openStore(io: ReturnType<typeof harness>) {
         create, persist, nanoid: () => `local-${++io.state.nextId}`, createDeferredPersistQueue: <T>(delay: number, flush: (value: T) => void) => createDeferredPersistQueue(delay, flush, { setTimeout: () => 1, clearTimeout() {} }),
         collectProjectChanges, createProjectChangeBuffer, applyCanvasProjectPatch,
         readCanvasProjects: io.readCanvasProjects, writeCanvasProjects: io.writeCanvasProjects, removeCanvasProjects: async () => { io.state.local = []; },
-        deploymentFeatures: { oaLoginEnabled: true }, useUserStore: userStore,
+        deploymentFeatures: { authenticationEnabled: true, oaLoginEnabled: true }, useUserStore: userStore,
         createCloudCanvasPersistence: io.factory,
         window: { addEventListener() {}, location: { reload() { reloads += 1; } } },
         console: { error() {} },

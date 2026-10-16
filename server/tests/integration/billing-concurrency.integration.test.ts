@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Pool, type PoolClient, type QueryResult } from "pg";
 
-import { BillingError, settleReservation } from "../../src/billing";
+import { adjustCredits, BillingError, reserveCredits, setCreditBalance, settleReservation } from "../../src/billing";
 import type { Cache, Database } from "../../src/db";
 import { enqueueTask, type TaskInput } from "../../src/tasks";
 
@@ -158,6 +158,66 @@ integration("PostgreSQL billing concurrency", () => {
     );
     return result.rows[0]!;
   }
+
+  test("concurrent administrator additions retain every increment and deduplicate a shared request", async () => {
+    const data = await fixture({ users: 1, department: false });
+    const userId = data.userIds[0]!;
+    const input = { actorId: userId, userId, amount: 7, reason: "Concurrency fixture adjustment" };
+    await Promise.all(Array.from({ length: 8 }, () => adjustCredits(database, { ...input, requestId: randomUUID() })));
+    expect(await balances([userId])).toEqual([156]);
+    const requestId = randomUUID();
+    const repeated = await Promise.all([adjustCredits(database, { ...input, requestId }), adjustCredits(database, { ...input, requestId })]);
+    expect(repeated.map(result => result.duplicate).sort()).toEqual([false, true]);
+    expect(await balances([userId])).toEqual([163]);
+    expect((await database.query("SELECT id FROM credit_ledger WHERE request_id=$1", [requestId])).rows).toHaveLength(1);
+  }, 20_000);
+
+  test("direct concurrent reservations share one hold and reject a different owner without unique-key errors", async () => {
+    const data = await fixture({ users: 2, department: false });
+    const task = data.input();
+    const input = { requestId: task.requestId, userId: task.userId, operationType: task.operationType, modelConfigId: task.modelConfigId, quantity: 1 };
+    const repeated = await Promise.all([reserveCredits(database, input), reserveCredits(database, input)]);
+    expect(repeated.map(result => result.duplicate).sort()).toEqual([false, true]);
+    expect(await balances(data.userIds)).toEqual([92, 100]);
+    await expect(reserveCredits(database, { ...input, userId: data.userIds[1]! })).rejects.toMatchObject({ code: "DUPLICATE_REQUEST" });
+    const sharedRequestId = randomUUID();
+    const competing = await Promise.allSettled(data.userIds.map(userId => reserveCredits(database, { ...input, requestId: sharedRequestId, userId })));
+    expect(competing.map(result => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect((competing.find(result => result.status === "rejected") as PromiseRejectedResult).reason).toMatchObject({ code: "DUPLICATE_REQUEST" });
+    expect((await database.query("SELECT id FROM credit_reservations WHERE request_id=$1", [sharedRequestId])).rows).toHaveLength(1);
+  }, 20_000);
+
+  test("a concurrent reused administrator request cannot change a second user", async () => {
+    const data = await fixture({ users: 2, department: false });
+    const requestId = randomUUID();
+    const result = await Promise.allSettled(data.userIds.map(userId => adjustCredits(database, {
+      requestId, userId, actorId: data.userIds[0]!, amount: 7, reason: "Conflicting fixture adjustment",
+    })));
+    expect(result.map(item => item.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const rejected = result.find(item => item.status === "rejected") as PromiseRejectedResult;
+    expect(rejected.reason).toMatchObject({ code: "CREDIT_REQUEST_CONFLICT" });
+    expect((await balances(data.userIds)).sort()).toEqual([100, 107]);
+    expect((await database.query("SELECT id FROM credit_ledger WHERE request_id=$1", [requestId])).rows).toHaveLength(1);
+  }, 20_000);
+
+  test("an absolute balance set and a task debit serialize without a client-computed delta race", async () => {
+    const data = await fixture({ users: 1, department: false });
+    const userId = data.userIds[0]!;
+    const requestId = randomUUID();
+    const task = data.input();
+    await Promise.all([
+      setCreditBalance(database, { requestId, userId, actorId: userId, balance: 200, reason: "Atomic absolute fixture" }),
+      enqueueTask(database, cache, task),
+    ]);
+    const ledger = await database.query<{ amount: number; balance_after: number; metadata: { balanceBefore: number } }>(
+      "SELECT amount,balance_after,metadata FROM credit_ledger WHERE request_id=$1", [requestId],
+    );
+    const adjustment = ledger.rows[0]!;
+    expect(adjustment.balance_after).toBe(200);
+    expect(adjustment.amount).toBe(200 - adjustment.metadata.balanceBefore);
+    expect(await balances([userId])).toEqual([100 + adjustment.amount - 8]);
+    expect([192, 200]).toContain((await balances([userId]))[0]);
+  }, 20_000);
 
   test("different designers in one unlimited department do not upgrade FK locks into a deadlock", async () => {
     const data = await fixture();

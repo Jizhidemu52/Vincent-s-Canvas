@@ -74,6 +74,7 @@ describe("OA token bootstrap", () => {
 
     test("enterprise sessions without identity request company OA re-entry without a QR or password page", () => {
         deploymentFeatures.oaLoginEnabled = true;
+        deploymentFeatures.authenticationEnabled = true;
         useUserStore.setState({ user: null, status: "guest" });
         // React server rendering reads Zustand's initial snapshot, not current state.
         Object.assign(useUserStore.getInitialState(), useUserStore.getState());
@@ -86,6 +87,7 @@ describe("OA token bootstrap", () => {
 
     test("OA employees can create without password changes but do not gain admin privileges", () => {
         deploymentFeatures.oaLoginEnabled = true;
+        deploymentFeatures.authenticationEnabled = true;
         useUserStore.setState({ user: { id: "visitor", role: "designer", mustChangePassword: true } as never, status: "authenticated" });
         Object.assign(useUserStore.getInitialState(), useUserStore.getState());
         const workspace = renderToStaticMarkup(<MemoryRouter><AuthGate><p>工作区内容</p></AuthGate></MemoryRouter>);

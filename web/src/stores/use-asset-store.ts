@@ -82,9 +82,9 @@ export const useAssetStore = create<AssetStore>()(
         (set, get) => {
             const cleanupTask = createCoalescedAsyncTask(
                 async (extras: unknown[]) => {
-                    // Other OA employees and pre-OA canvases share this blob store.
+                    // Other authenticated owners and trial canvases may share old blob storage.
                     // An active owner's project list cannot prove a blob is unused.
-                    if (deploymentFeatures.oaLoginEnabled) return;
+                    if (deploymentFeatures.authenticationEnabled) return;
                     const shared = { assets: get().assets, projects: useCanvasStore.getState().projects, extra: extras };
                     await cleanupUnusedImages(shared);
                     await cleanupUnusedMedia(shared);
@@ -167,7 +167,7 @@ export function assetOwnerId(asset: Pick<Asset, "ownerId" | "metadata">) {
 
 export function canUserAccessAsset(asset: Asset, user: LocalUser | null, serverAuthorized = false) {
     if (!user) return false;
-    if (deploymentFeatures.oaLoginEnabled) return assetOwnerId(asset) === user.id;
+    if (deploymentFeatures.authenticationEnabled) return assetOwnerId(asset) === user.id;
     // Only an active response for the current session can grant server-side sharing.
     // Persisted serverAssetId identifies a file; it never proves access to its local copy.
     if (serverAuthorized) return true;

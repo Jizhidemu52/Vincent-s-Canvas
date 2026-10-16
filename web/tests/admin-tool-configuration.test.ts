@@ -23,8 +23,8 @@ describe("formal admin catalog and isolated board saves", () => {
         expect(buildToolConfigurationInput(tool(), { enabled: false, modelConfigId: null, creditCostOverride: 0, rmbCostOverride: 0 })).toEqual({ enabled: false, modelConfigId: null, creditCostOverride: 0, rmbCostOverride: 0 });
         expect(buildToolConfigurationInput(tool(), { enabled: true })).toEqual({ enabled: true, modelConfigId: null, creditCostOverride: null, rmbCostOverride: null });
         const chat = completeToolConfigurations([]).find((item) => item.toolKey === "gpt-chat")!;
-        expect(buildToolConfigurationInput(chat, { creditCostOverride: 10, rmbCostOverride: 3 }).creditCostOverride).toBeNull();
-        expect(buildToolConfigurationInput(chat, { creditCostOverride: 10, rmbCostOverride: 3 }).rmbCostOverride).toBeNull();
+        expect(buildToolConfigurationInput(chat, { creditCostOverride: 10, rmbCostOverride: 3 })).toMatchObject({ creditCostOverride: 10, rmbCostOverride: 3 });
+        expect(buildToolConfigurationInput(chat, { creditCostOverride: 0, rmbCostOverride: 0 })).toMatchObject({ creditCostOverride: 0, rmbCostOverride: 0 });
     });
 
     test("catalog capabilities cannot be replaced by a bound model or a null join", () => {

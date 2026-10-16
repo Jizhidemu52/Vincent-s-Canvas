@@ -24,8 +24,8 @@ export function compatibleToolModels(tool: ToolApiConfiguration, models: ServerM
 export function buildToolConfigurationInput(tool: ToolApiConfiguration, values: Partial<ToolApiConfigurationInput>): ToolApiConfigurationInput {
     return {
         modelConfigId: values.modelConfigId || null, enabled: values.enabled ?? true,
-        creditCostOverride: tool.operationType === "chat" ? null : values.creditCostOverride ?? null,
-        rmbCostOverride: tool.operationType === "chat" ? null : values.rmbCostOverride ?? null,
+        creditCostOverride: values.creditCostOverride ?? null,
+        rmbCostOverride: values.rmbCostOverride ?? null,
     };
 }
 

@@ -88,11 +88,20 @@ export const useUserStore = create<UserStore>((set, get) => ({
         }
     },
     clearSession: async () => {
-        invalidateSessionRequests();
+        const epoch = invalidateSessionRequests();
+        const previouslyRejected = rejectedOaToken;
         rejectedOaToken = true;
-        set({ user: null, status: "guest" });
-        await logoutSession();
+        // Clearing identity synchronously restarts the app and can cancel the
+        // logout request before the server invalidates its cookie. Keep only
+        // this already-verified identity until the server confirms logout.
+        try { await logoutSession(); }
+        catch (error) {
+            if (epoch === sessionEpoch) rejectedOaToken = previouslyRejected;
+            throw error;
+        }
+        if (epoch !== sessionEpoch) return;
         broadcastWorkspaceIdentity(null);
+        set({ user: null, status: "guest" });
     },
     invalidateSession: () => {
         invalidateSessionRequests();

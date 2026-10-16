@@ -57,7 +57,7 @@ const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COALESCE(SUM(t.rmb_cost) FILTER (WHERE t.status='success'),0)::float8 AS consumed_rmb_cost
   FROM tasks t WHERE t.batch_id=b.id) stats ON true`;
 
-export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = true, videoPreflight = preflightStoredVideoTask) {
+export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask) {
   const router = Router();
 
   router.post("/preflight", async (request, response, next) => {
@@ -104,6 +104,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
 
   router.post("/", async (request, response, next) => {
     try {
+      const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
       const input = singleSchema.parse(request.body);
       const actor = (request as unknown as AuthenticatedRequest).auth;
       if (input.priority === "urgent" && actor.role !== "super_admin") {
@@ -140,6 +141,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditsEnabled = t
 
   router.post("/batch", async (request, response, next) => {
     try {
+      const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
       const input = batchSchema.parse(request.body);
       const execution = await resolveToolExecution(db, input);
       input.toolKey = execution.toolKey;

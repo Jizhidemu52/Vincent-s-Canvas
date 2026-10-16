@@ -5,10 +5,12 @@ import UserLayout from "@/layouts/user-layout";
 import { AuthGate } from "@/components/auth/auth-gate";
 import { ModuleGate } from "@/components/auth/module-gate";
 import { standaloneEdition } from "@/lib/standalone-edition";
+import { deploymentFeatures } from "@/lib/deployment-features";
 import type { ModuleKey } from "@/services/api/modules";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
 const AdminLoginPage = lazy(() => import("@/pages/admin/login"));
+const LoginPage = lazy(() => import("@/pages/login"));
 const AssetsPage = lazy(() => import("@/pages/assets"));
 const ReferenceImportPage = lazy(() => import("@/pages/reference-import"));
 const CanvasPage = lazy(() => import("@/pages/canvas"));
@@ -78,7 +80,7 @@ export const router = createBrowserRouter([
             { path: "/creative/pattern-repeat", element: moduleRoute(PatternRepeatPage, "pattern-repeat") },
             { path: "/creative/series-recipe", element: moduleRoute(SeriesRecipePage, "series-recipe") },
             { path: "/creative/:presetId", element: protectedRoute(CreativeScenePage) },
-            { path: "/login", element: <Navigate to="/" replace /> },
+            { path: "/login", element: !standaloneEdition && deploymentFeatures.authenticationEnabled && !deploymentFeatures.oaLoginEnabled ? routeElement(LoginPage) : <Navigate to="/" replace /> },
             { path: "/image", element: moduleRoute(ImagePage, imageModule) },
             { path: "/video", element: moduleRoute(VideoPage, "video") },
             { path: "/assets", element: moduleRoute(AssetsPage, "assets") },
@@ -92,7 +94,7 @@ export const router = createBrowserRouter([
                 { path: "/admin/design-library", element: protectedRoute(DesignLibraryPage, true) },
                 // Hiding role entrances must not lock operators out of maintenance.
                 { path: "/admin/login", element: routeElement(AdminLoginPage) },
-                { path: "/change-password", element: protectedRoute(ChangePasswordPage, true) },
+                { path: "/change-password", element: <AuthGate passwordChange>{routeElement(ChangePasswordPage)}</AuthGate> },
             ] : []),
             { path: "/canvas", element: moduleRoute(CanvasPage, canvasModule) },
             { path: "/chat", element: moduleRoute(ChatPage, "gpt-chat") },
