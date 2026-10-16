@@ -24,8 +24,8 @@ test("Mark choices require the fixed provider and exact supported IDs, without c
   expect(models).toHaveLength(8);
 });
 
-test("all nine platform models retain distinct UUIDs, exact display prefixes and explicit mask capabilities", () => {
-  expect(MARK_PLATFORM_MODELS).toHaveLength(9);
+test("all ten platform models retain distinct UUIDs, exact display prefixes and explicit mask capabilities", () => {
+  expect(MARK_PLATFORM_MODELS).toHaveLength(10);
   for (const [index, preset] of MARK_PLATFORM_MODELS.entries()) {
     const row = { ...mark, ...preset, id: `mark-model-${index}` };
     for (const role of ["designer", "super_admin"]) {
@@ -41,7 +41,7 @@ test("all nine platform models retain distinct UUIDs, exact display prefixes and
 });
 
 test("Nano2 Official exposes neutral capability limits, independently of Nano2.1", () => {
-  const preset = MARK_PLATFORM_MODELS.at(-1)!;
+  const preset = MARK_PLATFORM_MODELS.find(model => model.modelId === "gemini-3.1-flash-image-preview-official")!;
   const shown = presentPublicModel({ ...mark, ...preset, id: "nano-two-official" }, "designer");
   expect(shown).toMatchObject({ modelId: "nano-two-official", name: "aplmart-nano2", imageParameterProfile: "resolution", imageSupportsMask: false, imageSupportsOfficialFallback: false });
   expect(shown).not.toHaveProperty("parameterModelId");

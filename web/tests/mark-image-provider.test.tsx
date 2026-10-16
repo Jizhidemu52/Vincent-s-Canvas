@@ -129,10 +129,10 @@ test("first configuration groups every registered image, text, video and blend m
     try {
         const tree = await panel.settle();
         expect(panel.form.values.baseUrl).toBe(MARK_IMAGE_BASE_URL);
-        expect(MARK_PLATFORM_MODELS).toHaveLength(9);
+        expect(MARK_PLATFORM_MODELS).toHaveLength(10);
         expect(panel.form.values.models).toEqual(MARK_PLATFORM_MODELS.map(model => ({ enabled: model.defaultEnabled, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 })));
         expect(MARK_PLATFORM_MODELS.filter(model => !model.defaultEnabled).map(model => model.modelId)).toEqual(["grok-imagine-image-2.0"]);
-        expect(MARK_PLATFORM_MODELS.at(-1)?.modelId).toBe("gemini-3.1-flash-image-preview-official");
+        expect(MARK_PLATFORM_MODELS.at(-1)?.modelId).toBe("claude-sonnet-5-5");
         expect(tree.filter(element => element.type === "Text" && element.props.strong).map(element => element.props.children).sort()).toEqual(MARK_PLATFORM_MODELS.map(model => model.name).sort());
         expect(tree.filter(element => element.type === "Title" && element.props.id).map(element => element.props.children)).toEqual(["图片模型", "文字模型", "视频模型", "多图融合"]);
         expect(tree.filter(element => element.type === "InputNumber")).toHaveLength(MARK_PLATFORM_MODELS.length * 3);

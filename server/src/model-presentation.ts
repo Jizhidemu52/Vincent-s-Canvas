@@ -11,15 +11,19 @@ const openTokenImageLabels: Readonly<Record<string, { name: string; description:
   "gemini-3.1-flash-image": { name: "gemini-3.1-flash-image", description: "商品改款与参考图编辑" },
 };
 
-function openTokenImageLabel(model: Record<string, unknown>) {
-  if (model.providerId === MARK_IMAGE_PROVIDER_ID) return undefined;
+function isOpenTokenModel(model: Record<string, unknown>) {
+  if (model.providerId === MARK_IMAGE_PROVIDER_ID) return false;
   let openToken = String(model.providerName || "").trim().toLowerCase() === "opentoken";
   try {
     const hostname = new URL(String(model.providerBaseUrl || "")).hostname;
     openToken ||= hostname === "opentoken.io" || hostname.endsWith(".opentoken.io");
   } catch { /* A provider display name also identifies the local configuration. */ }
+  return openToken;
+}
+
+function openTokenImageLabel(model: Record<string, unknown>) {
   const modelId = String(model.modelId);
-  return openToken && Object.hasOwn(openTokenImageLabels, modelId) ? openTokenImageLabels[modelId] : undefined;
+  return isOpenTokenModel(model) && Object.hasOwn(openTokenImageLabels, modelId) ? openTokenImageLabels[modelId] : undefined;
 }
 
 function markImageLabel(model: Record<string, unknown>) {
@@ -87,17 +91,23 @@ export function canSeeModelIdentity(role: unknown) {
 
 /** Curate creation choices only; retained configurations and history are not deleted. */
 export function isSelectableCreativeModel(model: Record<string, unknown>) {
+  if (Array.isArray(model.capabilities) && model.capabilities.includes("chat")) {
+    if (model.providerId === MARK_IMAGE_PROVIDER_ID) {
+      return model.protocol === "apimart" && ["claude-sonnet-5-5", "gpt-6-astra"].includes(String(model.modelId));
+    }
+    return isOpenTokenModel(model) && ["openai", "openai-chat"].includes(String(model.protocol)) && model.modelId === "gpt-6-astra";
+  }
   return !isImageModel(model) || Boolean(creativeImageLabel(model));
 }
 
 export function selectCreativeModels<T extends Record<string, unknown>>(models: T[]): T[] {
-  const seenImages = new Set<string>();
+  const seenChoices = new Set<string>();
   const selected = models.filter(model => {
     if (!isSelectableCreativeModel(model)) return false;
-    if (!isImageModel(model)) return true;
+    if (!isImageModel(model) && !(Array.isArray(model.capabilities) && model.capabilities.includes("chat"))) return true;
     const identity = `${model.providerId || model.providerBaseUrl || model.providerName || ""}::${model.modelId}`;
-    if (seenImages.has(identity)) return false;
-    seenImages.add(identity);
+    if (seenChoices.has(identity)) return false;
+    seenChoices.add(identity);
     return true;
   });
   const order = (model: Record<string, unknown>) => typeof model.displayOrder === "number" && Number.isFinite(model.displayOrder)

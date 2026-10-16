@@ -5,6 +5,7 @@ import type { Database } from "../src/db";
 import { assignDemoPublicModelNumbers, isImageModel, presentAdminModel, presentPublicModel, selectCreativeModels } from "../src/model-presentation";
 import { createModelConfigurationRouter, createPublicModelRouter } from "../src/routes/model-configuration";
 import type { AppConfig } from "../src/config";
+import { MARK_IMAGE_PROVIDER_ID, MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
 
 const image = {
   id: "40000000-0000-4000-8000-000000000099", publicNumber: 7, name: "Vendor image",
@@ -29,7 +30,7 @@ describe("image identity presentation", () => {
   test("only image capabilities are anonymized and unknown fields are never copied", () => {
     const shown = presentPublicModel(image, "designer");
     expect(shown).toEqual({ id: image.id, modelId: image.id, name: "出图模型7", publicName: "出图模型7", modelIdentityHidden: true,
-      capabilities: ["generate", "edit"], creditCost: 4, rmbCost: 0, imageParameterProfile: "pixel", isFeatured: false, displayOrder: 1109 });
+      capabilities: ["generate", "edit"], creditCost: 4, rmbCost: 0, imageParameterProfile: "pixel", isFeatured: false, displayOrder: 1100 + MARK_PLATFORM_MODELS.length });
     expect(image.modelId).toBe("gpt-image-2");
     for (const capability of ["chat", "video", "audio"]) {
       const model = { ...image, capabilities: [capability, "generate"] };
@@ -81,7 +82,9 @@ test("formal HTTP router curates OpenToken images, keeps admin identity and reje
   const configuredImage = { ...image, providerName: "OpenToken" };
   const db = { query: async (sql: string) => {
     sqlCalls.push(sql);
-    if (sql.includes("FROM model_configs m")) return { rows: [configuredImage, { ...image, id: "other-channel" }] };
+    if (sql.includes("FROM model_configs m")) return { rows: [configuredImage, { ...image, id: "other-channel" },
+      { ...image, id: "retired-chat", capabilities: ["chat"], modelId: "claude-opus-5" }] };
+    if (sql.includes("FROM tool_api_configurations")) return { rows: [{ toolKey: "canvas-chat", enabled: true, modelConfigId: "retired-chat" }] };
     return { rows: [] };
   } } as unknown as Database;
   const app = express();
@@ -103,13 +106,13 @@ test("formal HTTP router curates OpenToken images, keeps admin identity and reje
   }
   expect((await fetch(`${url}/admin/models`)).status).toBe(403);
   const configured = await fetch(`${url}/admin/models`, { headers: { "x-test-role": "super_admin" } }).then((response) => response.json());
-  expect(configured.models).toHaveLength(2);
+  expect(configured.models).toHaveLength(3);
   expect(configured.models[0]).toMatchObject({ modelId: image.modelId, name: image.name, publicName: image.modelId });
 });
 
 test("image choices deduplicate OpenToken models without removing other media or retained configurations", () => {
   const selected = { ...image, id: "selected", providerName: "Custom name", providerBaseUrl: "https://cn2.gw.opentoken.io/v1" };
-  const chat = { ...image, id: "chat", capabilities: ["chat"] };
+  const chat = { ...image, id: "chat", modelId: "gpt-6-astra", providerName: "OpenToken", protocol: "openai", capabilities: ["chat"] };
   const catalog = [image, selected, { ...selected, id: "duplicate" }, { ...selected, id: "unknown", modelId: "constructor" }, chat];
   expect(selectCreativeModels(catalog).map(model => model.id)).toEqual(["selected", "chat"]);
   expect(catalog).toHaveLength(5);
@@ -117,10 +120,32 @@ test("image choices deduplicate OpenToken models without removing other media or
 
 test("image choices have a fixed use-case order with Gemini last regardless of catalog order", () => {
   const gemini = { ...image, providerName: "OpenToken", modelId: "gemini-3.1-flash-image" };
-  const chat = { ...image, id: "chat", capabilities: ["chat"] };
+  const chat = { ...image, id: "chat", modelId: "gpt-6-astra", providerName: "OpenToken", protocol: "openai", capabilities: ["chat"] };
   const models = [gemini, chat, { ...gemini, modelId: "gpt-image-2.5-sunburst" }, { ...gemini, modelId: "gpt-image-2.5-flare" }, { ...gemini, modelId: "gpt-image-2" }];
   const result = selectCreativeModels(models);
   expect(result.filter(isImageModel).map(model => model.modelId)).toEqual(["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-3.1-flash-image"]);
   expect(result[1]).toBe(chat);
   expect(models[0]).toBe(gemini);
+});
+
+test("text choices retain only two APIMart models and OpenToken Astra without deleting configurations", () => {
+  const markChat = { ...image, providerId: MARK_IMAGE_PROVIDER_ID, capabilities: ["chat", "vision", "tools"] };
+  const openTokenChat = { ...markChat, providerId: "opentoken", providerName: "OpenToken", protocol: "openai" };
+  const models = [
+    { ...markChat, id: "mark-astra", modelId: "gpt-6-astra" },
+    { ...markChat, id: "mark-sonnet", modelId: "claude-sonnet-5-5" },
+    { ...openTokenChat, id: "open-astra", modelId: "gpt-6-astra" },
+    { ...openTokenChat, id: "duplicate-astra", modelId: "gpt-6-astra" },
+    { ...openTokenChat, id: "open-claude", modelId: "claude-fable-5-1", protocol: "anthropic" },
+    { ...markChat, id: "old-sonnet", modelId: "claude-sonnet-5" },
+    { ...markChat, id: "old-opus", modelId: "claude-opus-5" },
+    { ...markChat, id: "gemini", modelId: "gemini-3.1-pro-preview" },
+    { ...markChat, id: "wrong-protocol", modelId: "claude-sonnet-5-5", protocol: "openai" },
+    { ...markChat, id: "wrong-provider", modelId: "gpt-6-astra", providerId: "other" },
+    { ...image, id: "video", capabilities: ["video"] },
+  ];
+  expect(selectCreativeModels(models).map(model => model.id)).toEqual(["mark-astra", "mark-sonnet", "open-astra", "video"]);
+  expect(models).toHaveLength(11);
+  const renamed = { ...openTokenChat, id: "renamed", modelId: "gpt-6-astra", providerName: "Renamed", providerBaseUrl: "https://cn2.gw.opentoken.io/v1" };
+  expect(selectCreativeModels([renamed])).toEqual([renamed]);
 });

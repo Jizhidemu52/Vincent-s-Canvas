@@ -3793,10 +3793,16 @@ function WirelessCanvasPage() {
         [createImageFileNode, message, runLocalImageOperation, screenToCanvas, size.height, size.width],
     );
 
-    const handleAssistantSessionsChange = useCallback((sessions: CanvasAssistantSession[], activeId: string | null) => {
+    const handleAssistantSessionsChange = useCallback(async (sessions: CanvasAssistantSession[], activeId: string | null, options?: { flush: boolean }) => {
         setChatSessions(sessions);
         setActiveChatId(activeId);
-    }, []);
+        if (options?.flush) {
+            // An older full-project snapshot must land before this completed conversation.
+            projectSaveQueueRef.current?.flush();
+            updateProject(projectId, { chatSessions: sessions, activeChatId: activeId });
+            await flushCanvasPersistence();
+        }
+    }, [projectId, updateProject]);
 
     const startTitleEditing = useCallback(() => {
         setTitleDraft(currentProject?.title || "未命名画布");

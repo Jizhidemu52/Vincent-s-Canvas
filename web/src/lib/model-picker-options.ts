@@ -1,4 +1,5 @@
 import { modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { preferredImageModel } from "@/lib/default-image-model";
 
 export type ModelPickerSource = "server" | "local";
 type CapabilityModel = { id?: string; modelId: string; name?: string; publicName?: string; capabilities: readonly string[] };
@@ -38,6 +39,7 @@ export function resolveCapabilityModel(config: AiConfig, capability: ModelCapabi
         || (source === "server" && value ? models.find(model => options.includes(model.modelId) && [model.id, model.name, model.publicName].includes(modelOptionName(value)))?.modelId : "");
     return resolve(current)
         || resolve(config[`${capability}Model`])
+        || (capability === "image" && source === "server" ? preferredImageModel(models.filter(model => options.includes(model.modelId)))?.modelId : "")
         || options[0]
         || "";
 }

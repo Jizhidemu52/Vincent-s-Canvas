@@ -196,7 +196,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
     const resolved = await resolveToolConfig(config, "chat", options?.tool || "gpt-chat");
     config = resolved.config;
     const modelId = modelOptionName(config.model || config.textModel);
-    const claude = isClaudeModel(modelId)
+    const claude = isClaudeModel(resolved.model.parameterModelId || resolved.model.modelId)
         ? { stream: config.claudeStream !== "false", thinking: config.claudeThinking === "true", maxTokens: normalizeClaudeMaxTokens(config.claudeMaxTokens) }
         : undefined;
     const response = await fetch("/api/chat/responses", {
@@ -215,7 +215,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
 }
 
 export function isClaudeModel(modelId: string) {
-    return /^claude-(opus|sonnet|fable)-5$/i.test(modelId.trim()) || modelId.trim().toLowerCase() === "claude-fable-5-1";
+    return /^claude-(opus|sonnet|fable)-5$/i.test(modelId.trim()) || ["claude-fable-5-1", "claude-sonnet-5-5"].includes(modelId.trim().toLowerCase());
 }
 
 function normalizeClaudeMaxTokens(value: string | undefined) {

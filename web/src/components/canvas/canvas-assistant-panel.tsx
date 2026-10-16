@@ -6,6 +6,7 @@ import { motion } from "motion/react";
 
 import { modelOptionName, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
+import { preferredImageModel } from "@/lib/default-image-model";
 import { ModelPicker } from "@/components/model-picker";
 import { CanvasPanelSizeControl } from "@/components/canvas/canvas-panel-size-control";
 import { getModelPickerOptions, resolveModelPickerSource } from "@/lib/model-picker-options";
@@ -316,8 +317,20 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const [onlineLogs, setOnlineLogs] = useState<OnlineAgentLog[]>([]);
     const [resizing, setResizing] = useState(false);
     const [removedReferenceIds, setRemovedReferenceIds] = useState<Set<string>>(new Set());
-    const [localSessions, setLocalSessions] = useState<CanvasAssistantSession[]>(() => (sessions.length ? sessions : [createSession()]));
-    const [localActiveSessionId, setLocalActiveSessionId] = useState<string | null>(activeSessionId);
+    const [localSessions, setLocalSessionsState] = useState<CanvasAssistantSession[]>(() => (sessions.length ? sessions : [createSession()]));
+    const localSessionsRef = useRef(localSessions);
+    // Keep the completed turn available before React publishes its next render.
+    const setLocalSessions = (next: CanvasAssistantSession[] | ((previous: CanvasAssistantSession[]) => CanvasAssistantSession[])) => {
+        const value = typeof next === "function" ? next(localSessionsRef.current) : next;
+        localSessionsRef.current = value;
+        setLocalSessionsState(value);
+    };
+    const [localActiveSessionId, setLocalActiveSessionIdState] = useState<string | null>(activeSessionId);
+    const localActiveSessionIdRef = useRef(localActiveSessionId);
+    const setLocalActiveSessionId = (next: string | null) => {
+        localActiveSessionIdRef.current = next;
+        setLocalActiveSessionIdState(next);
+    };
     const [chatMessageLimit, setChatMessageLimit] = useState(DEFAULT_AGENT_MESSAGE_WINDOW);
     const pendingToolContextRef = useRef(new Map<string, PendingOnlineToolContext>());
     const executingToolIdsRef = useRef(new Set<string>());
@@ -366,7 +379,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         if (images.status === "fulfilled") {
             setImageCapabilities(images.value);
             setGenerationSettings((current) => {
-                const selected = images.value.find((model) => model.modelId === current.imageModel) || images.value[0];
+                const selected = preferredImageModel(images.value, [current.imageModel]);
                 if (!selected) return current;
                 const normalized = normalizeAgentImageSettings({ ...current, imageModel: selected.modelId });
                 return current.mode === "image" ? normalized : { ...normalized, size: current.size };
@@ -457,6 +470,21 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 updatedAt: new Date().toISOString(),
             };
         });
+    };
+
+    const finishConversationTurn = async (sessionId: string) => {
+        try {
+            // A complete reply must not remain behind the panel and editor debounce queues.
+            const snapshot = { sessions: localSessionsRef.current, activeSessionId: localActiveSessionIdRef.current || sessionId };
+            setLocalActiveSessionId(snapshot.activeSessionId);
+            publishedSessionsRef.current = snapshot;
+            await onSessionsChange(snapshot.sessions, snapshot.activeSessionId, { flush: true });
+        } catch (error) {
+            addOnlineLog("对话保存失败", error instanceof Error ? error.message : error);
+            appendMessage(sessionId, { id: nanoid(), role: "error", title: "对话尚未保存", text: "回复已返回，但本机保存失败；请保留此页面并复制重要内容。" });
+        } finally {
+            setIsRunning(false);
+        }
     };
 
     const startChatSession = () => {
@@ -576,7 +604,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             addOnlineLog("请求失败", error instanceof Error ? error.message : error);
             appendMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
         } finally {
-            setIsRunning(false);
+            await finishConversationTurn(sessionId);
         }
     };
 
@@ -816,7 +844,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             appendMessage(session.id, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
         } finally {
             executingToolIdsRef.current.delete(messageId);
-            setIsRunning(false);
+            await finishConversationTurn(session.id);
         }
     };
 
@@ -932,7 +960,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         } catch (error) {
             addOnlineLog("视频生成未完成", error instanceof Error ? error.message : error);
         } finally {
-            setIsRunning(false);
+            await finishConversationTurn(sessionId);
         }
     };
 

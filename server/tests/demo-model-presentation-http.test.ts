@@ -39,7 +39,7 @@ test("designer sees four model-ID-named OpenToken images while UUID submission s
       ["40000000-0000-4000-8000-000000000106", "gemini-3.1-flash-image"],
     ]);
     expect(models.some(model => model.modelId === "happyhorse-1.1")).toBe(true);
-    expect(models.some(model => model.modelId === "claude-fable-5")).toBe(true);
+    expect(models.filter(model => model.capabilities.includes("chat")).map(model => model.modelId)).toEqual(["gpt-6-astra"]);
     for (const model of images) {
       expect(model.modelId).toBe(model.id);
       expect(model.publicName).toBe(model.name);

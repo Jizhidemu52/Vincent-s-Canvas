@@ -20,6 +20,8 @@ test("recognizes only the configured Claude 5 model identifiers", () => {
     expect(isClaudeModel("claude-sonnet-5")).toBe(true);
     expect(isClaudeModel("claude-fable-5")).toBe(true);
     expect(isClaudeModel("claude-fable-5-1")).toBe(true);
+    expect(isClaudeModel("claude-sonnet-5-5")).toBe(true);
+    expect(isClaudeModel("d5000000-0000-4000-8000-000000000010")).toBe(false);
     expect(isClaudeModel("gemini-3.1-pro-preview")).toBe(false);
 });
 
@@ -56,6 +58,51 @@ test("reads a compatible SSE text block that carries its text at block start", a
     const result = await readClaudeSseResponse(response);
 
     expect(result).toEqual({ content: "直接文本", toolCalls: [] });
+});
+
+test.each(["canvas-chat", "gpt-chat"])("APIMart Sonnet UUID retains its provider identity and activates Claude SSE for %s", async tool => {
+    const modelId = "d5000000-0000-4000-8000-000000000010";
+    const requests: Record<string, any>[] = [];
+    globalThis.fetch = (async (url, init) => {
+        if (String(url) === "/api/models") return Response.json({ models: [{ id: modelId, modelId, parameterModelId: "claude-sonnet-5-5", name: "claude-sonnet-5-5", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [], prices: [] });
+        expect(String(url)).toBe("/api/chat/responses");
+        requests.push(JSON.parse(String(init?.body)));
+        return new Response([
+            'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}\n\n',
+            'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"opaque-sonnet-signature"}}\n\n',
+            'data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}\n\n',
+            'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"已读取画布。"}}\n\n',
+            'data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"inspect-one","name":"inspect_images","input":{}}}\n\n',
+            'data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\\"image_ids\\":[\\"one\\"]}"}}\n\n',
+            'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}\n\n',
+            'data: {"type":"message_stop"}\n\n',
+        ].join(""), { headers: { "content-type": "text/event-stream" } });
+    }) as typeof fetch;
+    const deltas: string[] = [];
+    const result = await requestToolResponse({ ...defaultConfig, model: modelId, textModel: modelId, systemPrompt: "", claudeMaxTokens: "4096", claudeThinking: "false", claudeStream: "true" }, [{ role: "user", content: "只分析，不生图" }], [], "auto", text => deltas.push(text), { tool });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ modelId, toolKey: tool, claude: { stream: true, thinking: false, maxTokens: 4096 } });
+    expect(requests[0]!.modelId).not.toBe("claude-sonnet-5-5");
+    expect(result.content).toBe("已读取画布。");
+    expect(result.stopReason).toBe("tool_use");
+    expect(result.toolCalls[0]!.function.arguments).toBe('{"image_ids":["one"]}');
+    expect(result.claudeAssistantContent?.[0]).toEqual({ type: "thinking", thinking: "", signature: "opaque-sonnet-signature" });
+    expect(deltas.join(" ")).not.toContain("opaque-sonnet-signature");
+});
+
+test("APIMart Astra UUID remains a non-Claude request", async () => {
+    const modelId = "d5000000-0000-4000-8000-000000000004";
+    let calls = 0;
+    globalThis.fetch = (async (url, init) => {
+        if (String(url) === "/api/models") return Response.json({ models: [{ id: modelId, modelId, parameterModelId: "gpt-6-astra", name: "gpt-6-astra", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [], prices: [] });
+        calls++;
+        const body = JSON.parse(String(init?.body));
+        expect(body.modelId).toBe(modelId);
+        expect(body).not.toHaveProperty("claude");
+        return Response.json({ content: "Astra reply", toolCalls: [] });
+    }) as typeof fetch;
+    expect(await requestToolResponse({ ...defaultConfig, model: modelId, textModel: modelId }, [{ role: "user", content: "Hello" }], [])).toEqual({ content: "Astra reply", toolCalls: [] });
+    expect(calls).toBe(1);
 });
 
 test("reports tool activity before its arguments finish without exposing or executing partial JSON", async () => {

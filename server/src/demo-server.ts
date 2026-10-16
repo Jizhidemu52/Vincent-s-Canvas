@@ -18,7 +18,7 @@ import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
 import { resolveDemoHost } from "./demo-network-config";
 import { isOpenTokenImageModel, runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
 import { createGenerationTiming } from "./generation-timing";
-import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, chatFunctionToolsSchema, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
+import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, chatFunctionToolsSchema, isClaudeMessagesModel, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
 import { fetchProviderSubmission } from "./provider-submission-transport";
 import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
 import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./demo-video-sources";
@@ -978,7 +978,7 @@ Bun.serve({
           } : undefined,
         };
         try {
-          if (model.protocol === "anthropic" && input.claude?.stream) {
+          if (isClaudeMessagesModel(model) && input.claude?.stream) {
             const upstream = await requestClaudeStream(model, { apiKey }, chatInput);
             return new Response(upstream.body, {
               status: upstream.status,

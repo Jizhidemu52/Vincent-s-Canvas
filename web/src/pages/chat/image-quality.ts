@@ -1,10 +1,11 @@
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { readImageOptions } from "@/lib/image-advanced-settings";
+import { preferredImageModel } from "@/lib/default-image-model";
 
 type ImageModel = { id?: string; modelId: string; capabilities: string[] };
 export function preferredChatImageModel<T extends ImageModel>(models: T[], preferred: (string | undefined)[], action?: "generate" | "edit"): T | undefined {
     const available = action ? models.filter(model => model.capabilities.includes(action)) : models;
-    return preferred.map(id => available.find(model => model.modelId === id || model.id === id)).find(Boolean) || available[0];
+    return preferredImageModel(available, preferred);
 }
 
 export function chatImageQualitySettings(profile: ReturnType<typeof imageModelProfile>, requested?: string, requestedResolution?: string) {

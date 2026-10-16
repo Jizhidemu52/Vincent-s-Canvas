@@ -68,9 +68,9 @@ test("open demo supports configured chat and streaming without login, network or
     expect((await request("/api/auth/login", "POST", { identifier: "admin", password: "Canvas2026!#", portal: "admin" })).status).toBe(404);
     const visibleModels = (await (await request("/api/models")).json()).models as DemoModel[];
     const gptModel = visibleModels.find((model) => model.modelId === "gpt-6-astra")!;
-    const claudeModel = visibleModels.find((model) => model.modelId === "claude-fable-5-1")!;
+    const claudeModel = { id: "40000000-0000-4000-8000-000000000125", modelId: "claude-fable-5-1" };
     expect(gptModel).toBeDefined();
-    expect(claudeModel).toBeDefined();
+    expect(visibleModels.some((model) => model.modelId === claudeModel.modelId)).toBe(false);
     expect(JSON.stringify(visibleModels)).not.toContain("test-shared-key");
     expect(await (await chat(gptModel.id)).json()).toEqual({ content: "gpt reply", toolCalls: [] });
     expect(upstreamCalls.at(-1)!.url).toBe("http://opentoken.test/v1/responses");

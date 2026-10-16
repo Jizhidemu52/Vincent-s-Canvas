@@ -212,7 +212,8 @@ export function createPublicModelRouter(db: Database) {
             const selectedModels = selectCreativeModels(presentedModels);
             const selectedIds = new Set(selectedModels.map(model => model.id));
             const boundIds = new Set(tools.rows.filter(tool => tool.enabled && tool.modelConfigId).map(tool => tool.modelConfigId));
-            selectedModels.push(...presentedModels.filter(model => boundIds.has(model.id) && !selectedIds.has(model.id)));
+            selectedModels.push(...presentedModels.filter(model => boundIds.has(model.id) && !selectedIds.has(model.id)
+                && !(Array.isArray(model.capabilities) && model.capabilities.includes("chat"))));
             response.json({ models: selectedModels.map((model) => presentPublicModel(model, role)), prices: prices.rows, tools: toolDefinitions.map(definition => ({
                 ...definition,
                 ...(tools.rows.find(tool => tool.toolKey === definition.toolKey) ?? { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 }),

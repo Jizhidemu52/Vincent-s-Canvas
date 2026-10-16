@@ -14,8 +14,8 @@ const before = useBusinessConfigStore.getState();
 afterEach(() => useBusinessConfigStore.setState(before));
 const options = (value: Record<string, string>) => JSON.stringify(value);
 
-test("new defaults resolve Sunburst even when employee-facing IDs are opaque; explicit choices remain", () => {
-    const models = [{ id: "old", modelId: "old", publicName: "gpt-image-2", capabilities: ["generate"] }, { id: "fine", modelId: "fine", publicName: "gpt-image-2.5-sunburst", capabilities: ["generate"] }];
+test("new defaults resolve APIMart GPT2 even when employee-facing IDs are opaque; explicit choices remain", () => {
+    const models = [{ id: "old", modelId: "old", publicName: "gpt-image-2", capabilities: ["generate"] }, { id: "fine", modelId: "fine", publicName: "aplmart-gpt2", capabilities: ["generate"] }];
     expect(defaultConfig.quality).toBe("high");
     expect(resolveCapabilityModel(defaultConfig, "image", models)).toBe("fine");
     expect(resolveCapabilityModel(defaultConfig, "image", models, "old")).toBe("old");

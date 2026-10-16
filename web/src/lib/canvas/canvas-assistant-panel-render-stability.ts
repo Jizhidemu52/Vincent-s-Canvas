@@ -24,7 +24,7 @@ export type CanvasAssistantPanelRenderState = {
     sessions: CanvasAssistantSession[];
     activeSessionId: string | null;
     onSelectNodeIds: (ids: Set<string>) => void;
-    onSessionsChange: (sessions: CanvasAssistantSession[], activeSessionId: string | null) => void;
+    onSessionsChange: (sessions: CanvasAssistantSession[], activeSessionId: string | null, options?: { flush: boolean }) => void | Promise<void>;
     onApplyOps: (ops?: CanvasAgentOp[]) => CanvasAgentSnapshot;
     canUndoOps: boolean;
     onUndoOps: () => CanvasAgentSnapshot | null;

@@ -6,7 +6,7 @@ import ts from "typescript";
 
 import * as configModule from "@/stores/use-config-store";
 import { applyCanvasAgentOps, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
-import { CanvasNodeType, type CanvasAssistantMessage, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantSession, type CanvasNodeData } from "@/types/canvas";
 import { toolResponseToInput, type ToolResponseResult } from "@/services/api/image";
 import * as generationTasks from "@/services/api/generation-tasks";
 import { QueuedTaskPausedError } from "@/services/api/generation-tasks";
@@ -28,7 +28,7 @@ const toolConfigCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use
     compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true },
 }).outputText;
 
-function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; models?: BusinessConfig["models"]; standalone?: boolean; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile }) {
+function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; models?: BusinessConfig["models"]; imageCapabilities?: BusinessConfig["models"]; standalone?: boolean; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile }) {
     const states: unknown[] = [];
     const refs: unknown[] = [];
     const memos: Array<{ dependencies?: DependencyList; value: unknown }> = [];
@@ -51,8 +51,18 @@ function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial
             { id: "video-model", name: config.videoModel, modelId: config.videoModel, capabilities: ["video"], creditCost: 0, rmbCost: 0 },
         ], prices: [], tools: options.tools || [],
     };
-    const sessions = options.history ? [{ id: "history", title: "History", createdAt: "2026-09-06", updatedAt: "2026-09-06", messages: options.history }] : [];
-    const onSessionsChange = () => undefined;
+    let sessions: CanvasAssistantSession[] = options.history ? [{ id: "history", title: "History", createdAt: "2026-09-06", updatedAt: "2026-09-06", messages: options.history }] : [];
+    let activeSessionId: string | null = null;
+    const sessionCommits: Array<{ sessions: CanvasAssistantSession[]; activeId: string | null }> = [];
+    const sessionUpdates: Array<{ sessions: CanvasAssistantSession[]; activeId: string | null }> = [];
+    let commitGate: Promise<void> | undefined;
+    let replyGate: Promise<void> | undefined;
+    const onSessionsChange = (sessions: CanvasAssistantSession[], activeId: string | null, settings?: { flush: boolean }) => {
+        sessionUpdates.push({ sessions, activeId });
+        if (!settings?.flush) return;
+        sessionCommits.push({ sessions, activeId });
+        return commitGate;
+    };
     const capabilityRequests: string[] = [];
     const dependenciesEqual = (previous?: DependencyList, next?: DependencyList) => Boolean(previous && next && previous.length === next.length && previous.every((value, index) => Object.is(value, next[index])));
     const useMemo = (factory: () => unknown, dependencies?: DependencyList) => {
@@ -112,7 +122,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial
             ...generationTasks,
             getImageGenerationModels: async () => {
                 capabilityRequests.push("image");
-                return [{ id: "image-model", name: config.imageModel, modelId: config.imageModel, capabilities: ["generate"], creditCost: 0, rmbCost: 0 }];
+                return options.imageCapabilities || [{ id: "image-model", name: config.imageModel, modelId: config.imageModel, capabilities: ["generate"], creditCost: 0, rmbCost: 0 }];
             },
             getGenerationCapabilities: async () => {
                 capabilityRequests.push("video");
@@ -121,7 +131,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial
         },
         "@/services/api/image": {
             toolResponseToInput,
-            requestToolResponse: async (...args: any[]) => { requests.push({ type: "agent", args }); return options.replies.shift() || { content: "没有更多调用", toolCalls: [] }; },
+            requestToolResponse: async (...args: any[]) => { requests.push({ type: "agent", args }); await replyGate; return options.replies.shift() || { content: "没有更多调用", toolCalls: [] }; },
             requestImageQuestion: async (...args: any[]) => { requests.push({ type: "text", args }); return "refined prompt"; },
             requestGeneration: (...args: any[]) => imageRequest("image", args),
             requestEdit: (...args: any[]) => imageRequest("edit", args),
@@ -143,7 +153,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial
         stateIndex = refIndex = memoIndex = effectIndex = 0;
         const element = module.exports.CanvasAssistantPanel({
             selectedNodeIds: new Set(snapshotRef.current.selectedNodeIds), selectedNodes: options.selected || [], snapshotRef,
-            sessions, activeSessionId: null, onSelectNodeIds: () => undefined, onSessionsChange,
+            sessions, activeSessionId, onSelectNodeIds: () => undefined, onSessionsChange,
             onApplyOps: (ops: any[]) => snapshotRef.current = applyCanvasAgentOps(snapshotRef.current, ops),
             canUndoOps: false, onUndoOps: () => null, onPasteImage: () => undefined,
             agentMode: "online", onAgentModeChange: () => undefined, closing: false, onCollapse: () => undefined,
@@ -154,7 +164,12 @@ function panelHarness(options: { replies: ToolResponseResult[]; config?: Partial
     const composer = () => findElements(render()).find((element) => typeof element.props.onSubmit === "function")!;
     const messages = (): CanvasAssistantMessage[] => states.flatMap((value) => Array.isArray(value) ? value.flatMap((item) => item?.messages || []) : []);
     return {
-        requests, config, snapshotRef, composer, messages, assets, imageUploads, videoStores, capabilityRequests,
+        requests, config, snapshotRef, composer, messages, assets, imageUploads, videoStores, capabilityRequests, sessionCommits, sessionUpdates,
+        pauseCommit(gate: Promise<void>) { commitGate = gate; },
+        pauseReply(gate: Promise<void>) { replyGate = gate; },
+        newChat() { findElements(render()).find(element => element.props.title === "新对话")!.props.children.props.onClick(); },
+        echoCommit() { const committed = sessionCommits.at(-1)!; sessions = committed.sessions; activeSessionId = committed.activeId; render(); },
+        sessionIds: () => states.flatMap(value => Array.isArray(value) ? value.filter(item => Array.isArray(item?.messages)).map(item => item.id) : []),
         workflowCards: () => findElements(render()).filter((element) => typeof element.type === "function" && element.type.name === "CanvasAgentMediaWorkflowCard").map((element) => element.props),
         select(nodes: CanvasNodeData[]) {
             options.selected = nodes;
@@ -277,6 +292,19 @@ describe("canvas assistant submission", () => {
         expect(harness.requests).toHaveLength(0);
     });
 
+    test("capability loading resolves APIMart GPT2 for a new composer and retains a valid saved image model", async () => {
+        const models = [
+            { id: "first", modelId: "first", name: "gpt-image-2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
+            { id: "mark-gpt2", modelId: "mark-gpt2", name: "aplmart-gpt2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
+        ];
+        for (const [saved, expected] of [[configModule.defaultConfig.imageModel, "mark-gpt2"], ["first", "first"], ["removed", "mark-gpt2"]]) {
+            const harness = panelHarness({ replies: [], config: { imageModel: saved }, models, imageCapabilities: models });
+            await harness.ready();
+            expect(harness.composer().props.generationControls.props.settings.imageModel).toBe(expected);
+            expect(harness.requests).toHaveLength(0);
+        }
+    });
+
     test("disabled chat capability or canvas parent blocks stale submit handlers without media requests", async () => {
         for (const unavailable of [
             { flags: { canvas: false } },
@@ -317,6 +345,67 @@ describe("canvas assistant submission", () => {
         expect(harness.requests[0].args[3]).toBe("auto");
         expect(harness.messages().some((message) => message.text === "图片是静态画面，视频包含连续画面。")).toBe(true);
         expect(harness.snapshotRef.current.nodes).toHaveLength(0);
+    });
+
+    test("keeps a completed reply busy until the latest user and assistant messages finish persisting", async () => {
+        const saved = Promise.withResolvers<void>();
+        const harness = panelHarness({ replies: [{ content: "完整回复必须保存", toolCalls: [] }] });
+        harness.pauseCommit(saved.promise);
+        let completed = false;
+        const submitted = harness.submit("请保留问题和回复").then(() => { completed = true; });
+        await waitFor(() => harness.sessionCommits.length === 1);
+        expect(JSON.stringify(harness.sessionCommits[0])).toContain("请保留问题和回复");
+        expect(JSON.stringify(harness.sessionCommits[0])).toContain("完整回复必须保存");
+        expect(harness.composer().props.sending).toBe(true);
+        expect(completed).toBe(false);
+        saved.resolve();
+        await submitted;
+        expect(harness.composer().props.sending).toBe(false);
+        expect(harness.sessionUpdates.at(-1)?.activeId).toBe(harness.sessionCommits[0].activeId);
+    });
+
+    test("failed conversation storage preserves the visible reply and explicitly warns that it is not saved", async () => {
+        const harness = panelHarness({ replies: [{ content: "暂未落盘的回复", toolCalls: [] }] });
+        const failed = Promise.withResolvers<void>();
+        harness.pauseCommit(failed.promise);
+        const submitted = harness.submit("保存失败测试");
+        await waitFor(() => harness.sessionCommits.length === 1);
+        failed.reject(new Error("disk full"));
+        await submitted;
+        expect(harness.messages().some(message => message.text === "暂未落盘的回复")).toBe(true);
+        expect(harness.messages().some(message => message.title === "对话尚未保存")).toBe(true);
+        expect(harness.composer().props.sending).toBe(false);
+    });
+
+    test("finishing an older request preserves the conversation selected while it was running", async () => {
+        const reply = Promise.withResolvers<void>();
+        const harness = panelHarness({ replies: [{ content: "原会话回复", toolCalls: [] }] });
+        harness.pauseReply(reply.promise);
+        const submitted = harness.submit("原会话问题");
+        await waitFor(() => harness.requests.some(request => request.type === "agent"));
+        harness.newChat();
+        reply.resolve();
+        await submitted;
+        const committed = harness.sessionCommits[0];
+        const selected = (committed.sessions as Array<{ id: string; messages: CanvasAssistantMessage[] }>).find(session => session.id === committed.activeId);
+        expect(selected?.messages).toEqual([]);
+        expect(JSON.stringify(committed.sessions)).toContain("原会话回复");
+    });
+
+    test("a completed-turn parent echo does not overwrite a new conversation opened while saving", async () => {
+        const saved = Promise.withResolvers<void>();
+        const harness = panelHarness({ replies: [{ content: "已返回的完整回复", toolCalls: [] }] });
+        harness.pauseCommit(saved.promise);
+        const submitted = harness.submit("测试完成提交的父回声");
+        await waitFor(() => harness.sessionCommits.length === 1);
+        harness.newChat();
+        const newerIds = harness.sessionIds();
+        expect(newerIds).toHaveLength(2);
+        harness.echoCommit();
+        expect(harness.sessionIds()).toEqual(newerIds);
+        expect(harness.messages().some(message => message.text === "已返回的完整回复")).toBe(true);
+        saved.resolve();
+        await submitted;
     });
 
     test("waits for an explicit image tool result before returning completion to the chat model", async () => {
@@ -448,6 +537,7 @@ describe("canvas assistant submission", () => {
             harness.approve(firstPending.id);
             await waitFor(() => harness.messages().some((message) => message.id !== firstPending.id && message.detail?.status === "pending"));
             const secondPending = harness.messages().find((message) => message.id !== firstPending.id && message.detail?.status === "pending")!;
+            await waitFor(() => !harness.composer().props.sending);
             harness.approve(secondPending.id);
             await waitFor(() => harness.requests.filter((request) => request.type === "agent").length === 3);
         }

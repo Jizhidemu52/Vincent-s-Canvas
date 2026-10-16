@@ -69,7 +69,7 @@ const waitUntil = async predicate => {
     while (!predicate()) { if (Date.now() > until) throw new Error("Mock save was not observed"); await new Promise(resolve => setTimeout(resolve, 25)); }
 };
 try {
-    assert.equal(MARK_PLATFORM_MODELS.length, 9);
+    assert.equal(MARK_PLATFORM_MODELS.length, 10);
     if (!realAdmin) {
         await page.goto(`${origin}/admin?tab=mark-images`);
         await page.getByText("服务端密钥未配置", { exact: true }).waitFor();
@@ -90,7 +90,7 @@ try {
         await page.getByLabel(`启用 ${MARK_PLATFORM_MODELS.find(model => model.modelId === "grok-imagine-image-2.0").name}`, { exact: true }).scrollIntoViewIfNeeded();
         await page.screenshot({ path: path.join(output, "fresh-defaults-grok-nano2.png") });
         report.freshConfigurationDefaults = { defaults, savedModelCount: report.saves[0].models.length, grokSavedDisabled: true, nano2SavedEnabled: true };
-        report.checks.push("A completely unconfigured admin form displays all nine usage descriptions and saves only Grok disabled by default; Nano2 and all other presets default enabled.");
+        report.checks.push("A completely unconfigured admin form displays all ten usage descriptions and saves only Grok disabled by default; Nano2, Sonnet and all other presets default enabled.");
         report.saves.length = 0;
         config = legacyConfiguration();
     }

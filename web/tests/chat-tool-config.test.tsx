@@ -80,6 +80,30 @@ const model = (id: string, capability: string) => ({ id, modelId: id, name: id, 
 const tool = (toolKey: string, modelConfigId: string) => ({ toolKey, modelConfigId, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 });
 const select = (tree: ReactElement<any>[], label: string) => tree.find(element => element.type === "select" && element.props["aria-label"] === label)!;
 
+test("mounted Sonnet UUID shows native stream/token controls and documented channel-default thinking", async () => {
+    const sonnetId = "d5000000-0000-4000-8000-000000000010";
+    const astraId = "d5000000-0000-4000-8000-000000000004";
+    const page = chatPageHarness({ models: [
+        { ...model(sonnetId, "chat"), parameterModelId: "claude-sonnet-5-5", name: "claude-sonnet-5-5" },
+        { ...model(astraId, "chat"), parameterModelId: "gpt-6-astra", name: "gpt-6-astra" },
+        model("image", "generate"),
+    ], tools: [], prices: [] });
+    try {
+        const tree = await page.settle();
+        expect(select(tree, "对话模型").props.value).toBe(sonnetId);
+        const control = tree.find(element => typeof element.type === "function" && element.type.name === "ClaudeChatControls")!;
+        expect(control).toBeDefined();
+        expect(control.props.model).toBe("claude-sonnet-5-5");
+        const controls = elements((control.type as Function)(control.props));
+        expect(controls.filter(element => element.type === "input" && element.props.type === "checkbox")).toHaveLength(1);
+        expect(controls.find(element => element.type === "span" && element.props.children === "思考模式 · 渠道默认")).toBeDefined();
+        expect(controls.find(element => element.type === "select")?.props.value).toBe(defaultConfig.claudeMaxTokens);
+        expect(controls.find(element => element.type === "a")?.props.href).toBe("https://docs.apib.ai/cn/api-reference/texts/general/claude-messages");
+        select(tree, "对话模型").props.onChange({ target: { value: astraId } });
+        expect((await page.settle()).some(element => typeof element.type === "function" && element.type.name === "ClaudeChatControls")).toBe(false);
+    } finally { page.dispose(); }
+});
+
 test("the mounted chat page follows newly added bound chat and anonymous image models from one shared snapshot", async () => {
     const page = chatPageHarness({ models: [model("old-chat", "chat"), model("old-image", "generate")], tools: [], prices: [] });
     try {

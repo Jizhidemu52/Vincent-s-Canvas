@@ -23,7 +23,7 @@ const configurationInput = z.object({
   models: z.array(modelInput).length(MARK_PLATFORM_MODELS.length).refine(models =>
     new Set(models.map(model => model.modelId)).size === MARK_PLATFORM_MODELS.length
       && models.every(model => MARK_PLATFORM_MODELS.some(preset => preset.modelId === model.modelId)),
-  "须完整配置 APIMart 的六个图片模型、MJ Blend、文字和视频模型，不能重复或遗漏"),
+  "须完整配置 APIMart 的六个图片模型、MJ Blend、两个文字模型和视频模型，不能重复或遗漏"),
 }).strict();
 
 const providerSelect = `id,name,protocol,base_url AS "baseUrl",enabled,(encrypted_credentials IS NOT NULL) AS "hasCredentials"`;

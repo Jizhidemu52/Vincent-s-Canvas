@@ -5,6 +5,8 @@ import { nanoid } from "nanoid";
 import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
+import { DEFAULT_IMAGE_MODEL, preferredImageModel } from "@/lib/default-image-model";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 
 export type ApiCallFormat = "openai" | "gemini";
 
@@ -76,8 +78,8 @@ export const defaultConfig: AiConfig = {
             models: ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-3.1-flash-image", "happyhorse-1.1", DEFAULT_SERVER_TEXT_MODEL, "gpt-5.5", "gpt-4o-mini-tts"],
         },
     ],
-    model: "default::gpt-image-2.5-sunburst",
-    imageModel: "default::gpt-image-2.5-sunburst",
+    model: DEFAULT_IMAGE_MODEL,
+    imageModel: DEFAULT_IMAGE_MODEL,
     videoModel: "default::happyhorse-1.1",
     textModel: `default::${DEFAULT_SERVER_TEXT_MODEL}`,
     audioModel: "default::gpt-4o-mini-tts",
@@ -280,7 +282,14 @@ export function stripClientProviderSecrets(config: Partial<AiConfig>): AiConfig 
 
 export function useEffectiveConfig() {
     const config = useConfigStore((state) => state.config);
-    return useMemo(() => ({ ...config, channelMode: "local" as const }), [config]);
+    const models = useBusinessConfigStore((state) => state.models);
+    const status = useBusinessConfigStore((state) => state.status);
+    return useMemo(() => {
+        const available = models.filter(model => !model.modelId.startsWith("demo-") && model.capabilities.some(capability => capability === "generate" || capability === "edit"));
+        const imageModel = status === "ready" ? preferredImageModel(available, [config.imageModel, config.model])?.modelId || config.imageModel : config.imageModel;
+        return { ...config, channelMode: "local" as const, imageModel,
+            model: config.model === config.imageModel || config.model === DEFAULT_IMAGE_MODEL ? imageModel : config.model };
+    }, [config, models, status]);
 }
 
 export function createModelChannel(channel?: Partial<ModelChannel>): ModelChannel {

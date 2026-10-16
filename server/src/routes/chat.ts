@@ -24,6 +24,10 @@ type ChatModel = { model_id: string; base_url: string; protocol: string; encrypt
 /** Shared by explicit administrator analysis selection and the execution adapter. */
 export const CHAT_COMPLETION_PROTOCOLS = ["openai", "custom", "apimart", "gemini", "anthropic", "openai-chat"] as const;
 
+export function isClaudeMessagesModel(model: Pick<ChatModel, "protocol" | "model_id">) {
+    return model.protocol === "anthropic" || (model.protocol === "apimart" && model.model_id === "claude-sonnet-5-5");
+}
+
 // This endpoint returns client-side function plans only. Hosted tools (notably
 // image_generation) must not bypass authorized image tasks and their billing.
 export const chatFunctionToolsSchema = z.array(z.object({
@@ -90,7 +94,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
             if (config.OA_LOGIN_ENABLED === "true" && !(request as AuthenticatedRequest).allowsAnonymousCreation) {
                 usageRequestId = await beginUsageChat(db, { userId: actor.id, modelConfigId: execution.modelConfigId, boardKey: execution.toolKey, input: input.input });
             }
-            if (model.protocol === "anthropic" && input.claude?.stream) {
+            if (isClaudeMessagesModel(model) && input.claude?.stream) {
                 const upstream = await requestClaudeStream(model, credentials, input);
                 response.setHeader("content-type", "text/event-stream; charset=utf-8");
                 response.setHeader("cache-control", "no-cache");
@@ -149,7 +153,7 @@ export async function requestChatCompletion(
     // GPT-6 Astra function tools require Responses on Mark. Choose before submission; never retry another endpoint.
     if (model.protocol === "apimart" && model.model_id === "gpt-6-astra") return requestOpenAiCompletion(model, credentials, input);
     if (model.protocol === "gemini") return requestGeminiCompletion(model, credentials, input);
-    if (model.protocol === "anthropic") return requestClaudeCompletion(model, credentials, input);
+    if (isClaudeMessagesModel(model)) return requestClaudeCompletion(model, credentials, input);
     if (model.protocol === "openai-chat" || model.protocol === "apimart") return requestOpenAiChatCompletion(model, credentials, input);
     if (model.protocol === "openai" || model.protocol === "custom") return requestOpenAiCompletion(model, credentials, input);
     throw new ChatProtocolError("PROTOCOL_NOT_SUPPORTED", "当前对话入口暂不支持该 Provider 协议");
@@ -162,11 +166,11 @@ async function requestClaudeCompletion(
 ) {
     const upstream = await fetchProviderSubmission(claudeMessagesUrl(model.base_url), {
         method: "POST",
-        headers: claudeHeaders(credentials),
+        headers: claudeHeaders(credentials, model.protocol),
         body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking }) }),
         signal: AbortSignal.timeout(180000),
     });
-    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream);
+    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream, model.protocol === "apimart");
     return readClaudeResponse(await upstream.json() as ClaudeResponse);
 }
 
@@ -177,11 +181,11 @@ export async function requestClaudeStream(
 ) {
     const upstream = await fetchProviderSubmission(claudeMessagesUrl(model.base_url), {
         method: "POST",
-        headers: claudeHeaders(credentials),
+        headers: claudeHeaders(credentials, model.protocol),
         body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking, stream: true }) }),
         signal: AbortSignal.timeout(180000),
     });
-    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream);
+    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream, model.protocol === "apimart");
     if (!upstream.body) throw new ChatProtocolError("CLAUDE_STREAM_EMPTY", "Claude 流式响应为空");
     return upstream;
 }
@@ -190,8 +194,15 @@ function claudeMessagesUrl(baseUrl: string) {
     return `${baseUrl.replace(/\/$/, "").replace(/\/v1$/, "")}/v1/messages`;
 }
 
-function claudeHeaders(credentials: Record<string, string>) {
+function claudeHeaders(credentials: Record<string, string>, protocol: string) {
     const headers = requestHeaders(credentials);
+    // APIMart documents either Bearer or x-api-key, not a second credential.
+    if (protocol === "apimart") {
+        // Use Anthropic's published Messages version; APIMart's optional
+        // header example contains a version absent from its version history.
+        headers.set("anthropic-version", ANTHROPIC_MESSAGES_VERSION);
+        return headers;
+    }
     // OpenToken documents Bearer auth; retain x-api-key for existing native providers.
     if (credentials.apiKey) headers.set("x-api-key", credentials.apiKey);
     headers.set("anthropic-version", ANTHROPIC_MESSAGES_VERSION);
@@ -251,6 +262,9 @@ export function buildClaudeMessagesRequest(
 }
 
 function claudeThinkingParameters(options: { modelId?: string; maxTokens: number; thinking?: boolean }) {
+    // APIMart's Messages contract does not specify this alias's thinking mode.
+    // Keep the upstream default instead of guessing adaptive or legacy budgets.
+    if (options.modelId?.toLowerCase() === "claude-sonnet-5-5") return {};
     // OpenToken does not document a thinking override for this alias. Use its
     // default instead of guessing Claude 5 or legacy budget semantics.
     if (options.modelId?.toLowerCase() === "claude-fable-5-1") return {};

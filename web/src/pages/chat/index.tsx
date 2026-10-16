@@ -207,7 +207,8 @@ export default function ChatPage() {
     const imageCatalog = useMemo(() => buildCreativeImageCatalog(activeSession?.messages || []), [activeSession?.messages]);
     const imageLabels = useMemo(() => new Map(imageCatalog.map((item) => [item.id, item.label])), [imageCatalog]);
     const selected = availableModels.find((item) => item.modelId === selectedModel);
-    const selectedClaude = isClaudeModel(selectedModel);
+    const selectedParameterModel = selected?.parameterModelId || selected?.modelId || selectedModel;
+    const selectedClaude = isClaudeModel(selectedParameterModel);
 
     const updateSession = (id: string, update: (session: ChatSession) => ChatSession) => {
         if (loadedStorageKeyRef.current !== storageKey) return;
@@ -534,7 +535,7 @@ export default function ChatPage() {
                     {!sessionsReady ? <div role={sessionLoadError ? "alert" : "status"} className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{sessionLoadError || "正在读取本地聊天记录…"}</span>{sessionLoadError ? <Button onClick={() => setSessionReload((value) => value + 1)}>重试读取记录</Button> : null}</div> : null}
                     {sessionSaveError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{sessionSaveError}</span><Button onClick={() => { if (sessionsReady && !preparingMessageRef.current) { persistence.clear(); void persistSessions(sessionsRef.current).catch(() => undefined); } }}>重试保存记录</Button></div> : null}
 
-                    {selectedClaude ? <details className="border-b border-border px-4 py-2 text-xs text-muted-foreground md:px-6"><summary className="w-fit cursor-pointer">模型设置</summary><ClaudeChatControls model={selectedModel} stream={config.claudeStream !== "false"} thinking={config.claudeThinking === "true"} maxTokens={config.claudeMaxTokens} onStreamChange={(value) => updateConfig("claudeStream", String(value))} onThinkingChange={(value) => updateConfig("claudeThinking", String(value))} onMaxTokensChange={(value) => updateConfig("claudeMaxTokens", value)} /></details> : null}
+                    {selectedClaude ? <details className="border-b border-border px-4 py-2 text-xs text-muted-foreground md:px-6"><summary className="w-fit cursor-pointer">模型设置</summary><ClaudeChatControls model={selectedParameterModel} stream={config.claudeStream !== "false"} thinking={config.claudeThinking === "true"} maxTokens={config.claudeMaxTokens} onStreamChange={(value) => updateConfig("claudeStream", String(value))} onThinkingChange={(value) => updateConfig("claudeThinking", String(value))} onMaxTokensChange={(value) => updateConfig("claudeMaxTokens", value)} /></details> : null}
 
                     <div ref={scrollRef} onScroll={(event) => { const element = event.currentTarget; followBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-[8%]">
                         {!activeSession?.messages.length ? <div className="wb-empty mx-auto max-w-xl !min-h-0 !py-2">
@@ -591,17 +592,18 @@ const ChatBubble = memo(function ChatBubble({ message, imageLabels, actionsDisab
 
 function ClaudeChatControls({ model, stream, thinking, maxTokens, onStreamChange, onThinkingChange, onMaxTokensChange }: { model: string; stream: boolean; thinking: boolean; maxTokens: string; onStreamChange: (value: boolean) => void; onThinkingChange: (value: boolean) => void; onMaxTokensChange: (value: string) => void }) {
     const alwaysThinking = model.toLowerCase() === "claude-fable-5";
-    const channelDefaultThinking = model.toLowerCase() === "claude-fable-5-1";
+    const openTokenClaude = model.toLowerCase() === "claude-fable-5-1";
+    const channelDefaultThinking = openTokenClaude || model.toLowerCase() === "claude-sonnet-5-5";
     return <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">Claude 原生参数</span>
         <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={stream} onChange={(event) => onStreamChange(event.target.checked)} /> 流式输出</label>
-        {channelDefaultThinking ? <span title="OpenToken 文档未指定该模型的思考覆盖参数，使用渠道默认行为。">思考模式 · 渠道默认</span> : alwaysThinking ? <span title="Fable 5 不支持关闭思考，也不支持旧版固定思考预算。">自适应思考 · 始终开启</span> : <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={thinking} onChange={(event) => onThinkingChange(event.target.checked)} /> 自适应思考</label>}
+        {channelDefaultThinking ? <span title="渠道文档未指定该模型的思考覆盖参数，使用渠道默认行为。">思考模式 · 渠道默认</span> : alwaysThinking ? <span title="Fable 5 不支持关闭思考，也不支持旧版固定思考预算。">自适应思考 · 始终开启</span> : <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={thinking} onChange={(event) => onThinkingChange(event.target.checked)} /> 自适应思考</label>}
         <label className="inline-flex items-center gap-1.5" title="总输出预算包含思考与可见回复；16384 是当前项目限制，不是模型官方最大值。">总输出预算
             <select value={maxTokens} onChange={(event) => onMaxTokensChange(event.target.value)} className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none">
                 {["1024", "2048", "4096", "8192", "16384"].map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
         </label>
-        <a href={channelDefaultThinking ? "https://docs.opentoken.io/api/claude/messages-api/" : "https://docs.apimart.ai/cn/api-reference/texts/general/claude-messages"} target="_blank" rel="noreferrer" className="underline underline-offset-2">接口说明</a>
+        <a href={openTokenClaude ? "https://docs.opentoken.io/api/claude/messages-api/" : "https://docs.apib.ai/cn/api-reference/texts/general/claude-messages"} target="_blank" rel="noreferrer" className="underline underline-offset-2">接口说明</a>
         <span className="w-full text-[11px] leading-4">预算包含思考与回复；当前项目上限 16384 tokens。参数不适用于其他模型。</span>
     </div>;
 }

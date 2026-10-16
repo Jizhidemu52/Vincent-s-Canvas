@@ -21,4 +21,5 @@ export const MARK_PLATFORM_MODELS = [
   { modelId: "midjourney-blend", name: "aplmart-mj-blend", description: "多图创意融合（无需提示词）", defaultEnabled: true, capabilities: ["generate"] as const },
   ...MARK_EXTRA_IMAGE_MODELS.map(model => ({ ...model, capabilities: ["generate", "edit", "batch"] as const })),
   { modelId: "gemini-3.1-flash-image-preview-official", name: "aplmart-nano2", description: "日常改款与多图参考", defaultEnabled: true, capabilities: ["generate", "edit", "batch"] as const },
+  { modelId: "claude-sonnet-5-5", name: "aplmart-claude-sonnet-5-5", description: "文字对话与图文理解", defaultEnabled: true, capabilities: ["chat", "vision", "tools"] as const },
 ] as const;

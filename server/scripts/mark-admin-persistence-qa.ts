@@ -35,9 +35,9 @@ const originalFive = originalModelRows.filter(model => legacyModelIds.includes(m
 assert.equal(originalFive.length, 5, "This upgrade QA must reuse the existing isolated five-model database, not a fresh replacement");
 const originalEight = originalModelRows.filter(model => MARK_PLATFORM_MODELS.slice(0, 8).some(preset => preset.modelId === model.modelId));
 assert.equal(originalEight.length, 8, "The Nano2 upgrade must retain the existing eight-model fixture");
-assert.equal(MARK_PLATFORM_MODELS.length, 9);
+assert.equal(MARK_PLATFORM_MODELS.length, 10);
 assert.deepEqual(MARK_PLATFORM_MODELS.filter(model => !model.defaultEnabled).map(model => model.modelId), ["grok-imagine-image-2.0"]);
-assert.equal(MARK_PLATFORM_MODELS.at(-1)?.modelId, "gemini-3.1-flash-image-preview-official");
+assert.equal(MARK_PLATFORM_MODELS.at(-1)?.modelId, "claude-sonnet-5-5");
 await database.exec("CREATE TABLE IF NOT EXISTS schema_migrations(name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())");
 const applied = new Set((await database.query("SELECT name FROM schema_migrations")).rows.map((row: any) => row.name));
 for (const name of (await readdir("src/migrations")).filter(name => name.endsWith(".sql")).sort()) {
