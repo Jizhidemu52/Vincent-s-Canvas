@@ -57,12 +57,12 @@ export function resolveCanvasImageEdit(
         editPrompt: args.prompt,
         baseReferences: references.map(ref => ({ ...ref })),
     };
+    // The planner already receives the full edit context and must consolidate it
+    // into args.prompt. Keep raw user feedback in lineage, never append Chinese
+    // history to the English instructions sent to the image provider.
     const prompt = continuing ? [
-        intent === "correct_original" ? "基于所附第一轮原图重新编辑，不复制上一版错误。" : intent === "refine_latest" ? "基于所附最新结果继续优化，保留已经做好的部分。" : "以用户明确指定的所附图片为底图编辑。",
-        `初始要求（背景，不覆盖后续修改）：${context.originalPrompt}`,
-        `上一轮完整编辑要求（背景，以本轮要求为准）：${context.lastPrompt}`,
-        `本轮用户反馈：${userPrompt}`,
-        `本轮完整执行要求（优先）：${args.prompt}`,
+        intent === "correct_original" ? "Edit the attached original source image; do not reproduce errors from the previous result." : intent === "refine_latest" ? "Refine the attached latest result while preserving the successful changes." : "Use the attached image explicitly selected by the user as the editing base.",
+        args.prompt,
     ].join("\n\n") : args.prompt;
     return { references: references.map(ref => ({ ...ref, dataUrl: ref.dataUrl || "" })), prompt, lineage };
 }

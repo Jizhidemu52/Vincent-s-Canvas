@@ -11,27 +11,32 @@ const ctx = canvasImageEditContext([result("v1")]);
 
 test("round 1: correction uses original bytes even when the model requests the bad result", () => {
     let readWrongRefs = false;
-    const edit = resolveCanvasImageEdit({ editIntent: "correct_original", prompt: "恢复原有袖口，保持白底" }, ctx, () => { readWrongRefs = true; return ctx.results; }, "袖口改错了，改回来");
+    const edit = resolveCanvasImageEdit({ editIntent: "correct_original", prompt: "Restore the original cuffs; keep the white background and all other garment details." }, ctx, () => { readWrongRefs = true; return ctx.results; }, "袖口改错了，改回来");
     expect(readWrongRefs).toBe(false);
     expect(edit.references.map(ref => ref.dataUrl)).toEqual([original.dataUrl]);
     expect(edit.references[0]?.storageKey).toBe("image:original");
-    expect(edit.prompt).toContain("白底，人物服装不变");
-    expect(edit.prompt).toContain("袖口改错了");
+    expect(edit.prompt).toContain("attached original source image");
+    expect(edit.prompt).toContain("keep the white background");
+    expect(edit.prompt).not.toMatch(/[\u3400-\u9fff]/);
+    expect(edit.lineage.originalPrompt).toBe("白底，人物服装不变");
 });
 
 test("round 2: refinement uses latest result, not lingering selected originals", () => {
-    const edit = resolveCanvasImageEdit({ editIntent: "refine_latest", prompt: "改善灯光与留白" }, ctx, () => [original], "再好看一点");
+    const edit = resolveCanvasImageEdit({ editIntent: "refine_latest", prompt: "Improve lighting and negative space while retaining the white background and unchanged garment." }, ctx, () => [original], "再好看一点");
     expect(edit.references[0]?.dataUrl).toBe("data:image/png;base64,v1");
     expect(edit.lineage.originalReferences[0]?.storageKey).toBe("image:original");
-    expect(edit.prompt).toContain("保留已经做好的部分");
+    expect(edit.prompt).toContain("preserving the successful changes");
+    expect(edit.prompt).not.toContain("再好看一点");
 });
 
 test("round 3: correction after refinement and reload still returns to first original", () => {
-    const refinement = resolveCanvasImageEdit({ editIntent: "refine_latest", prompt: "优化光线" }, ctx, () => [], "再好看点");
+    const refinement = resolveCanvasImageEdit({ editIntent: "refine_latest", prompt: "Improve the lighting while retaining all garment details and the white background." }, ctx, () => [], "再好看点");
     const reloaded = JSON.parse(JSON.stringify([result("v1"), result("v2", refinement.lineage)]));
-    const edit = resolveCanvasImageEdit({ editIntent: "correct_original", prompt: "恢复衣服原色并保留光线优化" }, canvasImageEditContext(reloaded), () => [], "颜色改错了");
+    const edit = resolveCanvasImageEdit({ editIntent: "correct_original", prompt: "Restore the original garment colors; retain the improved lighting and white background." }, canvasImageEditContext(reloaded), () => [], "颜色改错了");
     expect(edit.references[0]?.dataUrl).toBe(original.dataUrl);
-    expect(edit.prompt).toContain("优化光线");
+    expect(edit.prompt).toContain("retain the improved lighting");
+    expect(edit.prompt).not.toMatch(/[\u3400-\u9fff]/);
+    expect(canvasImageEditContext(reloaded).lastPrompt).toBe(refinement.lineage.editPrompt);
     expect(edit.prompt).not.toContain("data:image/");
 });
 

@@ -6,12 +6,13 @@ import type { ReferenceImage } from "@/types/image";
 type Props = {
     references: ReferenceImage[];
     disabled?: boolean;
+    thumbnailSize?: number;
     onMove: (id: string, targetId: string) => void;
     onRemove: (id: string) => void;
     onClear: () => void;
 };
 
-export function CanvasQuickReferenceTray({ references, disabled, onMove, onRemove, onClear }: Props) {
+export function CanvasQuickReferenceTray({ references, disabled, thumbnailSize, onMove, onRemove, onClear }: Props) {
     const [activeId, setActiveId] = useState<string | null>(null);
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const activeIndex = references.findIndex((reference) => reference.id === activeId);
@@ -22,7 +23,7 @@ export function CanvasQuickReferenceTray({ references, disabled, onMove, onRemov
     return <section className="cw-reference-tray" aria-label="已选参考图">
         <div className="cw-reference-heading"><span>参考图 · {references.length}</span><button type="button" disabled={disabled} onClick={onClear}>清空</button></div>
         <div className="cw-references">
-            {references.map((reference, index) => <div key={reference.id} className={`cw-reference ${activeId === reference.id ? "is-active" : ""} ${draggingId === reference.id ? "is-dragging" : ""}`}
+            {references.map((reference, index) => <div key={reference.id} className={`cw-reference ${activeId === reference.id ? "is-active" : ""} ${draggingId === reference.id ? "is-dragging" : ""}`} style={thumbnailSize ? { width: thumbnailSize, height: thumbnailSize } : undefined}
                 onDragOver={(event) => { if (!disabled && draggingId) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }}
                 onDrop={(event) => { event.preventDefault(); if (!disabled && draggingId) onMove(draggingId, reference.id); setDraggingId(null); }}>
                 <button type="button" className="cw-reference-image" disabled={disabled} draggable={!disabled}

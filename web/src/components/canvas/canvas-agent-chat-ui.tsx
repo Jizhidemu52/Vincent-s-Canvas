@@ -19,7 +19,7 @@ export type CanvasAgentChatMessage = {
     attachments?: CanvasAgentChatAttachment[];
 };
 
-const WORKING_TEXT = "working...";
+const WORKING_TEXT = "处理中…";
 
 export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool, onUseImageForVideo }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void }) {
     const isUser = item.role === "user";
@@ -149,6 +149,7 @@ export function AgentWorkingMessage({ theme }: { theme: (typeof canvasThemes)[ke
 export function AgentChatComposer({
     prompt,
     attachments = [],
+    attachmentPreview,
     disabled,
     sending,
     placeholder,
@@ -162,6 +163,7 @@ export function AgentChatComposer({
 }: {
     prompt: string;
     attachments?: CanvasAgentChatAttachment[];
+    attachmentPreview?: ReactNode;
     disabled?: boolean;
     sending?: boolean;
     placeholder: string;
@@ -178,7 +180,7 @@ export function AgentChatComposer({
     return (
         <div className="min-w-0 w-full shrink-0 px-2 pb-2 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
             <div className="min-w-0 rounded-xl border px-2.5 pb-2 pt-2 shadow-sm" style={{ background: theme.node.panel, borderColor: theme.node.stroke }}>
-                {attachments.length ? (
+                {attachmentPreview ?? (attachments.length ? (
                     <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
                         {attachments.map((item) => (
                             <div key={item.id} className="group relative size-14 shrink-0 overflow-hidden rounded-xl border" style={{ borderColor: theme.node.stroke }} title={item.name}>
@@ -191,7 +193,7 @@ export function AgentChatComposer({
                             </div>
                         ))}
                     </div>
-                ) : null}
+                ) : null)}
                 <textarea
                     value={prompt}
                     onChange={(event) => onPromptChange(event.target.value)}

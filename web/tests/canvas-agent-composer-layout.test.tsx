@@ -128,6 +128,14 @@ test("attachment removal and paste keep image-only uploads without swallowing or
     expect(prevented).toBe(1);
 });
 
+test("a unified reference tray replaces small attachment previews without duplicating images", () => {
+    const tray = <section aria-label="排序参考图">large previews</section>;
+    const tree = composer({ attachments: [{ id: "reference", name: "reference.png", url: "blob:reference" }], attachmentPreview: tray }).render();
+    expect(tree).toContain(tray);
+    expect(tree.filter(element => element.type === "img")).toHaveLength(0);
+    expect(control(tree, "添加参考图")).toBeDefined();
+});
+
 test("upload invokes the hidden input and clears its value after forwarding the selected files", () => {
     const panel = composer({ generationControls });
     const tree = panel.render();

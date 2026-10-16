@@ -26,6 +26,8 @@ import { serverAssetIdFromAsset, useAssetStore } from "@/stores/use-asset-store"
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
+import { moveImageReference } from "@/lib/image-reference-policy";
+import { CanvasQuickReferenceTray } from "./canvas-quick-reference-tray";
 import { DiaTextReveal } from "@/components/ui/dia-text-reveal";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
@@ -53,6 +55,7 @@ import { buildCanvasAssistantContext } from "@/lib/canvas/canvas-assistant-conte
 import { captureCanvasContextSnapshot, readCanvasContextImage, readCanvasContextVideo, readCanvasConversationImage } from "@/lib/canvas/canvas-assistant-media";
 import { buildCanvasConversationHistory } from "@/lib/canvas/canvas-assistant-history";
 import { CANVAS_ASSISTANT_SYSTEM_PROMPT } from "@/lib/canvas/canvas-assistant-prompt";
+import { CANVAS_ASSISTANT_OUTPUT_POLICY, CANVAS_ENGLISH_IMAGE_PROMPT_SYSTEM, IMAGE_GENERATION_PROMPT_DESCRIPTION, canvasAssistantDisplayMessage, ensureEnglishImagePrompt } from "@/lib/canvas/canvas-assistant-output";
 import { createCanvasSelectionPromptSync } from "@/lib/canvas/canvas-selection-prompt";
 import { canvasImageEditContext, imageEditContextDescription, IMAGE_EDIT_TOOL_PROPERTIES, resolveCanvasImageEdit, type CanvasImageEditContext, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
@@ -116,7 +119,7 @@ function generationToolDefinition(name: string, description: string, mode?: "tex
         name,
         description,
         {
-            prompt: { type: "string" },
+            prompt: { type: "string", ...(name === "canvas_generate_image" ? { description: IMAGE_GENERATION_PROMPT_DESCRIPTION } : {}) },
             title: { type: "string" },
             x: { type: "number" },
             y: { type: "number" },
@@ -221,7 +224,7 @@ type OnlineAgentTab = "setup" | "chat" | "history" | "log";
 type OnlineAgentLog = { id: string; time: string; title: string; data?: unknown };
 type OnlineAgentLogContext = { model: string; running: boolean; confirmTools: boolean; messages: number; nodes: number; connections: number };
 type OnlineLoopContext = { step: number };
-type OnlineTurnContext = { userPrompt: string; references: CanvasAssistantReference[]; historyReferences?: CanvasAssistantReference[]; imageEditContext?: CanvasImageEditContext; settings: AgentGenerationSettings; videoSize: string; config: AiConfig; canvasSnapshot: CanvasAgentSnapshot; autoContext: boolean };
+type OnlineTurnContext = { userPrompt: string; references: CanvasAssistantReference[]; historyReferences?: CanvasAssistantReference[]; hiddenPrompts?: string[]; imageEditContext?: CanvasImageEditContext; settings: AgentGenerationSettings; videoSize: string; config: AiConfig; canvasSnapshot: CanvasAgentSnapshot; autoContext: boolean };
 type OnlineToolResult = { ok: true; message: string; data?: unknown; mediaWorkflow?: CanvasAgentMediaWorkflow } | { ok: false; message: string; data?: unknown };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
 type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: ToolResponseResult["responsesOutputItems"]; assistantId: string; step: number; turn: OnlineTurnContext };
@@ -290,6 +293,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const [autoContext, setAutoContext] = useState(true);
     const [isRunning, setIsRunning] = useState(false);
     const [uploadedReferences, setUploadedReferences] = useState<CanvasAssistantReference[]>([]);
+    const [referenceOrder, setReferenceOrder] = useState<string[]>([]);
     const [imageCapabilities, setImageCapabilities] = useState<ImageGenerationModel[]>([]);
     const [videoCapabilities, setVideoCapabilities] = useState<GenerationCapabilityModel[]>([]);
     const [capabilityError, setCapabilityError] = useState<string | null>(null);
@@ -414,7 +418,10 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const historySessions = safeSessions.filter((session) => session.messages.length > 0);
     const messages = activeSession?.messages || [];
     const renderedMessageWindow = useMemo(() => agentMessageWindow(messages.length, chatMessageLimit), [chatMessageLimit, messages.length]);
-    const renderedMessages = useMemo(() => messages.slice(renderedMessageWindow.start), [messages, renderedMessageWindow.start]);
+    const renderedMessages = useMemo(() => messages.slice(renderedMessageWindow.start).flatMap(message => {
+        const display = canvasAssistantDisplayMessage(message);
+        return display ? [display] : [];
+    }), [messages, renderedMessageWindow.start]);
     const hasMessages = messages.length > 0;
     const activeModel = effectiveConfig.textModel || effectiveConfig.model;
     const mediaWorkflowModels = useMemo(() => {
@@ -431,11 +438,31 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const syncSelectedPromptRef = useRef(createCanvasSelectionPromptSync());
     useEffect(() => {
         const selectedPrompt = syncSelectedPromptRef.current(selectedNodeIds, selectedNodes, snapshotRef.current.projectId);
-        if (selectedPrompt !== undefined) setPrompt(selectedPrompt);
+        // Selection still resets a stale draft, but internal generation prompts
+        // must never be recalled into the user-facing chat input.
+        if (selectedPrompt !== undefined) setPrompt("");
     }, [selectedNodeIds, selectedNodes, snapshotRef]);
     const allSelectedReferences = useMemo(() => buildAssistantReferences(selectedNodes), [selectedNodes]);
     const selectedReferences = useMemo(() => allSelectedReferences.filter((item) => !removedReferenceIds.has(item.id)), [allSelectedReferences, removedReferenceIds]);
-    const generationReferences = useMemo(() => [...selectedReferences, ...uploadedReferences].filter((item): item is CanvasAssistantReference & { dataUrl: string } => Boolean(item.dataUrl)), [selectedReferences, uploadedReferences]);
+    const draftReferences = useMemo(() => {
+        const available = new Map([...selectedReferences, ...uploadedReferences].map(item => [item.id, item]));
+        const ordered = referenceOrder.flatMap(id => {
+            const reference = available.get(id);
+            available.delete(id);
+            return reference ? [reference] : [];
+        });
+        return [...ordered, ...Array.from(available.values())];
+    }, [selectedReferences, uploadedReferences, referenceOrder]);
+    useEffect(() => {
+        const ids = draftReferences.map(item => item.id);
+        setReferenceOrder(current => current.length === ids.length && current.every((id, index) => id === ids[index]) ? current : ids);
+    }, [draftReferences]);
+    const generationReferences = useMemo(() => draftReferences.filter((item): item is CanvasAssistantReference & { dataUrl: string } => Boolean(item.dataUrl)), [draftReferences]);
+    const removeDraftReferences = (ids: string[]) => {
+        setUploadedReferences(current => current.filter(item => !ids.includes(item.id)));
+        setRemovedReferenceIds(current => new Set([...Array.from(current), ...ids]));
+        if (ids.some(id => selectedNodeIds.has(id))) onSelectNodeIds(new Set(Array.from(selectedNodeIds).filter(id => !ids.includes(id))));
+    };
     const iconButtonStyle = { color: theme.node.muted };
 
     useEffect(() => {
@@ -538,7 +565,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             setLocalActiveSessionId(session.id);
         }
 
-        const refs = savedReferences || [...selectedReferences, ...uploadedReferences];
+        const refs = savedReferences || draftReferences;
         const settings = { ...generationSettings };
         const turn: OnlineTurnContext = { userPrompt: text, references: refs, settings, videoSize: videoSizeRef.current, config: onlineAgentConfig(effectiveConfig, settings), canvasSnapshot: captureCanvasContextSnapshot(snapshotRef.current), autoContext };
         const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references: refs, detail: { generationSettings: settings } };
@@ -577,7 +604,6 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 "auto",
                 (text) => {
                     streamed = text;
-                    if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });
                 },
                 { webSearch: true, tool: "canvas-chat" },
             );
@@ -585,7 +611,6 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             if (result.toolCalls.length) {
                 const writableCalls = result.toolCalls.filter(isWritableToolCall);
                 if (confirmTools && writableCalls.length) {
-                    upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "准备执行工具，等待确认。" });
                     const toolMessageId = nanoid();
                     pendingToolContextRef.current.set(toolMessageId, { messages, toolCalls: result.toolCalls, claudeAssistantContent: result.claudeAssistantContent, responsesOutputItems: result.responsesOutputItems, assistantId, step: loop.step, turn });
                     const toolMessage: CanvasAssistantMessage = { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(result.toolCalls), detail: { status: "pending", step: loop.step, toolCalls: result.toolCalls, generationSettings: turn.settings, referenceImages: turn.references.map(({ id, title }) => ({ id, title })) } };
@@ -593,7 +618,6 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                     addOnlineLog("等待用户确认", result.toolCalls);
                     return;
                 }
-                if (result.content.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content });
                 await continueOnlineToolLoop(sessionId, assistantId, messages, result, loop.step, turn);
             } else {
                 if (!result.content.trim()) throw new Error("模型没有返回工具调用，画布操作未执行。");
@@ -623,6 +647,11 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     };
 
     const continueOnlineToolLoopAfterResults = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], toolCalls: ResponseToolCall[], toolResults: OnlineExecutedToolCall[], step: number, turn: OnlineTurnContext, claudeAssistantContent?: ClaudeAssistantContent, responsesOutputItems?: ToolResponseResult["responsesOutputItems"]) => {
+        const prompts = toolResults.map(item => objectDetail(item.result.data).prompt);
+        for (const call of toolCalls) {
+            try { prompts.push(parseToolArguments(call.function.arguments).prompt); } catch { /* Invalid arguments are reported by tool execution. */ }
+        }
+        turn.hiddenPrompts = Array.from(new Set([...(turn.hiddenPrompts || []), ...prompts.filter((value): value is string => typeof value === "string" && Boolean(value.trim()))]));
         const assistantTurn = toolResponseToInput({ toolCalls, claudeAssistantContent, responsesOutputItems });
         const nextMessages: ResponseInputMessage[] = [...messages, ...assistantTurn, ...toolResults.map((item) => ({ role: "tool" as const, tool_call_id: item.toolCallId, content: JSON.stringify(item.result) }))];
         if (toolResults.some((item) => !item.result.ok)) {
@@ -643,7 +672,6 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             "auto",
             (text) => {
                 streamed = text;
-                if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });
             },
             { webSearch: true, tool: "canvas-chat" },
         );
@@ -651,7 +679,6 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         if (next.toolCalls.length) {
             const writableCalls = next.toolCalls.filter(isWritableToolCall);
             if (confirmTools && writableCalls.length) {
-                upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || "准备执行工具，等待确认。" });
                 const toolMessageId = nanoid();
                 pendingToolContextRef.current.set(toolMessageId, { messages: nextMessages, toolCalls: next.toolCalls, claudeAssistantContent: next.claudeAssistantContent, responsesOutputItems: next.responsesOutputItems, assistantId, step: step + 1, turn });
                 appendMessage(sessionId, { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(next.toolCalls), detail: { status: "pending", step: step + 1, toolCalls: next.toolCalls, generationSettings: turn.settings, referenceImages: turn.references.map(({ id, title }) => ({ id, title })) } });
@@ -661,7 +688,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             await continueOnlineToolLoop(sessionId, assistantId, nextMessages, next, step + 1, turn);
             return;
         }
-        upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。" });
+        upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || toolResults.map((item) => toolResultText(item.result)).join("\n") || "画布操作已完成。", detail: { hiddenPrompts: turn.hiddenPrompts } });
     };
 
     const executeOps = (ops: CanvasAgentOp[]) => {
@@ -885,14 +912,19 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const plan = buildAgentGenerationPlan(settings, text, references, imageModelProfile(resolved.model.modelId, [resolved.model]));
         const activeReferences = plan.kind === "video" ? selectAgentVideoReferences(plan.model, references) : references;
         const progressId = nanoid();
-        const prompt = plan.kind === "image" && !plan.requiresPrompt ? "" : text.trim();
+        let prompt = plan.kind === "image" && !plan.requiresPrompt ? "" : text.trim();
         const strategy = plan.kind === "image" ? `${!plan.requiresPrompt ? "合成参考图并输出" : references.length ? "以参考图为依据编辑" : "按文字描述生成"} ${plan.count} 张图片` : `${activeReferences.length ? "以所选图片为参考生成" : "按文字描述生成"} ${plan.seconds === "-1" ? "智能时长" : `${plan.seconds} 秒`}视频`;
-        appendMessage(sessionId, { id: progressId, role: "assistant", text: `${strategy}，正在执行…${prompt ? `\n\n生成提示词：\n${prompt}` : ""}`, meta: imageModelDisplayName(modelOptionName(plan.model)), detail: { kind: "agent_generation", status: "running", prompt, settings } });
+        appendMessage(sessionId, { id: progressId, role: "assistant", text: `${strategy}，正在执行…`, meta: imageModelDisplayName(modelOptionName(plan.model)), detail: { kind: "agent_generation", status: "running", prompt, settings } });
         let submittedVideoTask: VideoGenerationTask | undefined;
         try {
             if (plan.kind === "image") {
+                prompt = await ensureEnglishImagePrompt(prompt, source => requestImageQuestion(
+                    { ...baseConfig, model: baseConfig.textModel || baseConfig.model, systemPrompt: "" },
+                    [{ role: "system", content: CANVAS_ENGLISH_IMAGE_PROMPT_SYSTEM }, { role: "user", content: source }],
+                    () => {}, { tool: "canvas-chat" },
+                ), { requiresPrompt: plan.requiresPrompt });
                 const config = { ...baseConfig, model: plan.model, imageModel: plan.model, size: plan.size, quality: plan.quality, imageOptions: plan.imageOptions ?? baseConfig.imageOptions, count: String(plan.count), canvasImageCount: String(plan.count), systemPrompt: "" };
-                const generated = references.length && plan.requiresPrompt ? await requestEdit(config, prompt, references, undefined, { tool: "canvas-edit" }) : await requestGeneration(config, prompt, { tool: "canvas-image" }, references);
+                const generated = references.length && plan.requiresPrompt ? await requestEdit(config, prompt, references, undefined, { tool: "canvas-edit", referencePromptLanguage: "en" }) : await requestGeneration(config, prompt, { tool: "canvas-image" }, references);
                 if (!generated.length) throw new Error("图片任务没有返回结果，尚未生成可见图片。");
                 const storedImages = await Promise.all(generated.map(async (item) => ({ item, image: await uploadImage(item.dataUrl) })));
                 const attachments: CanvasAssistantAttachment[] = storedImages.map(({ item, image }, index) => ({
@@ -918,17 +950,17 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                     metadata: { source: "canvas", module: "Agent", nodeId: attachments[index].id, projectId: snapshotRef.current.projectId, prompt, model: plan.model, serverAssetId: attachments[index].serverAssetId },
                 })));
                 const message = `${attachments.length} 张图片已生成并放入画布。`;
-                const lineage = imageEdit || { intent: "explicit" as const, originalReferences: references.map(ref => ({ id: ref.id, type: CanvasNodeType.Image, title: ref.name, dataUrl: ref.dataUrl, storageKey: ref.storageKey })), originalPrompt: text, editPrompt: text, baseReferences: [] };
+                const lineage = { ...(imageEdit || { intent: "explicit" as const, originalReferences: references.map(ref => ({ id: ref.id, type: CanvasNodeType.Image, title: ref.name, dataUrl: ref.dataUrl, storageKey: ref.storageKey })), originalPrompt: text, baseReferences: [] }), editPrompt: prompt };
                 // For an initially text-only task, its first output becomes the original.
                 if (!lineage.originalReferences.length) lineage.originalReferences = attachments.map(item => ({ id: item.id, type: CanvasNodeType.Image, title: item.name, dataUrl: item.url, storageKey: item.storageKey }));
-                upsertMessage(sessionId, { id: progressId, role: "assistant", text: `${message}${prompt ? `\n\n使用提示词：\n${prompt}` : ""}`, attachments, meta: `${attachments.length} 张 · ${imageModelDisplayName(modelOptionName(plan.model))} · ${plan.quality}`, detail: { kind: "agent_generation", status: "completed", prompt, settings, imageEdit: lineage } });
+                upsertMessage(sessionId, { id: progressId, role: "assistant", text: message, attachments, meta: `${attachments.length} 张 · ${imageModelDisplayName(modelOptionName(plan.model))} · ${plan.quality}`, detail: { kind: "agent_generation", status: "completed", prompt, settings, imageEdit: lineage } });
                 return { ok: true as const, message, data: { nodeIds: attachments.map((item) => item.id), mediaType: "image", prompt } };
             }
             const config = { ...baseConfig, model: plan.model, videoModel: plan.model, size: plan.size, videoSeconds: plan.seconds, vquality: plan.quality, videoGenerateAudio: settings.videoGenerateAudio ?? baseConfig.videoGenerateAudio };
             const videoPrompt = buildAgentVideoPrompt(prompt, plan.requiresReference);
             const result = await requestVideoGeneration(config, videoPrompt, activeReferences, [], [], { toolKey: "canvas-video", onSubmitted: (task) => {
                 submittedVideoTask = task;
-                upsertMessage(sessionId, { id: progressId, role: "assistant", text: `${strategy}，正在等待原任务结果…\n\n生成提示词：\n${videoPrompt}`, meta: modelOptionName(plan.model), detail: { kind: "agent_generation", status: "running", prompt: videoPrompt, settings, videoTask: task } });
+                upsertMessage(sessionId, { id: progressId, role: "assistant", text: `${strategy}，正在等待原任务结果…`, meta: modelOptionName(plan.model), detail: { kind: "agent_generation", status: "running", prompt: videoPrompt, settings, videoTask: task } });
             } });
             const video = await storeGeneratedVideo(result);
             const attachments: CanvasAssistantAttachment[] = [{ id: nanoid(), name: "生成视频", mediaType: "video", ...video }];
@@ -939,7 +971,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 metadata: { source: "canvas", module: "Agent", nodeId: attachments[0].id, projectId: snapshotRef.current.projectId, prompt: videoPrompt, model: plan.model, serverAssetId: video.serverAssetId },
             }]);
             const message = "视频已生成并放入画布。";
-            upsertMessage(sessionId, { id: progressId, role: "assistant", text: `${message}\n\n使用提示词：\n${videoPrompt}`, attachments, meta: `${plan.seconds} 秒 · ${modelOptionName(plan.model)}`, detail: { kind: "agent_generation", status: "completed", prompt: videoPrompt, settings } });
+            upsertMessage(sessionId, { id: progressId, role: "assistant", text: message, attachments, meta: `${plan.seconds} 秒 · ${modelOptionName(plan.model)}`, detail: { kind: "agent_generation", status: "completed", prompt: videoPrompt, settings } });
             return { ok: true as const, message, data: { nodeIds: attachments.map((item) => item.id), mediaType: "video", prompt: videoPrompt } };
         } catch (error) {
             const paused = error instanceof QueuedTaskPausedError;
@@ -967,7 +999,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const submit = async () => {
         const text = prompt.trim();
         if (!onlineEnabled || !text || isRunning) return;
-        await sendMessage(text, messages, [...selectedReferences, ...uploadedReferences]);
+        await sendMessage(text, messages, draftReferences);
     };
 
     const addImagesToAgent = async (files: FileList | File[] | null) => {
@@ -1054,7 +1086,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                     ...(canManageConfig ? [{ value: "setup" as const, label: "连接配置", icon: <Settings2 className="size-3.5" /> }] : []),
                     { value: "chat", label: "对话" },
                     { value: "history", label: "历史", icon: <History className="size-3.5" />, count: historySessions.length },
-                    { value: "log", label: "日志", count: onlineLogs.length },
+                    ...(canManageConfig ? [{ value: "log" as const, label: "日志", count: onlineLogs.length }] : []),
                 ]}
                 onChange={setView}
                 right={
@@ -1188,17 +1220,13 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 
             {view === "chat" ? (
                 <>
-                    {selectedReferences.length ? (
+                    {selectedReferences.some(item => !item.dataUrl) ? (
                         <div className="thin-scrollbar flex max-w-full gap-1.5 overflow-x-auto px-3 pb-1">
-                            {selectedReferences.map((item, index) => (
+                            {selectedReferences.filter(item => !item.dataUrl).map((item) => (
                                 <AssistantReferenceChip
                                     key={item.id}
                                     item={item}
-                                    label={assistantImageReferenceLabel(selectedReferences, index)}
-                                    onRemove={() => {
-                                        setRemovedReferenceIds((prev) => new Set(prev).add(item.id));
-                                        if (selectedNodeIds.has(item.id)) onSelectNodeIds(new Set(Array.from(selectedNodeIds).filter((nodeId) => nodeId !== item.id)));
-                                    }}
+                                    onRemove={() => removeDraftReferences([item.id])}
                                 />
                             ))}
                         </div>
@@ -1228,6 +1256,11 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         disabled={!onlineEnabled || !effectiveConfig.textModel}
                         prompt={prompt}
                         attachments={uploadedReferences.map((item) => ({ id: item.id, name: item.title, url: item.dataUrl || "", storageKey: item.storageKey, mediaType: "image" as const }))}
+                        attachmentPreview={<div className="min-w-0 [&_.cw-reference-preview]:!object-contain">
+                            <CanvasQuickReferenceTray references={generationReferences.map(referenceToImage)} thumbnailSize={96} disabled={isRunning}
+                                onMove={(id, targetId) => setReferenceOrder(moveImageReference(draftReferences, draftReferences.findIndex(item => item.id === id), draftReferences.findIndex(item => item.id === targetId)).map(item => item.id))}
+                                onRemove={id => removeDraftReferences([id])} onClear={() => removeDraftReferences(generationReferences.map(item => item.id))} />
+                        </div>}
                         sending={isRunning}
                         placeholder="直接问当前画布上的内容…"
                         theme={theme}
@@ -1300,7 +1333,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         {hasMessages ? <Tooltip title="新对话"><button type="button" className="cw-icon" aria-label="新对话" onClick={() => { startChatSession(); setView("chat"); }}><Plus className="size-4" /></button></Tooltip> : null}
                         <Dropdown trigger={["click"]} menu={{ items: [
                             { key: "history", icon: <History className="size-4" />, label: "对话历史", onClick: () => { onAgentModeChange("online"); setView("history"); } },
-                            { key: "log", label: "运行日志", onClick: () => { onAgentModeChange("online"); setView("log"); } },
+                            ...(canManageConfig ? [{ key: "log", label: "运行日志", onClick: () => { onAgentModeChange("online"); setView("log"); } }] : []),
                             { type: "divider" },
                             { key: "online", disabled: !onlineEnabled, label: `${agentMode === "online" ? "✓ " : ""}网站 Agent`, onClick: () => onAgentModeChange("online") },
                             { key: "local", disabled: !localEnabled, label: `${agentMode === "local" ? "✓ " : ""}本机 Agent`, onClick: () => onAgentModeChange("local") },
@@ -1569,11 +1602,11 @@ function AssistantReferenceChip({ item, label, onRemove }: { item: CanvasAssista
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const text = (item.text || item.title).replace(/\s+/g, " ").trim().slice(0, 1) || "文";
     return (
-        <div className="group/chip relative inline-flex h-8 max-w-[150px] shrink-0 items-center gap-1.5 rounded-lg text-sm" style={{ color: theme.node.text }}>
+        <div className="group/chip relative inline-flex max-w-[150px] shrink-0 items-center gap-1.5 rounded-lg text-sm" style={{ color: theme.node.text }}>
             {item.dataUrl || item.storageKey ? (
-                <span className="relative block size-8 shrink-0">
-                    <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} alt={item.title} className="size-8 rounded-lg object-cover" />
-                    {label ? <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-medium leading-none text-white">{label}</span> : null}
+                <span className="relative block size-20 shrink-0 rounded-lg border" style={{ borderColor: theme.node.stroke }}>
+                    <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} alt={item.title} className="size-full rounded-lg object-contain" />
+                    {label ? <span className="absolute bottom-1 left-1 rounded px-1 py-0.5 text-[10px] font-medium leading-none" style={{ background: theme.node.panel, color: theme.node.text }}>{label}</span> : null}
                 </span>
             ) : (
                 <span className="grid size-8 place-items-center rounded-lg border text-sm font-medium" style={{ background: theme.node.panel, borderColor: theme.node.activeStroke }}>
@@ -1606,7 +1639,11 @@ function formatSessionTime(value?: string) {
 }
 
 function sessionPreview(session: CanvasAssistantSession) {
-    return session.messages.at(-1)?.text || `${session.messages.length} 条消息`;
+    for (let index = session.messages.length - 1; index >= 0; index--) {
+        const preview = canvasAssistantDisplayMessage(session.messages[index]!);
+        if (preview?.text) return preview.text;
+    }
+    return `${session.messages.length} 条消息`;
 }
 
 function objectDetail(value: unknown) {
@@ -2097,7 +2134,7 @@ async function refineAgentGenerationPrompt(config: AiConfig, settings: AgentGene
     const messages: AiTextMessage[] = [
         {
             role: "system",
-            content: "你是创作编排 Agent。根据用户需求、参考图和预设，输出一段可直接交给指定图片或视频模型的中文生成提示词。只输出最终提示词，不解释、不加标题。保留用户明确要求；有参考图时必须锁定主体、服装、材质、花型、颜色、Logo 与构图中需要保留的元素。",
+            content: CANVAS_ENGLISH_IMAGE_PROMPT_SYSTEM,
         },
         {
             role: "user",
@@ -2131,7 +2168,7 @@ function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, userMessage: Canv
     return [
         {
             role: "system",
-            content: CANVAS_ASSISTANT_SYSTEM_PROMPT,
+            content: `${CANVAS_ASSISTANT_SYSTEM_PROMPT}\n${CANVAS_ASSISTANT_OUTPUT_POLICY}`,
         },
         ...conversation.messages,
         {
@@ -2140,7 +2177,7 @@ function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, userMessage: Canv
                 ...conversation.currentContent,
                 { type: "text", text: imageEditContextDescription(editContext) },
                 ...refs.flatMap((item) => (item.text ? [{ type: "text" as const, text: `选中节点 ${item.title}：${item.text}` }] : [])),
-                { type: "text", text: `当前画布结构（不代表已读取媒体）：${JSON.stringify(compactSnapshot(snapshot, false))}\n\n可用参考图片（id可用于referenceNodeIds）：${JSON.stringify(refs.filter((item) => item.dataUrl).map((item) => ({ id: item.id, title: item.title, source: snapshot.nodes.some((node) => node.id === item.id) ? "canvas" : "upload" })))}\n\n创作预设（仅为用户要求生成时的默认参数，不是生成指令）：${JSON.stringify(settings)}\n\n用户需求：${userMessage.text}` },
+                { type: "text", text: `当前画布结构（不代表已读取媒体）：${JSON.stringify(compactSnapshot(snapshot, false))}\n\n可用参考图片（按本轮手动排列顺序编号；id可用于referenceNodeIds）：${JSON.stringify(refs.filter((item) => item.dataUrl).map((item, index) => ({ id: item.id, label: `本轮${imageReferenceLabel(index)}`, title: item.title, source: snapshot.nodes.some((node) => node.id === item.id) ? "canvas" : "upload" })))}\n\n创作预设（仅为用户要求生成时的默认参数，不是生成指令）：${JSON.stringify(settings)}\n\n用户需求：${userMessage.text}` },
             ],
         },
     ];

@@ -1,13 +1,14 @@
 import type { AiTextMessage } from "@/services/api/image";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference } from "@/types/canvas";
 import { latestChatContext } from "@/lib/chat-context";
+import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 
 type Content = Exclude<AiTextMessage["content"], string>;
 export const CANVAS_HISTORY_LIMITS = { images: 20, imageCharacters: 6 * 1024 * 1024 };
 
-function messageImages(message: CanvasAssistantMessage) {
+function messageImages(message: CanvasAssistantMessage, isCurrent: boolean) {
     return [
-        ...(message.references || []).filter(ref => ref.type === CanvasNodeType.Image).map(ref => ({ ...ref, source: "用户参考图" })),
+        ...(message.references || []).filter(ref => ref.type === CanvasNodeType.Image).map((ref, index) => ({ ...ref, source: `${isCurrent ? "本轮" : ""}${imageReferenceLabel(index)} · 用户参考图` })),
         ...(message.contextReferences || []).map(ref => ({ ...ref, source: "当轮画布图片快照" })),
         ...(message.attachments || []).filter(item => item.mediaType === "image").map(item => ({ id: item.id, type: CanvasNodeType.Image, title: item.name, dataUrl: item.url, storageKey: item.storageKey, source: "助手生成结果" })),
     ];
@@ -26,7 +27,7 @@ export async function buildCanvasConversationHistory(
         content: message.text + (message.references || []).filter(ref => ref.text).map(ref => `\n[参考文本 ${ref.title}] ${ref.text}`).join("") || "[图片消息]",
     })));
     const entries = [...context, { ...current, role: "user" as const, content: current.text }];
-    const batches = entries.map((message, index) => messageImages(message).map((ref, imageIndex) => ({
+    const batches = entries.map((message, index) => messageImages(message, index === context.length).map((ref, imageIndex) => ({
         ...ref,
         // Only historical IDs use aliases; explicit current references keep their public IDs.
         id: index < context.length ? `history-${message.id}-${imageIndex}` : ref.id,
@@ -83,7 +84,7 @@ export async function buildCanvasConversationHistory(
     });
     const summary = { historyMessages: context.length, omittedMessages: eligible.length - context.length, images: imageCount, omitted, failed };
     const currentContent: Content = [
-        { type: "text", text: `图文会话上下文：${JSON.stringify(summary)}。仅携带最近最多 24 条历史消息和 48000 字符；仅依据实际图片对照版本与用户反馈。未提供的历史不得声称已读；需要缺失图片才能判断时明确请用户补充。` },
+        { type: "text", text: `图文会话上下文：${JSON.stringify(summary)}。图片编号仅按各消息的手动参考图顺序；自动画布图片不占编号。本轮的“图片N”对应“本轮图片N”标签，历史编号仅对应所属消息。仅携带最近最多 24 条历史消息和 48000 字符；仅依据实际图片对照版本与用户反馈。未提供的历史不得声称已读；需要缺失图片才能判断时明确请用户补充。` },
         ...boundedCanvas,
         ...batches.at(-1)!.flatMap(ref => parts.get(ref) || []),
     ];

@@ -37,6 +37,66 @@ test("new uploads do not erase earlier original and result images", async () => 
     expect(result.references.every(item => item.id.startsWith("history-"))).toBe(true);
 });
 
+test("current manual image labels follow their reordered inputs without counting text or canvas context", async () => {
+    const manual = [ref("pattern"), { id: "notes", type: CanvasNodeType.Text, title: "要求", text: "保留版型" }, ref("base")];
+    const message: CanvasAssistantMessage = { ...current, references: manual, contextReferences: [ref("snapshot")] };
+    const before = JSON.stringify(message);
+    const automaticImage = "data:image/png;base64,YXV0b21hdGlj";
+    const result = await buildCanvasConversationHistory([], message, preview,
+        [{ type: "text", text: "自动画布帧" }, { type: "image_url", image_url: { url: automaticImage } }]);
+    expect(images([{ role: "user", content: result.currentContent }])).toEqual([
+        automaticImage, await preview(ref("pattern")), await preview(ref("base")), await preview(ref("snapshot")),
+    ]);
+    const parts = result.currentContent;
+    const patternLabel = parts.findIndex(part => part.type === "text" && part.text.includes("消息 feedback · 本轮图片1 · 用户参考图 · pattern"));
+    const baseLabel = parts.findIndex(part => part.type === "text" && part.text.includes("消息 feedback · 本轮图片2 · 用户参考图 · base"));
+    expect(patternLabel).toBeGreaterThan(-1);
+    expect(baseLabel).toBeGreaterThan(patternLabel);
+    expect(parts[patternLabel + 1]).toEqual({ type: "image_url", image_url: { url: await preview(ref("pattern")) } });
+    expect(parts[baseLabel + 1]).toEqual({ type: "image_url", image_url: { url: await preview(ref("base")) } });
+    expect(JSON.stringify(parts)).toContain("referenceNodeIds 可显式使用 pattern");
+    expect(JSON.stringify(parts)).toContain("消息 feedback · 当轮画布图片快照 · snapshot");
+    expect(JSON.stringify(parts)).not.toContain("本轮图片3");
+    expect(JSON.stringify(message)).toBe(before);
+});
+
+test("historical manual numbering restarts per message while aliases retain each frozen image identity", async () => {
+    const older = { ...ref("shared"), title: "older-shared", storageKey: "image:older-shared" };
+    const newer = { ...ref("shared"), title: "newer-shared", storageKey: "image:newer-shared" };
+    const latest = { ...ref("shared"), title: "current-shared", storageKey: "image:current-shared" };
+    const prior: CanvasAssistantMessage[] = [
+        { id: "old-a", role: "user", text: "第一轮", references: [older, ref("other")], contextReferences: [ref("canvas-a")] },
+        { id: "old-b", role: "user", text: "第二轮", references: [newer], contextReferences: [ref("canvas-b")] },
+    ];
+    const result = await buildCanvasConversationHistory(prior, { ...current, references: [latest] }, preview);
+    const historyText = JSON.stringify(result.messages);
+    expect(historyText).toContain("消息 old-a · 图片1 · 用户参考图 · older-shared，referenceNodeIds 可显式使用 history-old-a-0");
+    expect(historyText).toContain("消息 old-a · 图片2 · 用户参考图 · other，referenceNodeIds 可显式使用 history-old-a-1");
+    expect(historyText).toContain("消息 old-b · 图片1 · 用户参考图 · newer-shared，referenceNodeIds 可显式使用 history-old-b-0");
+    expect(historyText).not.toContain("本轮图片");
+    expect(historyText).not.toContain("图片3");
+    expect(result.references.find(item => item.id === "history-old-a-0")?.storageKey).toBe("image:older-shared");
+    expect(result.references.find(item => item.id === "history-old-b-0")?.storageKey).toBe("image:newer-shared");
+    expect(result.references.find(item => item.id === "history-old-a-2")?.storageKey).toBe("image:canvas-a");
+    expect(images(result.messages)).toEqual([
+        await preview(older), await preview(ref("other")), await preview(ref("canvas-a")), await preview(newer), await preview(ref("canvas-b")),
+    ]);
+    expect(JSON.stringify(result.currentContent)).toContain("消息 feedback · 本轮图片1 · 用户参考图 · current-shared，referenceNodeIds 可显式使用 shared");
+    expect(images([{ role: "user", content: result.currentContent }])).toEqual([await preview(latest)]);
+});
+
+test("a failed explicit image keeps its original number instead of renumbering later inputs", async () => {
+    const result = await buildCanvasConversationHistory([], { ...current, references: [ref("missing"), ref("valid")] }, async item => {
+        if (item.id === "missing") throw new Error("missing");
+        return preview(item);
+    });
+    const labels = result.currentContent.flatMap(part => part.type === "text" ? [part.text] : []);
+    expect(labels.some(text => text.includes("本轮图片1 · 用户参考图 · missing") && text.includes("图片读取失败"))).toBe(true);
+    expect(labels.some(text => text.includes("本轮图片2 · 用户参考图 · valid"))).toBe(true);
+    expect(images([{ role: "user", content: result.currentContent }])).toEqual([await preview(ref("valid"))]);
+    expect(result.summary.failed).toBe(1);
+});
+
 test("repeated automatic snapshots reuse image evidence without crowding out distinct original/result versions", async () => {
     const result = await buildCanvasConversationHistory([
         ...history,

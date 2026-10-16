@@ -2,6 +2,8 @@
 
 ## Unreleased
 
++ [调整] 画布对话参考图统一放大并支持拖动、前后移动与键盘排序，显示编号与实际模型输入一致；对话仅展示中文关键结果，隐藏思考、工具明细及完整生成提示词，图片生成使用内部英文指令，整理失败不提交图片任务。
+
 + [调整] LLM 选择精简为 APIMart 的 Claude Sonnet 5.5、GPT-6 Astra，以及 OpenToken 的 GPT-6 Astra；Sonnet 使用原生 Claude Messages 协议。新配置生图默认 APIMart GPT2，保留有效的已保存选择及历史记录。
 
 + [修复] Claude Messages 统一使用官方版本头，并验证 Sonnet 流式工具生图链路；画布对话完成前等待最终回复持久化，修复立即刷新或重开后仅保留用户问题的问题，保存失败明确提示。
