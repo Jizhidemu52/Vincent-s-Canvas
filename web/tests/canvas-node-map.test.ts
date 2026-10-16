@@ -57,6 +57,45 @@ test("replaces the map when a node changes type or joins the resource index", ()
     expect(changedType).not.toBe(typeMap);
 });
 
+test("replaces the map when an empty image gains only a persisted storage key", () => {
+    const empty = { ...node("image"), type: CanvasNodeType.Image, metadata: {} };
+    const map = createCanvasNodeMap([empty]);
+    const persisted = { ...empty, metadata: { storageKey: "image:persisted" } };
+
+    const refreshed = refreshCanvasNodeMap(map, [persisted]);
+
+    expect(refreshed).not.toBe(map);
+    expect(refreshed.get("image")).toBe(persisted);
+    expect(map.get("image")).toBe(empty);
+});
+
+test("keeps the map identity while a storage-only image restores its content URL", () => {
+    const persisted = { ...node("image"), type: CanvasNodeType.Image, metadata: { storageKey: "image:persisted" } };
+    const map = createCanvasNodeMap([persisted]);
+    const restored = { ...persisted, metadata: { ...persisted.metadata, content: "blob:restored-image" } };
+
+    const refreshed = refreshCanvasNodeMap(map, [restored]);
+
+    expect(refreshed).toBe(map);
+    expect(refreshed.get("image")).toBe(restored);
+    expect(refreshed.get("image")?.metadata?.storageKey).toBe("image:persisted");
+    expect(refreshed.get("image")?.metadata?.content).toBe("blob:restored-image");
+});
+
+test("replaces the map when an image loses its last content or storage source", () => {
+    for (const metadata of [{ storageKey: "image:persisted" }, { content: "blob:image" }]) {
+        const populated = { ...node("image"), type: CanvasNodeType.Image, metadata };
+        const map = createCanvasNodeMap([populated]);
+        const empty = { ...populated, metadata: {} };
+
+        const refreshed = refreshCanvasNodeMap(map, [empty]);
+
+        expect(refreshed).not.toBe(map);
+        expect(refreshed.get("image")).toBe(empty);
+        expect(map.get("image")).toBe(populated);
+    }
+});
+
 test("replaces the map when batch membership changes", () => {
     const root = { ...node("root"), type: CanvasNodeType.Image, metadata: { isBatchRoot: true, batchChildIds: ["child-a", "child-b"] } };
     const child = { ...node("child-a", 180), type: CanvasNodeType.Image, metadata: { batchRootId: "root" } };

@@ -19,14 +19,24 @@ export function createImageThumbnailCache(deps: Dependencies, maxPending = 64) {
     const revisions = new Map<string, number>();
     const pending = new Map<string, { promise: Promise<Blob | null>; signals: Array<AbortSignal | undefined>; write?: Promise<unknown> }>();
     const urls = new Map<string, { url: string; references: number }>();
-    const queue: Array<() => Promise<void>> = [];
+    const queue: Array<{ interested: () => boolean; run: () => Promise<void>; cancel: () => void }> = [];
     let running = false;
+    const pruneCanceled = () => {
+        for (let index = queue.length - 1; index >= 0; index--) {
+            if (queue[index].interested()) continue;
+            const [task] = queue.splice(index, 1);
+            task.cancel();
+        }
+    };
     const drain = () => {
+        pruneCanceled();
         if (running || !queue.length) return;
         running = true;
         deps.schedule(() => {
-            const task = queue.shift()!;
-            void task().finally(() => { running = false; drain(); });
+            pruneCanceled();
+            const task = queue.shift();
+            if (!task) { running = false; return; }
+            void task.run().finally(() => { running = false; drain(); });
         });
     };
     const clearUrls = () => {
@@ -37,6 +47,10 @@ export function createImageThumbnailCache(deps: Dependencies, maxPending = 64) {
         async acquire(request: ImageThumbnailRequest, signal?: AbortSignal): Promise<ImageThumbnailLease | null> {
             if (!deps.isCurrent()) { clearUrls(); return null; }
             if (signal?.aborted) return null;
+            // Canceled zoom tiers must not consume the next tier's queue budget.
+            // Prune before looking up the key so a new consumer cannot join a
+            // canceled promise that is waiting for its cleanup microtask.
+            pruneCanceled();
             const key = cacheKey(request.storageKey, request.edge);
             const revision = revisions.get(request.storageKey) || 0;
             const current = () => deps.isCurrent() && (revisions.get(request.storageKey) || 0) === revision;
@@ -47,25 +61,32 @@ export function createImageThumbnailCache(deps: Dependencies, maxPending = 64) {
                     if (queue.length >= maxPending) return null;
                     const signals = [signal];
                     const interested = () => signals.some((item) => !item?.aborted);
-                    const work = new Promise<Blob | null>((resolve) => {
-                        queue.push(async () => {
+                    let resolveWork!: (blob: Blob | null) => void;
+                    const work = new Promise<Blob | null>((resolve) => { resolveWork = resolve; });
+                    job = { promise: work, signals };
+                    pending.set(key, job);
+                    queue.push({
+                        interested,
+                        cancel: () => {
+                            if (pending.get(key)?.promise === work) pending.delete(key);
+                            resolveWork(null);
+                        },
+                        run: async () => {
                             try {
-                                if (!current() || !interested()) return resolve(null);
+                                if (!current() || !interested()) return resolveWork(null);
                                 // Cache failure must never make an original image unavailable.
                                 const cached = await deps.read(key).catch(() => null);
-                                if (!current() || !interested()) return resolve(null);
+                                if (!current() || !interested()) return resolveWork(null);
                                 const blob = cached || await deps.generate(request);
-                                if (!current()) return resolve(null);
+                                if (!current()) return resolveWork(null);
                                 if (blob && !cached) {
                                     job!.write = deps.write(key, blob).catch(() => undefined);
                                     await job!.write;
                                 }
-                                resolve(current() ? blob : null);
-                            } catch { resolve(null); }
-                        });
+                                resolveWork(current() ? blob : null);
+                            } catch { resolveWork(null); }
+                        },
                     });
-                    job = { promise: work, signals };
-                    pending.set(key, job);
                     void work.finally(() => { if (pending.get(key)?.promise === work) pending.delete(key); });
                     drain();
                 } else job.signals.push(signal);

@@ -8,7 +8,7 @@ import { canvasNodeRenderStateEqual, type CanvasNodeRenderState } from "@/lib/ca
 import { canvasMediaPlaybackProps } from "@/lib/canvas/canvas-media-render-quality";
 import { canvasImageRenderProps } from "@/lib/canvas/canvas-image-render-quality";
 import { needsCanvasNodeMediaPreviewResolution, resolveCanvasNodeMediaPreview } from "@/lib/canvas/canvas-node-media-preview";
-import { canvasNodeRenderingStyle, shouldUseCanvasNodeOverview } from "@/lib/canvas/canvas-node-rendering";
+import { canvasNodeHasImagePreview, canvasNodeRenderingStyle, shouldUseCanvasNodeOverview } from "@/lib/canvas/canvas-node-rendering";
 import { canvasNodeResizePointerDelta } from "@/lib/canvas/canvas-node-resize";
 import { shouldRenderCanvasNodeControls } from "@/lib/canvas/canvas-node-controls-visibility";
 import { canvasNodeEffectiveHover } from "@/lib/canvas/canvas-node-hover-state";
@@ -157,9 +157,9 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const isMoving = renderQuality === "moving";
     const effectiveHovered = canvasNodeEffectiveHover(hovered, renderQuality);
-    const useOverview = shouldUseCanvasNodeOverview({ renderQuality, selected: isSelected, multiSelected: isMultiSelected, focused: isFocusRelated, connectionTarget: isConnectionTarget, showPanel, editing: isEditingContent, hovered: effectiveHovered });
+    const useOverview = shouldUseCanvasNodeOverview({ renderQuality, selected: isSelected, multiSelected: isMultiSelected, focused: isFocusRelated, connectionTarget: isConnectionTarget, showPanel, editing: isEditingContent, hovered: effectiveHovered, hasImagePreview: canvasNodeHasImagePreview(data) });
     const useMovingPlaceholder = shouldUseCanvasNodeMovingPlaceholder({ type: data.type, renderQuality, active: isActive, hovered: effectiveHovered, showPanel });
-    const controlState = { renderQuality, hovered: effectiveHovered, selected: isSelected, multiSelected: isMultiSelected && useOverview, connecting: isConnecting, isImage: hasImageContent };
+    const controlState = { renderQuality, hovered: effectiveHovered, selected: isSelected, multiSelected: isMultiSelected && !isFocusRelated && !isConnectionTarget && !showPanel && !isEditingContent, connecting: isConnecting, isImage: hasImageContent };
     const showResizeControls = shouldRenderCanvasNodeControls({ ...controlState, kind: "resize" });
     const showConnectionControls = shouldRenderCanvasNodeControls({ ...controlState, kind: "connection" });
     const contentRenderQuality: CanvasRenderQuality = useOverview ? "overview" : renderQuality === "overview" ? "full" : renderQuality;

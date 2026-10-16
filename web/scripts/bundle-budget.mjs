@@ -11,7 +11,8 @@ export const CANVAS_PROJECT_BUDGET = {
     // source snapshots/entry point add a small entry cost; comparison UI stays lazy.
     // Native copy/paste routing also lives in the entry so HTTP screenshot paste
     // works on the first gesture; reserve 1 KiB for that path, keeping the gate.
-    gzipBytes: 83 * 1024,
+    // Immediate undo must flush pending edits in the entry before changing history.
+    gzipBytes: 83 * 1024 + 128,
 };
 
 export function bundleBudgetViolations(entries) {

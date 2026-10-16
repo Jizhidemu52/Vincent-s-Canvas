@@ -109,6 +109,7 @@ import { createCanvasSelectedNodeCache } from "@/lib/canvas/canvas-selected-node
 import { createCanvasMinimapGeometryCache } from "@/lib/canvas/canvas-minimap-geometry-cache";
 import { createCanvasVisibleNodeCache } from "@/lib/canvas/canvas-visible-node-cache";
 import { createCanvasNodeMap, refreshCanvasNodeMap } from "@/lib/canvas/canvas-node-map";
+import { canvasNodeHasImagePreview } from "@/lib/canvas/canvas-node-rendering";
 import { CANVAS_AGENT_PANEL_MOTION_MS } from "@/lib/canvas/canvas-agent-panel-constants";
 import { loadCanvasAssistantPanel, loadCanvasLocalAgentPanel } from "@/lib/canvas/canvas-agent-panel-loaders";
 import { loadCanvasConfigNodePanel, loadCanvasConfigComposer, loadCanvasNodePromptPanel, loadCanvasQuickGeneratePanel } from "@/lib/canvas/canvas-node-panel-loaders";
@@ -408,7 +409,6 @@ function WirelessCanvasPage() {
     const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const applyingHistoryRef = useRef(false);
     const historyPausedRef = useRef(false);
-    const didInitialCenterRef = useRef(false);
     const rafRef = useRef<number | null>(null);
     const pendingDragPreviewRef = useRef<{ x: number; y: number } | null>(null);
     const selectionFrameRef = useRef<number | null>(null);
@@ -846,10 +846,26 @@ function WirelessCanvasPage() {
         openAgent("local");
     }, [projectLoaded, searchParams]);
 
+    const flushPendingHistory = useCallback(() => {
+        if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current || !lastHistoryRef.current) return false;
+        if (historyCommitTimerRef.current) {
+            clearTimeout(historyCommitTimerRef.current);
+            historyCommitTimerRef.current = null;
+        }
+        const current = createHistoryEntry();
+        historyRef.current = canvasHistoryForSave(historyRef.current, lastHistoryRef.current, current, false);
+        lastHistoryRef.current = current;
+        setHistoryState({ canUndo: historyRef.current.past.length > 0, canRedo: historyRef.current.future.length > 0 });
+        return true;
+    }, [createHistoryEntry, projectLoaded]);
+
     useEffect(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
         const next = createHistoryEntry();
         const previous = lastHistoryRef.current;
+        const pendingHistory = canvasHistoryForSave(historyRef.current, previous, next, false);
+        const availability = { canUndo: pendingHistory.past.length > 0, canRedo: pendingHistory.future.length > 0 };
+        setHistoryState(current => current.canUndo === availability.canUndo && current.canRedo === availability.canRedo ? current : availability);
         if (
             previous?.nodes === next.nodes &&
             previous.connections === next.connections &&
@@ -862,16 +878,7 @@ function WirelessCanvasPage() {
             return;
 
         if (historyCommitTimerRef.current) clearTimeout(historyCommitTimerRef.current);
-        historyCommitTimerRef.current = setTimeout(() => {
-            const current = createHistoryEntry();
-            const last = lastHistoryRef.current;
-            if (!last) return;
-            historyRef.current.past = [...historyRef.current.past.slice(-49), last];
-            historyRef.current.future = [];
-            setHistoryState({ canUndo: true, canRedo: false });
-            lastHistoryRef.current = current;
-            historyCommitTimerRef.current = null;
-        }, 180);
+        historyCommitTimerRef.current = setTimeout(flushPendingHistory, 180);
 
         return () => {
             if (historyCommitTimerRef.current) {
@@ -879,7 +886,7 @@ function WirelessCanvasPage() {
                 historyCommitTimerRef.current = null;
             }
         };
-    }, [activeChatId, backgroundMode, chatSessions, connections, groups, createHistoryEntry, nodes, projectLoaded, showImageInfo]);
+    }, [activeChatId, backgroundMode, chatSessions, connections, groups, createHistoryEntry, flushPendingHistory, nodes, projectLoaded, showImageInfo]);
 
     useEffect(
         () => () => {
@@ -965,23 +972,20 @@ function WirelessCanvasPage() {
     }, [nodes, connections, groups, selectedNodeIds, viewport, connectingParams, connectionTargetNodeId, pendingConnectionCreate]);
 
     useEffect(() => {
+        if (!projectLoaded) return;
         const el = containerRef.current;
         if (!el) return;
 
         const updateSize = () => {
             const rect = el.getBoundingClientRect();
             setSize({ width: rect.width, height: rect.height });
-            if (!didInitialCenterRef.current) {
-                didInitialCenterRef.current = true;
-                setViewport({ x: rect.width / 2, y: rect.height / 2, k: 1 });
-            }
         };
 
         updateSize();
         const resizeObserver = new ResizeObserver(updateSize);
         resizeObserver.observe(el);
         return () => resizeObserver.disconnect();
-    }, []);
+    }, [projectLoaded]);
 
     const screenToCanvas = useCallback((clientX: number, clientY: number) => {
         const rect = containerRef.current?.getBoundingClientRect();
@@ -1474,20 +1478,19 @@ function WirelessCanvasPage() {
         () => (canvasOverviewEnabled ? Array.from(nodeById.values()).filter((node) => !isCanvasBatchChildHidden(node, batchRootsById, collapsingBatchIds)) : []),
         [batchRootsById, canvasOverviewEnabled, collapsingBatchIds, nodeById],
     );
-    const overviewNodeIds = useMemo(() => {
-        return new Set(overviewNodes.map((node) => node.id));
-    }, [overviewNodes]);
     const overviewExcludedNodeIds = useMemo(() => {
         const ids = new Set(selectedNodeIds);
         if (!canvasOverviewEnabled) return ids;
         nodeById.forEach((node) => {
-            if (hiddenGroupNodeIds.has(node.id) || isCanvasBatchChildHidden(node, batchRootsById, collapsingBatchIds)) ids.add(node.id);
+            if (canvasNodeHasImagePreview(node) || hiddenGroupNodeIds.has(node.id) || isCanvasBatchChildHidden(node, batchRootsById, collapsingBatchIds)) ids.add(node.id);
         });
         return ids;
     }, [batchRootsById, canvasOverviewEnabled, collapsingBatchIds, hiddenGroupNodeIds, nodeById, selectedNodeIds]);
     const renderedNodes = useMemo(
-        () => (canvasOverviewEnabled ? visibleNodes.filter((node) => selectedNodeIds.has(node.id) || !overviewNodeIds.has(node.id)) : visibleNodes),
-        [canvasOverviewEnabled, overviewNodeIds, selectedNodeIds, visibleNodes],
+        // visibleNodes already excludes hidden groups/batches. Only selected nodes
+        // and real image previews need DOM content instead of rectangle summaries.
+        () => (canvasOverviewEnabled ? visibleNodes.filter((node) => overviewExcludedNodeIds.has(node.id)) : visibleNodes),
+        [canvasOverviewEnabled, overviewExcludedNodeIds, visibleNodes],
     );
     const renderedConnections = useMemo(
         () => (canvasOverviewEnabled ? selectCanvasOverviewConnections(visibleConnections, activeCanvasConnectionIds) : visibleConnections),
@@ -1891,20 +1894,22 @@ function WirelessCanvasPage() {
     }, []);
 
     const undoCanvas = useCallback(() => {
+        if (!flushPendingHistory()) return;
         const previous = historyRef.current.past.pop();
         const current = lastHistoryRef.current;
         if (!previous || !current) return;
         historyRef.current.future.push(current);
         applyHistory(previous);
-    }, [applyHistory]);
+    }, [applyHistory, flushPendingHistory]);
 
     const redoCanvas = useCallback(() => {
+        if (!flushPendingHistory()) return;
         const next = historyRef.current.future.pop();
         const current = lastHistoryRef.current;
         if (!next || !current) return;
         historyRef.current.past.push(current);
         applyHistory(next);
-    }, [applyHistory]);
+    }, [applyHistory, flushPendingHistory]);
 
     const createAndOpenProject = useCallback(() => {
         const id = createProject(`无线画布 ${useCanvasStore.getState().projects.length + 1}`);

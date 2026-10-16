@@ -123,5 +123,5 @@ function SizePreview({ ratio, color }: { ratio: string; color: string }) {
 }
 
 function SwitchRow({ label, checked, theme, onChange }: { label: string; checked: boolean; theme: CanvasTheme; onChange: (checked: boolean) => void }) {
-    return <div className="flex h-8 items-center justify-between gap-3"><span className="text-sm" style={{ color: theme.node.text }}>{label}</span><span onMouseDown={(event) => event.stopPropagation()}><Switch size="small" checked={checked} onChange={onChange} /></span></div>;
+    return <div className="flex h-8 items-center justify-between gap-3"><span className="text-sm" style={{ color: theme.node.text }}>{label}</span><span onMouseDown={(event) => event.stopPropagation()}><Switch aria-label={label} size="small" checked={checked} onChange={onChange} /></span></div>;
 }

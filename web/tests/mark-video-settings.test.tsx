@@ -45,6 +45,7 @@ describe("Mark UUID video model parameter identity", () => {
         const html = renderToStaticMarkup(<VideoSettingsPanel config={config} onConfigChange={() => undefined} theme={canvasThemes.light} />);
         expect(html).toContain('value="3"'); expect(html).toContain('value="15"');
         expect(html).not.toContain('value="30"'); expect(html).not.toContain(">生成声音<");
+        expect(html).toMatch(/<button[^>]*aria-label="添加水印"[^>]*role="switch"|<button[^>]*role="switch"[^>]*aria-label="添加水印"/);
         expect(config.model).toBe(markId);
     });
 

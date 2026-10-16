@@ -1,4 +1,5 @@
 import type { CanvasRenderQuality } from "@/lib/canvas/canvas-render-quality";
+import type { CanvasNodeData } from "@/types/canvas";
 
 /**
  * The spatial index intentionally keeps an overscan band mounted so a fast
@@ -10,8 +11,13 @@ export const canvasNodeRenderingStyle = {
     contentVisibility: "auto",
 } as const;
 
-/** A bulk selection is still an overview, not a request to open every editor/media player. */
-export function shouldUseCanvasNodeOverview({ renderQuality, selected, multiSelected, focused, connectionTarget, showPanel, editing, hovered }: {
+/** Image previews stay identifiable at low zoom, including lazily restored local files. */
+export function canvasNodeHasImagePreview(node: CanvasNodeData) {
+    return node.type === "image" && Boolean(node.metadata?.content || node.metadata?.storageKey);
+}
+
+/** Keep bulk editors lightweight without replacing image previews with empty summaries. */
+export function shouldUseCanvasNodeOverview({ renderQuality, selected, multiSelected, focused, connectionTarget, showPanel, editing, hovered, hasImagePreview = false }: {
     renderQuality: CanvasRenderQuality;
     selected: boolean;
     multiSelected: boolean;
@@ -20,8 +26,8 @@ export function shouldUseCanvasNodeOverview({ renderQuality, selected, multiSele
     showPanel: boolean;
     editing: boolean;
     hovered: boolean;
+    hasImagePreview?: boolean;
 }) {
-    if (renderQuality !== "overview" || focused || connectionTarget || showPanel || editing) return false;
-    if (selected && multiSelected) return true;
-    return !selected && !hovered;
+    if (hasImagePreview || renderQuality !== "overview" || focused || connectionTarget || showPanel || editing) return false;
+    return selected ? multiSelected : !hovered;
 }

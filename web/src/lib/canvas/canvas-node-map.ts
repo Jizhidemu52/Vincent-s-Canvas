@@ -1,4 +1,5 @@
 import type { CanvasNodeData } from "@/types/canvas";
+import { canvasNodeHasImagePreview } from "@/lib/canvas/canvas-node-rendering";
 
 export type CanvasNodeMap = Map<string, CanvasNodeData>;
 
@@ -42,7 +43,7 @@ export function refreshCanvasNodeMap(previous: CanvasNodeMap, nodes: CanvasNodeD
 }
 
 function resourceIndexKey(node: CanvasNodeData) {
-    if (node.type === "image") return node.metadata?.content ? "image" : "";
+    if (node.type === "image") return canvasNodeHasImagePreview(node) ? "image" : "";
     if (node.type === "video") return node.metadata?.content ? "video" : "";
     if (node.type === "audio") return node.metadata?.content ? "audio" : "";
     if (node.type === "text") return node.metadata?.content || node.metadata?.prompt ? "text" : "";

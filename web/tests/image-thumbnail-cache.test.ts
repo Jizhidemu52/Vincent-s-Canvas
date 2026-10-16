@@ -22,8 +22,8 @@ function harness(options: { limit?: number; generate?: (request: ImageThumbnailR
         createUrl: () => `blob:thumbnail-${++urlCount}`,
         revokeUrl: (url) => { revoked.push(url); },
     }, options.limit);
-    const flush = async () => {
-        for (let i = 0; i < 30; i++) { scheduled.shift()?.(); await Promise.resolve(); }
+    const flush = async (steps = 30) => {
+        for (let i = 0; i < steps; i++) { scheduled.shift()?.(); await Promise.resolve(); }
     };
     return { cache, stored, generated, scheduled, revoked, flush, switchEmployee: () => { current = false; } };
 }
@@ -93,6 +93,127 @@ test("unmounted queued previews are skipped while a surviving duplicate still wo
     await h.flush();
     expect(await canceled2).toBeNull();
     expect((await kept)?.url).toBe("blob:thumbnail-1");
+});
+
+test("sixty canceled queued previews free admission for sixty requests at the next zoom tier", async () => {
+    const h = harness();
+    const controllers = Array.from({ length: 60 }, () => new AbortController());
+    let canceledSettled = 0;
+    const canceled = controllers.map((controller, index) => h.cache.acquire({ ...request, storageKey: `image:${index}`, edge: 256 }, controller.signal).then((result) => { canceledSettled++; return result; }));
+    controllers.forEach((controller) => controller.abort());
+    const next = controllers.map((_, index) => h.cache.acquire({ ...request, storageKey: `image:${index}`, edge: 512 }));
+
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+    expect(canceledSettled).toBe(60);
+    expect(h.scheduled).toHaveLength(1);
+    expect(h.generated).toEqual([]);
+    await h.flush(2000);
+    const leases = await Promise.all(next);
+    expect(await Promise.all(canceled)).toEqual(Array(60).fill(null));
+    expect(leases.filter(Boolean)).toHaveLength(60);
+    expect(new Set(leases.map((lease) => lease?.url)).size).toBe(60);
+    expect(h.generated).toHaveLength(60);
+    expect([...h.stored.keys()].every((storedKey) => storedKey.endsWith(":512"))).toBe(true);
+    leases.forEach((lease) => lease?.release());
+    expect(h.revoked).toHaveLength(60);
+    expect(h.scheduled).toHaveLength(0);
+});
+
+test("queue pruning retains a shared job while any consumer is still interested", async () => {
+    const h = harness({ limit: 1 });
+    const firstController = new AbortController();
+    const canceled = h.cache.acquire(request, firstController.signal);
+    const kept = h.cache.acquire(request);
+    firstController.abort();
+
+    expect(await h.cache.acquire({ ...request, storageKey: "image:over-budget" })).toBeNull();
+    await h.flush();
+    expect(await canceled).toBeNull();
+    expect((await kept)?.url).toBe("blob:thumbnail-1");
+    expect(h.generated).toEqual([request.storageKey]);
+    (await kept)?.release();
+    expect(h.revoked).toEqual(["blob:thumbnail-1"]);
+});
+
+test("reacquiring a canceled key creates a live shared job without stale cleanup removing it", async () => {
+    const h = harness({ limit: 1 });
+    const controller = new AbortController();
+    let canceledSettled = false;
+    const canceled = h.cache.acquire(request, controller.signal).then((result) => { canceledSettled = true; return result; });
+    controller.abort();
+    const first = h.cache.acquire(request);
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+    expect(canceledSettled).toBe(true);
+    const second = h.cache.acquire(request);
+
+    await h.flush();
+    expect(await canceled).toBeNull();
+    const a = await first;
+    const b = await second;
+    expect(a?.url).toBe("blob:thumbnail-1");
+    expect(b?.url).toBe(a?.url);
+    expect(h.generated).toEqual([request.storageKey]);
+    a?.release();
+    expect(h.revoked).toEqual([]);
+    b?.release();
+    expect(h.revoked).toEqual(["blob:thumbnail-1"]);
+});
+
+test("a scheduled drain safely settles an entirely canceled queue", async () => {
+    const h = harness();
+    const controller = new AbortController();
+    const canceled = h.cache.acquire(request, controller.signal);
+    controller.abort();
+    await h.flush();
+    expect(await canceled).toBeNull();
+    expect(h.generated).toEqual([]);
+    expect(h.scheduled).toHaveLength(0);
+    const fresh = h.cache.acquire(request);
+    await h.flush();
+    expect((await fresh)?.url).toBe("blob:thumbnail-1");
+    (await fresh)?.release();
+});
+
+test("canceling queued work in one cache instance cannot cancel another instance's same key", async () => {
+    const firstCache = harness();
+    const secondCache = harness();
+    const controller = new AbortController();
+    const canceled = firstCache.cache.acquire(request, controller.signal);
+    const other = secondCache.cache.acquire(request);
+    controller.abort();
+    const fresh = firstCache.cache.acquire({ ...request, edge: 256 });
+    await firstCache.flush();
+    await secondCache.flush();
+    expect(await canceled).toBeNull();
+    expect(await fresh).not.toBeNull();
+    const otherLease = await other;
+    expect(otherLease?.url).toBe("blob:thumbnail-1");
+    expect(secondCache.generated).toEqual([request.storageKey]);
+    (await fresh)?.release();
+    expect(secondCache.revoked).toEqual([]);
+    otherLease?.release();
+    expect(secondCache.revoked).toEqual(["blob:thumbnail-1"]);
+});
+
+test("pruning queued zoom requests does not start another decoder while one is running", async () => {
+    let finish!: (value: Blob) => void;
+    const h = harness({ generate: (value) => value.storageKey === "image:running" ? new Promise((resolve) => { finish = resolve; }) : Promise.resolve(blob) });
+    const running = h.cache.acquire({ ...request, storageKey: "image:running" });
+    await h.flush();
+    const controllers = Array.from({ length: 60 }, () => new AbortController());
+    const canceled = controllers.map((controller, index) => h.cache.acquire({ ...request, storageKey: `image:${index}`, edge: 256 }, controller.signal));
+    controllers.forEach((controller) => controller.abort());
+    const next = controllers.map((_, index) => h.cache.acquire({ ...request, storageKey: `image:${index}`, edge: 512 }));
+    await h.flush();
+    expect(h.generated).toEqual(["image:running"]);
+    finish(blob);
+    await h.flush(2000);
+    const leases = await Promise.all(next);
+    expect(leases.filter(Boolean)).toHaveLength(60);
+    expect(await Promise.all(canceled)).toEqual(Array(60).fill(null));
+    expect(h.generated).toHaveLength(61);
+    (await running)?.release();
+    leases.forEach((lease) => lease?.release());
 });
 
 test("an employee switch during generation does not store or expose the thumbnail", async () => {
