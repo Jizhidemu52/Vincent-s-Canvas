@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
 
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
+import { PersonalSessionActions } from "@/components/layout/personal-session-actions";
 import { FrequentNavigation, UsageCollectionNotice } from "@/components/layout/frequent-navigation";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { navigationModuleKey, navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
@@ -100,6 +101,7 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
                 <Globe2 className="size-4 text-stone-400" />
                 中文
             </div>
+            <PersonalSessionActions />
         </div>
     );
 }
@@ -140,9 +142,9 @@ export function AppTopNav() {
         if (billing) {
             if (businessConfigStatus === "idle" || businessConfigStatus === "loading") return "同步中";
             const usage = estimate({ ...billing, quantity: 1 });
-            return usage.configured ? `${usage.credits}积分${slug === "video" ? "起" : ""}` : "待配置";
+            return usage.configured ? `${usage.credits}积分${slug === "video" ? "起" : slug === "gpt-chat" ? "/次" : ""}` : "待配置";
         }
-        if (slug === "prompts" || slug === "my-prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
+        if (slug === "prompts" || slug === "my-prompts" || slug === "assets" || slug === "canvas") return "0积分";
         if (slug === "admin") return "管理员";
         if (slug === "team") return "本组";
         return undefined;

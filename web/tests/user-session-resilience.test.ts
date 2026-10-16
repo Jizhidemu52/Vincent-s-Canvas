@@ -146,3 +146,12 @@ test("late logout acknowledgement cannot clear a newer verified identity", async
     s.requests[0].resolve(new Response(null, { status: 204 })); await logout;
     expect(s.state().user.id).toBe("b"); expect(s.broadcasts).toEqual([]);
 });
+
+test("logout clears the local identity when the server confirms the session already expired", async () => {
+    const s = session(); s.state().updateUser(employee("expired"));
+    const logout = s.state().clearSession();
+    s.requests[0].resolve(Response.json({ error: "SESSION_EXPIRED", message: "登录已失效，请重新登录" }, { status: 401 }));
+    await logout;
+    expect(s.state()).toMatchObject({ user: null, status: "guest" });
+    expect(s.broadcasts).toEqual([null]);
+});

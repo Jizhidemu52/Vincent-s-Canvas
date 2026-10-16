@@ -69,6 +69,25 @@ function deferred<T>() {
 }
 
 describe("account credit contracts", () => {
+    test("new disabled accounts keep the selected state and usage comes from settled ledger totals", async () => {
+        const created: any[] = [];
+        const panel = harness("../src/pages/admin/index.tsx", "default", {
+            "@/stores/use-user-store": { isAdminRole: () => true, useUserStore: (select: Function) => select({ user: { id: "admin", role: "super_admin" } }) },
+            "@/stores/use-module-store": { useModuleStore: (select: Function) => select({ flags: { performance: false } }) },
+            "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: false } },
+            "./admin-overview": { loadAdminOverview: async () => ({ accounts: [{ id: "person", role: "designer", displayName: "设计师", creditLimit: 100, creditBalance: 0, monthlyCreditLimit: 100 }], totalUsedCredits: 0, departments: [], auditLogs: [], errors: [] }), resolveAdminTab: () => "accounts" },
+            "@/services/api/admin-accounts": { createAccount: async (input: any) => { created.push(input); return { user: input }; } },
+        });
+        try {
+            const tree = await panel.settle();
+            const accountForm = tree.find(element => element.props.name === "admin-account" && element.props.onFinish)!;
+            await accountForm.props.onFinish({ loginName: "disabled-person", name: "待启用账号", password: "Test-Only-Password123!", role: "designer", status: "disabled", quotaRemaining: 0, monthlyCreditLimit: 0 });
+            expect(created[0].status).toBe("disabled");
+            expect(tree.find(element => element.props.label === "累计已用积分")?.props.value).toBe("0");
+            expect(tree.some(element => element.type === "Alert" && element.props.title === "使用分析仅在企业 OA 模式启用")).toBe(true);
+        } finally { panel.dispose(); }
+    });
+
     test("exact setting sends an absolute PUT, while additions retain independent idempotent POST requests", async () => {
         const calls: Array<{ path: string; init?: RequestInit }> = [];
         globalThis.fetch = (async (path: RequestInfo | URL, init?: RequestInit) => { calls.push({ path: String(path), init }); return Response.json({ user: { id: "person" } }); }) as typeof fetch;
@@ -103,6 +122,7 @@ describe("account credit contracts", () => {
         });
         try {
             let tree = await panel.settle();
+            expect(tree.find(element => element.props.label === "累计已用积分")?.props.value).toBe("—");
             expect(tree.filter(element => element.props.form && element.props.onFinish).map(element => element.props.name)).toEqual(["admin-account", "admin-credit-adjustment", "admin-monthly-credit"]);
             const department = tree.find(element => element.type === "FormItem" && element.props.name === "departmentId")!;
             expect(department.props.rules[0]({ getFieldValue: () => "designer" }).required).toBe(false);

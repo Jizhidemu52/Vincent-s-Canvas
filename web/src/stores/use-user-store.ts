@@ -96,8 +96,12 @@ export const useUserStore = create<UserStore>((set, get) => ({
         // this already-verified identity until the server confirms logout.
         try { await logoutSession(); }
         catch (error) {
-            if (epoch === sessionEpoch) rejectedOaToken = previouslyRejected;
-            throw error;
+            // A revoked/expired session is already logged out server-side. Only
+            // outages or other failures should preserve the current identity.
+            if (!(error instanceof AuthRequestError && error.status === 401)) {
+                if (epoch === sessionEpoch) rejectedOaToken = previouslyRejected;
+                throw error;
+            }
         }
         if (epoch !== sessionEpoch) return;
         broadcastWorkspaceIdentity(null);

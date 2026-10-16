@@ -7,14 +7,14 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 
-test("new configurations contain all four configured image models and default to Sunburst high", () => {
+test("new configurations retain the configured image catalog and prefer the APIMart GPT2 alias", () => {
     const models = ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-3.1-flash-image"];
     expect(defaultConfig.imageModels).toEqual(models.map(model => `default::${model}`));
     for (const model of models) {
         expect(defaultConfig.channels[0]!.models).toContain(model);
         expect(defaultConfig.models).toContain(`default::${model}`);
     }
-    expect(defaultConfig.model).toBe("default::gpt-image-2.5-sunburst");
+    expect(defaultConfig.model).toBe("aplmart-gpt2");
     expect(defaultConfig.imageModel).toBe(defaultConfig.model);
     expect(defaultConfig.quality).toBe("high");
 });

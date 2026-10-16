@@ -102,6 +102,18 @@ describe("image binary output contracts", () => {
         expect(area).toBe(4033 * 2161);
         allReleased();
     });
+    test("a grid finer than the original pixels cannot create blank output pieces", async () => {
+        sourceSize = { width: 1, height: 1 };
+        await expect(splitImageBlobs("blob:tiny-original", { rows: 2, columns: 2 })).rejects.toThrow("原图像素");
+        expect(canvases).toHaveLength(0);
+        sourceSize = { width: 3, height: 2 };
+        await expect(splitDataUrl("blob:tiny-original", { rows: 3, columns: 3 })).rejects.toThrow("原图像素");
+        expect(canvases).toHaveLength(0);
+        const pieces = await splitImageBlobs("blob:tiny-original", { rows: 2, columns: 3 });
+        expect(pieces).toHaveLength(6);
+        expect(await unpackBlob(pieces[5]!.blob)).toMatchObject({ width: 1, height: 1, draw: [2, 1, 1, 1, 0, 0, 1, 1] });
+        allReleased();
+    });
     for (const algorithm of ["nearest", "bilinear", "high"] as ImageUpscaleAlgorithm[]) {
         test(`4K ${algorithm} resize retains aspect, sampling flags, and legacy draw operations`, async () => {
             sourceSize = { width: 333, height: 271 };

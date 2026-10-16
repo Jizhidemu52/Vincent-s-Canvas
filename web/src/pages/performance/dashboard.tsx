@@ -1,6 +1,6 @@
-import { App, Button, DatePicker, Empty, Progress, Segmented, Select, Spin, Table, Tag, Tooltip } from "antd";
+import { Alert, App, Button, DatePicker, Empty, Progress, Segmented, Select, Spin, Table, Tag, Tooltip } from "antd";
 import { Activity, CheckCircle2, Clock3, Coins, Download, Gauge, Image, RefreshCw, Sparkles, Target, TrendingUp } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { designDirectionLabels, getPerformanceDashboard, updateAssetDirection, type DesignDirection, type PerformanceDashboard as DashboardData, type PerformanceFilters, type PerformancePreset } from "@/services/api/performance";
@@ -15,16 +15,20 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
   const [selection, setSelection] = useState<Pick<PerformanceFilters, "departmentId" | "groupId" | "userId">>({});
   const [data, setData] = useState<DashboardData>();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const requestSequence = useRef(0);
 
   const load = async () => {
-    if (preset === "custom" && !range) return;
-    setLoading(true);
+    const sequence = ++requestSequence.current;
+    if (preset === "custom" && !range) { setLoading(false); return; }
+    setLoading(true); setLoadError("");
     try {
-      setData(await getPerformanceDashboard({ preset, ...(preset === "custom" && range ? { from: range[0], to: range[1] } : {}), ...selection }));
-    } catch (error) { message.error(error instanceof Error ? error.message : "设计效能数据加载失败"); }
-    finally { setLoading(false); }
+      const result = await getPerformanceDashboard({ preset, ...(preset === "custom" && range ? { from: range[0], to: range[1] } : {}), ...selection });
+      if (sequence === requestSequence.current) setData(result);
+    } catch (error) { if (sequence === requestSequence.current) setLoadError(error instanceof Error ? error.message : "设计效能数据加载失败"); }
+    finally { if (sequence === requestSequence.current) setLoading(false); }
   };
-  useEffect(() => { void load(); }, [preset, range?.[0], range?.[1], selection.departmentId, selection.groupId, selection.userId]);
+  useEffect(() => { void load(); return () => { requestSequence.current++; }; }, [preset, range?.[0], range?.[1], selection.departmentId, selection.groupId, selection.userId]);
 
   const maxTrend = Math.max(1, ...(data?.trend.map((item) => item.outputs) ?? [1]));
   const filteredGroups = useMemo(() => data?.options.groups.filter((item) => !selection.departmentId || item.departmentId === selection.departmentId) ?? [], [data, selection.departmentId]);
@@ -50,6 +54,7 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
       <Select allowClear showSearch optionFilterProp="label" placeholder="设计师" className="min-w-36" options={filteredUsers} value={selection.userId} onChange={(userId) => setSelection((value) => ({ ...value, userId }))} />
     </div>
 
+    {loadError ? <Alert type="error" showIcon title="设计效能数据暂未更新" description={loadError} action={<Button loading={loading} onClick={() => void load()}>重试</Button>} /> : null}
     <Spin spinning={loading}>
       {data ? <>
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -130,7 +135,7 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
             { title: "状态", dataIndex: "resultStatus", width: 90 },
           ]} />
         </Panel>
-      </> : <Empty description="暂无设计效能数据" />}
+      </> : !loading && !loadError ? <Empty description="暂无设计效能数据" /> : null}
     </Spin>
   </div>;
 }

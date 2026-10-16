@@ -13,6 +13,7 @@ import { readFeaturedModelIds } from "../featured-models";
 import { toolDefinitions } from "../../../shared/feature-catalog";
 import { createMarkImageProviderRouter } from "./mark-image-provider";
 import { createFeaturedModelsRouter } from "./featured-models";
+import { withTransaction } from "../db-transaction";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
@@ -161,36 +162,43 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     router.post("/prices", async (request, response, next) => {
         try {
             const input = priceInput.parse(request.body); const actor = (request as unknown as AuthenticatedRequest).auth;
-            const result = await db.query(`INSERT INTO pricing_rule_versions(operation_type,label,credits,rmb_cost,version,status,created_by)
-                SELECT $1,$2,$3,$4,COALESCE(MAX(version),0)+1,'draft',$5 FROM pricing_rule_versions WHERE operation_type=$1 RETURNING id,operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version,status`,
-                [input.operationType, input.label, input.credits, input.rmbCost, actor.id]);
-            await writeAudit(db, { actor, action: "price.draft_created", targetType: "price", targetId: result.rows[0].id, result: "success", detail: input, ip: request.ip });
-            response.status(201).json({ price: result.rows[0] });
+            const price = await withTransaction(db, async client => {
+                const result = await client.query(`INSERT INTO pricing_rule_versions(operation_type,label,credits,rmb_cost,version,status,created_by)
+                    SELECT $1,$2,$3,$4,COALESCE(MAX(version),0)+1,'draft',$5 FROM pricing_rule_versions WHERE operation_type=$1 RETURNING id,operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version,status`,
+                    [input.operationType, input.label, input.credits, input.rmbCost, actor.id]);
+                await writeAudit(client, { actor, action: "price.draft_created", targetType: "price", targetId: result.rows[0].id, result: "success", detail: input, ip: request.ip });
+                return result.rows[0];
+            });
+            response.status(201).json({ price });
         } catch (error) { next(error); }
     });
     router.post("/prices/:id/test", async (request, response, next) => {
         try {
             const actor = (request as unknown as AuthenticatedRequest).auth;
-            const result = await db.query("UPDATE pricing_rule_versions SET status='testing' WHERE id=$1 AND status='draft' RETURNING id", [request.params.id]);
-            if (!result.rows[0]) { response.status(409).json({ error: "INVALID_STATE", message: "只有草稿价格可以进入测试" }); return; }
-            await writeAudit(db, { actor, action: "price.testing", targetType: "price", targetId: request.params.id, result: "success", ip: request.ip });
+            const changed = await withTransaction(db, async client => {
+                const result = await client.query("UPDATE pricing_rule_versions SET status='testing' WHERE id=$1 AND status='draft' RETURNING id", [request.params.id]);
+                if (!result.rows[0]) return false;
+                await writeAudit(client, { actor, action: "price.testing", targetType: "price", targetId: request.params.id, result: "success", ip: request.ip });
+                return true;
+            });
+            if (!changed) { response.status(409).json({ error: "INVALID_STATE", message: "只有草稿价格可以进入测试" }); return; }
             response.status(204).end();
         } catch (error) { next(error); }
     });
     router.post("/prices/:id/publish", async (request, response, next) => {
-        const client = await db.connect();
         try {
             const actor = (request as unknown as AuthenticatedRequest).auth;
-            await client.query("BEGIN");
-            const target = await client.query<{ operation_type: string }>("SELECT operation_type FROM pricing_rule_versions WHERE id=$1 AND status IN ('draft','testing') FOR UPDATE", [request.params.id]);
-            if (!target.rows[0]) { await client.query("ROLLBACK"); response.status(409).json({ error: "INVALID_STATE", message: "该价格版本不能发布" }); return; }
-            await client.query("UPDATE pricing_rule_versions SET status='retired' WHERE operation_type=$1 AND status='published'", [target.rows[0].operation_type]);
-            await client.query("UPDATE pricing_rule_versions SET status='published',published_at=now() WHERE id=$1", [request.params.id]);
-            await client.query("COMMIT");
-            await writeAudit(db, { actor, action: "price.published", targetType: "price", targetId: request.params.id, result: "success", detail: { operationType: target.rows[0].operation_type }, ip: request.ip });
+            const changed = await withTransaction(db, async client => {
+                const target = await client.query<{ operation_type: string }>("SELECT operation_type FROM pricing_rule_versions WHERE id=$1 AND status IN ('draft','testing') FOR UPDATE", [request.params.id]);
+                if (!target.rows[0]) return false;
+                await client.query("UPDATE pricing_rule_versions SET status='retired' WHERE operation_type=$1 AND status='published'", [target.rows[0].operation_type]);
+                await client.query("UPDATE pricing_rule_versions SET status='published',published_at=now() WHERE id=$1", [request.params.id]);
+                await writeAudit(client, { actor, action: "price.published", targetType: "price", targetId: request.params.id, result: "success", detail: { operationType: target.rows[0].operation_type }, ip: request.ip });
+                return true;
+            });
+            if (!changed) { response.status(409).json({ error: "INVALID_STATE", message: "该价格版本不能发布" }); return; }
             response.status(204).end();
-        } catch (error) { await client.query("ROLLBACK").catch(() => undefined); next(error); }
-        finally { client.release(); }
+        } catch (error) { next(error); }
     });
     return router;
 }

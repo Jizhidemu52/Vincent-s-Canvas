@@ -165,6 +165,17 @@ async function changeCreditBalance(
     if (balance > 2_147_483_647 || Math.abs(user.temporary_credit_adjustment + amount) > 2_147_483_647) {
       throw new BillingError("INVALID_CREDIT", "积分调整超过可保存范围");
     }
+    // Holds have already left the available balance but can still return on a
+    // failed/cancelled task. Keep room for every current-period personal refund.
+    // Do not lock reservation rows here: settlement locks them before the user.
+    const held = await client.query<{ credits: string }>(
+      `SELECT COALESCE(SUM(personal_credits),0)::text AS credits FROM credit_reservations
+        WHERE user_id=$1 AND status='held' AND credit_period_start=$2::date`,
+      [input.userId, user.credit_period_start],
+    );
+    if (balance + Number(held.rows[0]!.credits) > 2_147_483_647) {
+      throw new BillingError("INVALID_CREDIT", "积分余额与当前冻结积分之和超过可保存范围");
+    }
     const creditLimit = Math.max(user.credit_limit, balance);
     await client.query(
       `UPDATE users SET credit_balance=$1,credit_limit=$2,

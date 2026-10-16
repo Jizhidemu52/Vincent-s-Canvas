@@ -18,6 +18,7 @@ let calls: Array<{ path: string; method: string; init?: RequestInit }>;
 
 beforeEach(() => {
     calls = [];
+    deploymentFeatures.authenticationEnabled = true;
     deploymentFeatures.oaLoginEnabled = true;
     globals.window = { location: { pathname: "/canvas/canvas-1" }, setTimeout, clearTimeout };
     useUserStore.setState({ user: { id: "employee-a", role: "designer", status: "active" } as never, status: "authenticated", hydrateSession: async () => {} });

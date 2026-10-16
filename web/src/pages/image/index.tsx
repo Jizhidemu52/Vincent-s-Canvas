@@ -196,7 +196,6 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const effectiveConfig = useToolConfig({ ...baseConfig, model: selectedImageModel, imageModel: selectedImageModel }, toolKey);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const updateInputConfig: UpdateAiConfig = (key, value) => { inputRevision.current += 1; updateConfig(key, value); };
-    const isAiConfigReady = (..._args: unknown[]) => true;
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const canManageConfig = useCanManageConfig();
     const user = useUserStore((state) => state.user);
@@ -257,14 +256,16 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const adminModelId = modelOptionName(model);
     const selectedModelProfile = useImageModelProfile(adminModelId);
+    // The dedicated entry keeps its input contract even before a model is configured.
+    const isBlend = historyTool === "midjourney-blend" || selectedModelProfile.kind === "midjourney-blend";
+    const requiresPrompt = !isBlend;
     const generationCount = Number(normalizeImageModelSettings(config, selectedModelProfile).count);
-    const referenceValidation = validateImageReferences(adminModelId, references);
+    const referenceValidation = validateImageReferences(adminModelId, references, isBlend ? { ...selectedModelProfile, kind: "midjourney-blend" } : selectedModelProfile);
     const estimatedUsage = estimate({ operationType, toolKey, modelId: adminModelId, quantity: generationCount });
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
-    const missingReference = toolModeConfig.requiresReference && references.length === 0;
-    const invalidBlendReferences = selectedModelProfile.kind === "midjourney-blend" && (references.length < 2 || references.length > 4);
-    const requiresPrompt = selectedModelProfile.kind !== "midjourney-blend";
-    const canGenerate = (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
+    const missingReference = !isBlend && toolModeConfig.requiresReference && references.length === 0;
+    const invalidBlendReferences = isBlend && (references.length < 2 || references.length > 4);
+    const canGenerate = Boolean(model) && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
 
     const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => { inputRevision.current += 1; setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))])); };
     const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => { inputRevision.current += 1; setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin)))); };
@@ -429,10 +430,6 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         }
         if (missingReference) {
             message.error(`${toolModeConfig.title}需要先添加参考图`);
-            return;
-        }
-        if (!isAiConfigReady(effectiveConfig, model)) {
-            handleMissingModelConfig();
             return;
         }
         if (!user || user.status !== "active") {
@@ -656,12 +653,16 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const buildRequestSnapshot = () => {
         previewRevision.current += 1;
         setPreviewLoading(false);
+        if (!model) {
+            handleMissingModelConfig();
+            return null;
+        }
         if (garmentNeedsApply || incompleteCreativePrompt) {
             message.warning(garmentNeedsApply ? "服装要求或参考图已改变，请重新套用到提示词" : "请先把提示词中的填写位置替换成你的设计要求");
             return null;
         }
         const text = prompt.trim();
-        if (!text && selectedModelProfile.requiresPrompt) {
+        if (!text && requiresPrompt) {
             message.error("请输入生图提示词");
             return null;
         }
@@ -679,8 +680,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
-            const requestOptions = { operationType: selectedModelProfile.kind === "midjourney-blend" ? "image_generation" as const : operationType, tool: historyTool };
-            const result = selectedModelProfile.kind === "midjourney-blend"
+            const requestOptions = { operationType: isBlend ? "image_generation" as const : operationType, tool: historyTool };
+            const result = isBlend
                 ? await requestGeneration(snapshot.config, snapshot.text, requestOptions, snapshot.references)
                 : snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
             const image = result[0];
@@ -751,8 +752,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         </div>
 
                         <div className="mt-6 space-y-5">
-                            {initialGarmentScenario ? <GarmentRecipePanel key={garmentScope} references={references} disabled={running || !selectedModelProfile.requiresPrompt} initialScenario={initialGarmentScenario} onApply={applyGarmentRecipe} onDraftChange={handleGarmentDraftChange} /> : null}
-                            {selectedModelProfile.requiresPrompt && historyTool !== "midjourney-blend" ? <div>
+                            {initialGarmentScenario ? <GarmentRecipePanel key={garmentScope} references={references} disabled={running || !requiresPrompt} initialScenario={initialGarmentScenario} onApply={applyGarmentRecipe} onDraftChange={handleGarmentDraftChange} /> : null}
+                            {requiresPrompt ? <div>
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                                     <span className="text-base font-semibold">提示词</span>
                                     <div className="flex flex-wrap gap-2">
@@ -764,7 +765,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea aria-label="图像提示词" value={prompt} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} rows={6} disabled={running || !selectedModelProfile.requiresPrompt} placeholder={selectedModelProfile.requiresPrompt ? toolModeConfig.placeholder : "这个模型直接合成参考图，不需要填写文字"} />
+                                <Input.TextArea aria-label="图像提示词" value={prompt} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} rows={6} disabled={running || !requiresPrompt} placeholder={requiresPrompt ? toolModeConfig.placeholder : "这个模型直接合成参考图，不需要填写文字"} />
                             </div> : <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。</p>}
 
                             <ReferenceImageTray
@@ -831,7 +832,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         ) : (
                             <div className="wb-empty lg:min-h-[480px]">
                                 <ImagePlus size={42} strokeWidth={1.2} />
-                                <strong>{selectedModelProfile.requiresPrompt ? "第一张作品，从一句描述开始" : "上传参考图，开始多图融合"}</strong><p>{selectedModelProfile.requiresPrompt ? "在左侧写下画面内容，选择模型和参数" : "在左侧上传 2–4 张参考图，选择融合参数"}，点击「{toolModeConfig.button}」。结果会出现在这里。</p>
+                                <strong>{requiresPrompt ? "第一张作品，从一句描述开始" : "上传参考图，开始多图融合"}</strong><p>{requiresPrompt ? "在左侧写下画面内容，选择模型和参数" : "在左侧上传 2–4 张参考图，选择融合参数"}，点击「{toolModeConfig.button}」。结果会出现在这里。</p>
                             </div>
                         )}
                     </div>

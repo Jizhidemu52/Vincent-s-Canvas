@@ -5,7 +5,7 @@ export type Department = { id: string; name: string; code: string; createdAt: st
 export type AuditLog = { id: string; action: string; targetType: string; targetId: string | null; result: "success" | "denied" | "failed"; detail: Record<string, unknown>; createdAt: string; actorName: string | null; actorRole: ApiUserRole | null; departmentName: string | null };
 export type AccountInput = {
     username: string; displayName: string; email?: string | null; employeeNo?: string | null; password: string;
-    role: ApiUserRole; departmentId?: string | null; creditBalance: number; creditLimit: number; monthlyCreditLimit?: number;
+    role: ApiUserRole; status?: "active" | "disabled"; departmentId?: string | null; creditBalance: number; creditLimit: number; monthlyCreditLimit?: number;
 };
 export type AccountUpdate = Partial<Pick<ApiUser, "displayName" | "email" | "employeeNo" | "departmentId" | "status" | "creditLimit" | "monthlyCreditLimit">> & { role?: "department_admin" | "designer" };
 
@@ -18,7 +18,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return response.status === 204 ? (undefined as T) : response.json() as Promise<T>;
 }
 
-export const listAccounts = () => request<{ users: ApiUser[] }>("/api/admin/accounts");
+export const listAccounts = () => request<{ users: ApiUser[]; totalUsedCredits: number }>("/api/admin/accounts");
 export const createAccount = (input: AccountInput) => request<{ user: ApiUser }>("/api/admin/accounts", { method: "POST", body: JSON.stringify(input) });
 export const updateAccount = (id: string, input: AccountUpdate) => request<{ user: ApiUser }>(`/api/admin/accounts/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const resetAccountPassword = (id: string, password: string) => request<void>(`/api/admin/accounts/${id}/reset-password`, { method: "POST", body: JSON.stringify({ password }) });

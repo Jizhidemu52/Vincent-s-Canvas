@@ -20,11 +20,11 @@ describe("admin and team overview loading", () => {
         const result = loadAdminOverview();
         expect(requests).toHaveLength(4);
         expect(requests.map((request) => request.url)).toContain("/api/admin/history?page=1&pageSize=1");
-        requests[0].respond({ users: [{ id: "account" }] });
+        requests[0].respond({ users: [{ id: "account" }], totalUsedCredits: 0 });
         requests[1].respond({ departments: [{ id: "department" }] });
         requests[2].respond({ message: "审计暂不可用" }, 503);
         requests[3].respond({ history: [], totalRmbCost: 123.45 });
-        expect(await result).toEqual({ accounts: [{ id: "account" }], departments: [{ id: "department" }], auditLogs: undefined, totalCost: 123.45, errors: ["审计：审计暂不可用"] });
+        expect(await result).toEqual({ accounts: [{ id: "account" }], totalUsedCredits: 0, departments: [{ id: "department" }], auditLogs: undefined, totalCost: 123.45, errors: ["审计：审计暂不可用"] });
     });
 
     test("department admins cannot select super-admin tabs through URL parameters", () => {

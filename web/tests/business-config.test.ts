@@ -1,7 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import { estimateServerUsage, resolveToolModel, type BusinessConfig } from "../src/services/api/business-config";
 import { stripClientProviderSecrets } from "../src/stores/use-config-store";
+import { deploymentFeatures } from "../src/lib/deployment-features";
+import { toolDefinitions } from "../../shared/feature-catalog";
+
+const originalFeatures = { ...deploymentFeatures };
+afterEach(() => Object.assign(deploymentFeatures, originalFeatures));
 
 const config: BusinessConfig = {
     models: [{ id: "model-id", name: "公司生图模型", modelId: "image-v1", capabilities: ["generate"], creditCost: 3, rmbCost: 0.25 }],
@@ -80,9 +85,40 @@ describe("server-synchronized usage estimates", () => {
         expect(estimateServerUsage(isolated, { operationType: "image_generation", toolKey: "canvas-image", quantity: 3 }).rmbCost).toBe(1.05);
     });
 
-    test("chat is uncharged even if stale price overrides are present", () => {
+    test("chat retains provider costs with credits off and uses the independent override with credits on", () => {
         const chat = { ...config, models: [{ ...config.models[0], capabilities: ["chat"] }], tools: [{ ...config.tools[0], toolKey: "gpt-chat", rmbCostOverride: 9, creditCostOverride: 9 }] };
-        expect(estimateServerUsage(chat, { operationType: "chat", toolKey: "gpt-chat" })).toEqual({ credits: 0, rmbCost: 0, configured: true });
+        expect(estimateServerUsage(chat, { operationType: "chat", toolKey: "gpt-chat" })).toEqual({ credits: 0, rmbCost: 9, configured: true });
+        deploymentFeatures.creditsEnabled = true;
+        expect(estimateServerUsage(chat, { operationType: "chat", toolKey: "gpt-chat", quantity: 2 })).toEqual({ credits: 18, rmbCost: 18, configured: true });
+        const inherited = { ...chat, tools: [{ ...chat.tools[0], creditCostOverride: null, rmbCostOverride: null }] };
+        expect(estimateServerUsage(inherited, { operationType: "chat", toolKey: "gpt-chat" })).toEqual({ credits: 3, rmbCost: 0.25, configured: true });
+    });
+
+    test.each(toolDefinitions)("$toolKey matches enabled, free, inherited and disabled board pricing", definition => {
+        deploymentFeatures.creditsEnabled = true;
+        const board: BusinessConfig = {
+            models: [{ ...config.models[0], capabilities: [...definition.capabilities] }],
+            prices: [{ ...config.prices[0], operationType: definition.operationType }],
+            tools: [{ ...config.tools[0], toolKey: definition.toolKey }],
+        };
+        const input = { operationType: definition.operationType, toolKey: definition.toolKey, quantity: 2 };
+        expect(estimateServerUsage(board, input)).toEqual({ credits: 10, rmbCost: 0.7, configured: true });
+        board.tools[0].creditCostOverride = 7; board.tools[0].rmbCostOverride = 0.5;
+        expect(estimateServerUsage(board, input)).toEqual({ credits: 14, rmbCost: 1, configured: true });
+        board.tools[0].creditCostOverride = 0; board.tools[0].rmbCostOverride = 0;
+        expect(estimateServerUsage(board, input)).toEqual({ credits: 0, rmbCost: 0, configured: true });
+        board.tools[0].enabled = false;
+        expect(estimateServerUsage(board, input).configured).toBe(false);
+        board.tools[0].enabled = true; board.tools[0].creditCostOverride = null; board.tools[0].rmbCostOverride = null;
+        deploymentFeatures.creditsEnabled = false;
+        expect(estimateServerUsage(board, input)).toEqual({ credits: 0, rmbCost: 0.7, configured: true });
+    });
+
+    test("disabled parent binding and missing inherited prices do not advertise a usable price", () => {
+        deploymentFeatures.creditsEnabled = true;
+        const child = { ...config, tools: [{ ...config.tools[0], toolKey: "gpt-chat-image" }, { ...config.tools[0], toolKey: "gpt-chat", enabled: false }] };
+        expect(estimateServerUsage(child, { operationType: "image_generation", toolKey: "gpt-chat-image" }).configured).toBe(false);
+        expect(estimateServerUsage({ ...config, prices: [], tools: [{ ...config.tools[0], creditCostOverride: 4 }] }, { operationType: "image_generation", toolKey: "image" }).configured).toBe(false);
     });
 });
 

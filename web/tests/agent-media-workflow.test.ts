@@ -875,10 +875,18 @@ test("online execution persists reference IDs and media settings into the staged
             imageCount: 1,
             videoSeconds: "8",
             aspectRatio: "9:16",
-            imageModel: defaultConfig.imageModel,
+            // The configured legacy alias is not a selectable channel ID, so
+            // the dispatcher must use the first available image capability.
+            imageModel: defaultConfig.imageModels[0],
             videoModel: defaultConfig.videoModel,
         },
     });
+});
+
+test("online staged workflows retain an explicitly selected available image model", () => {
+    const config = { ...defaultConfig, imageModel: "selected-image-id", imageModels: ["first-image-id", "selected-image-id"] };
+    const execution = resolveOnlineToolExecution("canvas_generate_image", { prompt: "editorial still" }, "选图后生成视频", emptyAgentSnapshot, config);
+    expect(execution).toMatchObject({ kind: "workflow", workflow: { imageModel: "selected-image-id" } });
 });
 
 test("video-stage success persists the real canvas result node, URL, and storage key", () => {

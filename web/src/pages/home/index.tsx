@@ -47,7 +47,7 @@ export default function IndexPage() {
                             </Link>;
                         })}
                     </div> : <div className="wb-surface wb-empty"><LayoutGrid size={36} strokeWidth={1.2} /><strong>这里将保存你的创作</strong><p>新建画布后，把图片拖进来，输入你想修改的地方，就可以开始。</p><button className="wb-primary-link" onClick={createAndEnter}><Plus size={16} />创建第一个画布</button></div>}
-                    <p className="home-local-note">画布自动保存在当前浏览器。重要项目请在画布中导出备份，再换电脑或清理浏览器。</p>
+                    <p className="home-local-note">保存位置和同步状态以画布顶部提示为准。重要项目请及时导出备份，再换电脑或清理浏览器。</p>
                 </section> : null}
                 {flags.prompts ? <Link to="/prompts" className="home-help"><BookOpen size={20} /><div><strong>还不知道怎么描述想法？</strong><span>打开提示词库，挑一个模板开始。</span></div><ArrowRight size={18} /></Link> : null}
             </div>

@@ -26,6 +26,7 @@ function httpFixture(enabled = true) {
     let authQueries = 0;
     const authDb = { query: async (sql: string, values: unknown[]) => {
         authQueries++;
+        if (sql.includes("FROM credit_policy")) return { rows: [{ creditsEnabled: false, updatedAt: null }] };
         if (!sql.includes("FROM sessions s")) throw new Error("Authentication must never create a guest or write the database");
         const row = sql.includes("s.token_hash=$1") ? sessions.get(String(values[0])) : [...sessions.values()].find(value => value.session_id === values[0]);
         return { rows: row ? [row] : [] };

@@ -65,6 +65,12 @@ export function createChatRouter(db: Database, config: AppConfig) {
     router.post("/responses", async (request, response, next) => {
         let usageRequestId: string | undefined;
         let billingReservationId: string | null = null;
+        const socket = request.socket;
+        const hadRemoteAddress = Boolean(socket?.remoteAddress);
+        // Bun 1.3.x can lose its native socket without setting destroyed or
+        // emitting ServerResponse.close. Its public peer address then disappears.
+        const disconnected = () => Boolean(response.destroyed || request.aborted || socket?.destroyed
+            || (hadRemoteAddress && !socket.remoteAddress));
         try {
             const input = schema.parse(request.body) as {
                 requestId?: string;
@@ -104,6 +110,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 anonymous: (request as AuthenticatedRequest).allowsAnonymousCreation,
                 enabled: features.authenticationEnabled && await getCreditsEnabled(db, features.creditsEnabled), execution,
             });
+            if (disconnected()) throw new ChatProtocolError("CHAT_REQUEST_CANCELLED", "对话请求已中断，本次不扣积分");
             if (features.oaLoginEnabled && !(request as AuthenticatedRequest).allowsAnonymousCreation) {
                 usageRequestId = await beginUsageChat(db, { userId: actor.id, modelConfigId: execution.modelConfigId, boardKey: execution.toolKey, input: input.input });
             }
@@ -113,13 +120,13 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 response.setHeader("cache-control", "no-cache");
                 const streamOutcome = new ChatStreamOutcome();
                 for await (const chunk of upstream.body!) {
-                    if (response.destroyed) break;
+                    if (disconnected()) break;
                     streamOutcome.push(chunk);
                     response.write(chunk);
                 }
-                if (!response.destroyed && !streamOutcome.successful) throw new ChatProtocolError("CHAT_STREAM_INCOMPLETE", "对话流未完整返回有效回复，本次不扣积分");
-                if (usageRequestId) await finishUsageChat(db, usageRequestId, response.destroyed ? "interrupted" : "success");
-                if (!response.destroyed) await writeAudit(db, {
+                if (!disconnected() && !streamOutcome.successful) throw new ChatProtocolError("CHAT_STREAM_INCOMPLETE", "对话流未完整返回有效回复，本次不扣积分");
+                if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "success");
+                if (!disconnected()) await writeAudit(db, {
                     actor,
                     action: "chat.completed",
                     targetType: "model",
@@ -128,16 +135,16 @@ export function createChatRouter(db: Database, config: AppConfig) {
                     detail: { protocol: model.protocol, streaming: true, toolKey: execution.toolKey, configurationVersion: execution.configurationVersion },
                     ip: request.ip,
                 });
-                await finishChatBilling(db, billingReservationId, !response.destroyed && streamOutcome.successful);
+                await finishChatBilling(db, billingReservationId, !disconnected() && streamOutcome.successful);
                 billingReservationId = null;
                 response.end();
                 return;
             }
             const resultPayload = await requestChatCompletion(model, credentials, input);
             if (!resultPayload.content.trim() && !resultPayload.toolCalls.length) throw new ChatProtocolError("CHAT_RESPONSE_EMPTY", "模型未返回有效回复，本次不扣积分");
-            if (usageRequestId) await finishUsageChat(db, usageRequestId, response.destroyed ? "interrupted" : "success");
+            if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "success");
 
-            await writeAudit(db, {
+            if (!disconnected()) await writeAudit(db, {
                 actor,
                 action: "chat.completed",
                 targetType: "model",
@@ -148,14 +155,15 @@ export function createChatRouter(db: Database, config: AppConfig) {
             });
             // Capture only after required bookkeeping succeeds. A failed audit or
             // usage write must still follow the held-reservation refund path.
-            await finishChatBilling(db, billingReservationId, !response.destroyed);
+            await finishChatBilling(db, billingReservationId, !disconnected());
             billingReservationId = null;
             response.json(resultPayload);
         } catch (error) {
             if (billingReservationId) await finishChatBilling(db, billingReservationId, false).catch((releaseError) => console.error("Chat credit release failed", { reservationId: billingReservationId, code: releaseError?.code }));
-            if (usageRequestId) await finishUsageChat(db, usageRequestId, response.destroyed ? "interrupted" : "failed").catch(() => undefined);
+            if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "failed").catch(() => undefined);
+            if (disconnected()) return;
             if (response.headersSent) {
-                if (!response.destroyed) response.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "对话流已中断，请重试。" } })}\n\n`);
+                response.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "对话流已中断，请重试。" } })}\n\n`);
                 return;
             }
             next(error);
@@ -366,9 +374,17 @@ async function requestOpenAiCompletion(
     if (model.protocol === "apimart") return readApiMartResponses(await readApiMartChatPayload(upstream));
 
     const body = await upstream.json() as {
+        status?: string;
+        error?: unknown;
         output_text?: string;
-        output?: Array<{ type?: string; content?: Array<{ text?: string }>; id?: string; call_id?: string; name?: string; arguments?: string; thoughtSignature?: string }>;
+        output?: Array<{ type?: string; status?: string; content?: Array<{ text?: string }>; id?: string; call_id?: string; name?: string; arguments?: string; thoughtSignature?: string }>;
     };
+    // HTTP 200 can contain a failed or incomplete Responses operation with
+    // partial text. It is not a completed model call and must take the refund path.
+    if (body.error || (body.status !== undefined && body.status !== "completed")
+        || body.output?.some(item => item.status !== undefined && item.status !== "completed")) {
+        throw new ChatProtocolError("CHAT_RESPONSE_INCOMPLETE", "模型未完整返回有效回复，本次不扣积分");
+    }
     const content = body.output_text
         || body.output?.flatMap((item) => item.type === "message" ? item.content || [] : []).map((item) => item.text || "").join("")
         || "";

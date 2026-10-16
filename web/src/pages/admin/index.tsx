@@ -65,6 +65,7 @@ export default function AdminPage() {
     const [accountsLoading, setAccountsLoading] = useState(true);
     const [accountsReady, setAccountsReady] = useState(false);
     const [totalCost, setTotalCost] = useState<number>();
+    const [totalUsedCredits, setTotalUsedCredits] = useState<number>();
     const [loadError, setLoadError] = useState("");
     const [pendingAction, setPendingAction] = useState("");
     const pendingActionRef = useRef("");
@@ -90,13 +91,14 @@ export default function AdminPage() {
             if (result.departments) setDepartments(result.departments);
             if (result.auditLogs) setAuditLogs(result.auditLogs);
             if (result.totalCost !== undefined) setTotalCost(result.totalCost);
+            setTotalUsedCredits(result.totalUsedCredits);
             setLoadError(result.errors.join("；"));
         } catch (error) { if (request === accountsRequest.current) setLoadError(error instanceof Error ? error.message : "账号数据加载失败"); }
         finally { if (request === accountsRequest.current) setAccountsLoading(false); }
     };
 
     useEffect(() => {
-        setAccounts([]); setDepartments([]); setAuditLogs([]); setTotalCost(undefined); setAccountsReady(false);
+        setAccounts([]); setDepartments([]); setAuditLogs([]); setTotalCost(undefined); setTotalUsedCredits(undefined); setAccountsReady(false);
         if (canManageAccounts) void refreshAccounts();
         return () => { accountsRequest.current++; };
     }, [canManageAccounts, signedInUser?.id, signedInUser?.role, signedInUser?.departmentId]);
@@ -122,7 +124,6 @@ export default function AdminPage() {
         }
     }, [activeAdminTab, activeDesigner, creditForm, limitForm]);
     const totalRemaining = accounts.reduce((sum, designer) => sum + designer.creditBalance, 0);
-    const totalUsed = accounts.reduce((sum, designer) => sum + Math.max(0, designer.creditLimit - designer.creditBalance), 0);
 
     const changeAdminTab = (tab: string) => {
         setSearchParams(tab === "accounts" ? {} : { tab }, { replace: true });
@@ -168,7 +169,7 @@ export default function AdminPage() {
                 if (values.password) await resetAccountPassword(editingAccountId, values.password);
                 if (editingAccountId === signedInUser?.id) await hydrateSession();
             } else {
-                await createAccount({ username: values.loginName, displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, password: values.password || "", role: values.role, creditBalance: values.quotaRemaining, creditLimit: Math.max(values.quotaRemaining, values.monthlyCreditLimit), monthlyCreditLimit: values.monthlyCreditLimit });
+                await createAccount({ username: values.loginName, displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, password: values.password || "", role: values.role, status: values.status === "disabled" ? "disabled" : "active", creditBalance: values.quotaRemaining, creditLimit: Math.max(values.quotaRemaining, values.monthlyCreditLimit), monthlyCreditLimit: values.monthlyCreditLimit });
             }
             message.success(editingAccountId ? "账号和当前积分余额已更新" : "账号已开通，首次登录必须修改密码");
             setEditingAccountId(null);
@@ -272,7 +273,7 @@ export default function AdminPage() {
                 <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="管理概览" aria-busy={accountsLoading}>
                     <Metric icon={<UsersRound className="size-4" />} label="可管理账号" value={accountsReady ? String(accounts.length) : "—"} />
                     <Metric icon={<WalletCards className="size-4" />} label="剩余额度" value={accountsReady ? totalRemaining.toLocaleString() : "—"} />
-                    <Metric icon={<SlidersHorizontal className="size-4" />} label="已用额度" value={accountsReady ? totalUsed.toLocaleString() : "—"} />
+                    <Metric icon={<SlidersHorizontal className="size-4" />} label="累计已用积分" value={totalUsedCredits === undefined ? "—" : totalUsedCredits.toLocaleString()} />
                     <Metric icon={<ShieldCheck className="size-4" />} label="人民币成本" value={totalCost === undefined ? "—" : `￥${totalCost.toFixed(2)}`} />
                 </section>
                 {loadError ? <Alert type="warning" showIcon title="部分概览暂未更新" description={loadError} action={<Button loading={accountsLoading} onClick={() => void refreshAccounts()}>重试</Button>} /> : null}
@@ -479,7 +480,7 @@ export default function AdminPage() {
                             {
                                 key: "usage-analysis",
                                 label: "使用分析",
-                                children: isAdmin ? <UsageAnalyticsPanel /> : null,
+                                children: isAdmin ? (deploymentFeatures.oaLoginEnabled ? <UsageAnalyticsPanel /> : <Alert type="info" showIcon title="使用分析仅在企业 OA 模式启用" description="当前未启用企业 OA 身份与使用记录采集。独立账号登录不自动开启该采集，也不会发送分析数据。" />) : null,
                             },
                             {
                                 key: "mark-images",

@@ -17,7 +17,9 @@ import { createPromptListLoader } from "@/lib/prompt-list-loader";
 export default function PromptsPage() {
     const { message, modal } = App.useApp(); const navigate = useNavigate();
     const user = useUserStore((state) => state.user);
-    const [scope, setScope] = useWorkbenchField<"team" | "public">("prompts:scope", user?.groupId ? "team" : "public");
+    const [storedScope, setScope] = useWorkbenchField<"team" | "public">("prompts:scope", user?.groupId ? "team" : "public");
+    const canAccessTeam = Boolean(user?.groupId) || isAdminRole(user?.role);
+    const scope = storedScope === "team" && !canAccessTeam ? "public" : storedScope;
     const [items, setItems] = useState<PromptTemplate[]>([]); const [submissions, setSubmissions] = useState<PromptSubmission[]>([]);
     const [query, setQuery] = useWorkbenchField("prompts:query", ""); const [loading, setLoading] = useState(true);
     const [page, setPage] = useWorkbenchField("prompts:page", 1);
@@ -53,7 +55,7 @@ export default function PromptsPage() {
                     {isSuper && scope === "public" ? <Button size="large" type="primary" icon={<Plus className="size-4" />} onClick={() => { setEditing(null); setEditorOpen(true); }}>新建公共模板</Button> : <Button size="large" onClick={() => navigate("/my-prompts")}>我的提示词</Button>}
                 </header>
                 <section className="wb-toolbar mb-6">
-                    <Segmented value={scope} onChange={(value) => { setScope(value as "team" | "public"); setPage(1); }} options={[...(user?.groupId || isAdminRole(user?.role) ? [{ value: "team", label: "团队提示词" }] : []), { value: "public", label: "公共提示词库" }]} />
+                    <Segmented value={scope} onChange={(value) => { setScope(value as "team" | "public"); setPage(1); }} options={[...(canAccessTeam ? [{ value: "team", label: "团队提示词" }] : []), { value: "public", label: "公共提示词库" }]} />
                     <Input className="max-w-md" allowClear prefix={<Search className="size-4 text-stone-400" />} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="搜索标题、完整提示词或分类" />
                     <span aria-live="polite" className="ml-auto text-xs text-stone-500">{loading && items.length ? "正在更新 · " : ""}共 {total} 个已发布模板</span>
                 </section>

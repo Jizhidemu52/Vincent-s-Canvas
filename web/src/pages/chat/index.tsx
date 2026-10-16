@@ -564,7 +564,7 @@ export default function ChatPage() {
                                 </div>
                                 <input ref={fileInputRef} type="file" multiple disabled={!sessionsReady || readingAttachments} accept={CHAT_ATTACHMENT_ACCEPT} className="hidden" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} />
                             </div>
-                            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"><CornerDownLeft className="size-3.5" /><span>Ctrl / ⌘ + Enter 发送</span><span className="opacity-45">·</span><span>{deploymentFeatures.creditsEnabled ? "生成图片会扣积分" : "直接继续提要求，无需重复上传"}</span></p>
+                            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"><CornerDownLeft className="size-3.5" /><span>Ctrl / ⌘ + Enter 发送</span><span className="opacity-45">·</span><span>{deploymentFeatures.creditsEnabled ? "对话按成功模型调用计费（含工具续答），生成图片另计积分" : "直接继续提要求，无需重复上传"}</span></p>
                         </div>
                     </div>
                 </section>

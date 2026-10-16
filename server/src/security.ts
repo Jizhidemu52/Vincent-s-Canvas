@@ -2,9 +2,11 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import argon2 from "argon2";
 
 export const MIN_PASSWORD_LENGTH = 12;
+export const MAX_PASSWORD_LENGTH = 200;
 
 export function validatePassword(password: string) {
     if (password.length < MIN_PASSWORD_LENGTH) return `密码至少需要 ${MIN_PASSWORD_LENGTH} 位`;
+    if (password.length > MAX_PASSWORD_LENGTH) return `密码不能超过 ${MAX_PASSWORD_LENGTH} 位`;
     if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) return "密码必须同时包含字母和数字";
     return null;
 }

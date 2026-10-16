@@ -1,12 +1,14 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Button, Empty, Input, Modal, Pagination, Tag } from "antd";
+import { Alert, Button, Empty, Input, Modal, Pagination, Spin, Tag } from "antd";
 import { Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { isSupportedServerAsset, serverAssetToLocal } from "@/lib/server-asset-local";
 import { needsCanvasAssetPreviewResolution, resolveCanvasAssetPreview } from "@/lib/canvas/canvas-asset-preview";
 import { resolveImageUrl } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
-import { canUserAccessAsset, useAssetStore, type Asset } from "@/stores/use-asset-store";
+import { listServerAssets } from "@/services/api/server-assets";
+import { canUserAccessAsset, serverAssetIdFromAsset, useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 
 export type InsertAssetPayload =
@@ -24,9 +26,10 @@ type Props = {
 };
 
 export function AssetPickerModal({ open, onInsert, onInsertMany, onClose, selectionMode = "single" }: Props) {
+    const ownerId = useUserStore((state) => state.user?.id);
     return (
         <Modal title="选择素材" open={open} onCancel={onClose} footer={null} width={860} destroyOnHidden styles={{ body: { padding: "0 24px 24px", minHeight: 480 } }}>
-            <MyAssetsTab onInsert={onInsert} onInsertMany={onInsertMany} selectionMode={selectionMode} />
+            <MyAssetsTab key={ownerId || "signed-out"} open={open} onInsert={onInsert} onInsertMany={onInsertMany} selectionMode={selectionMode} />
         </Modal>
     );
 }
@@ -84,25 +87,53 @@ function PickerCard({ asset, selected, onClick }: { asset: Asset; selected?: boo
     );
 }
 
-function MyAssetsTab({ onInsert, onInsertMany, selectionMode }: { onInsert?: (payload: InsertAssetPayload) => void; onInsertMany?: (payloads: InsertAssetPayload[]) => void; selectionMode: "single" | "multiple-images" }) {
-    const assets = useAssetStore((state) => state.assets);
+function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: boolean; onInsert?: (payload: InsertAssetPayload) => void; onInsertMany?: (payloads: InsertAssetPayload[]) => void; selectionMode: "single" | "multiple-images" }) {
+    const localAssets = useAssetStore((state) => state.assets);
     const user = useUserStore((state) => state.user);
+    const ownerId = user?.id;
+    const [serverState, setServerState] = useState<{ ownerId: string; assets: Asset[]; loading: boolean; error: string } | null>(null);
+    const [refreshRevision, setRefreshRevision] = useState(0);
     const [keyword, setKeyword] = useState("");
     const deferredKeyword = useDeferredValue(keyword);
     const [kindFilter, setKindFilter] = useState("all");
     const [page, setPage] = useState(1);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+    useEffect(() => {
+        if (!open || !ownerId) return;
+        const controller = new AbortController();
+        const isCurrent = () => !controller.signal.aborted && useUserStore.getState().user?.id === ownerId;
+        setServerState((current) => ({ ownerId, assets: current?.ownerId === ownerId ? current.assets : [], loading: true, error: "" }));
+        void listServerAssets(controller.signal).then(({ assets }) => {
+            if (isCurrent()) setServerState({ ownerId, assets: assets.filter(isSupportedServerAsset).map(serverAssetToLocal), loading: false, error: "" });
+        }).catch((error: unknown) => {
+            if (isCurrent()) setServerState((current) => ({ ownerId, assets: current?.ownerId === ownerId ? current.assets : [], loading: false, error: error instanceof Error ? error.message : "素材加载失败，请重试" }));
+        });
+        return () => controller.abort();
+    }, [open, ownerId, refreshRevision]);
+
+    useEffect(() => { setSelectedIds(new Set()); }, [open, ownerId, selectionMode]);
+
+    const serverAssets = useMemo(() => serverState?.ownerId === ownerId ? serverState?.assets || [] : [], [serverState, ownerId]);
+    const serverAssetIds = useMemo(() => new Set(serverAssets.map((asset) => asset.id)), [serverAssets]);
+    const assets = useMemo(() => [
+        ...serverAssets,
+        ...localAssets.filter((asset) => !serverAssetIds.has(asset.id) && !serverAssetIds.has(serverAssetIdFromAsset(asset) || "")),
+    ], [localAssets, serverAssets, serverAssetIds]);
+    const loading = Boolean(open && ownerId && (serverState?.ownerId !== ownerId || serverState.loading));
+    const error = serverState?.ownerId === ownerId ? serverState?.error : "";
+
     const filtered = useMemo(() => {
         const query = deferredKeyword.trim().toLowerCase();
         return assets
-            .filter((asset) => canUserAccessAsset(asset, user))
+            .filter((asset) => canUserAccessAsset(asset, user, serverAssetIds.has(asset.id)))
             .filter((a) => selectionMode === "multiple-images" ? a.kind === "image" : a.kind === "text" || a.kind === "image" || a.kind === "video")
             .filter((a) => kindFilter === "all" || a.kind === kindFilter)
             .filter((a) => !query || [a.title, ...(a.tags || [])].join(" ").toLowerCase().includes(query));
-    }, [assets, deferredKeyword, kindFilter, user]);
+    }, [assets, deferredKeyword, kindFilter, selectionMode, serverAssetIds, user]);
 
     const visible = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
+    const selected = useMemo(() => filtered.filter((asset) => selectedIds.has(asset.id)), [filtered, selectedIds]);
 
     useEffect(() => {
         const maxPage = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -119,6 +150,8 @@ function MyAssetsTab({ onInsert, onInsertMany, selectionMode }: { onInsert?: (pa
     };
 
     const handleInsert = (asset: Asset) => {
+        const currentUser = useUserStore.getState().user;
+        if (!open || !ownerId || currentUser?.id !== ownerId || !canUserAccessAsset(asset, currentUser, serverAssetIds.has(asset.id))) return;
         if (selectionMode === "multiple-images") {
             setSelectedIds((current) => {
                 const next = new Set(current);
@@ -130,7 +163,12 @@ function MyAssetsTab({ onInsert, onInsertMany, selectionMode }: { onInsert?: (pa
         onInsert?.(toPayload(asset));
     };
 
-    const confirmMultiple = () => onInsertMany?.(filtered.filter((asset) => selectedIds.has(asset.id)).map(toPayload));
+    const confirmMultiple = () => {
+        const currentUser = useUserStore.getState().user;
+        if (!open || !ownerId || currentUser?.id !== ownerId) return;
+        const payloads = selected.filter((asset) => canUserAccessAsset(asset, currentUser, serverAssetIds.has(asset.id))).map(toPayload);
+        if (payloads.length) onInsertMany?.(payloads);
+    };
 
     return (
         <div className="space-y-4">
@@ -162,18 +200,22 @@ function MyAssetsTab({ onInsert, onInsertMany, selectionMode }: { onInsert?: (pa
                         </Tag.CheckableTag>
                     ))}
                 </div>
-                {selectionMode === "multiple-images" ? <Button type="primary" size="small" disabled={!selectedIds.size} onClick={confirmMultiple}>加入 {selectedIds.size} 张参考图</Button> : null}
+                <Button size="small" loading={loading} disabled={!ownerId} onClick={() => setRefreshRevision((value) => value + 1)}>刷新</Button>
+                {selectionMode === "multiple-images" ? <Button type="primary" size="small" disabled={!selected.length} onClick={confirmMultiple}>加入 {selected.length} 张参考图</Button> : null}
             </div>
 
+            {error ? <Alert type="error" showIcon title="素材加载失败" description={error} action={<Button size="small" onClick={() => setRefreshRevision((value) => value + 1)}>重试</Button>} /> : null}
             {visible.length ? (
                 <div className="grid grid-cols-4 gap-3">
                     {visible.map((asset) => (
                         <PickerCard key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} onClick={() => handleInsert(asset)} />
                     ))}
                 </div>
-            ) : (
+            ) : loading ? (
+                <div role="status" className="flex items-center justify-center gap-2 py-12 text-sm"><Spin size="small" />正在加载素材…</div>
+            ) : !error ? (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有素材" className="py-12" />
-            )}
+            ) : null}
 
             {filtered.length > PAGE_SIZE && (
                 <div className="flex justify-center">

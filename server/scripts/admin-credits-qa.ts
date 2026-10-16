@@ -2,7 +2,8 @@
  * From server/: bun scripts/admin-credits-qa.ts --serve
  * Optional --resume <run-directory> reopens only this harness's own database.
  * Uses real authentication/admin routes and PostgreSQL SQL; Redis is a local
- * cache double. No worker, asset uploads or external provider calls are allowed.
+ * cache double and fixture media is kept only in this run's local directory.
+ * No worker or external provider calls are allowed; this does not validate S3.
  */
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -25,13 +26,23 @@ import { createAccountsRouter } from "../src/routes/accounts";
 import { createCreditPolicyRouter } from "../src/routes/credit-policy";
 import { createDepartmentsRouter } from "../src/routes/departments";
 import { createAuditRouter } from "../src/routes/audit-logs";
-import { createAdminHistoryRouter } from "../src/routes/history";
-import { createGroupsRouter } from "../src/routes/groups";
+import { createAdminHistoryRouter, createHistoryRouter } from "../src/routes/history";
+import { createGroupsRouter, createTeamRouter } from "../src/routes/groups";
 import { createModelConfigurationRouter, createPublicModelRouter } from "../src/routes/model-configuration";
 import { createModuleFlagsRouter, createAdminModuleFlagsRouter } from "../src/routes/module-flags";
 import { createCanvasDocumentsRouter } from "../src/routes/canvas-documents";
 import { createBillingRouter } from "../src/routes/billing";
 import { createWorkflowsRouter } from "../src/routes/workflows";
+import { createAdminGroupCreditsRouter, createGroupCreditsRouter, createTeamGroupCreditsRouter } from "../src/routes/group-credits";
+import { createAdminAssetsRouter, createAssetsRouter } from "../src/routes/assets";
+import { createAdminProjectsRouter, createProjectsRouter } from "../src/routes/projects";
+import { createAdminTasksRouter } from "../src/routes/tasks";
+import { createIntegrationsRouter } from "../src/routes/integrations";
+import { createAdminUsageRouter } from "../src/routes/usage-analytics";
+import { createPromptTemplatesRouter } from "../src/routes/prompt-templates";
+import { createPerformanceRouter } from "../src/routes/performance";
+import { createGenerationCapabilitiesRouter } from "../src/routes/generation-capabilities";
+import type { ObjectStorage } from "../src/object-storage";
 
 if (!process.argv.includes("--serve")) throw new Error("Explicit --serve is required for local QA");
 const root = [process.cwd(), resolve(process.cwd(), ".."), resolve(dirname(fileURLToPath(import.meta.url)), "../..")]
@@ -88,6 +99,20 @@ const cache = {
 } as Cache;
 const config = loadConfig({ NODE_ENV: "test", DATABASE_URL: "isolated-qa", REDIS_URL: "cache-double", AUTH_ENABLED: "true", ROLE_PORTALS_ENABLED: "true", CREDITS_ENABLED: "false", SESSION_COOKIE_NAME: "canvas_admin_credits_qa", PROVIDER_ENCRYPTION_KEY: Buffer.alloc(32, 19).toString("base64") });
 const features = deploymentFeatures(config);
+const mediaDirectory = join(runDirectory, "media");
+const mediaPath = (key: string) => {
+    const target = resolve(mediaDirectory, key);
+    if (!target.startsWith(mediaDirectory + sep)) throw new Error("QA media must stay inside its own run directory");
+    return target;
+};
+const fixtureStorage = {
+    configured: true,
+    async put(key: string, body: Uint8Array) { const target = mediaPath(key); await mkdir(dirname(target), { recursive: true }); await writeFile(target, body); },
+    async get(key: string) { const bytes = await readFile(mediaPath(key)); return { ContentLength: bytes.length, Body: { async transformToByteArray() { return bytes; } } }; },
+    async head(key: string) { return { ContentLength: (await readFile(mediaPath(key))).length }; },
+    async signedDownloadUrl() { throw new Error("QA_ONLY: External model media delivery is disabled"); },
+    async remove() { throw new Error("QA_ONLY: Fixture cleanup is not an application action"); },
+} as unknown as ObjectStorage;
 const readPolicy = () => getCreditsEnabled(db, false);
 const app = express();
 app.disable("x-powered-by");
@@ -106,6 +131,24 @@ app.use("/api/admin/departments", createDepartmentsRouter(db));
 app.use("/api/admin/audit-logs", createAuditRouter(db));
 app.use("/api/admin/history", createAdminHistoryRouter(db));
 app.use("/api/admin/groups", createGroupsRouter(db));
+app.use("/api/admin/group-credits", createAdminGroupCreditsRouter(db));
+app.use("/api/admin/assets", createAdminAssetsRouter(db));
+app.use("/api/assets", createAssetsRouter(db, fixtureStorage));
+app.use("/api/admin/projects", createAdminProjectsRouter(db));
+app.use("/api/admin/tasks", (request, response, next) => {
+    if (request.method !== "GET") { response.status(403).json({ error: "QA_ONLY", message: "隔离验证环境不运行或重试生成任务" }); return; }
+    next();
+}, createAdminTasksRouter(db, cache));
+app.use("/api/admin/integrations", createIntegrationsRouter(config));
+app.use("/api/admin/usage", createAdminUsageRouter(db, config, { enabled: features.oaLoginEnabled }));
+app.use("/api/group-credits", createGroupCreditsRouter(db));
+app.use("/api/team/group-credits", createTeamGroupCreditsRouter(db));
+app.use("/api/team", createTeamRouter(db));
+app.use("/api/projects", createProjectsRouter(db));
+app.use("/api/history", createHistoryRouter(db));
+app.use("/api/prompt-templates", createPromptTemplatesRouter(db));
+app.use("/api/performance", createPerformanceRouter(db));
+app.use("/api/generation-capabilities", createGenerationCapabilitiesRouter(db));
 app.use("/api/admin/model-configuration", createModelConfigurationRouter(db, config));
 app.use("/api/admin/workflows", createWorkflowsRouter(db));
 app.use("/api/admin/modules", createAdminModuleFlagsRouter(db));
@@ -113,12 +156,12 @@ app.use("/api/modules", createModuleFlagsRouter(db));
 app.use("/api/models", createPublicModelRouter(db, readPolicy));
 app.use("/api/billing", createBillingRouter(db, readPolicy));
 app.use("/api/canvas-documents", createCanvasDocumentsRouter(db));
-app.use("/api", (_request, response) => response.status(403).json({ error: "QA_ONLY", message: "这是隔离的本地后台验证环境；上传、生成和未纳入测试的接口均未启用" }));
+app.use("/api", (_request, response) => response.status(403).json({ error: "QA_ONLY", message: "这是隔离的本地验证环境；模型生成及未纳入测试的接口均未启用" }));
 const dist = join(root, "web/dist");
 app.use(express.static(dist, { index: false }));
 app.use(async (_request, response) => {
     const html = await readFile(join(dist, "index.html"), "utf8");
-    response.type("html").send(html.replace("</body>", '<div style="position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#7c2d12;color:#fff;text-align:center;font:12px sans-serif;padding:4px;pointer-events:none">隔离本地验证环境 · 仅测试账号和积分 · 不连接真实模型</div></body>'));
+    response.type("html").send(html.replace("</body>", '<div style="position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#7c2d12;color:#fff;text-align:center;font:12px sans-serif;padding:4px;pointer-events:none">隔离本地验证环境 · 本地模拟素材存储 · 不连接真实模型</div></body>'));
 });
 app.use(((error, _request, response, _next) => {
     console.error(error);

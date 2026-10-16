@@ -124,7 +124,8 @@ export function navigationModuleKey(slug: NavigationToolSlug) {
     return slug === "my-prompts" ? "prompts" : slug;
 }
 
-export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operationType: AdminOperationType; toolKey: string }>> = {
+export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operationType: AdminOperationType | "chat"; toolKey: string }>> = {
+    "gpt-chat": { operationType: "chat", toolKey: "gpt-chat" },
     image: { operationType: "image_generation", toolKey: "image" },
     "detail-enhance": { operationType: "upscale", toolKey: "detail-enhance" },
     "image-edit": { operationType: "inpaint", toolKey: "image-edit" },

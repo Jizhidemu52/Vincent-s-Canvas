@@ -579,7 +579,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         <div className="sr-empty">
                             {project.references[0] ? <img src={project.references[0].dataUrl} alt="当前参考底图预览" /> : <ImagePlus size={52} strokeWidth={1} />}
                             <h3>{project.references[0] ? "参考图已就位" : "从你的产品参考开始"}</h3>
-                            <p>选择 1–6 个配色或定位方向，生成结果会在这里逐个出现。不会使用模拟改色图代替模型结果。</p>
+                            <p>设置一个配色或定位方向，每次生成 1 个候选。修改方向后可再次生成；不会使用模拟改色图代替模型结果。</p>
                         </div>
                     ) : (
                         <div className="sr-results">

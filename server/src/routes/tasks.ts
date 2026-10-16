@@ -205,38 +205,46 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
           const reason =
             error instanceof Error ? error.message : "任务创建失败";
           const itemRequestId = `${input.requestId}:${index}`;
-          const existing = await db.query<{ id: string }>(
-            "SELECT id FROM tasks WHERE request_id=$1",
+          const existing = await db.query<{ id: string; userId: string; batchId: string | null; requestId: string; status: string; credits: number; rmbCost: number }>(
+            `SELECT id,user_id AS "userId",batch_id AS "batchId",request_id AS "requestId",status,credits,rmb_cost::float8 AS "rmbCost" FROM tasks WHERE request_id=$1`,
             [itemRequestId],
           );
-          const failedId = existing.rows[0]?.id ?? randomUUID();
-          if (existing.rows[0]) {
-            await db.query(
-              "UPDATE tasks SET status='failed',credits=0,rmb_cost=0,failure_reason=$1,completed_at=now(),updated_at=now() WHERE id=$2",
-              [reason, failedId],
-            );
-          } else {
-            await db.query(
-              `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,status,credits,rmb_cost,failure_reason,completed_at,tool_key)
-               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'failed',0,0,$13,now(),$14)`,
-              [
-                failedId,
-                itemRequestId,
-                batchId,
-                actor.id,
-                actor.departmentId,
-                input.projectId,
-                input.operationType,
-                input.modelConfigId ?? null,
-                input.prompt,
-                input.parameters,
-                JSON.stringify(item.sourceUrls),
-                input.priority,
-                reason,
-                execution.toolKey,
-              ],
-            );
+          const committed = existing.rows[0];
+          if (committed) {
+            if (committed.userId !== actor.id || committed.batchId !== batchId) {
+              throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他任务占用");
+            }
+            // Queue delivery happens after SQL commits. Preserve the admitted
+            // task and its hold so recovery retries the same task without charging
+            // again; never overwrite another task or turn its hold into a leak.
+            const { userId: _owner, batchId: _batch, ...task } = committed;
+            tasks.push({ ...task, itemIndex: index });
+            failures.push({ index, reason });
+            continue;
           }
+          const failedId = randomUUID();
+          const failed = await db.query<{ id: string }>(
+            `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,status,credits,rmb_cost,failure_reason,completed_at,tool_key)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'failed',0,0,$13,now(),$14)
+               ON CONFLICT(request_id) DO NOTHING RETURNING id`,
+            [
+              failedId,
+              itemRequestId,
+              batchId,
+              actor.id,
+              actor.departmentId,
+              input.projectId,
+              input.operationType,
+              input.modelConfigId ?? null,
+              input.prompt,
+              input.parameters,
+              JSON.stringify(item.sourceUrls),
+              input.priority,
+              reason,
+              execution.toolKey,
+            ],
+          );
+          if (!failed.rows[0]) throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他任务占用");
           await db.query(
             `INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,status,failure_reason)
              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'[]',0,0,'failed',$10)
@@ -260,6 +268,10 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       await recalculateBatch(db, batchId);
       response.status(201).json({ batchId, tasks, failures });
     } catch (error) {
+      if (error instanceof BillingError) {
+        response.status(400).json({ error: error.code, message: error.message });
+        return;
+      }
       next(error);
     }
   });

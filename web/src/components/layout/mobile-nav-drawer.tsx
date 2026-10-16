@@ -1,6 +1,7 @@
 import { Drawer } from "antd";
 import { Link } from "react-router-dom";
 import { FrequentNavigation, UsageCollectionNotice } from "@/components/layout/frequent-navigation";
+import { PersonalSessionActions } from "@/components/layout/personal-session-actions";
 
 import { navigationModuleKey, navigationToolBilling, navigationTools, type NavigationGroup, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { cn } from "@/lib/utils";
@@ -33,9 +34,9 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
         const billing = navigationToolBilling[slug];
         if (billing) {
             const usage = estimate({ ...billing, quantity: 1 });
-            return usage.configured ? `${usage.credits}积分${slug === "video" ? "起" : ""}` : "待配置";
+            return usage.configured ? `${usage.credits}积分${slug === "video" ? "起" : slug === "gpt-chat" ? "/次" : ""}` : "待配置";
         }
-        if (slug === "prompts" || slug === "my-prompts" || slug === "assets" || slug === "canvas" || slug === "gpt-chat") return "0积分";
+        if (slug === "prompts" || slug === "my-prompts" || slug === "assets" || slug === "canvas") return "0积分";
         if (slug === "admin") return "管理员";
         if (slug === "team") return "本组";
         return undefined;
@@ -73,6 +74,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                         </section>
                     );
                 })}
+                <PersonalSessionActions onSignedOut={onClose} />
                 <UsageCollectionNotice />
             </div>
         </Drawer>

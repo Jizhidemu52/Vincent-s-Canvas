@@ -79,6 +79,7 @@ async function* splitCanvases(dataUrl: string, params: ImageSplitParams, options
     if (!Number.isFinite(params.rows) || !Number.isFinite(params.columns)) throw new Error("切分行列数无效");
     const rows = Math.max(1, Math.floor(params.rows));
     const columns = Math.max(1, Math.floor(params.columns));
+    if (rows > image.height || columns > image.width) throw new Error("切分行列数不能超过原图像素尺寸，请减少行数或列数");
 
     for (let row = 0; row < rows; row += 1) {
         const sy = Math.floor((row * image.height) / rows);

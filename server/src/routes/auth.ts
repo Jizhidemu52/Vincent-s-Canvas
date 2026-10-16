@@ -6,7 +6,7 @@ import { writeAudit } from "../audit";
 import type { AppConfig } from "../config";
 import type { Cache, Database } from "../db";
 import { canUsePortal } from "../rbac";
-import { createSessionToken, hashPassword, hashToken, validatePassword, verifyPassword } from "../security";
+import { createSessionToken, hashPassword, hashToken, MAX_PASSWORD_LENGTH, validatePassword, verifyPassword } from "../security";
 import { sessionMiddleware, setSessionCookie } from "../session";
 import type { AuthenticatedRequest } from "../types";
 import { mapUser, userSelect, type UserRow } from "../user-mapper";
@@ -21,10 +21,10 @@ import { getCreditsEnabled } from "../credit-policy";
 
 const loginSchema = z.object({
     identifier: z.string().trim().min(1).max(200),
-    password: z.string().min(1).max(200),
+    password: z.string().min(1).max(MAX_PASSWORD_LENGTH),
     portal: z.enum(["designer", "admin"]),
 });
-const passwordSchema = z.object({ currentPassword: z.string().min(1), newPassword: z.string().min(1) });
+const passwordSchema = z.object({ currentPassword: z.string().min(1).max(MAX_PASSWORD_LENGTH), newPassword: z.string().min(1) });
 
 export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) {
     const router = Router();
@@ -109,19 +109,25 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
                 return;
             }
             const session = createSessionToken();
-            const client = await db.connect();
-            try {
-                await client.query("BEGIN");
+            const created = await withTransaction(db, async (client) => {
+                // Credential verification is deliberately outside the row lock,
+                // but a reset/disable that wins the race must cancel this login.
+                const locked = await client.query<Pick<UserRow, "status" | "role" | "is_guest"> & { password_hash: string | null; locked_until: Date | null }>(
+                    "SELECT password_hash,status,role,is_guest,locked_until FROM users WHERE id=$1 FOR UPDATE", [row.id],
+                );
+                const current = locked.rows[0];
+                if (!current || current.password_hash !== row.password_hash || current.status !== "active" || current.is_guest
+                    || (current.locked_until && current.locked_until > new Date()) || !canUsePortal(current.role, input.portal)) return false;
                 await client.query(`INSERT INTO sessions(id,user_id,token_hash,ip_address,user_agent,expires_at)
                     VALUES($1,$2,$3,$4,$5,now()+($6 * interval '1 second'))`,
                     [session.id, row.id, hashToken(session.token), request.ip, request.get("user-agent"), config.SESSION_TTL_SECONDS]);
                 await client.query("UPDATE users SET failed_login_count=0, locked_until=NULL, last_login_at=now() WHERE id=$1", [row.id]);
-                await client.query("COMMIT");
-            } catch (error) {
-                await client.query("ROLLBACK");
-                throw error;
-            } finally {
-                client.release();
+                return true;
+            });
+            if (!created) {
+                await writeAudit(db, { action: "auth.login", targetType: "user", targetId: row.id, result: "denied", detail: { portal: input.portal }, ip: request.ip });
+                response.status(401).json({ error: "INVALID_CREDENTIALS", message: "账号、密码或登录入口不正确" });
+                return;
             }
             await cache.set(`session:${hashToken(session.token)}`, session.id, { EX: config.SESSION_TTL_SECONDS });
             setSessionCookie(response, config, session.token);
@@ -155,13 +161,20 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             const passwordError = validatePassword(input.newPassword);
             if (passwordError) { response.status(400).json({ error: "WEAK_PASSWORD", message: passwordError }); return; }
             const authenticated = request as unknown as AuthenticatedRequest;
-            const current = await db.query<{ password_hash: string | null }>("SELECT password_hash FROM users WHERE id=$1", [authenticated.auth.id]);
-            if (!current.rows[0]?.password_hash || !(await verifyPassword(current.rows[0].password_hash, input.currentPassword))) {
-                response.status(400).json({ error: "INVALID_PASSWORD", message: "当前密码不正确" }); return;
+            const rejection = await withTransaction(db, async (client) => {
+                // Serialize credential changes so a reset cannot race verification,
+                // and never leave a changed password with unrevoked old sessions.
+                const current = await client.query<{ password_hash: string | null }>("SELECT password_hash FROM users WHERE id=$1 FOR UPDATE", [authenticated.auth.id]);
+                if (!current.rows[0]?.password_hash || !(await verifyPassword(current.rows[0].password_hash, input.currentPassword))) return "INVALID_PASSWORD";
+                if (input.newPassword === input.currentPassword) return "PASSWORD_UNCHANGED";
+                await client.query("UPDATE users SET password_hash=$1,must_change_password=false,password_changed_at=now(),updated_at=now() WHERE id=$2", [await hashPassword(input.newPassword), authenticated.auth.id]);
+                await client.query("UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND id<>$2", [authenticated.auth.id, authenticated.sessionId]);
+                await writeAudit(client, { actor: authenticated.auth, action: "auth.password_changed", targetType: "user", targetId: authenticated.auth.id, result: "success", ip: request.ip });
+                return null;
+            });
+            if (rejection) {
+                response.status(400).json({ error: rejection, message: rejection === "PASSWORD_UNCHANGED" ? "新密码不能与当前密码相同" : "当前密码不正确" }); return;
             }
-            await db.query("UPDATE users SET password_hash=$1,must_change_password=false,password_changed_at=now(),updated_at=now() WHERE id=$2", [await hashPassword(input.newPassword), authenticated.auth.id]);
-            await db.query("UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND id<>$2", [authenticated.auth.id, authenticated.sessionId]);
-            await writeAudit(db, { actor: authenticated.auth, action: "auth.password_changed", targetType: "user", targetId: authenticated.auth.id, result: "success", ip: request.ip });
             response.status(204).end();
         } catch (error) { next(error); }
     });

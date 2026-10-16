@@ -12,9 +12,10 @@ type Values = Omit<MarkImageConfigurationInput, "models"> & {
 };
 
 const imageModelIds = new Set<string>(MARK_PLATFORM_MODELS.filter(model => model.modelId !== "midjourney-blend" && model.capabilities.some(capability => capability === "generate")).map(model => model.modelId));
+const textModelIds = new Set<string>(MARK_PLATFORM_MODELS.filter(model => model.capabilities.some(capability => capability === "chat")).map(model => model.modelId));
 const modelGroups = [
     { key: "image", title: "图片模型", description: `${imageModelIds.size} 个出图模型，按各模型能力提供生成和参考图编辑。`, matches: (modelId: string) => imageModelIds.has(modelId) },
-    { key: "text", title: "文字模型", description: "文字模型当前仅配置接入与开关；站内计费/并发限制尚未执行，供应商仍按实际请求计费。", matches: (modelId: string) => modelId === "gpt-6-astra" },
+    { key: "text", title: "文字模型", description: "此处仅配置文字模型接入与开关；对话积分请在“板块 API 配置”中设置，并受积分总开关控制。文字并发限制尚未执行，供应商仍按实际请求计费。", matches: (modelId: string) => textModelIds.has(modelId) },
     { key: "video", title: "视频模型", description: "独立视频生成模型。", matches: (modelId: string) => modelId === "happyhorse-1.1" },
     { key: "blend", title: "多图融合", description: "Midjourney Blend：上传 2–4 张参考图进行融合，无需提示词。", matches: (modelId: string) => modelId === "midjourney-blend" },
 ];
@@ -103,7 +104,7 @@ export function MarkImageProviderPanel() {
                     <Typography.Title level={3} className="!mb-2 !text-base">APIMart 平台 · 独立 API 配置</Typography.Title>
                     <Space wrap size={[6, 6]}>
                         <Tag>APIMart · 独立密钥</Tag>
-                        <Tag>{imageModelIds.size} 图片 · 1 文字 · 1 视频 · 1 多图融合</Tag>
+                        <Tag>{imageModelIds.size} 图片 · {textModelIds.size} 文字 · 1 视频 · 1 多图融合</Tag>
                         <Tag color={config?.provider?.hasCredentials ? "green" : "default"} icon={<KeyRound className="size-3" />}>
                             {loading ? "正在读取凭据状态" : loadError ? "凭据状态未知" : config?.provider?.hasCredentials ? "服务端密钥已配置" : "服务端密钥未配置"}
                         </Tag>

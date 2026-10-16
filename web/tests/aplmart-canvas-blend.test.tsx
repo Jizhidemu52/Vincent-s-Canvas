@@ -12,6 +12,7 @@ import { canvasToolKey } from "@/hooks/use-tool-config";
 import { createImageReferenceItem } from "@/lib/image-reference-policy";
 import { toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 
 const noop = () => undefined;
 const model = { id: "blend-uuid", modelId: "blend-uuid", name: "aplmart-mj-blend", imageParameterProfile: "midjourney-blend" as const, imageSupportsMask: false, capabilities: ["generate"], creditCost: 0, rmbCost: 0 };
@@ -34,8 +35,11 @@ test.each([0, 1, 2, 4, 5])("Blend quick canvas with %i references hides old prom
     expect(html).not.toContain("<textarea");
     expect(html).not.toContain("OLD_DRAFT_MUST_NOT_SHOW");
     expect(html).not.toContain('aria-label="生成张数"');
-    expect(html).toContain("1 个任务");
-    expect(actionButton(html, "开始融合").includes('disabled=""')).toBe(count < 2 || count > 4);
+    const action = actionButton(html, "开始融合");
+    expect(action).toContain('aria-label="每次生成 1 张"');
+    expect(action).toContain("×1</span>");
+    expect(normalizeImageModelSettings({ size: "3:2", quality: "turbo", count: "9" }, imageModelProfile(model.id, [model])).count).toBe("1");
+    expect(action.includes('disabled=""')).toBe(count < 2 || count > 4);
 }));
 
 test.each([1, 2, 4, 5])("Blend Config node with %i references cannot assemble a prompt or fan out old counts", count => configured(() => {

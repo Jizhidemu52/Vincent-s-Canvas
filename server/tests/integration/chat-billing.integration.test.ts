@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
+import { createConnection, type Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import express, { type ErrorRequestHandler } from "express";
 import type { Database } from "../../src/db";
@@ -105,15 +106,36 @@ integration("isolated PostgreSQL chat billing", () => {
 
     test("real HTTP chat route uses persisted switch, captures success, returns failures and never resubmits an ID", async () => {
         let calls = 0;
-        let mode: "success" | "fail" | "empty" | "stream" | "incomplete" = "success";
+        let mode: "success" | "fail" | "empty" | "stream" | "incomplete" | "json-failed" | "json-incomplete" | "item-incomplete" | "tool" | "stream-tool" | "stream-error" | "stream-hold" = "success";
+        let onProviderCall: (() => Promise<void>) | null = null;
+        const heldStream: { finish?: () => void } = {};
+        let lastProviderInput: unknown;
         const providerApp = express();
-        providerApp.post(["/responses", "/v1/messages"], (_request, response) => {
+        providerApp.use(express.json());
+        providerApp.post(["/responses", "/v1/messages"], async (request, response) => {
             calls++;
+            lastProviderInput = request.body.input;
+            if (onProviderCall) { const action = onProviderCall; onProviderCall = null; await action(); }
             if (mode === "fail") { response.status(503).json({ error: "fixture failure" }); return; }
-            if (mode === "stream" || mode === "incomplete") {
+            if (mode === "json-failed" || mode === "json-incomplete") {
+                response.json({ status: mode === "json-failed" ? "failed" : "incomplete", output_text: "partial fixture answer" }); return;
+            }
+            if (mode === "item-incomplete") {
+                response.json({ status: "completed", output: [{ type: "message", status: "incomplete", content: [{ type: "output_text", text: "partial fixture answer" }] }] }); return;
+            }
+            if (mode === "tool") {
+                response.json({ status: "completed", output: [{ type: "function_call", status: "completed", call_id: "fixture-call", name: "canvas_get_state", arguments: "{}" }] }); return;
+            }
+            if (["stream", "incomplete", "stream-tool", "stream-error", "stream-hold"].includes(mode)) {
                 response.setHeader("content-type", "text/event-stream");
-                response.write('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"fixture answer"}}\n\n');
-                if (mode === "stream") response.write('data: {"type":"message_stop"}\n\n');
+                response.write(mode === "stream-tool"
+                    ? 'data: {"type":"content_block_start","content_block":{"type":"tool_use","id":"fixture-tool","name":"canvas_get_state","input":{}}}\n\n'
+                    : 'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"fixture answer"}}\n\n');
+                if (mode === "stream-hold") {
+                    heldStream.finish = () => { response.end('data: {"type":"message_stop"}\n\n'); }; return;
+                }
+                if (mode === "stream-error") response.write('data: {"type":"error","error":{"type":"overloaded_error","message":"fixture error"}}\n\n');
+                if (mode !== "incomplete") response.write('data: {"type":"message_stop"}\n\n');
                 response.end(); return;
             }
             response.json({ output_text: mode === "empty" ? "" : "fixture answer" });
@@ -122,15 +144,21 @@ integration("isolated PostgreSQL chat billing", () => {
         await new Promise<void>(done => providerServer.once("listening", done));
         const encryptionKey = Buffer.alloc(32, 9).toString("base64");
         const userId = await actor(100);
+        let disconnectRequestId: string | null = null;
+        let disconnectedSocket: Socket | null = null;
         const app = express();
         app.use(express.json());
-        app.use((request, _response, next) => { Object.assign(request, { auth: { id: userId, role: "designer", departmentId: null } }); next(); });
+        app.use((request, response, next) => {
+            Object.assign(request, { auth: { id: userId, role: "designer", departmentId: null } });
+            if (request.body.requestId === disconnectRequestId) disconnectedSocket = request.socket;
+            next();
+        });
         app.use("/chat", createChatRouter(db, { AUTH_ENABLED: "true", PROVIDER_ENCRYPTION_KEY: encryptionKey } as never));
         app.use(((error, _request, response, _next) => response.status(error.code === "CHAT_REQUEST_ALREADY_SUBMITTED" ? 409 : error.code === "P0001" ? 500 : 400).json({ code: error.code })) as ErrorRequestHandler);
         const server = app.listen(0, "127.0.0.1");
         await new Promise<void>(done => server.once("listening", done));
         const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-        const post = (requestId = randomUUID(), stream = false) => fetch(`${base}/chat/responses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId, modelId: execution.modelConfigId, toolKey: "gpt-chat", input: [{ role: "user", content: "test only" }], ...(stream ? { claude: { stream: true } } : {}) }) });
+        const post = (requestId = randomUUID(), stream = false, input: unknown[] = [{ role: "user", content: "test only" }], signal?: AbortSignal) => fetch(`${base}/chat/responses`, { method: "POST", signal, headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId, modelId: execution.modelConfigId, toolKey: "gpt-chat", input, ...(stream ? { claude: { stream: true } } : {}) }) });
         try {
             await db.query("UPDATE providers SET base_url=$1,encrypted_credentials=$2 WHERE id=(SELECT provider_id FROM model_configs WHERE id=$3)", [`http://127.0.0.1:${(providerServer.address() as { port: number }).port}`, encryptSecret(JSON.stringify({ apiKey: "fixture-only" }), encryptionKey), execution.modelConfigId]);
             await db.query("INSERT INTO tool_api_configurations(tool_key,model_config_id,credit_cost_override,rmb_cost_override) VALUES('gpt-chat',$1,7,0) ON CONFLICT(tool_key) DO UPDATE SET model_config_id=$1,credit_cost_override=7,rmb_cost_override=0", [execution.modelConfigId]);
@@ -179,7 +207,68 @@ integration("isolated PostgreSQL chat billing", () => {
                 expect(entries.rows.map(row => row.entry_type)).toEqual(["hold", "release"]);
             }
             await database.exec("DROP TRIGGER fail_chat_audit_fixture ON audit_logs; DROP FUNCTION fail_chat_audit_fixture();");
+
+            await db.query("UPDATE providers SET protocol='openai'");
+            for (const failedMode of ["json-failed", "json-incomplete", "item-incomplete"] as const) {
+                mode = failedMode;
+                const failedId = randomUUID();
+                expect((await post(failedId)).status).toBe(400);
+                expect(await balance(userId)).toBe(86);
+                expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [`chat:${userId}:${failedId}`])).rows[0].status).toBe("released");
+            }
+            // A tool plan and the following model answer are distinct billable calls.
+            mode = "tool";
+            expect((await (await post()).json()).toolCalls).toHaveLength(1);
+            expect(await balance(userId)).toBe(79);
+            mode = "success";
+            const continuation = [{ type: "function_call", call_id: "fixture-call", name: "canvas_get_state", arguments: "{}" }, { type: "function_call_output", call_id: "fixture-call", output: "fixture state" }];
+            expect((await post(randomUUID(), false, continuation)).status).toBe(200);
+            expect(lastProviderInput).toEqual(continuation);
+            expect(await balance(userId)).toBe(72);
+
+            // Configuration changes during an admitted call affect only the next
+            // request: the in-flight hold still captures its original seven credits.
+            const snapshotId = randomUUID();
+            onProviderCall = async () => {
+                await db.query("UPDATE credit_policy SET credits_enabled=false");
+                await db.query("UPDATE tool_api_configurations SET credit_cost_override=19 WHERE tool_key='gpt-chat'");
+            };
+            expect((await post(snapshotId)).status).toBe(200);
+            expect(await balance(userId)).toBe(65);
+            expect((await db.query("SELECT status,credits FROM credit_reservations WHERE request_id=$1", [`chat:${userId}:${snapshotId}`])).rows).toEqual([{ status: "captured", credits: 7 }]);
+            expect((await post()).status).toBe(200); expect(await balance(userId)).toBe(65);
+            await db.query("UPDATE credit_policy SET credits_enabled=true");
+            await db.query("UPDATE tool_api_configurations SET credit_cost_override=7 WHERE tool_key='gpt-chat'");
+
+            await db.query("UPDATE providers SET protocol='anthropic'");
+            mode = "stream-tool";
+            expect(await (await post(randomUUID(), true)).text()).toContain('"tool_use"');
+            expect(await balance(userId)).toBe(58);
+            mode = "stream-error";
+            expect(await (await post(randomUUID(), true)).text()).toContain("event: error");
+            expect(await balance(userId)).toBe(58);
+
+            mode = "stream-hold";
+            const cancelledId = randomUUID();
+            disconnectRequestId = cancelledId;
+            await new Promise<void>((done, reject) => {
+                const socket = createConnection({ host: "127.0.0.1", port: (server.address() as { port: number }).port });
+                const body = JSON.stringify({ requestId: cancelledId, modelId: execution.modelConfigId, toolKey: "gpt-chat", input: [{ role: "user", content: "disconnect fixture" }], claude: { stream: true } });
+                socket.on("connect", () => socket.write(`POST /chat/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`));
+                socket.on("data", chunk => {
+                    if (chunk.toString().includes("fixture answer")) { socket.destroy(); done(); }
+                });
+                socket.on("error", reject);
+            });
+            expect(await balance(userId)).toBe(51);
+            for (let attempt = 0; attempt < 100 && disconnectedSocket!.remoteAddress && !disconnectedSocket!.destroyed; attempt++) await new Promise(done => setTimeout(done, 10));
+            expect(!disconnectedSocket!.remoteAddress || disconnectedSocket!.destroyed).toBe(true);
+            heldStream.finish!();
+            for (let attempt = 0; attempt < 100 && await balance(userId) !== 58; attempt++) await new Promise(done => setTimeout(done, 10));
+            expect(await balance(userId)).toBe(58);
+            expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [`chat:${userId}:${cancelledId}`])).rows[0].status).toBe("released");
         } finally {
+            heldStream.finish?.();
             await Promise.all([server, providerServer].map(item => new Promise<void>(done => { item.close(() => done()); item.closeAllConnections(); })));
         }
     });

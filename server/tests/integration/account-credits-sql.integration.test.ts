@@ -64,6 +64,9 @@ sqlTest("account credit HTTP routes persist exact balances, idempotency and atom
     const change = (method: "PUT" | "POST", body: unknown, userId = designerId, actor: string | null = adminId) => fetch(`${base}/api/admin/accounts/${userId}/credits`, {
       method, headers: { "content-type": "application/json", ...(actor ? { "x-fixture-actor": actor } : {}) }, body: JSON.stringify(body),
     });
+    const patch = (body: unknown, userId = designerId, actor = adminId) => fetch(`${base}/api/admin/accounts/${userId}`, {
+      method: "PATCH", headers: { "content-type": "application/json", "x-fixture-actor": actor }, body: JSON.stringify(body),
+    });
     const state = async () => (await query("SELECT credit_balance,credit_limit,monthly_credit_limit,temporary_credit_adjustment FROM users WHERE id=$1", [designerId])).rows[0];
     const set = { requestId: "sql-set-balance", balance: 500, reason: "分配本月额度" };
     const assigned = await change("PUT", set);
@@ -93,6 +96,13 @@ sqlTest("account credit HTTP routes persist exact balances, idempotency and atom
     expect((await change("PUT", set, secondDesignerId, departmentAdminId)).status).toBe(403);
     expect((await change("PUT", { ...set, requestId: "sql-dept-permitted", balance: 520 }, designerId, departmentAdminId)).status).toBe(200);
     expect(await state()).toEqual({ credit_balance: 520, credit_limit: 550, monthly_credit_limit: 100, temporary_credit_adjustment: 440 });
+    expect((await patch({ monthlyCreditLimit: 200 }, secondDesignerId, departmentAdminId)).status).toBe(403);
+    expect((await patch({ monthlyCreditLimit: 200 }, designerId, designerId)).status).toBe(403);
+    expect((await patch({ monthlyCreditLimit: 200 }, adminId)).status).toBe(403);
+    expect((await patch({ role: "department_admin" }, designerId, departmentAdminId)).status).toBe(403);
+    expect((await patch({ departmentId: null }, designerId, departmentAdminId)).status).toBe(403);
+    expect((await patch({ monthlyCreditLimit: 100 }, designerId, departmentAdminId)).status).toBe(200);
+    expect(await state()).toEqual({ credit_balance: 520, credit_limit: 550, monthly_credit_limit: 100, temporary_credit_adjustment: 440 });
     // Failure at the final audit write must roll back BOTH the ledger and balance.
     await database.exec("CREATE FUNCTION reject_fixture_credit_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.detail->>'requestId'='sql-audit-failure' THEN RAISE EXCEPTION 'Fixture audit unavailable'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_fixture_credit_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_fixture_credit_audit();");
     expect((await change("PUT", { ...set, requestId: "sql-audit-failure", balance: 999 })).status).toBe(500);
@@ -109,8 +119,33 @@ sqlTest("account credit HTTP routes persist exact balances, idempotency and atom
     expect((await change("PUT", { ...set, requestId: "sql-new-month-set", balance: 40 })).status).toBe(200);
     expect(await state()).toEqual({ credit_balance: 40, credit_limit: 100, monthly_credit_limit: 100, temporary_credit_adjustment: -60 });
     expect((await query("SELECT id FROM credit_ledger WHERE user_id=$1 AND entry_type='monthly_reset'", [designerId])).rows).toHaveLength(1);
+    // A previous-month absolute request must never reapply its value after rollover.
+    expect((await change("PUT", set)).status).toBe(200);
+    expect((await state()).credit_balance).toBe(40);
+    expect((await query("SELECT id FROM credit_ledger WHERE request_id=$1", [set.requestId])).rows).toHaveLength(1);
     expect((await change("PUT", { ...set, requestId: "sql-zero-balance", balance: 0 })).status).toBe(200);
     expect((await state()).credit_balance).toBe(0);
+    const list = (actor = adminId) => fetch(`${base}/api/admin/accounts`, { headers: { "x-fixture-actor": actor } });
+    // Administrator adjustments (including setting zero) are not consumption.
+    expect((await (await list()).json()).totalUsedCredits).toBe(0);
+    const group = await query("INSERT INTO designer_groups(department_id,name,code) VALUES($1,'Usage fixture','usage-fixture') RETURNING id", [departmentId]);
+    for (const [requestId, userId, status, credits, groupCredits] of [
+      ["usage-personal", designerId, "captured", 15, 0],
+      ["usage-shared", designerId, "captured", 10, 8],
+      ["usage-other-department", secondDesignerId, "captured", 17, 0],
+      ["usage-department-admin", departmentAdminId, "captured", 19, 0],
+      ["usage-super-admin", adminId, "captured", 21, 0],
+      ["usage-held", designerId, "held", 23, 0],
+      ["usage-released", designerId, "released", 29, 0],
+    ] as const) {
+      await query(`INSERT INTO credit_reservations(request_id,user_id,operation_type,quantity,credits,personal_credits,group_credits,group_id,group_period_start,rmb_cost,price_snapshot,status)
+        VALUES($1,$2,'image_generation',1,$3,$4,$5,$6,CASE WHEN $5>0 THEN date_trunc('month',timezone('Asia/Shanghai',now()))::date END,0,'{}'::jsonb,$7)`,
+        [requestId, userId, credits, credits - groupCredits, groupCredits, groupCredits ? group.rows[0].id : null, status]);
+    }
+    expect((await (await list()).json()).totalUsedCredits).toBe(82);
+    const departmentUsage = await (await list(departmentAdminId)).json();
+    expect(departmentUsage.totalUsedCredits).toBe(25);
+    expect(departmentUsage.users.map((user: { id: string }) => user.id)).toEqual([designerId]);
   } finally {
     if (server) await new Promise<void>(done => { server!.close(() => done()); server!.closeAllConnections(); });
     await database.close();

@@ -31,6 +31,6 @@ export function UsageCollectionNotice({ compact = false }: { compact?: boolean }
     if (status !== "authenticated" || user?.status !== "active") return null;
     const text = deploymentFeatures.oaLoginEnabled
         ? "记录业务访问、控件操作和受限参数；不录屏、不采集键入内容或密钥。正式提交的提示词由业务服务保存。仅超级管理员可查看明细。"
-        : "常用板块仅按本账户在此浏览器的访问次数排序；当前试用环境不上报操作记录。";
+        : "常用板块仅按本账户在此浏览器的访问次数排序；未启用企业 OA，不上报操作记录。";
     return <p data-usage-ignore className={compact ? "max-w-64 text-[10px] leading-4 text-stone-500" : "px-2 text-[10px] leading-4 text-stone-500"} title={text}>{text}{unavailable ? " 本地存储不可用，部分记录可能无法保留。" : ""}</p>;
 }

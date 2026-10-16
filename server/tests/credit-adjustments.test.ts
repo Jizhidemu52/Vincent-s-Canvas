@@ -10,6 +10,7 @@ function fixture() {
     statements.push(sql);
     if (sql.includes("FROM users")) return { rows: [{ ...user }] };
     if (sql.includes("FROM credit_ledger")) return { rows: [ledger.get(String(values[0]))].filter(Boolean) };
+    if (sql.includes("FROM credit_reservations")) return { rows: [{ credits: "0" }] };
     if (sql.startsWith("UPDATE users")) {
       user.credit_balance = Number(values[0]);
       user.credit_limit = Number(values[1]);

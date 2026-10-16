@@ -16,6 +16,7 @@ export async function loadAdminOverview() {
     const errors = [accounts, departments, audit, history].flatMap((result, index) => result.status === "rejected" ? [`${["账号", "部门", "审计", "成本统计"][index]}：${result.reason instanceof Error ? result.reason.message : "加载失败"}`] : []);
     return {
         accounts: accounts.status === "fulfilled" ? accounts.value.users : undefined,
+        totalUsedCredits: accounts.status === "fulfilled" ? accounts.value.totalUsedCredits : undefined,
         departments: departments.status === "fulfilled" ? departments.value.departments : undefined,
         auditLogs: audit.status === "fulfilled" ? audit.value.auditLogs : undefined,
         totalCost: history.status === "fulfilled" ? history.value.totalRmbCost : undefined,

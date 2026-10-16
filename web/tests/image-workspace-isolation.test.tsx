@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import React, { type DependencyList, type EffectCallback, type ReactElement } from "react";
 import ts from "typescript";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import * as referencePolicy from "@/lib/image-reference-policy";
 
 const pageUrl = new URL("../src/pages/image/index.tsx", import.meta.url);
 const requireModule = createRequire(pageUrl);
@@ -34,6 +35,12 @@ function elements(node: unknown): ReactElement<any>[] {
     return [element, ...elements(element.props.children)];
 }
 
+function textContent(node: unknown): string {
+    if (Array.isArray(node)) return node.map(textContent).join("");
+    if (React.isValidElement(node)) return textContent((node as ReactElement<any>).props.children);
+    return typeof node === "string" || typeof node === "number" ? String(node) : "";
+}
+
 function deferred<T>() {
     let resolve!: (value: T) => void;
     const promise = new Promise<T>(done => { resolve = done; });
@@ -41,7 +48,7 @@ function deferred<T>() {
 }
 
 /** Per-instance hook state, effect cleanup, and keyed reconciliation without process-global mocks. */
-function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]>) {
+function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]>, models: Parameters<typeof imageModelProfile>[1] = [{ id: "test-model", modelId: "test-model", name: "Test model", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 }]) {
     type Frame = { values: any[]; effects: Array<{ dependencies?: DependencyList; cleanup?: ReturnType<EffectCallback> }>; pending: Array<() => void>; cursor: number; mounted: boolean };
     const frame = (): Frame => ({ values: [], effects: [], pending: [], cursor: 0, mounted: true });
     const wrapper = frame();
@@ -56,6 +63,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     let sequence = 0;
     const requests: Array<{ kind: string; args: any[] }> = [];
     const errors: string[] = [];
+    const warnings: string[] = [];
     const delayedMedia = new Map<string, Promise<string>>();
     const stored = new Map(initial.map(log => [log.id, structuredClone(log)]));
     const config: Record<string, any> = { model: "test-model", imageModel: "test-model", quality: "standard", size: "1024x1024", count: "1" };
@@ -78,7 +86,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         owner.mounted = false;
         owner.effects.forEach(effect => effect.cleanup?.());
     };
-    const message = { success() {}, info() {}, warning() {}, error: (error: string) => errors.push(error) };
+    const message = { success() {}, info() {}, warning: (warning: string) => warnings.push(warning), error: (error: string) => errors.push(error) };
     const app = { message, modal: { confirm() {} } };
     const updateConfig = (key: string, value: unknown) => { config[key] = value; };
     const configState = { config, updateConfig, openConfigDialog() {} };
@@ -125,7 +133,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         },
         "@/stores/use-user-store": { useUserStore: Object.assign((select: Function) => select(userState()), { getState: userState }) },
         "@/stores/use-theme-store": { useThemeStore: (select: Function) => select({ theme: "light" }) },
-        "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ models: [{ id: "test-model", modelId: "test-model", capabilities: ["generate", "edit"] }], estimate: () => ({ configured: true, credits: 0 }) }) },
+        "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ models, estimate: () => ({ configured: true, credits: 0 }) }) },
         "@/stores/use-asset-store": { useAssetStore: (select: Function) => select({ addAsset() {} }) },
         "@/hooks/use-workbench-field": { useWorkbenchField: (_key: string, initialValue: unknown) => useState(initialValue) },
         "@/hooks/use-image-copy-editor": { useImageCopyEditor: () => ({ node: null }) },
@@ -133,7 +141,8 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         "@/hooks/use-tool-config": { useToolConfig: (value: typeof config) => value },
         "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: false, oaLoginEnabled: false } },
         "@/lib/canvas-theme": { canvasThemes: { light: {} } },
-        "@/lib/image-model-settings": { useImageModelProfile: (model: string) => imageModelProfile(model, [], "designer"), normalizeImageModelSettings },
+        "@/lib/image-model-settings": { useImageModelProfile: (model: string) => imageModelProfile(model, models, "designer"), normalizeImageModelSettings },
+        "@/lib/image-reference-policy": { ...referencePolicy, validateImageReferences: (model: string, references: Parameters<typeof referencePolicy.validateImageReferences>[1], profile?: Parameters<typeof referencePolicy.validateImageReferences>[2]) => referencePolicy.validateImageReferences(model, references, profile ?? imageModelProfile(model, models, "designer")) },
         "@/lib/submission-gate": { workbenchSubmissions: { acquire: () => () => undefined } },
         "@/services/api/image": { requestGeneration: (...args: any[]) => request("generate", args), requestEdit: (...args: any[]) => request("edit", args) },
         "@/services/image-storage": {
@@ -184,7 +193,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     const unmount = () => { cleanup(workspace); cleanup(wrapper); };
     disposers.push(unmount);
     return {
-        boundary, render, stored, requests, errors, config,
+        boundary, render, stored, requests, errors, warnings, config,
         navigate(tool: string, query = "") { params = new URLSearchParams(`tool=${tool}${query ? `&${query}` : ""}`); },
         setOwner(value: string) { ownerId = value; },
         setCreative(value?: object) { creativePreset = value; },
@@ -461,5 +470,63 @@ describe("image workspace isolation", () => {
         expect(page.requests).toHaveLength(1);
         expect(page.requests[0]!.args[0].count).toBe("1");
         expect(page.errors).toEqual([]);
+    });
+});
+
+describe("Blend entry semantics", () => {
+    const references = (count: number) => Array.from({ length: count }, (_, index) => ({ id: `blend-${index}`, name: `reference-${index}.png`, type: "image/png", dataUrl: `https://fixture.invalid/${index}.png` }));
+
+    test.each([0, 1, 2, 4, 5])("unconfigured Blend with %i references keeps no-prompt copy and exact limits without submitting", async count => {
+        const page = pageHarness([], undefined, []);
+        page.navigate("midjourney-blend");
+        page.references().onChange(references(count));
+        const tree = page.render();
+        expect(elements(tree).some(element => element.type === "TextArea")).toBe(false);
+        expect(textContent(tree)).toContain("上传参考图，开始多图融合");
+        expect(textContent(tree)).toContain("在左侧上传 2–4 张参考图");
+        expect(textContent(tree)).not.toContain("第一张作品，从一句描述开始");
+        expect(textContent(tree)).not.toContain("至少一张参考图");
+        expect(page.references().validation).toMatchObject({ minimum: 2, maximum: 4, valid: count >= 2 && count <= 4 });
+        expect(page.generate().disabled).toBe(true);
+        page.generate().onClick();
+        await page.settle();
+        expect(page.requests).toEqual([]);
+        expect(page.errors).not.toContain("请输入生图提示词");
+        if (count === 2 || count === 4) expect(page.warnings).toContain("当前没有可用模型，请联系管理员统一配置模型和 API");
+    });
+
+    test.each([1, 2, 4, 5])("configured Blend with %i references enforces limits and submits no-prompt generation only", async count => {
+        const page = pageHarness([], async () => [{ id: "blended", dataUrl: "data:image/png;base64,YQ==" }], [
+            { id: "opaque-blend", modelId: "opaque-blend", name: "Blend fixture", imageParameterProfile: "blend", capabilities: ["generate"], creditCost: 0, rmbCost: 0 },
+        ]);
+        page.navigate("midjourney-blend");
+        page.references().onChange(references(count));
+        const allowed = count >= 2 && count <= 4;
+        expect(page.generate().disabled).toBe(!allowed);
+        expect(page.references().validation).toMatchObject({ minimum: 2, maximum: 4, valid: allowed });
+        expect(elements(page.render()).some(element => element.type === "TextArea")).toBe(false);
+        page.generate().onClick();
+        await page.settle();
+        expect(page.requests).toHaveLength(allowed ? 1 : 0);
+        if (allowed) {
+            expect(page.requests[0]!.kind).toBe("generate");
+            expect(page.requests[0]!.args[2]).toEqual({ operationType: "image_generation", tool: "midjourney-blend" });
+            expect(page.requests[0]!.args[3]).toHaveLength(count);
+            expect(page.errors).toEqual([]);
+        } else expect(page.errors).toContain("当前合成模型需要 2–4 张参考图。");
+    });
+
+    test("ordinary image and edit entries retain prompt and single-reference guidance", () => {
+        const page = pageHarness();
+        expect(textContent(page.render())).toContain("第一张作品，从一句描述开始");
+        expect(page.generate().disabled).toBe(true);
+        page.prompt().onChange({ target: { value: "A normal image prompt" } });
+        expect(page.generate().disabled).toBe(false);
+        page.navigate("image-edit");
+        expect(textContent(page.render())).toContain("至少一张参考图");
+        page.prompt().onChange({ target: { value: "A normal edit prompt" } });
+        page.references().onChange(references(1));
+        expect(page.generate().disabled).toBe(false);
+        expect(page.references().validation).toMatchObject({ minimum: 0, maximum: 16, valid: true });
     });
 });

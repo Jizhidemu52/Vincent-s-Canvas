@@ -71,13 +71,13 @@ export function estimateServerUsage(config: BusinessConfig, input: { operationTy
     const model = input.toolKey ? resolveToolModel(config, input.toolKey, input.modelId) : findModel(config, input.modelId);
     const available = input.toolKey ? tool?.enabled !== false && Boolean(model) : !input.modelId || Boolean(model);
     if (!available) return { credits: 0, rmbCost: 0, configured: false };
-    if (input.operationType === "chat") return { credits: 0, rmbCost: 0, configured: true };
     const credits = tool?.creditCostOverride ?? ((price?.credits ?? 0) + (model?.creditCost ?? 0));
     const rmbCost = tool?.rmbCostOverride ?? ((price?.rmbCost ?? 0) + (model?.rmbCost ?? 0));
     return {
         credits: deploymentFeatures.creditsEnabled ? credits * quantity : 0,
         rmbCost: Math.round(rmbCost * quantity * 10_000) / 10_000,
-        configured: !deploymentFeatures.creditsEnabled || Boolean(price) || tool?.creditCostOverride != null,
+        configured: !deploymentFeatures.creditsEnabled || input.operationType === "chat" || Boolean(price)
+            || (tool?.creditCostOverride != null && tool?.rmbCostOverride != null),
     };
 }
 
@@ -90,6 +90,7 @@ export function resolveToolModel(config: BusinessConfig, toolKey: string, reques
     const tool = config.tools.find((item) => item.toolKey === toolKey);
     if (tool?.enabled === false) return undefined;
     const definition = getToolDefinition(toolKey);
+    if (definition?.parent && config.tools.some(item => item.toolKey === definition.parent && !item.enabled)) return undefined;
     if (!tool && !definition) return undefined;
     const capabilities = tool?.capabilities ?? definition?.capabilities;
     const compatible = (model: PublicModel) => !capabilities?.length || capabilities.some((capability) => model.capabilities.includes(capability));

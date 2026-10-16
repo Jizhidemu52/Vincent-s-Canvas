@@ -1240,10 +1240,18 @@ integration("production identity and RBAC", () => {
 
       const duplicateTemporary = await api<{ user: { creditBalance: number } }>(
         `/api/admin/accounts/${designerA.id}/credits`,
+        { method: "POST", body: JSON.stringify({ requestId: temporaryRequestId, amount: 500, reason: "本月临时项目补贴" }) },
+        admin.cookie,
+      );
+      expect(duplicateTemporary.response.status).toBe(200);
+      expect(duplicateTemporary.body.user.creditBalance).toBe(1500);
+      const conflictingTemporary = await api<{ error: string }>(
+        `/api/admin/accounts/${designerA.id}/credits`,
         { method: "POST", body: JSON.stringify({ requestId: temporaryRequestId, amount: 500, reason: "重复提交" }) },
         admin.cookie,
       );
-      expect(duplicateTemporary.body.user.creditBalance).toBe(1500);
+      expect(conflictingTemporary.response.status).toBe(409);
+      expect(conflictingTemporary.body.error).toBe("CREDIT_REQUEST_CONFLICT");
 
       await database.query(
         `UPDATE users SET credit_period_start=(date_trunc('month', timezone('Asia/Shanghai', now())) - interval '1 month')::date

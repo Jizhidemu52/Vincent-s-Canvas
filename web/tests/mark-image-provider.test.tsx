@@ -130,6 +130,7 @@ test("first configuration groups every registered image, text, video and blend m
         const tree = await panel.settle();
         expect(panel.form.values.baseUrl).toBe(MARK_IMAGE_BASE_URL);
         expect(MARK_PLATFORM_MODELS).toHaveLength(10);
+        expect(tree.some(element => element.type === "Tag" && Array.isArray(element.props.children) && element.props.children.join("") === "6 图片 · 2 文字 · 1 视频 · 1 多图融合")).toBe(true);
         expect(panel.form.values.models).toEqual(MARK_PLATFORM_MODELS.map(model => ({ enabled: model.defaultEnabled, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 })));
         expect(MARK_PLATFORM_MODELS.filter(model => !model.defaultEnabled).map(model => model.modelId)).toEqual(["grok-imagine-image-2.0"]);
         expect(MARK_PLATFORM_MODELS.at(-1)?.modelId).toBe("claude-sonnet-5-5");
@@ -239,12 +240,13 @@ test("text billing and concurrency controls are disabled and disclosed while sav
         const tree = await panel.settle();
         const inputs = tree.filter(element => element.type === "InputNumber");
         const textModelName = existing.models[textIndex]!.name;
-        expect(inputs.filter(element => element.props.disabled).map(element => element.props["aria-label"])).toEqual([
-            `${textModelName} 站内积分`, `${textModelName} 内部成本`, `${textModelName} 并发上限`,
-        ]);
-        expect(inputs.filter(element => !element.props.disabled)).toHaveLength((MARK_PLATFORM_MODELS.length - 1) * 3);
+        const textModels = MARK_PLATFORM_MODELS.filter(model => model.capabilities.some(capability => capability === "chat"));
+        expect(inputs.filter(element => element.props.disabled).map(element => element.props["aria-label"])).toEqual(textModels.flatMap(model => [
+            `${model.name} 站内积分`, `${model.name} 内部成本`, `${model.name} 并发上限`,
+        ]));
+        expect(inputs.filter(element => !element.props.disabled)).toHaveLength((MARK_PLATFORM_MODELS.length - textModels.length) * 3);
         expect(tree.find(element => element.type === "Switch" && element.props["aria-label"] === `启用 ${textModelName}`)?.props.disabled).not.toBe(true);
-        expect(tree.some(element => element.type === "Text" && element.props.children === "文字模型当前仅配置接入与开关；站内计费/并发限制尚未执行，供应商仍按实际请求计费。")).toBe(true);
+        expect(tree.some(element => element.type === "Text" && typeof element.props.children === "string" && element.props.children.includes("对话积分请在“板块 API 配置”中设置"))).toBe(true);
         await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
         expect(panel.writes[0].models[textIndex]).toEqual({ modelId: "gpt-6-astra", enabled: true, creditCost: 9, rmbCost: 0.1234, concurrencyLimit: 7 });
     } finally { panel.dispose(); }

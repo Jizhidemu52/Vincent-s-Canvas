@@ -51,8 +51,9 @@ sqlTest("credit policy is authorized, durable and read on every new task without
     await query("UPDATE module_flags SET enabled=true WHERE module_key='image'");
     const db = { query, connect: async () => ({ query, release() {} }) } as unknown as Database;
     const queued: string[] = [];
+    let queueFails = false;
     // There is no worker and no network provider. Observe committed queue delivery only.
-    const cache = { zAdd: async (_key: string, item: { value: string }) => { queued.push(item.value); return 1; } } as unknown as Cache;
+    const cache = { zAdd: async (_key: string, item: { value: string }) => { if (queueFails) throw new Error("Fixture queue unavailable"); queued.push(item.value); return 1; } } as unknown as Cache;
     const app = express();
     app.use(express.json());
     app.use((request, response, next) => {
@@ -159,6 +160,65 @@ sqlTest("credit policy is authorized, durable and read on every new task without
     expect(repeatedBody).not.toHaveProperty("user_id");
     expect((await query("SELECT id FROM credit_reservations WHERE request_id=$1", [reservedInput.requestId])).rows).toHaveLength(1);
     expect(await balance()).toBe(1000);
+    await database.exec("DROP TRIGGER reject_fixture_policy_audit ON audit_logs; DROP FUNCTION reject_fixture_policy_audit();");
+    expect((await setPolicy(true)).status).toBe(200);
+    const batchBody = (requestId: string) => ({ ...taskBody(requestId), items: [{ sourceUrls: ["fixture-only.png"] }] });
+    const victim = await submit("policy-batch-collision:0");
+    expect(victim.status).toBe(201);
+    const victimTask = (await victim.json()).task;
+    const foreignBatch = await request("/api/tasks/batch", "POST", batchBody("policy-batch-collision"), adminId);
+    expect(foreignBatch.status).toBe(400);
+    expect((await foreignBatch.json()).error).toBe("DUPLICATE_REQUEST");
+    expect((await query("SELECT status,credits FROM tasks WHERE id=$1", [victimTask.id])).rows).toEqual([{ status: "waiting", credits: 13 }]);
+    expect((await query("SELECT task_id FROM generation_history WHERE task_id=$1", [victimTask.id])).rows).toEqual([]);
+    await settleReservation(db, "policy-batch-collision:0", "release");
+    expect(await balance()).toBe(1000);
+
+    // SQL commits before queue delivery. A queue outage must not rewrite a held
+    // task to a zero-price failure or leak its hold; retry can deliver the same ID.
+    queueFails = true;
+    const interruptedBatch = await request("/api/tasks/batch", "POST", batchBody("policy-queue-outage"), designerId);
+    expect(interruptedBatch.status).toBe(201);
+    const interruptedBody = await interruptedBatch.json();
+    expect(interruptedBody.tasks).toHaveLength(1);
+    expect(interruptedBody.failures).toHaveLength(1);
+    expect(interruptedBody.tasks[0]).toMatchObject({ status: "waiting", credits: 13 });
+    expect(await balance()).toBe(987);
+    expect((await query("SELECT status,credits FROM tasks WHERE request_id='policy-queue-outage:0'")).rows).toEqual([{ status: "waiting", credits: 13 }]);
+    queueFails = false;
+    const recoveredBatch = await request("/api/tasks/batch", "POST", batchBody("policy-queue-outage"), designerId);
+    expect(recoveredBatch.status).toBe(201);
+    expect((await recoveredBatch.json()).tasks[0].id).toBe(interruptedBody.tasks[0].id);
+    expect(await balance()).toBe(987);
+    expect((await query("SELECT id FROM credit_reservations WHERE request_id='policy-queue-outage:0'")).rows).toHaveLength(1);
+    await settleReservation(db, "policy-queue-outage:0", "release");
+    expect(await balance()).toBe(1000);
+
+    // Zero is an explicit free override; null inherits operation plus model.
+    await query("UPDATE tool_api_configurations SET credit_cost_override=0,configuration_version=configuration_version+1 WHERE tool_key='image'");
+    const zeroTask = await submit("policy-zero-override");
+    expect(zeroTask.status).toBe(201);
+    expect((await zeroTask.json()).task.credits).toBe(0);
+    expect(await balance()).toBe(1000);
+    await query("UPDATE tool_api_configurations SET credit_cost_override=NULL,configuration_version=configuration_version+1 WHERE tool_key='image'");
+    const operationPrice = (await query("SELECT credits FROM pricing_rule_versions WHERE operation_type='image_generation' AND status='published'")).rows[0].credits;
+    const inherited = await submit("policy-inherited-price");
+    expect(inherited.status).toBe(201);
+    const inheritedPrice = 99 + operationPrice;
+    expect((await inherited.json()).task.credits).toBe(inheritedPrice);
+    expect(await balance()).toBe(1000 - inheritedPrice);
+    await query("UPDATE tool_api_configurations SET credit_cost_override=23,configuration_version=configuration_version+1 WHERE tool_key='image'");
+    const changedPrice = await submit("policy-changed-price");
+    expect(changedPrice.status).toBe(201);
+    expect((await changedPrice.json()).task.credits).toBe(23);
+    const repeatedInherited = await submit("policy-inherited-price");
+    expect((await repeatedInherited.json()).task.credits).toBe(inheritedPrice);
+    expect((await query("SELECT price_snapshot->>'creditCostOverride' AS override,credits FROM credit_reservations WHERE request_id='policy-inherited-price'")).rows).toEqual([{ override: null, credits: inheritedPrice }]);
+    expect((await setPolicy(false)).status).toBe(200);
+    await settleReservation(db, "policy-inherited-price", "capture");
+    await settleReservation(db, "policy-changed-price", "release");
+    expect(await balance()).toBe(1000 - inheritedPrice);
+    expect((await query("SELECT status,credits FROM credit_reservations WHERE request_id='policy-inherited-price'")).rows).toEqual([{ status: "captured", credits: inheritedPrice }]);
   } finally {
     if (server) await new Promise<void>(done => { server!.close(() => done()); server!.closeAllConnections(); });
     await database.close();
