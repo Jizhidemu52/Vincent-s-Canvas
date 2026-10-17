@@ -30,8 +30,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { loadCanvasImageTools } from "@/lib/canvas/canvas-image-tool-loader";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
 import { canvasImageUsageInput } from "@/lib/canvas/canvas-image-usage";
-import { bindCanvasClipboardEvents } from "@/lib/canvas/canvas-system-clipboard";
-import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
+import { cloneCanvasNodeGraph, copyCanvasNodeGraph, type CanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { zoomViewportAtCanvasCenter } from "@/lib/canvas/canvas-viewport-interaction";
@@ -81,7 +80,7 @@ import { canvasImageBaseName, canvasImageExportStem, canvasImageVersion, canvasI
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
-import { getSharedConfigForTarget, getSharedConfigTargets, normalizeCanvasConnection } from "@/lib/canvas/canvas-shared-connections";
+import { getConfigImageInputs, getSharedConfigForTarget, getSharedConfigTargets, normalizeCanvasConnection } from "@/lib/canvas/canvas-shared-connections";
 import type { SharedGenerationExecution } from "./canvas-shared-generation-runtime";
 import { createCanvasBatchRenderIndex } from "@/lib/canvas/canvas-batch-motion";
 import { isCanvasBatchChildHidden, isCanvasBatchConnectionEndpointHidden } from "@/lib/canvas/canvas-batch-visibility";
@@ -115,7 +114,7 @@ import { createCanvasNodeMap, refreshCanvasNodeMap } from "@/lib/canvas/canvas-n
 import { canvasNodeHasImagePreview } from "@/lib/canvas/canvas-node-rendering";
 import { CANVAS_AGENT_PANEL_MOTION_MS } from "@/lib/canvas/canvas-agent-panel-constants";
 import { loadCanvasAssistantPanel, loadCanvasLocalAgentPanel } from "@/lib/canvas/canvas-agent-panel-loaders";
-import { loadCanvasConfigNodePanel, loadCanvasConfigComposer, loadCanvasNodePromptPanel, loadCanvasQuickGeneratePanel } from "@/lib/canvas/canvas-node-panel-loaders";
+import { loadCanvasConfigNodePanel, loadCanvasNodePromptPanel, loadCanvasQuickGeneratePanel } from "@/lib/canvas/canvas-node-panel-loaders";
 import { loadCanvasNodeHoverToolbar, loadCanvasNodeInfoModal } from "@/lib/canvas/canvas-node-hover-loaders";
 import {
     loadAssetPickerModal,
@@ -178,7 +177,6 @@ const CanvasNodeMaskEditDialog = lazy(loadCanvasNodeMaskEditDialog);
 const CanvasNodeSplitDialog = lazy(loadCanvasNodeSplitDialog);
 const CanvasNodeUpscaleDialog = lazy(loadCanvasNodeUpscaleDialog);
 const AssetPickerModal = lazy(loadAssetPickerModal);
-const CanvasConfigComposer = lazy(loadCanvasConfigComposer);
 const CanvasConfigNodePanel = lazy(loadCanvasConfigNodePanel);
 const CanvasNodePromptPanel = lazy(loadCanvasNodePromptPanel);
 const CanvasQuickGeneratePanel = lazy(loadCanvasQuickGeneratePanel);
@@ -189,7 +187,6 @@ const CanvasNodeHoverToolbar = lazy(loadCanvasNodeHoverToolbar);
 const CanvasNodeInfoModal = lazy(loadCanvasNodeInfoModal);
 
 type CanvasClipboard = {
-    token: string;
     nodes: CanvasNodeData[];
     connections: CanvasConnection[];
     groups?: CanvasNodeGroup[];
@@ -394,7 +391,6 @@ function WirelessCanvasPage() {
     const quickReferenceInputRef = useRef<HTMLInputElement>(null);
     const batchFilesInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
-    const clipboardRef = useRef<CanvasClipboard | null>(null);
     const historyRef = useRef<{ past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }>({ past: [], future: [] });
     const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
     const historyCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1800,13 +1796,11 @@ function WirelessCanvasPage() {
         const graph = copyCanvasNodeGraph(nodesRef.current, connectionsRef.current, groupsRef.current, selectedIds);
         if (!graph.nodes.length) return;
 
-        clipboardRef.current = { token: nanoid(), ...graph };
-        return { token: clipboardRef.current.token, text: graph.nodes.map(node => node.title).join("\n") };
+        return graph;
     }, []);
 
-    const pasteCopiedNodes = useCallback((token: string) => {
-        const clipboard = clipboardRef.current;
-        if (!clipboard?.nodes.length || clipboard.token !== token) return false;
+    const pasteCopiedNodes = useCallback((clipboard: CanvasNodeGraph) => {
+        if (!clipboard?.nodes.length) return false;
 
         const center = getCanvasCenter();
         const bounds = clipboard.nodes.reduce(
@@ -2312,19 +2306,44 @@ function WirelessCanvasPage() {
         });
     }, [createImageFileNode, getCanvasCenter, message, runLocalImageOperation]);
 
-    useEffect(() => bindCanvasClipboardEvents(window, {
-        copyNodes: copySelectedNodes,
-        pasteNodes: pasteCopiedNodes,
-        pasteImages: pasteSystemClipboard,
-        pasteText: createTextNodeFromClipboard,
-    }), [copySelectedNodes, pasteCopiedNodes, pasteSystemClipboard, createTextNodeFromClipboard]);
+    useEffect(() => {
+        let disposed = false;
+        let unbind: (() => void) | undefined;
+        void import("@/lib/canvas/canvas-system-clipboard").then(({ bindCanvasClipboardEvents, canvasCutBlockReason }) => {
+            if (disposed) return;
+            unbind = bindCanvasClipboardEvents(window, {
+                copyNodes: copySelectedNodes,
+                canCutNodes: () => {
+                    const reason = canvasCutBlockReason({
+                        nodes: nodesRef.current, connections: connectionsRef.current, selectedIds: selectedNodeIdsRef.current,
+                        requests: [...generationRequestsRef.current.values()], dispatchLocks: [...generationDispatchLocksRef.current],
+                    });
+                    if (reason) message.warning(reason);
+                    return !reason;
+                },
+                cutNodes: () => deleteNodes(new Set(selectedNodeIdsRef.current)),
+                pasteNodes: pasteCopiedNodes,
+                pasteImages: pasteSystemClipboard,
+                pasteText: createTextNodeFromClipboard,
+            });
+        }).catch(() => { if (!disposed) message.warning("剪贴板加载失败，请刷新后重试"); });
+        return () => { disposed = true; unbind?.(); };
+    }, [copySelectedNodes, pasteCopiedNodes, pasteSystemClipboard, createTextNodeFromClipboard, deleteNodes, message]);
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (shouldIgnoreCanvasShortcut(event, event.target)) return;
+            if (shouldIgnoreCanvasShortcut(event, event.target, true)) return;
 
             const key = event.key.toLowerCase();
             const isModifierShortcut = (event.metaKey || event.ctrlKey) && !event.altKey;
+
+            // Let the browser dispatch native copy/cut/paste (including screenshots).
+            if (isModifierShortcut && ["c", "x", "v"].includes(key)) return;
+            if (isModifierShortcut && key === "d" && !event.shiftKey) {
+                event.preventDefault();
+                if (!event.repeat) duplicateNodes(new Set(selectedNodeIdsRef.current));
+                return;
+            }
 
             if (isModifierShortcut && key === "g" && !event.shiftKey) {
                 event.preventDefault();
@@ -2380,7 +2399,7 @@ function WirelessCanvasPage() {
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [cancelSelectionPreview, commitSelectedNodeIds, createSelectedGroup, deleteConnection, deleteNodes, redoCanvas, selectedConnectionId, setConnecting, undoCanvas]);
+    }, [cancelSelectionPreview, commitSelectedNodeIds, createSelectedGroup, deleteConnection, deleteNodes, duplicateNodes, redoCanvas, selectedConnectionId, setConnecting, undoCanvas]);
 
     const handleConnectStart = useCallback(
         (event: ReactMouseEvent, nodeId: string, handleType: "source" | "target") => {
@@ -3615,8 +3634,13 @@ function WirelessCanvasPage() {
                     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content && !sourceNode?.metadata?.storageKey;
                     const savedReferences = !shared && sourceNode ? resolveCanvasNodeImageReferences(sourceNode, nodesRef.current, connectionsRef.current) : [];
                     const referenceImages = savedReferences.length ? savedReferences : generationContext.referenceImages;
-                    const toolKey = shared?.toolKey || canvasToolKey(mode, referenceImages.length > 0, imageModelProfile(generationConfig.model).kind);
-                    if (!shared) generationConfig = currentToolConfig(generationConfig, toolKey);
+                    let toolKey = shared?.toolKey;
+                    if (!shared) {
+                        const { resolveCanvasImageConfig } = await import("@/lib/canvas/canvas-generation-model");
+                        const resolved = resolveCanvasImageConfig(generationConfig, useBusinessConfigStore.getState(), referenceImages.length > 0);
+                        generationConfig = resolved.config;
+                        toolKey = resolved.toolKey;
+                    }
                     const profile = imageModelProfile(generationConfig.model);
                     const effectivePrompt = profile.requiresPrompt ? generationContext.prompt.trim() : "";
                     generationConfig = { ...generationConfig, ...normalizeImageModelSettings(generationConfig, profile), canvasImageCount: "1" };
@@ -3636,6 +3660,13 @@ function WirelessCanvasPage() {
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
                     const gap = 96;
                     const rowGap = 36;
+                    const outputPosition = isEmptyImageNode ? parentPosition : placeCanvasImageOutputs(
+                        nodesRef.current,
+                        shared ? [shared.plan.configNode, shared.plan.targetNode] : sourceNode ? [sourceNode] : [],
+                        imageConfig,
+                        { x: parentPosition.x + parentConfig.width + gap + imageConfig.width / 2, y: parentPosition.y + parentConfig.height / 2 },
+                        gap,
+                    );
                     const rootId = isEmptyImageNode ? nodeId : nanoid();
                     const childIds = count > 1 ? Array.from({ length: count }, () => nanoid()) : [];
                     const targetIds = count > 1 ? childIds : [rootId];
@@ -3644,10 +3675,7 @@ function WirelessCanvasPage() {
                         id: rootId,
                         type: CanvasNodeType.Image,
                         title: effectivePrompt.slice(0, 32) || "Generated Image",
-                        position: {
-                            x: isEmptyImageNode ? parentPosition.x : parentPosition.x + parentConfig.width + gap,
-                            y: parentPosition.y + parentConfig.height / 2 - imageConfig.height / 2,
-                        },
+                        position: outputPosition,
                         width: isEmptyImageNode ? sourceNode?.width || imageConfig.width : imageConfig.width,
                         height: isEmptyImageNode ? sourceNode?.height || imageConfig.height : imageConfig.height,
                         metadata: {
@@ -4434,16 +4462,7 @@ function WirelessCanvasPage() {
 
     const renderCanvasNodePanel = useCallback(
         (panelNode: CanvasNodeData) =>
-            panelNode.type === CanvasNodeType.Config ? (panelNode.metadata?.generationMode !== "video" && panelNode.metadata?.generationMode !== "text" && panelNode.metadata?.generationMode !== "audio" && imageModelProfile(panelNode.metadata?.model || effectiveConfig.imageModel).kind === "midjourney-blend" ? null :
-                <Suspense fallback={<CanvasNodePanelLoading />}>
-                    <CanvasConfigComposer
-                        value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
-                        inputs={configGenerationInputIndex.get(panelNode.id)}
-                        onChange={(composerContent) => handleConfigNodeChange(panelNode.id, { composerContent })}
-                        onClose={() => setDialogNodeId(null)}
-                    />
-                </Suspense>
-            ) : (
+            panelNode.type === CanvasNodeType.Config ? null : (
                 <Suspense fallback={<CanvasNodePanelLoading />}>
                     <CanvasNodePromptPanel
                         node={panelNode}
@@ -4464,27 +4483,32 @@ function WirelessCanvasPage() {
                     />
                 </Suspense>
             ),
-        [configGenerationInputIndex, confirmStopGeneration, connections, effectiveConfig.imageModel, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferenceIndex, nodes, runningNodeId],
+        [confirmStopGeneration, connections, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferenceIndex, nodes, runningNodeId],
     );
 
     const configNodeActionsRef = useRef<{
         handleConfigNodeChange: typeof handleConfigNodeChange;
         confirmStopGeneration: typeof confirmStopGeneration;
         handleGenerateNode: typeof handleGenerateNode;
+        configGenerationInputIndex: typeof configGenerationInputIndex;
     } | null>(null);
-    configNodeActionsRef.current = { handleConfigNodeChange, confirmStopGeneration, handleGenerateNode };
+    configNodeActionsRef.current = { handleConfigNodeChange, confirmStopGeneration, handleGenerateNode, configGenerationInputIndex };
 
     const renderConfigNodeContent = useCallback(
-        (contentNode: CanvasNodeData, { inputSummary, isRunning }: { inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number }; isRunning: boolean }) => (
+        (contentNode: CanvasNodeData, { inputSummary, isRunning }: { inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number }; isRunning: boolean }) => {
+            const targets = getSharedConfigTargets(contentNode.id, nodesRef.current, connectionsRef.current);
+            return (
             <Suspense fallback={null}>
             <CanvasConfigNodePanel
                 node={contentNode}
                 isRunning={isRunning}
                 inputSummary={inputSummary}
-                linkedTaskCount={getSharedConfigTargets(contentNode.id, nodesRef.current, connectionsRef.current).length}
-                linkedTaskHasImages={getSharedConfigTargets(contentNode.id, nodesRef.current, connectionsRef.current).some((node) => node.type === CanvasNodeType.Image && Boolean(node.metadata?.content || node.metadata?.storageKey))}
+                inputs={configNodeActionsRef.current?.configGenerationInputIndex.get(contentNode.id)}
+                imageReferences={resolveCanvasNodeImageReferences(contentNode, nodesRef.current, connectionsRef.current)}
+                inputImageTaskCount={getConfigImageInputs(contentNode.id, nodesRef.current, connectionsRef.current).length}
+                linkedTaskCount={targets.length}
+                linkedTaskHasImages={targets.some((node) => node.type === CanvasNodeType.Image && Boolean(node.metadata?.content || node.metadata?.storageKey))}
                 onConfigChange={(nodeId, patch) => configNodeActionsRef.current?.handleConfigNodeChange(nodeId, patch)}
-                onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
                 onStop={(nodeId) => configNodeActionsRef.current?.confirmStopGeneration(nodeId)}
                 onGenerate={(nodeId) => {
                     const target = nodesRef.current.find((item) => item.id === nodeId);
@@ -4492,7 +4516,8 @@ function WirelessCanvasPage() {
                 }}
             />
             </Suspense>
-        ),
+            );
+        },
         [connections],
     );
 
@@ -5210,6 +5235,8 @@ const CanvasTopBar = memo(function CanvasTopBar({
                     <Shortcut keys={["Ctrl / Cmd", "A"]} value="全选节点" />
                     <Shortcut keys={["Ctrl / Cmd", "G"]} value="创建款式组" />
                     <Shortcut keys={["Ctrl / Cmd", "C / V"]} value="复制 / 粘贴节点，或粘贴剪切板文本/图片" />
+                    <Shortcut keys={["Ctrl / Cmd", "X"]} value="剪切选中节点" />
+                    <Shortcut keys={["Ctrl / Cmd", "D"]} value="快速复制选中节点" />
                     <Shortcut keys={["Ctrl / Cmd", "Z"]} value="撤销" />
                     <Shortcut keys={["Ctrl / Cmd", "Shift", "Z"]} value="重做" />
                     <Shortcut keys={["Ctrl / Cmd", "Y"]} value="重做" />

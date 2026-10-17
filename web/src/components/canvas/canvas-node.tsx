@@ -12,7 +12,6 @@ import { canvasNodeHasImagePreview, canvasNodeRenderingStyle, shouldUseCanvasNod
 import { canvasNodeResizePointerDelta } from "@/lib/canvas/canvas-node-resize";
 import { shouldRenderCanvasNodeControls } from "@/lib/canvas/canvas-node-controls-visibility";
 import { canvasNodeEffectiveHover } from "@/lib/canvas/canvas-node-hover-state";
-import { shouldUseCanvasNodeMovingPlaceholder } from "@/lib/canvas/canvas-node-moving-content";
 import { shouldShowCanvasTextStream } from "@/lib/canvas/canvas-text-stream-visibility";
 import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
 import type { CanvasResizeBounds } from "@/lib/canvas/canvas-resize-preview";
@@ -158,7 +157,6 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isMoving = renderQuality === "moving";
     const effectiveHovered = canvasNodeEffectiveHover(hovered, renderQuality);
     const useOverview = shouldUseCanvasNodeOverview({ renderQuality, selected: isSelected, multiSelected: isMultiSelected, focused: isFocusRelated, connectionTarget: isConnectionTarget, showPanel, editing: isEditingContent, hovered: effectiveHovered, hasImagePreview: canvasNodeHasImagePreview(data) });
-    const useMovingPlaceholder = shouldUseCanvasNodeMovingPlaceholder({ type: data.type, renderQuality, active: isActive, hovered: effectiveHovered, showPanel });
     const controlState = { renderQuality, hovered: effectiveHovered, selected: isSelected, multiSelected: isMultiSelected && !isFocusRelated && !isConnectionTarget && !showPanel && !isEditingContent, connecting: isConnecting, isImage: hasImageContent };
     const showResizeControls = shouldRenderCanvasNodeControls({ ...controlState, kind: "resize" });
     const showConnectionControls = shouldRenderCanvasNodeControls({ ...controlState, kind: "connection" });
@@ -429,8 +427,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                     }
                 >
                     {useOverview ? (
-                        <CanvasNodeOverview node={data} theme={theme} />
-                    ) : useMovingPlaceholder ? (
                         <CanvasNodeOverview node={data} theme={theme} />
                     ) : (
                         <NodeContent

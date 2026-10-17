@@ -64,6 +64,7 @@ export type CanvasNodeMetadata = {
     videoTaskCanRecover?: boolean;
     fontSize?: number;
     generationMode?: CanvasGenerationMode;
+    configImageInputMode?: "per-image" | "combined";
     generationType?: CanvasImageGenerationType;
     model?: string;
     size?: string;

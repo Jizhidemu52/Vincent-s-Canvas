@@ -35,3 +35,13 @@ test("space hand mode resets on blur without a keyup, ignores repeats and dispos
     target.dispatchEvent(new Event("blur"));
     expect(states).toEqual([true, false]);
 });
+
+test("graph shortcuts allow ordinary canvas buttons and panels without taking editable or popup focus", () => {
+    const target = (match: string) => ({ closest: (selector: string) => selector.split(",").includes(match) ? {} : null }) as Element;
+    for (const match of ["button", "[data-canvas-no-zoom]"]) {
+        expect(shouldIgnoreCanvasShortcut(normal, target(match), true)).toBe(false);
+        expect(shouldIgnoreCanvasShortcut(normal, target(match))).toBe(true);
+    }
+    for (const match of ["input", "textarea", "[role='dialog']", ".ant-modal", ".ant-dropdown"])
+        expect(shouldIgnoreCanvasShortcut(normal, target(match), true)).toBe(true);
+});

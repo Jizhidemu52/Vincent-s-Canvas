@@ -3,8 +3,10 @@ import { nanoid } from "nanoid";
 import { canvasToolKey, currentToolConfig } from "@/hooks/use-tool-config";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
-import { getSharedConfigForTarget, getSharedConfigTargets } from "@/lib/canvas/canvas-shared-connections";
+import { configUsesSeparateImageInputs, getConfigImageInputs, getSharedConfigForTarget, getSharedConfigTargets } from "@/lib/canvas/canvas-shared-connections";
 import { resolveSharedGenerationPlan, type SharedGenerationPlan } from "@/lib/canvas/canvas-shared-generation";
+import { resolveCanvasImageConfig } from "@/lib/canvas/canvas-generation-model";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { ToolKey } from "../../../../shared/feature-catalog";
@@ -38,31 +40,57 @@ export async function runCanvasGeneration(
             const source = snapshot.nodes.find((node) => node.id === nodeId);
             if (source?.metadata?.mediaTask || source?.metadata?.generationSubmissionUncertain || snapshot.nodes.some(node => node.metadata?.mediaTask && node.metadata.generationOrigin?.sourceNodeId === nodeId)) throw new Error("该结果仍有关联的未决任务，请先使用结果节点的重试处理原任务，勿重复生成");
             const inherited = source?.type === CanvasNodeType.Config ? source : getSharedConfigForTarget(nodeId, snapshot.nodes, snapshot.connections);
-            const targets = inherited ? source?.type === CanvasNodeType.Config ? getSharedConfigTargets(inherited.id, snapshot.nodes, snapshot.connections) : source ? [source] : [] : [];
+            if (inherited) {
+                // Inspect the original run before deriving today's targets. Changing
+                // mode, exclusions or wiring must not bypass an unresolved submission.
+                const directOutputIds = new Set(source?.type === CanvasNodeType.Config
+                    ? snapshot.connections.filter(edge => edge.kind === "generation-output" && edge.fromNodeId === inherited.id).map(edge => edge.toNodeId)
+                    : []);
+                const previousOutputs = snapshot.nodes.filter(node => directOutputIds.has(node.id)
+                    || (node.metadata?.generationOrigin?.configNodeId === inherited.id
+                        && (source?.type === CanvasNodeType.Config || node.metadata.generationOrigin.sourceNodeId === nodeId)));
+                const pending = previousOutputs.filter(node => node.metadata?.imageTask);
+                if (pending.length) {
+                    message.info("先查询这组尚未完成的原图片任务，本次不会重复提交");
+                    const recovered = (await Promise.all(pending.map(node => recoverPending(node.id)))).flatMap(items => items || []);
+                    onResult?.({ mode: inherited.metadata?.generationMode || "image", outputs: recovered });
+                    return;
+                }
+                const unresolvedMedia = previousOutputs.some(node => node.metadata?.mediaTask || node.metadata?.generationSubmissionUncertain
+                    || (node.metadata?.status !== "success" && (node.metadata?.videoTaskCanRecover || (node.metadata?.status === "loading" && node.metadata.generationOrigin?.mode !== "image"))));
+                if (unresolvedMedia) throw new Error("这组仍有未完成的音视频/文本结果，请先检查原任务或结果节点，避免重复提交");
+            }
+            let targets = inherited ? source?.type === CanvasNodeType.Config ? getSharedConfigTargets(inherited.id, snapshot.nodes, snapshot.connections) : source ? [source] : [] : [];
+            let inputTasks = false;
+            let planSnapshot = snapshot;
+            if (source?.type === CanvasNodeType.Config && !targets.length && (source.metadata?.generationMode || "image") === "image") {
+                const images = getConfigImageInputs(source.id, snapshot.nodes, snapshot.connections);
+                const base = buildConfig(source, "image");
+                const { config } = resolveCanvasImageConfig(base, useBusinessConfigStore.getState(), images.length > 0);
+                inputTasks = configUsesSeparateImageInputs(source, images.length, 0, imageModelProfile(config.model).requiresPrompt);
+                if (inputTasks) {
+                    targets = images;
+                    const imageIds = new Set(images.map(image => image.id));
+                    // Execution-only graph: each input becomes its own target, not another task's reference.
+                    planSnapshot = { nodes: snapshot.nodes, connections: [
+                        ...snapshot.connections.filter(edge => edge.toNodeId !== source.id || !imageIds.has(edge.fromNodeId)),
+                        ...images.map(image => ({ id: `input-task:${source.id}:${image.id}`, fromNodeId: source.id, toNodeId: image.id, kind: "config-target" as const })),
+                    ] };
+                }
+            }
             if (!inherited || !targets.length) {
                 await executeGenerateNode(nodeId, mode, prompt, onResult);
                 return;
             }
             sharedConfigId = inherited.id;
-            const targetIds = new Set(targets.map((node) => node.id));
-            const pending = snapshot.nodes.filter((node) => node.metadata?.generationOrigin?.configNodeId === inherited.id && targetIds.has(node.metadata.generationOrigin.sourceNodeId) && node.metadata.imageTask);
-            if (pending.length) {
-                message.info("先查询这组尚未完成的原图片任务，本次不会重复提交");
-                const recovered = (await Promise.all(pending.map((node) => recoverPending(node.id)))).flatMap((items) => items || []);
-                onResult?.({ mode: inherited.metadata?.generationMode || "image", outputs: recovered });
-                return;
-            }
-            const unresolvedMedia = snapshot.nodes.some((node) => node.metadata?.generationOrigin?.configNodeId === inherited.id && targetIds.has(node.metadata.generationOrigin.sourceNodeId) &&
-                (node.metadata.mediaTask || node.metadata.generationSubmissionUncertain || (node.metadata.status !== "success" && (node.metadata.videoTaskCanRecover || (node.metadata.status === "loading" && node.metadata.generationOrigin.mode !== "image")))));
-            if (unresolvedMedia) throw new Error("这组仍有未完成的音视频/文本结果，请先检查原任务或结果节点，避免重复提交");
             // Resolve every input and model before starting: edits during execution affect only the next run.
             const plans = await Promise.all(targets.map(async (target) => {
-                const plan = resolveSharedGenerationPlan(target.id, inherited.id, snapshot);
+                const plan = resolveSharedGenerationPlan(target.id, inherited.id, planSnapshot);
                 let config = buildConfig(plan.configNode, plan.mode);
-                const toolKey = canvasToolKey(plan.mode, plan.context.imageCount > 0, imageModelProfile(config.model).kind);
-                config = { ...currentToolConfig(config, toolKey), count: "1", canvasImageCount: "1" };
-                const finalToolKey = canvasToolKey(plan.mode, plan.context.imageCount > 0, imageModelProfile(config.model).kind);
-                if (finalToolKey !== toolKey) throw new Error("公共配置绑定模型与生成/编辑板块不一致，请检查模型绑定");
+                let toolKey = canvasToolKey(plan.mode, plan.context.imageCount > 0);
+                if (plan.mode === "image") ({ config, toolKey } = resolveCanvasImageConfig(config, useBusinessConfigStore.getState(), plan.context.imageCount > 0));
+                else config = currentToolConfig(config, toolKey);
+                config = { ...config, count: "1", canvasImageCount: "1" };
                 if (!isAiConfigReady(config, config.model)) throw new Error("公共配置的模型不可用，请先检查模型设置");
                 if (plan.mode === "image") {
                     const profile = imageModelProfile(config.model);
@@ -87,7 +115,10 @@ export async function runCanvasGeneration(
             for (const { plan, config, toolKey } of plans) {
                 if (controller.signal.aborted) break;
                 const current = getSnapshot();
-                if (!current.nodes.some(node => node.id === inherited.id) || !current.nodes.some(node => node.id === plan.targetNode.id) || !current.connections.some(edge => edge.kind === "config-target" && edge.fromNodeId === inherited.id && edge.toNodeId === plan.targetNode.id)) {
+                const stillConnected = inputTasks
+                    ? getConfigImageInputs(inherited.id, current.nodes, current.connections).some(node => node.id === plan.targetNode.id)
+                    : current.connections.some(edge => edge.kind === "config-target" && edge.fromNodeId === inherited.id && edge.toNodeId === plan.targetNode.id);
+                if (!current.nodes.some(node => node.id === inherited.id) || !current.nodes.some(node => node.id === plan.targetNode.id) || !stillConnected) {
                     outputs.push({ nodeId: plan.targetNode.id, status: "failed", error: "目标或连线已删除" });
                     continue;
                 }

@@ -17,3 +17,25 @@ export function zoomViewportAtCanvasCenter(viewport: ViewportTransform, canvasSi
 export function canvasViewportTransform(viewport: ViewportTransform) {
     return `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})`;
 }
+
+/** React may publish an earlier virtualized viewport after a newer live frame. */
+export function createCanvasViewportPreview(initial: ViewportTransform) {
+    let committed = initial;
+    let latest = initial;
+    let previews = new WeakSet<ViewportTransform>();
+    return {
+        current: () => latest,
+        preview(next: ViewportTransform) {
+            latest = next;
+            previews.add(next);
+        },
+        commit(next: ViewportTransform) {
+            if (next === committed) return;
+            committed = next;
+            // A known preview is an acknowledgement, not an instruction to
+            // rewind. A new viewport (reset, restore, fit) still takes effect.
+            if (!previews.has(next)) latest = next;
+            if (next === latest) previews = new WeakSet();
+        },
+    };
+}

@@ -24,9 +24,9 @@ function withBusinessConfig<T>(patch: Partial<BusinessState>, run: () => T): T {
     try { return run(); } finally { Object.assign(initialState, saved); Object.assign(moduleState, savedModules); }
 }
 
-function panel(metadata: CanvasNodeMetadata, state: Partial<BusinessState> = {}, isRunning = false, linkedTaskCount = 0, linkedTaskHasImages = false) {
+function panel(metadata: CanvasNodeMetadata, state: Partial<BusinessState> = {}, isRunning = false, linkedTaskCount = 0, linkedTaskHasImages = false, imageCount = 0, textCount = 0) {
     const node: CanvasNodeData = { id: "config-node", type: CanvasNodeType.Config, title: "配置", position: { x: 0, y: 0 }, width: 400, height: 240, metadata: { prompt: "请生成内容", ...metadata } };
-    return withBusinessConfig(state, () => renderToStaticMarkup(<CanvasConfigNodePanel node={node} isRunning={isRunning} linkedTaskCount={linkedTaskCount} linkedTaskHasImages={linkedTaskHasImages} inputSummary={{ textCount: 0, imageCount: 0, videoCount: 0, audioCount: 0 }} onConfigChange={() => undefined} onGenerate={() => undefined} onStop={() => undefined} onComposerToggle={() => undefined} />));
+    return withBusinessConfig(state, () => renderToStaticMarkup(<CanvasConfigNodePanel node={node} isRunning={isRunning} linkedTaskCount={linkedTaskCount} linkedTaskHasImages={linkedTaskHasImages} inputSummary={{ textCount, imageCount, videoCount: 0, audioCount: 0 }} onConfigChange={() => undefined} onGenerate={() => undefined} onStop={() => undefined} onComposerToggle={() => undefined} />));
 }
 
 function actionButton(markup: string, label = "开始生成") {
@@ -36,6 +36,40 @@ function actionButton(markup: string, label = "开始生成") {
 }
 
 describe("configuration node model availability", () => {
+    test("saved Blend and removed models use the same bound GPT edit route as execution", () => {
+        const blend = { id: "blend", name: "旧融合模型", modelId: "midjourney-blend", capabilities: ["generate"], creditCost: 0, rmbCost: 0 };
+        const binding = (toolKey: string) => ({ toolKey, modelConfigId: "image", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 });
+        const metadata = { generationMode: "image", model: "midjourney-blend", prompt: "保留主体" } as const;
+        for (const state of [
+            { models: [...models, blend], tools: [binding("canvas-image"), binding("canvas-edit")] },
+            { models: [...models, blend], tools: [binding("canvas-image")] },
+            { models, tools: [binding("canvas-edit")] },
+        ]) {
+            const separate = panel(metadata, state, false, 0, false, 2);
+            expect(actionButton(separate, "执行 2 个任务")).not.toContain('disabled=""');
+            expect(separate).not.toContain("融合 2–4 张参考图，不使用提示词");
+            expect(separate).toContain('aria-label="提示词"');
+            expect(separate).toContain("后台指定");
+            const combined = panel({ ...metadata, configImageInputMode: "combined" }, state, false, 0, false, 2);
+            expect(actionButton(combined, "合并参考生成 1 张")).not.toContain('disabled=""');
+        }
+    });
+    test("implicit image tasks require a prompt, but connected common text can supply it", () => {
+        const metadata = { generationMode: "image", model: "gpt-image-2", prompt: "", composerContent: "" } as const;
+        expect(actionButton(panel(metadata, {}, false, 0, false, 2), "执行 2 个任务")).toContain('disabled=""');
+        expect(actionButton(panel(metadata, {}, false, 0, false, 2, 1), "执行 2 个任务")).not.toContain('disabled=""');
+        expect(actionButton(panel({ ...metadata, configImageInputMode: "combined" }, {}, false, 0, false, 2), "合并参考生成 1 张")).toContain('disabled=""');
+    });
+    test("two input images visibly default to two tasks and can explicitly combine into one", () => {
+        const metadata = { generationMode: "image", model: "gpt-image-2" } as const;
+        const separate = panel(metadata, {}, false, 0, false, 2);
+        expect(separate).toContain("逐图执行 · 2 个任务");
+        expect(separate).toContain("每个任务主图均为图片1，公共参考从图片2起");
+        expect(actionButton(separate, "执行 2 个任务")).not.toContain('disabled=""');
+        const combined = panel({ ...metadata, configImageInputMode: "combined" }, {}, false, 0, false, 2);
+        expect(combined).toContain("多张参考图共同生成 1 张结果");
+        expect(actionButton(combined, "合并参考生成 1 张")).not.toContain('disabled=""');
+    });
     test("image targets select the edit tool even without a shared reference image", () => {
         const tools = [{ toolKey: "canvas-edit", modelConfigId: "image", enabled: false, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }];
         const metadata = { generationMode: "image", model: "gpt-image-2" } as const;

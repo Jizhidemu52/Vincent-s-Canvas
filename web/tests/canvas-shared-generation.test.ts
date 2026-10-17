@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { getSharedConfigForTarget, getSharedConfigTargets, normalizeCanvasConnection, resolveSharedGenerationPlan } from "@/lib/canvas/canvas-shared-generation";
+import { getConfigImageInputs } from "@/lib/canvas/canvas-shared-connections";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 
 const node = (id: string, type: CanvasNodeType, metadata: CanvasNodeMetadata = {}): CanvasNodeData => ({ id, type, title: id, position: { x: 0, y: 0 }, width: 100, height: 100, metadata });
@@ -9,6 +10,14 @@ const edge = (fromNodeId: string, toNodeId: string, kind?: CanvasConnection["kin
 const targetEdge = (id: string, configId = "config") => edge(configId, id, "config-target");
 
 describe("shared canvas generation relationships", () => {
+    test("incoming image tasks ignore exclusions, empty nodes, generated edges and duplicate connections", () => {
+        const settings = config("image", { excludedConnectedImageReferenceKeys: ["node:b"] });
+        const nodes = [settings, image("a"), image("b"), image("generated"), node("empty", CanvasNodeType.Image), node("text", CanvasNodeType.Text), node("stored", CanvasNodeType.Image, { storageKey: "stored-only" })];
+        const connections = [edge("a", "config"), edge("a", "config"), edge("b", "config"), edge("generated", "config", "generation-output"), edge("empty", "config"), edge("text", "config"), edge("stored", "config"), edge("missing", "config")];
+        expect(getConfigImageInputs("config", nodes, connections).map(item => item.id)).toEqual(["a", "stored"]);
+        expect(getConfigImageInputs("a", nodes, connections)).toEqual([]);
+    });
+
     test("only fans out explicit one-hop targets and ignores historical results, inputs and duplicates", () => {
         const nodes = [config(), image("a"), image("b"), image("input"), image("output")];
         const connections = [targetEdge("a"), targetEdge("a"), edge("config", "b"), edge("input", "config"), edge("config", "output", "generation-output"), targetEdge("missing")];

@@ -116,3 +116,55 @@ describe("bulk overview node output", () => {
         expect(html).toContain("Shared settings");
     });
 });
+
+describe("configuration editor content while the canvas is moving", () => {
+    const config: CanvasNodeData = {
+        id: "inactive-config", type: CanvasNodeType.Config, title: "Shared settings",
+        position: { x: 120, y: 80 }, width: 320, height: 240,
+        metadata: { generationMode: "image", prompt: "Keep this editable prompt" },
+    };
+    const inactive: Partial<typeof props> = {
+        data: config, isSelected: false, isMultiSelected: false, isRelated: false,
+        isFocusRelated: false, isConnectionTarget: false, isConnecting: false, showPanel: false,
+    };
+    const editor = () => <section data-testid="config-editor-content"><textarea aria-label="Config prompt" defaultValue={config.metadata!.prompt} /><button type="button">Generate from config</button></section>;
+
+    test.each(["full", "moving"] as const)("inactive Config keeps its editable renderer in %s quality", renderQuality => {
+        const calls: Array<Parameters<NonNullable<typeof props.renderNodeContent>>> = [];
+        const inputSummary = { textCount: 1, imageCount: 2, videoCount: 0, audioCount: 0 };
+        const html = markup({ ...inactive, renderQuality, configInputSummary: inputSummary, renderNodeContent: (...args) => { calls.push(args); return editor(); } });
+        expect(calls).toEqual([[config, { inputSummary, isRunning: false }]]);
+        expect(html).toContain('data-node-id="inactive-config"');
+        expect(html).toContain('data-testid="config-editor-content"');
+        expect(html).toContain('<textarea aria-label="Config prompt">Keep this editable prompt</textarea>');
+        expect(html).toContain("Generate from config");
+        expect(html).not.toContain('data-testid="canvas-node-overview"');
+        expect(html).toContain("translate(120px, 80px)");
+        expect(html).toContain("width:320px");
+        expect(html).toContain("height:240px");
+    });
+
+    test("moving Config hides connection and resize handles without replacing its editor", () => {
+        const full = markup({ ...inactive, renderQuality: "full", isSelected: true, renderNodeContent: editor });
+        expect(full).toContain("data-canvas-connection-handle");
+        expect(full).toContain("data-canvas-resize-handle");
+        for (const isSelected of [false, true]) {
+            const moving = markup({ ...inactive, renderQuality: "moving", isSelected, renderNodeContent: editor });
+            expect(moving).toContain('data-testid="config-editor-content"');
+            expect(moving).not.toContain("data-canvas-connection-handle");
+            expect(moving).not.toContain("data-canvas-resize-handle");
+            expect(moving).not.toContain('data-testid="canvas-node-overview"');
+        }
+    });
+
+    test("inactive Config still uses the lightweight overview instead of invoking its editor", () => {
+        let renders = 0;
+        const html = markup({ ...inactive, renderQuality: "overview", renderNodeContent: () => { renders++; return editor(); } });
+        expect(renders).toBe(0);
+        expect(html).toContain('data-testid="canvas-node-overview"');
+        expect(html).not.toContain('data-testid="config-editor-content"');
+        expect(html).not.toContain("data-canvas-connection-handle");
+        expect(html).not.toContain("data-canvas-resize-handle");
+        expect(html).not.toMatch(/<(textarea|button)\b/);
+    });
+});

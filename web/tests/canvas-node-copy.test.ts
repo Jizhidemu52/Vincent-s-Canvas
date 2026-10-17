@@ -22,6 +22,24 @@ const groups: CanvasNodeGroup[] = [
 ];
 
 describe("canvas node graph copy", () => {
+    test("copies detach nested drafts and strip all paid task execution/recovery bindings", () => {
+        const original = { ...node("running"), metadata: {
+            status: "loading" as const, prompt: "保留提示词", references: ["asset:a"],
+            imageTask: { requestId: "image-request", taskId: "task", ownerId: "owner", projectId: "project", resultIndex: 0 },
+            mediaTask: { requestId: "media-request", taskId: "task", ownerId: "owner", projectId: "project" },
+            textRequestId: "text-request", sourceTaskId: "source-task", videoTaskId: "video-task", videoTaskCanRecover: true,
+            generationSubmissionUncertain: true, errorDetails: "old error",
+        } };
+        const snapshot = copyCanvasNodeGraph([original], [], [], new Set([original.id]));
+        original.metadata.references.push("changed-after-copy");
+        expect(snapshot.nodes[0]!.metadata!.references).toEqual(["asset:a"]);
+        const copy = cloneCanvasNodeGraph(snapshot, { x: 0, y: 0 }).nodes[0]!;
+        expect(copy.metadata).toMatchObject({ status: "idle", prompt: "保留提示词", references: ["asset:a"] });
+        for (const key of ["imageTask", "mediaTask", "textRequestId", "sourceTaskId", "videoTaskId", "videoTaskCanRecover", "generationSubmissionUncertain", "errorDetails"])
+            expect(copy.metadata).not.toHaveProperty(key);
+        expect(original.metadata.status).toBe("loading");
+        expect(original.metadata.mediaTask.taskId).toBe("task");
+    });
     test("copied shared graphs isolate origin, prompt mentions and reference ordering without changing assets", () => {
         const source = node("source");
         const config = { ...node("config"), type: CanvasNodeType.Config, metadata: {

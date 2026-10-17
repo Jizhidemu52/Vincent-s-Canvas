@@ -2,12 +2,12 @@ import { nanoid } from "nanoid";
 
 import type { CanvasConnection, CanvasNodeData, CanvasNodeGroup, Position } from "@/types/canvas";
 
-type CanvasNodeGraph = { nodes: CanvasNodeData[]; connections: CanvasConnection[]; groups?: CanvasNodeGroup[] };
+export type CanvasNodeGraph = { nodes: CanvasNodeData[]; connections: CanvasConnection[]; groups?: CanvasNodeGroup[] };
 
 /** Both clipboard and context-menu copies own only the selected graph. */
 export function copyCanvasNodeGraph(nodes: readonly CanvasNodeData[], connections: readonly CanvasConnection[], groups: readonly CanvasNodeGroup[], selectedIds: ReadonlySet<string>): CanvasNodeGraph {
     return {
-        nodes: nodes.filter(node => selectedIds.has(node.id)).map(node => ({ ...node, position: { ...node.position }, metadata: node.metadata ? { ...node.metadata } : undefined })),
+        nodes: nodes.filter(node => selectedIds.has(node.id)).map(node => structuredClone(node)),
         connections: connections.filter(connection => selectedIds.has(connection.fromNodeId) && selectedIds.has(connection.toNodeId)).map(connection => ({ ...connection })),
         groups: groups.filter(group => group.nodeIds.length && group.nodeIds.every(id => selectedIds.has(id))).map(group => ({ ...group, nodeIds: [...group.nodeIds] })),
     };
@@ -23,7 +23,7 @@ export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position): 
             id,
             title: node.title.endsWith(" Copy") ? node.title : `${node.title} Copy`,
             position: { x: node.position.x + offset.x, y: node.position.y + offset.y },
-            metadata: node.metadata ? { ...node.metadata } : undefined,
+            metadata: node.metadata ? structuredClone(node.metadata) : undefined,
         };
     });
     const connections = graph.connections.flatMap((connection, index) => {
@@ -41,6 +41,16 @@ export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position): 
     });
     nodes.forEach(node => {
         if (!node.metadata) return;
+        // A copy is a new draft/result, never another owner of a billed request.
+        delete node.metadata.imageTask;
+        delete node.metadata.mediaTask;
+        delete node.metadata.textRequestId;
+        delete node.metadata.sourceTaskId;
+        delete node.metadata.videoTaskId;
+        delete node.metadata.videoTaskCanRecover;
+        delete node.metadata.generationSubmissionUncertain;
+        delete node.metadata.errorDetails;
+        node.metadata.status = node.metadata.content ? "success" : "idle";
         if (node.metadata.batchRootId) node.metadata.batchRootId = idMap.get(node.metadata.batchRootId);
         if (node.metadata.batchChildIds) node.metadata.batchChildIds = node.metadata.batchChildIds.flatMap(id => idMap.has(id) ? [idMap.get(id)!] : []);
         if (node.metadata.primaryImageId) node.metadata.primaryImageId = idMap.get(node.metadata.primaryImageId);

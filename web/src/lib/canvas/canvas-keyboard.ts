@@ -2,8 +2,11 @@ import { CANVAS_WHEEL_PASSTHROUGH_SELECTOR } from "./canvas-wheel-target";
 
 const interactiveSelector = `input,textarea,select,button,[contenteditable]:not([contenteditable='false']),[role='textbox'],[role='dialog'],[role='menu'],${CANVAS_WHEEL_PASSTHROUGH_SELECTOR}`;
 
-export function shouldIgnoreCanvasShortcut(event: Pick<KeyboardEvent, "isComposing" | "keyCode" | "defaultPrevented">, target: EventTarget | null) {
-    return event.defaultPrevented || event.isComposing || event.keyCode === 229 || Boolean((target as Element | null)?.closest?.(interactiveSelector));
+export function shouldIgnoreCanvasShortcut(event: Pick<KeyboardEvent, "isComposing" | "keyCode" | "defaultPrevented">, target: EventTarget | null, allowCanvasControls = false) {
+    const selector = allowCanvasControls
+        ? "input,textarea,select,[contenteditable]:not([contenteditable='false']),[role='textbox'],[role='dialog'],[role='menu'],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown"
+        : interactiveSelector;
+    return event.defaultPrevented || event.isComposing || event.keyCode === 229 || Boolean((target as Element | null)?.closest?.(selector));
 }
 
 /** A lost keyup (Alt-Tab/window switch) must not leave temporary hand mode latched. */

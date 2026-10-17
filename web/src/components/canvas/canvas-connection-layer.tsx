@@ -5,6 +5,7 @@ import { getFastCanvas2DContext } from "@/lib/canvas/canvas-2d-context";
 import { canvasConnectionViewportBounds, createCanvasConnectionDrawCache, drawCanvasConnectionBatches, filterCanvasConnectionDrawBatches, type CanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
 import { canvasConnectionCanvasSize, type CanvasConnectionCanvasSize } from "@/lib/canvas/canvas-connection-canvas-size";
 import { shouldDrawCanvasConnectionLayer, shouldRedrawCanvasConnectionLayer, type CanvasConnectionLayerPaintState } from "@/lib/canvas/canvas-dynamic-connection-layer";
+import { createCanvasViewportPreview } from "@/lib/canvas/canvas-viewport-interaction";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -35,7 +36,8 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
     const dynamicCanvasRef = useRef<HTMLCanvasElement>(null);
     const staticCanvasSizeRef = useRef<CanvasConnectionCanvasSize | null>(null);
     const dynamicCanvasSizeRef = useRef<CanvasConnectionCanvasSize | null>(null);
-    const latestViewportRef = useRef(viewport);
+    const viewportPreviewRef = useRef<ReturnType<typeof createCanvasViewportPreview> | null>(null);
+    if (!viewportPreviewRef.current) viewportPreviewRef.current = createCanvasViewportPreview(viewport);
     const geometryCacheRef = useRef(createConnectionGeometryCache());
     const resolveGeometryRef = useRef<(connection: CanvasConnection) => CanvasConnectionGeometry | undefined>(() => undefined);
     const drawCacheRef = useRef(createCanvasConnectionDrawCache((connection) => resolveGeometryRef.current(connection)));
@@ -54,7 +56,6 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
     const previousResolverRef = useRef(resolveNode);
     const failedRef = useRef(false);
     const staticPaintKey = `${theme.node.muted}:${theme.node.activeStroke}`;
-    latestViewportRef.current = viewport;
     resolveGeometryRef.current = (connection) => {
         const from = resolveNode(connection.fromNodeId);
         const to = resolveNode(connection.toNodeId);
@@ -135,6 +136,7 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
     const draw = useCallback(
         (nextViewport: ViewportTransform) => {
             if (failedRef.current) return;
+            viewportPreviewRef.current!.preview(nextViewport);
             const dynamicIds = dynamicConnectionIdsRef.current;
             if (isDraggingNodes && dynamicIds.size) {
                 const { batches } = splitBatches(dynamicIds);
@@ -175,6 +177,7 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
     const refresh = useCallback(
         (nextViewport: ViewportTransform, nextAffectedConnectionIds: ReadonlySet<string>) => {
             if (failedRef.current) return;
+            viewportPreviewRef.current!.preview(nextViewport);
             batchesRef.current = drawCacheRef.current.sync(connections, activeConnectionIds, nextAffectedConnectionIds, false);
             dynamicConnectionIdsRef.current = new Set(nextAffectedConnectionIds);
             if (!nextAffectedConnectionIds.size) {
@@ -218,14 +221,15 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
             const rect = entries[0]?.contentRect;
             if (!rect) return;
             syncCanvasSize(rect.width, rect.height);
-            draw(latestViewportRef.current);
+            draw(viewportPreviewRef.current!.current());
         });
         observer.observe(host);
         return () => observer.disconnect();
     }, [draw, syncCanvasSize]);
 
     useLayoutEffect(() => {
-        draw(viewport);
+        viewportPreviewRef.current!.commit(viewport);
+        draw(viewportPreviewRef.current!.current());
     }); // The draw cache can change without a camera or callback change (add/delete/undo).
 
     return (

@@ -1,5 +1,5 @@
 import { useEffect, type CSSProperties } from "react";
-import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video } from "lucide-react";
+import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Square, Video } from "lucide-react";
 import { Button, Segmented } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -16,49 +16,83 @@ import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 import { imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
+import { configUsesSeparateImageInputs } from "@/lib/canvas/canvas-shared-connections";
+import { CanvasConfigComposer } from "./canvas-config-composer";
+import { CanvasConfigImageReferences } from "./canvas-config-image-references";
+import type { NodeGenerationInput } from "./canvas-node-generation";
+import type { ImageReferenceItem } from "@/types/image";
+import { resolveCanvasImageConfig } from "@/lib/canvas/canvas-generation-model";
 
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
     isRunning: boolean;
     linkedTaskCount?: number;
     linkedTaskHasImages?: boolean;
+    inputImageTaskCount?: number;
+    inputs?: NodeGenerationInput[];
+    imageReferences?: ImageReferenceItem[];
     inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number };
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
     onGenerate: (nodeId: string) => void;
     onStop: (nodeId: string) => void;
-    onComposerToggle: () => void;
+    onComposerToggle?: () => void;
 };
 
-export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, linkedTaskHasImages = false, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
+export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, linkedTaskHasImages = false, inputSummary, inputImageTaskCount = inputSummary.imageCount, inputs = [], imageReferences, onConfigChange, onGenerate, onStop }: CanvasConfigNodePanelProps) {
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const businessModels = useBusinessConfigStore((state) => state.models);
+    const businessTools = useBusinessConfigStore((state) => state.tools);
     const businessConfigStatus = useBusinessConfigStore((state) => state.status);
     const mode = node.metadata?.generationMode || "image";
     const selectedModel = businessConfigStatus === "ready" ? mode === "text" ? globalConfig.textModel : resolveCapabilityModel(globalConfig, mode, businessModels, node.metadata?.model) : "";
-    const toolKey = canvasToolKey(mode, inputSummary.imageCount > 0 || linkedTaskHasImages, imageModelProfile(selectedModel, businessModels).kind);
-    const boundModelId = useBusinessConfigStore(state => state.tools.find(item => item.toolKey === toolKey)?.modelConfigId);
-    const config = useToolConfig(buildNodeConfig(globalConfig, node, mode, selectedModel), toolKey);
+    const references = imageReferences || [];
+    const imageCount = imageReferences?.length ?? inputSummary.imageCount;
+    const hasImages = imageCount > 0 || linkedTaskHasImages;
+    let toolKey = canvasToolKey(mode, hasImages, imageModelProfile(selectedModel, businessModels).kind);
+    const initialToolKey = toolKey;
+    let imageModelIsBound = false;
+    let config = useToolConfig(buildNodeConfig(globalConfig, node, mode, selectedModel), toolKey);
+    let routingError = "";
+    if (mode === "image" && businessConfigStatus === "ready") {
+        try {
+            const resolved = resolveCanvasImageConfig(buildNodeConfig(globalConfig, node, mode, selectedModel), { models: businessModels, tools: businessTools, prices: [] }, hasImages);
+            config = resolved.config;
+            toolKey = resolved.toolKey;
+            imageModelIsBound = resolved.isBound;
+        } catch (error) {
+            routingError = error instanceof Error ? error.message : "当前生图模型配置不可用";
+            config = { ...config, model: "", imageModel: "" };
+        }
+    }
+    const boundModelId = businessTools.find(item => item.toolKey === toolKey)?.modelConfigId;
+    const modelIsBound = Boolean(boundModelId) || imageModelIsBound;
+    const pickerToolKey = imageModelIsBound && !boundModelId ? initialToolKey : toolKey;
     const model = config.model;
     const profile = useImageModelProfile(model);
     const blend = mode === "image" && !profile.requiresPrompt;
+    const separateImages = configUsesSeparateImageInputs(node, inputImageTaskCount, linkedTaskCount, profile.requiresPrompt);
+    const taskCount = linkedTaskCount || (separateImages ? inputImageTaskCount : 0);
+    const showInputMode = mode === "image" && !blend && !linkedTaskCount && inputImageTaskCount > 1;
     const toolEnabled = useToolEnabled(toolKey);
     const hasAvailableModel = Boolean(model);
     const count = 1;
-    const credits = requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? count : 1 }) * Math.max(1, linkedTaskCount);
+    const credits = requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? count : 1 }) * Math.max(1, taskCount);
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
-    const hasAnyInput = Boolean(linkedTaskCount || inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
+    const hasAnyInput = Boolean(linkedTaskCount || inputSummary.textCount || (mode !== "audio" && imageCount) || (mode === "video" && (inputSummary.videoCount || inputSummary.audioCount)));
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
-    const modelIsSynced = mode === "text" || Boolean(boundModelId) || node.metadata?.model === model;
-    const canGenerate = toolEnabled && hasAvailableModel && modelIsSynced && (linkedTaskCount > 0 || (blend ? inputSummary.imageCount >= 2 && inputSummary.imageCount <= 4 : hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput)));
+    const hasPromptInput = hasComposerContent || (inputs.length ? inputs.some(input => Boolean(input.text?.trim())) : inputSummary.textCount > 0);
+    const modelIsSynced = mode === "text" || modelIsBound || node.metadata?.model === model;
+    const canGenerate = toolEnabled && hasAvailableModel && modelIsSynced && (linkedTaskCount > 0 || (blend ? imageCount >= 2 && imageCount <= 4 : mode === "video" ? hasPromptInput || hasAnyInput : hasPromptInput));
+    const referencePresentation = configReferencePresentation(references, inputs, mode, separateImages);
 
     useEffect(() => {
-        if (mode !== "text" && !boundModelId && !isRunning && businessConfigStatus === "ready" && (node.metadata?.model || "") !== model) onConfigChange(node.id, { model });
-    }, [mode, boundModelId, businessConfigStatus, isRunning, model, node.id, node.metadata?.model, onConfigChange]);
+        if (mode !== "text" && !routingError && !modelIsBound && !isRunning && businessConfigStatus === "ready" && (node.metadata?.model || "") !== model) onConfigChange(node.id, { model });
+    }, [mode, routingError, modelIsBound, businessConfigStatus, isRunning, model, node.id, node.metadata?.model, onConfigChange]);
 
     return (
-        <div className="flex h-full w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
+        <div className="thin-scrollbar flex h-full w-full cursor-move flex-col overflow-y-auto px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
             <div className="mb-2 flex items-center justify-between gap-3">
                 <div className="shrink-0 text-sm font-semibold">生成配置</div>
                 <div className="cursor-default" onMouseDown={(event) => event.stopPropagation()}>
@@ -115,35 +149,39 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
             </div>
 
             <div className="mb-2 text-[11px] leading-4" style={{ color: theme.node.muted }}>
-                <div>左侧接共用素材，右侧连接任务</div>
-                {linkedTaskCount > 0 ? <div role="status"><span style={{ color: theme.node.text }}>待执行 {linkedTaskCount} 个任务</span> · 每个任务使用自身输入与公共素材</div> : null}
+                {showInputMode ? <div className="mb-1 cursor-default" onMouseDown={event => event.stopPropagation()}>
+                    <Segmented block size="small" aria-label="图片执行方式" disabled={isRunning}
+                        value={separateImages ? "per-image" : "combined"}
+                        onChange={value => onConfigChange(node.id, { configImageInputMode: value as "per-image" | "combined" })}
+                        options={[{ value: "per-image", label: `逐图执行 · ${inputImageTaskCount} 个任务` }, { value: "combined", label: "合并参考 · 1 个任务" }]} />
+                </div> : <div>左侧接共用素材，右侧连接任务</div>}
+                {taskCount > 0 ? <div role="status"><span style={{ color: theme.node.text }}>待执行 {taskCount} 个任务</span> · {separateImages ? "每个任务主图均为图片1，公共参考从图片2起" : "每个任务使用自身输入与公共素材"}</div> : showInputMode ? <div role="status">多张参考图共同生成 1 张结果</div> : null}
             </div>
 
-            <div className="mb-2 flex flex-wrap gap-1.5">
-                {!blend ? <InputChip label="提示词" value={`${inputSummary.textCount} 个`} style={chipStyle} /> : null}
-                <InputChip label="参考图" value={`${inputSummary.imageCount} 张`} style={chipStyle} />
-                <InputChip label="参考视频" value={`${inputSummary.videoCount} 个`} style={chipStyle} />
-                <InputChip label="参考音频" value={`${inputSummary.audioCount} 个`} style={chipStyle} />
-                {!blend ? <button type="button" className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2 text-[11px]" style={chipStyle} onMouseDown={(event) => event.stopPropagation()} onClick={onComposerToggle}>
-                    <Settings2 className="size-3.5" />
-                    组装提示词
-                </button> : <span role="status" className="text-xs">融合 2–4 张参考图，不使用提示词。</span>}
+            <div className="mb-2 shrink-0 space-y-2">
+                {!blend ? <CanvasConfigComposer compact value={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} inputs={referencePresentation.inputs} referenceLabels={referencePresentation.mentionLabels} disabled={isRunning} label={mode === "audio" ? "朗读文本" : "提示词"} onChange={composerContent => onConfigChange(node.id, { composerContent })} /> : <span role="status" className="text-xs">融合 2–4 张参考图，不使用提示词。</span>}
+                {mode !== "audio" ? <CanvasConfigImageReferences node={node} references={references} labels={referencePresentation.trayLabels} disabled={isRunning} onChange={onConfigChange} /> : null}
+                {mode === "video" && (inputSummary.videoCount > 0 || inputSummary.audioCount > 0) ? <div className="flex flex-wrap gap-1.5">
+                    {inputSummary.videoCount > 0 ? <InputChip label="已连视频" value={`${inputSummary.videoCount} 个`} style={chipStyle} /> : null}
+                    {inputSummary.audioCount > 0 ? <InputChip label="已连音频" value={`${inputSummary.audioCount} 个`} style={chipStyle} /> : null}
+                </div> : null}
             </div>
 
             {mode !== "text" ? <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${hasAvailableModel ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
-                <ModelPicker toolKey={toolKey} className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} modelsSource="server" disabled={isRunning} onMissingConfig={() => openConfigDialog(true)} fullWidth />
+                <ModelPicker toolKey={pickerToolKey} className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} modelsSource="server" disabled={isRunning} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                 {hasAvailableModel && mode === "video" ? (
                     <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                 ) : hasAvailableModel && mode === "image" ? (
-                    <CanvasImageSettingsPopover config={config} referenceCount={inputSummary.imageCount} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
+                    <CanvasImageSettingsPopover config={config} taskCount={Math.max(1, taskCount)} referenceCount={separateImages ? 1 + (node.metadata?.manualImageReferences?.length || 0) : imageCount} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
                 ) : hasAvailableModel && mode === "audio" ? (
                     <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                 ) : null}
             </div> : null}
 
+            {routingError ? <div role="alert" className="mb-2 text-xs" style={{ color: theme.node.muted }}>{routingError}</div> : null}
             <Button
                 type="primary"
-                className="mt-auto !h-9 !w-full !cursor-pointer !rounded-lg"
+                className="mt-auto shrink-0 !h-9 !w-full !cursor-pointer !rounded-lg"
                 danger={isRunning}
                 disabled={!isRunning && !canGenerate}
                 onMouseDown={(event) => event.stopPropagation()}
@@ -163,13 +201,27 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                                 {credits.toLocaleString()}
                             </span> : null}
                             <Play className="size-4" />
-                            <span>{linkedTaskCount > 0 ? `执行 ${linkedTaskCount} 个任务` : "开始生成"}</span>
+                            <span>{taskCount > 0 ? `执行 ${taskCount} 个任务` : showInputMode ? "合并参考生成 1 张" : "开始生成"}</span>
                         </>
                     )}
                 </span>
             </Button>
         </div>
     );
+}
+
+export function configReferencePresentation(references: ImageReferenceItem[], inputs: NodeGenerationInput[], mode: CanvasGenerationMode, separateImages: boolean) {
+    const common = separateImages ? references.filter(image => image.origin !== "connection") : references;
+    const taskIds = inputs.filter(input => input.type === "image" && references.some(image => image.origin === "connection" && image.id === input.nodeId)).map(input => input.nodeId);
+    const trayLabels = separateImages ? Object.fromEntries(references.map(image => [image.referenceKey, image.origin === "connection" ? `任务输入${taskIds.indexOf(image.id) + 1}` : `图片${common.indexOf(image) + 2}`])) : undefined;
+    const mentionLabels = separateImages ? Object.fromEntries(common.map((image, index) => [image.id, `图片${index + 2}`])) : undefined;
+    return {
+        trayLabels, mentionLabels,
+        inputs: [
+            ...inputs.filter(input => input.type !== "image" && (mode === "video" || input.type === "text")),
+            ...(mode === "audio" ? [] : common.map(image => ({ nodeId: image.id, type: "image" as const, title: image.name, image }))),
+        ],
+    };
 }
 
 function InputChip({ label, value, style }: { label: string; value: string; style: CSSProperties }) {

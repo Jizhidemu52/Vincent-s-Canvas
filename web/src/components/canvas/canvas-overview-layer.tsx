@@ -4,6 +4,7 @@ import { canvasConnectionCanvasSize, type CanvasConnectionCanvasSize } from "@/l
 import { getFastCanvas2DContext } from "@/lib/canvas/canvas-2d-context";
 import { filterCanvasOverviewRenderNodes } from "@/lib/canvas/canvas-overview-rendering";
 import { canvasOverviewViewportBounds } from "@/lib/canvas/canvas-overview-visibility";
+import { createCanvasViewportPreview } from "@/lib/canvas/canvas-viewport-interaction";
 import { createCanvasSpatialIndex, refreshCanvasSpatialGeometryIndex, selectCanvasSpatialIndexNodes } from "@/lib/canvas/canvas-spatial-index";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -21,7 +22,8 @@ export const CanvasOverviewLayer = memo(forwardRef<CanvasOverviewLayerHandle, {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const canvasSizeRef = useRef<CanvasConnectionCanvasSize | null>(null);
     const spatialIndexRef = useRef<ReturnType<typeof createCanvasSpatialIndex> | null>(null);
-    const latestViewportRef = useRef(viewport);
+    const viewportPreviewRef = useRef<ReturnType<typeof createCanvasViewportPreview> | null>(null);
+    if (!viewportPreviewRef.current) viewportPreviewRef.current = createCanvasViewportPreview(viewport);
     const excludedNodeIdsRef = useRef(excludedNodeIds);
     const didDrawExcludedNodesRef = useRef(false);
     const failedRef = useRef(false);
@@ -47,7 +49,7 @@ export const CanvasOverviewLayer = memo(forwardRef<CanvasOverviewLayerHandle, {
     const draw = useCallback((nextViewport: ViewportTransform) => {
         const canvas = canvasRef.current;
         if (!canvas || failedRef.current) return;
-        latestViewportRef.current = nextViewport;
+        viewportPreviewRef.current!.preview(nextViewport);
         let size = canvasSizeRef.current;
         if (!size) {
             const host = canvas.parentElement;
@@ -104,13 +106,13 @@ export const CanvasOverviewLayer = memo(forwardRef<CanvasOverviewLayerHandle, {
             const rect = entries[0]?.contentRect;
             if (!rect) return;
             syncCanvasSize(rect.width, rect.height);
-            draw(latestViewportRef.current);
+            draw(viewportPreviewRef.current!.current());
         });
         observer.observe(host);
         const handleWindowResize = () => {
             const rect = host.getBoundingClientRect();
             syncCanvasSize(rect.width, rect.height);
-            draw(latestViewportRef.current);
+            draw(viewportPreviewRef.current!.current());
         };
         window.addEventListener("resize", handleWindowResize);
         return () => {
@@ -119,14 +121,17 @@ export const CanvasOverviewLayer = memo(forwardRef<CanvasOverviewLayerHandle, {
         };
     }, [draw, syncCanvasSize]);
 
-    useLayoutEffect(() => draw(viewport), [draw, viewport]);
+    useLayoutEffect(() => {
+        viewportPreviewRef.current!.commit(viewport);
+        draw(viewportPreviewRef.current!.current());
+    }, [draw, viewport]);
 
     useLayoutEffect(() => {
         if (!didDrawExcludedNodesRef.current) {
             didDrawExcludedNodesRef.current = true;
             return;
         }
-        draw(latestViewportRef.current);
+        draw(viewportPreviewRef.current!.current());
     }, [draw, excludedNodeIds]);
 
     return <canvas aria-hidden="true" data-testid="canvas-overview-layer" ref={canvasRef} className="pointer-events-none absolute inset-0 z-0" />;

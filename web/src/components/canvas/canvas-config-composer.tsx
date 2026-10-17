@@ -7,12 +7,18 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { NodeGenerationInput } from "./canvas-node-generation";
+import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
+import { resolveImageUrl } from "@/services/image-storage";
 
 type CanvasConfigComposerProps = {
     value: string;
     inputs: NodeGenerationInput[];
     onChange: (value: string) => void;
-    onClose: () => void;
+    onClose?: () => void;
+    compact?: boolean;
+    disabled?: boolean;
+    label?: string;
+    referenceLabels?: Record<string, string>;
 };
 
 type Token =
@@ -25,7 +31,7 @@ type MentionState = {
 
 export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g;
 
-export function CanvasConfigComposer({ value, inputs, onChange, onClose }: CanvasConfigComposerProps) {
+export function CanvasConfigComposer({ value, inputs, onChange, onClose, compact = false, disabled = false, label = "提示词", referenceLabels }: CanvasConfigComposerProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
@@ -43,8 +49,8 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
         if (!mention) return [];
         const query = (mention.query || "").trim().toLowerCase();
         if (!query) return inputs;
-        return inputs.filter((input) => `${resourceLabel(input, inputs)} ${input.title} ${input.text || ""}`.toLowerCase().includes(query));
-    }, [inputs, mention]);
+        return inputs.filter((input) => `${resourceLabel(input, inputs, referenceLabels)} ${input.title} ${input.text || ""}`.toLowerCase().includes(query));
+    }, [inputs, mention, referenceLabels]);
 
     useEffect(() => {
         if (document.activeElement === editorRef.current) return;
@@ -58,6 +64,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
             }
             const input = referenceById.get(token.nodeId);
             if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview));
+            else editor.append(document.createTextNode(`@[node:${token.nodeId}]`));
         });
     }, [inputs, referenceById, theme, tokens]);
 
@@ -124,26 +131,30 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
     return (
         <div
             data-canvas-no-zoom
-            className="rounded-2xl border p-3 shadow-2xl backdrop-blur"
-            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+            className={compact ? "min-w-0 cursor-text" : "rounded-2xl border p-3 shadow-2xl backdrop-blur"}
+            style={{ background: compact ? undefined : theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={stopCanvasInteraction}
             onPointerDown={stopCanvasInteraction}
             onWheel={(event) => event.stopPropagation()}
         >
             <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-baseline gap-2">
-                    <div className="shrink-0 text-xs font-semibold">组装提示词</div>
-                    <div className="truncate text-[11px] opacity-55">@ 引用已连接素材，发送前按当前连接重新编号</div>
+                    <div className="shrink-0 text-xs font-semibold">{label}</div>
+                    {inputs.length ? <div className="truncate text-[11px] opacity-55">@ 引用素材</div> : null}
                 </div>
-                <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
+                {onClose ? <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} /> : null}
             </div>
             <div className="relative rounded-xl border" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
-                {!draftValue.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-7" style={{ color: theme.node.placeholder }}>输入提示词，按 @ 引用连接的图片或文本</div> : null}
+                {!draftValue.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-6" style={{ color: theme.node.placeholder }}>{label === "朗读文本" ? "输入需要转为语音的文字" : "描述希望生成或修改的内容"}</div> : null}
                 <div
                     ref={editorRef}
-                    contentEditable
+                    contentEditable={!disabled}
+                    role="textbox"
+                    aria-label={label}
+                    aria-multiline="true"
+                    aria-disabled={disabled}
                     suppressContentEditableWarning
-                    className="thin-scrollbar min-h-28 w-full overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none"
+                    className={`thin-scrollbar ${compact ? "h-24" : "min-h-28 max-h-64"} w-full select-text overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-6 outline-none`}
                     style={{ color: theme.node.text }}
                     onInput={() => {
                         if (!composingRef.current) syncFromEditor();
@@ -157,6 +168,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                     }}
                     onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
                         event.stopPropagation();
+                        if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
                         if (mention && candidates.length) {
                             if (event.key === "ArrowDown") {
                                 event.preventDefault();
@@ -186,9 +198,9 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                         }
                         requestAnimationFrame(syncMention);
                     }}
-                    onBlur={() => window.setTimeout(closeMention, 120)}
+                    onBlur={() => { draftRef.current?.flush(); window.setTimeout(closeMention, 120); }}
                 />
-                {mention && candidates.length ? <MentionMenu inputs={candidates} allInputs={inputs} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null}
+                {mention && candidates.length ? <MentionMenu inputs={candidates} allInputs={inputs} referenceLabels={referenceLabels} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null}
             </div>
             {imagePreview ? <Image src={imagePreview} alt="引用图片预览" style={{ display: "none" }} preview={{ visible: true, src: imagePreview, onVisibleChange: (visible) => !visible && setImagePreview(null) }} /> : null}
         </div>
@@ -196,7 +208,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
 
 }
 
-function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inputs: NodeGenerationInput[]; allInputs: NodeGenerationInput[]; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (input: NodeGenerationInput) => void }) {
+function MentionMenu({ inputs, allInputs, referenceLabels, activeIndex, theme, onSelect }: { inputs: NodeGenerationInput[]; allInputs: NodeGenerationInput[]; referenceLabels?: Record<string, string>; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (input: NodeGenerationInput) => void }) {
     const selectedRef = useRef(false);
     const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
@@ -227,7 +239,7 @@ function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inpu
                 >
                     <ResourcePreview input={input} />
                     <span className="min-w-0 flex-1">
-                        <span className="block font-medium">{resourceLabel(input, allInputs)}</span>
+                        <span className="block font-medium">{resourceLabel(input, allInputs, referenceLabels)}</span>
                         <span className="block truncate opacity-65">{input.text || input.title}</span>
                     </span>
                 </button>
@@ -237,7 +249,7 @@ function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inpu
 }
 
 function ResourcePreview({ input }: { input: NodeGenerationInput }) {
-    if (input.type === "image" && input.image) return <img src={input.image.dataUrl} alt="" className="size-9 rounded-md object-cover" />;
+    if (input.type === "image" && input.image) return <CanvasPersistedMediaPreview kind="image" url={input.image.dataUrl} storageKey={input.image.storageKey} alt="" className="size-9 rounded-md object-cover" />;
     if (input.type === "video" && input.video) return <video src={input.video.url} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" />;
     const Icon = input.type === "audio" ? Music2 : input.type === "video" ? Video : input.type === "image" ? ImageIcon : FileText;
     return (
@@ -255,7 +267,8 @@ function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationI
     Object.assign(wrapper.style, chipStyle(theme));
     if (input.type === "image" && input.image) {
         const image = document.createElement("img");
-        image.src = input.image.dataUrl;
+        if (!input.image.storageKey) image.src = input.image.dataUrl;
+        else void resolveImageUrl(input.image.storageKey, input.image.dataUrl).then(url => { if (url) image.src = url; }).catch(() => { image.alt = "参考图暂不可用"; });
         image.alt = input.title;
         image.className = "size-6 rounded object-cover";
         wrapper.className = "mx-px inline-flex size-6 items-center justify-center overflow-hidden rounded align-middle";
@@ -263,7 +276,7 @@ function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationI
         wrapper.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            onImagePreview(input.image?.dataUrl || "");
+            if (image.getAttribute("src")) onImagePreview(image.src);
         });
     } else {
         wrapper.title = input.text || input.title;
@@ -374,7 +387,8 @@ function parseComposerTokens(value: string): Token[] {
     return tokens;
 }
 
-function resourceLabel(input: NodeGenerationInput, inputs: NodeGenerationInput[]) {
+function resourceLabel(input: NodeGenerationInput, inputs: NodeGenerationInput[], labels?: Record<string, string>) {
+    if (labels?.[input.nodeId]) return labels[input.nodeId];
     const sameTypeInputs = inputs.filter((item) => item.type === input.type);
     const index = Math.max(0, sameTypeInputs.findIndex((item) => item.nodeId === input.nodeId));
     if (input.type === "image") return `图片${index + 1}`;

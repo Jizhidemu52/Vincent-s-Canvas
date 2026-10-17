@@ -60,6 +60,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
     const isCanvasInteractionRef = useRef(false);
     const frameRef = useRef<number | null>(null);
     const pendingViewportRef = useRef<ViewportTransform | null>(null);
+    const wheelBoundsRef = useRef<DOMRect | null>(null);
     const wheelCommitTimerRef = useRef<number | null>(null);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
     const [isPanning, setIsPanning] = useState(false);
@@ -126,6 +127,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         }
         const next = pendingViewportRef.current || liveViewportRef.current;
         pendingViewportRef.current = null;
+        wheelBoundsRef.current = null;
         applyLiveViewport(next);
         lastVirtualizationViewportRef.current = next;
         onViewportChange(next);
@@ -150,6 +152,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
             if (frameRef.current) return;
             frameRef.current = requestAnimationFrame(() => {
                 frameRef.current = null;
+                wheelBoundsRef.current = null;
                 const pending = pendingViewportRef.current;
                 if (!pending) return;
                 pendingViewportRef.current = null;
@@ -168,6 +171,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
                 frameRef.current = null;
             }
             pendingViewportRef.current = null;
+            wheelBoundsRef.current = null;
             if (wheelCommitTimerRef.current) {
                 window.clearTimeout(wheelCommitTimerRef.current);
                 wheelCommitTimerRef.current = null;
@@ -184,12 +188,16 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         const target = event.target instanceof Element ? event.target : null;
         if (!shouldCanvasCaptureWheel(target)) return;
 
-        const rect = containerRef.current?.getBoundingClientRect();
+        // A trackpad can emit several events before paint. Read host bounds
+        // once for that queued frame, then refresh them for the next frame.
+        const rect = wheelBoundsRef.current ?? containerRef.current?.getBoundingClientRect();
         if (!rect || event.deltaY === 0 || panState.current.isPanning) return;
         // Include every event received before paint, even after a direction or anchor change.
         const current = pendingViewportRef.current ?? liveViewportRef.current;
         const factor = canvasWheelZoomFactor(event.deltaY, event.deltaMode, rect.height);
         const newScale = clampCanvasZoom(current.k * factor);
+        if (newScale === current.k) return;
+        wheelBoundsRef.current = rect;
 
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;

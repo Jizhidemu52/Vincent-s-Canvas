@@ -1,5 +1,22 @@
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
+/** Incoming images can be independent jobs; never infer jobs from generated output edges. */
+export function getConfigImageInputs(configId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): CanvasNodeData[] {
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    const config = byId.get(configId);
+    if (config?.type !== CanvasNodeType.Config) return [];
+    const excluded = new Set(config.metadata?.excludedConnectedImageReferenceKeys || []);
+    const ids = new Set(connections.filter(edge => edge.toNodeId === configId && edge.kind !== "generation-output").map(edge => edge.fromNodeId));
+    return [...ids].flatMap(id => {
+        const node = byId.get(id);
+        return node?.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey) && !excluded.has(`node:${id}`) ? [node] : [];
+    });
+}
+
+export function configUsesSeparateImageInputs(node: CanvasNodeData, imageCount: number, linkedTaskCount: number, requiresPrompt: boolean) {
+    return (node.metadata?.generationMode || "image") === "image" && requiresPrompt && !linkedTaskCount && imageCount > 1 && node.metadata?.configImageInputMode !== "combined";
+}
+
 /** Only explicit user-created target edges participate; historical result edges never fan out. */
 export function getSharedConfigTargets(configId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): CanvasNodeData[] {
     const byId = new Map(nodes.map(node => [node.id, node]));
