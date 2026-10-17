@@ -20,6 +20,8 @@ import { imageModelProfile, useImageModelProfile } from "@/lib/image-model-setti
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
     isRunning: boolean;
+    linkedTaskCount?: number;
+    linkedTaskHasImages?: boolean;
     inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number };
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
     onGenerate: (nodeId: string) => void;
@@ -27,7 +29,7 @@ type CanvasConfigNodePanelProps = {
     onComposerToggle: () => void;
 };
 
-export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
+export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, linkedTaskHasImages = false, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -35,7 +37,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const businessConfigStatus = useBusinessConfigStore((state) => state.status);
     const mode = node.metadata?.generationMode || "image";
     const selectedModel = businessConfigStatus === "ready" ? mode === "text" ? globalConfig.textModel : resolveCapabilityModel(globalConfig, mode, businessModels, node.metadata?.model) : "";
-    const toolKey = canvasToolKey(mode, inputSummary.imageCount > 0, imageModelProfile(selectedModel, businessModels).kind);
+    const toolKey = canvasToolKey(mode, inputSummary.imageCount > 0 || linkedTaskHasImages, imageModelProfile(selectedModel, businessModels).kind);
     const boundModelId = useBusinessConfigStore(state => state.tools.find(item => item.toolKey === toolKey)?.modelConfigId);
     const config = useToolConfig(buildNodeConfig(globalConfig, node, mode, selectedModel), toolKey);
     const model = config.model;
@@ -44,12 +46,12 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const toolEnabled = useToolEnabled(toolKey);
     const hasAvailableModel = Boolean(model);
     const count = 1;
-    const credits = requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? count : 1 });
+    const credits = requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? count : 1 }) * Math.max(1, linkedTaskCount);
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
-    const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
+    const hasAnyInput = Boolean(linkedTaskCount || inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
     const modelIsSynced = mode === "text" || Boolean(boundModelId) || node.metadata?.model === model;
-    const canGenerate = toolEnabled && hasAvailableModel && modelIsSynced && (blend ? inputSummary.imageCount >= 2 && inputSummary.imageCount <= 4 : hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput));
+    const canGenerate = toolEnabled && hasAvailableModel && modelIsSynced && (linkedTaskCount > 0 || (blend ? inputSummary.imageCount >= 2 && inputSummary.imageCount <= 4 : hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput)));
 
     useEffect(() => {
         if (mode !== "text" && !boundModelId && !isRunning && businessConfigStatus === "ready" && (node.metadata?.model || "") !== model) onConfigChange(node.id, { model });
@@ -112,6 +114,11 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 </div>
             </div>
 
+            <div className="mb-2 text-[11px] leading-4" style={{ color: theme.node.muted }}>
+                <div>左侧接共用素材，右侧连接任务</div>
+                {linkedTaskCount > 0 ? <div role="status"><span style={{ color: theme.node.text }}>待执行 {linkedTaskCount} 个任务</span> · 每个任务使用自身输入与公共素材</div> : null}
+            </div>
+
             <div className="mb-2 flex flex-wrap gap-1.5">
                 {!blend ? <InputChip label="提示词" value={`${inputSummary.textCount} 个`} style={chipStyle} /> : null}
                 <InputChip label="参考图" value={`${inputSummary.imageCount} 张`} style={chipStyle} />
@@ -156,7 +163,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                                 {credits.toLocaleString()}
                             </span> : null}
                             <Play className="size-4" />
-                            <span>开始生成</span>
+                            <span>{linkedTaskCount > 0 ? `执行 ${linkedTaskCount} 个任务` : "开始生成"}</span>
                         </>
                     )}
                 </span>

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { deploymentFeatures } from "../src/lib/deployment-features";
 import type { ApiUser } from "../src/services/api/auth";
-import { QueuedTaskFailedError, recoverQueuedMedia, requestQueuedImageBatch, requestQueuedImages, type QueuedTask } from "../src/services/api/generation-tasks";
+import { QueuedTaskFailedError, QueuedTaskSubmissionUncertainError, recoverQueuedMedia, requestQueuedImageBatch, requestQueuedImages, type QueuedTask } from "../src/services/api/generation-tasks";
 import { useUserStore } from "../src/stores/use-user-store";
 
 const originalFetch = globalThis.fetch;
@@ -108,7 +108,11 @@ describe("generation results do not wait for session refresh", () => {
     test.each(paths)("%s preserves the original query error while session refresh is pending", async path => {
         const originalError = new Error("original task query failed");
         controlledNetwork("initial", { pollError: originalError });
-        await expect(promptly(run(path))).rejects.toBe(originalError);
+        const error = await promptly(run(path)).catch(error => error);
+        if (path === "recovery") {
+            expect(error).toBeInstanceOf(QueuedTaskSubmissionUncertainError);
+            expect(error).toMatchObject({ requestId: completedTask.requestId, taskId: completedTask.id, cause: originalError });
+        } else expect(error).toBe(originalError);
     });
 
     test.each(paths)("%s still cancels on abort without waiting for session refresh", async path => {

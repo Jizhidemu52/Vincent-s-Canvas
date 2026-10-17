@@ -34,11 +34,33 @@ export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position): 
     });
 
     // A copied style group owns its copied batches, never their source IDs.
+    const remapReferenceKey = (key: string) => key.replace(/^(node|canvas|source):(.+)$/, (original, prefix: string, id: string) => idMap.has(id) ? `${prefix}:${idMap.get(id)}` : original);
+    const remapMention = (text: string) => text.replace(/@\[node:([^\]]+)\]/g, (original, id: string) => {
+        const next = idMap.get(id) || remapReferenceKey(id);
+        return next !== id ? `@[node:${next}]` : original;
+    });
     nodes.forEach(node => {
         if (!node.metadata) return;
         if (node.metadata.batchRootId) node.metadata.batchRootId = idMap.get(node.metadata.batchRootId);
         if (node.metadata.batchChildIds) node.metadata.batchChildIds = node.metadata.batchChildIds.flatMap(id => idMap.has(id) ? [idMap.get(id)!] : []);
         if (node.metadata.primaryImageId) node.metadata.primaryImageId = idMap.get(node.metadata.primaryImageId);
+        const origin = node.metadata.generationOrigin;
+        if (origin) {
+            const sourceNodeId = idMap.get(origin.sourceNodeId);
+            const configNodeId = origin.configNodeId ? idMap.get(origin.configNodeId) : undefined;
+            node.metadata.generationOrigin = sourceNodeId && (!origin.configNodeId || configNodeId) ? { ...origin, sourceNodeId, configNodeId } : undefined;
+        }
+        if (node.metadata.prompt) node.metadata.prompt = remapMention(node.metadata.prompt);
+        if (node.metadata.composerContent) node.metadata.composerContent = remapMention(node.metadata.composerContent);
+        if (node.metadata.draftPrompt) node.metadata.draftPrompt = remapMention(node.metadata.draftPrompt);
+        if (node.metadata.manualImageReferences) node.metadata.manualImageReferences = node.metadata.manualImageReferences.map(reference => ({
+            ...reference,
+            id: reference.origin === "canvas" ? idMap.get(reference.id) || reference.id : reference.id,
+            sourceNodeId: reference.sourceNodeId ? idMap.get(reference.sourceNodeId) : undefined,
+            referenceKey: remapReferenceKey(reference.referenceKey),
+        }));
+        if (node.metadata.imageReferenceOrder) node.metadata.imageReferenceOrder = node.metadata.imageReferenceOrder.map(remapReferenceKey);
+        if (node.metadata.excludedConnectedImageReferenceKeys) node.metadata.excludedConnectedImageReferenceKeys = node.metadata.excludedConnectedImageReferenceKeys.map(remapReferenceKey);
     });
     const groups = (graph.groups || []).map(group => ({ ...group, id: `group-${nanoid()}`, nodeIds: group.nodeIds.flatMap(id => idMap.has(id) ? [idMap.get(id)!] : []) }));
     return { nodes, connections, groups };

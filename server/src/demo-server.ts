@@ -1131,7 +1131,7 @@ Bun.serve({
       } | null;
       if (!input?.requestId || !input.projectId || !input.operationType || !input.modelConfigId || !Array.isArray(input.items) || !input.items.length)
         return json({ error: "INVALID_BATCH", message: "Batch task details are incomplete" }, 400);
-      if (input.items.length !== 1) return json({ error: "SINGLE_IMAGE_ONLY", message: "每次只能生成 1 张图片，请分别发起独立任务" }, 400);
+      if (input.items.length > 100) return json({ error: "BATCH_LIMIT_EXCEEDED", message: "每批最多提交 100 个独立任务" }, 400);
       const batchTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
       const batchId = crypto.randomUUID();
       const cookie = request.headers.get("cookie") || "";

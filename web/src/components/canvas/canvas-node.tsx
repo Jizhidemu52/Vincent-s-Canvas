@@ -371,8 +371,9 @@ export const CanvasNode = React.memo(function CanvasNode({
                 height,
                 transition: isMoving ? "none" : "box-shadow 200ms ease",
                 ...canvasNodeRenderingStyle,
-                // Lightweight bulk overviews reuse their paint while moving; auto invalidates each root.
-                contentVisibility: useOverview && isMultiSelected ? "visible" : canvasNodeRenderingStyle.contentVisibility,
+                // content-visibility:auto adds paint containment: it clips the half-outside
+                // connection/resize handles and the editor panel, including their hit areas.
+                contentVisibility: showConnectionControls || showResizeControls || showPanel || (useOverview && isMultiSelected) ? "visible" : canvasNodeRenderingStyle.contentVisibility,
             }}
             onMouseEnter={() => {
                 if (isMoving) return;
@@ -467,8 +468,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 {showResizeControls ? <>{(["top-left", "top-right", "bottom-left", "bottom-right"] as ResizeCorner[]).map((corner) => <ResizeHandle key={corner} corner={corner} theme={theme} onMouseDown={handleResizeMouseDown} />)}</> : null}
             </div>
 
-            {showConnectionControls ? <><ConnectionHandleDot side="left" theme={theme} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
-            <ConnectionHandleDot side="right" theme={theme} visible={data.type !== CanvasNodeType.Config && (effectiveHovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /></> : null}
+            {showConnectionControls ? <><ConnectionHandleDot side="left" theme={theme} label={data.type === CanvasNodeType.Config ? "公共素材输入" : "输入连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
+            <ConnectionHandleDot side="right" theme={theme} label={data.type === CanvasNodeType.Config ? "共享配置输出" : "输出连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /></> : null}
 
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
         </div>
@@ -903,11 +904,13 @@ function ResizeHandle({ corner, theme, onMouseDown }: { corner: ResizeCorner; th
     </div>;
 }
 
-function ConnectionHandleDot({ side, theme, visible, onMouseDown }: { side: "left" | "right"; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
+function ConnectionHandleDot({ side, theme, label, visible, onMouseDown }: { side: "left" | "right"; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; label: string; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
 
     return (
         <div
             data-canvas-connection-handle={side}
+            title={label}
+            aria-label={label}
             className={`absolute top-1/2 z-30 flex size-12 -translate-y-1/2 cursor-crosshair items-center justify-center transition-opacity duration-150 ${
                 side === "left" ? "-left-6" : "-right-6"
             } ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}

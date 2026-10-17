@@ -10,7 +10,10 @@ export type CanvasFrameScheduler = {
 
 export function createCanvasFrameScheduler(): CanvasFrameScheduler {
     if (typeof requestAnimationFrame === "function" && typeof cancelAnimationFrame === "function") {
-        return { request: requestAnimationFrame, cancel: cancelAnimationFrame };
+        return {
+            request: (callback) => globalThis.requestAnimationFrame(callback),
+            cancel: (handle) => globalThis.cancelAnimationFrame(handle),
+        };
     }
     return {
         request: (callback) => setTimeout(callback, 16) as unknown as number,

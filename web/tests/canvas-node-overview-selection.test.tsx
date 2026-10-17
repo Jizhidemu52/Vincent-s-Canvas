@@ -17,8 +17,11 @@ const markup = (patch: Partial<typeof props> = {}) => renderToStaticMarkup(<Canv
 describe("bulk overview node output", () => {
     test("keeps offscreen skipping for image previews while reusing empty bulk overview paint", () => {
         expect(markup({ data: { ...image, metadata: {} } })).toContain("content-visibility:visible");
-        for (const patch of [{}, { isMultiSelected: false }, { isFocusRelated: true }, { isConnectionTarget: true }, { showPanel: true }, { renderQuality: "full" as const }, { renderQuality: "moving" as const }]) {
+        for (const patch of [{}, { renderQuality: "moving" as const }]) {
             expect(markup(patch)).toContain("content-visibility:auto");
+        }
+        for (const patch of [{ isMultiSelected: false }, { isFocusRelated: true }, { isConnectionTarget: true }, { showPanel: true }, { isConnecting: true }, { renderQuality: "full" as const }]) {
+            expect(markup(patch)).toContain("content-visibility:visible");
         }
         expect(markup({ isSelected: false, isMultiSelected: false })).toContain("content-visibility:auto");
     });
@@ -59,7 +62,7 @@ describe("bulk overview node output", () => {
             expect(html).toContain('<img src="https://example.invalid/image.png"');
             expect(html).toContain('<img src="https://example.invalid/second-image.png"');
             expect(html.match(/data-canvas-image-resolution="original"/g)).toHaveLength(2);
-            expect(html.match(/content-visibility:auto/g)).toHaveLength(2);
+            expect(html.match(/content-visibility:auto/g)).toHaveLength(secondSelected ? 1 : 2);
             expect(html).not.toContain('data-testid="canvas-node-overview"');
         }
     });
@@ -103,5 +106,13 @@ describe("bulk overview node output", () => {
         expect(html).not.toContain("data-canvas-resize-handle");
         expect(html).toContain("data-canvas-image-resolution");
         expect(html).not.toContain('data-testid="canvas-node-overview"');
+    });
+
+    test("selected configuration ports and panels are not paint-contained outside the node bounds", () => {
+        const html = markup({ data: { ...image, type: CanvasNodeType.Config }, renderQuality: "full", isMultiSelected: false, showPanel: true, renderPanel: () => <div>Shared settings</div> });
+        expect(html).toContain("content-visibility:visible");
+        expect(html).toContain('aria-label="公共素材输入"');
+        expect(html).toContain('aria-label="共享配置输出"');
+        expect(html).toContain("Shared settings");
     });
 });

@@ -43,7 +43,11 @@ export type CanvasStoredImageReference = {
 };
 
 export type CanvasNodeMetadata = {
+    generationOrigin?: { configNodeId?: string; sourceNodeId: string; runId: string; mode: CanvasGenerationMode };
     imageTask?: import("@/lib/canvas/canvas-image-task-recovery").CanvasImageTaskBinding;
+    mediaTask?: { requestId: string; taskId?: string; ownerId: string; projectId: string };
+    generationSubmissionUncertain?: boolean;
+    textRequestId?: string;
     designLibrarySource?: { entryId: string; imageId: string; title: string; authorName: string; assetId: string };
     sourceTaskId?: string;
     systemPrompt?: string;
@@ -108,6 +112,7 @@ export type CanvasNodeData = {
 
 export type CanvasConnection = {
     id: string;
+    kind?: "config-target" | "generation-output";
     fromNodeId: string;
     toNodeId: string;
 };

@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { getNodeSpec } from "@/constant/canvas";
+import { normalizeCanvasConnection } from "@/lib/canvas/canvas-shared-connections";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type ViewportTransform } from "@/types/canvas";
 
 export type CanvasAgentOp =
@@ -76,9 +77,15 @@ export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasA
         }
         if (op.type === "connect_nodes") {
             if (!op.fromNodeId || !op.toNodeId) return;
-            const exists = connections.some((conn) => conn.fromNodeId === op.fromNodeId && conn.toNodeId === op.toNodeId);
-            const hasNodes = nodes.some((node) => node.id === op.fromNodeId) && nodes.some((node) => node.id === op.toNodeId);
-            if (!exists && hasNodes) connections = [...connections, { id: op.id || nanoid(), fromNodeId: op.fromNodeId, toNodeId: op.toNodeId }];
+            const from = nodes.find(node => node.id === op.fromNodeId);
+            const to = nodes.find(node => node.id === op.toNodeId);
+            if (!from || !to) return;
+            const edge = normalizeCanvasConnection(from, to, "source");
+            if (!edge) return;
+            if (edge.kind === "config-target" && connections.some(conn => conn.kind === "config-target" && conn.toNodeId === to.id && conn.fromNodeId !== from.id)) return;
+            const existing = connections.find(conn => conn.fromNodeId === edge.fromNodeId && conn.toNodeId === edge.toNodeId);
+            if (!existing) connections = [...connections, { id: op.id || nanoid(), ...edge }];
+            else if (edge.kind === "config-target" && existing.kind !== edge.kind) connections = connections.map(conn => conn === existing ? { ...conn, kind: edge.kind } : conn);
         }
         if (op.type === "set_viewport" && op.viewport) viewport = op.viewport;
         if (op.type === "select_nodes") selectedNodeIds = (op.ids || []).filter((id) => nodes.some((node) => node.id === id));

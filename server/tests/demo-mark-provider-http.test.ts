@@ -8,6 +8,9 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
   const provider = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     expect(request.headers.get("authorization")).toBe("Bearer fake-mark-http-key");
     const path = new URL(request.url).pathname;
+    if (request.method === "POST" && path === "/v1/uploads/images") {
+      return Response.json({ url: "https://mock-batch-reference.invalid/image.png" });
+    }
     if (request.method === "POST" && path === "/v1/images/generations") {
       submissions.push(await request.json() as Record<string, unknown>);
       return Response.json({ data: [{ task_id: `fake-upstream-${submissions.length}` }] });
@@ -56,9 +59,9 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     const upload = await request("/api/assets/upload-request", "POST", { filename: "reference-limit.png", mimeType: "image/png", byteSize: png.byteLength }).then(response => response.json());
     expect((await fetch(base + upload.uploadUrl, { method: "PUT", body: png, headers: { "content-type": "image/png" } })).ok).toBe(true);
     const sourceUrl = `/api/assets/${upload.assetId}/content`;
-    const multiBatch = await request("/api/tasks/batch", "POST", { requestId: crypto.randomUUID(), projectId: "single-image-check", operationType: "batch_image", toolKey: "canvas-batch", modelConfigId: images[0]!.id, parameters: { count: 10 }, items: [{ sourceUrls: [sourceUrl] }, { sourceUrls: [sourceUrl] }] });
+    const multiBatch = await request("/api/tasks/batch", "POST", { requestId: crypto.randomUUID(), projectId: "single-image-check", operationType: "batch_image", toolKey: "canvas-batch", modelConfigId: images[0]!.id, parameters: { count: 10 }, items: Array.from({ length: 101 }, () => ({ sourceUrls: [sourceUrl] })) });
     expect(multiBatch.status).toBe(400);
-    expect((await multiBatch.json()).error).toBe("SINGLE_IMAGE_ONLY");
+    expect((await multiBatch.json()).error).toBe("BATCH_LIMIT_EXCEEDED");
     expect(submissions).toHaveLength(0);
     const disabled = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), operationType: "image_generation", modelConfigId: "d5000000-0000-4000-8000-000000000008", prompt: "disabled Grok cannot submit", parameters: { size: "1:1", resolution: "1k" } });
     expect(disabled.status).toBe(400);
@@ -93,6 +96,15 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     }
     expect(submissions).toHaveLength(3);
     expect(reads).toHaveLength(3);
+    const batchResponse = await request("/api/tasks/batch", "POST", { requestId: crypto.randomUUID(), projectId: "multi-input-check", operationType: "batch_image", toolKey: "canvas-batch", modelConfigId: images[0]!.id, prompt: "batch independent edit", parameters: { count: 10, n: 10, resolution: "1k", quality: "low" }, items: [{ sourceUrls: [sourceUrl] }, { sourceUrls: [sourceUrl] }] });
+    expect(batchResponse.status).toBe(201);
+    const batch = await batchResponse.json();
+    expect(batch.failures).toEqual([]);
+    expect(batch.tasks).toHaveLength(2);
+    expect(new Set(batch.tasks.map((task: { id: string }) => task.id)).size).toBe(2);
+    for (let attempt = 0; attempt < 100 && submissions.length < 5; attempt++) await Bun.sleep(50);
+    expect(submissions).toHaveLength(5);
+    expect(submissions.slice(3).every(item => item.n === 1 && item.prompt === "batch independent edit")).toBe(true);
   } finally {
     child.kill(); await child.exited; provider.stop(true);
   }

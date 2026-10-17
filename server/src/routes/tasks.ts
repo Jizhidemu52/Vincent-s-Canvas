@@ -41,7 +41,7 @@ const batchSchema = base.extend({
       }),
     )
     .min(1)
-    .max(1, "每次只能生成 1 张图片，请分别发起独立任务"),
+    .max(100, "每批最多提交 100 个独立任务"),
 });
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 

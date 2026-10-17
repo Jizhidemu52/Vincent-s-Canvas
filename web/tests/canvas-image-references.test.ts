@@ -49,3 +49,21 @@ test("config nodes and empty image nodes retain their auxiliary ordering without
     const empty = { ...imageNode, metadata: { manualImageReferences: configNode.metadata!.manualImageReferences } };
     expect(resolveCanvasNodeImageReferences(empty, [empty], []).map(item => item.id)).toEqual(["logo"]);
 });
+
+test("retains ordered storage-only public images and applies their exclusion keys", () => {
+    const stored = { ...imageNode, metadata: { storageKey: "image:product", content: "", mimeType: "image/webp" } };
+    const references = resolveCanvasImageReferences(configNode, [configNode, stored], [connection]);
+    expect(references.map(reference => reference.id)).toEqual(["logo", "product"]);
+    expect(references[1]).toMatchObject({ storageKey: "image:product", dataUrl: "", type: "image/webp" });
+    const excluded = { ...configNode, metadata: excludeConnectedReference(configNode.metadata!, "node:product") };
+    expect(resolveCanvasImageReferences(excluded, [excluded, stored], [connection]).map(reference => reference.id)).toEqual(["logo"]);
+});
+
+test("keeps distinct storage-only original and auxiliary images instead of treating empty URLs as duplicates", () => {
+    const original = { ...imageNode, metadata: { storageKey: "image:product", content: "" } };
+    const auxiliary = { ...imageNode, id: "auxiliary", metadata: { storageKey: "image:auxiliary", content: "" } };
+    const references = resolveCanvasNodeImageReferences(original, [original, auxiliary], [{ id: "aux-source", fromNodeId: "auxiliary", toNodeId: original.id }]);
+    expect(references.map(reference => [reference.id, reference.dataUrl, reference.storageKey])).toEqual([
+        ["product", "", "image:product"], ["auxiliary", "", "image:auxiliary"],
+    ]);
+});

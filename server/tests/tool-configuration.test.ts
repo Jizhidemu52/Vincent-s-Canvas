@@ -319,13 +319,18 @@ describe("authoritative scoped execution", () => {
   test("batch uses one binding and price snapshot, recording source on each task", async () => {
     const state = fixture(); state.bind("canvas-batch", { creditCostOverride: 10, rmbCostOverride: 0, configurationVersion: 2 });
     const { url } = await serve(state);
-    const response = await post(`${url}/tasks/batch`, { requestId: "batch-123456", projectId: "canvas", toolKey: "canvas-batch", operationType: "batch_image", prompt: "edit", items: [{ sourceUrls: ["one"] }] });
+    const response = await post(`${url}/tasks/batch`, { requestId: "batch-123456", projectId: "canvas", toolKey: "canvas-batch", operationType: "batch_image", prompt: "edit", parameters: { count: 8, n: 8 }, items: [{ sourceUrls: ["one"] }, { sourceUrls: ["two"] }] });
     expect(response.status).toBe(201);
     const result = await response.json();
-    expect(result.failures).toEqual([]); expect(result.tasks).toHaveLength(1);
+    expect(result.failures).toEqual([]); expect(result.tasks).toHaveLength(2);
     expect(result.tasks.every((task: { toolKey: string; credits: number; rmbCost: number }) => task.toolKey === "canvas-batch" && task.credits === 0 && task.rmbCost === 0)).toBe(true);
+    const inserted = state.statements.filter(({ sql }) => sql.startsWith("INSERT INTO tasks"));
+    expect(inserted).toHaveLength(2);
+    expect(inserted.map(({ values }) => values[1])).toEqual(["batch-123456:0", "batch-123456:1"]);
+    expect(inserted.map(({ values }) => values[9])).toEqual([expect.objectContaining({ count: 1, n: 1 }), expect.objectContaining({ count: 1, n: 1 })]);
+    expect(inserted.map(({ values }) => JSON.parse(String(values[10])))).toEqual([["one"], ["two"]]);
     expect(state.statements.filter(({ sql }) => sql.includes("FROM pricing_rule_versions"))).toHaveLength(1);
-    expect(state.reservations.map(values => values[6])).toEqual([expect.objectContaining({ toolKey: "canvas-batch", configurationVersion: 2 })]);
+    expect(state.reservations.map(values => values[6])).toEqual([expect.objectContaining({ toolKey: "canvas-batch", configurationVersion: 2 }), expect.objectContaining({ toolKey: "canvas-batch", configurationVersion: 2 })]);
   });
 
   test("prompt estimates honor known source binding and overrides instead of shared model/global price", async () => {

@@ -46,17 +46,21 @@ type CanvasNodePromptPanelProps = {
     onImageSettingsOpenChange?: (open: boolean) => void;
     canvasNodes?: CanvasNodeData[];
     canvasConnections?: CanvasConnection[];
+    sharedConfig?: CanvasNodeData;
+    onOpenSharedConfig?: (id: string) => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [] }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [], sharedConfig, onOpenSharedConfig }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const estimate = useBusinessConfigStore((state) => state.estimate);
+    const models = useBusinessConfigStore((state) => state.models);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const mode = defaultMode(node.type);
-    const baseConfig = buildNodeConfig(globalConfig, node, mode);
+    const mode = sharedConfig ? sharedConfig.metadata?.generationMode || "image" : defaultMode(node.type);
+    const baseConfig = buildNodeConfig(globalConfig, sharedConfig || node, mode);
     const baseProfile = useImageModelProfile(baseConfig.model);
-    const toolKey = canvasToolKey(mode, mode === "image" && resolveCanvasNodeImageReferences(node, canvasNodes, canvasConnections).length > 0, baseProfile.kind);
+    const hasTaskImageInput = resolveCanvasNodeImageReferences(node, canvasNodes, canvasConnections).length > 0 || Boolean(sharedConfig && resolveCanvasNodeImageReferences(sharedConfig, canvasNodes, canvasConnections).length > 0);
+    const toolKey = canvasToolKey(mode, mode === "image" && hasTaskImageInput, baseProfile.kind);
     const config = useToolConfig(baseConfig, toolKey);
     const profile = useImageModelProfile(config.model);
     const requiresPrompt = mode !== "image" || profile.requiresPrompt;
@@ -148,6 +152,22 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         })).then((items) => saveReferences(dedupeImageReferences([...imageReferences, ...items])));
         if (uploadInputRef.current) uploadInputRef.current.value = "";
     };
+
+    if (sharedConfig) {
+        const sharedPrompt = sharedConfig.metadata?.composerContent || sharedConfig.metadata?.prompt || "";
+        const model = models.find(item => item.modelId === config.model || item.id === config.model);
+        const modeLabel = { image: "图片", text: "文本", video: "视频", audio: "音频" }[mode];
+        return <div className="rounded-xl border p-3 text-sm backdrop-blur" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
+            <div className="font-medium">继承配置：{sharedConfig.title || "公共配置"}</div>
+            <div className="mt-1 text-xs" style={{ color: theme.node.muted }}>{modeLabel} · {mode === "text" ? "统一文本模型" : model?.publicName || model?.name || "使用公共配置模型"}</div>
+            <div className="mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border px-3 py-2 text-xs leading-5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }} aria-label="公共提示词预览">{sharedPrompt || "未填写公共提示词，将使用任务输入"}</div>
+            <p className="my-2 text-xs leading-5" style={{ color: theme.node.muted }}>每个目标使用自身输入与公共素材独立执行，原节点保留。参数由公共配置统一管理。</p>
+            <div className="flex items-center justify-between gap-2">
+                <Button size="small" disabled={!onOpenSharedConfig} onClick={() => onOpenSharedConfig?.(sharedConfig.id)}>编辑公共配置</Button>
+                <Button type="primary" danger={isRunning} aria-label={isRunning ? "停止" : "仅执行此任务"} onClick={() => isRunning ? onStop(node.id) : onGenerate(node.id, mode, sharedPrompt)}>{isRunning ? "停止" : "仅执行此任务"}</Button>
+            </div>
+        </div>;
+    }
 
     return (
         <div

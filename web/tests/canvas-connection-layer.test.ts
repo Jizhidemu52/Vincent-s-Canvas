@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import { canvasConnectionViewportBounds, createCanvasConnectionDrawBatches, createCanvasConnectionDrawCache, drawCanvasConnectionBatches, drawCanvasConnections, filterCanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
 import type { CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
+import { shouldRedrawCanvasConnectionLayer } from "@/lib/canvas/canvas-dynamic-connection-layer";
 
 const geometry: CanvasConnectionGeometry = {
     d: "M 10 20 C 40 20, 70 80, 100 80",
@@ -181,4 +182,39 @@ test("keeps the correct connection active when an unresolved connection is skipp
 
     expect(updated.regular).toEqual([]);
     expect(updated.active.map((item) => item.geometry)).toEqual([geometry]);
+});
+
+test("committed node moves invalidate static paint even if connections and camera are unchanged", () => {
+    const connections = [{ id: "a", fromNodeId: "one", toNodeId: "two" }];
+    let currentGeometry = geometry;
+    const cache = createCanvasConnectionDrawCache(() => currentGeometry);
+    const initial = cache.sync(connections, new Set(), new Set(), true);
+    const previousPaint = { hasContent: true, batches: initial, paintKey: "light", viewport: { x: 0, y: 0, k: 1 } };
+    currentGeometry = { ...geometry, d: "moved" };
+    const moved = cache.sync(connections, new Set(), new Set(), true);
+    expect(moved.regular[0].geometry).toBe(currentGeometry);
+    expect(shouldRedrawCanvasConnectionLayer(previousPaint, { ...previousPaint, batches: moved })).toBe(true);
+    expect(cache.sync(connections, new Set(), new Set(), true)).toBe(moved);
+});
+
+test("refreshes retained endpoints when visible connections change in the same update", () => {
+    const a = { id: "a", fromNodeId: "one", toNodeId: "two" };
+    const b = { id: "b", fromNodeId: "one", toNodeId: "three" };
+    let currentGeometry = geometry;
+    const cache = createCanvasConnectionDrawCache(() => currentGeometry);
+    cache.sync([a], new Set(), new Set(), true);
+    currentGeometry = { ...geometry, d: "after undo" };
+    const updated = cache.sync([a, b], new Set(), new Set(), true);
+    expect(updated.regular.map(item => item.geometry.d)).toEqual(["after undo", "after undo"]);
+});
+
+test("full refresh recovers missing endpoints and removes stale endpoint paths", () => {
+    const connections = [{ id: "a", fromNodeId: "one", toNodeId: "two" }];
+    let currentGeometry: CanvasConnectionGeometry | undefined;
+    const cache = createCanvasConnectionDrawCache(() => currentGeometry);
+    expect(cache.sync(connections, new Set(["a"]), new Set(), true).active).toEqual([]);
+    currentGeometry = geometry;
+    expect(cache.sync(connections, new Set(["a"]), new Set(), true).active[0].id).toBe("a");
+    currentGeometry = undefined;
+    expect(cache.sync(connections, new Set(["a"]), new Set(), true).active).toEqual([]);
 });

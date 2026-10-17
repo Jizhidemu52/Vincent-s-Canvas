@@ -9,15 +9,15 @@ import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { resolveToolConfig } from "./tool-runtime";
 
-type RequestOptions = { signal?: AbortSignal; toolKey?: "video" | "canvas-video"; onSubmitted?: (task: VideoGenerationTask) => void };
+type RequestOptions = { signal?: AbortSignal; toolKey?: "video" | "canvas-video"; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: VideoGenerationTask) => void | Promise<void> };
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
-export type VideoGenerationTask = { id: string; provider: "server"; model: string };
+export type VideoGenerationTask = { id: string; requestId?: string; provider: "server"; model: string };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
     const input = await queuedVideoInput(config, prompt, references, videoReferences, audioReferences, options);
-    const [url] = await requestQueuedMedia({ ...input, onSubmitted: (task) => options?.onSubmitted?.({ id: task.id, provider: "server", model: input.modelId }) });
+    const [url] = await requestQueuedMedia({ ...input, onSubmitted: (task) => options?.onSubmitted?.({ id: task.id, requestId: task.requestId, provider: "server", model: input.modelId }) });
     if (!url) throw new Error("视频任务没有返回结果");
     return { url, mimeType: "video/mp4" };
 }
@@ -113,6 +113,7 @@ async function queuedVideoInput(config: AiConfig, prompt: string, references: Re
         sourceMetadata,
         sourceOrder,
         signal: options?.signal,
+        onSubmissionStarted: options?.onSubmissionStarted,
     };
 }
 

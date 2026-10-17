@@ -3,12 +3,13 @@ import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as React
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronDown, Bot, Download, Globe, Home, ImageIcon, Images, Info, LayoutGrid, List, Menu, Music2, Pause, Play, Plus, Redo2, Settings2, Share2, Sparkles, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 
-import { requestBatchEdit, requestImageQuestion } from "@/services/api/image";
+import { requestImageQuestion } from "@/services/api/image";
+import type { BatchEditFileItem } from "./canvas-batch-edit-runtime";
 import { ModelPicker } from "@/components/model-picker";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { canvasToolKey, currentToolConfig, useToolConfig } from "@/hooks/use-tool-config";
 import { useCanvasImageTasks } from "./use-canvas-image-tasks";
-import { controlQueuedBatch, QueuedTaskFailedError, QueuedTaskPausedError, type QueuedBatchAction } from "@/services/api/generation-tasks";
+import { QueuedTaskFailedError, QueuedTaskPausedError, type QueuedBatchAction } from "@/services/api/generation-tasks";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { recoverVideoGenerationTask, requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { fetchServerAssetContent, type ServerAssetVariants } from "@/services/api/server-assets";
@@ -80,6 +81,8 @@ import { canvasImageBaseName, canvasImageExportStem, canvasImageVersion, canvasI
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
+import { getSharedConfigForTarget, getSharedConfigTargets, normalizeCanvasConnection } from "@/lib/canvas/canvas-shared-connections";
+import type { SharedGenerationExecution } from "./canvas-shared-generation-runtime";
 import { createCanvasBatchRenderIndex } from "@/lib/canvas/canvas-batch-motion";
 import { isCanvasBatchChildHidden, isCanvasBatchConnectionEndpointHidden } from "@/lib/canvas/canvas-batch-visibility";
 import { createConnectionAdjacency } from "@/lib/canvas/canvas-connection-geometry";
@@ -230,15 +233,8 @@ type CanvasGenerationResult = {
     outputs: CanvasGenerationOutput[];
 };
 
-type BatchEditFileItem = {
-    id: string;
-    file: File;
-    relativePath: string;
-    status: "waiting" | "processing" | "paused" | "success" | "failed" | "cancelled";
-    sourceUrl?: string;
-    resultUrl?: string;
-    failureReason?: string;
-};
+
+const loadBatchEditRuntime = () => import("./canvas-batch-edit-runtime");
 
 const VIDEO_NODE_MAX_WIDTH = 420;
 const VIDEO_NODE_MAX_HEIGHT = 420;
@@ -615,6 +611,7 @@ function WirelessCanvasPage() {
     const agentCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
+    const generationDispatchLocksRef = useRef(new Set<string>());
     const { createOptions, recoverPending } = useCanvasImageTasks({ projectId, nodes: nodesRef, setNodes, saveQueue: projectSaveQueueRef, generating: generationRequestsRef });
     const projectAsyncLifecycleRef = useRef(createCanvasProjectAsyncLifecycle());
     const loadedReuseTokenRef = useRef(new Set<string>());
@@ -1167,9 +1164,15 @@ function WirelessCanvasPage() {
                 return;
             }
             const { fromNodeId, toNodeId } = connection;
+            if (connection.kind === "config-target" && connectionsRef.current.some((edge) => edge.kind === "config-target" && edge.toNodeId === toNodeId && edge.fromNodeId !== fromNodeId)) {
+                message.warning("一个任务只能使用一套公共配置，请先断开原配置连线");
+                return;
+            }
             const exists = connectionsRef.current.some((conn) => conn.fromNodeId === fromNodeId && conn.toNodeId === toNodeId);
             if (!exists) {
-                setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, fromNodeId, toNodeId }]);
+                setConnections((prev) => [...prev, { id: nanoid(), ...connection }]);
+            } else if (connection.kind === "config-target") {
+                setConnections((prev) => prev.map((edge) => edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId ? { ...edge, kind: "config-target" } : edge));
             }
             setContextMenu(null);
         },
@@ -1641,6 +1644,12 @@ function WirelessCanvasPage() {
             nodesRef.current.forEach((node) => {
                 if (ids.has(node.id)) node.metadata?.batchChildIds?.forEach((childId) => allIds.add(childId));
             });
+            const stoppedRuns = new Set<string>();
+            generationRequestsRef.current.forEach((request) => {
+                if (allIds.has(request.targetNodeId) || allIds.has(request.originNodeId) || allIds.has(request.runningNodeId) ||
+                    connectionsRef.current.some((edge) => edge.kind === "config-target" && allIds.has(edge.fromNodeId) && edge.toNodeId === request.originNodeId)) stoppedRuns.add(request.runningNodeId);
+            });
+            stoppedRuns.forEach(stopGenerationByRunningId);
             setNodes((prev) => {
                 const next = prev.filter((node) => !allIds.has(node.id));
                 return next.map((node) => {
@@ -1680,7 +1689,7 @@ function WirelessCanvasPage() {
             setContextMenu((current) => (current?.type === "node" && allIds.has(current.nodeId) ? null : current));
             cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node) => !allIds.has(node.id)), chatSessions });
         },
-        [chatSessions, cleanupCanvasFiles, projectId],
+        [chatSessions, cleanupCanvasFiles, projectId, stopGenerationByRunningId],
     );
 
     const createSelectedGroup = useCallback(() => {
@@ -3432,22 +3441,14 @@ function WirelessCanvasPage() {
             });
     }, [message, modal, projectLoaded, searchParams]);
 
-    const applyBatchEditFiles = useCallback((files: FileList | File[] | null) => {
-        const imageFiles = Array.from(files || [])
-            .filter((file) => file.type.startsWith("image/"))
-            .sort((a, b) => batchFilePath(a).localeCompare(batchFilePath(b), "zh-Hans-CN", { numeric: true }));
-        if (imageFiles.length > 1) {
-            message.warning("每次只能处理 1 张图片，请重新选择 1 张；原列表未改变。");
-            return;
+    const applyBatchEditFiles = useCallback(async (files: FileList | File[] | null) => {
+        const selected = Array.from(files || []);
+        try {
+            const { prepareCanvasBatchFiles } = await loadBatchEditRuntime();
+            setBatchEditItems(prepareCanvasBatchFiles(selected));
+        } catch (error) {
+            message.warning(String(error instanceof Error ? error.message : error));
         }
-        setBatchEditItems(
-            imageFiles.map((file) => ({
-                id: nanoid(),
-                file,
-                relativePath: batchFilePath(file),
-                status: "waiting",
-            })),
-        );
     }, [message]);
 
     const handleBatchFolderInputChange = useCallback(
@@ -3459,316 +3460,37 @@ function WirelessCanvasPage() {
     );
 
     const runBatchImageEdit = useCallback(async () => {
-        const prompt = batchEditPrompt.trim();
-        const items = batchEditItems;
-        const model = batchGenerationConfig.model;
-        const modelId = modelOptionName(model);
-        const usage = estimateUsage({ operationType: "batch_image", toolKey: "canvas-batch", modelId, quantity: items.length });
-
-        if (items.length !== 1) {
-            message.error("每次只能处理 1 张图片，请选择 1 张图片；已有多图列表请先清空后重新选择。");
-            return;
-        }
-        if (!prompt) {
-            message.error("请输入批量改图提示词");
-            return;
-        }
-        if (!isAiConfigReady(batchGenerationConfig, model)) {
-            handleMissingModelConfig();
-            return;
-        }
-        if (!user || user.status !== "active") {
-            message.error("当前设计师账号不可用");
-            return;
-        }
-        if (deploymentFeatures.creditsEnabled && usage.configured && user.creditBalance < usage.credits) {
-            message.error(`额度不足：预计需要 ${usage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
-            return;
-        }
-
-        const localBatchId = `canvas-batch-${nanoid()}`;
-        const origin = getCanvasCenter();
-        const sourceX = origin.x - 420;
-        const resultX = origin.x + 60;
-        const rowGap = 52;
-        const maxWidth = 320;
-        const maxHeight = 240;
-        const prepared: Array<{
-            originalIndex: number;
-            item: BatchEditFileItem;
-            sourceId: string;
-            resultId: string;
-            uploadedSource: UploadedImage;
-        }> = [];
-        const initialBatchNodes: CanvasNodeData[] = [];
-        const initialBatchConnections: CanvasConnection[] = [];
-        let localFailures = 0;
-        const selectedResults: string[] = [];
-        const settledResultIds = new Set<string>();
-        const generatedAssets: AssetInput[] = [];
-
+        if (generationDispatchLocksRef.current.size) { message.info("当前任务仍在执行，请完成或停止后再运行"); return; }
+        generationDispatchLocksRef.current.add("canvas-batch");
         setBatchEditRunning(true);
-        setBatchEditServerId(null);
-        setBatchEditAction(null);
-        setBatchEditItems((prev) => prev.map((item) => ({ ...item, status: "waiting", sourceUrl: undefined, resultUrl: undefined, failureReason: undefined })));
-
-        for (const [index, item] of items.entries()) {
-            const sourceId = `${localBatchId}-source-${index + 1}`;
-            const resultId = `${localBatchId}-result-${index + 1}`;
-            try {
-                setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "processing" } : entry)));
-                const uploadedSource = await uploadImage(item.file);
-                const sourceSize = fitNodeSize(uploadedSource.width, uploadedSource.height, maxWidth, maxHeight);
-                const rowY = origin.y + index * (Math.max(sourceSize.height, maxHeight) + rowGap);
-                initialBatchNodes.push(
-                    {
-                        id: sourceId,
-                        type: CanvasNodeType.Image,
-                        title: item.relativePath,
-                        position: { x: sourceX, y: rowY },
-                        width: sourceSize.width,
-                        height: sourceSize.height,
-                        metadata: { ...imageMetadata(uploadedSource), prompt, batchRootId: localBatchId },
-                    },
-                    {
-                        id: resultId,
-                        type: CanvasNodeType.Image,
-                        title: `${item.file.name} 改图结果`,
-                        position: { x: resultX, y: rowY },
-                        width: sourceSize.width,
-                        height: sourceSize.height,
-                        metadata: {
-                            prompt,
-                            status: NODE_STATUS_LOADING,
-                            generationType: "edit",
-                            model,
-                            size: batchGenerationConfig.size,
-                            quality: batchGenerationConfig.quality,
-                            imageOptions: batchGenerationConfig.imageOptions,
-                            count: 1,
-                            references: [uploadedSource.storageKey || uploadedSource.url],
-                            batchRootId: localBatchId,
-                        },
-                    },
-                );
-                initialBatchConnections.push({ id: nanoid(), fromNodeId: sourceId, toNodeId: resultId });
-                prepared.push({ originalIndex: index, item, sourceId, resultId, uploadedSource });
-                setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "waiting", sourceUrl: uploadedSource.url } : entry)));
-            } catch (error) {
-                localFailures += 1;
-                const reason = error instanceof Error ? error.message : "本地图片读取失败";
-                setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "failed", sourceUrl: `file://${item.relativePath}`, failureReason: reason } : entry)));
-            }
-        }
-
-        if (!prepared.length) {
-            setBatchEditRunning(false);
-            message.error("没有可提交的图片");
-            return;
-        }
-
-        setNodes((prev) => [...prev, ...initialBatchNodes]);
-        setConnections((prev) => [...prev, ...initialBatchConnections]);
-
-        const preparedIndexByItemId = new Map(prepared.map((entry, index) => [entry.item.id, index]));
-        let failedCount = localFailures;
-        let cancelledCount = 0;
         try {
-            const result = await requestBatchEdit(
-                { ...batchGenerationConfig, model, count: "1" },
-                prompt,
-                prepared.map((entry) => ({ file: entry.item.file, title: entry.item.relativePath })),
-                {
-                    onSubmitted: setBatchEditServerId,
-                    onProgress: (current) => {
-                        const byPreparedIndex = new Map(current.map((task) => [task.itemIndex, task]));
-                        setBatchEditItems((prev) => {
-                            let changed = false;
-                            const next = prev.map((entry) => {
-                                const preparedIndex = preparedIndexByItemId.get(entry.id);
-                                if (preparedIndex === undefined) return entry;
-                                const task = byPreparedIndex.get(preparedIndex);
-                                if (!task) return entry;
-                                const status = batchTaskUiStatus(task.status);
-                                const failureReason = task.failureReason || entry.failureReason;
-                                if (entry.status === status && entry.failureReason === failureReason) return entry;
-                                changed = true;
-                                return {
-                                    ...entry,
-                                    status,
-                                    failureReason,
-                                };
-                            });
-                            return changed ? next : prev;
-                        });
-                    },
-                },
-            );
-
-            const completedBatchItems = new Map<string, { status: "failed" | "cancelled"; failureReason: string }>();
-            const completedBatchResultNodes = new Map<string, string>();
-            const successfulBatchTasks: Array<{ entry: (typeof prepared)[number]; resultUrl: string; sourceTaskId: string }> = [];
-
-            for (const failure of result.failures) {
-                const entry = prepared[failure.index];
-                if (!entry) continue;
-                failedCount += 1;
-                completedBatchItems.set(entry.item.id, { status: "failed", failureReason: failure.reason });
-                completedBatchResultNodes.set(entry.resultId, failure.reason);
-                settledResultIds.add(entry.resultId);
-            }
-
-            for (const task of result.tasks) {
-                const entry = prepared[task.itemIndex];
-                if (!entry) continue;
-                if (task.status !== "success") {
-                    const cancelled = task.status === "cancelled";
-                    if (cancelled) cancelledCount += 1;
-                    else failedCount += 1;
-                    const reason = task.failureReason || (cancelled ? "任务已取消" : "批量改图失败");
-                    completedBatchItems.set(entry.item.id, { status: cancelled ? "cancelled" : "failed", failureReason: reason });
-                    completedBatchResultNodes.set(entry.resultId, reason);
-                    settledResultIds.add(entry.resultId);
-                    continue;
-                }
-                const resultUrl = task.resultUrls[0];
-                if (!resultUrl) {
-                    failedCount += 1;
-                    const reason = "任务成功但没有返回结果图片";
-                    completedBatchItems.set(entry.item.id, { status: "failed", failureReason: reason });
-                    completedBatchResultNodes.set(entry.resultId, reason);
-                    settledResultIds.add(entry.resultId);
-                    continue;
-                }
-                successfulBatchTasks.push({ entry, resultUrl, sourceTaskId: task.id });
-            }
-            await mapCanvasAsyncPool(successfulBatchTasks, 3, async ({ entry, resultUrl, sourceTaskId }) => {
-                try {
-                    const uploadedResult = await uploadImage(resultUrl);
-                    const resultSize = fitNodeSize(uploadedResult.width, uploadedResult.height, maxWidth, maxHeight);
-                    selectedResults.push(entry.resultId);
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === entry.resultId
-                                ? {
-                                      ...node,
-                                      position: {
-                                          x: node.position.x + node.width / 2 - resultSize.width / 2,
-                                          y: node.position.y + node.height / 2 - resultSize.height / 2,
-                                      },
-                                      width: resultSize.width,
-                                      height: resultSize.height,
-                                      metadata: {
-                                          ...node.metadata,
-                                          ...imageMetadata(uploadedResult),
-                                          sourceTaskId,
-                                          originalFileName: entry.item.file.name,
-                                          imageName: entry.item.file.name.replace(/\.[^.]+$/, ""), imageVersion: 2,
-                                          prompt,
-                                          generationType: "edit",
-                                          model,
-                                          size: batchGenerationConfig.size,
-                                          quality: batchGenerationConfig.quality,
-                                          imageOptions: batchGenerationConfig.imageOptions,
-                                          count: 1,
-                                          references: [entry.uploadedSource.storageKey || entry.uploadedSource.url],
-                                      },
-                                  }
-                                : node,
-                        ),
-                    );
-                    generatedAssets.push({
-                        kind: "image",
-                        title: `${entry.item.file.name} 改图结果`,
-                        coverUrl: uploadedResult.url,
-                        tags: ["批量改图"],
-                        source: "无线画布-批量改图",
-                        data: {
-                            dataUrl: uploadedResult.url,
-                            storageKey: uploadedResult.storageKey,
-                            width: uploadedResult.width,
-                            height: uploadedResult.height,
-                            bytes: uploadedResult.bytes,
-                            mimeType: uploadedResult.mimeType,
-                        },
-                        metadata: {
-                            source: "canvas",
-                            module: "批量改图",
-                            imageName: entry.item.file.name.replace(/\.[^.]+$/, ""), imageVersion: 2,
-                            prompt,
-                            model,
-                            modelId,
-                            projectId,
-                            nodeId: entry.resultId,
-                            sourceFile: entry.item.relativePath,
-                            serverBatchId: result.batchId,
-                            serverAssetId: serverAssetIdFromContentUrl(resultUrl),
-                            toolMode: "batch-image-edit",
-                            recreatePath: `/image?tool=image-edit&prompt=${encodeURIComponent(prompt)}&model=${encodeURIComponent(model)}`,
-                        },
-                    });
-                    setBatchEditItems((prev) => prev.map((item) => (item.id === entry.item.id ? { ...item, status: "success", resultUrl: uploadedResult.url } : item)));
-                } catch (error) {
-                    failedCount += 1;
-                    const reason = error instanceof Error ? error.message : "结果图存储失败";
-                    completedBatchItems.set(entry.item.id, { status: "failed", failureReason: reason });
-                    completedBatchResultNodes.set(entry.resultId, reason);
-                } finally {
-                    settledResultIds.add(entry.resultId);
-                }
+            const { runCanvasBatchImageEdit } = await loadBatchEditRuntime();
+            await runCanvasBatchImageEdit({
+                prompt: batchEditPrompt, items: batchEditItems, config: batchGenerationConfig, estimate: estimateUsage, isAiConfigReady,
+                onMissingModel: handleMissingModelConfig, user, projectId, getCenter: getCanvasCenter, imageMetadata, addAssets,
+                setRunning: setBatchEditRunning, setServerId: setBatchEditServerId, setAction: setBatchEditAction, setItems: setBatchEditItems,
+                setNodes, setConnections, setSelectedNodeIds, message,
             });
-            if (completedBatchItems.size) {
-                setBatchEditItems((prev) =>
-                    prev.map((item) => {
-                        const completed = completedBatchItems.get(item.id);
-                        return completed ? { ...item, ...completed } : item;
-                    }),
-                );
-            }
-            if (completedBatchResultNodes.size) {
-                setNodes((prev) =>
-                    prev.map((node) => {
-                        const reason = completedBatchResultNodes.get(node.id);
-                        return reason ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node;
-                    }),
-                );
-            }
         } catch (error) {
-            const reason = error instanceof Error ? error.message : "批量任务提交失败";
-            const unresolved = prepared.filter((entry) => !settledResultIds.has(entry.resultId));
-            const unresolvedItemIds = new Set(unresolved.map((entry) => entry.item.id));
-            const unresolvedResultIds = new Set(unresolved.map((entry) => entry.resultId));
-            failedCount += unresolved.length;
-            setBatchEditItems((prev) => prev.map((item) => (unresolvedItemIds.has(item.id) ? { ...item, status: "failed", failureReason: reason } : item)));
-            setNodes((prev) => prev.map((node) => (unresolvedResultIds.has(node.id) ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node)));
+            message.error(error instanceof Error ? error.message : "批量改图加载失败");
         } finally {
-            if (generatedAssets.length) addAssets(generatedAssets);
-            setSelectedNodeIds(new Set(selectedResults));
+            generationDispatchLocksRef.current.delete("canvas-batch");
             setBatchEditRunning(false);
-        }
-
-        if (failedCount || cancelledCount) {
-            message.warning(`批量改图完成，成功 ${selectedResults.length} 张，失败 ${failedCount} 张，取消 ${cancelledCount} 张`);
-        } else {
-            message.success(`批量改图完成：${selectedResults.length} 张`);
         }
     }, [addAssets, batchEditItems, batchEditPrompt, batchGenerationConfig, estimateUsage, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, message, projectId, user]);
 
-    const controlActiveBatchEdit = useCallback(
-        async (action: QueuedBatchAction) => {
-            if (!batchEditServerId) return;
-            setBatchEditAction(action);
-            try {
-                const result = await controlQueuedBatch(batchEditServerId, action);
-                message.success(`${action === "pause" ? "暂停" : action === "resume" ? "恢复" : "取消"}成功，影响 ${result.changed} 张图片`);
-            } catch (error) {
-                message.error(error instanceof Error ? error.message : "批量任务操作失败");
-            } finally {
-                setBatchEditAction(null);
-            }
-        },
-        [batchEditServerId, message],
-    );
+    const controlActiveBatchEdit = useCallback(async (action: QueuedBatchAction) => {
+        if (!batchEditServerId) return;
+        setBatchEditAction(action);
+        try {
+            const { controlCanvasBatch } = await loadBatchEditRuntime();
+            await controlCanvasBatch(batchEditServerId, action, message);
+        } catch (error) {
+            message.error(String(error instanceof Error ? error.message : error));
+        } finally {
+            setBatchEditAction(null);
+        }
+    }, [batchEditServerId, message]);
 
     const handleDrop = useCallback(
         (event: ReactDragEvent<HTMLDivElement>) => {
@@ -3829,8 +3551,8 @@ function WirelessCanvasPage() {
         setContextMenu({ type: "connection", x: event.clientX, y: event.clientY, connectionId: connection.id });
     }, [canvasConnectionFallback, findConnectionAtClientPoint, screenToCanvas]);
 
-    const handleGenerateNode = useCallback(
-        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void) => {
+    const executeGenerateNode = useCallback(
+        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, shared?: SharedGenerationExecution) => {
             let reported = false;
             const reportResult = (outputs: CanvasGenerationOutput[]) => {
                 if (reported) return;
@@ -3842,33 +3564,44 @@ function WirelessCanvasPage() {
                 reportResult(recovered);
                 return;
             }
-            const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
-            let generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
+            const sourceNode = shared?.plan.targetNode || nodesRef.current.find((node) => node.id === nodeId);
+            let generationConfig = shared?.config || buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
                 reportResult([{ nodeId, status: "failed", error: "模型配置不可用" }]);
                 return;
             }
 
-            setRunningNodeId(nodeId);
-            const runController = startGenerationRequest(nodeId, nodeId, nodeId);
+            const runningId = shared?.runningId || nodeId;
+            setRunningNodeId(runningId);
+            const runController = startGenerationRequest(nodeId, nodeId, runningId, shared?.controller);
+            const generationOrigin = shared ? { configNodeId: shared.plan.configNode.id, sourceNodeId: nodeId, runId: shared.runId, mode } : undefined;
             const sourceTextContent = sourceNode?.type === CanvasNodeType.Text ? sourceNode.metadata?.content?.trim() || "" : "";
             const editingTextNode = mode === "text" && Boolean(sourceTextContent);
-            const generationContext = await hydrateNodeGenerationContext(
-                buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : prompt),
-            );
+            let generationContext;
+            try {
+                generationContext = await hydrateNodeGenerationContext(shared?.plan.context ||
+                    buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : prompt));
+            } catch (error) {
+                finishGenerationRequest(nodeId, runController);
+                if (!shared) setRunningNodeId(null);
+                const detail = error instanceof Error ? error.message : "无法读取输入素材";
+                message.error(detail);
+                reportResult([{ nodeId, status: "failed", error: detail }]);
+                return;
+            }
             const effectivePrompt = generationContext.prompt.trim();
             if (runController.signal.aborted) {
                 finishGenerationRequest(nodeId, runController);
-                setRunningNodeId(null);
+                if (!shared) setRunningNodeId(null);
                 reportResult([{ nodeId, status: "failed", error: "生成已取消" }]);
                 return;
             }
-            const markSourceStatus = sourceNode?.type !== CanvasNodeType.Image && !editingTextNode;
+            const markSourceStatus = !shared && sourceNode?.type !== CanvasNodeType.Image && !editingTextNode;
             const statusPrompt = sourceNode?.type === CanvasNodeType.Config ? effectivePrompt : prompt;
             if (!effectivePrompt && (mode === "text" || mode === "audio")) {
                 finishGenerationRequest(nodeId, runController);
-                setRunningNodeId(null);
+                if (!shared) setRunningNodeId(null);
                 reportResult([{ nodeId, status: "failed", error: "缺少生成提示词" }]);
                 return;
             }
@@ -3879,11 +3612,11 @@ function WirelessCanvasPage() {
                 if (mode === "image") {
                     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
                     const isImageNode = sourceNode?.type === CanvasNodeType.Image;
-                    const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;
-                    const savedReferences = sourceNode ? resolveCanvasNodeImageReferences(sourceNode, nodesRef.current, connectionsRef.current) : [];
+                    const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content && !sourceNode?.metadata?.storageKey;
+                    const savedReferences = !shared && sourceNode ? resolveCanvasNodeImageReferences(sourceNode, nodesRef.current, connectionsRef.current) : [];
                     const referenceImages = savedReferences.length ? savedReferences : generationContext.referenceImages;
-                    const toolKey = canvasToolKey(mode, referenceImages.length > 0, imageModelProfile(generationConfig.model).kind);
-                    generationConfig = currentToolConfig(generationConfig, toolKey);
+                    const toolKey = shared?.toolKey || canvasToolKey(mode, referenceImages.length > 0, imageModelProfile(generationConfig.model).kind);
+                    if (!shared) generationConfig = currentToolConfig(generationConfig, toolKey);
                     const profile = imageModelProfile(generationConfig.model);
                     const effectivePrompt = profile.requiresPrompt ? generationContext.prompt.trim() : "";
                     generationConfig = { ...generationConfig, ...normalizeImageModelSettings(generationConfig, profile), canvasImageCount: "1" };
@@ -3892,12 +3625,12 @@ function WirelessCanvasPage() {
                     if (!referenceValidation.valid) {
                         message.error(referenceValidation.message);
                         finishGenerationRequest(nodeId, runController);
-                        setRunningNodeId(null);
+                        if (!shared) setRunningNodeId(null);
                         reportResult([{ nodeId, status: "failed", error: referenceValidation.message }]);
                         return;
                     }
                     const generationType = referenceImages.length && profile.kind !== "midjourney-blend" ? ("edit" as const) : ("generation" as const);
-                    const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages);
+                    const generationMetadata = { ...buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages), generationOrigin, systemPrompt: generationConfig.systemPrompt };
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
@@ -3939,12 +3672,12 @@ function WirelessCanvasPage() {
                         height: imageConfig.height,
                         metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, batchRootId: count > 1 ? rootId : undefined, ...generationMetadata },
                     }));
-                    const batchConnections = [...(isEmptyImageNode ? [] : [{ id: nanoid(), fromNodeId: nodeId, toNodeId: rootId }]), ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: rootId, toNodeId: childId }))];
+                    const batchConnections = [...(isEmptyImageNode ? [] : [{ id: nanoid(), fromNodeId: nodeId, toNodeId: rootId, kind: "generation-output" as const }]), ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: rootId, toNodeId: childId, kind: "generation-output" as const }))];
 
                     setNodes((prev) => [
                         ...prev.map((node) =>
                             node.id === nodeId
-                                ? isConfigNode
+                                ? shared && !isEmptyImageNode ? node : isConfigNode
                                     ? {
                                           ...node,
                                           metadata: { ...node.metadata, prompt: effectivePrompt, status: NODE_STATUS_LOADING, errorDetails: undefined },
@@ -3982,8 +3715,8 @@ function WirelessCanvasPage() {
                     setDialogNodeId(nodeId);
 
                     const controller = runController;
-                    targetIds.forEach((targetId) => startGenerationRequest(targetId, nodeId, nodeId, controller));
-                    if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
+                    targetIds.forEach((targetId) => startGenerationRequest(targetId, nodeId, runningId, controller));
+                    if (count > 1) startGenerationRequest(rootId, nodeId, runningId, controller);
                     let hasSuccess = false;
                     let hasFailure = false;
                     const imageOutputs: CanvasGenerationOutput[] = [];
@@ -4080,121 +3813,25 @@ function WirelessCanvasPage() {
                     return;
                 }
 
-                generationConfig = currentToolConfig(generationConfig, canvasToolKey(mode));
-                if (mode === "video") {
-                    const spec = nodeSizeFromRatio(generationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
-                    const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
-                    const videoId = isEmptyVideoNode ? nodeId : nanoid();
-                    const parent = sourceNode?.position || { x: 0, y: 0 };
-                    const videoNode: CanvasNodeData = {
-                        id: videoId,
-                        type: CanvasNodeType.Video,
-                        title: effectivePrompt.slice(0, 32) || "Generated Video",
-                        position: isEmptyVideoNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y },
-                        width: isEmptyVideoNode ? sourceNode.width : spec.width,
-                        height: isEmptyVideoNode ? sourceNode.height : spec.height,
-                        metadata: {
-                            prompt: effectivePrompt,
-                            status: NODE_STATUS_LOADING,
-                            model: generationConfig.model,
-                            size: generationConfig.size,
-                            seconds: generationConfig.videoSeconds,
-                            videoMode: generationConfig.videoMode,
-                            vquality: generationConfig.vquality,
-                            generateAudio: generationConfig.videoGenerateAudio,
-                            watermark: generationConfig.videoWatermark,
-                            references: generationReferenceUrls(generationContext),
-                        },
-                    };
-                    pendingChildIds = [videoId];
-                    setNodes((prev) =>
-                        isEmptyVideoNode
-                            ? prev.map((node) => (node.id === nodeId ? { ...node, ...videoNode } : node))
-                            : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), videoNode],
-                    );
-                    if (!isEmptyVideoNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: videoId }]);
-                    const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
-                    try {
-                        const video = await storeGeneratedVideo(
-                            await requestVideoGeneration(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, {
-                                toolKey: "canvas-video",
-                                signal: controller.signal,
-                                onSubmitted: (task) => setNodes((prev) => prev.map((node) => node.id === videoId ? { ...node, metadata: { ...node.metadata, videoTaskId: task.id, videoTaskCanRecover: true } } : node)),
-                            }),
-                        );
-                        const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                        setNodes((prev) =>
-                            prev.map((node) =>
-                                node.id === videoId
-                                    ? {
-                                          ...node,
-                                          width: videoSize.width,
-                                          height: videoSize.height,
-                                          position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 },
-                                          metadata: {
-                                              ...node.metadata,
-                                              ...videoMetadata(video),
-                                              prompt: effectivePrompt,
-                                              model: generationConfig.model,
-                                              size: generationConfig.size,
-                                              seconds: generationConfig.videoSeconds,
-                                              videoMode: generationConfig.videoMode,
-                                              vquality: generationConfig.vquality,
-                                              generateAudio: generationConfig.videoGenerateAudio,
-                                              watermark: generationConfig.videoWatermark,
-                                              references: generationReferenceUrls(generationContext),
-                                          },
-                                      }
-                                    : node,
-                            ),
-                        );
-                        reportResult([{ nodeId: videoId, status: "success", url: video.url, storageKey: video.storageKey }]);
-                    } finally {
-                        finishGenerationRequest(videoId, controller);
-                    }
-                    return;
-                }
-
-                if (mode === "audio") {
-                    const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
-                    const isEmptyAudioNode = sourceNode?.type === CanvasNodeType.Audio && !sourceNode.metadata?.content;
-                    const audioId = isEmptyAudioNode ? nodeId : nanoid();
-                    const parent = sourceNode?.position || { x: 0, y: 0 };
-                    const audioNode: CanvasNodeData = {
-                        id: audioId,
-                        type: CanvasNodeType.Audio,
-                        title: effectivePrompt.slice(0, 32) || "Generated Audio",
-                        position: isEmptyAudioNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y + ((sourceNode?.height || spec.height) - spec.height) / 2 },
-                        width: isEmptyAudioNode ? sourceNode.width : spec.width,
-                        height: isEmptyAudioNode ? sourceNode.height : spec.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, ...buildAudioGenerationMetadata(generationConfig) },
-                    };
-                    pendingChildIds = [audioId];
-                    setNodes((prev) =>
-                        isEmptyAudioNode
-                            ? prev.map((node) => (node.id === nodeId ? { ...node, ...audioNode } : node))
-                            : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), audioNode],
-                    );
-                    if (!isEmptyAudioNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: audioId }]);
-                    const controller = startGenerationRequest(audioId, nodeId, nodeId, runController);
-                    try {
-                        const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, effectivePrompt, { signal: controller.signal }), generationConfig.audioFormat);
-                        setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)));
-                    } finally {
-                        finishGenerationRequest(audioId, controller);
-                    }
+                if (!shared) generationConfig = currentToolConfig(generationConfig, canvasToolKey(mode));
+                if (mode === "video" || mode === "audio") {
+                    const { runCanvasMediaGeneration } = await import("./canvas-media-generation-runtime");
+                    const output = await runCanvasMediaGeneration({ nodeId, mode, source: sourceNode, shared: Boolean(shared), config: generationConfig, context: generationContext, origin: generationOrigin,
+                        controller: runController, runningId, projectId, nodes: nodesRef, setNodes, setConnections, flushSave: () => projectSaveQueueRef.current?.flush(), isCurrent: () => designProjectIdRef.current === projectId, start: startGenerationRequest, finish: finishGenerationRequest });
+                    if (output.status === "failed" && !runController.signal.aborted) message.error(output.error);
+                    reportResult([output]);
                     return;
                 }
 
                 let streamed = "";
                 const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
-                const textCount = isConfigNode ? getGenerationCount(generationConfig.count) : 1;
+                const textCount = !shared && isConfigNode ? getGenerationCount(generationConfig.count) : 1;
                 const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : CanvasNodeType.Text];
                 const textConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
                 const parentPosition = sourceNode?.position || { x: 0, y: 0 };
-                const childIds = isConfigNode || editingTextNode ? Array.from({ length: textCount }, () => nanoid()) : [];
+                const childIds = shared || isConfigNode || editingTextNode ? Array.from({ length: textCount }, () => nanoid()) : [];
                 pendingChildIds = childIds;
-                if (isConfigNode || editingTextNode) {
+                if (shared || isConfigNode || editingTextNode) {
                     const childNodes: CanvasNodeData[] = childIds.map((id, index) => ({
                         id,
                         type: CanvasNodeType.Text,
@@ -4205,15 +3842,15 @@ function WirelessCanvasPage() {
                         },
                         width: textConfig.width,
                         height: textConfig.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, fontSize: 14 },
+                        metadata: { prompt: effectivePrompt, generationOrigin, status: NODE_STATUS_LOADING, fontSize: 14 },
                     }));
                     setNodes((prev) => [...prev.map((node) => (node.id === nodeId && isConfigNode ? { ...node, metadata: { ...node.metadata, prompt: effectivePrompt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)), ...childNodes]);
-                    setConnections((prev) => [...prev, ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: childId }))]);
+                    setConnections((prev) => [...prev, ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: childId, kind: "generation-output" as const }))]);
                 }
 
                 const controller = runController;
                 const textTargetIds = childIds.length ? childIds : [nodeId];
-                textTargetIds.forEach((targetNodeId) => startGenerationRequest(targetNodeId, nodeId, nodeId, controller));
+                textTargetIds.forEach((targetNodeId) => startGenerationRequest(targetNodeId, nodeId, runningId, controller));
                 const answers = await Promise.all(
                     textTargetIds.map((targetNodeId) => {
                         let localStreamed = "";
@@ -4226,7 +3863,9 @@ function WirelessCanvasPage() {
                                 if (isConfigNode) return;
                                 textStreamBufferRef.current?.push({ nodeId: targetNodeId, content: text });
                             },
-                            { signal: controller.signal, tool: "canvas-chat" },
+                            { signal: controller.signal, tool: "canvas-chat", onChatSubmissionStarted: shared ? (textRequestId) => {
+                                setNodes(previous => previous.map(node => node.id === targetNodeId ? { ...node, metadata: { ...node.metadata, textRequestId, generationSubmissionUncertain: true } } : node));
+                            } : undefined },
                         )
                             .then((answer) => ({ nodeId: targetNodeId, content: answer || localStreamed }))
                             .finally(() => finishGenerationRequest(targetNodeId, controller));
@@ -4234,6 +3873,7 @@ function WirelessCanvasPage() {
                 );
                 if (controller.signal.aborted) {
                     textTargetIds.forEach((targetNodeId) => textStreamBufferRef.current?.clear(targetNodeId));
+                    reportResult(textTargetIds.map((targetNodeId) => ({ nodeId: targetNodeId, status: "failed", error: "生成已取消" })));
                     return;
                 }
                 const answerByNodeId = new Map(answers.map((item) => [item.nodeId, item.content]));
@@ -4241,14 +3881,15 @@ function WirelessCanvasPage() {
                 setNodes((prev) =>
                     prev.map((node) =>
                         childIds.includes(node.id)
-                            ? { ...node, metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS } }
+                            ? { ...node, metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS, generationSubmissionUncertain: undefined } }
                             : node.id === nodeId && isConfigNode
                               ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } }
-                              : node.id === nodeId && !editingTextNode
+                              : node.id === nodeId && !editingTextNode && !shared
                                 ? { ...node, type: CanvasNodeType.Text, title: prompt.slice(0, 32) || "Generated Text", metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS } }
                                 : node,
                     ),
                 );
+                reportResult(answers.map((answer) => ({ nodeId: answer.nodeId, status: "success" })));
             } catch (error) {
                 (pendingChildIds.length ? pendingChildIds : [nodeId]).forEach((targetNodeId) => textStreamBufferRef.current?.clear(targetNodeId));
                 if (isGenerationCanceled(error)) {
@@ -4263,11 +3904,35 @@ function WirelessCanvasPage() {
                 reportResult((pendingChildIds.length ? pendingChildIds : [nodeId]).map((outputNodeId) => ({ nodeId: outputNodeId, status: "failed", error: errorDetails })));
             } finally {
                 finishGenerationRequest(nodeId, runController);
-                setRunningNodeId(null);
+                if (!shared) setRunningNodeId(null);
             }
         },
-        [createOptions, effectiveConfig, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, recoverPending, startGenerationRequest],
+        [createOptions, effectiveConfig, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, projectId, recoverPending, startGenerationRequest],
     );
+    const handleGenerateNode = useCallback(async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void) => {
+        // Lock before the lazy import: rapid double clicks must not submit twice.
+        if (generationDispatchLocksRef.current.size) {
+            message.info("请先完成或停止当前任务");
+            return;
+        }
+        generationDispatchLocksRef.current.add(nodeId);
+        const snapshot = { nodes: nodesRef.current, connections: connectionsRef.current };
+        try {
+            const { runCanvasGeneration } = await import("./canvas-shared-generation-runtime");
+            await runCanvasGeneration(nodeId, mode, prompt, onResult, {
+                snapshot, getSnapshot: () => ({ nodes: nodesRef.current, connections: connectionsRef.current }),
+                buildConfig: (node, selectedMode) => buildGenerationConfig(effectiveConfig, node, selectedMode),
+                isAiConfigReady, execute: executeGenerateNode, recover: recoverPending, start: startGenerationRequest, finish: finishGenerationRequest,
+                setRunning: setRunningNodeId, setNodes, message,
+            });
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : "加载失败";
+            message.error(detail);
+            onResult?.({ mode, outputs: [{ nodeId, status: "failed", error: detail }] });
+        } finally {
+            generationDispatchLocksRef.current.delete(nodeId);
+        }
+    }, [effectiveConfig, executeGenerateNode, finishGenerationRequest, isAiConfigReady, message, recoverPending, startGenerationRequest]);
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
     }, [handleGenerateNode]);
@@ -4393,6 +4058,17 @@ function WirelessCanvasPage() {
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData) => {
             if (node.type === CanvasNodeType.Image && await recoverPending(node.id)) return;
+            if (node.type === CanvasNodeType.Text && node.metadata?.generationSubmissionUncertain) {
+                const { confirmCanvasTextRetry } = await import("./canvas-media-generation-runtime");
+                confirmCanvasTextRetry(node, { nodes: nodesRef, setNodes, locks: generationDispatchLocksRef.current, generate: handleGenerateNode, message, modal });
+                return;
+            }
+            if (node.metadata?.mediaTask || node.metadata?.generationSubmissionUncertain) {
+                const { retryCanvasMediaNode } = await import("./canvas-media-generation-runtime");
+                await retryCanvasMediaNode(node.id, { projectId, nodes: nodesRef, setNodes, flushSave: () => projectSaveQueueRef.current?.flush(), isCurrent: () => designProjectIdRef.current === projectId,
+                    locks: generationDispatchLocksRef.current, start: startGenerationRequest, finish: finishGenerationRequest, setRunning: setRunningNodeId, message });
+                return;
+            }
             if (node.type === CanvasNodeType.Video && node.metadata?.videoTaskId && node.metadata.status !== NODE_STATUS_SUCCESS) {
                 if (node.metadata.videoTaskCanRecover === false) { message.warning("原视频任务提交状态待核查，请勿重复生成"); return; }
                 const controller = startGenerationRequest(node.id, node.id, node.id);
@@ -4414,6 +4090,17 @@ function WirelessCanvasPage() {
                 }
                 return;
             }
+            const origin = node.metadata?.generationOrigin;
+            if (origin?.configNodeId && node.type !== CanvasNodeType.Image) {
+                const config = nodesRef.current.find((item) => item.id === origin.configNodeId);
+                if (!config || !nodesRef.current.some((item) => item.id === origin.sourceNodeId)) {
+                    message.warning("原公共配置或任务输入已删除，不能重建此任务");
+                    return;
+                }
+                message.info("将按当前公共配置重新执行此任务，保留已有结果");
+                await handleGenerateNode(origin.sourceNodeId, origin.mode, config.metadata?.composerContent || config.metadata?.prompt || "");
+                return;
+            }
             const sourceNode = findRetrySourceNode(node.id, nodesRef.current, connectionsRef.current) || node;
             const batchRoot = node.metadata?.batchRootId ? nodesRef.current.find((item) => item.id === node.metadata?.batchRootId) : null;
             const savedImageMetadata = node.type === CanvasNodeType.Image ? { ...batchRoot?.metadata, ...node.metadata } : undefined;
@@ -4425,6 +4112,7 @@ function WirelessCanvasPage() {
                           model: savedImageMetadata.model || effectiveConfig.imageModel || effectiveConfig.model,
                           quality: savedImageMetadata.quality || effectiveConfig.quality,
                           imageOptions: savedImageMetadata.imageOptions ?? effectiveConfig.imageOptions,
+                          systemPrompt: savedImageMetadata.systemPrompt ?? effectiveConfig.systemPrompt,
                           size: savedImageMetadata.size || effectiveConfig.size,
                           count: "1",
                       }
@@ -4544,7 +4232,7 @@ function WirelessCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [createOptions, effectiveConfig, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, recoverPending, startGenerationRequest],
+        [createOptions, effectiveConfig, finishGenerationRequest, handleGenerateNode, handleMissingModelConfig, isAiConfigReady, message, modal, projectId, recoverPending, startGenerationRequest],
     );
 
     const generateImageFromTextNode = useCallback(
@@ -4759,12 +4447,14 @@ function WirelessCanvasPage() {
                 <Suspense fallback={<CanvasNodePanelLoading />}>
                     <CanvasNodePromptPanel
                         node={panelNode}
-                        isRunning={runningNodeId === panelNode.id}
+                        sharedConfig={connections.find((edge) => edge.kind === "config-target" && edge.toNodeId === panelNode.id) ? nodes.find((node) => node.id === connections.find((edge) => edge.kind === "config-target" && edge.toNodeId === panelNode.id)?.fromNodeId) : undefined}
+                        onOpenSharedConfig={(configId) => { setSelectedNodeIds(new Set([configId])); setDialogNodeId(configId); }}
+                        isRunning={runningNodeId === panelNode.id || connections.some((edge) => edge.kind === "config-target" && edge.toNodeId === panelNode.id && edge.fromNodeId === runningNodeId)}
                         mentionReferences={mentionReferenceIndex.get(panelNode.id)}
                         onPromptChange={handleNodePromptChange}
                         onConfigChange={handleConfigNodeChange}
                         onGenerate={handleGenerateNode}
-                        onStop={confirmStopGeneration}
+                        onStop={(targetId) => confirmStopGeneration(generationRequestsRef.current.get(targetId)?.runningNodeId || runningNodeId || targetId)}
                         canvasNodes={nodes}
                         canvasConnections={connections}
                         onImageSettingsOpenChange={(open) => {
@@ -4791,6 +4481,8 @@ function WirelessCanvasPage() {
                 node={contentNode}
                 isRunning={isRunning}
                 inputSummary={inputSummary}
+                linkedTaskCount={getSharedConfigTargets(contentNode.id, nodesRef.current, connectionsRef.current).length}
+                linkedTaskHasImages={getSharedConfigTargets(contentNode.id, nodesRef.current, connectionsRef.current).some((node) => node.type === CanvasNodeType.Image && Boolean(node.metadata?.content || node.metadata?.storageKey))}
                 onConfigChange={(nodeId, patch) => configNodeActionsRef.current?.handleConfigNodeChange(nodeId, patch)}
                 onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
                 onStop={(nodeId) => configNodeActionsRef.current?.confirmStopGeneration(nodeId)}
@@ -4801,7 +4493,7 @@ function WirelessCanvasPage() {
             />
             </Suspense>
         ),
-        [],
+        [connections],
     );
 
     const addImageNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Image), [createNode]);
@@ -4832,7 +4524,9 @@ function WirelessCanvasPage() {
         setQuickGenerateReferences((current) => moveImageReference(current, current.findIndex((reference) => reference.id === id), current.findIndex((reference) => reference.id === targetId)));
     }, []);
     const editNodeFromToolbar = useCallback((node: CanvasNodeData) => {
-        if (node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)) {
+        if (connectionsRef.current.some((edge) => edge.kind === "config-target" && edge.toNodeId === node.id)) {
+            setDialogNodeId((current) => current === node.id ? null : node.id);
+        } else if (node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)) {
             commitSelectedNodeIds(new Set([node.id])); setDialogNodeId(null); openQuickGenerateFromToolbar();
             requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-testid="canvas-quick-generate-panel"] textarea')?.focus());
         } else setDialogNodeId((current) => current === node.id ? null : node.id);
@@ -5025,7 +4719,7 @@ function WirelessCanvasPage() {
                             isConnecting={Boolean(connectingParams)}
                             isRunning={runningNodeId === node.id}
                             editRequestNonce={editingNodeId === node.id ? editRequestNonce : 0}
-                            showPanel={dialogNodeId === node.id && !isSelecting && !(node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey))}
+                            showPanel={dialogNodeId === node.id && !isSelecting && (!(node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)) || connections.some((edge) => edge.kind === "config-target" && edge.toNodeId === node.id))}
                             batchCount={batchChildCountById.get(node.id) || 0}
                             batchExpanded={Boolean(node.metadata?.imageBatchExpanded)}
                             batchClosing={Boolean(node.metadata?.batchRootId && collapsingBatchIds.has(node.metadata.batchRootId))}
@@ -5290,16 +4984,16 @@ function WirelessCanvasPage() {
                     }
                 >
                     <div className="space-y-4">
-                        <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-900">每次选择 1 张图片并生成 1 张结果，原图保留。可连续发起多个独立任务，并发队列不变。</div>
+                        <div className="rounded-lg border px-3 py-2 text-xs leading-5" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.text }}>可多选 1–100 张图片，每张独立生成 1 张结果，原图保留。</div>
                         <fieldset disabled={batchEditRunning} className="space-y-2 border-0 p-0">
                             <ModelPicker toolKey="canvas-batch" config={batchGenerationConfig} value={batchGenerationConfig.model} capability="image" fullWidth disabled={batchEditRunning}
                                 onChange={model => setBatchImageSettings(current => ({ ...current, model, imageModel: model }))} />
-                            <ImageSettingsPanel config={batchGenerationConfig} referenceCount={batchEditItems.length} theme={theme} maxCount={1} showTitle={false}
+                            <ImageSettingsPanel config={batchGenerationConfig} referenceCount={batchEditItems.length ? 1 : 0} theme={theme} maxCount={1} showTitle={false}
                                 onConfigChange={(key, value) => setBatchImageSettings(current => ({ ...current, [key]: value }))} />
                         </fieldset>
                         <div className="flex flex-wrap gap-2">
                             <Button onClick={() => batchFilesInputRef.current?.click()} disabled={batchEditRunning}>
-                                选择 1 张图片
+                                选择图片（可多选）
                             </Button>
                             <Button
                                 disabled={batchEditRunning || !batchEditItems.length}
@@ -5367,7 +5061,7 @@ function WirelessCanvasPage() {
                         </div>
                     </div>
                 </Modal>
-                <input ref={batchFilesInputRef} type="file" accept="image/*" className="hidden" onChange={handleBatchFolderInputChange} />
+                <input ref={batchFilesInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBatchFolderInputChange} />
                 {localAgentModuleEnabled && codexCompactAgent && !assistantMounted ? (
                     <Suspense fallback={null}>
                         <CanvasLocalAgentPanel headless snapshotRef={agentSnapshotRef} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} autoConnect={codexAutoConnect} />
@@ -5613,14 +5307,6 @@ function batchStatusClass(status: BatchEditFileItem["status"]) {
     return `${base} bg-stone-100 text-stone-500`;
 }
 
-function batchTaskUiStatus(status: string): BatchEditFileItem["status"] {
-    if (status === "processing" || status === "paused" || status === "success" || status === "failed" || status === "cancelled") return status;
-    return "waiting";
-}
-
-function serverAssetIdFromContentUrl(url: string) {
-    return url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i)?.[1];
-}
 
 function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
     return { imageTask: undefined, errorDetails: undefined, content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType, ...(image.originalFileName ? { originalFileName: image.originalFileName, imageName: image.originalFileName.replace(/\.[^.]+$/, ""), imageVersion: 1 } : {}) };
@@ -5840,12 +5526,7 @@ function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeDat
 function normalizeConnection(firstNodeId: string, secondNodeId: string, nodes: CanvasNodeData[], firstHandleType: "source" | "target") {
     const first = nodes.find((node) => node.id === firstNodeId);
     const second = nodes.find((node) => node.id === secondNodeId);
-    if (!first || !second || first.id === second.id) return null;
-    if (first.type === CanvasNodeType.Config && second.type === CanvasNodeType.Config) return null;
-    if (second.type === CanvasNodeType.Config) return { fromNodeId: first.id, toNodeId: second.id };
-    if (first.type === CanvasNodeType.Config && firstHandleType === "target") return { fromNodeId: second.id, toNodeId: first.id };
-    if (first.type === CanvasNodeType.Config) return { fromNodeId: first.id, toNodeId: second.id };
-    return { fromNodeId: first.id, toNodeId: second.id };
+    return first && second ? normalizeCanvasConnection(first, second, firstHandleType) : null;
 }
 
 function getInputSummary(inputs: NodeGenerationInput[]) {

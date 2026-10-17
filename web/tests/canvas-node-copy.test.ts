@@ -22,6 +22,31 @@ const groups: CanvasNodeGroup[] = [
 ];
 
 describe("canvas node graph copy", () => {
+    test("copied shared graphs isolate origin, prompt mentions and reference ordering without changing assets", () => {
+        const source = node("source");
+        const config = { ...node("config"), type: CanvasNodeType.Config, metadata: {
+            prompt: "use @[node:source] and @[node:node:source]",
+            composerContent: "use @[node:canvas:source]",
+            manualImageReferences: [{ id: "source", sourceNodeId: "source", referenceKey: "canvas:source", origin: "canvas" as const, name: "原图", type: "image/png", content: "blob:source", storageKey: "asset:unchanged" }],
+            imageReferenceOrder: ["canvas:source", "node:source", "upload:independent"],
+            excludedConnectedImageReferenceKeys: ["node:source"],
+        } };
+        const output = { ...node("output"), metadata: { generationOrigin: { configNodeId: "config", sourceNodeId: "source", runId: "run", mode: "image" as const } } };
+        const graph = { nodes: [source, config, output], connections: [{ id: "shared", fromNodeId: "config", toNodeId: "source", kind: "config-target" as const }] };
+        const before = structuredClone(graph);
+        const copied = cloneCanvasNodeGraph(graph, { x: 0, y: 0 });
+        const [newSource, newConfig, newOutput] = copied.nodes;
+        expect(newOutput!.metadata!.generationOrigin).toMatchObject({ configNodeId: newConfig!.id, sourceNodeId: newSource!.id });
+        expect(newConfig!.metadata!.prompt).toBe(`use @[node:${newSource!.id}] and @[node:node:${newSource!.id}]`);
+        expect(newConfig!.metadata!.composerContent).toBe(`use @[node:canvas:${newSource!.id}]`);
+        expect(newConfig!.metadata!.manualImageReferences![0]).toMatchObject({ id: newSource!.id, sourceNodeId: newSource!.id, referenceKey: `canvas:${newSource!.id}`, content: "blob:source", storageKey: "asset:unchanged" });
+        expect(newConfig!.metadata!.imageReferenceOrder).toEqual([`canvas:${newSource!.id}`, `node:${newSource!.id}`, "upload:independent"]);
+        expect(newConfig!.metadata!.excludedConnectedImageReferenceKeys).toEqual([`node:${newSource!.id}`]);
+        expect(copied.connections[0]).toMatchObject({ kind: "config-target", fromNodeId: newConfig!.id, toNodeId: newSource!.id });
+        expect(graph).toEqual(before);
+        const outputOnly = cloneCanvasNodeGraph({ nodes: [output], connections: [] }, { x: 0, y: 0 });
+        expect(outputOnly.nodes[0]!.metadata!.generationOrigin).toBeUndefined();
+    });
     test("copies only selected nodes, internal connections and completely selected style groups", () => {
         const copied = copyCanvasNodeGraph(nodes, connections, groups, new Set(["root", "child"]));
         expect(copied.nodes.map(item => item.id)).toEqual(["root", "child"]);

@@ -183,7 +183,7 @@ function readNodeTextInput(node: CanvasNodeData) {
     return node.metadata?.prompt || "";
 }
 
-function generationInputForNode(node: CanvasNodeData): NodeGenerationInput | null {
+export function generationInputForNode(node: CanvasNodeData): NodeGenerationInput | null {
     const image = readReferenceImage(node);
     if (image) return { nodeId: node.id, type: "image", title: node.title, image };
     const video = readReferenceVideo(node);
@@ -223,14 +223,14 @@ function generationLabel(type: NodeGenerationInput["type"], index: number) {
 }
 
 function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
-    if (node.type !== CanvasNodeType.Image || !node.metadata?.content) return null;
+    if (node.type !== CanvasNodeType.Image || (!node.metadata?.content && !node.metadata?.storageKey)) return null;
     return {
         id: node.id,
         name: node.metadata.originalFileName || node.title || node.id,
         originalFileName: node.metadata.originalFileName,
         imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node),
         type: node.metadata.mimeType || "image/png",
-        dataUrl: node.metadata.content,
+        dataUrl: node.metadata.content || "",
         storageKey: node.metadata.storageKey,
         bytes: node.metadata.bytes,
         width: node.metadata.naturalWidth,

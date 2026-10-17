@@ -32,9 +32,19 @@ export class QueuedTaskFailedError extends Error {
         this.name = "QueuedTaskFailedError";
     }
 }
+/** A POST may have been accepted, or an accepted task could not be settled locally. Never generate again to recover it. */
+export class QueuedTaskSubmissionUncertainError extends Error {
+    constructor(readonly requestId: string, readonly taskId?: string, readonly cause?: unknown) {
+        super(`原音视频任务状态待核查${taskId ? `（任务 ${taskId}）` : ""}，请查询原任务，勿重复生成。`);
+        this.name = "QueuedTaskSubmissionUncertainError";
+    }
+}
+class QueuedTaskHttpError extends Error {
+    constructor(readonly status: number, message: string) { super(message); }
+}
 export type GenerationVideoCapability = { seconds: readonly [number, number]; resolutions: readonly string[]; sizes: readonly string[]; minImages: number; maxImages: number; firstFrameRequired: boolean; supportsAudio: boolean };
 export type GenerationCapabilityModel = { id: string; name: string; modelId: string; capability: GenerationVideoCapability };
-export type QueuedMediaInput = { modelId: string; resolvedModel?: PublicModel; prompt: string; operationType: string; toolKey?: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; sourceMetadata?: Record<string, unknown>[]; sourceOrder?: Array<{ kind: "file" | "url"; index: number }>; signal?: AbortSignal; onSubmitted?: (task: QueuedTask) => void };
+export type QueuedMediaInput = { modelId: string; resolvedModel?: PublicModel; prompt: string; operationType: string; toolKey?: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; sourceMetadata?: Record<string, unknown>[]; sourceOrder?: Array<{ kind: "file" | "url"; index: number }>; signal?: AbortSignal; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: QueuedTask) => void | Promise<void> };
 export type QueuedBatchItem = QueuedTask & { itemIndex: number };
 export type QueuedBatchFailure = { index: number; reason: string };
 export type QueuedBatchAction = "pause" | "resume" | "cancel";
@@ -47,7 +57,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     });
     if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message || "任务提交失败");
+        throw new QueuedTaskHttpError(response.status, body.message || "任务提交失败");
     }
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
@@ -157,7 +167,7 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
 }
 
 export async function requestQueuedImageBatch(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; parameters?: Record<string, unknown>; files: Array<{ file: File; title: string }>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
-    if (input.files.length !== 1) throw new Error("每次只能选择 1 张图片生成；可分别发起多个独立任务。");
+    if (!input.files.length || input.files.length > 100) throw new Error("每批请选择 1–100 张图片，每张独立生成 1 张结果。");
     const model = input.resolvedModel || await resolvePublicModel(input.modelId, "batch_image", "canvas-batch");
     const uploadedItems: Array<{ itemIndex: number; sourceUrl: string }> = [];
     const uploadFailures: QueuedBatchFailure[] = [];
@@ -250,12 +260,16 @@ export function createQueuedMediaTaskPayloads(input: {
 }
 
 export async function submitQueuedMediaTask(input: QueuedMediaInput) {
+    input.signal?.throwIfAborted();
     const toolKey = requireToolKey(input.operationType, input.toolKey);
     const model = input.resolvedModel || await resolvePublicModel(input.modelId, input.operationType, toolKey);
+    input.signal?.throwIfAborted();
     const sourceUrls = [...(input.sourceUrls || [])];
     const uploadedUrls: string[] = [];
     for (const [index, file] of (input.sourceFiles || []).entries()) {
-        const id = await uploadServerAsset(file, { ...input.sourceMetadata?.[index], title: file.name, source: "task-reference" });
+        input.signal?.throwIfAborted();
+        const id = await uploadServerAsset(file, { ...input.sourceMetadata?.[index], title: file.name, source: "task-reference" }, { signal: input.signal });
+        input.signal?.throwIfAborted();
         uploadedUrls.push(`/api/assets/${id}/content`);
         sourceUrls.push(`/api/assets/${id}/content`);
     }
@@ -269,20 +283,38 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
         parameters: { ...input.parameters, tool: toolKey },
         sourceUrls: input.sourceOrder ? input.sourceOrder.map((source) => source.kind === "file" ? uploadedUrls[source.index] : input.sourceUrls![source.index]) : sourceUrls,
     });
+    input.signal?.throwIfAborted();
     if (input.operationType === "video_generation") {
         const preflight = await request<{ ok: boolean; normalized: Record<string, unknown> }>("/api/tasks/preflight", {
             method: "POST",
             body: JSON.stringify(preflightPayload),
+            signal: input.signal,
         });
+        input.signal?.throwIfAborted();
         if (!preflight.ok) throw new Error("Video preflight failed");
         submitPayload.parameters = { ...submitPayload.parameters, ...preflight.normalized };
     }
-    const result = await request<{ task: QueuedTask }>("/api/tasks", {
-        method: "POST",
-        body: JSON.stringify(submitPayload),
-    });
+    input.signal?.throwIfAborted();
+    await input.onSubmissionStarted?.(submitPayload.requestId);
+    input.signal?.throwIfAborted();
+    let task: QueuedTask;
+    try {
+        const result = await request<{ task: QueuedTask }>("/api/tasks", {
+            method: "POST",
+            body: JSON.stringify(submitPayload),
+            signal: input.signal,
+        });
+        if (!result?.task?.id) throw new Error("服务器未返回任务编号");
+        task = { ...result.task, requestId: submitPayload.requestId };
+    } catch (error) {
+        // An explicit client rejection is known not to have created a new task.
+        if (error instanceof QueuedTaskHttpError && error.status >= 400 && error.status < 500 && error.status !== 408) throw error;
+        throw new QueuedTaskSubmissionUncertainError(submitPayload.requestId, undefined, error);
+    }
+    // Once acknowledged, keep the ID available to onSubmitted and cancellation;
+    // do not turn a known accepted task into an unknown submission on a late abort.
     void refreshSessionBalance();
-    return result.task;
+    return task;
 }
 
 export async function getQueuedTask(id: string, signal?: AbortSignal) {
@@ -331,7 +363,8 @@ export async function listQueuedTasks(signal?: AbortSignal) {
 
 export async function requestQueuedMedia(input: QueuedMediaInput) {
     const submitted = await submitQueuedMediaTask(input);
-    input.onSubmitted?.(submitted);
+    try { await input.onSubmitted?.(submitted); }
+    catch (error) { throw new QueuedTaskSubmissionUncertainError(submitted.requestId, submitted.id, error); }
     return waitForQueuedMedia(submitted, input.signal);
 }
 
@@ -349,8 +382,13 @@ async function waitForQueuedMedia(submitted: QueuedTask, signal?: AbortSignal) {
         if (completed.status !== "success") throw new QueuedTaskFailedError(completed);
         return completed.resultUrls;
     } catch (error) {
-        if (signal?.aborted) await cancelTasks(ids);
-        throw error;
+        if (signal?.aborted) {
+            try { await request<void>(`/api/tasks/${submitted.id}/cancel`, { method: "POST" }); }
+            catch (cancelError) { throw new QueuedTaskSubmissionUncertainError(submitted.requestId, submitted.id, cancelError); }
+            throw error;
+        }
+        if (error instanceof QueuedTaskFailedError || error instanceof QueuedTaskPausedError) throw error;
+        throw new QueuedTaskSubmissionUncertainError(submitted.requestId, submitted.id, error);
     } finally {
         void refreshSessionBalance();
     }

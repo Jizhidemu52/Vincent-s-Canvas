@@ -53,6 +53,17 @@ test("lazily resolves global resource labels while retaining document order", ()
     expect(index.get("missing")).toBeUndefined();
 });
 
+test("includes storage-only images in both global resources and public input mentions", () => {
+    const stored = { ...node("stored", CanvasNodeType.Image), metadata: { content: "", storageKey: "image:stored" } };
+    const empty = node("empty", CanvasNodeType.Image);
+    const config = node("config", CanvasNodeType.Config);
+    const nodes = [stored, empty, config];
+    expect(createCanvasResourceReferenceIndex(nodes).get("stored")).toMatchObject({ nodeId: "stored", kind: "image", label: "图片1" });
+    expect(createCanvasResourceReferenceIndex(nodes).get("empty")).toBeUndefined();
+    const index = createCanvasMentionReferenceIndex(nodes, [connection("stored-config", "stored", "config"), connection("empty-config", "empty", "config")]);
+    expect(index.get("config").map(reference => reference.nodeId)).toEqual(["stored"]);
+});
+
 test("reads current resource content from a stable node map without rebuilding relationship indexes", () => {
     const image = node("image", CanvasNodeType.Image, "data:image/png;base64,one");
     const originalText = node("text", CanvasNodeType.Text, "first draft");

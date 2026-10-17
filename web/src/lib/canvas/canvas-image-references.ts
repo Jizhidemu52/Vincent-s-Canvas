@@ -9,8 +9,8 @@ export function resolveCanvasImageReferences(node: CanvasNodeData, nodes: Canvas
     const manual = (node.metadata?.manualImageReferences || []).map(toReferenceItem);
     const excluded = new Set(node.metadata?.excludedConnectedImageReferenceKeys || []);
     const connected = getGenerationResourceNodes(node.id, nodes, connections)
-        .filter((candidate) => candidate.type === CanvasNodeType.Image && Boolean(candidate.metadata?.content))
-        .map((candidate) => createImageReferenceItem({ id: candidate.id, name: candidate.metadata?.originalFileName || candidate.title || candidate.id, originalFileName: candidate.metadata?.originalFileName, imageName: canvasImageBaseName(candidate), imageVersion: canvasImageVersion(candidate), type: candidate.metadata?.mimeType || "image/png", dataUrl: candidate.metadata!.content!, storageKey: candidate.metadata?.storageKey }, "connection"))
+        .filter((candidate) => candidate.type === CanvasNodeType.Image && Boolean(candidate.metadata?.content || candidate.metadata?.storageKey))
+        .map((candidate) => createImageReferenceItem({ id: candidate.id, name: candidate.metadata?.originalFileName || candidate.title || candidate.id, originalFileName: candidate.metadata?.originalFileName, imageName: canvasImageBaseName(candidate), imageVersion: canvasImageVersion(candidate), type: candidate.metadata?.mimeType || "image/png", dataUrl: candidate.metadata?.content || "", storageKey: candidate.metadata?.storageKey }, "connection"))
         .map((reference) => ({ ...reference, referenceKey: `node:${reference.id}` }))
         .filter((reference) => !excluded.has(reference.referenceKey));
     return applyCanvasReferenceOrder(dedupeImageReferences([...manual, ...connected]), node.metadata?.imageReferenceOrder || []);
@@ -19,14 +19,14 @@ export function resolveCanvasImageReferences(node: CanvasNodeData, nodes: Canvas
 /** The node-edit tray, mentions and generation request share this exact input order. */
 export function resolveCanvasNodeImageReferences(node: CanvasNodeData, nodes: CanvasNodeData[], connections: CanvasConnection[]): ImageReferenceItem[] {
     const references = resolveCanvasImageReferences(node, nodes, connections);
-    if (node.type !== CanvasNodeType.Image || !node.metadata?.content) return references;
+    if (node.type !== CanvasNodeType.Image || (!node.metadata?.content && !node.metadata?.storageKey)) return references;
     const source = {
         ...createImageReferenceItem({ id: node.id, name: node.metadata.originalFileName || node.title || node.id, originalFileName: node.metadata.originalFileName,
             imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node), type: node.metadata.mimeType || "image/png",
-            dataUrl: node.metadata.content, storageKey: node.metadata.storageKey }, "canvas"),
+            dataUrl: node.metadata.content || "", storageKey: node.metadata.storageKey }, "canvas"),
         referenceKey: `source:${node.id}`, originLabel: "当前原图",
     };
-    return dedupeImageReferences([source, ...references.filter(reference => reference.id !== node.id && reference.dataUrl !== source.dataUrl)]);
+    return dedupeImageReferences([source, ...references.filter(reference => reference.id !== node.id && (!source.dataUrl || reference.dataUrl !== source.dataUrl))]);
 }
 
 export function canvasImageReferenceMentions(references: ImageReferenceItem[]): CanvasResourceReference[] {

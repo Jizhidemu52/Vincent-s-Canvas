@@ -77,7 +77,7 @@ export function createCanvasConnectionDrawCache(resolveGeometry: (connection: Ca
             const geometry = canReuseGeometry ? previousItem.geometry : resolveGeometry(connection);
             if (!geometry) return;
 
-            const item = canReuseGeometry ? previousItem : { id: connection.id, geometry, active: false };
+            const item = canReuseGeometry ? previousItem : { id: connection.id, geometry, active: nextActiveIds.has(connection.id) };
             nextItemById.set(connection.id, item);
             nextItems.push(item);
         });
@@ -104,20 +104,35 @@ export function createCanvasConnectionDrawCache(resolveGeometry: (connection: Ca
             if (previousConnections !== connections) {
                 previousConnections = connections;
                 reconcile(connections, nextActiveIds);
-                return batches;
             }
 
             const activeChanged = !sameConnectionIds(activeIds, nextActiveIds);
+            let geometryChanged = false;
             const idsToRefresh = refreshAll ? connections.map((connection) => connection.id) : affectedConnectionIds;
             for (const id of idsToRefresh) {
                 const connection = connectionById.get(id);
                 const item = itemById.get(id);
-                if (!connection || !item) continue;
+                if (!connection) continue;
                 const geometry = resolveGeometry(connection);
-                if (geometry) item.geometry = geometry;
+                if (!geometry) {
+                    if (item) {
+                        itemById.delete(id);
+                        geometryChanged = true;
+                    }
+                } else if (!item) {
+                    itemById.set(id, { id, geometry, active: nextActiveIds.has(id) });
+                    geometryChanged = true;
+                } else if (geometry !== item.geometry) {
+                    item.geometry = geometry;
+                    geometryChanged = true;
+                }
             }
 
-            if (activeChanged) {
+            // A committed geometry change must invalidate the static paint key.
+            // Drag-only updates keep item references so split dynamic batches stay cheap.
+            const membershipChanged = items.length !== itemById.size || items.some((item) => itemById.get(item.id || "") !== item);
+            if (membershipChanged) items = connections.flatMap((connection) => { const item = itemById.get(connection.id); return item ? [item] : []; });
+            if (activeChanged || membershipChanged || (refreshAll && geometryChanged)) {
                 itemById.forEach((item, id) => {
                     item.active = nextActiveIds.has(id);
                 });

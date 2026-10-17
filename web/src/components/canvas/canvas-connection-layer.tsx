@@ -51,6 +51,7 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
         dynamic: { regular: [], active: [] },
     });
     const wasDraggingNodesRef = useRef(false);
+    const previousResolverRef = useRef(resolveNode);
     const failedRef = useRef(false);
     const staticPaintKey = `${theme.node.muted}:${theme.node.activeStroke}`;
     latestViewportRef.current = viewport;
@@ -59,7 +60,7 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
         const to = resolveNode(connection.toNodeId);
         return from && to ? geometryCacheRef.current.get(connection, from, to) : undefined;
     };
-    const refreshAllGeometry = !isDraggingNodes && wasDraggingNodesRef.current;
+    const refreshAllGeometry = !isDraggingNodes && (wasDraggingNodesRef.current || previousResolverRef.current !== resolveNode);
     batchesRef.current = drawCacheRef.current.sync(connections, activeConnectionIds, affectedConnectionIds, refreshAllGeometry);
 
     const syncCanvasSize = useCallback((cssWidth: number, cssHeight: number) => {
@@ -204,7 +205,8 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
 
     useLayoutEffect(() => {
         wasDraggingNodesRef.current = isDraggingNodes;
-    }, [isDraggingNodes]);
+        previousResolverRef.current = resolveNode;
+    }, [isDraggingNodes, resolveNode]);
 
     useLayoutEffect(() => {
         const canvas = staticCanvasRef.current;
@@ -224,12 +226,12 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
 
     useLayoutEffect(() => {
         draw(viewport);
-    }, [draw, viewport]);
+    }); // The draw cache can change without a camera or callback change (add/delete/undo).
 
     return (
         <>
-            <canvas ref={staticCanvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" />
-            <canvas ref={dynamicCanvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" />
+            <canvas ref={staticCanvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-0 h-full w-full" />
+            <canvas ref={dynamicCanvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-0 h-full w-full" />
         </>
     );
 }));

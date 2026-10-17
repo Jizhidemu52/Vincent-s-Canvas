@@ -74,12 +74,12 @@ async function post(url: string, body?: unknown) {
 }
 
 describe("production generation routes", () => {
-  test("new image batch submissions reject multiple inputs before writes or queueing", async () => {
+  test("image batch submissions reject over 100 independent inputs before writes or queueing", async () => {
     const deps = dependencies();
     const url = await serve(createTasksRouter(deps.database as never, deps.cache as never));
-    const response = await post(`${url}/batch`, { ...videoInput(), operationType: "batch_image", toolKey: "canvas-batch", items: [{ sourceUrls: ["/first"] }, { sourceUrls: ["/second"] }] });
+    const response = await post(`${url}/batch`, { ...videoInput(), operationType: "batch_image", toolKey: "canvas-batch", items: Array.from({ length: 101 }, (_, index) => ({ sourceUrls: [`/source-${index}`] })) });
     expect(response.status).toBe(400);
-    expect(await response.text()).toContain("每次只能生成 1 张");
+    expect(await response.text()).toContain("每批最多提交 100");
     expect(deps.reads).toHaveLength(0); expect(deps.writes).toHaveLength(0); expect(deps.queued).toHaveLength(0);
   });
   test("reads an owned older task by ID without a recent-history limit", async () => {

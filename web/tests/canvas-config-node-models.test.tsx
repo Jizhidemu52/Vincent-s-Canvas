@@ -24,9 +24,9 @@ function withBusinessConfig<T>(patch: Partial<BusinessState>, run: () => T): T {
     try { return run(); } finally { Object.assign(initialState, saved); Object.assign(moduleState, savedModules); }
 }
 
-function panel(metadata: CanvasNodeMetadata, state: Partial<BusinessState> = {}, isRunning = false) {
+function panel(metadata: CanvasNodeMetadata, state: Partial<BusinessState> = {}, isRunning = false, linkedTaskCount = 0, linkedTaskHasImages = false) {
     const node: CanvasNodeData = { id: "config-node", type: CanvasNodeType.Config, title: "配置", position: { x: 0, y: 0 }, width: 400, height: 240, metadata: { prompt: "请生成内容", ...metadata } };
-    return withBusinessConfig(state, () => renderToStaticMarkup(<CanvasConfigNodePanel node={node} isRunning={isRunning} inputSummary={{ textCount: 0, imageCount: 0, videoCount: 0, audioCount: 0 }} onConfigChange={() => undefined} onGenerate={() => undefined} onStop={() => undefined} onComposerToggle={() => undefined} />));
+    return withBusinessConfig(state, () => renderToStaticMarkup(<CanvasConfigNodePanel node={node} isRunning={isRunning} linkedTaskCount={linkedTaskCount} linkedTaskHasImages={linkedTaskHasImages} inputSummary={{ textCount: 0, imageCount: 0, videoCount: 0, audioCount: 0 }} onConfigChange={() => undefined} onGenerate={() => undefined} onStop={() => undefined} onComposerToggle={() => undefined} />));
 }
 
 function actionButton(markup: string, label = "开始生成") {
@@ -36,6 +36,35 @@ function actionButton(markup: string, label = "开始生成") {
 }
 
 describe("configuration node model availability", () => {
+    test("image targets select the edit tool even without a shared reference image", () => {
+        const tools = [{ toolKey: "canvas-edit", modelConfigId: "image", enabled: false, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }];
+        const metadata = { generationMode: "image", model: "gpt-image-2" } as const;
+        expect(actionButton(panel(metadata, { tools }, false, 2, true), "执行 2 个任务")).toContain('disabled=""');
+        expect(actionButton(panel(metadata, { tools }, false, 2, false), "执行 2 个任务")).not.toContain('disabled=""');
+    });
+    test("linked tasks supply independent inputs across all four modes", () => {
+        const audioModel = { id: "audio", name: "真实音频模型", modelId: "real-audio", capabilities: ["audio"], creditCost: 0, rmbCost: 0 };
+        const tools = [{ toolKey: "gpt-chat", modelConfigId: "text", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }];
+        for (const [generationMode, model] of [["image", "gpt-image-2"], ["text", "chat-custom"], ["video", "wan2.7"], ["audio", "real-audio"]] as const) {
+            const markup = panel({ generationMode, model, prompt: "" }, { models: [...models, audioModel], tools }, false, 3);
+            expect(markup).toContain("待执行 3 个任务");
+            expect(markup).toContain("每个任务使用自身输入与公共素材");
+            expect(markup).toContain("左侧接共用素材，右侧连接任务");
+            expect(actionButton(markup, "执行 3 个任务")).not.toContain('disabled=""');
+            expect(markup).not.toContain("开始生成");
+        }
+    });
+
+    test("linked tasks cannot bypass unavailable or disabled models and remain stoppable", () => {
+        const disabledTool = { toolKey: "canvas-image", modelConfigId: "image", enabled: false, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 };
+        expect(actionButton(panel({ generationMode: "image", model: "gpt-image-2" }, { tools: [disabledTool] }, false, 2), "执行 2 个任务")).toContain('disabled=""');
+        expect(actionButton(panel({ generationMode: "audio", model: "missing" }, {}, false, 2), "执行 2 个任务")).toContain('disabled=""');
+        expect(actionButton(panel({ generationMode: "image", model: "stale" }, {}, false, 2), "执行 2 个任务")).toContain('disabled=""');
+        const running = panel({ generationMode: "audio", model: "missing" }, {}, true, 2);
+        expect(actionButton(running, "停止")).not.toContain('disabled=""');
+        expect(actionButton(running, "停止")).not.toContain("执行 2 个任务");
+    });
+
     test("missing audio capability shows a clear empty state, hides Alloy and disables generation", () => {
         const markup = panel({ generationMode: "audio", model: "gpt-image-2" });
         expect(markup).toContain("暂无可用音频模型");

@@ -22,6 +22,8 @@ const originalBusiness = useBusinessConfigStore.getState();
 let requests: Array<{ path: string; body?: Record<string, any> }>;
 beforeEach(() => {
     requests = [];
+    let batchTasks: Array<{ id: string; itemIndex: number; status: string; resultUrls: string[] }> = [];
+    let uploadedAssetCount = 0;
     globals.window = { location: { pathname: "/canvas/aplmart-request-test" } };
     useUserStore.setState({ user: { id: "qa-user", status: "active", role: "designer" } as never, status: "authenticated" });
     // Empty UI cache: request profile and mask policy must come from the fresh server snapshot.
@@ -31,10 +33,18 @@ beforeEach(() => {
         const body = init?.body ? JSON.parse(String(init.body)) : undefined;
         requests.push({ path, body });
         if (path === "/api/models") return Response.json({ models, tools: [], prices: [] });
-        if (path === "/api/assets/upload-request") return Response.json({ assetId: "reference", uploadUrl: null });
+        if (path === "/api/assets/upload-request") {
+            if (body?.filename === "fail.png") return Response.json({ message: "mock upload failed" }, { status: 400 });
+            uploadedAssetCount++;
+            return Response.json({ assetId: body?.metadata?.source === "canvas-batch-reference" ? `reference-${uploadedAssetCount}` : "reference", uploadUrl: null });
+        }
+        if (path === "/api/tasks/batch") {
+            batchTasks = body!.items.map((_: unknown, itemIndex: number) => ({ id: `batch-task-${itemIndex}`, itemIndex, status: "success", resultUrls: [`/api/assets/result-${itemIndex}/content`] }));
+            return Response.json({ batchId: "batch-many", tasks: batchTasks, failures: [] });
+        }
         if (path === "/api/tasks" && init?.method === "POST") return Response.json({ task: { id: "task-1", status: "queued" } });
         if (path === "/api/tasks/task-1") return Response.json({ task: { id: "task-1", status: "success", resultUrls: ["/api/assets/result/content"] } });
-        if (path === "/api/tasks") return Response.json({ tasks: [{ id: "task-1", status: "success", resultUrls: ["/api/assets/result/content"] }] });
+        if (path === "/api/tasks") return Response.json({ tasks: batchTasks.length ? batchTasks : [{ id: "task-1", status: "success", resultUrls: ["/api/assets/result/content"] }] });
         if (path === "/api/auth/session") return Response.json({ user: { id: "qa-user", status: "active", role: "designer" } });
         throw new Error(`Unexpected request: ${path}`);
     }) as typeof fetch;
@@ -108,8 +118,29 @@ test("OpenToken ignores historical output counts while allowing consecutive inde
     expect(posts().map(item => item.body!.prompt)).toEqual(["first", "second"]);
 });
 
-test("batch refuses multiple inputs before configuration reads and file uploads", async () => {
-    const files = [1, 2].map(index => ({ file: new File(["x"], `${index}.png`, { type: "image/png" }), title: String(index) }));
-    await expect(requestBatchEdit({ ...defaultConfig, model: "grok" }, "edit", files)).rejects.toThrow("只能处理 1 张");
+test("batch rejects over 100 inputs before configuration reads and file uploads", async () => {
+    const files = Array.from({ length: 101 }, (_, index) => ({ file: new File(["x"], `${index}.png`, { type: "image/png" }), title: String(index) }));
+    await expect(requestBatchEdit({ ...defaultConfig, model: "grok" }, "edit", files)).rejects.toThrow("1–100");
     expect(requests).toHaveLength(0);
+});
+
+test("batch sends N independent single-image inputs, not N references or N outputs in one task", async () => {
+    const files = [1, 2, 3, 4].map(index => ({ file: new File(["x"], `${index}.png`, { type: "image/png" }), title: String(index) }));
+    const result = await requestBatchEdit({ ...defaultConfig, model: "grok", count: "8" }, "edit", files);
+    const payload = requests.find(item => item.path === "/api/tasks/batch")!.body!;
+    expect(payload.parameters).toMatchObject({ count: 1, n: 1 });
+    expect(payload.items).toHaveLength(4);
+    expect(payload.items.every((item: { sourceUrls: string[] }) => item.sourceUrls.length === 1)).toBe(true);
+    expect(new Set(payload.items.map((item: { sourceUrls: string[] }) => item.sourceUrls[0])).size).toBe(4);
+    expect(result.tasks.map(item => item.itemIndex)).toEqual([0, 1, 2, 3]);
+    expect(result.tasks.every(item => item.resultUrls.length === 1)).toBe(true);
+    expect(result.failures).toEqual([]);
+});
+
+test("one failed source upload does not discard other batch items or shift their original indices", async () => {
+    const files = ["first.png", "fail.png", "third.png"].map(name => ({ file: new File(["x"], name, { type: "image/png" }), title: name }));
+    const result = await requestBatchEdit({ ...defaultConfig, model: "grok" }, "edit", files);
+    expect(result.tasks.map(item => item.itemIndex)).toEqual([0, 2]);
+    expect(result.failures).toEqual([{ index: 1, reason: "mock upload failed" }]);
+    expect(requests.find(item => item.path === "/api/tasks/batch")!.body!.items).toHaveLength(2);
 });
