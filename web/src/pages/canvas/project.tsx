@@ -64,7 +64,7 @@ import { clampCanvasPanelWidth, clampCanvasPromptHeight } from "@/lib/canvas/can
 import { useCanvasPanelStore } from "@/stores/canvas/use-canvas-panel-store";
 import { shouldOpenCanvasCreationPanel } from "@/lib/canvas/canvas-layout-breakpoint";
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
-import { flushCanvasPersistence, loadCanvasProject, useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { flushCanvasPersistence, hasPendingCanvasPersistence, loadCanvasProject, useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasSaveStatus, canvasLinkCopiedMessage } from "@/components/canvas/canvas-save-status";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -401,6 +401,7 @@ function WirelessCanvasPage() {
     const savedProjectIdRef = useRef(projectId);
     const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const applyingHistoryRef = useRef(false);
+    const pendingHistoryEntryRef = useRef<CanvasHistoryEntry | null>(null);
     const historyPausedRef = useRef(false);
     const rafRef = useRef<number | null>(null);
     const pendingDragPreviewRef = useRef<{ x: number; y: number } | null>(null);
@@ -718,6 +719,8 @@ function WirelessCanvasPage() {
         if (!hydrated) return;
         const lifecycle = projectAsyncLifecycleRef.current;
         const restoreToken = lifecycle.begin();
+        pendingHistoryEntryRef.current = null;
+        applyingHistoryRef.current = false;
         setCompareImageIds(null);
         setTemplateSourceId(undefined);
         const invalidateRestore = () => lifecycle.invalidate(restoreToken);
@@ -929,9 +932,21 @@ function WirelessCanvasPage() {
             void flushCanvasPersistence().catch(() => undefined);
         };
         const onVisibility = () => { if (document.visibilityState === "hidden") flushProjectSave(); };
+        const onBeforeUnload = (event: BeforeUnloadEvent) => {
+            const pending = projectSaveQueueRef.current?.hasPending() || hasPendingCanvasPersistence();
+            flushProjectSave();
+            // IndexedDB writes cannot be awaited during unload. Give the user a
+            // chance to stay until the pending write finishes instead of losing it silently.
+            if (pending) {
+                event.preventDefault();
+                event.returnValue = "";
+            }
+        };
+        window.addEventListener("beforeunload", onBeforeUnload);
         window.addEventListener("pagehide", flushProjectSave);
         document.addEventListener("visibilitychange", onVisibility);
         return () => {
+            window.removeEventListener("beforeunload", onBeforeUnload);
             window.removeEventListener("pagehide", flushProjectSave);
             document.removeEventListener("visibilitychange", onVisibility);
             flushProjectSave();
@@ -964,6 +979,17 @@ function WirelessCanvasPage() {
         connectionTargetNodeIdRef.current = connectionTargetNodeId;
         pendingConnectionCreateRef.current = pendingConnectionCreate;
     }, [nodes, connections, groups, selectedNodeIds, viewport, connectingParams, connectionTargetNodeId, pendingConnectionCreate]);
+
+    useLayoutEffect(() => {
+        const restored = pendingHistoryEntryRef.current;
+        if (!restored || nodes !== restored.nodes || connections !== restored.connections || groups !== restored.groups ||
+            chatSessions !== restored.chatSessions || activeChatId !== restored.activeChatId || backgroundMode !== restored.backgroundMode || showImageInfo !== restored.showImageInfo) return;
+        // The visible graph is ready now; a timer would leave rapid redo/undo ignored.
+        lastHistoryRef.current = restored;
+        pendingHistoryEntryRef.current = null;
+        applyingHistoryRef.current = false;
+        setHistoryState({ canUndo: historyRef.current.past.length > 0, canRedo: historyRef.current.future.length > 0 });
+    }, [activeChatId, backgroundMode, chatSessions, connections, groups, nodes, showImageInfo]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -1626,17 +1652,19 @@ function WirelessCanvasPage() {
                     : undefined;
             const newNode = createCanvasNode(type, targetPosition, configMetadata);
 
+            flushPendingHistory();
             setNodes((prev) => [...prev, newNode]);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
             if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio) setDialogNodeId(newNode.id);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
+        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, flushPendingHistory, getCanvasCenter],
     );
 
     const deleteNodes = useCallback(
         (ids: Set<string>) => {
             if (!ids.size) return;
+            flushPendingHistory();
             const allIds = new Set(ids);
             nodesRef.current.forEach((node) => {
                 if (ids.has(node.id)) node.metadata?.batchChildIds?.forEach((childId) => allIds.add(childId));
@@ -1686,7 +1714,7 @@ function WirelessCanvasPage() {
             setContextMenu((current) => (current?.type === "node" && allIds.has(current.nodeId) ? null : current));
             cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node) => !allIds.has(node.id)), chatSessions });
         },
-        [chatSessions, cleanupCanvasFiles, projectId, stopGenerationByRunningId],
+        [chatSessions, cleanupCanvasFiles, flushPendingHistory, projectId, stopGenerationByRunningId],
     );
 
     const createSelectedGroup = useCallback(() => {
@@ -1744,10 +1772,11 @@ function WirelessCanvasPage() {
     }, [renameGroup]);
 
     const deleteConnection = useCallback((connectionId: string) => {
+        flushPendingHistory();
         setConnections((prev) => prev.filter((conn) => conn.id !== connectionId));
         setSelectedConnectionId((current) => (current === connectionId ? null : current));
         setContextMenu((current) => (current?.type === "connection" && current.connectionId === connectionId ? null : current));
-    }, []);
+    }, [flushPendingHistory]);
 
     const deselectCanvas = useCallback(() => {
         cancelPendingConnectionCreate();
@@ -1762,6 +1791,7 @@ function WirelessCanvasPage() {
     }, [cancelPendingConnectionCreate, cancelSelectionPreview, commitSelectedNodeIds]);
 
     const clearCanvas = useCallback(() => {
+        flushPendingHistory();
         setNodes([]);
         setConnections([]);
         setGroups([]);
@@ -1776,19 +1806,21 @@ function WirelessCanvasPage() {
         deselectCanvas();
         setClearConfirmOpen(false);
         cleanupCanvasFiles({ projectId, nodes: [], chatSessions: [] });
-    }, [cleanupCanvasFiles, deselectCanvas, projectId]);
+    }, [cleanupCanvasFiles, deselectCanvas, flushPendingHistory, projectId]);
 
     const duplicateNodes = useCallback((ids: ReadonlySet<string>) => {
         const source = copyCanvasNodeGraph(nodesRef.current, connectionsRef.current, groupsRef.current, ids);
         if (!source.nodes.length) return;
         const next = cloneCanvasNodeGraph(source, { x: 36, y: 36 });
+        // Keep distinct commands separate even when the previous edit is still debounced.
+        flushPendingHistory();
         setNodes(prev => [...prev, ...next.nodes]);
         setConnections(prev => [...prev, ...next.connections]);
         if (next.groups?.length) setGroups(current => [...current, ...next.groups!]);
         setSelectedNodeIds(new Set(next.nodes.map(node => node.id)));
         setSelectedConnectionId(null);
         setDialogNodeId(next.nodes.length === 1 ? next.nodes[0]!.id : null);
-    }, []);
+    }, [flushPendingHistory]);
 
     const copySelectedNodes = useCallback(() => {
         const selectedIds = selectedNodeIdsRef.current;
@@ -1817,6 +1849,7 @@ function WirelessCanvasPage() {
         const dy = center.y - (bounds.top + bounds.bottom) / 2;
         const { nodes: nextNodes, connections: nextConnections, groups: nextGroups } = cloneCanvasNodeGraph(clipboard, { x: dx, y: dy });
 
+        flushPendingHistory();
         setNodes((prev) => [...prev, ...nextNodes]);
         setConnections((prev) => [...prev, ...nextConnections]);
         if (nextGroups?.length) setGroups(current => [...current, ...nextGroups]);
@@ -1825,7 +1858,7 @@ function WirelessCanvasPage() {
         setContextMenu(null);
         setDialogNodeId(nextNodes[0]?.id || null);
         return true;
-    }, [getCanvasCenter]);
+    }, [flushPendingHistory, getCanvasCenter]);
 
     const resetViewport = useCallback(() => {
         const next = { x: size.width / 2, y: size.height / 2, k: 1 };
@@ -1880,6 +1913,7 @@ function WirelessCanvasPage() {
             historyCommitTimerRef.current = null;
         }
         applyingHistoryRef.current = true;
+        pendingHistoryEntryRef.current = restoredEntry;
         setNodes(restoredNodes);
         setConnections(entry.connections);
         setGroups(restoredEntry.groups);
@@ -1890,11 +1924,6 @@ function WirelessCanvasPage() {
         setSelectedNodeIds(new Set());
         setSelectedConnectionId(null);
         setContextMenu(null);
-        transientTimeoutsRef.current.schedule("history-apply", () => {
-            lastHistoryRef.current = restoredEntry;
-            applyingHistoryRef.current = false;
-            setHistoryState({ canUndo: historyRef.current.past.length > 0, canRedo: historyRef.current.future.length > 0 });
-        }, 0);
     }, []);
 
     const undoCanvas = useCallback(() => {
@@ -2018,11 +2047,12 @@ function WirelessCanvasPage() {
             startY: event.clientY,
             initialSelectedNodes: dragNodes.nodes,
         };
+        flushPendingHistory();
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
         setIsNodeDragging(true);
         handleCanvasInteractionChange(true);
-    }, [commitSelectedNodeIds, connectionAdjacency, handleCanvasInteractionChange, nodeById]);
+    }, [commitSelectedNodeIds, connectionAdjacency, flushPendingHistory, handleCanvasInteractionChange, nodeById]);
 
     const moveGroup = useCallback((event: ReactMouseEvent, id: string) => {
         const group = groupIndex.groups.find(item => item.group.id === id);
@@ -2231,16 +2261,18 @@ function WirelessCanvasPage() {
         // Clipboard import selects its new reference, but must not replace the live creation draft.
         // Consume this selection without inventing a source prompt on the uploaded image.
         if (preserveQuickGeneratePrompt) syncSelectedGenerationRef.current(new Set([id]), [newNode], projectId);
+        flushPendingHistory();
         setNodes((prev) => [...prev, newNode]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
         setDialogNodeId(id);
-    }, [projectId]);
+    }, [flushPendingHistory, projectId]);
 
     const createVideoFileNode = useCallback(async (file: File, position: Position) => {
         const video = await uploadMediaFile(file, "video");
         const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
         const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        flushPendingHistory();
         setNodes((prev) => [
             ...prev,
             {
@@ -2256,12 +2288,13 @@ function WirelessCanvasPage() {
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
         setDialogNodeId(id);
-    }, []);
+    }, [flushPendingHistory]);
 
     const createAudioFileNode = useCallback(async (file: File, position: Position) => {
         const audio = await uploadMediaFile(file, "audio");
         const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
         const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        flushPendingHistory();
         setNodes((prev) => [
             ...prev,
             {
@@ -2276,7 +2309,7 @@ function WirelessCanvasPage() {
         ]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
-    }, []);
+    }, [flushPendingHistory]);
 
     const createTextNodeFromClipboard = useCallback(
         (text: string) => {
@@ -2288,6 +2321,7 @@ function WirelessCanvasPage() {
                 title: trimmed.slice(0, 32) || "剪切板文本",
             };
 
+            flushPendingHistory();
             setNodes((prev) => [...prev, node]);
             setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
@@ -2295,7 +2329,7 @@ function WirelessCanvasPage() {
             setDialogNodeId(node.id);
             return true;
         },
-        [getCanvasCenter],
+        [flushPendingHistory, getCanvasCenter],
     );
 
     const pasteSystemClipboard = useCallback(async (files: File[]) => {
@@ -3089,56 +3123,90 @@ function WirelessCanvasPage() {
         async (event: ReactChangeEvent<HTMLInputElement>) => {
             const file = event.target.files?.[0];
             const target = uploadTargetRef.current;
+            uploadTargetRef.current = null;
+            event.target.value = "";
             if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/") && !isAudioFile(file))) return;
-            if (file.type.startsWith("image/")) {
-                try { assertCanvasImageUploadSize(file); }
-                catch (error) {
-                    message.error((error as Error).message);
-                    uploadTargetRef.current = null;
-                    event.target.value = "";
-                    return;
-                }
-            }
-
-            if (target?.nodeId) {
-                if (isAudioFile(file)) {
-                    const audio = await uploadMediaFile(file, "audio");
-                    const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
+            try {
+                if (file.type.startsWith("image/")) assertCanvasImageUploadSize(file);
+                if (target?.nodeId) {
+                    if (isAudioFile(file)) {
+                        const audio = await uploadMediaFile(file, "audio");
+                        const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
+                        flushPendingHistory();
+                        setNodes((prev) =>
+                            prev.map((node) =>
+                                node.id === target.nodeId
+                                    ? {
+                                          ...node,
+                                          type: CanvasNodeType.Audio,
+                                          title: file.name,
+                                          position: { x: node.position.x + node.width / 2 - spec.width / 2, y: node.position.y + node.height / 2 - spec.height / 2 },
+                                          width: spec.width,
+                                          height: spec.height,
+                                          metadata: { ...node.metadata, ...audioMetadata(audio), errorDetails: undefined },
+                                      }
+                                    : node,
+                            ),
+                        );
+                        setSelectedNodeIds(new Set([target.nodeId]));
+                        setSelectedConnectionId(null);
+                        return;
+                    }
+                    if (file.type.startsWith("video/")) {
+                        const video = await uploadMediaFile(file, "video");
+                        const nextSize = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                        flushPendingHistory();
+                        setNodes((prev) =>
+                            prev.map((node) =>
+                                node.id === target.nodeId
+                                    ? {
+                                          ...node,
+                                          type: CanvasNodeType.Video,
+                                          title: file.name,
+                                          position: { x: node.position.x + node.width / 2 - nextSize.width / 2, y: node.position.y + node.height / 2 - nextSize.height / 2 },
+                                          width: nextSize.width,
+                                          height: nextSize.height,
+                                          metadata: { ...node.metadata, ...videoMetadata(video), errorDetails: undefined },
+                                      }
+                                    : node,
+                            ),
+                        );
+                        setSelectedNodeIds(new Set([target.nodeId]));
+                        setSelectedConnectionId(null);
+                        setDialogNodeId(target.nodeId);
+                        return;
+                    }
+                    const image = await uploadImage(file);
+                    const size = fitNodeSize(image.width, image.height);
+                    flushPendingHistory();
                     setNodes((prev) =>
                         prev.map((node) =>
                             node.id === target.nodeId
                                 ? {
                                       ...node,
-                                      type: CanvasNodeType.Audio,
+                                      type: CanvasNodeType.Image,
                                       title: file.name,
-                                      position: { x: node.position.x + node.width / 2 - spec.width / 2, y: node.position.y + node.height / 2 - spec.height / 2 },
-                                      width: spec.width,
-                                      height: spec.height,
-                                      metadata: { ...node.metadata, ...audioMetadata(audio), errorDetails: undefined },
-                                  }
-                                : node,
-                        ),
-                    );
-                    setSelectedNodeIds(new Set([target.nodeId]));
-                    setSelectedConnectionId(null);
-                    uploadTargetRef.current = null;
-                    event.target.value = "";
-                    return;
-                }
-                if (file.type.startsWith("video/")) {
-                    const video = await uploadMediaFile(file, "video");
-                    const nextSize = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === target.nodeId
-                                ? {
-                                      ...node,
-                                      type: CanvasNodeType.Video,
-                                      title: file.name,
-                                      position: { x: node.position.x + node.width / 2 - nextSize.width / 2, y: node.position.y + node.height / 2 - nextSize.height / 2 },
-                                      width: nextSize.width,
-                                      height: nextSize.height,
-                                      metadata: { ...node.metadata, ...videoMetadata(video), errorDetails: undefined },
+                                      width: size.width,
+                                      height: size.height,
+                                      metadata: {
+                                          ...node.metadata,
+                                          ...imageMetadata(image),
+                                          errorDetails: undefined,
+                                          freeResize: false,
+                                          isBatchRoot: undefined,
+                                          batchRootId: undefined,
+                                          batchChildIds: undefined,
+                                          batchUsesReferenceImages: undefined,
+                                          generationType: undefined,
+                                          model: undefined,
+                                          size: undefined,
+                                          quality: undefined,
+                                          count: undefined,
+                                          references: undefined,
+                                          compareSources: undefined,
+                                          primaryImageId: undefined,
+                                          imageBatchExpanded: undefined,
+                                      },
                                   }
                                 : node,
                         ),
@@ -3146,56 +3214,15 @@ function WirelessCanvasPage() {
                     setSelectedNodeIds(new Set([target.nodeId]));
                     setSelectedConnectionId(null);
                     setDialogNodeId(target.nodeId);
-                    uploadTargetRef.current = null;
-                    event.target.value = "";
-                    return;
+                } else {
+                    const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
+                    await (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
                 }
-                const image = await uploadImage(file);
-                const size = fitNodeSize(image.width, image.height);
-                setNodes((prev) =>
-                    prev.map((node) =>
-                        node.id === target.nodeId
-                            ? {
-                                  ...node,
-                                  type: CanvasNodeType.Image,
-                                  title: file.name,
-                                  width: size.width,
-                                  height: size.height,
-                                  metadata: {
-                                      ...node.metadata,
-                                      ...imageMetadata(image),
-                                      errorDetails: undefined,
-                                      freeResize: false,
-                                      isBatchRoot: undefined,
-                                      batchRootId: undefined,
-                                      batchChildIds: undefined,
-                                      batchUsesReferenceImages: undefined,
-                                      generationType: undefined,
-                                      model: undefined,
-                                      size: undefined,
-                                      quality: undefined,
-                                      count: undefined,
-                                      references: undefined,
-                                      compareSources: undefined,
-                                      primaryImageId: undefined,
-                                      imageBatchExpanded: undefined,
-                                  },
-                              }
-                            : node,
-                    ),
-                );
-                setSelectedNodeIds(new Set([target.nodeId]));
-                setSelectedConnectionId(null);
-                setDialogNodeId(target.nodeId);
-            } else {
-                const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                void (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "素材导入失败，请重试");
             }
-
-            uploadTargetRef.current = null;
-            event.target.value = "";
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, message, screenToCanvas, size.height, size.width],
+        [createAudioFileNode, createImageFileNode, createVideoFileNode, flushPendingHistory, message, screenToCanvas, size.height, size.width],
     );
 
     const handleQuickReferenceInputChange = useCallback(
@@ -3525,14 +3552,20 @@ function WirelessCanvasPage() {
     }, [batchEditServerId, message]);
 
     const handleDrop = useCallback(
-        (event: ReactDragEvent<HTMLDivElement>) => {
+        async (event: ReactDragEvent<HTMLDivElement>) => {
             event.preventDefault();
-            const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item));
-            if (!file) return;
-
+            const dropped = Array.from(event.dataTransfer.files);
+            const files = dropped.filter((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item));
+            if (files.length !== dropped.length) message.warning("仅支持图片、视频和音频，其他文件已跳过");
             const pos = screenToCanvas(event.clientX, event.clientY);
-            void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos))
-                .catch((error: Error) => { message.error(error.message); });
+            for (const [index, file] of files.entries()) {
+                const position = { x: pos.x + index * 36, y: pos.y + index * 36 };
+                try {
+                    await (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
+                } catch (error) {
+                    message.error(`${file.name}：${error instanceof Error ? error.message : "素材导入失败"}`);
+                }
+            }
         },
         [createAudioFileNode, createImageFileNode, createVideoFileNode, message, screenToCanvas],
     );

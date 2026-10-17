@@ -80,6 +80,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
         ...clipboard, ...nodeCopy, clipboardModule: clipboard, shouldIgnoreCanvasShortcut, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success", assertCanvasImageUploadSize,
         window: target, navigator: {}, // HTTP/permissionless path: no navigator.clipboard exists.
         useCallback: (callback: unknown) => callback,
+        flushPendingHistory: () => true,
         useEffect: (effect: () => (() => void) | void) => { const dispose = effect(); if (dispose) disposers.push(dispose); },
         nanoid: () => `fixture-${++nextId}`,
         syncSelectedGenerationRef, projectId: "clipboard-test",

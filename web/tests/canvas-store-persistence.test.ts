@@ -87,12 +87,76 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
         window: browser ? { addEventListener() {}, location: { reload() { reloads += 1; } } } : undefined,
         console: { error: (...args: unknown[]) => errors.push(args) },
     };
-    const exports = {} as { useCanvasStore: any; flushCanvasPersistence: () => Promise<void>; flushCanvasCloudPersistence: () => Promise<void> };
+    const exports = {} as { useCanvasStore: any; flushCanvasPersistence: () => Promise<void>; flushCanvasCloudPersistence: () => Promise<void>; hasPendingCanvasPersistence: () => boolean };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
     const store = exports.useCanvasStore;
     if (!store.persist.hasHydrated() && oaOwnerId !== null) await new Promise<void>(resolve => { const unsubscribe = store.persist.onFinishHydration(() => { unsubscribe(); resolve(); }); });
-    return { store, flush: exports.flushCanvasPersistence, retry: exports.flushCanvasCloudPersistence, errors, userStore, reloads: () => reloads };
+    return { store, flush: exports.flushCanvasPersistence, retry: exports.flushCanvasCloudPersistence, hasPending: exports.hasPendingCanvasPersistence, errors, userStore, reloads: () => reloads };
 }
+
+test("pending persistence stays true from debounce through the actual database write", async () => {
+    const io = database(), tab = await openTab(io);
+    expect(tab.hasPending()).toBe(false);
+    tab.store.getState().renameProject("shared", "等待落盘");
+    expect(tab.hasPending()).toBe(true);
+    const gate = Promise.withResolvers<void>();
+    io.pauseNextWrite(gate.promise);
+    const saving = tab.flush();
+    // The queue and change map have already emptied, but the Promise has not run.
+    expect(tab.hasPending()).toBe(true);
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    expect(io.read()[0].title).toBe("原画布");
+    expect(tab.hasPending()).toBe(true);
+    gate.resolve();
+    await saving;
+    expect(io.read()[0].title).toBe("等待落盘");
+    expect(tab.hasPending()).toBe(false);
+});
+
+test("completed earlier writes cannot mark a newer queued write as saved", async () => {
+    const io = database(), tab = await openTab(io);
+    const firstGate = Promise.withResolvers<void>();
+    io.pauseNextWrite(firstGate.promise);
+    tab.store.getState().renameProject("shared", "较早快照");
+    const first = tab.flush();
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    const secondGate = Promise.withResolvers<void>();
+    io.pauseNextWrite(secondGate.promise);
+    tab.store.getState().renameProject("shared", "最新快照");
+    const second = tab.flush();
+    firstGate.resolve();
+    await first;
+    expect(tab.hasPending()).toBe(true);
+    secondGate.resolve();
+    await second;
+    expect(tab.hasPending()).toBe(false);
+    expect(io.read()[0].title).toBe("最新快照");
+});
+
+test("failed writes remain pending until a successful explicit retry", async () => {
+    const io = database(), tab = await openTab(io);
+    io.failNextWrite();
+    tab.store.getState().renameProject("shared", "不能静默丢弃的编辑");
+    await expect(tab.flush()).rejects.toThrow();
+    expect(tab.hasPending()).toBe(true);
+    await tab.retry();
+    expect(tab.hasPending()).toBe(false);
+    expect(io.read()[0].title).toBe("不能静默丢弃的编辑");
+});
+
+test("pending persistence does not expose a previous owner's write to a new session", async () => {
+    const io = database(), tab = await openTab(io, "employee-A");
+    const gate = Promise.withResolvers<void>();
+    io.pauseNextWrite(gate.promise);
+    tab.store.getState().createProject("员工 A 的最后编辑");
+    expect(tab.hasPending()).toBe(true);
+    tab.userStore.setState({ user: { id: "employee-B", role: "designer" }, status: "authenticated" });
+    expect(tab.hasPending()).toBe(false);
+    gate.resolve();
+    await tab.flush();
+    expect(io.read(`${storageKey}:oa:user:employee-A`)[0].title).toBe("员工 A 的最后编辑");
+    expect(io.read(`${storageKey}:oa:user:employee-B`)).toEqual([]);
+});
 
 test("non-browser imports do not schedule browser persistence or rewrite stored projects", async () => {
     const io = database(), tab = await openTab(io, undefined, false);

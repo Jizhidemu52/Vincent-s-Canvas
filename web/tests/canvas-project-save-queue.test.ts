@@ -52,9 +52,12 @@ test("flushes a pending canvas project snapshot before the page closes", () => {
     const saved: string[] = [];
     const queue = createCanvasProjectSaveQueue(180, (snapshot: string) => saved.push(snapshot), timers.scheduler);
 
+    expect(queue.hasPending()).toBe(false);
     queue.schedule("draft");
+    expect(queue.hasPending()).toBe(true);
     queue.flush();
 
+    expect(queue.hasPending()).toBe(false);
     expect(saved).toEqual(["draft"]);
     expect(timers.count()).toBe(0);
 });

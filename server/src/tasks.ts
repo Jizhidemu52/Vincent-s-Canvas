@@ -223,8 +223,9 @@ export async function transitionTask(
     operation_type: string;
     attempts: number;
     upstream_task_id: string | null;
+    upstream_submission_started_at: string | null;
   }>(
-    "SELECT id,request_id,batch_id,status,priority,operation_type,attempts,upstream_task_id FROM tasks WHERE id=$1 AND status IN ('waiting','paused')",
+    "SELECT id,request_id,batch_id,status,priority,operation_type,attempts,upstream_task_id,upstream_submission_started_at FROM tasks WHERE id=$1 AND status IN ('waiting','paused')",
     [taskId],
   );
   const task = current.rows[0];
@@ -263,8 +264,15 @@ export async function transitionTask(
       throw error;
     }
   } else {
+    // A local cancel cannot cancel or settle unknown provider work. Synchronous
+    // image/audio/workflow calls have no submission marker, so started attempts
+    // are also uncertain; only video has a reliable pre-submission retry boundary.
+    if (task.upstream_task_id || task.upstream_submission_started_at
+      || (task.operation_type !== "video_generation" && task.attempts > 0)) return null;
     const changed = await db.query(
-      "UPDATE tasks SET status='cancelled',completed_at=now(),updated_at=now() WHERE id=$1 AND status=$2 RETURNING id",
+      `UPDATE tasks SET status='cancelled',completed_at=now(),updated_at=now()
+        WHERE id=$1 AND status=$2 AND upstream_task_id IS NULL AND upstream_submission_started_at IS NULL
+          AND (operation_type='video_generation' OR attempts=0) RETURNING id`,
       [taskId, task.status],
     );
     if (!changed.rows[0]) return null;

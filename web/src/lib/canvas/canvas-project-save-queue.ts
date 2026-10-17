@@ -6,6 +6,7 @@ export type CanvasProjectSaveScheduler = {
 export type CanvasProjectSaveQueue<T> = {
     schedule: (snapshot: T, delayMs?: number) => void;
     flush: () => void;
+    hasPending: () => boolean;
 };
 
 const browserScheduler: CanvasProjectSaveScheduler = {
@@ -34,5 +35,6 @@ export function createCanvasProjectSaveQueue<T>(delayMs: number, onFlush: (snaps
             timer = scheduler.set(flush, nextDelayMs);
         },
         flush,
+        hasPending: () => pending !== null,
     };
 }

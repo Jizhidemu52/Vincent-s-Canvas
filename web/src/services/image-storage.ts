@@ -1,5 +1,5 @@
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
-import { rememberMediaSource } from "./canvas-media-links";
+import { forgetMediaSource, rememberMediaSource } from "./canvas-media-links";
 
 import { nanoid } from "nanoid";
 import { readImageMeta } from "@/lib/image-utils";
@@ -29,14 +29,41 @@ const loadObjectUrl = createDedupedAsyncResolver(async (storageKey: string) => {
 
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
     store.assertAccess();
-    const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
+    let blob: Blob;
+    if (typeof input === "string") {
+        const response = await fetch(input);
+        if (!response.ok) throw new Error(`图片读取失败（${response.status}），请重新添加图片`);
+        blob = await response.blob();
+    } else {
+        blob = input;
+    }
+    if (!blob.size) throw new Error("图片文件为空，请重新选择图片");
     const storageKey = `image:${nanoid()}`;
-    await store.setItem(storageKey, blob);
-    if (typeof input === "string") await rememberMediaSource(storageKey, input);
     const url = URL.createObjectURL(blob);
-    cacheObjectUrl(objectUrls, storageKey, url);
-    const meta = await readImageMeta(url);
-    return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType, ...(typeof File !== "undefined" && input instanceof File ? { originalFileName: input.name } : {}) };
+    let storageAttempted = false;
+    let sourceAttempted = false;
+    try {
+        // Validate before writing: keep the original bytes, not a re-encoded copy.
+        const meta = await readImageMeta(url);
+        storageAttempted = true;
+        await store.setItem(storageKey, blob);
+        if (typeof input === "string") {
+            sourceAttempted = true;
+            await rememberMediaSource(storageKey, input);
+        }
+        cacheObjectUrl(objectUrls, storageKey, url);
+        return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType, ...(typeof File !== "undefined" && input instanceof File ? { originalFileName: input.name } : {}) };
+    } catch (error) {
+        URL.revokeObjectURL(url);
+        const cleanup = await Promise.allSettled([
+            ...(storageAttempted ? [store.removeItem(storageKey)] : []),
+            ...(sourceAttempted ? [forgetMediaSource(storageKey)] : []),
+        ]);
+        if (cleanup.some((result) => result.status === "rejected")) {
+            throw new Error(`${error instanceof Error ? error.message : "保存图片失败"}；本地临时数据清理失败，请重新打开工作区后重试`, { cause: error });
+        }
+        throw error;
+    }
 }
 
 export async function resolveImageUrl(storageKey?: string, fallback = "") {

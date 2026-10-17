@@ -43,8 +43,7 @@ test("drop catches the size error and shows feedback instead of leaving an unhan
         message: { error: (text: string) => errors.push(text) },
     });
     let prevented = false;
-    drop({ dataTransfer: { files: [large] }, preventDefault: () => { prevented = true; }, clientX: 0, clientY: 0 });
-    await Promise.resolve();
+    await drop({ dataTransfer: { files: [large] }, preventDefault: () => { prevented = true; }, clientX: 0, clientY: 0 });
     expect(prevented).toBe(true);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("超过 20 MB");
@@ -61,6 +60,47 @@ test("file-picker rejection preserves a replacement target and resets the input 
         expect(uploadTargetRef.current).toBeNull();
         expect(input.value).toBe("");
     }
+});
+
+test("file-picker reports decode failures without mutating a replacement and can select the same file again", async () => {
+    for (const target of [null, { nodeId: "existing-image" }]) {
+        let mutations = 0;
+        const errors: string[] = [];
+        const invalid = async () => { throw new Error("图片无法读取，请选择有效的图片"); };
+        const uploadTargetRef = { current: target };
+        const change = callback("handleImageInputChange", {
+            uploadTargetRef, isAudioFile: () => false, uploadImage: invalid, createImageFileNode: invalid,
+            screenToCanvas: () => ({ x: 0, y: 0 }), size: { width: 100, height: 100 }, containerRef: { current: null },
+            message: { error: (text: string) => errors.push(text) }, setNodes: () => mutations++,
+        });
+        const input = { files: [small], value: "normal.png" };
+        await change({ target: input });
+        expect(errors).toEqual(["图片无法读取，请选择有效的图片"]);
+        expect(input.value).toBe("");
+        expect(uploadTargetRef.current).toBeNull();
+        expect(mutations).toBe(0);
+    }
+});
+
+test("multi-file drop imports every supported file in order and continues after a failed image", async () => {
+    const calls: { name: string; x: number; y: number }[] = [];
+    const errors: string[] = [], warnings: string[] = [];
+    const create = async (file: typeof small, position: { x: number; y: number }) => {
+        calls.push({ name: file.name, ...position });
+        if (file.name === "broken.png") throw new Error("图片损坏");
+    };
+    const drop = callback("handleDrop", {
+        screenToCanvas: () => ({ x: 10, y: 20 }), isAudioFile: (file: typeof small) => file.type.startsWith("audio/"),
+        createImageFileNode: create, createVideoFileNode: create, createAudioFileNode: create,
+        message: { error: (text: string) => errors.push(text), warning: (text: string) => warnings.push(text) },
+    });
+    await drop({ dataTransfer: { files: [small, { ...small, name: "broken.png" }, { name: "notes.txt", type: "text/plain" }, { name: "clip.mp4", type: "video/mp4" }, { name: "audio.mp3", type: "audio/mpeg" }] }, preventDefault() {}, clientX: 0, clientY: 0 });
+    expect(calls).toEqual([
+        { name: "normal.png", x: 10, y: 20 }, { name: "broken.png", x: 46, y: 56 },
+        { name: "clip.mp4", x: 82, y: 92 }, { name: "audio.mp3", x: 118, y: 128 },
+    ]);
+    expect(errors).toEqual(["broken.png：图片损坏"]);
+    expect(warnings).toEqual(["仅支持图片、视频和音频，其他文件已跳过"]);
 });
 
 test("clipboard validates the entire selection before creating any node or success message", async () => {

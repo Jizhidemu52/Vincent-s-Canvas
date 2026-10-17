@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 
 type Entry = { nodes: CanvasNodeData[]; connections: unknown[]; groups: unknown[]; chatSessions: unknown[]; activeChatId: string | null; backgroundMode: string; showImageInfo: boolean };
 type History = { past: Entry[]; future: Entry[] };
@@ -11,7 +12,7 @@ type History = { past: Entry[]; future: Entry[] };
 const source = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const helperNames = new Set(["boundedCanvasHistory", "canvasHistoryForSave"]);
-const callbackNames = new Set(["flushPendingHistory", "undoCanvas", "redoCanvas"]);
+const callbackNames = new Set(["flushPendingHistory", "duplicateNodes", "undoCanvas", "redoCanvas"]);
 const callbacks: string[] = [];
 let historyEffect = "";
 function collect(node: ts.Node) {
@@ -41,7 +42,16 @@ function harness(history: History, previous: Entry, current: Entry) {
     let timerId = 17;
     let live = current;
     let availability = { canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
-    const actions = new Function("useCallback", "historyRef", "lastHistoryRef", "createHistoryEntry", "applyHistory", "historyCommitTimerRef", "applyingHistoryRef", "historyPausedRef", "setHistoryState", "clearTimeout", "setTimeout", "projectLoaded", `${code}\nreturn { undoCanvas, redoCanvas, runHistoryEffect };`)(
+    const commandScope = {
+        copyCanvasNodeGraph, cloneCanvasNodeGraph,
+        nodesRef: { get current() { return live.nodes; } }, connectionsRef: { get current() { return live.connections; } },
+        groupsRef: { get current() { return live.groups; } },
+        setNodes: (update: (nodes: CanvasNodeData[]) => CanvasNodeData[]) => { live = { ...live, nodes: update(live.nodes) }; },
+        setConnections: (update: (connections: unknown[]) => unknown[]) => { live = { ...live, connections: update(live.connections) }; },
+        setGroups: (update: (groups: unknown[]) => unknown[]) => { live = { ...live, groups: update(live.groups) }; },
+        setSelectedNodeIds() {}, setSelectedConnectionId() {}, setDialogNodeId() {},
+    };
+    const actions = new Function("useCallback", "historyRef", "lastHistoryRef", "createHistoryEntry", "applyHistory", "historyCommitTimerRef", "applyingHistoryRef", "historyPausedRef", "setHistoryState", "clearTimeout", "setTimeout", "projectLoaded", "commandScope", `const { ${Object.keys(commandScope).join(",")} } = commandScope;\n${code}\nreturn { duplicateNodes, undoCanvas, redoCanvas, runHistoryEffect };`)(
         (callback: () => void) => callback,
         historyRef,
         lastHistoryRef,
@@ -54,7 +64,8 @@ function harness(history: History, previous: Entry, current: Entry) {
         (timer: number) => { clearedTimers.push(timer); pendingTimers.delete(timer); },
         (callback: () => void) => { pendingTimers.set(++timerId, callback); return timerId; },
         true,
-    ) as { undoCanvas: () => void; redoCanvas: () => void; runHistoryEffect: () => void | (() => void) };
+        commandScope,
+    ) as { duplicateNodes: (ids: Set<string>) => void; undoCanvas: () => void; redoCanvas: () => void; runHistoryEffect: () => void | (() => void) };
     const commitPending = () => {
         const timer = historyCommitTimerRef.current;
         if (timer === null) return;
@@ -66,6 +77,22 @@ function harness(history: History, previous: Entry, current: Entry) {
 }
 
 describe("canvas commands before the history debounce commits", () => {
+    test("import then duplicate immediately preserves the original when undoing the duplicate", () => {
+        const empty = entry();
+        const imported = { ...empty, nodes: entry("original").nodes };
+        const editor = harness({ past: [], future: [] }, empty, imported);
+        editor.duplicateNodes(new Set(["original"]));
+        expect(editor.live().nodes).toHaveLength(2);
+        editor.undoCanvas();
+        expect(editor.live()).toBe(imported);
+        expect(editor.live().nodes.map(node => node.id)).toEqual(["original"]);
+        editor.redoCanvas();
+        expect(editor.live().nodes).toHaveLength(2);
+        editor.undoCanvas();
+        editor.undoCanvas();
+        expect(editor.live()).toBe(empty);
+    });
+
     test("immediate undo of a sixty-image bulk drag never returns to the older thirty-image import", () => {
         const imported = entry(...Array.from({ length: 60 }, (_, index) => `image-${index}`));
         imported.nodes = imported.nodes.map((node, index) => ({ ...node, type: CanvasNodeType.Image, position: { x: index * 120, y: 80 }, metadata: { content: `blob:${node.id}`, storageKey: `image:${node.id}` } }));

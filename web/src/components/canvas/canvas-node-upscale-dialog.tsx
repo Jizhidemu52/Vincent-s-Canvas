@@ -27,6 +27,7 @@ const defaultParams: CanvasImageUpscaleParams = {
 export function CanvasNodeUpscaleDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageUpscaleParams) => void }) {
     const [params, setParams] = useState<CanvasImageUpscaleParams>(defaultParams);
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
+    const [imageError, setImageError] = useState("");
     const sourceLongEdge = image ? Math.max(image.width, image.height) : 0;
     const outputSize = useMemo(() => (image ? resolveUpscaleSize(image.width, image.height, params.targetLongEdge) : null), [image, params.targetLongEdge]);
     const canUpscale = Boolean(image && sourceLongEdge < params.targetLongEdge && params.targetLongEdge <= MAX_UPSCALE_LONG_EDGE);
@@ -40,7 +41,13 @@ export function CanvasNodeUpscaleDialog({ dataUrl, open, onClose, onConfirm }: {
 
     useEffect(() => {
         if (!open) return;
-        void readImageMeta(dataUrl).then(setImage);
+        let active = true;
+        setImageError("");
+        void readImageMeta(dataUrl).then(
+            (meta) => { if (active) setImage(meta); },
+            (error) => { if (active) setImageError(error instanceof Error ? error.message : "图片读取失败"); },
+        );
+        return () => { active = false; };
     }, [dataUrl, open]);
 
     useEffect(() => {
@@ -52,6 +59,7 @@ export function CanvasNodeUpscaleDialog({ dataUrl, open, onClose, onConfirm }: {
     return (
         <Modal title={null} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={820} centered destroyOnHidden>
             <div className="space-y-5">
+                {imageError ? <div role="alert" className="text-sm">{imageError}</div> : null}
                 <div>
                     <h2 className="text-xl font-semibold">图片放大</h2>
                 </div>
@@ -62,7 +70,7 @@ export function CanvasNodeUpscaleDialog({ dataUrl, open, onClose, onConfirm }: {
                         </div>
                         <div className="mt-3 flex items-center justify-between text-sm">
                             <span className="opacity-60">源图</span>
-                            <span className="font-semibold">{image ? `${image.width} x ${image.height} px` : "读取中"}</span>
+                            <span className="font-semibold">{image ? `${image.width} x ${image.height} px` : imageError ? "读取失败" : "读取中"}</span>
                         </div>
                     </div>
                     <div className="space-y-6 py-2">

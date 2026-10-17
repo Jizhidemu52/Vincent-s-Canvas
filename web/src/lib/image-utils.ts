@@ -40,12 +40,27 @@ export function readFileAsDataUrl(file: File) {
 }
 
 export function readImageMeta(dataUrl: string) {
-    return new Promise<{ width: number; height: number; mimeType: string }>((resolve) => {
+    return new Promise<{ width: number; height: number; mimeType: string }>((resolve, reject) => {
         const image = new Image();
-        const done = () => resolve({ width: image.naturalWidth || 1024, height: image.naturalHeight || 1024, mimeType: dataUrl.match(/^data:([^;]+)/)?.[1] || "image/png" });
-        image.onload = done;
-        image.onerror = done;
-        setTimeout(done, 3000);
+        let settled = false;
+        const done = (error?: Error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            image.onload = null;
+            image.onerror = null;
+            if (error) {
+                image.src = "";
+                reject(error);
+            } else {
+                resolve({ width: image.naturalWidth, height: image.naturalHeight, mimeType: dataUrl.match(/^data:([^;,]+)/i)?.[1] || "image/png" });
+            }
+        };
+        // Large originals may take longer than a few seconds to decode. A timeout
+        // is still an error, never a fabricated 1024 x 1024 image.
+        const timeout = setTimeout(() => done(new Error("图片读取超时，请重新添加图片")), 30_000);
+        image.onload = () => done(image.naturalWidth > 0 && image.naturalHeight > 0 ? undefined : new Error("图片尺寸无效，请重新选择图片"));
+        image.onerror = () => done(new Error("图片无法读取，文件可能已损坏或格式不受支持"));
         image.src = dataUrl;
     });
 }

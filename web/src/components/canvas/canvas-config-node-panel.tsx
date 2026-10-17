@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Square, Video } from "lucide-react";
 import { Button, Segmented } from "antd";
 
@@ -17,7 +17,7 @@ import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 import { imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
 import { configUsesSeparateImageInputs } from "@/lib/canvas/canvas-shared-connections";
-import { CanvasConfigComposer } from "./canvas-config-composer";
+import { CanvasConfigComposer, CONFIG_REFERENCE_PATTERN, type CanvasConfigComposerHandle } from "./canvas-config-composer";
 import { CanvasConfigImageReferences } from "./canvas-config-image-references";
 import type { NodeGenerationInput } from "./canvas-node-generation";
 import type { ImageReferenceItem } from "@/types/image";
@@ -39,6 +39,8 @@ type CanvasConfigNodePanelProps = {
 };
 
 export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, linkedTaskHasImages = false, inputSummary, inputImageTaskCount = inputSummary.imageCount, inputs = [], imageReferences, onConfigChange, onGenerate, onStop }: CanvasConfigNodePanelProps) {
+    const composerRef = useRef<CanvasConfigComposerHandle>(null);
+    const [inputModeFeedback, setInputModeFeedback] = useState<{ error: boolean; text: string } | null>(null);
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -84,8 +86,18 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
     const hasPromptInput = hasComposerContent || (inputs.length ? inputs.some(input => Boolean(input.text?.trim())) : inputSummary.textCount > 0);
     const modelIsSynced = mode === "text" || modelIsBound || node.metadata?.model === model;
-    const canGenerate = toolEnabled && hasAvailableModel && modelIsSynced && (linkedTaskCount > 0 || (blend ? imageCount >= 2 && imageCount <= 4 : mode === "video" ? hasPromptInput || hasAnyInput : hasPromptInput));
+    const inputModeCheck = separateImages ? configImageInputModeChange(node, references, inputs, "per-image", node.metadata?.composerContent ?? node.metadata?.prompt ?? "") : undefined;
+    const fixedTaskReference = inputModeCheck && (!inputModeCheck.patch || inputModeCheck.patch.composerContent !== undefined);
+    const canGenerate = toolEnabled && hasAvailableModel && modelIsSynced && !fixedTaskReference && (linkedTaskCount > 0 || (blend ? imageCount >= 2 && imageCount <= 4 : mode === "video" ? hasPromptInput || hasAnyInput : hasPromptInput));
     const referencePresentation = configReferencePresentation(references, inputs, mode, separateImages);
+    const changeInputMode = (value: "per-image" | "combined") => {
+        const prompt = composerRef.current?.read() ?? node.metadata?.composerContent ?? node.metadata?.prompt ?? "";
+        const result = configImageInputModeChange(node, references, inputs, value, prompt);
+        setInputModeFeedback(result.feedback || null);
+        if (!result.patch) return;
+        composerRef.current?.replace(result.patch.composerContent ?? prompt);
+        onConfigChange(node.id, result.patch);
+    };
 
     useEffect(() => {
         if (mode !== "text" && !routingError && !modelIsBound && !isRunning && businessConfigStatus === "ready" && (node.metadata?.model || "") !== model) onConfigChange(node.id, { model });
@@ -152,14 +164,16 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                 {showInputMode ? <div className="mb-1 cursor-default" onMouseDown={event => event.stopPropagation()}>
                     <Segmented block size="small" aria-label="图片执行方式" disabled={isRunning}
                         value={separateImages ? "per-image" : "combined"}
-                        onChange={value => onConfigChange(node.id, { configImageInputMode: value as "per-image" | "combined" })}
+                        onChange={value => changeInputMode(value as "per-image" | "combined")}
                         options={[{ value: "per-image", label: `逐图执行 · ${inputImageTaskCount} 个任务` }, { value: "combined", label: "合并参考 · 1 个任务" }]} />
                 </div> : <div>左侧接共用素材，右侧连接任务</div>}
                 {taskCount > 0 ? <div role="status"><span style={{ color: theme.node.text }}>待执行 {taskCount} 个任务</span> · {separateImages ? "每个任务主图均为图片1，公共参考从图片2起" : "每个任务使用自身输入与公共素材"}</div> : showInputMode ? <div role="status">多张参考图共同生成 1 张结果</div> : null}
+                {inputModeFeedback ? <div role={inputModeFeedback.error ? "alert" : "status"} className="mt-1">{inputModeFeedback.text}</div> : null}
+                {fixedTaskReference ? <div role="alert" className="mt-1">逐图提示词仍固定引用某张任务图片。请改为“图片1”（每个任务的主图）；需要固定共享的图片请添加为公共参考，或切回合并参考。</div> : null}
             </div>
 
             <div className="mb-2 shrink-0 space-y-2">
-                {!blend ? <CanvasConfigComposer compact value={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} inputs={referencePresentation.inputs} referenceLabels={referencePresentation.mentionLabels} disabled={isRunning} label={mode === "audio" ? "朗读文本" : "提示词"} onChange={composerContent => onConfigChange(node.id, { composerContent })} /> : <span role="status" className="text-xs">融合 2–4 张参考图，不使用提示词。</span>}
+                {!blend ? <CanvasConfigComposer ref={composerRef} compact value={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} inputs={referencePresentation.inputs} referenceLabels={referencePresentation.mentionLabels} disabled={isRunning} label={mode === "audio" ? "朗读文本" : "提示词"} onChange={composerContent => { setInputModeFeedback(null); onConfigChange(node.id, { composerContent }); }} /> : <span role="status" className="text-xs">融合 2–4 张参考图，不使用提示词。</span>}
                 {mode !== "audio" ? <CanvasConfigImageReferences node={node} references={references} labels={referencePresentation.trayLabels} disabled={isRunning} onChange={onConfigChange} /> : null}
                 {mode === "video" && (inputSummary.videoCount > 0 || inputSummary.audioCount > 0) ? <div className="flex flex-wrap gap-1.5">
                     {inputSummary.videoCount > 0 ? <InputChip label="已连视频" value={`${inputSummary.videoCount} 个`} style={chipStyle} /> : null}
@@ -208,6 +222,28 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
             </Button>
         </div>
     );
+}
+
+/** A fixed task image can become the current primary; distinct image roles cannot be merged safely. */
+export function configImageInputModeChange(node: CanvasNodeData, references: ImageReferenceItem[], inputs: NodeGenerationInput[], mode: "per-image" | "combined", prompt: string): {
+    patch?: Partial<CanvasNodeMetadata>; feedback?: { error: boolean; text: string };
+} {
+    const patch: Partial<CanvasNodeMetadata> = { configImageInputMode: mode };
+    if (prompt !== (node.metadata?.composerContent ?? node.metadata?.prompt ?? "")) patch.composerContent = prompt;
+    if (mode !== "per-image") return { patch };
+    const commonAliases = new Set([
+        ...references.filter(image => image.origin !== "connection").flatMap(image => [image.id, image.referenceKey]),
+        ...(node.metadata?.manualImageReferences || []).flatMap(image => [image.id, image.referenceKey, image.sourceNodeId].filter((id): id is string => Boolean(id))),
+    ]);
+    const inputAliases = new Map(inputs.filter(input => input.type === "image").flatMap(input => [[input.nodeId, input.nodeId], [`node:${input.nodeId}`, input.nodeId]]));
+    const activeIds = new Set(references.filter(image => image.origin === "connection").map(image => image.id));
+    const taskTokens = [...prompt.matchAll(CONFIG_REFERENCE_PATTERN)].filter(match => !commonAliases.has(match[1]!) && inputAliases.has(match[1]!));
+    if (taskTokens.some(match => !activeIds.has(inputAliases.get(match[1]!)!))) return { feedback: { error: true, text: "提示词仍引用已移除的任务图片，请先删除该引用或恢复图片；当前仍为合并参考模式。" } };
+    if (new Set(taskTokens.map(match => inputAliases.get(match[1]!))).size > 1) return { feedback: { error: true, text: "提示词指定了多张不同的任务图片，已保留合并参考。请将每个任务的主图改写为“图片1”；需要固定共享的图片请添加为公共参考。" } };
+    if (!taskTokens.length) return { patch };
+    const aliases = new Set(taskTokens.map(match => match[1]!));
+    patch.composerContent = prompt.replace(CONFIG_REFERENCE_PATTERN, (token, id: string) => aliases.has(id) ? "图片1" : token);
+    return { patch, feedback: { error: false, text: "已将任务图片引用改为“图片1”（每个任务的当前主图），公共参考引用保持不变。" } };
 }
 
 export function configReferencePresentation(references: ImageReferenceItem[], inputs: NodeGenerationInput[], mode: CanvasGenerationMode, separateImages: boolean) {

@@ -13,6 +13,7 @@ const maxGridSize = 12;
 export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageSplitParams) => void }) {
     const [params, setParams] = useState(defaultParams);
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
+    const [imageError, setImageError] = useState("");
     const total = params.rows * params.columns;
     const pieceSize = image ? { width: Math.max(1, Math.floor(image.width / params.columns)), height: Math.max(1, Math.floor(image.height / params.rows)) } : null;
 
@@ -24,7 +25,13 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
 
     useEffect(() => {
         if (!open) return;
-        void readImageMeta(dataUrl).then(setImage);
+        let active = true;
+        setImageError("");
+        void readImageMeta(dataUrl).then(
+            (meta) => { if (active) setImage(meta); },
+            (error) => { if (active) setImageError(error instanceof Error ? error.message : "图片读取失败"); },
+        );
+        return () => { active = false; };
     }, [dataUrl, open]);
 
     const update = (key: keyof CanvasImageSplitParams, value: string | number | null) => {
@@ -34,6 +41,7 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
     return (
         <Modal title={null} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={780} centered destroyOnHidden>
             <div className="space-y-5">
+                {imageError ? <div role="alert" className="text-sm">{imageError}</div> : null}
                 <div>
                     <h2 className="text-xl font-semibold">切分图片</h2>
                     <p className="mt-1 text-sm opacity-60">生成 {total} 个图片子节点，并按原图网格排列到画布右侧</p>
@@ -48,7 +56,7 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
                         </div>
                         <div className="mt-3 flex items-center justify-between text-sm">
                             <span className="opacity-60">原图</span>
-                            <span className="font-semibold">{image ? `${image.width} x ${image.height} px` : "读取中"}</span>
+                            <span className="font-semibold">{image ? `${image.width} x ${image.height} px` : imageError ? "读取失败" : "读取中"}</span>
                         </div>
                     </div>
                     <div className="space-y-5 py-2">
@@ -64,7 +72,7 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
                                 <span className="font-semibold">{pieceSize ? `${pieceSize.width} x ${pieceSize.height}` : "未知"}</span>
                             </div>
                         </div>
-                        <Button type="primary" size="large" className="w-full" icon={<Grid2x2 className="size-4" />} onClick={() => onConfirm(params)}>
+                        <Button type="primary" size="large" className="w-full" icon={<Grid2x2 className="size-4" />} disabled={!image} onClick={() => onConfirm(params)}>
                             生成子节点
                         </Button>
                     </div>

@@ -67,8 +67,12 @@ const projectWriteBuffer = createProjectChangeBuffer<CanvasProject>();
 type PersistWrite = { name: string; value: StorageValue<CanvasStore>; changes: Map<string, ProjectChange<CanvasProject>> };
 let persistWriteChain: Promise<void> = Promise.resolve();
 let lastPersistError: unknown = null;
+let pendingPersistWrites = 0;
 const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, changes }) => {
     pendingProjectChanges.clear();
+    // Mark the write before the Promise callback starts: a flushed debounce is
+    // not durable until its IndexedDB transaction has actually completed.
+    pendingPersistWrites += 1;
     // IndexedDB writes are asynchronous. Keep their order stable so a slow
     // older snapshot can never finish after and overwrite a newer edit.
     persistWriteChain = persistWriteChain
@@ -92,8 +96,14 @@ const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, chan
             lastPersistError = error;
             if (canvasOwnerValid) useCanvasStore.setState({ cloudStatus: "local-error", cloudError: "画布写入本机失败，尚未同步本次改动；请重试保存或导出备份。" });
             console.error("画布自动保存失败，改动将随下次编辑重试；请先导出重要作品。", error);
-        });
+        })
+        .finally(() => { pendingPersistWrites -= 1; });
 });
+
+/** Includes scheduled changes, queued/in-flight writes and a failed write. */
+export function hasPendingCanvasPersistence() {
+    return isCanvasOwnerValid() && (pendingProjectChanges.size > 0 || pendingPersistWrites > 0 || Boolean(lastPersistError));
+}
 
 /** Explicit save actions wait for the same ordered queue used by autosave. */
 export async function flushCanvasPersistence() {
@@ -164,13 +174,16 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         if (!isCanvasOwnerValid()) return;
         persistQueue.clear();
         pendingProjectChanges.clear();
+        pendingPersistWrites += 1;
         persistWriteChain = persistWriteChain
             .catch(() => undefined)
             .then(async () => {
                 await removeCanvasProjects(name);
                 projectWriteBuffer.clear();
             })
-            .then(() => undefined);
+            .then(() => { lastPersistError = null; })
+            .catch(error => { lastPersistError = error; throw error; })
+            .finally(() => { pendingPersistWrites -= 1; });
         return persistWriteChain;
     },
 };

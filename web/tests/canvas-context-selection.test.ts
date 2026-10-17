@@ -60,6 +60,7 @@ function pageHarness(initialNodes = [node("a"), node("b", 100), node("c", 300)],
     };
     const scope: Record<string, unknown> = {
         CanvasNodeType, copyCanvasNodeGraph, cloneCanvasNodeGraph, removeCanvasGroupMembers, clipboardRef,
+        flushPendingHistory: () => true, generationRequestsRef: { current: new Map() }, stopGenerationByRunningId: () => {},
         nodesRef: { get current() { return state.nodes; } }, connectionsRef: { get current() { return state.connections; } },
         groupsRef: { get current() { return state.groups; } }, selectedNodeIdsRef: { get current() { return state.selectedNodeIds; } },
         setNodes: update("nodes"), setConnections: update("connections"), setGroups: update("groups"),

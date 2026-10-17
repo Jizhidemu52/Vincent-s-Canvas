@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent } from "react";
+import { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, Ref } from "react";
 import { Button, Image } from "antd";
 import { FileText, Image as ImageIcon, Music2, Video, X } from "lucide-react";
 
@@ -11,6 +11,7 @@ import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { resolveImageUrl } from "@/services/image-storage";
 
 type CanvasConfigComposerProps = {
+    ref?: Ref<CanvasConfigComposerHandle>;
     value: string;
     inputs: NodeGenerationInput[];
     onChange: (value: string) => void;
@@ -20,6 +21,8 @@ type CanvasConfigComposerProps = {
     label?: string;
     referenceLabels?: Record<string, string>;
 };
+
+export type CanvasConfigComposerHandle = { read: () => string; replace: (value: string) => void };
 
 type Token =
     | { type: "text"; value: string }
@@ -31,7 +34,7 @@ type MentionState = {
 
 export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g;
 
-export function CanvasConfigComposer({ value, inputs, onChange, onClose, compact = false, disabled = false, label = "提示词", referenceLabels }: CanvasConfigComposerProps) {
+export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, compact = false, disabled = false, label = "提示词", referenceLabels }: CanvasConfigComposerProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
@@ -43,6 +46,11 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose, compact
     onChangeRef.current = onChange;
     const draftRef = useRef<ReturnType<typeof createCanvasTextDraft> | null>(null);
     if (!draftRef.current) draftRef.current = createCanvasTextDraft(value, (next) => onChangeRef.current(next));
+    // A mode change must read pending typing and cancel its old debounce atomically.
+    useImperativeHandle(ref, () => ({
+        read: () => editorRef.current ? serializeEditor(editorRef.current) : draftValue,
+        replace: (next) => { draftRef.current?.reset(next); setDraftValue(next); },
+    }));
     const tokens = useMemo(() => parseComposerTokens(draftValue), [draftValue]);
     const referenceById = useMemo(() => new Map(inputs.map((input) => [input.nodeId, input])), [inputs]);
     const candidates = useMemo(() => {

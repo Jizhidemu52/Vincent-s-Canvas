@@ -23,6 +23,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
     const [crop, setCrop] = useState<CanvasImageCropRect>(defaultCrop);
     const [locked, setLocked] = useState(false);
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
+    const [imageError, setImageError] = useState("");
     const cropSize = image ? { width: Math.max(1, Math.round(crop.width * image.width)), height: Math.max(1, Math.round(crop.height * image.height)) } : null;
 
     useEffect(() => {
@@ -31,7 +32,14 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
 
     useEffect(() => {
         if (!open) return;
-        void readImageMeta(dataUrl).then(setImage);
+        let active = true;
+        setImage(null);
+        setImageError("");
+        void readImageMeta(dataUrl).then(
+            (meta) => { if (active) setImage(meta); },
+            (error) => { if (active) setImageError(error instanceof Error ? error.message : "图片读取失败"); },
+        );
+        return () => { active = false; };
     }, [dataUrl, open]);
 
     const startDrag = (mode: DragMode, event: ReactPointerEvent, handle?: ResizeHandle) => {
@@ -56,6 +64,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
     return (
         <Modal title="裁剪图片" open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={780} centered destroyOnHidden>
             <div className="space-y-4">
+                {imageError ? <div role="alert" className="text-sm">{imageError}</div> : null}
                 <div className="flex justify-center">
                     <div ref={boxRef} className="relative inline-block max-w-full overflow-hidden rounded-lg bg-black select-none">
                         <img src={dataUrl} alt="" className="block max-h-[62vh] max-w-full opacity-90" draggable={false} />
@@ -92,7 +101,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
                     <Button icon={<X className="size-4" />} onClick={onClose}>
                         取消
                     </Button>
-                    <Button type="primary" icon={<Check className="size-4" />} onClick={() => onConfirm(crop)}>
+                    <Button type="primary" icon={<Check className="size-4" />} disabled={!image} onClick={() => onConfirm(crop)}>
                         确认裁剪
                     </Button>
                 </div>

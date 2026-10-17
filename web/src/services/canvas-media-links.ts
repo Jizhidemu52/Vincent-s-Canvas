@@ -5,6 +5,7 @@ export function serverMediaId(url: string) { return url.match(/^\/api\/assets\/(
 export async function rememberMediaSource(storageKey: string, url: string) {
     if (serverMediaId(url)) await links.setItem(`source:${storageKey}`, url);
 }
+export const forgetMediaSource = (storageKey: string) => links.removeItem(`source:${storageKey}`);
 export const readMediaSource = (storageKey: string) => links.getItem<string>(`source:${storageKey}`);
 export const readUploadedMedia = (owner: string, key: string) => links.getItem<string>(JSON.stringify([owner, key]));
 export const rememberUploadedMedia = (owner: string, key: string, url: string) => links.setItem(JSON.stringify([owner, key]), url);
