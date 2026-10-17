@@ -44,6 +44,7 @@ import { verifyOaToken, OaError, OA_SESSION_TTL_SECONDS } from "./oa";
 import { readReferenceImportBody, referenceImportFailure, runReferenceImportAction } from "./routes/reference-import";
 import { moduleKeys, moduleIsEnabled, toolDefinitions, type ToolKey } from "../../shared/feature-catalog";
 import { DemoToolConfigurationError, resolveDemoToolConfiguration } from "./demo-tool-configuration";
+import { applyDefaultChatModel, INITIAL_CHAT_MODEL_ID } from "./chat-model-policy";
 
 const sessions = new Map<string, string>();
 const modules = moduleKeys;
@@ -368,9 +369,10 @@ const demoPrices: Array<Record<string, unknown>> = Array.from(
 }));
 const demoToolConfigurations: Array<{ toolKey: ToolKey; modelConfigId: string | null; enabled: boolean; creditCostOverride: number | null; rmbCostOverride: number | null; configurationVersion: number }> = toolDefinitions.map((tool) => ({
   toolKey: tool.toolKey,
-  // Demo has no admin maintenance login. Retain model choice rather than creating
-  // mandatory mock bindings that hide the server-configured real providers.
-  modelConfigId: tool.toolKey === "seamless-stitch" && !markImageProvider.apiKey ? String(demoModels[3]!.id) : null,
+  // Only chat has a mandatory shared default; image choices remain independent.
+  modelConfigId: tool.toolKey === "gpt-chat"
+    ? String(markImageProvider.models.find(model => model.modelId === INITIAL_CHAT_MODEL_ID)!.id)
+    : tool.toolKey === "seamless-stitch" && !markImageProvider.apiKey ? String(demoModels[3]!.id) : null,
   enabled: true,
   creditCostOverride: null,
   rmbCostOverride: null,
@@ -928,7 +930,7 @@ Bun.serve({
             rmbCost,
             version,
           })),
-        tools: demoToolConfigurations,
+        tools: applyDefaultChatModel(demoToolConfigurations),
       });
     if (path === "/api/chat/responses" && request.method === "POST") {
       const input = (await request.json()) as {
@@ -1962,7 +1964,7 @@ Bun.serve({
     )
       return json({
         tools: toolDefinitions.map((definition) => {
-          const binding = demoToolConfigurations.find(
+          const binding = applyDefaultChatModel(demoToolConfigurations).find(
             (item) => item.toolKey === definition.toolKey,
           );
           const model = demoModels.find(
@@ -2017,6 +2019,7 @@ Bun.serve({
         creditCostOverride: number | null;
         rmbCostOverride: number | null;
       };
+      if (selectedTool === "canvas-chat") input.modelConfigId = null;
       const existing = demoToolConfigurations.find(
         (item) => item.toolKey === selectedTool,
       );
@@ -2029,7 +2032,7 @@ Bun.serve({
           configurationVersion: 1,
         });
       return json({
-        tool: { toolKey: selectedTool, ...input, updatedAt: now() },
+        tool: { ...applyDefaultChatModel(demoToolConfigurations).find(item => item.toolKey === selectedTool), updatedAt: now() },
       });
     }
     if (path === "/api/admin/projects" && request.method === "GET") {

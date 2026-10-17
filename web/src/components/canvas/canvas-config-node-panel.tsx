@@ -34,7 +34,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const businessModels = useBusinessConfigStore((state) => state.models);
     const businessConfigStatus = useBusinessConfigStore((state) => state.status);
     const mode = node.metadata?.generationMode || "image";
-    const selectedModel = businessConfigStatus === "ready" ? resolveCapabilityModel(globalConfig, mode, businessModels, node.metadata?.model) : "";
+    const selectedModel = businessConfigStatus === "ready" ? mode === "text" ? globalConfig.textModel : resolveCapabilityModel(globalConfig, mode, businessModels, node.metadata?.model) : "";
     const toolKey = canvasToolKey(mode, inputSummary.imageCount > 0, imageModelProfile(selectedModel, businessModels).kind);
     const boundModelId = useBusinessConfigStore(state => state.tools.find(item => item.toolKey === toolKey)?.modelConfigId);
     const config = useToolConfig(buildNodeConfig(globalConfig, node, mode, selectedModel), toolKey);
@@ -48,12 +48,12 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
-    const modelIsSynced = Boolean(boundModelId) || node.metadata?.model === model;
+    const modelIsSynced = mode === "text" || Boolean(boundModelId) || node.metadata?.model === model;
     const canGenerate = toolEnabled && hasAvailableModel && modelIsSynced && (blend ? inputSummary.imageCount >= 2 && inputSummary.imageCount <= 4 : hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput));
 
     useEffect(() => {
-        if (!boundModelId && !isRunning && businessConfigStatus === "ready" && (node.metadata?.model || "") !== model) onConfigChange(node.id, { model });
-    }, [boundModelId, businessConfigStatus, isRunning, model, node.id, node.metadata?.model, onConfigChange]);
+        if (mode !== "text" && !boundModelId && !isRunning && businessConfigStatus === "ready" && (node.metadata?.model || "") !== model) onConfigChange(node.id, { model });
+    }, [mode, boundModelId, businessConfigStatus, isRunning, model, node.id, node.metadata?.model, onConfigChange]);
 
     return (
         <div className="flex h-full w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
@@ -67,7 +67,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                         disabled={isRunning}
                         onChange={(value) => {
                             const nextMode = value as CanvasGenerationMode;
-                            const nextModel = businessConfigStatus === "ready" ? resolveCapabilityModel(globalConfig, nextMode, businessModels, node.metadata?.model) : "";
+                            const nextModel = businessConfigStatus === "ready" ? nextMode === "text" ? globalConfig.textModel : resolveCapabilityModel(globalConfig, nextMode, businessModels, node.metadata?.model) : "";
                             onConfigChange(node.id, { generationMode: nextMode, model: nextModel });
                         }}
                         options={[
@@ -123,7 +123,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 </button> : <span role="status" className="text-xs">融合 2–4 张参考图，不使用提示词。</span>}
             </div>
 
-            <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${hasAvailableModel && mode !== "text" ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
+            {mode !== "text" ? <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${hasAvailableModel ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
                 <ModelPicker toolKey={toolKey} className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} modelsSource="server" disabled={isRunning} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                 {hasAvailableModel && mode === "video" ? (
                     <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
@@ -132,7 +132,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 ) : hasAvailableModel && mode === "audio" ? (
                     <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                 ) : null}
-            </div>
+            </div> : null}
 
             <Button
                 type="primary"

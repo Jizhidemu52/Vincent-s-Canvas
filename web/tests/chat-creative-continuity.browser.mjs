@@ -43,7 +43,8 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         check(await tab.getByRole("button", { name: /^(聊天|创作|Agent)$/ }).count() === 0, "Manual chat/create/agent mode buttons still exist");
         check(await tab.getByRole("combobox", { name: /^(编辑起点|创作理解模型|图像模型)$/ }).count() === 0, "Manual image target or creative-model selectors still exist");
         check(await tab.getByRole("button", { name: /继续编辑/ }).count() === 0, "Click-to-select image editing buttons still exist");
-        check(await tab.getByRole("combobox", { name: "对话模型", exact: true }).inputValue() === "gpt-fixture-chat", "A usable chat model was not automatically selected");
+        check(await tab.getByRole("combobox", { name: "对话模型", exact: true }).count() === 0, "Designer chat model selection is still exposed");
+        check(await tab.getByText("隔离对话模型", { exact: true }).count() === 0, "The managed chat model name is still exposed");
     };
     const screenshot = async name => {
         if (!options.screenshotDirectory) return;
@@ -99,7 +100,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         if (url.pathname === "/api/deployment") return json({ authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false });
         if (url.pathname === "/api/auth/session") return json({ user });
         if (url.pathname === "/api/modules") return json({ modules: ["canvas", "image", "assets", "gpt-chat"].map(moduleKey => ({ moduleKey, enabled: true, updatedAt: "fixture" })) });
-        if (url.pathname === "/api/models") return json({ models, prices: [], tools: [] });
+        if (url.pathname === "/api/models") return json({ models, prices: [], tools: [{ toolKey: "gpt-chat", modelConfigId: "fixture-chat", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }] });
         if (url.pathname === "/api/generation-capabilities") return json({ models: [] });
         const taskIndex = taskIds.findIndex(id => url.pathname === `/api/tasks/${id}`);
         if (taskIndex >= 0 && taskPosts[taskIndex]) return json({ task: { id: taskIds[taskIndex], requestId: taskPosts[taskIndex].requestId, status: "success", ownerUserId: user.id, userId: user.id, operationType: "inpaint", resultUrls: [`/api/assets/fixture-edited-result-${taskIndex + 1}/content`], failureReason: null } });
@@ -126,7 +127,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         const draft = tab.getByRole("textbox", { name: "对话内容", exact: true });
         const send = tab.getByRole("button", { name: "发送", exact: true });
         await draft.waitFor({ state: "visible", timeout: 60_000 });
-        await waitFor(() => tab.getByRole("combobox", { name: "对话模型", exact: true }).inputValue().then(value => value === "gpt-fixture-chat"), "Chat model was not ready automatically");
+        await waitFor(() => tab.getByRole("combobox", { name: "出图模型", exact: true }).inputValue().then(value => value === "gpt-image-2"), "Shared business configuration did not become ready");
         await assertNaturalChatControls();
         await tab.locator('input[type="file"]').setInputFiles([
             { name: "原款.png", mimeType: "image/png", buffer: Buffer.from(fixtureImages.original.split(",")[1], "base64") },
@@ -139,6 +140,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         await send.click();
         await waitFor(async () => (await readSession())?.messages.at(-1)?.generatedImages?.[0]?.id === resultIds[0], "First direct image edit did not persist its result");
         check(plannerRequests.length === 1 && taskPosts.length === 1, "First direct edit did not produce exactly one plan and one image task");
+        check(plannerRequests[0].modelId === "gpt-fixture-chat", "Chat did not use the administrative model binding");
         const firstState = await readSession();
         const firstUser = firstState.messages[0];
         const firstImage = firstState.messages.at(-1).generatedImages[0];

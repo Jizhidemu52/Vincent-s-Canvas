@@ -94,6 +94,13 @@ export function resolveToolModel(config: BusinessConfig, toolKey: string, reques
     if (!tool && !definition) return undefined;
     const capabilities = tool?.capabilities ?? definition?.capabilities;
     const compatible = (model: PublicModel) => !capabilities?.length || capabilities.some((capability) => model.capabilities.includes(capability));
+    // All designer LLM calls share this administrative binding. The caller's
+    // own switch and pricing remain independent, including canvas-chat.
+    if (definition?.operationType === "chat") {
+        const managedModelId = config.tools.find(item => item.toolKey === "gpt-chat")?.modelConfigId;
+        const managed = managedModelId ? config.models.find(item => item.id === managedModelId) : undefined;
+        return managed && compatible(managed) ? managed : undefined;
+    }
     if (tool?.modelConfigId) {
         const bound = config.models.find((item) => item.id === tool.modelConfigId);
         return bound && compatible(bound) ? bound : undefined;

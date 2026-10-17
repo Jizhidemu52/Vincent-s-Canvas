@@ -3,7 +3,7 @@ import { expect, spyOn, test } from "bun:test";
 type DemoFetch = (request: Request) => Promise<Response>;
 type DemoModel = { id: string; modelId: string; providerId: string; capabilities: string[]; creditCost: number; rmbCost: number };
 
-test("open demo supports configured chat and streaming without login, network or a listening port", async () => {
+test("open demo ignores legacy OpenToken selections and uses the shared Sonnet default for chat and streams", async () => {
   const testEnv = {
     LOCAL_STANDALONE: "true",
     OA_LOGIN_ENABLED: "false",
@@ -12,6 +12,8 @@ test("open demo supports configured chat and streaming without login, network or
     APIMART_API_KEY: "test-apimart-key",
     GPT_IMAGE_2_API_KEY: "",
     APIMART_BASE_URL: "http://apimart.test/v1",
+    MARK_IMAGE_BASE_URL: "http://mark.test/v1",
+    MARK_IMAGE_API_KEY: "test-mark-key",
     DEMO_RECOVERY_FILE: "",
     DEMO_STATE_PATH: ":memory:",
     DEMO_PUBLIC_ASSET_ORIGIN: "",
@@ -37,13 +39,7 @@ test("open demo supports configured chat and streaming without login, network or
     const address = String(url);
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     upstreamCalls.push({ url: address, headers: new Headers(init?.headers), body });
-    if (address === "http://opentoken.test/v1/responses") {
-      return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: "gpt reply" }] }] });
-    }
-    if (address === "http://opentoken.test/v1/chat/completions") {
-      return Response.json({ choices: [{ message: { content: "chat completions reply" }, finish_reason: "stop" }] });
-    }
-    if (address === "http://opentoken.test/v1/messages") {
+    if (address === "http://mark.test/v1/messages") {
       return body.stream
         ? new Response(streamBody, { headers: { "content-type": "text/event-stream" } })
         : Response.json({ content: assistantContent, stop_reason: "tool_use" });
@@ -72,14 +68,14 @@ test("open demo supports configured chat and streaming without login, network or
     expect(gptModel).toBeDefined();
     expect(visibleModels.some((model) => model.modelId === claudeModel.modelId)).toBe(false);
     expect(JSON.stringify(visibleModels)).not.toContain("test-shared-key");
-    expect(await (await chat(gptModel.id)).json()).toEqual({ content: "gpt reply", toolCalls: [] });
-    expect(upstreamCalls.at(-1)!.url).toBe("http://opentoken.test/v1/responses");
-    expect(upstreamCalls.at(-1)!.headers.get("authorization")).toBe("Bearer test-shared-key");
-    expect(upstreamCalls.at(-1)!.body).toMatchObject({ model: "gpt-6-astra", input: [{ role: "user", content: "hello" }] });
+    expect(await (await chat(gptModel.id)).json()).toMatchObject({ claudeAssistantContent: assistantContent });
+    expect(upstreamCalls.at(-1)!.url).toBe("http://mark.test/v1/messages");
+    expect(upstreamCalls.at(-1)!.headers.get("authorization")).toBe("Bearer test-mark-key");
+    expect(upstreamCalls.at(-1)!.body).toMatchObject({ model: "claude-sonnet-5-5", messages: [{ role: "user", content: "hello" }] });
 
     const claudeResult = await (await chat(claudeModel.modelId, { claude: { thinking: true } })).json();
     expect(claudeResult).toMatchObject({ claudeAssistantContent: assistantContent, stopReason: "tool_use" });
-    expect(upstreamCalls.at(-1)!.headers.get("authorization")).toBe("Bearer test-shared-key");
+    expect(upstreamCalls.at(-1)!.headers.get("authorization")).toBe("Bearer test-mark-key");
     expect(upstreamCalls.at(-1)!.headers.get("anthropic-version")).toBe("2023-06-01");
     expect(upstreamCalls.at(-1)!.body.thinking).toBeUndefined();
     const streamed = await chat(claudeModel.id, {
@@ -91,15 +87,16 @@ test("open demo supports configured chat and streaming without login, network or
     });
     expect(streamed.headers.get("content-type")).toContain("text/event-stream");
     expect(await streamed.text()).toBe(streamBody);
-    expect(upstreamCalls.at(-1)!.body).toMatchObject({ model: "claude-fable-5-1", stream: true, max_tokens: 4096, messages: [
+    expect(upstreamCalls.at(-1)!.body).toMatchObject({ model: "claude-sonnet-5-5", stream: true, max_tokens: 4096, messages: [
       { role: "assistant", content: assistantContent },
       { role: "user", content: [{ type: "tool_result", tool_use_id: "read-1", content: "node contents" }] },
     ] });
     expect(upstreamCalls.at(-1)!.body.thinking).toBeUndefined();
 
     const callCount = upstreamCalls.length;
-    expect((await chat("unknown-model")).status).toBe(400);
-    expect(upstreamCalls).toHaveLength(callCount);
+    expect((await chat("unknown-model")).status).toBe(200);
+    expect(upstreamCalls).toHaveLength(callCount + 1);
+    expect(upstreamCalls.every(call => call.body.model === "claude-sonnet-5-5" && call.url === "http://mark.test/v1/messages")).toBe(true);
   } finally {
     serve.mockRestore();
     log.mockRestore();

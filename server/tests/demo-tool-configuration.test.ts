@@ -9,6 +9,20 @@ const providers = [{ id: "provider", enabled: true }];
 const binding = { toolKey: "creative-garment-colorway" as const, modelConfigId: "model-a", enabled: true };
 
 describe("demo formal tool configuration", () => {
+  test("chat ignores canvas and client choices, including shared upstream IDs from other providers", () => {
+    const chats = [
+      { id: "chat-a", modelId: "same-upstream", providerId: "provider", enabled: true, capabilities: ["chat"] },
+      { id: "chat-b", modelId: "same-upstream", providerId: "second-provider", enabled: true, capabilities: ["chat"] },
+    ];
+    const configured = [{ toolKey: "gpt-chat", modelConfigId: "chat-a", enabled: true }, { toolKey: "canvas-chat", modelConfigId: "chat-b", enabled: true }];
+    const chatProviders = [...providers, { id: "second-provider", enabled: true }];
+    for (const toolKey of [undefined, "gpt-chat", "canvas-chat"]) {
+      expect(resolveDemoToolConfiguration({ operationType: "chat", toolKey, modelConfigId: "chat-b" }, configured, chats, chatProviders, flags).modelConfigId).toBe("chat-a");
+    }
+    expect(() => resolveDemoToolConfiguration({ operationType: "chat", modelConfigId: "chat-b" }, [], chats, chatProviders, flags)).toThrow("尚未配置统一对话模型");
+    chats[0]!.enabled = false;
+    expect(() => resolveDemoToolConfiguration({ operationType: "chat", toolKey: "canvas-chat", modelConfigId: "chat-b" }, configured, chats, chatProviders, flags)).toThrow("未启用");
+  });
   test("catalog includes formal AI slots, promoted design tools and no unfinished placeholders", () => {
     expect(toolDefinitions).toHaveLength(27);
     expect(new Set(moduleKeys).size).toBe(44);

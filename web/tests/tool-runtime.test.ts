@@ -179,9 +179,25 @@ describe("formal tool model consumption", () => {
     });
 
     test.each(["gpt-chat", "canvas-chat"])("%s binds the actual chat request", async tool => {
-        const requests = mockServer(business(binding(tool, text.id)));
+        const requests = mockServer(business(binding("gpt-chat", text.id), binding("canvas-chat", "stale-canvas-model")));
         await requestImageQuestion({ ...defaultConfig, model: "gpt-6-astra" }, [{ role: "user", content: "描述服装" }], () => undefined, { tool });
         expect(requests.find(item => item.path === "/api/chat/responses")?.body).toMatchObject({ toolKey: tool, modelId: text.modelId });
+    });
+
+    test("managed chat ignores client and obsolete canvas selections without inheriting another board's switch", () => {
+        const fixture = business(binding("gpt-chat", text.id, false), binding("canvas-chat", image.id));
+        expect(resolveConfiguredToolModel(fixture, "canvas-chat", image.modelId)).toBe(text);
+        expect(() => resolveConfiguredToolModel(fixture, "gpt-chat", text.modelId)).toThrow("已停用");
+        expect(() => resolveConfiguredToolModel(business(binding("gpt-chat", text.id), binding("canvas-chat", text.id, false)), "canvas-chat", text.modelId)).toThrow("已停用");
+        const saved = { ...defaultConfig, model: "old-node-model", textModel: "old-personal-model" };
+        expect(applyToolModel(saved, fixture, "canvas-chat")).toMatchObject({ model: text.modelId, textModel: text.modelId });
+        expect(saved).toMatchObject({ model: "old-node-model", textModel: "old-personal-model" });
+    });
+
+    test.each([null, "removed", image.id])("unavailable unified chat binding %s never falls back to the client or canvas model", async modelId => {
+        const requests = mockServer(business(binding("gpt-chat", modelId), binding("canvas-chat", text.id)));
+        await expect(requestImageQuestion({ ...defaultConfig, model: text.modelId }, [{ role: "user", content: "hello" }], () => undefined, { tool: "canvas-chat" })).rejects.toThrow("统一配置");
+        expect(requests.map(item => item.path)).toEqual(["/api/models"]);
     });
 
     test("batch images carry the independent canvas batch binding and metadata", async () => {

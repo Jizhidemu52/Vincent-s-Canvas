@@ -70,4 +70,17 @@ describe("formal admin catalog and isolated board saves", () => {
         expect(toolConfigurationState({ ...tool(), modelConfigId: "missing" }, [model]).ready).toBe(false);
         expect(toolConfigurationState({ ...tool(), modelConfigId: "model" }, [model]).ready).toBe(true);
     });
+
+    test("chat is centrally configured, never left to designer selection", () => {
+        const chat = completeToolConfigurations([]).find(item => item.toolKey === "gpt-chat")!;
+        const canvasChat = completeToolConfigurations([]).find(item => item.toolKey === "canvas-chat")!;
+        const textModel: ServerModel = { ...model, id: "sonnet", modelId: "claude-sonnet-5-5", capabilities: ["chat"] };
+        expect(toolConfigurationState(chat, [textModel])).toMatchObject({ ready: false, label: "待配置" });
+        expect(toolConfigurationState(canvasChat, [textModel]).ready).toBe(false);
+        expect(toolConfigurationState({ ...chat, modelConfigId: "sonnet" }, [textModel])).toMatchObject({ ready: true, label: "统一模型已配置" });
+        expect(toolConfigurationState({ ...canvasChat, modelConfigId: "sonnet" }, [textModel])).toMatchObject({ ready: true, label: "跟随统一模型" });
+        expect(buildToolConfigurationInput(canvasChat, { modelConfigId: "stale-canvas-choice", enabled: false, creditCostOverride: 0, rmbCostOverride: 0.1 })).toEqual({ modelConfigId: null, enabled: false, creditCostOverride: 0, rmbCostOverride: 0.1 });
+        expect(buildToolConfigurationInput(chat, { modelConfigId: "sonnet", enabled: true }).modelConfigId).toBe("sonnet");
+        expect(chat.label).toBe("对话改图");
+    });
 });

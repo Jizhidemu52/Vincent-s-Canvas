@@ -5,6 +5,7 @@ import ts from "typescript";
 import { buildChatRequestMessages, type ChatHistoryMessage } from "@/lib/chat-context";
 import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
 import { chatImageRequestOptions, preferredChatImageModel, resolveChatImageQuality } from "@/pages/chat/image-quality";
+import { resolveToolModel, type BusinessConfig } from "@/services/api/business-config";
 
 function memoryStore() {
     const values = new Map<string, unknown>();
@@ -107,6 +108,12 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
     const memory: { draft: string; attachments: any[] } = { draft: "未发送的图片问题", attachments: [{ id: "image", name: "image.png", mimeType: "image/png", size: 3, dataUrl: "data:image/png;base64,AQID" }] };
     const session = { id: "session", mode, title: "新对话", editTargetImageId: undefined as string | undefined, imageModelId: undefined as string | undefined, messages: [] as any[] };
     const sessionsRef = { current: [session] };
+    const businessConfig: BusinessConfig = {
+        models: [{ id: "fixture-chat", modelId: creativeModelId || "gpt-6-astra", name: "Fixture chat", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }],
+        prices: [],
+        tools: [{ toolKey: "gpt-chat", modelConfigId: creativeModelId ? "fixture-chat" : null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }],
+    };
+    const selected = resolveToolModel(businessConfig, "gpt-chat");
     let ids = 0;
     let writes = 0;
     const imageTask = async (action: string, options: typeof taskOptions[number]) => {
@@ -120,8 +127,8 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
     };
     const bindings = {
         sessionsReady: ready, draft: memory.draft, attachments: memory.attachments, isSending: false, readingAttachments: false,
-        activeSession: session, selectedModel: creativeModelId, selected: creativeModelId ? { modelId: creativeModelId, capabilities: ["chat"] } : undefined, imageModels, preferredChatImageModel, resolveChatImageQuality, chatImageRequestOptions, config: {} as Record<string, string>,
-        creativeChat, creativeModelId, sendingRef: { current: false }, placingImageRef: { current: false }, activeSendRef: { current: null as { controller: AbortController; submitted: boolean } | null },
+        activeSession: session, selectedModel: selected?.modelId || "", selected, imageModels, preferredChatImageModel, resolveChatImageQuality, chatImageRequestOptions, config: {} as Record<string, string>,
+        creativeChat, creativeModelId: selected?.modelId || "", sendingRef: { current: false }, placingImageRef: { current: false }, activeSendRef: { current: null as { controller: AbortController; submitted: boolean } | null },
         createClientId: () => `message-${++ids}`, buildChatRequestMessages, sessionsRef,
         preparingMessageRef: { current: false }, loadedStorageKeyRef: { current: "user-a" }, storageKey: "user-a",
         persistence: { clear: () => events.push("clear-pending") },
@@ -263,7 +270,7 @@ test.each([true, false])("creative sending always uses the planner even with leg
     expect(page.sessionsRef.current[0]!.messages.at(-1).content).toBe("只讨论设计");
 });
 
-test.each([true, false])("missing creative understanding model preserves the unsent draft and blocks all requests (legacy toggle %s)", async (creativeChat) => {
+test.each([true, false])("missing managed chat binding preserves the unsent draft and blocks all requests (legacy toggle %s)", async (creativeChat) => {
     const page = pageSendHarness({ mode: "create", creativeChat, creativeModelId: "" });
     const before = structuredClone(page.memory);
     await page.send();

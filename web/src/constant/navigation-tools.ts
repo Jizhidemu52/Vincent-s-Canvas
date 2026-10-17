@@ -83,7 +83,7 @@ export const navigationTools = [
     {
         slug: "gpt-chat",
         path: "/chat",
-        label: "LLM 对话",
+        label: "对话改图",
         icon: MessageSquare,
         group: "online",
     },

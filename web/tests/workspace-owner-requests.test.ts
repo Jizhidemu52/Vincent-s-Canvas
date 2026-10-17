@@ -21,7 +21,7 @@ test("task and chat HTTP requests bind the displayed employee instead of trustin
     const requests: Array<{ path: string; owner: string | null }> = [];
     globalThis.fetch = (async (path, init) => {
         requests.push({ path: String(path), owner: new Headers(init?.headers).get("X-Canvas-Owner-Id") });
-        if (path === "/api/models") return Response.json({ models: [{ id: "chat-model", modelId: "test-model", name: "Test chat", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [], prices: [] });
+        if (path === "/api/models") return Response.json({ models: [{ id: "chat-model", modelId: "test-model", name: "Test chat", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: "chat-model", enabled: true }], prices: [] });
         return Response.json({ task: { id: "task-a" }, tasks: [], content: "verified", toolCalls: [] });
     }) as typeof fetch;
     await getQueuedTask("task-a");

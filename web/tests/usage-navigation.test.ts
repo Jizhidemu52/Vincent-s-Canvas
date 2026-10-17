@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { frequentUsageDestinations, usageBoardAvailable, usageBoardForLocation } from "../src/lib/usage-navigation";
 import { moduleDefinitions, type ModuleKey } from "../../shared/feature-catalog";
-import { navigationToolBilling } from "../src/constant/navigation-tools";
+import { navigationToolBilling, navigationTools } from "../src/constant/navigation-tools";
 const flags = Object.fromEntries(moduleDefinitions.map(item => [item.moduleKey, true])) as Record<ModuleKey, boolean>;
 describe("usage board navigation", () => {
     test("chat navigation uses the same per-model-call estimator as paid AI tools", () => {
         expect(navigationToolBilling["gpt-chat"]).toEqual({ operationType: "chat", toolKey: "gpt-chat" });
+        expect(navigationTools.find(item => item.slug === "gpt-chat")).toMatchObject({ path: "/chat", label: "对话改图" });
+        expect(frequentUsageDestinations({ "gpt-chat": 3 }, flags, []).map(item => ({ path: item.path, label: item.label }))).toEqual([{ path: "/chat", label: "对话改图" }]);
     });
     test("canonical boards never retain query strings or project IDs", () => {
         expect(usageBoardForLocation("/canvas/private-id", "?token=private")).toBe("canvas");

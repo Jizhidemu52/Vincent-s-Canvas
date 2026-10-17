@@ -16,9 +16,9 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
     calls.push(call);
     if (call.authorization !== "Bearer isolated-mark-test-key" || !path.startsWith("/mark/v1/"))
       return Response.json({ error: "A Mark request used the wrong channel" }, { status: 403 });
-    if (path === "/mark/v1/responses") {
+    if (path === "/mark/v1/messages") {
       call.body = await request.json();
-      return Response.json({ code: 200, data: { choices: [{ message: { content: "The original cable structure is intact." }, finish_reason: "stop" }] } });
+      return Response.json({ content: [{ type: "text", text: "The original cable structure is intact." }], stop_reason: "end_turn" });
     }
     if (path === "/mark/v1/uploads/images") {
       expect((await request.formData()).get("file")).toBeInstanceOf(File);
@@ -82,7 +82,7 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
     expect(reply.status).toBe(200);
     expect(await reply.json()).toMatchObject({ content: "The original cable structure is intact.", toolCalls: [] });
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.body).toEqual({ model: "gpt-6-astra", stream: false, input: [{ role: "user", content: "Inspect this knit." }], tools: [], tool_choice: "auto", parallel_tool_calls: false });
+    expect(calls[0]!.body).toEqual({ model: "claude-sonnet-5-5", max_tokens: 2048, messages: [{ role: "user", content: "Inspect this knit." }] });
 
     const reference = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", "720x960", "-i", "pipe:0", "-frames:v", "1", "-threads", "1", "-c:v", "png", "-f", "image2pipe", "pipe:1"], {
       input: new Uint8Array(720 * 960 * 3).fill(128), encoding: "buffer", timeout: 15_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true,
@@ -116,7 +116,7 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
     expect(new Uint8Array(await (await request(completed.resultUrls[0])).arrayBuffer())).toEqual(output);
     expect(polls).toBe(2);
     expect(calls.map(call => [call.path, call.method])).toEqual([
-      ["/mark/v1/responses", "POST"], ["/mark/v1/uploads/images", "POST"], ["/mark/v1/videos/generations", "POST"],
+      ["/mark/v1/messages", "POST"], ["/mark/v1/uploads/images", "POST"], ["/mark/v1/videos/generations", "POST"],
       ["/mark/v1/tasks/same-mark-video-task", "GET"], ["/mark/v1/tasks/same-mark-video-task", "GET"],
     ]);
   } finally {

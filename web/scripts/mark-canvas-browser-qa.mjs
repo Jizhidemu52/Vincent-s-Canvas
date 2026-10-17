@@ -53,7 +53,7 @@ await context.route("**/*", async route => {
   const json = (value, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(value) });
   if (pathname === "/api/deployment") return json({ authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false });
   if (pathname === "/api/auth/session") return json({ user: { id: "mark-canvas-qa", username: "qa", displayName: "隔离画布QA", role: "designer", status: "active", mustChangePassword: false, creditBalance: 999, avatarUrl: "", departmentId: null, groupId: null } });
-  if (pathname === "/api/models") return json({ models: selectCreativeModels(models).map(model => presentPublicModel(model, "designer")), prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) });
+  if (pathname === "/api/models") return json({ models: selectCreativeModels(models).map(model => presentPublicModel(model, "designer")), prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: tool.operationType === "chat" ? models.find(model => model.capabilities.includes("chat")).id : null, configurationVersion: 1 })) });
   if (pathname === "/api/modules") return json({ modules: moduleDefinitions.map(item => ({ moduleKey: item.moduleKey, enabled: true })) });
   if (pathname === "/api/generation-capabilities") return json({ models: [{ id: models[5].id, modelId: "happyhorse-1.1", name: models[5].name, capability: { minImages: 0, maxImages: 2, sizes: ["16:9", "9:16", "1:1", "4:3", "3:4"], seconds: [3, 15], resolutions: ["720p", "1080p"], supportsAudio: false } }] });
   if (pathname === "/api/chat/responses" && method === "POST") {
@@ -217,8 +217,8 @@ try {
     await page.getByRole("tab", { name: "对话", exact: true }).click();
     await page.getByPlaceholder("直接问当前画布上的内容…").waitFor({ timeout: 45000 });
     const agent = page.locator(".cw-agent-panel");
-    await agent.getByTestId("canvas-agent-text-model").locator(".canvas-composer-model-picker").click();
-    await page.getByRole("option", { name: /aplmart-gpt6-astra/ }).click();
+    assert.equal(await agent.getByTestId("canvas-agent-text-model").count(), 0);
+    assert.equal(await agent.getByText("aplmart-gpt6-astra", { exact: true }).count(), 0);
     const imagePicker = agent.locator(".canvas-composer-model-picker").last();
     await imagePicker.click();
     await page.getByRole("option", { name: new RegExp(MARK_IMAGE_MODELS[1].name.replaceAll(".", "\\.")) }).click();

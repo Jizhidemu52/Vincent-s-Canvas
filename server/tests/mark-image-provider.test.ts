@@ -16,14 +16,15 @@ afterEach(async () => {
 async function fixture(role = "super_admin", encryptionKey: string | undefined = key) {
   let provider: Record<string, any> | null = null;
   let models: Record<string, any>[] = [];
-  let snapshot: { provider: Record<string, any> | null; models: Record<string, any>[] } | null = null;
+  let chatBinding = { modelConfigId: null as string | null, configurationVersion: 1, updatedBy: null as string | null };
+  let snapshot: { provider: Record<string, any> | null; models: Record<string, any>[]; chatBinding: typeof chatBinding } | null = null;
   const audit: unknown[] = [], statements: string[] = [];
   let failAtModel = "";
   const query = async (sql: string, values: any[] = []) => {
     statements.push(sql);
-    if (sql === "BEGIN") { snapshot = structuredClone({ provider, models }); return { rows: [] }; }
+    if (sql === "BEGIN") { snapshot = structuredClone({ provider, models, chatBinding }); return { rows: [] }; }
     if (sql === "COMMIT") { snapshot = null; return { rows: [] }; }
-    if (sql === "ROLLBACK") { if (snapshot) { provider = snapshot.provider; models = snapshot.models; } snapshot = null; return { rows: [] }; }
+    if (sql === "ROLLBACK") { if (snapshot) { provider = snapshot.provider; models = snapshot.models; chatBinding = snapshot.chatBinding; } snapshot = null; return { rows: [] }; }
     if (sql.includes("pg_advisory_xact_lock")) return { rows: [] };
     if (sql.startsWith("SELECT") && sql.includes("FROM providers")) {
       expect(values[0]).toBe(MARK_IMAGE_PROVIDER_ID);
@@ -50,6 +51,17 @@ async function fixture(role = "super_admin", encryptionKey: string | undefined =
       models = [...models.filter(item => item.modelId !== modelId), model];
       return { rows: [] };
     }
+    if (sql.startsWith("INSERT INTO tool_api_configurations")) {
+      expect(values).toEqual([MARK_IMAGE_PROVIDER_ID, "claude-sonnet-5-5"]);
+      expect(sql).toContain("tool_api_configurations.model_config_id IS NULL");
+      expect(sql).toContain("tool_api_configurations.updated_by IS NULL");
+      expect(sql).toContain("tool_api_configurations.configuration_version=1");
+      const selected = models.find(model => model.providerId === values[0] && model.modelId === values[1]);
+      if (selected && !chatBinding.modelConfigId && !chatBinding.updatedBy && chatBinding.configurationVersion === 1) {
+        chatBinding = { ...chatBinding, modelConfigId: selected.id, configurationVersion: 2 };
+      }
+      return { rows: [] };
+    }
     if (sql.startsWith("INSERT INTO audit_logs")) { audit.push(values); return { rows: [] }; }
     throw new Error(`Unexpected SQL: ${sql}`);
   };
@@ -63,7 +75,7 @@ async function fixture(role = "super_admin", encryptionKey: string | undefined =
   await new Promise<void>(resolve => server.once("listening", resolve));
   const address = server.address() as { port: number };
   const url = `http://127.0.0.1:${address.port}/mark/mark-images`;
-  return { url, state: () => ({ provider, models }), audit, statements, fail: (modelId: string) => { failAtModel = modelId; } };
+  return { url, state: () => ({ provider, models, chatBinding }), setChatBinding: (value: typeof chatBinding) => { chatBinding = value; }, audit, statements, fail: (modelId: string) => { failAtModel = modelId; } };
 }
 const input = () => ({ baseUrl: MARK_IMAGE_BASE_URL, enabled: true, apiKey: "fixture-mark-key", models: MARK_PLATFORM_MODELS.map(model => ({ modelId: model.modelId, enabled: true, creditCost: 8, rmbCost: 0, concurrencyLimit: 2 })) });
 const save = (url: string, body: unknown) => fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -77,6 +89,7 @@ test("separate Mark configuration is atomic, idempotent, and never returns plain
   expect(data.provider).toMatchObject({ id: MARK_IMAGE_PROVIDER_ID, protocol: "apimart", hasCredentials: true });
   expect(data.models.map((model: any) => model.name)).toEqual(MARK_PLATFORM_MODELS.map(model => model.name));
   expect(f.state().models.map(model => model.capabilities)).toEqual(MARK_PLATFORM_MODELS.map(model => [...model.capabilities]));
+  expect(f.state().chatBinding.modelConfigId).toBe(data.models.find((model: any) => model.modelId === "claude-sonnet-5-5").id);
   const encrypted = f.state().provider!.encryptedCredentials;
   expect(JSON.parse(decryptSecret(encrypted, key))).toEqual({ apiKey: "fixture-mark-key" });
   expect(JSON.stringify(data)).not.toContain(encrypted);
@@ -88,6 +101,17 @@ test("separate Mark configuration is atomic, idempotent, and never returns plain
   expect(f.state().provider!.enabled).toBe(false);
   expect(f.state().models).toHaveLength(MARK_PLATFORM_MODELS.length);
   expect(JSON.stringify(f.audit)).not.toContain("fixture-mark-key");
+});
+
+test("APIMart saves do not overwrite an explicit shared model selection or clearing", async () => {
+  const f = await fixture();
+  expect((await save(f.url, input())).status).toBe(200);
+  for (const modelConfigId of [f.state().models[0]!.id, null]) {
+    const selected = { modelConfigId, configurationVersion: 3, updatedBy: "administrator" };
+    f.setChatBinding(selected);
+    expect((await save(f.url, { ...input(), apiKey: "" })).status).toBe(200);
+    expect(f.state().chatBinding).toEqual(selected);
+  }
 });
 
 test.each(["designer", "department_admin"])("%s cannot read or write the dedicated key", async role => {
@@ -126,7 +150,7 @@ test("model insertion failure rolls back provider and model changes together", a
   const f = await fixture();
   f.fail(MARK_PLATFORM_MODELS[4].modelId);
   expect((await save(f.url, input())).status).toBe(500);
-  expect(f.state()).toEqual({ provider: null, models: [] });
+  expect(f.state()).toEqual({ provider: null, models: [], chatBinding: { modelConfigId: null, configurationVersion: 1, updatedBy: null } });
   expect(f.statements).toContain("ROLLBACK");
   expect(f.audit).toHaveLength(0);
 });

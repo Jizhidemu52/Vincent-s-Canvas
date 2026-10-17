@@ -25,7 +25,7 @@ for (const modelId of ["gpt-6-astra", "claude-fable-5-1"]) {
     test(`${modelId} sends the previous uploaded image in the real second-turn HTTP payload`, async () => {
         const requests: Array<{ url: string; body: any }> = [];
         globalThis.fetch = (async (url, init) => {
-            if (url === "/api/models") return Response.json({ tools: [], prices: [], models: [{ id: "text-model", modelId, name: modelId, capabilities: ["chat"], creditCost: 0, rmbCost: 0 }] });
+            if (url === "/api/models") return Response.json({ tools: [{ toolKey: "gpt-chat", modelConfigId: "text-model", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }], prices: [], models: [{ id: "text-model", modelId, name: modelId, capabilities: ["chat"], creditCost: 0, rmbCost: 0 }] });
             requests.push({ url: String(url), body: JSON.parse(String(init?.body)) });
             return Response.json({ content: "verified", toolCalls: [] });
         }) as typeof fetch;

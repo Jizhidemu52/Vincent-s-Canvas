@@ -5,9 +5,9 @@ import { defaultConfig } from "../src/stores/use-config-store";
 
 const originalFetch = globalThis.fetch;
 
-function withModelConfig(handler: (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): typeof fetch {
+function withModelConfig(handler: (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>, modelId = "claude-opus-5"): typeof fetch {
     return ((url, init) => String(url) === "/api/models"
-        ? Promise.resolve(Response.json({ models: ["claude-opus-5", "claude-sonnet-5"].map(model => ({ id: model, modelId: model, name: model, capabilities: ["chat"], creditCost: 0, rmbCost: 0 })), tools: [], prices: [] }))
+        ? Promise.resolve(Response.json({ models: ["claude-opus-5", "claude-sonnet-5"].map(model => ({ id: model, modelId: model, name: model, capabilities: ["chat"], creditCost: 0, rmbCost: 0 })), tools: [{ toolKey: "gpt-chat", modelConfigId: modelId, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }], prices: [] }))
         : handler(url, init)) as typeof fetch;
 }
 
@@ -64,7 +64,7 @@ test.each(["canvas-chat", "gpt-chat"])("APIMart Sonnet UUID retains its provider
     const modelId = "d5000000-0000-4000-8000-000000000010";
     const requests: Record<string, any>[] = [];
     globalThis.fetch = (async (url, init) => {
-        if (String(url) === "/api/models") return Response.json({ models: [{ id: modelId, modelId, parameterModelId: "claude-sonnet-5-5", name: "claude-sonnet-5-5", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [], prices: [] });
+        if (String(url) === "/api/models") return Response.json({ models: [{ id: modelId, modelId, parameterModelId: "claude-sonnet-5-5", name: "claude-sonnet-5-5", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: modelId, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }], prices: [] });
         expect(String(url)).toBe("/api/chat/responses");
         requests.push(JSON.parse(String(init?.body)));
         return new Response([
@@ -94,7 +94,7 @@ test("APIMart Astra UUID remains a non-Claude request", async () => {
     const modelId = "d5000000-0000-4000-8000-000000000004";
     let calls = 0;
     globalThis.fetch = (async (url, init) => {
-        if (String(url) === "/api/models") return Response.json({ models: [{ id: modelId, modelId, parameterModelId: "gpt-6-astra", name: "gpt-6-astra", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [], prices: [] });
+        if (String(url) === "/api/models") return Response.json({ models: [{ id: modelId, modelId, parameterModelId: "gpt-6-astra", name: "gpt-6-astra", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: modelId, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }], prices: [] });
         calls++;
         const body = JSON.parse(String(init?.body));
         expect(body.modelId).toBe(modelId);
@@ -151,7 +151,7 @@ test("retries a zero-text Claude response that stopped at max_tokens with a larg
     const fetchMock = mock(async () => new Response(fetchMock.mock.calls.length === 1 ? exhausted : completed, {
         headers: { "content-type": "text/event-stream" },
     }));
-    globalThis.fetch = withModelConfig(fetchMock);
+    globalThis.fetch = withModelConfig(fetchMock, "claude-sonnet-5");
 
     const answer = await requestImageQuestion(
         { ...defaultConfig, model: "claude-sonnet-5", textModel: "claude-sonnet-5", claudeMaxTokens: "2048" },
@@ -167,7 +167,7 @@ test("retries a zero-text Claude response that stopped at max_tokens with a larg
 test("does not replay an empty Claude response when the configured budget is already at the maximum", async () => {
     const exhausted = 'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"max_tokens"}}\n\n';
     const fetchMock = mock(async () => new Response(exhausted, { headers: { "content-type": "text/event-stream" } }));
-    globalThis.fetch = withModelConfig(fetchMock);
+    globalThis.fetch = withModelConfig(fetchMock, "claude-sonnet-5");
 
     await expect(requestImageQuestion(
         { ...defaultConfig, model: "claude-sonnet-5", textModel: "claude-sonnet-5", claudeMaxTokens: "16384" },

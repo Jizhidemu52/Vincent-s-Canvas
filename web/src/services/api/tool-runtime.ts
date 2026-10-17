@@ -1,4 +1,4 @@
-import { getBusinessConfig, type BusinessConfig } from "./business-config";
+import { getBusinessConfig, resolveToolModel, type BusinessConfig } from "./business-config";
 import { getToolDefinition, resolveToolKey, type ToolKey } from "../../../../shared/feature-catalog";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -16,6 +16,11 @@ export function resolveConfiguredToolModel(business: BusinessConfig, toolKey: To
     const parent = getToolDefinition(toolKey)?.parent;
     const parentBinding = parent ? business.tools.find(item => item.toolKey === parent) : undefined;
     if (binding?.enabled === false || parentBinding?.enabled === false) throw new Error("当前板块或所属入口已停用，请联系管理员。");
+    if (getToolDefinition(toolKey)?.operationType === "chat") {
+        const managed = resolveToolModel(business, toolKey);
+        if (!managed) throw new Error("对话服务尚未就绪，请联系管理员检查统一配置。");
+        return managed;
+    }
     const requested = binding?.modelConfigId || requestedModel;
     const normalized = modelOptionName(requested);
     const model = business.models.find(item => binding?.modelConfigId ? item.id === binding.modelConfigId : item.id === requested || item.modelId === normalized || item.name === requested);

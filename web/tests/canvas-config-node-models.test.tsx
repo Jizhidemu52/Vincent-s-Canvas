@@ -53,14 +53,19 @@ describe("configuration node model availability", () => {
         }
     });
 
-    test("correcting a stale saved model must finish before generation is enabled", () => {
-        const stale = panel({ generationMode: "text", model: "gpt-image-2" });
-        expect(stale).toContain("真实文本模型");
+    test("text configuration hides model identity and stale node selections cannot block the unified model", () => {
+        const tools = [{ toolKey: "gpt-chat", modelConfigId: "text", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }];
+        const stale = panel({ generationMode: "text", model: "gpt-image-2" }, { tools });
+        expect(stale).not.toContain("真实文本模型");
+        expect(stale).not.toContain("chat-custom");
+        expect(stale).not.toContain('data-usage-control="model"');
         expect(stale).not.toContain("gpt-image-2");
-        expect(actionButton(stale)).toContain('disabled=""');
-        const synced = panel({ generationMode: "text", model: "chat-custom" });
+        expect(actionButton(stale)).not.toContain('disabled=""');
+        const synced = panel({ generationMode: "text", model: "chat-custom" }, { tools });
         expect(actionButton(synced)).not.toContain('disabled=""');
-        expect(actionButton(panel({ generationMode: "text", model: "chat-custom", prompt: "" }))).toContain('disabled=""');
+        expect(actionButton(panel({ generationMode: "text", model: "chat-custom", prompt: "" }, { tools }))).toContain('disabled=""');
+        expect(actionButton(panel({ generationMode: "text", model: "chat-custom" }, { tools: [] }))).toContain('disabled=""');
+        for (const status of ["loading", "error"] as const) expect(actionButton(panel({ generationMode: "text", model: "chat-custom" }, { tools, status }))).toContain('disabled=""');
     });
 
     test("an actually configured audio model enables its settings and generation", () => {

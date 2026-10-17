@@ -5055,7 +5055,7 @@ function WirelessCanvasPage() {
                         );
                     })}
 
-                    {localToolsEnabled && !isNodeDragging && !isNodeResizing && !isSelecting && !connectingParams && singleSelectedNode?.type === CanvasNodeType.Image && renderedNodes.some(node => node.id === singleSelectedNode.id) ? <Suspense fallback={null}><CanvasInlineImageCompare key={singleSelectedNode.id} node={singleSelectedNode} scale={viewport.k} showImageInfo={showImageInfo} onAdvanced={() => openImageCompare(singleSelectedNode)} /></Suspense> : null}
+                    {localToolsEnabled && !isNodeDragging && !isNodeResizing && !isSelecting && !connectingParams && singleSelectedNode?.type === CanvasNodeType.Image && renderedNodes.some(node => node.id === singleSelectedNode.id) ? <Suspense fallback={null}><CanvasInlineImageCompare key={singleSelectedNode.id} node={singleSelectedNode} nodes={nodes} scale={viewport.k} showImageInfo={showImageInfo} onAdvanced={sourceId => sourceId ? setCompareImageIds([sourceId, singleSelectedNode.id]) : openImageCompare(singleSelectedNode)} /></Suspense> : null}
                     <CanvasSelectionOverlay ref={selectionOverlayRef} borderColor={theme.canvas.selectionStroke} background={theme.canvas.selectionFill} />
                     {pendingConnectionCreate ? <ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /> : null}
                 </WirelessCanvas>

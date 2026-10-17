@@ -36,7 +36,7 @@ test("Claude tool loop keeps two complete assistant turns and signatures out of 
 
     const submitted: Array<ReturnType<typeof buildClaudeMessagesRequest>> = [];
     globalThis.fetch = mock(async (url: string | URL | Request, init?: RequestInit) => {
-        if (String(url) === "/api/models") return Response.json({ models: [{ id: "claude-fable", modelId: "claude-fable-5", name: "Claude Fable", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [], prices: [] });
+        if (String(url) === "/api/models") return Response.json({ models: [{ id: "claude-fable", modelId: "claude-fable-5", name: "Claude Fable", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: "claude-fable", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }], prices: [] });
         const payload = JSON.parse(String(init?.body));
         const body = buildClaudeMessagesRequest(payload, { modelId: payload.modelId, maxTokens: payload.claude.maxTokens, thinking: payload.claude.thinking });
         submitted.push(body);

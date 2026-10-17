@@ -196,16 +196,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             <ModelPicker toolKey={toolKey} config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasAudioSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
-                    ) : (
-                        <ModelPicker toolKey={toolKey} config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
-                    )}
+                    ) : null}
                 </div>
                 <Button
                     type="primary"
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
                     danger={isRunning}
                     style={isRunning ? undefined : { background: theme.toolbar.primary, borderColor: theme.toolbar.primary }}
-                    disabled={!isRunning && (!toolEnabled || (requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(videoValidation))}
+                    disabled={!isRunning && (!toolEnabled || (mode === "text" && !config.textModel) || (requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(videoValidation))}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={isRunning ? "停止生成" : "生成"}
                 >
@@ -254,7 +252,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     const defaultModel = mode === "image" ? globalConfig.imageModel : mode === "video" ? globalConfig.videoModel : mode === "audio" ? globalConfig.audioModel : globalConfig.textModel;
     return {
         ...globalConfig,
-        model: node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
+        model: mode === "text" ? globalConfig.textModel : node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
         quality: node.metadata?.quality ?? globalConfig.quality ?? defaultConfig.quality,
         imageOptions: node.metadata?.imageOptions ?? globalConfig.imageOptions,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,

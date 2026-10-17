@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { ToolKey } from "../../../shared/feature-catalog";
+import { getToolDefinition, type ToolKey } from "../../../shared/feature-catalog";
 import { applyToolModel } from "@/services/api/tool-runtime";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import type { AiConfig } from "@/stores/use-config-store";
@@ -17,7 +17,9 @@ export function useToolEnabled(toolKey: ToolKey) {
 
 export function currentToolConfig(config: AiConfig, toolKey: ToolKey): AiConfig {
     const business = useBusinessConfigStore.getState();
-    if (!business.tools.some(item => item.toolKey === toolKey && item.modelConfigId)) return config;
+    const managedChat = getToolDefinition(toolKey)?.operationType === "chat";
+    if (managedChat && business.status !== "ready") throw new Error("对话服务配置尚未就绪，请稍后重试。");
+    if (!managedChat && !business.tools.some(item => item.toolKey === toolKey && item.modelConfigId)) return config;
     return applyToolModel(config, business, toolKey);
 }
 
@@ -25,9 +27,12 @@ export function currentToolConfig(config: AiConfig, toolKey: ToolKey): AiConfig 
 export function useToolConfig(config: AiConfig, toolKey: ToolKey) {
     const models = useBusinessConfigStore(state => state.models);
     const tools = useBusinessConfigStore(state => state.tools);
+    const status = useBusinessConfigStore(state => state.status);
     return useMemo(() => {
-        if (!tools.some(item => item.toolKey === toolKey && item.modelConfigId)) return config;
+        const managedChat = getToolDefinition(toolKey)?.operationType === "chat";
+        if (managedChat && status !== "ready") return { ...config, model: "", textModel: "" };
+        if (!managedChat && !tools.some(item => item.toolKey === toolKey && item.modelConfigId)) return config;
         try { return applyToolModel(config, { models, tools, prices: [] }, toolKey); }
-        catch { return { ...config, model: "", imageModel: "", videoModel: "", textModel: "", audioModel: "" }; }
-    }, [config, models, tools, toolKey]);
+        catch { return managedChat ? { ...config, model: "", textModel: "" } : { ...config, model: "", imageModel: "", videoModel: "", textModel: "", audioModel: "" }; }
+    }, [config, models, tools, status, toolKey]);
 }

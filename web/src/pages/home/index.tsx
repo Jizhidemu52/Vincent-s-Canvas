@@ -10,7 +10,7 @@ import "./home.css";
 const entries = [
     { path: "/image", flag: "image" as const, icon: ImagePlus, title: "图像创作", description: "描述一个想法，把它变成图片", action: "开始生图" },
     { path: "/video", flag: "video" as const, icon: Video, title: "视频创作", description: "从文字或图片，生成一段视频", action: "制作视频" },
-    { path: "/chat", flag: "gpt-chat" as const, icon: MessageSquareText, title: "AI 对话", description: "整理思路、完善文案和提示词", action: "开始对话" },
+    { path: "/chat", flag: "gpt-chat" as const, icon: MessageSquareText, title: "对话改图", description: "发送图片，接着聊、接着改", action: "开始对话" },
     { path: "/assets", flag: "assets" as const, icon: Images, title: "我的素材", description: "收藏作品，随时带回创作", action: "管理素材" },
 ];
 

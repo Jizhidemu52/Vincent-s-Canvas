@@ -8,6 +8,7 @@ import type { AppConfig } from "../config";
 import type { Database } from "../db";
 import { encryptSecret } from "../security";
 import type { AuthenticatedRequest } from "../types";
+import { initializeDefaultChatModel } from "../chat-model-policy";
 
 const modelInput = z.object({
   modelId: z.string(), enabled: z.boolean(), creditCost: z.number().int().nonnegative(),
@@ -72,6 +73,7 @@ export function createMarkImageProviderRouter(db: Database, config: AppConfig) {
           concurrency_limit=EXCLUDED.concurrency_limit,enabled=EXCLUDED.enabled,updated_at=now()`,
         [MARK_IMAGE_PROVIDER_ID, preset.name, preset.modelId, [...preset.capabilities], model.creditCost, model.rmbCost, model.concurrencyLimit, model.enabled, actor.id]);
       }
+      await initializeDefaultChatModel(client);
       await writeAudit(client, { actor, action: "mark_platform.configured", targetType: "provider", targetId: MARK_IMAGE_PROVIDER_ID,
         result: "success", detail: { enabled: input.enabled, credentialsChanged: Boolean(input.apiKey), modelIds: input.models.map(model => model.modelId) }, ip: request.ip });
       const result = await readConfiguration(client);

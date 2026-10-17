@@ -89,7 +89,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
             const result = await db.query<ChatModel>(
                 `SELECT m.model_id,p.base_url,p.protocol,p.encrypted_credentials
                  FROM model_configs m JOIN providers p ON p.id=m.provider_id
-                 WHERE (m.id::text=$1 OR m.model_id=$1)
+                 WHERE m.id=$1
                    AND m.enabled=true AND p.enabled=true AND 'chat'=ANY(m.capabilities)
                  LIMIT 1`,
                 [execution.modelConfigId],

@@ -74,7 +74,7 @@ export default function CanvasPage() {
                 <header className="wb-page-header">
                     <div>
                         <p className="wb-eyebrow">{chatMode ? "在线功能" : "画布库"}</p>
-                        <h1 className="wb-title">{chatMode ? "GPT 对话" : "无线画布"}</h1>
+                        <h1 className="wb-title">{chatMode ? "对话改图" : "无线画布"}</h1>
                         {!chatMode ? <p className="wb-description">{projects.length} 个画布 · <CanvasSaveStatus /></p> : null}
                         {chatMode ? <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-500 dark:text-stone-400">选择或新建一个画布后，助手会围绕当前项目内容进行对话、拆解提示词和生成建议，后台会把相关任务归入画布项目历史。</p> : null}
                     </div>
@@ -109,7 +109,7 @@ export default function CanvasPage() {
                             <MessageSquareText className="size-5" />
                         </div>
                         <div>
-                            <div className="font-semibold">画布 GPT 对话模式已启用</div>
+                            <div className="font-semibold">画布对话改图模式已启用</div>
                             <p className="mt-1 leading-6">从这里进入的项目会保留 `tool=gpt-chat` 参数，适合把素材、提示词和生成结果放在同一个画布里复盘。</p>
                         </div>
                     </section>

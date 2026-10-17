@@ -42,7 +42,7 @@ function bubbleHarness(actionsDisabled = false) {
     return { tree, nodes, calls, generated, text };
 }
 
-test("the page has one natural conversation entry and no mode or manual edit-target controls", () => {
+test("the page has one natural conversation entry and no LLM model, mode, or manual edit-target controls", () => {
     const labels: string[] = [];
     const calledFunctions: string[] = [];
     const visit = (node: ts.Node) => {
@@ -51,8 +51,8 @@ test("the page has one natural conversation entry and no mode or manual edit-tar
         ts.forEachChild(node, visit);
     };
     visit(ast);
-    expect(labels.filter((label) => label === "对话模型")).toHaveLength(1);
-    for (const label of ["编辑起点", "创作理解模型", "图像模型"]) expect(labels).not.toContain(label);
+    expect(labels.filter((label) => label === "出图模型")).toHaveLength(1);
+    for (const label of ["对话模型", "编辑起点", "创作理解模型", "图像模型"]) expect(labels).not.toContain(label);
     for (const fn of ["switchMode", "continueEditing", "setMode", "onContinueEditing"]) expect(calledFunctions).not.toContain(fn);
 });
 

@@ -1,12 +1,13 @@
 import { loadConfig } from "./config";
 import { createDatabase } from "./db";
 import { hashPassword } from "./security";
+import { initializeDefaultChatModel } from "./chat-model-policy";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
 const exists = await db.query("SELECT id FROM users WHERE role='super_admin' LIMIT 1");
 if (exists.rowCount) {
-    console.log("A super administrator already exists; no changes made.");
+    console.log("A super administrator already exists; administrator account unchanged.");
 } else {
     if (!config.BOOTSTRAP_ADMIN_USERNAME || !config.BOOTSTRAP_ADMIN_PASSWORD) {
         throw new Error("Set BOOTSTRAP_ADMIN_USERNAME and BOOTSTRAP_ADMIN_PASSWORD before first bootstrap");
@@ -21,4 +22,5 @@ if (exists.rowCount) {
     );
     console.log(`Created super administrator ${result.rows[0].username} (${result.rows[0].id}).`);
 }
+await initializeDefaultChatModel(db);
 await db.end();

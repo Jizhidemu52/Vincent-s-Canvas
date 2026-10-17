@@ -73,10 +73,10 @@ function fixture() {
   return { db, cache, flags, models, configurations, statements, reservations, bind, get queues() { return queues; }, get videoPreflights() { return videoPreflights; }, preflight: async () => { videoPreflights++; return { normalized: {} }; } };
 }
 
-async function serve(state = fixture()) {
+async function serve(state = fixture(), role = "super_admin") {
   const app = express();
   app.use(express.json());
-  app.use((request, _response, next) => { Object.assign(request, { auth: { id: modelId, role: "super_admin", departmentId: null } }); next(); });
+  app.use((request, _response, next) => { Object.assign(request, { auth: { id: modelId, role, departmentId: null } }); next(); });
   app.use("/admin", createModelConfigurationRouter(state.db, {} as never));
   app.use("/models", createPublicModelRouter(state.db));
   app.use("/tasks", createTasksRouter(state.db, state.cache as never, false, state.preflight as never));
@@ -90,6 +90,34 @@ async function serve(state = fixture()) {
 const post = (url: string, body: unknown, method = "POST") => fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 describe("formal catalog configuration", () => {
+  test("chat model belongs only to gpt-chat while canvas switches and prices remain independent", async () => {
+    const state = fixture();
+    state.bind("gpt-chat");
+    state.bind("canvas-chat", { modelConfigId: secondModelId, creditCostOverride: 7, rmbCostOverride: 0.5 });
+    const { url } = await serve(state);
+    for (const path of ["/admin/tool-configurations", "/models"]) {
+      const result = await (await fetch(`${url}${path}`)).json();
+      expect(result.tools.find((item: any) => item.toolKey === "canvas-chat")).toMatchObject({ modelConfigId: modelId, creditCostOverride: 7, rmbCostOverride: 0.5 });
+      if (path === "/models") expect(result.models.some((item: any) => item.id === modelId)).toBe(true);
+    }
+    const saved = await post(`${url}/admin/tool-configurations/canvas-chat`, { modelConfigId: secondModelId, enabled: false, creditCostOverride: 9, rmbCostOverride: 0 }, "PUT");
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).tool).toMatchObject({ modelConfigId: modelId, enabled: false, creditCostOverride: 9 });
+    expect(state.configurations.get("canvas-chat")).toMatchObject({ modelConfigId: null, enabled: false, creditCostOverride: 9 });
+    expect(state.configurations.get("gpt-chat")?.modelConfigId).toBe(modelId);
+    await post(`${url}/admin/tool-configurations/gpt-chat`, { modelConfigId: secondModelId, enabled: true, creditCostOverride: null, rmbCostOverride: null }, "PUT");
+    const refreshed = await (await fetch(`${url}/models`)).json();
+    expect(refreshed.tools.find((item: any) => item.toolKey === "canvas-chat")).toMatchObject({ modelConfigId: secondModelId, enabled: false, creditCostOverride: 9 });
+  });
+
+  test.each(["designer", "department_admin"])("%s cannot mutate the shared chat default", async role => {
+    const state = fixture();
+    const { url } = await serve(state, role);
+    const response = await post(`${url}/admin/tool-configurations/gpt-chat`, { modelConfigId: modelId, enabled: true, creditCostOverride: 0, rmbCostOverride: 0 }, "PUT");
+    expect(response.status).toBe(403);
+    expect(state.configurations.size).toBe(0);
+  });
+
   test("Blend binding accepts only the Blend model while canvas-image keeps that choice", async () => {
     const state = fixture();
     state.models[0]!.modelId = "midjourney-blend";
@@ -162,6 +190,40 @@ describe("formal catalog configuration", () => {
 });
 
 describe("authoritative scoped execution", () => {
+  test("all chat requests ignore old or forged model choices and use the shared configuration UUID", async () => {
+    const state = fixture();
+    state.bind("gpt-chat", { creditCostOverride: 2 });
+    state.bind("canvas-chat", { modelConfigId: secondModelId, creditCostOverride: 7, configurationVersion: 5 });
+    for (const toolKey of [undefined, "gpt-chat", "canvas-chat"]) {
+      for (const selected of [undefined, secondModelId, state.models[1]!.modelId, "forged-model"]) {
+        const result = await resolveToolExecution(state.db, { operationType: "chat", toolKey, modelId: selected });
+        expect(result.modelConfigId).toBe(modelId);
+        expect(result.creditCostOverride).toBe(toolKey === "canvas-chat" ? 7 : 2);
+      }
+    }
+    state.models[1]!.modelId = state.models[0]!.modelId;
+    state.bind("gpt-chat", { modelConfigId: secondModelId });
+    expect((await resolveToolExecution(state.db, { operationType: "chat", toolKey: "canvas-chat", modelConfigId: modelId })).modelConfigId).toBe(secondModelId);
+    // Disabling independent chat does not disable a separately enabled canvas chat.
+    state.bind("gpt-chat", { modelConfigId: secondModelId, enabled: false });
+    expect((await resolveToolExecution(state.db, { operationType: "chat", toolKey: "canvas-chat" })).modelConfigId).toBe(secondModelId);
+  });
+
+  test("an absent or unavailable shared chat model never falls back to client or canvas choices", async () => {
+    const state = fixture();
+    const input = { operationType: "chat", toolKey: "canvas-chat", modelId: secondModelId };
+    state.bind("canvas-chat", { modelConfigId: secondModelId });
+    await expect(resolveToolExecution(state.db, input)).rejects.toMatchObject({ code: "CHAT_MODEL_NOT_CONFIGURED", status: 503 });
+    state.bind("gpt-chat");
+    for (const field of ["enabled", "providerEnabled"] as const) {
+      state.models[0]![field] = false;
+      await expect(resolveToolExecution(state.db, input)).rejects.toMatchObject({ code: "MODEL_DISABLED" });
+      state.models[0]![field] = true;
+    }
+    state.models[0]!.capabilities = ["edit"];
+    await expect(resolveToolExecution(state.db, input)).rejects.toMatchObject({ code: "MODEL_CAPABILITY_MISMATCH" });
+  });
+
   test("Blend rejects wrong chosen or bound models before task reservation and permits canvas-image", async () => {
     const state = fixture();
     state.models[0]!.modelId = "midjourney-blend";
@@ -232,7 +294,7 @@ describe("authoritative scoped execution", () => {
     expect(state.queues).toBe(0); expect(state.videoPreflights).toBe(0); expect(state.reservations).toHaveLength(0);
     // Independent chat reaches its credential check, never an external request.
     expect((await post(`${url}/chat/responses`, { toolKey: "gpt-chat", input: [] })).status).toBe(503);
-    expect((await post(`${url}/chat/responses`, { toolKey: "gpt-chat", modelId: secondModelId, input: [] })).status).toBe(409);
+    expect((await post(`${url}/chat/responses`, { toolKey: "gpt-chat", modelId: secondModelId, input: [] })).status).toBe(503);
   });
 
   test("a disabled parent API binding also blocks its child image operation", async () => {

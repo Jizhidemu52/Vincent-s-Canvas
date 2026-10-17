@@ -1,5 +1,5 @@
 import { App, Button, Tooltip } from "antd";
-import { Bot, ChevronDown, CornerDownLeft, FileText, ImagePlus, LoaderCircle, MessageSquarePlus, Paperclip, PanelLeftClose, PanelLeftOpen, Send, Trash2, WandSparkles, X } from "lucide-react";
+import { Bot, CornerDownLeft, FileText, ImagePlus, LoaderCircle, MessageSquarePlus, Paperclip, PanelLeftClose, PanelLeftOpen, Send, Trash2, WandSparkles, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -18,6 +18,7 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { isClaudeModel, requestEdit, requestGeneration } from "@/services/api/image";
 import { requestCreativeChatPlan } from "@/services/api/creative-chat";
+import { resolveToolModel } from "@/services/api/business-config";
 import { recoverChatImageTask, type PendingChatImageTask } from "@/services/api/chat-image-recovery";
 import { imageToDataUrl, uploadImage } from "@/services/image-storage";
 import { flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -66,7 +67,6 @@ export default function ChatPage() {
     const { models, tools: toolBindings, status: modelsStatus, refresh: refreshModels } = businessConfig;
     const modelsLoading = modelsStatus === "idle" || modelsStatus === "loading";
     const modelError = modelsStatus === "error" ? businessConfig.error || "模型列表暂时无法读取，请重试。" : "";
-    const [selectedModel, setSelectedModel] = useState("");
     const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches);
     const [sessions, setSessionsState] = useState<ChatSession[]>([]);
     const sessionsRef = useRef(sessions);
@@ -186,27 +186,19 @@ export default function ChatPage() {
 
     const activeSession = useMemo(() => sessions.find((item) => item.id === activeSessionId) || sessions[0], [activeSessionId, sessions]);
     const pendingImageMessage = activeSession?.messages.find((item) => item.pendingImageTask);
-    const chatBinding = toolBindings.find(item => item.toolKey === "gpt-chat");
     const imageBinding = toolBindings.find(item => item.toolKey === "gpt-chat-image");
     const chatImageEnabled = useModuleEnabled("gpt-chat-image");
-    const chatModels = useMemo(() => modelsStatus === "ready" ? models.filter((item) => item.capabilities.includes("chat") && chatBinding?.enabled !== false && (!chatBinding?.modelConfigId || item.id === chatBinding.modelConfigId)) : [], [models, modelsStatus, chatBinding]);
+    const selected = modelsStatus === "ready" ? resolveToolModel(businessConfig, "gpt-chat") : undefined;
+    const selectedModel = selected?.modelId || "";
     // The conversation chooses whether an image task is needed. Demo-only
     // models must never be picked for a real provider task.
     const imageModels = useMemo(() => modelsStatus === "ready" ? models.filter((item) => chatImageEnabled && imageBinding?.enabled !== false && (!imageBinding?.modelConfigId || item.id === imageBinding.modelConfigId) && !item.modelId.startsWith("demo-") && item.capabilities.some((capability) => ["generate", "edit"].includes(capability))) : [], [models, modelsStatus, imageBinding, chatImageEnabled]);
     const preferredImageModel = preferredChatImageModel(imageModels, [activeSession?.imageModelId, config.imageModel, config.model]);
     const qualityProfile = useImageModelProfile(preferredImageModel?.modelId || "");
     const imageQualitySettings = chatImageQualitySettings(qualityProfile, activeSession?.imageQuality, activeSession?.imageResolution);
-    const availableModels = chatModels;
-    const preferredModel = activeSession?.chatModelId;
-    useEffect(() => {
-        setSelectedModel((current) => preferredModel && availableModels.some((item) => item.modelId === preferredModel)
-            ? preferredModel : availableModels.some((item) => item.modelId === current) ? current
-                : availableModels.find((item) => item.modelId === "gpt-6-astra")?.modelId || availableModels[0]?.modelId || "");
-    }, [availableModels, preferredModel, activeSession?.id]);
     const creativeModelId = selectedModel;
     const imageCatalog = useMemo(() => buildCreativeImageCatalog(activeSession?.messages || []), [activeSession?.messages]);
     const imageLabels = useMemo(() => new Map(imageCatalog.map((item) => [item.id, item.label])), [imageCatalog]);
-    const selected = availableModels.find((item) => item.modelId === selectedModel);
     const selectedParameterModel = selected?.parameterModelId || selected?.modelId || selectedModel;
     const selectedClaude = isClaudeModel(selectedParameterModel);
 
@@ -525,13 +517,11 @@ export default function ChatPage() {
                 <section className="flex min-w-0 flex-1 flex-col">
                     <header className="flex min-h-24 flex-wrap items-center gap-3 border-b border-border px-4 py-4 md:px-6">
                         <Tooltip title={sidebarOpen ? "收起会话" : "展开会话"}><button type="button" aria-label={sidebarOpen ? "收起会话" : "展开会话"} onClick={() => setSidebarOpen((value) => !value)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted">{sidebarOpen ? <PanelLeftClose className="size-5" /> : <PanelLeftOpen className="size-5" />}</button></Tooltip>
-                        <div className="min-w-0 flex-1"><h1 className="wb-title">LLM 对话</h1><p className="mt-1 text-sm text-muted-foreground">直接发消息、图片或文件，接着聊、接着改。</p></div>
-                        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-                            {modelsLoading ? <LoaderCircle role="status" aria-label="正在读取模型" className="size-4 animate-spin text-muted-foreground" /> : null}
-                            <div className="relative min-w-0"><select data-usage-control="model" aria-label="对话模型" disabled={isSending || modelsLoading || !availableModels.length} value={selectedModel} onChange={(event) => { const modelId = event.target.value; setSelectedModel(modelId); if (activeSession) updateSession(activeSession.id, (session) => ({ ...session, chatModelId: modelId })); }} className="h-10 max-w-[240px] appearance-none rounded-xl bg-transparent py-0 pl-3 pr-9 text-sm text-foreground outline-none hover:bg-muted disabled:opacity-50">{!selectedModel ? <option value="">{modelsLoading ? "正在读取模型" : "暂无可用模型"}</option> : null}{availableModels.map((item) => <option key={item.modelId} value={item.modelId}>{modelLabelWithUsage(item.name, item.publicDescription)}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-3 size-4 text-muted-foreground" /></div>
-                        </div>
+                        <div className="min-w-0 flex-1"><h1 className="wb-title">对话改图</h1><p className="mt-1 text-sm text-muted-foreground">直接发消息、图片或文件，接着聊、接着改。</p></div>
+                        {modelsLoading ? <LoaderCircle role="status" aria-label="正在读取对话配置" className="size-4 animate-spin text-muted-foreground" /> : null}
                     </header>
                     {modelError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{modelError}</span><Button onClick={() => void refreshModels().catch(() => undefined)}>重试加载</Button></div> : null}
+                    {modelsStatus === "ready" && !selected ? <p role="status" className="border-b border-border px-6 py-3 text-sm text-muted-foreground">对话服务暂不可用，请联系管理员检查后台配置。</p> : null}
                     {!sessionsReady ? <div role={sessionLoadError ? "alert" : "status"} className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{sessionLoadError || "正在读取本地聊天记录…"}</span>{sessionLoadError ? <Button onClick={() => setSessionReload((value) => value + 1)}>重试读取记录</Button> : null}</div> : null}
                     {sessionSaveError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{sessionSaveError}</span><Button onClick={() => { if (sessionsReady && !preparingMessageRef.current) { persistence.clear(); void persistSessions(sessionsRef.current).catch(() => undefined); } }}>重试保存记录</Button></div> : null}
 
@@ -595,9 +585,9 @@ function ClaudeChatControls({ model, stream, thinking, maxTokens, onStreamChange
     const openTokenClaude = model.toLowerCase() === "claude-fable-5-1";
     const channelDefaultThinking = openTokenClaude || model.toLowerCase() === "claude-sonnet-5-5";
     return <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">Claude 原生参数</span>
+        <span className="font-medium text-foreground">回复参数</span>
         <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={stream} onChange={(event) => onStreamChange(event.target.checked)} /> 流式输出</label>
-        {channelDefaultThinking ? <span title="渠道文档未指定该模型的思考覆盖参数，使用渠道默认行为。">思考模式 · 渠道默认</span> : alwaysThinking ? <span title="Fable 5 不支持关闭思考，也不支持旧版固定思考预算。">自适应思考 · 始终开启</span> : <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={thinking} onChange={(event) => onThinkingChange(event.target.checked)} /> 自适应思考</label>}
+        {channelDefaultThinking ? <span title="使用后台配置对应的默认思考行为。">思考模式 · 渠道默认</span> : alwaysThinking ? <span title="当前服务始终启用自适应思考，不支持关闭或固定思考预算。">自适应思考 · 始终开启</span> : <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="checkbox" checked={thinking} onChange={(event) => onThinkingChange(event.target.checked)} /> 自适应思考</label>}
         <label className="inline-flex items-center gap-1.5" title="总输出预算包含思考与可见回复；16384 是当前项目限制，不是模型官方最大值。">总输出预算
             <select value={maxTokens} onChange={(event) => onMaxTokensChange(event.target.value)} className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none">
                 {["1024", "2048", "4096", "8192", "16384"].map((value) => <option key={value} value={value}>{value}</option>)}

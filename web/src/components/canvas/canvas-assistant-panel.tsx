@@ -728,7 +728,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const metadata = node.metadata || {};
         const mode = op.mode || metadata.generationMode || (node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image");
         const config: AiConfig = {
-            ...turn.config, model: metadata.model || defaultGenerationModel(turn.config, mode),
+            ...turn.config, model: mode === "text" ? turn.config.textModel : metadata.model || defaultGenerationModel(turn.config, mode),
             size: metadata.size || (mode === "video" ? turn.videoSize : turn.config.size), quality: metadata.quality || turn.config.quality,
             imageOptions: metadata.imageOptions ?? turn.config.imageOptions,
             count: String(metadata.count ?? turn.config.count), canvasImageCount: String(metadata.count ?? turn.config.canvasImageCount),
@@ -1128,7 +1128,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             /> : null}
 
             {canManageConfig && view === "setup" ? (
-                <OnlineAgentSetupView theme={theme} config={effectiveConfig} disabled={isRunning} onModelChange={(model) => updateConfig("textModel", model)} />
+                <OnlineAgentSetupView theme={theme} />
             ) : (
                 <div className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
                     {view === "history" ? (
@@ -1244,10 +1244,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                             </div>
                         </div>
                     ) : null}
-                    <div className="mx-4 mb-2 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }} data-testid="canvas-agent-text-model">
-                        <span className="shrink-0">对话模型</span>
-                        <AgentTextModelPicker config={effectiveConfig} value={effectiveConfig.textModel} disabled={isRunning} onChange={(model) => updateConfig("textModel", model)} />
-                    </div>
+                    {onlineEnabled && !effectiveConfig.textModel ? <p role="status" className="mx-4 mb-2 text-xs" style={{ color: theme.node.muted }}>{businessConfigStatus === "idle" || businessConfigStatus === "loading" ? "正在读取对话配置…" : "对话服务暂不可用，请联系管理员检查后台配置。"}</p> : null}
                     <div className="mx-4 mb-2 flex items-center justify-between gap-2 text-[11px]" style={{ color: theme.node.muted }} data-testid="canvas-auto-context">
                         <span title="发送时读取可见、选中和预览中的素材；视频提供抽样画面，不含声音。关闭后仍保留画布结构与手动参考。">{autoContext ? "自动读取画布 · 图片、视频画面与文字" : "自动读取已关闭 · 仅结构与手动参考"}</span>
                         <button type="button" className="shrink-0 hover:underline" aria-pressed={autoContext} onClick={() => setAutoContext((current) => !current)}>{autoContext ? "关闭" : "开启"}</button>
@@ -1346,21 +1343,6 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         </motion.div>
     );
 }, canvasAssistantPanelPropsEqual);
-
-function AgentTextModelPicker({ config, value, onChange, disabled = false }: { config: AiConfig; value: string; onChange: (model: string) => void; disabled?: boolean }) {
-    return (
-        <ModelPicker
-            toolKey="canvas-chat"
-            config={config}
-            value={value}
-            onChange={onChange}
-            capability="text"
-            modelsSource="server"
-            disabled={disabled}
-            className="h-7 min-w-0 max-w-[260px] rounded-md border-0 bg-transparent px-1 py-0 text-xs shadow-none"
-        />
-    );
-}
 
 function AgentQuickstart({ theme, onSelect }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (kind: "video" | "lookbook" | "illustration" | "poster") => void }) {
     const items: Array<{ kind: "video" | "lookbook" | "illustration" | "poster"; label: string }> = [
@@ -1509,24 +1491,18 @@ function AssistantHistory({ sessions, activeSession, onOpen, onDelete }: { sessi
     );
 }
 
-function OnlineAgentSetupView({ theme, config, onModelChange, disabled = false }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; config: AiConfig; onModelChange: (model: string) => void; disabled?: boolean }) {
+function OnlineAgentSetupView({ theme }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     return (
         <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
             <div className="space-y-4">
                 <div>
                     <div className="text-base font-semibold leading-6">连接配置</div>
                     <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>
-                        网站 Agent 使用后台已启用的对话模型和 API。选择会同步到网页全局文本模型配置，无需在这里填写密钥。
+                        网站 Agent 的对话服务由后台统一配置，无需在这里选择模型或填写密钥。
                     </div>
                 </div>
                 <div className="rounded-lg border p-3" style={{ borderColor: theme.node.stroke }}>
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                            <div className="text-sm font-medium leading-5">对话模型</div>
-                            <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>
-                                <AgentTextModelPicker config={config} value={config.textModel} disabled={disabled} onChange={onModelChange} />
-                            </div>
-                        </div>
                         <Button className="!h-8 !px-3" type="primary" icon={<Settings2 className="size-4" />} href="/admin?tab=api" target="_blank" rel="noopener noreferrer">
                             后台模型配置
                         </Button>

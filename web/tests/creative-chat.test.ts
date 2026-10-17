@@ -305,9 +305,9 @@ describe("creative chat plan validation", () => {
     });
 });
 
-function withModelConfig(handler: (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): typeof fetch {
+function withModelConfig(handler: (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>, modelId = "gpt-6-astra"): typeof fetch {
     return ((url, init) => String(url) === "/api/models"
-        ? Promise.resolve(Response.json({ models: ["gpt-6-astra", "claude-opus-5"].map(modelId => ({ id: `chat-${modelId}`, modelId, name: modelId, capabilities: ["chat"], creditCost: 0, rmbCost: 0 })), tools: [], prices: [] }))
+        ? Promise.resolve(Response.json({ models: ["gpt-6-astra", "claude-opus-5"].map(modelId => ({ id: `chat-${modelId}`, modelId, name: modelId, capabilities: ["chat"], creditCost: 0, rmbCost: 0 })), tools: [{ toolKey: "gpt-chat", modelConfigId: `chat-${modelId}`, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }], prices: [] }))
         : handler(url, init)) as typeof fetch;
 }
 
@@ -587,7 +587,7 @@ describe("creative chat bounded natural-conversation service", () => {
                     stream.close();
                 } else finalStream = stream;
             } }), { headers: { "content-type": "text/event-stream" } });
-        });
+        }, "claude-opus-5");
         let finished = false;
         const planning = requestCreativeChatPlan({ ...config, model: "claude-opus-5" }, [generated("target")], user("查看后改浅颜色"), { onPhase: (value) => phases.push(value), onDelta: (value) => visibleText.push(value) }).then((plan) => { finished = true; return plan; });
         try {

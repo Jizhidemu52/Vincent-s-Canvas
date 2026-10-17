@@ -2,6 +2,7 @@ import { getToolDefinition, resolveToolKey, type ToolKey } from "../../shared/fe
 import type { Database } from "./db";
 import { modelSupportsOperation } from "./billing";
 import { assertModuleEnabled } from "./module-flags";
+import { DEFAULT_CHAT_MODEL_TOOL_KEY } from "./chat-model-policy";
 
 export type ToolConfiguration = {
   toolKey: ToolKey;
@@ -36,7 +37,7 @@ export async function readToolConfiguration(db: Pick<Database, "query">, toolKey
   return result.rows[0] ?? { toolKey, modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 };
 }
 
-/** Resolve once at submission; a configured binding never silently swaps stale client parameters. */
+/** Chat always uses the administrator's shared model; image bindings still reject stale parameters. */
 export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   operationType: string; toolKey?: string | null; parameters?: Record<string, unknown>;
   modelConfigId?: string | null; modelId?: string | null;
@@ -50,7 +51,11 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
     throw new ToolConfigurationError("TOOL_DISABLED", "所属功能的模型调用已停用", 403);
   }
   const requested = input.modelConfigId ?? input.modelId;
-  const selected = configuration.modelConfigId ?? requested;
+  const isChat = input.operationType === "chat";
+  const modelConfiguration = isChat && toolKey !== DEFAULT_CHAT_MODEL_TOOL_KEY
+    ? await readToolConfiguration(db, DEFAULT_CHAT_MODEL_TOOL_KEY) : configuration;
+  const selected = isChat ? modelConfiguration.modelConfigId : configuration.modelConfigId ?? requested;
+  if (isChat && !selected) throw new ToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", "管理员尚未配置统一对话模型", 503);
   if (!selected) throw new ToolConfigurationError("MODEL_REQUIRED", "请先选择一个已启用的模型");
   const result = await db.query<{
     id: string; modelId: string; enabled: boolean; providerEnabled: boolean;
@@ -63,7 +68,7 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   const model = result.rows[0];
   if (!model || !model.enabled || !model.providerEnabled) throw new ToolConfigurationError("MODEL_DISABLED", "模型或 Provider 不存在或未启用");
   if (model.workflowConfigId && !model.workflowEnabled) throw new ToolConfigurationError("WORKFLOW_DISABLED", "模型工作流未启用");
-  if (configuration.modelConfigId && requested && requested !== model.id && requested !== model.modelId) {
+  if (!isChat && configuration.modelConfigId && requested && requested !== model.id && requested !== model.modelId) {
     throw new ToolConfigurationError("TOOL_MODEL_CHANGED", "管理员已更改该板块模型，请刷新模型配置和参数后重试", 409);
   }
   if (toolKey === "midjourney-blend" && model.modelId !== "midjourney-blend") {

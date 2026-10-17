@@ -397,7 +397,11 @@ try {
     for (const variant of (savedPlanReplay ? [0] : [0, 1])) await run({ id: savedPlanReplay?.replayCaseId || `chat-knit-${variant ? 'B' : 'A'}${!variant && ['tools-compatible', 'responses'].includes(process.env.MARK_QA_CHAT_RETEST) ? `-${process.env.MARK_QA_CHAT_RETEST}` : ''}`, tool: 'gpt-chat-image', scenario: savedPlanReplay ? 'Replay the exact paid Responses plan; only the image task can incur a new charge' : variant ? 'Mark text plans button replacement, Nano edit' : 'Mark text plans neckline recolor, Sunburst edit', ...(savedPlanReplay ? { replayedFromCaseId: savedPlanReplay.sourceCaseId } : {}) }, async () => {
       await page.goto(`${origin}/chat`);
       if (variant) await page.getByRole('button', { name: '新建对话', exact: true }).click();
-      await page.getByLabel('对话模型', { exact: true }).selectOption(chatModelId);
+      const configurationResponse = await context.request.get(`${origin}/api/models`);
+      assert.ok(configurationResponse.ok(), 'Unable to verify the administrative chat binding before paid QA');
+      const configuration = await configurationResponse.json();
+      assert.equal(configuration.tools.find(tool => tool.toolKey === 'gpt-chat')?.modelConfigId, chatModelId, 'Paid QA requires the explicitly budgeted chat model to be bound in the backend; the runner never changes that binding');
+      assert.equal(await page.getByLabel('对话模型', { exact: true }).count(), 0, 'Designer LLM selection must remain hidden');
       await page.getByLabel('出图模型', { exact: true }).selectOption(modelIds[variant ? 2 : 1]);
       await page.getByTestId(variant ? 'chat-image-quality' : 'chat-image-resolution').selectOption(variant ? '2k' : '1k');
       if (!variant) await page.getByTestId('chat-image-quality').selectOption('high');

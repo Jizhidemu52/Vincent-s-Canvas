@@ -72,11 +72,11 @@ describe("排版仅移动位置，组与批次不可拆分", () => {
 });
 
 describe("本地改款对比", () => {
-    test("two explicit selected images take priority; same title alone is not a version", () => {
+    test("two explicit selected images take priority; same names and nearby versions cannot imply lineage", () => {
         const a = node("a"), b = node("b"), c = { ...node("c"), metadata: { ...node("c").metadata, imageVersion: 2 } };
         expect(chooseCanvasComparePair([a, b, c], ["b", "a"])).toEqual(["b", "a"]);
-        expect(chooseCanvasComparePair([a, b, c], ["a"])).toEqual(["a", "c"]);
-        expect(chooseCanvasComparePair([a, b], ["a"])).toEqual(["a", ""]);
+        expect(chooseCanvasComparePair([a, b, c], ["a"])).toEqual(["", "a"]);
+        expect(chooseCanvasComparePair([a, b], ["a"])).toEqual(["", "a"]);
         expect(canvasCompareImages([{ ...a, metadata: undefined }])).toEqual([]);
     });
     test("contain rect never stretches aspect ratio", () => {

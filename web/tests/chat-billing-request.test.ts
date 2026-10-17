@@ -8,7 +8,7 @@ afterEach(() => { globalThis.fetch = originalFetch; });
 test("each model call has its own billing ID; explicit transport replay retains that ID", async () => {
     const ids: string[] = [];
     globalThis.fetch = (async (url, init) => {
-        if (String(url) === "/api/models") return Response.json({ models: [{ id: "fixture-chat", modelId: "fixture-chat", name: "fixture", capabilities: ["chat"], creditCost: 7, rmbCost: 0 }], tools: [], prices: [] });
+        if (String(url) === "/api/models") return Response.json({ models: [{ id: "fixture-chat", modelId: "fixture-chat", name: "fixture", capabilities: ["chat"], creditCost: 7, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: "fixture-chat", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }], prices: [] });
         expect(String(url)).toBe("/api/chat/responses");
         ids.push(JSON.parse(String(init?.body)).requestId);
         return Response.json({ content: "fixture answer", toolCalls: [] });

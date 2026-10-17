@@ -22,6 +22,7 @@ function chatPageHarness(initial: BusinessConfig) {
     type State = BusinessConfig & { status: "ready" | "loading" | "error"; error: string | null; refresh: () => Promise<void> };
     let refreshes = 0;
     let directModelReads = 0;
+    const plannedConfigs: Array<{ model: string; textModel: string }> = [];
     let business: State = { ...initial, status: "ready", error: null, refresh: async () => { refreshes++; } };
     const values: any[] = [];
     const effects: Array<{ deps?: DependencyList; cleanup?: ReturnType<EffectCallback> }> = [];
@@ -53,7 +54,8 @@ function chatPageHarness(initial: BusinessConfig) {
         "react-router-dom": { useNavigate: () => () => undefined },
         "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: true, creditsEnabled: false } },
         "@/lib/deferred-persist-queue": { createDeferredPersistQueue: () => ({ schedule() {}, flush() {}, clear() {} }) },
-        "./chat-session-storage": { chatSessionStorage: { load: async () => [{ id: "session", title: "new", messages: [], updatedAt: "now" }], save: async () => undefined } },
+        "./chat-session-storage": { chatSessionStorage: { load: async () => [{ id: "session", title: "new", messages: [], updatedAt: "now", chatModelId: "saved-old-model" }], save: async () => undefined } },
+        "@/services/api/creative-chat": { requestCreativeChatPlan: async (config: { model: string; textModel: string }) => { plannedConfigs.push(config); return { kind: "discussion", content: "已收到" }; } },
         "@/stores/use-user-store": { useUserStore: Object.assign((select: Function) => select(userState), { getState: () => userState }) },
         "@/stores/use-config-store": { useConfigStore: (select: Function) => select({ updateConfig() {} }), useEffectiveConfig: () => config },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select?: Function) => select ? select(business) : business },
@@ -73,48 +75,62 @@ function chatPageHarness(initial: BusinessConfig) {
         async settle() { let root = render(); for (let index = 0; index < 4; index++) { await Promise.resolve(); root = render(); } return elements(root); },
         dispose: () => effects.forEach(effect => effect.cleanup?.()),
         counts: () => ({ refreshes, directModelReads }),
+        plannedConfigs,
     };
 }
 
 const model = (id: string, capability: string) => ({ id, modelId: id, name: id, capabilities: [capability], creditCost: 0, rmbCost: 0 });
 const tool = (toolKey: string, modelConfigId: string) => ({ toolKey, modelConfigId, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 });
 const select = (tree: ReactElement<any>[], label: string) => tree.find(element => element.type === "select" && element.props["aria-label"] === label)!;
+const sendButton = (tree: ReactElement<any>[]) => tree.find(element => element.type === "Button" && element.props.children === "发送")!;
+const draftInput = (tree: ReactElement<any>[]) => tree.find(element => element.type === "textarea" && element.props["aria-label"] === "对话内容")!;
+const visibleText = (tree: ReactElement<any>[]) => tree.flatMap(element => [element.props.children, element.props.title]).filter(value => typeof value === "string").join(" ");
 
-test("mounted Sonnet UUID shows native stream/token controls and documented channel-default thinking", async () => {
+test("managed Sonnet retains stream/token controls without exposing a model picker or model name", async () => {
     const sonnetId = "d5000000-0000-4000-8000-000000000010";
     const astraId = "d5000000-0000-4000-8000-000000000004";
     const page = chatPageHarness({ models: [
         { ...model(sonnetId, "chat"), parameterModelId: "claude-sonnet-5-5", name: "claude-sonnet-5-5" },
         { ...model(astraId, "chat"), parameterModelId: "gpt-6-astra", name: "gpt-6-astra" },
         model("image", "generate"),
-    ], tools: [], prices: [] });
+    ], tools: [tool("gpt-chat", sonnetId)], prices: [] });
     try {
         const tree = await page.settle();
-        expect(select(tree, "对话模型").props.value).toBe(sonnetId);
+        expect(select(tree, "对话模型")).toBeUndefined();
+        expect(visibleText(tree)).toContain("对话改图");
+        expect(visibleText(tree)).not.toContain("claude-sonnet-5-5");
         const control = tree.find(element => typeof element.type === "function" && element.type.name === "ClaudeChatControls")!;
         expect(control).toBeDefined();
         expect(control.props.model).toBe("claude-sonnet-5-5");
         const controls = elements((control.type as Function)(control.props));
+        expect(visibleText(controls)).not.toContain("Claude");
+        expect(visibleText(controls)).not.toContain("Sonnet");
         expect(controls.filter(element => element.type === "input" && element.props.type === "checkbox")).toHaveLength(1);
         expect(controls.find(element => element.type === "span" && element.props.children === "思考模式 · 渠道默认")).toBeDefined();
         expect(controls.find(element => element.type === "select")?.props.value).toBe(defaultConfig.claudeMaxTokens);
         expect(controls.find(element => element.type === "a")?.props.href).toBe("https://docs.apib.ai/cn/api-reference/texts/general/claude-messages");
-        select(tree, "对话模型").props.onChange({ target: { value: astraId } });
+        page.set({ tools: [tool("gpt-chat", astraId)] });
         expect((await page.settle()).some(element => typeof element.type === "function" && element.type.name === "ClaudeChatControls")).toBe(false);
     } finally { page.dispose(); }
 });
 
-test("the mounted chat page follows newly added bound chat and anonymous image models from one shared snapshot", async () => {
-    const page = chatPageHarness({ models: [model("old-chat", "chat"), model("old-image", "generate")], tools: [], prices: [] });
+test("the mounted chat follows a changed administrative binding despite a stale saved session model", async () => {
+    const page = chatPageHarness({ models: [model("old-chat", "chat"), model("old-image", "generate")], tools: [tool("gpt-chat", "old-chat")], prices: [] });
     try {
         const initial = await page.settle();
-        expect(select(initial, "对话模型").props.value).toBe("old-chat");
+        expect(select(initial, "对话模型")).toBeUndefined();
+        draftInput(initial).props.onChange({ target: { value: "hello" } });
+        sendButton(await page.settle()).props.onClick();
+        await page.settle();
+        expect(page.plannedConfigs.at(-1)).toMatchObject({ model: "old-chat", textModel: "old-chat" });
         page.set({ models: [model("new-chat", "chat"), { ...model("opaque-image", "generate"), imageParameterProfile: "standard-flex-plus", modelIdentityHidden: true }], tools: [tool("gpt-chat", "new-chat"), tool("gpt-chat-image", "opaque-image")] });
         const refreshed = await page.settle();
-        const chat = select(refreshed, "对话模型");
-        expect(chat.props.value).toBe("new-chat");
-        expect(chat.props.disabled).toBe(false);
-        expect(elements(chat).filter(element => element.type === "option").map(element => element.props.value)).toEqual(["new-chat"]);
+        expect(select(refreshed, "对话模型")).toBeUndefined();
+        expect(visibleText(refreshed)).not.toContain("new-chat");
+        draftInput(refreshed).props.onChange({ target: { value: "again" } });
+        sendButton(await page.settle()).props.onClick();
+        await page.settle();
+        expect(page.plannedConfigs.at(-1)).toMatchObject({ model: "new-chat", textModel: "new-chat" });
         const quality = select(refreshed, "图片清晰度");
         expect(quality.props.disabled).toBe(false);
         expect(elements(quality).some(element => element.type === "option" && element.props.value === "xhigh")).toBe(true);
@@ -123,13 +139,15 @@ test("the mounted chat page follows newly added bound chat and anonymous image m
 });
 
 test("chat disables stale models on shared loading/error and retry refreshes the same store", async () => {
-    const page = chatPageHarness({ models: [model("chat", "chat"), model("image", "generate")], tools: [], prices: [] });
+    const page = chatPageHarness({ models: [model("chat", "chat"), model("image", "generate")], tools: [tool("gpt-chat", "chat")], prices: [] });
     try {
-        await page.settle();
+        draftInput(await page.settle()).props.onChange({ target: { value: "test" } });
+        expect(sendButton(await page.settle()).props.disabled).toBe(false);
         for (const status of ["loading", "error"] as const) {
             page.set({ status, error: status === "error" ? "同步失败" : null });
             const tree = await page.settle();
-            expect(select(tree, "对话模型").props.disabled).toBe(true);
+            expect(select(tree, "对话模型")).toBeUndefined();
+            expect(sendButton(tree).props.disabled).toBe(true);
             expect(select(tree, "图片清晰度").props.disabled).toBe(true);
             if (status === "error") tree.find(element => element.type === "Button" && element.props.children === "重试加载")!.props.onClick();
         }
@@ -137,31 +155,44 @@ test("chat disables stale models on shared loading/error and retry refreshes the
     } finally { page.dispose(); }
 });
 
-test("mounted chat model pickers show trimmed usage descriptions while preserving model IDs and selection", async () => {
+test("a missing or broken unified binding disables chat without exposing or using another available model", async () => {
+    const page = chatPageHarness({ models: [model("chat", "chat"), model("image", "generate")], tools: [], prices: [] });
+    try {
+        draftInput(await page.settle()).props.onChange({ target: { value: "test" } });
+        for (const tools of [[], [tool("gpt-chat", "removed")], [tool("gpt-chat", "image")]]) {
+            page.set({ tools });
+            const tree = await page.settle();
+            expect(select(tree, "对话模型")).toBeUndefined();
+            expect(sendButton(tree).props.disabled).toBe(true);
+            expect(visibleText(tree)).toContain("对话服务暂不可用");
+            sendButton(tree).props.onClick();
+            await page.settle();
+        }
+        expect(page.plannedConfigs).toEqual([]);
+    } finally { page.dispose(); }
+});
+
+test("image choices retain usage descriptions while all LLM choices and labels remain hidden", async () => {
     const page = chatPageHarness({ models: [
         { ...model("chat-primary-config", "chat"), modelId: "chat-primary", name: "通用对话", publicDescription: "  日常问答与推理  " },
         { ...model("chat-secondary-config", "chat"), modelId: "chat-secondary", name: "长文对话" },
         { ...model("image-primary-config", "generate"), modelId: "image-primary", name: "快速出图", publicDescription: "  适合草稿探索  " },
         { ...model("image-secondary-config", "generate"), modelId: "image-secondary", name: "精细出图", publicDescription: "   " },
-    ], tools: [], prices: [] });
+    ], tools: [tool("gpt-chat", "chat-primary-config")], prices: [] });
     try {
         const initial = await page.settle();
-        const chat = select(initial, "对话模型");
+        expect(select(initial, "对话模型")).toBeUndefined();
         const image = select(initial, "出图模型");
-        expect(elements(chat).filter(element => element.type === "option").map(element => ({ value: element.props.value, label: element.props.children }))).toEqual([
-            { value: "chat-primary", label: "通用对话 · 日常问答与推理" },
-            { value: "chat-secondary", label: "长文对话" },
-        ]);
+        expect(visibleText(initial)).not.toContain("通用对话");
+        expect(visibleText(initial)).not.toContain("长文对话");
         expect(elements(image).filter(element => element.type === "option").map(element => ({ value: element.props.value, label: element.props.children }))).toEqual([
             { value: "image-primary", label: "快速出图 · 适合草稿探索" },
             { value: "image-secondary", label: "精细出图" },
         ]);
-        expect(chat.props.value).toBe("chat-primary");
         expect(image.props.value).toBe("image-primary");
-        chat.props.onChange({ target: { value: "chat-secondary" } });
         image.props.onChange({ target: { value: "image-secondary" } });
         const changed = await page.settle();
-        expect(select(changed, "对话模型").props.value).toBe("chat-secondary");
+        expect(select(changed, "对话模型")).toBeUndefined();
         expect(select(changed, "出图模型").props.value).toBe("image-secondary");
     } finally { page.dispose(); }
 });
@@ -170,7 +201,7 @@ test("switching the mounted chat image picker updates GPT, Nano2.1, and official
     const markGpt = { ...model("mark-gpt-uuid", "generate"), name: "aplmart-gpt2.5-flare", imageParameterProfile: "quality-resolution" };
     const markNano = { ...model("mark-nano-uuid", "generate"), name: "aplmart-nano2.1", imageParameterProfile: "resolution-1k" };
     const markNanoOfficial = { ...model("mark-nano-official-uuid", "generate"), name: "aplmart-nano2", imageParameterProfile: "resolution", imageSupportsMask: false, imageSupportsOfficialFallback: false };
-    const page = chatPageHarness({ models: [model("chat", "chat"), markGpt, markNano, markNanoOfficial], tools: [], prices: [] });
+    const page = chatPageHarness({ models: [model("chat", "chat"), markGpt, markNano, markNanoOfficial], tools: [tool("gpt-chat", "chat")], prices: [] });
     try {
         const initial = await page.settle();
         expect(select(initial, "出图模型").props.value).toBe("mark-gpt-uuid");
@@ -183,7 +214,7 @@ test("switching the mounted chat image picker updates GPT, Nano2.1, and official
         expect(select(changed, "图片质量").props.value).toBe("max");
         select(changed, "出图模型").props.onChange({ target: { value: "mark-nano-uuid" } });
         const nano = await page.settle();
-        expect(select(nano, "对话模型").props.value).toBe("chat");
+        expect(select(nano, "对话模型")).toBeUndefined();
         expect(select(nano, "出图模型").props.value).toBe("mark-nano-uuid");
         expect(select(nano, "图片分辨率")).toBeUndefined();
         expect(select(nano, "图片质量")).toBeUndefined();
@@ -191,7 +222,7 @@ test("switching the mounted chat image picker updates GPT, Nano2.1, and official
         expect(elements(select(nano, "图片清晰度")).filter(element => element.type === "option").map(element => element.props.value)).toEqual(["1k", "2k", "4k"]);
         select(nano, "出图模型").props.onChange({ target: { value: "mark-nano-official-uuid" } });
         const nanoOfficial = await page.settle();
-        expect(select(nanoOfficial, "对话模型").props.value).toBe("chat");
+        expect(select(nanoOfficial, "对话模型")).toBeUndefined();
         expect(select(nanoOfficial, "出图模型").props.value).toBe("mark-nano-official-uuid");
         expect(select(nanoOfficial, "图片分辨率")).toBeUndefined();
         expect(select(nanoOfficial, "图片质量")).toBeUndefined();

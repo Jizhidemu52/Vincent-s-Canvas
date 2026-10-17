@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 type PublicModel = { id: string; modelId: string; parameterModelId?: string; capabilities: string[] };
 
-test("demo exposes exactly the three requested chat choices and isolates Sonnet Messages, SSE, and Astra Responses", async () => {
+test("demo defaults every chat entry to Sonnet Messages and SSE regardless of stale client model choices", async () => {
   const calls: Array<{ path: string; headers: Headers; body: any }> = [];
   const assistantContent = [
     { type: "thinking", thinking: "", signature: "opaque-demo-signature" },
@@ -62,6 +62,8 @@ test("demo exposes exactly the three requested chat choices and isolates Sonnet 
     const openTokenAstra = chats.find(model => model.modelId === "gpt-6-astra")!;
     expect(sonnet).toBeDefined(); expect(markAstra).toBeDefined(); expect(openTokenAstra).toBeDefined();
     expect(sonnet.modelId).toBe(sonnet.id);
+    expect(catalog.tools.find((tool: any) => tool.toolKey === "gpt-chat").modelConfigId).toBe(sonnet.id);
+    expect(catalog.tools.find((tool: any) => tool.toolKey === "canvas-chat").modelConfigId).toBe(sonnet.id);
     expect(JSON.stringify(catalog)).not.toMatch(/isolated-mark-key|isolated-opentoken-key|wrong-legacy-key|127\.0\.0\.1/);
     const tools = [{ type: "function", name: "read_node", parameters: { type: "object", properties: { id: { type: "string" } } } }];
     const response = await chat(sonnet.id, { tools, toolChoice: "required", claude: { maxTokens: 4096, thinking: true } });
@@ -76,9 +78,10 @@ test("demo exposes exactly the three requested chat choices and isolates Sonnet 
     expect(stream.headers.get("content-type")).toContain("text/event-stream");
     expect(await stream.text()).toBe(events);
     expect(calls[1]!.body).toEqual({ model: "claude-sonnet-5-5", max_tokens: 16384, stream: true, messages: [{ role: "assistant", content: assistantContent }, { role: "user", content: [{ type: "tool_result", tool_use_id: "read-1", content: "Cable knit" }] }] });
-    expect(await (await chat(markAstra.id)).json()).toMatchObject({ content: "APIMart Astra reply.", toolCalls: [] });
-    expect(await (await chat(openTokenAstra.id)).json()).toMatchObject({ content: "OpenToken Astra reply.", toolCalls: [] });
-    expect(calls.map(call => call.path)).toEqual(["/mark/v1/messages", "/mark/v1/messages", "/mark/v1/responses", "/opentoken/v1/responses"]);
+    expect(await (await chat(markAstra.id)).json()).toMatchObject({ claudeAssistantContent: assistantContent });
+    expect(await (await chat(openTokenAstra.id, { toolKey: "canvas-chat" })).json()).toMatchObject({ claudeAssistantContent: assistantContent });
+    expect(await (await chat("forged-client-model", { toolKey: undefined })).json()).toMatchObject({ claudeAssistantContent: assistantContent });
+    expect(calls.map(call => call.path)).toEqual(Array(5).fill("/mark/v1/messages"));
   } finally {
     child.kill(); await child.exited; provider.stop(true);
   }

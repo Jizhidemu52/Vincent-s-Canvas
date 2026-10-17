@@ -25,7 +25,7 @@ export const toolDefinitions = [
   { toolKey: "canvas-chat", label: "画布 Agent / 文字与反推", group: "无线画布", operationType: "chat", operations: ["chat"], capabilities: ["chat"], parent: "canvas" },
   { toolKey: "canvas-video", label: "画布视频生成", group: "无线画布", operationType: "video_generation", operations: ["video_generation"], capabilities: ["video"], parent: "canvas" },
   { toolKey: "canvas-audio", label: "画布音频生成", group: "无线画布", operationType: "audio_generation", operations: ["audio_generation"], capabilities: ["audio"], parent: "canvas" },
-  { toolKey: "gpt-chat", label: "独立对话 / 附件分析", group: "对话", operationType: "chat", operations: ["chat"], capabilities: ["chat"], parent: null },
+  { toolKey: "gpt-chat", label: "对话改图", group: "对话", operationType: "chat", operations: ["chat"], capabilities: ["chat"], parent: null },
   { toolKey: "gpt-chat-image", label: "对话生图与连续改图", group: "对话", operationType: "image_generation", operations: ["image_generation", "inpaint"], capabilities: ["generate", "edit"], parent: "gpt-chat" },
 ] as const;
 
@@ -52,7 +52,7 @@ export const nonAiDefinitions = [
 
 export const moduleDefinitions = [
   ...nonAiDefinitions,
-  ...toolDefinitions.map((tool) => ({ moduleKey: tool.toolKey, label: tool.label, group: tool.group, kind: "ai" as const, parent: tool.parent, description: "独立模型绑定与开关；可设置本板块费用覆盖，积分总开关关闭时不扣分" })),
+  ...toolDefinitions.map((tool) => ({ moduleKey: tool.toolKey, label: tool.label, group: tool.group, kind: "ai" as const, parent: tool.parent, description: tool.operationType === "chat" ? "模型由后台“对话改图”统一指定；本板块开关与费用独立，积分总开关关闭时不扣分" : "独立模型绑定与开关；可设置本板块费用覆盖，积分总开关关闭时不扣分" })),
 ];
 export type ModuleKey = (typeof moduleDefinitions)[number]["moduleKey"];
 export const moduleKeys = moduleDefinitions.map((item) => item.moduleKey) as [ModuleKey, ...ModuleKey[]];

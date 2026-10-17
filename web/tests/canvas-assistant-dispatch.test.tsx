@@ -20,6 +20,7 @@ import * as toolRuntime from "@/services/api/tool-runtime";
 import { createAgentMediaWorkflow } from "@/lib/canvas/agent-media-workflow";
 
 const requireModule = createRequire(new URL("../src/components/canvas/canvas-assistant-panel.tsx", import.meta.url));
+const requireToolConfigModule = createRequire(new URL("../src/hooks/use-tool-config.ts", import.meta.url));
 const source = readFileSync(new URL("../src/components/canvas/canvas-assistant-panel.tsx", import.meta.url), "utf8");
 const code = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
@@ -51,6 +52,11 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
             { id: "video-model", name: config.videoModel, modelId: config.videoModel, capabilities: ["video"], creditCost: 0, rmbCost: 0 },
         ], prices: [], tools: options.tools || [],
     };
+    if (!business.tools.some(item => item.toolKey === "gpt-chat")) business.tools = [
+        ...business.tools,
+        { toolKey: "gpt-chat", modelConfigId: business.models.find(model => model.capabilities.includes("chat"))?.id || null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 },
+    ];
+    const businessState = { ...business, status: "ready" as const, refresh: async () => undefined };
     let sessions: CanvasAssistantSession[] = options.history ? [{ id: "history", title: "History", createdAt: "2026-09-06", updatedAt: "2026-09-06", messages: options.history }] : [];
     let activeSessionId: string | null = null;
     const sessionCommits: Array<{ sessions: CanvasAssistantSession[]; activeId: string | null }> = [];
@@ -112,7 +118,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         "@/stores/canvas/use-canvas-agent-store": { useCanvasAgentStore: (selector: (state: unknown) => unknown) => selector({ confirmTools: options.confirmTools || false, setAgentState: () => undefined }) },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },
         "@/stores/use-module-store": { isModuleAvailable, useModuleEnabled: (key: ModuleKey) => isModuleAvailable(flags, business.tools, key), useModuleStore: (selector: (state: unknown) => unknown) => selector({ flags, status: "ready" }) },
-        "@/stores/use-business-config-store": { useBusinessConfigStore: Object.assign((selector: (state: BusinessConfig) => unknown) => selector(business), { getState: () => business }) },
+        "@/stores/use-business-config-store": { useBusinessConfigStore: Object.assign((selector: (state: typeof businessState) => unknown) => selector(businessState), { getState: () => businessState }) },
         "@/services/api/tool-runtime": { ...toolRuntime, resolveToolConfig: async (config: configModule.AiConfig, operation: string, key?: string) => {
             const toolKey = toolRuntime.requireToolKey(operation, key);
             const resolved = toolRuntime.applyToolModel(config, business, toolKey);
@@ -145,7 +151,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     // Execute the real hook against this harness's React dispatcher and scoped stores.
     // No global Zustand state or network configuration leaks into manual renders.
     const toolConfigModule = { exports: {} as any };
-    new Function("require", "module", "exports", toolConfigCode)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), toolConfigModule, toolConfigModule.exports);
+    new Function("require", "module", "exports", toolConfigCode)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireToolConfigModule(name), toolConfigModule, toolConfigModule.exports);
     dependencies["@/hooks/use-tool-config"] = toolConfigModule.exports;
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
@@ -304,7 +310,7 @@ describe("canvas assistant submission", () => {
             { id: "mark-gpt2", modelId: "mark-gpt2", name: "aplmart-gpt2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
         ];
         for (const [saved, expected] of [[configModule.defaultConfig.imageModel, "mark-gpt2"], ["first", "first"], ["removed", "mark-gpt2"]]) {
-            const harness = panelHarness({ replies: [], config: { imageModel: saved }, models, imageCapabilities: models });
+            const harness = panelHarness({ replies: [], config: { imageModel: saved }, models: [...models, { id: "text-model", modelId: "text-model", name: "Text model", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], imageCapabilities: models });
             await harness.ready();
             expect(harness.composer().props.generationControls.props.settings.imageModel).toBe(expected);
             expect(harness.requests).toHaveLength(0);

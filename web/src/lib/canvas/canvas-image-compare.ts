@@ -1,5 +1,8 @@
-import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { sha256 } from "@noble/hashes/sha256";
+import { bytesToHex } from "@noble/hashes/utils";
+import { CanvasNodeType, type CanvasCompareSource, type CanvasNodeData } from "@/types/canvas";
 import { getImageBlob } from "@/services/image-storage";
+import { inlineCompareSources } from "./canvas-inline-compare";
 
 export type CanvasCompareMode = "slider" | "side" | "overlay" | "difference";
 export type CanvasCompareZoom = "fit" | 1 | 2 | 4;
@@ -43,12 +46,71 @@ export function canvasComparePreviewScale(width: number, height: number, viewpor
     return zoom === "fit" ? Math.min(1, Math.max(1, viewportWidth) / width, Math.max(1, viewportHeight) / height) : zoom;
 }
 export function canvasCompareImages(nodes: CanvasNodeData[]) { return nodes.filter(node => node.type === CanvasNodeType.Image && Boolean(node.metadata?.content || node.metadata?.storageKey)); }
-export function chooseCanvasComparePair(nodes: CanvasNodeData[], selected: readonly string[]) {
+
+type CompareMedia = { content?: string; storageKey?: string };
+function sameCompareMedia(a: CompareMedia | undefined, b: CompareMedia | undefined) {
+    if (a?.storageKey && b?.storageKey) return a.storageKey === b.storageKey;
+    return Boolean(a?.content && b?.content && a.content === b.content);
+}
+
+/** Names, versions and mutable node IDs are not media identity. */
+export function canvasCompareSameImage(a: CanvasNodeData, b: CanvasNodeData) {
+    return sameCompareMedia(a.metadata, b.metadata);
+}
+
+function snapshotCompareImage(source: CanvasCompareSource): CanvasNodeData {
+    const identity = source.storageKey ? `storageKey:${source.storageKey}` : `content:${source.content}`;
+    return {
+        id: `canvas-compare-source:${bytesToHex(sha256(identity))}`,
+        type: CanvasNodeType.Image,
+        title: source.label || "来源图片",
+        // Read-only candidates are never inserted into the canvas. Their original dimensions are unknown.
+        position: { x: 0, y: 0 }, width: 0, height: 0,
+        metadata: { content: source.content, ...(source.storageKey ? { storageKey: source.storageKey } : {}) },
+    };
+}
+
+function findCompareSource(images: CanvasNodeData[], current: CanvasNodeData, source: CanvasCompareSource) {
+    const matches = images.filter(image => image.id !== current.id && !canvasCompareSameImage(image, current) && sameCompareMedia(image.metadata, source));
+    return matches.find(image => source.storageKey && image.metadata?.storageKey === source.storageKey) || matches[0];
+}
+
+/** Include saved originals even after the canvas node that held them is overwritten or deleted. */
+export function canvasCompareCandidates(nodes: CanvasNodeData[]) {
     const images = canvasCompareImages(nodes);
-    const chosen = selected.map(id => images.find(node => node.id === id)).filter((node): node is CanvasNodeData => Boolean(node));
-    const first = chosen[0] || images[0];
-    const sameSource = first?.metadata?.imageName ? images.filter(node => node.id !== first.id && node.metadata?.imageName === first.metadata?.imageName && node.metadata?.imageVersion !== first.metadata?.imageVersion).sort((a, b) => Math.abs((a.metadata?.imageVersion || 1) - (first.metadata?.imageVersion || 1)) - Math.abs((b.metadata?.imageVersion || 1) - (first.metadata?.imageVersion || 1))) : [];
-    return [first?.id || "", chosen[1]?.id || sameSource[0]?.id || ""] as const;
+    const candidates = [...images];
+    // Prefer a durable snapshot over another snapshot containing only the same display URL.
+    const snapshots = images.flatMap(current => inlineCompareSources(current).sources.map(source => ({ current, source })))
+        .sort((a, b) => Number(Boolean(b.source.storageKey)) - Number(Boolean(a.source.storageKey)));
+    for (const { current, source } of snapshots) {
+        if (!sameCompareMedia(current.metadata, source) && !findCompareSource(candidates, current, source)) candidates.push(snapshotCompareImage(source));
+    }
+    return candidates;
+}
+
+export function canvasCompareSources(nodes: CanvasNodeData[], current: CanvasNodeData): { images: CanvasNodeData[]; automatic: boolean } {
+    const { sources, automatic } = inlineCompareSources(current);
+    const candidates = canvasCompareCandidates(nodes);
+    const images: CanvasNodeData[] = [];
+    for (const source of sources) {
+        if (sameCompareMedia(current.metadata, source)) continue;
+        const image = findCompareSource(candidates, current, source) || snapshotCompareImage(source);
+        if (!images.some(candidate => canvasCompareSameImage(candidate, image))) images.push(image);
+    }
+    return { images, automatic: automatic && images.length === 1 };
+}
+
+export function chooseCanvasComparePair(nodes: CanvasNodeData[], selected: readonly string[]) {
+    const images = canvasCompareCandidates(nodes);
+    const chosen: CanvasNodeData[] = [];
+    for (const id of selected) {
+        const image = images.find(node => node.id === id);
+        if (image && !chosen.some(node => node.id === image.id || canvasCompareSameImage(node, image))) chosen.push(image);
+        if (chosen.length === 2) return [chosen[0].id, chosen[1].id] as const;
+    }
+    if (!chosen[0]) return ["", ""] as const;
+    const sources = canvasCompareSources(nodes, chosen[0]);
+    return [sources.automatic ? sources.images[0].id : "", chosen[0].id] as const;
 }
 export function compareContainRect(width: number, height: number, boxWidth: number, boxHeight: number) {
     const scale = Math.min(boxWidth / Math.max(1, width), boxHeight / Math.max(1, height));

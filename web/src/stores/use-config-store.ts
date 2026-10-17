@@ -7,6 +7,7 @@ import { deploymentFeatures } from "@/lib/deployment-features";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { DEFAULT_IMAGE_MODEL, preferredImageModel } from "@/lib/default-image-model";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { resolveToolModel } from "@/services/api/business-config";
 
 export type ApiCallFormat = "openai" | "gemini";
 
@@ -283,13 +284,15 @@ export function stripClientProviderSecrets(config: Partial<AiConfig>): AiConfig 
 export function useEffectiveConfig() {
     const config = useConfigStore((state) => state.config);
     const models = useBusinessConfigStore((state) => state.models);
+    const tools = useBusinessConfigStore((state) => state.tools);
     const status = useBusinessConfigStore((state) => state.status);
     return useMemo(() => {
         const available = models.filter(model => !model.modelId.startsWith("demo-") && model.capabilities.some(capability => capability === "generate" || capability === "edit"));
         const imageModel = status === "ready" ? preferredImageModel(available, [config.imageModel, config.model])?.modelId || config.imageModel : config.imageModel;
-        return { ...config, channelMode: "local" as const, imageModel,
+        const textModel = status === "ready" ? resolveToolModel({ models, tools, prices: [] }, "canvas-chat")?.modelId || "" : "";
+        return { ...config, channelMode: "local" as const, imageModel, textModel,
             model: config.model === config.imageModel || config.model === DEFAULT_IMAGE_MODEL ? imageModel : config.model };
-    }, [config, models, status]);
+    }, [config, models, tools, status]);
 }
 
 export function createModelChannel(channel?: Partial<ModelChannel>): ModelChannel {
