@@ -129,7 +129,7 @@ function generationToolDefinition(name: string, description: string, mode?: "tex
             autoRun: { type: "boolean" },
             ...GENERATION_OPTION_PROPERTIES,
         },
-        name === "canvas_generate_image" ? ["prompt", "editIntent"] : ["prompt"],
+        name === "canvas_generate_image" ? ["prompt", "editIntent", "editContract"] : ["prompt"],
     );
 }
 

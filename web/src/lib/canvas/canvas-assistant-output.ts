@@ -58,11 +58,23 @@ export function canvasAssistantDisplayMessage(message: CanvasAssistantMessage): 
 const QUOTED_LITERAL = /"[^"\n]*"|“[^”\n]*”|'[^'\n]*'|‘[^’\n]*’|「[^」\n]*」/gu;
 const ENGLISH_LITERAL_LABEL = /\b(?:text|wording|words?|logo|label|lettering|inscription|reads?|reading|brand(?: name)?)\s*(?:(?:must|should)\s+be\s*|(?:is|as|says?|reads?)\s*)?[:=]?\s*$/iu;
 
-function instructionsWithoutArtworkLiterals(prompt: string): string {
+export function instructionsWithoutArtworkLiterals(prompt: string): string {
     return prompt.replace(QUOTED_LITERAL, (literal, offset: number) => {
         const introduction = prompt.slice(Math.max(0, offset - 100), offset);
         return ENGLISH_LITERAL_LABEL.test(introduction) ? " literal " : literal;
     });
+}
+
+/** Transform instruction spans only; explicit artwork wording is literal data, not a reference expression. */
+export function transformImagePromptInstructions(prompt: string, transform: (text: string) => string): string {
+    let start = 0, result = "";
+    for (const match of prompt.matchAll(QUOTED_LITERAL)) {
+        const index = match.index!;
+        if (!ENGLISH_LITERAL_LABEL.test(prompt.slice(Math.max(0, index - 100), index))) continue;
+        result += transform(prompt.slice(start, index)) + match[0];
+        start = index + match[0].length;
+    }
+    return result + transform(prompt.slice(start));
 }
 
 function requiredArtworkLiterals(prompt: string): string[] {
@@ -85,10 +97,41 @@ export function isEnglishImagePrompt(prompt: string): boolean {
 export class CanvasImagePromptLanguageError extends Error {
     readonly code = "IMAGE_PROMPT_LANGUAGE_REQUIRED";
     readonly submitted = false;
-    constructor() {
-        super("未能整理出完整英文生图指令，本次未提交图片生成任务；请稍后重试。");
+    constructor(reason = "未能整理出完整英文生图指令") {
+        super(`${reason}，本次未提交图片生成任务；请重新整理指令。`);
         this.name = "CanvasImagePromptLanguageError";
     }
+}
+
+const SMALL_NUMBERS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
+function invariantNumbers(text: string): Set<string> {
+    const count = `(?:\\d+|${SMALL_NUMBERS.join("|")})`;
+    const source = instructionsWithoutArtworkLiterals(text)
+        .replace(/\[\[ref:[^\]]+\]\]|\bimage\s*#?\s*\d+\b|图(?:片)?\s*[\d一二三四五六七八九十]+/giu, "")
+        // Output count/aspect ratio are independently constrained by generation settings, not image-content counts.
+        .replace(new RegExp(`(?:生成|输出|出图|制作|提供|返回|只要|只需)\\s*(?:仅|只|恰好)?\\s*\\d+\\s*张(?:图(?:片)?)?|\\b(?:generate|output|return|produce|want|need)\\s+(?:(?:only|exactly)\\s+)?${count}\\s+(?:images?|pictures?|outputs?|variations?)\\b|(?:比例|aspect\\s+ratio)\\s*[:：]?\\s*\\d+\\s*[:：]\\s*\\d+`, "giu"), "")
+        .replace(/\b(?:both|a pair of)\s+(?=(?:[a-z]+\s+){0,2}(?:sleeves|cuffs|pockets|buttons|straps|handles|legs|shoes|socks|ears|eyes|wings)\b)/giu, "two ");
+    const found = new Set(Array.from(source.matchAll(/\b\d+(?:\.\d+)?\b/gu), match => String(Number(match[0]))));
+    const words = new RegExp(`\\b(${SMALL_NUMBERS.join("|")})\\b`, "giu");
+    for (const match of source.matchAll(words)) found.add(String(SMALL_NUMBERS.indexOf(match[1]!.toLowerCase())));
+    const chineseDigit = (value: string) => "零一二三四五六七八九".indexOf(value.replace("两", "二"));
+    for (const match of source.matchAll(/([零一二两三四五六七八九十]{1,3})(?=颗|粒|枚|条|根|只|朵|片|瓣|排|行|列|圈|个(?:纽扣|口袋|花瓣|图案))/gu)) {
+        const value = match[1]!;
+        const number = value.includes("十") ? (value.split("十")[0] ? chineseDigit(value.split("十")[0]!) : 1) * 10 + (value.split("十")[1] ? chineseDigit(value.split("十")[1]!) : 0) : chineseDigit(value);
+        if (number >= 0) found.add(String(number));
+    }
+    return found;
+}
+
+/** Deliberately narrow: lexical counts, explicit negation/preservation markers and artwork literals, not semantic equivalence. */
+export function assertImagePromptInvariantCoverage(source: string, target: string, options: { negation?: boolean; supersededText?: string } = {}): void {
+    const targetNumbers = invariantNumbers(target);
+    const removedNumbers = invariantNumbers(options.supersededText || "");
+    if (requiredArtworkLiterals(source).some(literal => !target.includes(literal) && !options.supersededText?.includes(literal))) throw new CanvasImagePromptLanguageError("英文指令遗漏必须保留的文字标识");
+    if ([...invariantNumbers(source)].some(value => !targetNumbers.has(value) && !removedNumbers.has(value))) throw new CanvasImagePromptLanguageError("英文指令遗漏可确定的数量");
+    const negativeSource = /\b(?:no|not|never|without|avoid|unchanged|unaltered|preserve|retain)\b|(?:不要|不能|不得|禁止|不许|不变|保持|保留)/iu.test(instructionsWithoutArtworkLiterals(source));
+    const negativeTarget = /\b(?:no|not|never|without|avoid|unchanged|unaltered|preserve|retain|keep|leave)\b/iu.test(instructionsWithoutArtworkLiterals(target));
+    if (options.negation !== false && negativeSource && !negativeTarget) throw new CanvasImagePromptLanguageError("英文指令遗漏明确的禁止或保留约束");
 }
 
 /** Validate before any billed image dispatch; translate at most once, and never invent a fallback. */
@@ -107,6 +150,7 @@ export async function ensureEnglishImagePrompt(
     } catch {
         throw new CanvasImagePromptLanguageError();
     }
-    if (!isBareEnglishPrompt(translated) || requiredArtworkLiterals(source).some(literal => !translated.includes(literal))) throw new CanvasImagePromptLanguageError();
+    if (!isBareEnglishPrompt(translated)) throw new CanvasImagePromptLanguageError();
+    assertImagePromptInvariantCoverage(source, translated);
     return translated;
 }

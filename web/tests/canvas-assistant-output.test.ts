@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { canvasAssistantDisplayMessage, canvasAssistantDisplayText, CanvasImagePromptLanguageError, ensureEnglishImagePrompt, isEnglishImagePrompt } from "@/lib/canvas/canvas-assistant-output";
+import { assertImagePromptInvariantCoverage, canvasAssistantDisplayMessage, canvasAssistantDisplayText, CanvasImagePromptLanguageError, ensureEnglishImagePrompt, isEnglishImagePrompt } from "@/lib/canvas/canvas-assistant-output";
 import type { CanvasAssistantMessage } from "@/types/canvas";
 
 test("rendering removes old full prompts and keeps source message and attachments untouched", () => {
@@ -64,4 +64,25 @@ test("a non-English prompt gets one full-source translation and never a generic 
     await expect(ensureEnglishImagePrompt(source, async () => "")).rejects.toBeInstanceOf(CanvasImagePromptLanguageError);
     await expect(ensureEnglishImagePrompt(source, async () => "Change only the background to white. Keep the handbag unchanged.")).rejects.toBeInstanceOf(CanvasImagePromptLanguageError);
     await expect(ensureEnglishImagePrompt("<think>First inspect the image.</think>Keep the bag unchanged.")).rejects.toBeInstanceOf(CanvasImagePromptLanguageError);
+});
+
+test("normalization catches deterministic omissions of counts, prohibitions, and artwork identifiers", async () => {
+    await expect(ensureEnglishImagePrompt("衬衫改粉色，保留七颗米白纽扣，其他不变", async () => "Make the shirt pink.")).rejects.toThrow("数量");
+    await expect(ensureEnglishImagePrompt("不要添加口袋", async () => "Add pockets.")).rejects.toThrow("禁止或保留");
+    await expect(ensureEnglishImagePrompt("保留文字“ABC-123”", async () => "Keep the label unchanged.")).rejects.toThrow("标识");
+    expect(() => assertImagePromptInvariantCoverage("七颗米白纽扣和两只袖子保持不变", "Preserve seven cream mother-of-pearl buttons and two sleeves.")).not.toThrow();
+});
+
+test("output quantity metadata does not masquerade as a visual part count", () => {
+    const target = "Image 1: base reference. Keep seven cream buttons and two sleeves unchanged.";
+    for (const source of ["只生成1张，保留7颗米白纽扣和2只袖子，其他不变", "只要1张，保留7颗米白纽扣和2只袖子", "只需1张，七颗纽扣与两只袖子不变", "输出2张图片，七颗纽扣与两只袖子不变", "生成1张，比例3:4，保留七颗米白纽扣和两只袖子", "Only generate one image. Preserve seven buttons and two sleeves."]) expect(() => assertImagePromptInvariantCoverage(source, target)).not.toThrow();
+    expect(() => assertImagePromptInvariantCoverage("输出2张，保留7颗纽扣和2只袖子", "Preserve seven buttons.")).toThrow("数量");
+    expect(() => assertImagePromptInvariantCoverage("生成1张，衣身有1个口袋", "Make the shirt pink.")).toThrow("数量");
+});
+
+test("both and a pair of sleeves preserve the explicit content quantity two", () => {
+    const source = "衣身、领子、两只袖子和袖口改成浅玫瑰粉";
+    expect(() => assertImagePromptInvariantCoverage(source, "Recolor the body, collar, both sleeves and cuffs light rose pink.")).not.toThrow();
+    expect(() => assertImagePromptInvariantCoverage(source, "Recolor the body, collar, a pair of long sleeves and cuffs light rose pink.")).not.toThrow();
+    expect(() => assertImagePromptInvariantCoverage(source, "Recolor the body, collar, one sleeve and cuffs light rose pink.")).toThrow("数量");
 });

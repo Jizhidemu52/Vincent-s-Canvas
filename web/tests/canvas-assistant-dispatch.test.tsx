@@ -195,7 +195,20 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
             return chips.flatMap((element) => findElements((element.type as Function)(element.props))).filter((element) => typeof element.type === "function" && element.type.name === "CanvasPersistedMediaPreview").map((element) => element.props);
         },
         async ready() { await waitFor(() => !composer().props.disabled); },
-        async submit(prompt: string) { await waitFor(() => !composer().props.disabled); composer().props.onPromptChange(prompt); await composer().props.onSubmit(); },
+        async submit(prompt: string) {
+            await waitFor(() => !composer().props.disabled);
+            const references = findElements(composer().props.attachmentPreview).find(element => typeof element.props.onMove === "function")?.props.references || [];
+            // Populate ordinary mocked planner replies with the new contract. Explicit test contracts (including null) stay untouched.
+            for (const reply of options.replies) for (const call of reply.toolCalls) if (call.function.name === "canvas_generate_image") {
+                const args = JSON.parse(call.function.arguments);
+                if (!("editContract" in args)) {
+                    const text = typeof args.prompt === "string" && !/[\u3400-\u9fff]/u.test(args.prompt) ? args.prompt : "refined prompt";
+                    args.editContract = { mode: "complete", changes: [], preserve: [{ id: "fixture", text, source: prompt }], forbid: [], supersedes: [], referenceRoles: references.map((ref: any) => ({ id: ref.id, role: "reference" })) };
+                    call.function.arguments = JSON.stringify(args);
+                }
+            }
+            composer().props.onPromptChange(prompt); await composer().props.onSubmit();
+        },
         approve(messageId: string) { findElements(render()).find((element) => typeof element.props.onApproveTool === "function")!.props.onApproveTool(messageId); },
         approvalHandler() { return findElements(render()).find((element) => typeof element.props.onApproveTool === "function")!.props.onApproveTool as (messageId: string) => void; },
         async uploadReference(name = "uploaded-reference.png", dataUrl = "data:image/png;base64,dXBsb2FkZWQtcmVmZXJlbmNl") {
@@ -451,18 +464,19 @@ describe("canvas assistant submission", () => {
         harness.approve(confirmation.id);
         await waitFor(() => harness.requests.filter((request) => request.type === "agent").length === 2);
         const edit = harness.requests.find((request) => request.type === "edit");
-        expect(edit?.args[1]).toBe("refined prompt");
+        expect(edit?.args[1]).toContain("refined prompt");
         expect(edit?.args[4]).toMatchObject({ referencePromptLanguage: "en" });
         expect(edit?.args[2]).toHaveLength(2);
         expect(edit?.args[2]).toContainEqual(expect.objectContaining({ id: "selected-reference", storageKey: "stored-reference-key" }));
         expect(edit?.args[2]).toContainEqual(expect.objectContaining({ name: "uploaded-reference.png", dataUrl: "data:image/png;base64,dXBsb2FkZWQtcmVmZXJlbmNl" }));
         expect(harness.messages().some((message) => message.attachments?.length && message.text.includes(edit!.args[1]))).toBe(false);
-        expect(harness.messages().find(message => message.attachments?.length)?.detail?.prompt).toBe("refined prompt");
+        expect(harness.messages().find(message => message.attachments?.length)?.detail?.prompt).toBe(edit?.args[1]);
     });
 
     test("one draft order controls mixed image previews, numbered chat evidence and frozen edit input", async () => {
         const selected: CanvasNodeData = { id: "selected", type: CanvasNodeType.Image, title: "原款", position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { content: "data:image/png;base64,c2VsZWN0ZWQ=", status: "success" } };
-        const harness = panelHarness({ selected: [selected], confirmTools: true, replies: [tool("canvas_generate_image", { editIntent: "new", prompt: "Use Image 1 for the print and Image 2 for the shape. Preserve all other details." }), { content: "已调整图案，版型保持不变。", toolCalls: [] }] });
+        const orderedCall = tool("canvas_generate_image", { editIntent: "new", prompt: "Use the bound references for print and shape. Preserve all other details." });
+        const harness = panelHarness({ selected: [selected], confirmTools: true, replies: [orderedCall, { content: "已调整图案，版型保持不变。", toolCalls: [] }] });
         await harness.uploadReference("print.png", "data:image/png;base64,cHJpbnQ=");
         const first = harness.referenceTray();
         expect(first.thumbnailSize).toBe(96);
@@ -473,6 +487,7 @@ describe("canvas assistant submission", () => {
         expect(withThird.references.map((reference: any) => reference.name)).toEqual(["print.png", "原款", "color.png"]);
         withThird.onRemove(withThird.references[2].id);
         const submittedIds = harness.referenceTray().references.map((reference: any) => reference.id);
+        orderedCall.toolCalls[0]!.function.arguments = JSON.stringify({ editIntent: "new", prompt: "Use the bound references.", editContract: { mode: "complete", changes: [{ id: "print", text: `Use [[ref:${submittedIds[0]}]] for the print on [[ref:${submittedIds[1]}]].`, source: "按图1的花型改图2的衣服" }], preserve: [{ id: "rest", text: "All other details.", source: "其他不变" }], forbid: [], supersedes: [], referenceRoles: [{ id: submittedIds[0], role: "pattern" }, { id: submittedIds[1], role: "shape" }] } });
         await harness.submit("按图1的花型改图2的衣服，其他不变");
         const sent = harness.messages().find(message => message.role === "user")!;
         expect(sent.references?.map(reference => reference.id)).toEqual(submittedIds);
@@ -487,6 +502,7 @@ describe("canvas assistant submission", () => {
         await waitFor(() => harness.requests.some(request => request.type === "edit"));
         const actual = harness.requests.find(request => request.type === "edit")!;
         expect(actual.args[2].map((reference: any) => reference.id)).toEqual(submittedIds);
+        expect(actual.args[1]).toContain("Use Image 1 for the print on Image 2.");
         expect(harness.requests.filter(request => request.type === "text")).toHaveLength(0);
     });
 
@@ -498,8 +514,8 @@ describe("canvas assistant submission", () => {
         await harness.submit("背景换成浅蓝，衣服不变");
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "image", "agent"]);
         const generation = harness.messages().find(message => message.attachments?.length)!;
-        expect(generation.detail?.prompt).toBe(internal);
-        expect(generation.detail?.imageEdit).toMatchObject({ editPrompt: internal });
+        expect(generation.detail?.prompt).toContain(internal);
+        expect(generation.detail?.imageEdit).toMatchObject({ editPrompt: generation.detail?.prompt });
         expect(generation.text).not.toContain(internal);
         expect(JSON.stringify(harness.messages())).not.toContain("INTERNAL_");
         const visible = harness.displayedMessages();
@@ -509,13 +525,49 @@ describe("canvas assistant submission", () => {
         expect(harness.requests[0].args[1][0].content).toContain("内部完整生成提示词必须使用英文");
     });
 
-    test.each([async () => "仍然是中文提示词", async () => { throw new Error("translator offline"); }])("failed English consolidation never submits or retries an image task", async (translate) => {
-        const harness = panelHarness({ translate, replies: [tool("canvas_generate_image", { editIntent: "new", prompt: "只改成浅蓝背景，保留衣服的全部细节" })] });
+    test.each([null, { mode: "complete", changes: [{ id: "background", text: "仍然是中文提示词", source: "背景换成浅蓝" }], preserve: [], forbid: [], supersedes: [], referenceRoles: [] }])("invalid or non-English contract never submits or spends a translation retry", async (editContract) => {
+        const harness = panelHarness({ replies: [tool("canvas_generate_image", { editIntent: "new", prompt: "只改成浅蓝背景，保留衣服的全部细节", editContract })] });
         await harness.submit("背景换成浅蓝");
-        expect(harness.requests.map(request => request.type)).toEqual(["agent", "text"]);
+        expect(harness.requests.map(request => request.type)).toEqual(["agent"]);
         expect(harness.assets).toHaveLength(0);
-        expect(harness.messages().some(message => message.text.includes("本次未提交图片生成任务"))).toBe(true);
-        expect(harness.displayedMessages().some(message => message.text.includes("本次未提交图片生成任务"))).toBe(true);
+        expect(harness.messages().some(message => message.text.includes("尚未提交图片生成"))).toBe(true);
+        expect(harness.displayedMessages().some(message => message.text.includes("尚未提交图片生成"))).toBe(true);
+    });
+
+    test.each(["stale-number", "missing-count", "lost-negation"])("contract guard blocks %s before provider dispatch and translation", async kind => {
+        const selected: CanvasNodeData = { id: "shirt", type: CanvasNodeType.Image, title: "shirt", position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { content: "data:image/png;base64,ORIGINAL" } };
+        const user = kind === "lost-negation" ? "不要添加口袋，只生成1张" : "只生成1张，保留七颗纽扣";
+        const editContract = { mode: "complete", changes: kind === "lost-negation" ? [{ id: "pockets", text: "Add pockets.", source: "不要添加口袋" }] : [], preserve: kind === "lost-negation" ? [] : [{ id: "buttons", text: kind === "missing-count" ? "The cream buttons." : "Seven cream buttons.", source: "保留七颗纽扣" }], forbid: [], supersedes: [], referenceRoles: [{ id: "shirt", role: "base" }] };
+        const harness = panelHarness({ selected: [selected], replies: [tool("canvas_generate_image", { editIntent: "new", prompt: kind === "stale-number" ? "Use Image 3 for color." : "Edit the shirt.", editContract })] });
+        await harness.submit(user);
+        expect(harness.requests.map(request => request.type)).toEqual(["agent"]);
+        expect(harness.assets).toHaveLength(0);
+        expect(harness.imageUploads).toHaveLength(0);
+        expect(harness.messages().some(message => message.role === "tool" && message.detail?.status === "failed")).toBe(true);
+    });
+
+    test("correction dispatch after reload uses original pixels and all current requested targets", async () => {
+        const original = { id: "shirt", type: CanvasNodeType.Image, title: "shirt", dataUrl: "data:image/png;base64,ORIGINAL" };
+        const contract = { changes: [{ id: "fabric", text: "Make the shirt pink.", source: "衬衫改粉色" }], preserve: [{ id: "buttons", text: "Seven cream buttons.", source: "保留七颗米白纽扣" }], forbid: [] };
+        const history: CanvasAssistantMessage[] = [{ id: "pink", role: "assistant", text: "已生成（不代表验收）", detail: { status: "completed", imageEdit: { intent: "new", originalReferences: [original], originalPrompt: "衬衫改粉色，保留七颗米白纽扣", editPrompt: "Make the shirt pink.", baseReferences: [original], contract } }, attachments: [{ id: "pink", mediaType: "image", name: "pink", url: "data:image/png;base64,PINK" }] }];
+        const editContract = { mode: "update", changes: [{ id: "buttons", text: "Make the seven buttons burgundy.", source: "七颗纽扣改酒红" }], preserve: [], forbid: [], supersedes: ["buttons"], referenceRoles: [{ id: "edit-original-0", role: "base" }] };
+        const harness = panelHarness({ history: JSON.parse(JSON.stringify(history)), replies: [tool("canvas_generate_image", { editIntent: "correct_original", prompt: "Fix the buttons.", referenceNodeIds: ["pink"], editContract }), { content: "已更新。", toolCalls: [] }] });
+        await harness.submit("粉色不变，七颗纽扣改酒红，只生成1张");
+        expect(harness.requests.map(request => request.type)).toEqual(["agent", "edit", "agent"]);
+        // Verify the real planner request receives delta guidance, not merely a disconnected exported constant.
+        const planner = harness.requests.find(request => request.type === "agent")!;
+        expect(planner.args[1][0].content).toContain("完全未变条件必须省略，由代码继承");
+        const schema = planner.args[2].find((item: any) => item.function.name === "canvas_generate_image").function.parameters.properties.editContract;
+        expect(schema.properties.mode.description).toContain("update is a delta");
+        for (const group of ["changes", "preserve", "forbid"]) expect(schema.properties[group].description).toContain("Omit unchanged ids");
+        const edit = harness.requests.find(request => request.type === "edit")!;
+        expect(edit.args[2][0].dataUrl).toBe(original.dataUrl);
+        expect(edit.args[1]).toContain("Make the shirt pink.");
+        expect(edit.args[1]).toContain("Make the seven buttons burgundy.");
+        expect(edit.args[1]).not.toContain("Seven cream buttons.");
+        const saved = harness.messages().filter(message => message.attachments?.length).at(-1)!;
+        expect((saved.detail?.imageEdit as any).contract.changes).toHaveLength(2);
+        expect(JSON.stringify((saved.detail?.imageEdit as any).contract)).not.toMatch(/approved|accepted/);
     });
 
     test("uses the explicit video tool and preserves duration, aspect ratio, quality, audio, and reference data", async () => {
@@ -575,7 +627,7 @@ describe("canvas assistant submission", () => {
         const harness = panelHarness({ replies: [tool("canvas_generate_image", { editIntent: "new", prompt: "保留原图主体，换成浅蓝背景", referenceNodeIds: [] }), { content: "改图完成", toolCalls: [] }] });
         await harness.uploadReference();
         await harness.submit("这张图只改背景");
-        expect(harness.requests.map((request) => request.type)).toEqual(["agent", "text", "edit", "agent"]);
+        expect(harness.requests.map((request) => request.type)).toEqual(["agent", "edit", "agent"]);
         expect(harness.requests.find(request => request.type === "edit")!.args[2]).toHaveLength(1);
     });
 
@@ -660,7 +712,7 @@ describe("canvas assistant submission", () => {
     test("keeps the user's image model when the planner asks to switch providers", async () => {
         const harness = panelHarness({ replies: [tool("canvas_generate_image", { editIntent: "new", model: "vcen-gpt2", prompt: "红色花瓶", count: 7, quality: "4k", size: "3:4" }), { content: "已完成", toolCalls: [] }] });
         await harness.submit("生成七张红色花瓶");
-        expect(harness.requests.map((request) => request.type)).toEqual(["agent", "text", "image", "agent"]);
+        expect(harness.requests.map((request) => request.type)).toEqual(["agent", "image", "agent"]);
         expect(harness.requests.find(request => request.type === "image")!.args[0]).toMatchObject({ model: "gpt-image-2", count: "1", quality: "auto", size: "1152x1536" });
         expect(harness.assets[0].metadata).toMatchObject({ model: "gpt-image-2" });
     });
@@ -707,7 +759,7 @@ describe("canvas assistant submission", () => {
         await harness.submit("生成绿色花瓶");
         expect(harness.imageUploads).toEqual([url]);
         expect(harness.assets).toHaveLength(1);
-        expect(harness.assets[0]).toMatchObject({ kind: "image", data: { dataUrl: "blob:cached-image", storageKey: "image:cached", width: 1024, height: 1024, bytes: 12345 }, metadata: { serverAssetId, nodeId: "green-vase", projectId: "project", prompt: "refined prompt", model: "gpt-image-2" } });
+        expect(harness.assets[0]).toMatchObject({ kind: "image", data: { dataUrl: "blob:cached-image", storageKey: "image:cached", width: 1024, height: 1024, bytes: 12345 }, metadata: { serverAssetId, nodeId: "green-vase", projectId: "project", prompt: "Keep unchanged:\n- refined prompt", model: "gpt-image-2" } });
         expect(serverAssetIdFromAsset(harness.assets[0])).toBe(serverAssetId);
     });
 

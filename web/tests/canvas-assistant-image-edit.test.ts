@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { canvasImageEditContext, resolveCanvasImageEdit, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
+import { canvasImageEditContext, resolveCanvasImageEdit as resolveEdit, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
 import { buildCanvasConversationHistory } from "@/lib/canvas/canvas-assistant-history";
 import { portableCanvasMedia } from "@/lib/canvas/canvas-portable-media";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference } from "@/types/canvas";
@@ -8,6 +8,14 @@ const original: CanvasAssistantReference = { id: "source", type: CanvasNodeType.
 const lineage: CanvasImageEditLineage = { intent: "new", originalReferences: [original], originalPrompt: "白底，人物服装不变", editPrompt: "仅换成纯白背景，保留人物服装", baseReferences: [original] };
 const result = (id: string, imageEdit = lineage): CanvasAssistantMessage => ({ id, role: "assistant", text: "已生成", detail: { kind: "agent_generation", status: "completed", imageEdit, prompt: imageEdit.editPrompt }, attachments: [{ id, name: id, mediaType: "image", url: `data:image/png;base64,${id}`, storageKey: `image:${id}` }] });
 const ctx = canvasImageEditContext([result("v1")]);
+
+// These legacy tests isolate base selection; contract semantics have dedicated adversarial tests.
+function resolveCanvasImageEdit(...[args, context, explicit, userPrompt]: Parameters<typeof resolveEdit>) {
+    const references = args.editIntent === "correct_original" ? context.originals : args.editIntent === "refine_latest" ? context.results.filter(ref => !args.resultImageId || ref.id === args.resultImageId) : explicit();
+    const previous = context.contract;
+    const editContract = { mode: previous ? "update" : "complete", changes: [{ id: "fixture", text: /[\u3400-\u9fff]/u.test(args.prompt) ? "Refine the selected garment." : args.prompt, source: userPrompt }], preserve: [], forbid: [], supersedes: previous ? ["fixture"] : [], referenceRoles: references.map(ref => ({ id: ref.id, role: "base" })) };
+    return resolveEdit({ ...args, editContract }, context, explicit, userPrompt);
+}
 
 test("round 1: correction uses original bytes even when the model requests the bad result", () => {
     let readWrongRefs = false;

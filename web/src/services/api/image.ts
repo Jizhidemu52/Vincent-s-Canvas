@@ -9,6 +9,7 @@ import { generationDraftInput } from "./generation-history";
 import { imageAdvancedParameters, readImageOptions } from "@/lib/image-advanced-settings";
 import { resolveToolConfig } from "./tool-runtime";
 import { createClientId } from "@/lib/client-id";
+import { parseStrictJson } from "@/lib/strict-json";
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -189,6 +190,10 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 
 export async function requestToolResponse(config: AiConfig, messages: ResponseInputMessage[], tools: ResponseFunctionTool[], toolChoice: ToolChoice = "auto", onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
     const result = await requestServerResponse(config, toResponseInput(withSystemMessage(config, messages)), tools.map(toResponseTool), toolChoice, options, onDelta);
+    // Non-streaming/Responses providers can return raw argument strings without using the SSE boundary.
+    if (Array.isArray(result.toolCalls)) for (const call of result.toolCalls) {
+        if (typeof call.function?.arguments === "string") parseStrictJson(call.function.arguments);
+    }
     if (result.content) onDelta?.(result.content);
     return result;
 }
@@ -250,7 +255,7 @@ export async function readClaudeSseResponse(response: Response, onDelta?: (text:
         if (done) break;
     }
     if (state.buffer.trim()) consumeClaudeSseEvent(state.buffer, state, onDelta, onToolCallStart);
-    const blocks: ClaudeAssistantContent = Array.from(state.blocks.entries()).sort(([left], [right]) => left - right).map(([, item]) => ({ ...item.block, ...(item.inputJson ? { input: JSON.parse(item.inputJson) as unknown } : {}) }));
+    const blocks: ClaudeAssistantContent = Array.from(state.blocks.entries()).sort(([left], [right]) => left - right).map(([, item]) => ({ ...item.block, ...(item.inputJson ? { input: parseStrictJson(item.inputJson) } : {}) }));
     const toolCalls: ResponseToolCall[] = blocks.flatMap((block) => block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string" ? [{
         id: block.id,
         type: "function" as const,

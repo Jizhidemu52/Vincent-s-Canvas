@@ -235,10 +235,14 @@ describe("creative chat plan validation", () => {
         expect(parseCreativeChatPlan({ content: "可以先比较配色，再决定是否生成。", toolCalls: [] }, resolveCreativeChatReferences([], user("讨论", [image("reference")])))).toEqual({ kind: "discussion", content: "可以先比较配色，再决定是否生成。" });
     });
 
-    test("preserves the complete prompt without trimming away user constraints", () => {
+    test("compiles the complete prompt and explicit constraints into the executable plan", () => {
         const prompt = "  保留原图构图、中文春日及尺寸 20cm。\n只将花瓣改细，其他不变。  ";
         const references = resolveCreativeChatReferences([generated("latest")], user("修改"));
-        expect(parseCreativeChatPlan({ content: "我会保留其他细节。", toolCalls: [editTool("latest", prompt, [], ["中文春日", "尺寸20cm"])] }, references)).toEqual({ kind: "image", content: "我会保留其他细节。", action: "edit", prompt, references, lineage: { parentImageId: "latest", sourceImageIds: ["latest"], preservedConstraints: ["中文春日", "尺寸20cm"] } });
+        const plan = parseCreativeChatPlan({ content: "我会保留其他细节。", toolCalls: [editTool("latest", prompt, [], ["中文春日", "尺寸20cm"])] }, references);
+        expect(plan).toMatchObject({ kind: "image", content: "我会保留其他细节。", action: "edit", references, lineage: { parentImageId: "latest", sourceImageIds: ["latest"], preservedConstraints: ["中文春日", "尺寸20cm"] } });
+        if (plan.kind !== "image") throw new Error("expected image plan");
+        expect(plan.prompt).toContain(prompt.trim());
+        expect(plan.prompt).toContain("【本轮仍有效的保留项】\n- 中文春日\n- 尺寸20cm");
     });
 
     test("reference-based new layouts are editable plans, not reference-free generation", () => {
