@@ -29,6 +29,7 @@ import { useAssetStore, type AssetInput } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { loadCanvasImageTools } from "@/lib/canvas/canvas-image-tool-loader";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
+import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { canvasImageUsageInput } from "@/lib/canvas/canvas-image-usage";
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph, type CanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
@@ -2212,6 +2213,7 @@ function WirelessCanvasPage() {
 
     const createImageFileNode = useCallback(async (file: File, position: Position, signal?: AbortSignal, preserveQuickGeneratePrompt = false) => {
         signal?.throwIfAborted();
+        assertCanvasImageUploadSize(file);
         const image = await uploadImage(file);
         signal?.throwIfAborted();
         const size = fitNodeSize(image.width, image.height);
@@ -2299,6 +2301,7 @@ function WirelessCanvasPage() {
     const pasteSystemClipboard = useCallback(async (files: File[]) => {
         const center = getCanvasCenter();
         await runLocalImageOperation(`clipboard-paste:${nanoid()}`, "粘贴", async (signal) => {
+            files.forEach(assertCanvasImageUploadSize);
             for (const [index, file] of files.entries()) {
                 await createImageFileNode(file, { x: center.x + index * 36, y: center.y + index * 36 }, signal, true);
             }
@@ -3087,6 +3090,15 @@ function WirelessCanvasPage() {
             const file = event.target.files?.[0];
             const target = uploadTargetRef.current;
             if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/") && !isAudioFile(file))) return;
+            if (file.type.startsWith("image/")) {
+                try { assertCanvasImageUploadSize(file); }
+                catch (error) {
+                    message.error((error as Error).message);
+                    uploadTargetRef.current = null;
+                    event.target.value = "";
+                    return;
+                }
+            }
 
             if (target?.nodeId) {
                 if (isAudioFile(file)) {
@@ -3183,7 +3195,7 @@ function WirelessCanvasPage() {
             uploadTargetRef.current = null;
             event.target.value = "";
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas, size.height, size.width],
+        [createAudioFileNode, createImageFileNode, createVideoFileNode, message, screenToCanvas, size.height, size.width],
     );
 
     const handleQuickReferenceInputChange = useCallback(
@@ -3200,6 +3212,7 @@ function WirelessCanvasPage() {
             }
 
             try {
+                files.forEach(assertCanvasImageUploadSize);
                 const uploaded = await Promise.all(
                     files.map(async (file) => {
                         const image = await uploadImage(file);
@@ -3518,9 +3531,10 @@ function WirelessCanvasPage() {
             if (!file) return;
 
             const pos = screenToCanvas(event.clientX, event.clientY);
-            void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos));
+            void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos))
+                .catch((error: Error) => { message.error(error.message); });
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas],
+        [createAudioFileNode, createImageFileNode, createVideoFileNode, message, screenToCanvas],
     );
 
     const pasteAssistantImage = useCallback(

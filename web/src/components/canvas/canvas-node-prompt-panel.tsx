@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ArrowUp, LoaderCircle, Square } from "lucide-react";
-import { Button } from "antd";
+import { App, Button } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, modelOptionName, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -25,6 +25,7 @@ import { createImageReferenceItem, dedupeImageReferences, validateImageReference
 import { canvasImageReferenceMentions, resolveCanvasNodeImageReferences, toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraft } from "@/lib/canvas/canvas-node-prompt-draft";
 import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
+import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { uploadImage } from "@/services/image-storage";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -51,6 +52,7 @@ type CanvasNodePromptPanelProps = {
 };
 
 export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [], sharedConfig, onOpenSharedConfig }: CanvasNodePromptPanelProps) {
+    const { message } = App.useApp();
     const globalConfig = useEffectiveConfig();
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const models = useBusinessConfigStore((state) => state.models);
@@ -144,13 +146,20 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         setAssetPickerOpen(false);
     };
 
-    const addUploads = (files: FileList | null) => {
+    const addUploads = async (files: FileList | null) => {
         if (!files) return;
-        void Promise.all(Array.from(files).filter((file) => file.type.startsWith("image/")).map(async (file) => {
-            const stored = await uploadImage(file);
-            return createImageReferenceItem({ id: createClientId(), name: file.name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "upload");
-        })).then((items) => saveReferences(dedupeImageReferences([...imageReferences, ...items])));
+        const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
         if (uploadInputRef.current) uploadInputRef.current.value = "";
+        try {
+            images.forEach(assertCanvasImageUploadSize);
+            const items = await Promise.all(images.map(async (file) => {
+                const stored = await uploadImage(file);
+                return createImageReferenceItem({ id: createClientId(), name: file.name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "upload");
+            }));
+            saveReferences(dedupeImageReferences([...imageReferences, ...items]));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "参考图上传失败");
+        }
     };
 
     if (sharedConfig) {
@@ -252,7 +261,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     <AssetPickerModal open selectionMode="multiple-images" onInsertMany={addAssets} onClose={() => setAssetPickerOpen(false)} />
                 </Suspense>
             ) : null}
-            <input ref={uploadInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => addUploads(event.target.files)} />
+            <input ref={uploadInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => void addUploads(event.target.files)} />
         </div>
     );
 }

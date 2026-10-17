@@ -1,10 +1,12 @@
 import { useRef, useState } from "react";
+import { App } from "antd";
 import { ChevronLeft, ChevronRight, ImagePlus, LoaderCircle, X } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { createClientId } from "@/lib/client-id";
 import { createImageReferenceItem, dedupeImageReferences, moveImageReference } from "@/lib/image-reference-policy";
 import { toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
+import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { uploadImage } from "@/services/image-storage";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import type { ImageReferenceItem } from "@/types/image";
@@ -31,6 +33,7 @@ type Props = {
 /** Compact card tray: uploads are stored by the existing image service, never ephemeral file URLs. */
 export function CanvasConfigImageReferences(props: Props) {
     const { node, references, disabled, labels, onChange } = props;
+    const { message } = App.useApp();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const inputRef = useRef<HTMLInputElement>(null);
     const latest = useRef(props);
@@ -49,11 +52,16 @@ export function CanvasConfigImageReferences(props: Props) {
         try {
             for (const file of files) {
                 if (!file.type.startsWith("image/")) throw new Error("请选择图片文件");
+                assertCanvasImageUploadSize(file);
+            }
+            for (const file of files) {
                 const stored = await uploadImage(file);
                 added.push(createImageReferenceItem({ id: createClientId(), name: file.name, originalFileName: file.name, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }, "upload"));
             }
         } catch (reason) {
-            setError(reason instanceof Error ? reason.message : "图片上传失败，请重试");
+            const detail = reason instanceof Error ? reason.message : "图片上传失败，请重试";
+            setError(detail);
+            void message.error(detail);
         } finally {
             const current = latest.current;
             if (added.length && current.node.id === node.id) current.onChange(node.id, configImageReferencePatch(current.node, current.references, dedupeImageReferences([...current.references, ...added])));

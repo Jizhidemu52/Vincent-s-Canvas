@@ -6,6 +6,7 @@ import { getNodeSpec } from "@/constant/canvas";
 import * as clipboard from "@/lib/canvas/canvas-system-clipboard";
 import * as nodeCopy from "@/lib/canvas/canvas-node-copy";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
+import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { createCanvasSelectionGenerationSync } from "@/lib/canvas/canvas-selection-prompt";
@@ -76,7 +77,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const noop = () => {};
     const update = <T>(ref: { current: T }) => (value: T | ((current: T) => T)) => { ref.current = typeof value === "function" ? (value as (current: T) => T)(ref.current) : value; };
     const env = {
-        ...clipboard, ...nodeCopy, clipboardModule: clipboard, shouldIgnoreCanvasShortcut, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success",
+        ...clipboard, ...nodeCopy, clipboardModule: clipboard, shouldIgnoreCanvasShortcut, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success", assertCanvasImageUploadSize,
         window: target, navigator: {}, // HTTP/permissionless path: no navigator.clipboard exists.
         useCallback: (callback: unknown) => callback,
         useEffect: (effect: () => (() => void) | void) => { const dispose = effect(); if (dispose) disposers.push(dispose); },
@@ -143,6 +144,19 @@ function node(id: string): CanvasNodeData {
 const screenshot = () => new File([new Uint8Array([0, 255, 1, 2])], "screenshot.png", { type: "image/png" });
 
 describe("native canvas clipboard", () => {
+    test("oversized clipboard images are rejected before storage while existing canvas nodes remain intact", async () => {
+        const original = node("existing");
+        const canvas = harness([original]);
+        const oversized = new File([new Uint8Array(CANVAS_IMAGE_MAX_BYTES + 1)], "large.png", { type: "image/png" });
+        canvas.paste(data([screenshot(), oversized]));
+        await canvas.flush();
+        expect(canvas.imports).toEqual([]);
+        expect(canvas.nodes()).toEqual([original]);
+        expect(canvas.errors).toHaveLength(1);
+        expect((canvas.errors[0] as Error).message).toContain("超过 20 MB");
+        canvas.dispose();
+    });
+
     test("the lazy clipboard module checks an immutable cut snapshot without changing the graph or selection", () => {
         const snapshot = {
             nodes: [

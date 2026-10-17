@@ -1,9 +1,12 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
+import ts from "typescript";
 import { CanvasConfigNodePanel, configReferencePresentation } from "@/components/canvas/canvas-config-node-panel";
 import { CanvasConfigImageReferences, configImageReferencePatch } from "@/components/canvas/canvas-config-image-references";
-import { createImageReferenceItem, moveImageReference } from "@/lib/image-reference-policy";
+import { createImageReferenceItem, dedupeImageReferences, moveImageReference } from "@/lib/image-reference-policy";
 import { resolveCanvasImageReferences, toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
+import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 
 const noop = () => {};
@@ -89,4 +92,115 @@ test("reference edits persist uploads, exclude connected images without deleting
     expect(resolveCanvasImageReferences({ ...config, metadata: { ...config.metadata, ...removePatch } }, [config, source], connections).map(item => item.id)).toEqual(["uploaded"]);
     expect(connections).toHaveLength(1);
     expect(config.metadata.manualImageReferences).toHaveLength(1);
+});
+
+// Exercise the component's actual upload and file-input handlers without module mocks,
+// persistence, network requests, or mounting unrelated canvas controls.
+const uploadSource = readFileSync(new URL("../src/components/canvas/canvas-config-image-references.tsx", import.meta.url), "utf8");
+const uploadAst = ts.createSourceFile("canvas-config-image-references.tsx", uploadSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let addFilesInitializer: ts.Expression | undefined;
+let fileInputHandler: ts.Expression | undefined;
+function findUploadHandlers(value: ts.Node) {
+    if (ts.isVariableDeclaration(value) && value.name.getText(uploadAst) === "addFiles") addFilesInitializer = value.initializer;
+    if (ts.isJsxSelfClosingElement(value) && value.tagName.getText(uploadAst) === "input") {
+        const attribute = value.attributes.properties.find(item => ts.isJsxAttribute(item) && item.name.getText(uploadAst) === "onChange") as ts.JsxAttribute | undefined;
+        if (attribute?.initializer && ts.isJsxExpression(attribute.initializer)) fileInputHandler = attribute.initializer.expression;
+    }
+    ts.forEachChild(value, findUploadHandlers);
+}
+findUploadHandlers(uploadAst);
+if (!addFilesInitializer || !fileInputHandler) throw new Error("The real config reference upload handlers were not found");
+const uploadHandlerCode = ts.transpileModule(`const addFiles = ${addFilesInitializer.getText(uploadAst)};
+exports.addFiles = addFiles;
+exports.onInputChange = ${fileInputHandler.getText(uploadAst)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+
+function uploadHarness(failUpload = false) {
+    const original = [image("existing")];
+    const references = [...original];
+    const uploads: File[] = [];
+    const patches: Array<Partial<NonNullable<CanvasNodeData["metadata"]>>> = [];
+    const messages: string[] = [];
+    const uploadingRef = { current: false };
+    let uploading = false;
+    let error = "";
+    let nextId = 0;
+    const env = {
+        node, disabled: false, uploadingRef,
+        latest: { current: { node, references, onChange: (_id: string, patch: typeof patches[number]) => patches.push(patch) } },
+        setUploading: (value: boolean) => { uploading = value; },
+        setError: (value: string) => { error = value; },
+        message: { error: (detail: string) => { messages.push(detail); } },
+        assertCanvasImageUploadSize, createImageReferenceItem, dedupeImageReferences, configImageReferencePatch,
+        createClientId: () => `uploaded-${++nextId}`,
+        uploadImage: async (file: File) => {
+            uploads.push(file);
+            if (failUpload) throw new Error("测试存储失败");
+            return { url: `blob:${file.name}`, storageKey: `image:${file.name}`, mimeType: file.type, bytes: file.size };
+        },
+    };
+    const handlers = {} as { addFiles: (files: File[]) => Promise<void>; onInputChange: (event: { target: { files: File[]; value: string } }) => void };
+    new Function("env", "exports", `const { ${Object.keys(env).join(",")} } = env; ${uploadHandlerCode}`)(env, handlers);
+    return { ...handlers, uploads, patches, messages, original, references, uploadingRef, get uploading() { return uploading; }, get error() { return error; } };
+}
+
+function sizedImageFile(name: string, size: number) {
+    const file = new File(["image"], name, { type: "image/png" });
+    Object.defineProperty(file, "size", { value: size });
+    return file;
+}
+
+test.each([0, 1])("config reference uploads reject the whole selection before storage when oversized image is at index %s", async index => {
+    const h = uploadHarness();
+    const files = [sizedImageFile("valid.png", 100), sizedImageFile("too-large.png", CANVAS_IMAGE_MAX_BYTES + 1)];
+    if (index === 0) files.reverse();
+    await expect(h.addFiles(files)).resolves.toBeUndefined();
+    expect(h.uploads).toHaveLength(0);
+    expect(h.patches).toHaveLength(0);
+    expect(h.references).toEqual(h.original);
+    expect(h.messages).toHaveLength(1);
+    expect(h.messages[0]).toContain("too-large.png");
+    expect(h.messages[0]).toContain("超过 20 MB");
+    expect(h.error).toBe(h.messages[0]);
+    expect(h.uploading).toBe(false);
+    expect(h.uploadingRef.current).toBe(false);
+});
+
+test("config reference uploads accept the exact 20 MiB limit unchanged and retain existing references", async () => {
+    const h = uploadHarness();
+    const file = sizedImageFile("boundary.png", CANVAS_IMAGE_MAX_BYTES);
+    await h.addFiles([file]);
+    expect(h.uploads).toEqual([file]);
+    expect(h.uploads[0]).toBe(file);
+    expect(h.patches).toHaveLength(1);
+    expect(h.patches[0]?.manualImageReferences?.map(item => item.name)).toEqual(["existing.png", "boundary.png"]);
+    expect(h.messages).toHaveLength(0);
+    expect(h.error).toBe("");
+    expect(h.uploadingRef.current).toBe(false);
+});
+
+test("config reference input clears rejected selections and permits choosing the same file again", async () => {
+    const h = uploadHarness();
+    const file = sizedImageFile("repeat.png", CANVAS_IMAGE_MAX_BYTES + 1);
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const target = { files: [file], value: "C:\\fakepath\\repeat.png" };
+        h.onInputChange({ target });
+        expect(target.value).toBe("");
+    }
+    expect(h.messages).toHaveLength(2);
+    expect(h.uploads).toHaveLength(0);
+    expect(h.patches).toHaveLength(0);
+    await h.addFiles([sizedImageFile("repeat.png", CANVAS_IMAGE_MAX_BYTES)]);
+    expect(h.uploads).toHaveLength(1);
+    expect(h.patches).toHaveLength(1);
+});
+
+test("config reference storage failures are caught and shown without changing existing references", async () => {
+    const h = uploadHarness(true);
+    await expect(h.addFiles([sizedImageFile("valid.png", 100)])).resolves.toBeUndefined();
+    expect(h.messages).toEqual(["测试存储失败"]);
+    expect(h.error).toBe("测试存储失败");
+    expect(h.patches).toHaveLength(0);
+    expect(h.references).toEqual(h.original);
+    expect(h.uploading).toBe(false);
+    expect(h.uploadingRef.current).toBe(false);
 });

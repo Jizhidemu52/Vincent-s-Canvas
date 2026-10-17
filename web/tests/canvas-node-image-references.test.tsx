@@ -14,6 +14,7 @@ import { defaultConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { canvasImageReferenceMentions, resolveCanvasNodeImageReferences } from "@/lib/canvas/canvas-image-references";
 import { createCanvasMentionReferenceIndex, createCanvasResourceReferenceIndex } from "@/lib/canvas/canvas-resource-references";
+import { CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
 
 const noop = () => undefined;
 const source: CanvasNodeData = { id: "original", type: CanvasNodeType.Image, title: "原始产品", position: { x: 0, y: 0 }, width: 240, height: 240,
@@ -36,6 +37,7 @@ function loadComponent<T = (props: any) => ReactElement<any>>(path: string, name
     const code = ts.transpileModule(readFileSync(url, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     const dependencies: Record<string, unknown> = {
         react: { ...React, useState: (initial: any) => [typeof initial === "function" ? initial() : initial, noop], useRef: (current: unknown) => ({ current }), useEffect: noop },
+        antd: { ...requireModule("antd"), App: { useApp: () => ({ message: { error: noop } }) } },
         "@/stores/use-config-store": { ...requireModule("@/stores/use-config-store"), useEffectiveConfig: () => defaultConfig, useConfigStore: (select: Function) => select({ openConfigDialog: noop }) },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ estimate: () => ({ configured: true, credits: 0 }) }) },
         "@/stores/use-theme-store": { useThemeStore: (select: Function) => select({ theme: "light" }) },
@@ -68,6 +70,65 @@ function panel(node = source, canvasNodes = [node], canvasConnections: any[] = [
 }
 
 function tray(app: ReturnType<typeof panel>) { return app.render().find(element => element.type === ReferenceImageTray)!; }
+
+function uploadPanel(failUpload = false) {
+    const uploaded: File[] = [];
+    const errors: string[] = [];
+    const requireModule = createRequire(import.meta.url);
+    const render = loadComponent("../src/components/canvas/canvas-node-prompt-panel.tsx", "CanvasNodePromptPanel", {
+        antd: { ...requireModule("antd"), App: { useApp: () => ({ message: { error: (text: string) => errors.push(text) } }) } },
+        "@/services/image-storage": { uploadImage: async (file: File) => {
+            uploaded.push(file);
+            if (failUpload) throw new Error("本地图片保存失败");
+            return { url: `blob:${file.name}`, storageKey: `image:${file.name}`, mimeType: file.type };
+        } },
+    });
+    const app = panel(source, [source], [], render);
+    const select = async (files: File[]) => {
+        const input = app.render().find(element => element.type === "input" && element.props.type === "file")!;
+        const target = { files, value: "selected" };
+        input.props.ref.current = target;
+        input.props.onChange({ target });
+        expect(target.value).toBe("");
+        await new Promise(resolve => setTimeout(resolve, 0));
+    };
+    return { app, uploaded, errors, select };
+}
+
+test("node reference uploads reject a later oversized file before saving any selected image and allow reselect", async () => {
+    const h = uploadPanel();
+    const small = new File(["image"], "small.png", { type: "image/png" });
+    const large = new File([new Uint8Array(CANVAS_IMAGE_MAX_BYTES + 1)], "large.png", { type: "image/png" });
+    await h.select([small, large]);
+    expect(h.uploaded).toEqual([]);
+    expect(h.app.node).toBe(source);
+    expect(h.errors).toHaveLength(1);
+    expect(h.errors[0]).toContain("large.png");
+    expect(h.errors[0]).toContain("20 MB");
+    await h.select([large]);
+    expect(h.errors).toHaveLength(2);
+    expect(h.uploaded).toEqual([]);
+    await h.select([small]);
+    expect(h.uploaded).toEqual([small]);
+    expect(h.app.node.metadata?.manualImageReferences?.map(item => item.name)).toEqual(["配色", "花型", "small.png"]);
+});
+
+test("node reference uploads preserve exact 20 MiB files without compression", async () => {
+    const h = uploadPanel();
+    const boundary = new File([new Uint8Array(CANVAS_IMAGE_MAX_BYTES)], "boundary.png", { type: "image/png" });
+    await h.select([boundary]);
+    expect(h.uploaded).toEqual([boundary]);
+    expect(h.uploaded[0]).toBe(boundary);
+    expect(h.errors).toEqual([]);
+    expect(h.app.node.metadata?.manualImageReferences?.at(-1)?.name).toBe("boundary.png");
+});
+
+test("node reference upload failures are handled without altering existing references", async () => {
+    const h = uploadPanel(true);
+    await h.select([new File(["image"], "small.png", { type: "image/png" })]);
+    expect(h.errors).toEqual(["本地图片保存失败"]);
+    expect(h.app.node).toBe(source);
+});
 
 test("node editing displays the original and two auxiliaries in the same order used by image mentions", () => {
     const app = panel();

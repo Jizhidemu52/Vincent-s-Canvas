@@ -5,6 +5,7 @@ import { controlQueuedBatch, type QueuedBatchAction } from "@/services/api/gener
 import { uploadImage, type UploadedImage } from "@/services/image-storage";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
+import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { AssetInput } from "@/stores/use-asset-store";
@@ -59,6 +60,12 @@ export async function runCanvasBatchImageEdit({
 
         if (!items.length || items.length > 100) {
             message.error("请选择 1–100 张图片，每张图片独立生成 1 张结果。");
+            return;
+        }
+        try {
+            items.forEach(item => assertCanvasImageUploadSize(item.file));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "图片过大，未提交批量改图");
             return;
         }
         if (!prompt) {
@@ -351,6 +358,7 @@ export function prepareCanvasBatchFiles(files: File[]) {
     const images = files.filter(file => file.type.startsWith("image/"))
         .sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name, "zh-Hans-CN", { numeric: true }));
     if (images.length > 100) throw new Error("每批最多处理 100 张图片，请分批选择；原列表未改变。");
+    images.forEach(assertCanvasImageUploadSize);
     return images.map(file => ({ id: nanoid(), file, relativePath: file.webkitRelativePath || file.name, status: "waiting" as const }));
 }
 export async function controlCanvasBatch(id: string, action: QueuedBatchAction, message: Runtime["message"]) {
