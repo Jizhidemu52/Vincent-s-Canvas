@@ -5,7 +5,7 @@ description: 用完整后端启动无线画布
 
 # 快速开始
 
-本页适用于完整 Docker 部署。根目录模板采用 `OA_LOGIN_ENABLED=true`，使用者从企业微信中的公司 OA 进入画布，不新增扫码或密码步骤。Windows 默认免登录试用见 [部署导航](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/installation-guide.md)。正式域名、OA 入口及公司网络限制须由 IT 配置，真实模型调用仍可能收费。
+本页适用于完整 Docker 部署。根目录模板与 Compose 默认关闭 OA 员工识别（`OA_LOGIN_ENABLED=false`），打开即可试用；Compose 的 API 与 Worker 设置会覆盖旧 `.env` 中的开启值。此模式不代表员工隔离或公司正式入口，只能放在受信网络或受控入口后。Windows 试用见 [部署导航](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/installation-guide.md)；真实模型调用仍可能收费。
 
 ## 1. 准备环境
 
@@ -17,7 +17,7 @@ cd Vincent-s-Canvas
 cp .env.example .env
 ```
 
-编辑 `.env`，至少替换数据库密码、首位管理员初始密码、Provider 加密密钥和对象存储密钥；按 [公司 OA 接入](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/oa-workspace-integration.md) 确认可信身份接口与 HTTPS 入口。若只做隔离的本机试用，显式设 `OA_LOGIN_ENABLED=false`，不要将其开放为公司正式入口。
+编辑 `.env`，至少替换数据库密码、首位管理员初始密码、Provider 加密密钥和对象存储密钥。若需要企业 OA 员工身份与云同步，先按 [公司 OA 接入](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/oa-workspace-integration.md) 由 IT 确认可信身份接口、HTTPS 和网络限制，再显式调整 API 与 Worker 的 Compose 覆盖配置；只修改 `.env` 不会启用 OA。
 
 ## 2. 启动完整服务
 
@@ -35,6 +35,8 @@ curl http://localhost:3000/api/health
 4. 进入模型配置；无需为普通创作用户开通账号。
 
 ## 4. 从公司 OA 进入创作
+
+本节仅适用于已显式启用并联调企业 OA 的部署。默认免登录试用直接打开画布地址，不具备以下员工身份与云同步保证。
 
 1. 企业微信打开公司 OA，再点画布菜单，入口自动携带可验证的临时身份凭证。
 2. 画布验证 OA 身份后加载本人数据，不新增扫码、密码或内部积分；凭证失效时返回 OA，不回退访客。

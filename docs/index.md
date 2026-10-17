@@ -13,7 +13,7 @@
 
 - [功能总览](content/docs/overview/features.mdx)。
 - [画布操作](content/docs/canvas/canvas-node-manual.mdx) · [快捷键](content/docs/canvas/canvas-shortcuts.mdx)。
-- [图片参数](manual/image-model-parameters.md) · [视频参数](manual/video-model-parameters.md) · [聊天参数](manual/chat-model-parameters.md)。模型协议资料供管理员维护；设计师端的图片模型使用匿名编号。
+- [图片参数](manual/image-model-parameters.md) · [视频参数](manual/video-model-parameters.md) · [聊天参数](manual/chat-model-parameters.md)。模型协议资料供管理员维护；设计师可选择已启用的图片模型，对话理解模型由后台统一管理，不在设计师端选型。
 - [提示词模板](manual/prompt-template-guide.md)。历史公司管理参考：[小组与模块](manual/groups-and-module-switches.md) · [共享额度](manual/group-shared-credit-pool.md) · [设计效能](manual/design-performance-dashboard.md)；不是当前创作的前置步骤。
 
 ## 开发入口

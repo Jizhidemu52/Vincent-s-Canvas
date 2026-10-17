@@ -53,7 +53,7 @@ bash offline.sh init
 - `PROVIDER_ENCRYPTION_KEY` 使用 `openssl rand -base64 32` 生成并单独安全备份，不在升级时重置。
 - 保留 `NODE_ENV=production`、`TRUST_PROXY=true`、`TASK_MOCK_MODE=false`。
 - 不启用企业微信时四项 `WECOM_*` 全部留空；离线包模板已清空示例回调地址。
-- 12 核/64 GB 机器可从 `WORKER_CONCURRENCY=8` 开始，单模型并发按供应商限制配置。企业部署保留 `OA_LOGIN_ENABLED=true`，复用公司 OA 员工身份，内部积分和角色入口关闭；仅本机试用设 OA 为 false。真实模型仍可能收费，正式入口须限制公司网络访问。
+- 12 核/64 GB 机器可从 `WORKER_CONCURRENCY=8` 开始，单模型并发按供应商限制配置。当前仓库模板与 Compose 默认关闭 OA；企业 OA 部署须显式设置 `OA_LOGIN_ENABLED=true`，同时把 Compose 中 API 与 Worker 的同名覆盖改为 `"true"`，只修改 `.env` 不生效。启用后复用公司 OA 员工身份，内部积分和角色入口关闭；免登录试用不代表企业隔离。真实模型仍可能收费，正式入口须限制公司网络访问。
 
 使用有 Docker 权限的终端执行：
 

@@ -7,7 +7,7 @@ description: 使用 Docker Compose 部署完整业务平台
 
 根目录 Compose 会启动 Web、API、Worker、PostgreSQL、Redis、MinIO、初始化器和备份服务。
 
-根目录模板默认 `OA_LOGIN_ENABLED=true`，使用者从企业微信中的公司 OA 进入画布，不新增扫码。只有隔离本机试用才设为 false；公司服务器、正式 HTTPS、OA 凭证和公司网络白名单仍须 IT 联调验收。
+根目录模板与 Compose 默认 `OA_LOGIN_ENABLED=false`，使用者可直接打开画布；API 与 Worker 的 Compose 设置会覆盖旧 `.env` 中的开启值。免登录试用不代表员工隔离，只能放在受信网络或受控入口后。启用企业 OA 须显式调整两处 Compose 覆盖，并由 IT 联调公司服务器、正式 HTTPS、可信 OA 接口和网络限制；仅修改 `.env` 不会启用。
 
 ## 启动
 

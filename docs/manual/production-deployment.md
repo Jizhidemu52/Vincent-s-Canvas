@@ -86,7 +86,7 @@ docker run --rm --env-file .env \
 
 ### 企业模式与本机试用
 
-根目录生产模板使用 `OA_LOGIN_ENABLED=true`；仅隔离本机试用设为 `false`。前端以 `/api/deployment` 的实际返回值为准，部署时必须使用同版本前后端，不用旧 `AUTH_ENABLED` 字段代替 OA 模式选择。
+根目录模板与 Compose 当前默认 `OA_LOGIN_ENABLED=false`；API 与 Worker 的 Compose 设置会覆盖 `.env`。企业 OA 须在 IT 联调身份接口、HTTPS 和网络限制后显式启用两处服务配置，仅改 `.env` 不生效。前端以 `/api/deployment` 的实际返回值为准，并使用同版本前后端；`AUTH_ENABLED` 控制独立密码账号，不代替 OA 模式选择。下表描述独立账号关闭时的 OA／试用路径。
 
 | 状态 | 当前行为 |
 | --- | --- |

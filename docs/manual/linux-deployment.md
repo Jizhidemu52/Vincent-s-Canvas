@@ -82,7 +82,7 @@ WECOM_SECRET=
 WECOM_CALLBACK_URL=
 ```
 
-根目录生产模板启用企业 OA 模式，普通用户从“企业微信 → 公司 OA → 画布”进入，不另行扫码或输入密码。`/api/deployment` 应返回 `oaLoginEnabled=true`、`authenticationEnabled=true`；内部积分和角色入口关闭：
+根目录模板与 Compose 默认关闭企业 OA。以下配置仅用于经 IT 联调后显式启用的企业 OA 模式，还须将 Compose 中 API 与 Worker 的 `OA_LOGIN_ENABLED` 覆盖均改为 `"true"`，只修改 `.env` 不生效。启用后普通用户从“企业微信 → 公司 OA → 画布”进入，不另行扫码或输入密码；`/api/deployment` 应返回 `oaLoginEnabled=true`、`authenticationEnabled=true`，内部积分和角色入口关闭：
 
 ```dotenv
 OA_LOGIN_ENABLED=true

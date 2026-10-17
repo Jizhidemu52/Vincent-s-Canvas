@@ -196,7 +196,7 @@ openssl rand -base64 32
 
 对这台机器建议初始 `WORKER_CONCURRENCY=8`，后台单模型并发从 `2` 开始，依据真实供应商额度和实测逐步调整。不是因为有 12 核就必须开 12/40 并发；视频探测、上传和代理也需要资源。暂不添加未经压测的 PostgreSQL 内存参数或容器内存硬限制。
 
-保留：`NODE_ENV=production`、`TRUST_PROXY=true`、`TASK_MOCK_MODE=false`，企业部署设置 `OA_LOGIN_ENABLED=true`，复用“企业微信 → 公司 OA → 画布”的员工身份；内部积分和角色入口关闭。仅本机试用设 OA 为 false。画布不提供额外企业微信扫码，`WECOM_CORP_ID`、`WECOM_AGENT_ID`、`WECOM_SECRET`、`WECOM_CALLBACK_URL` **全部留空**。实际 OA 与公司网络限制见 [接入说明](oa-workspace-integration.md)，真实模型仍可能收费。
+保留：`NODE_ENV=production`、`TRUST_PROXY=true`、`TASK_MOCK_MODE=false`。当前模板与 Compose 默认关闭 OA；企业 OA 部署需显式设置 `OA_LOGIN_ENABLED=true`，并同步将 Compose 中 API 与 Worker 的同名覆盖改为 `"true"`，只修改 `.env` 不生效。启用后复用“企业微信 → 公司 OA → 画布”的员工身份；内部积分和角色入口关闭。免登录试用不代表企业隔离。画布不提供额外企业微信扫码，`WECOM_CORP_ID`、`WECOM_AGENT_ID`、`WECOM_SECRET`、`WECOM_CALLBACK_URL` **全部留空**。实际 OA 与公司网络限制见 [接入说明](oa-workspace-integration.md)，真实模型仍可能收费。
 
 创建本机 `docker-compose.override.yml`，不覆盖已有文件。默认采用同机 HTTPS 代理，并绑定不与常用 3000 冲突的 **127.0.0.1:3300**（仍应先查端口）：
 
