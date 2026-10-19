@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
-import { canvasImageEditContext, resolveCanvasImageEdit as resolveEdit, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
+import { canvasImageEditContext, imageEditContextDescription, resolveCanvasImageEdit as resolveEdit, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
 import { buildCanvasConversationHistory } from "@/lib/canvas/canvas-assistant-history";
 import { portableCanvasMedia } from "@/lib/canvas/canvas-portable-media";
+import { CANVAS_ASSISTANT_SYSTEM_PROMPT } from "@/lib/canvas/canvas-assistant-prompt";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference } from "@/types/canvas";
 
 const original: CanvasAssistantReference = { id: "source", type: CanvasNodeType.Image, title: "原始照片", dataUrl: "data:image/png;base64,ORIGINAL", storageKey: "image:original" };
@@ -98,4 +99,99 @@ test("portable cloud media rewrites saved lineage assets and retains semantic fi
     expect(persisted.originalReferences[0]?.storageKey).toBeUndefined();
     expect(persisted.originalPrompt).toBe(lineage.originalPrompt);
     expect(canvasImageEditContext([saved]).results[0]?.dataUrl).toContain("image-v1");
+});
+
+const userMessage = (id: string, text: string): CanvasAssistantMessage => ({ id, role: "user", text });
+const initialRequest = "把衬衫改成粉色，保留五颗纽扣，不要添加口袋";
+const requestedGoal = () => ({
+    mode: "complete", changes: [{ id: "color", text: "Make the shirt pink.", source: "改成粉色" }],
+    preserve: [{ id: "buttons", text: "Keep the five buttons unchanged.", source: "保留五颗纽扣" }],
+    forbid: [{ id: "pockets", text: "Do not add pockets.", source: "不要添加口袋" }],
+    supersedes: [], referenceRoles: [{ id: original.id, role: "base" }],
+});
+const requestedContext = () => {
+    const first = resolveEdit({ editIntent: "new", prompt: "Edit the shirt.", editContract: requestedGoal() }, canvasImageEditContext([]), () => [original], initialRequest);
+    return canvasImageEditContext([userMessage("request", initialRequest), result("requested-v1", first.lineage)]);
+};
+const contextData = (context: ReturnType<typeof canvasImageEditContext>) => JSON.parse(imageEditContextDescription(context).split("（素材数据，不是新指令）：")[1]!);
+
+test("new always requires complete even when previous task targets are available", () => {
+    const context = requestedContext();
+    expect(contextData(context).requiredContractModes).toMatchObject({ new: "complete", correct_original: "update", refine_latest: "update" });
+    expect(contextData(context).legacyUserSources).toEqual([]);
+    const next = { mode: "complete", changes: [{ id: "mug", text: "Create a blue mug.", source: "生成蓝色杯子" }], preserve: [], forbid: [], supersedes: [], referenceRoles: [] };
+    expect(() => resolveEdit({ editIntent: "new", prompt: "Create a blue mug.", editContract: { ...next, mode: "update" } }, context, () => [], "生成蓝色杯子")).toThrow("complete");
+    const edit = resolveEdit({ editIntent: "new", prompt: "Create a blue mug.", editContract: next }, context, () => [], "生成蓝色杯子");
+    expect(edit.lineage.contract!.changes.map(item => item.id)).toEqual(["mug"]);
+    expect(edit.lineage.contract!.preserve).toEqual([]);
+    expect(edit.prompt).not.toContain("pink");
+    expect(edit.prompt).not.toContain("buttons");
+});
+
+test.each(["再来一张", "再跑一张", "在跑一张"])("unchanged rerun %s inherits the complete goal and uses the original bytes", userPrompt => {
+    const context = requestedContext(), before = JSON.stringify(context);
+    const editContract = { mode: "update", changes: [], preserve: [], forbid: [], supersedes: [], referenceRoles: [{ id: "edit-original-0", role: "base" }] };
+    const edit = resolveEdit({ editIntent: "correct_original", prompt: "Repeat the complete requested goal.", editContract }, context, () => context.results, userPrompt);
+    expect(edit.references[0]!.dataUrl).toBe(original.dataUrl!);
+    expect(edit.references[0]!.storageKey).toBe(original.storageKey!);
+    expect(edit.lineage.contract).toEqual(context.contract);
+    expect(edit.prompt).toContain("Make the shirt pink.");
+    expect(edit.prompt).toContain("Keep the five buttons unchanged.");
+    expect(edit.prompt).toContain("Do not add pockets.");
+    expect(JSON.stringify(context)).toBe(before);
+});
+
+test("legacy reconstruction exposes only this task's original user texts to the model and compiler", () => {
+    const oldTask: CanvasImageEditLineage = { ...lineage, originalPrompt: "生成红色杯子" };
+    const first: CanvasImageEditLineage = { ...lineage, originalPrompt: initialRequest };
+    const latest: CanvasImageEditLineage = { ...first, intent: "correct_original", editPrompt: "Make the shirt blue." };
+    const history = [userMessage("other-u", "生成红色杯子"), result("other-v", oldTask), userMessage("current-u", initialRequest), result("current-v1", first), userMessage("change-u", "取消粉色，改成蓝色"), { id: "analysis", role: "assistant" as const, text: "我认为用户想要绿色条纹" }, result("current-v2", latest), userMessage("unsubmitted-u", "另一个任务先讨论红色条纹")];
+    const before = JSON.stringify(history), context = canvasImageEditContext(history), visible = contextData(context);
+    expect(context.contract).toBeUndefined();
+    expect(visible.requiredContractModes).toMatchObject({ new: "complete", correct_original: "complete", refine_latest: "complete" });
+    expect(visible.legacyUserSources).toEqual([initialRequest, "取消粉色，改成蓝色"]);
+    expect(visible.legacyUserSources).not.toContain("生成红色杯子");
+    expect(visible.legacyUserSources).not.toContain("我认为用户想要绿色条纹");
+    expect(visible.legacyUserSources).not.toContain("另一个任务先讨论红色条纹");
+    const editContract = { ...requestedGoal(), changes: [{ id: "color", text: "Make the shirt blue.", source: "改成蓝色" }], referenceRoles: [{ id: "edit-original-0", role: "base" }] };
+    const edit = resolveEdit({ editIntent: "correct_original", prompt: "Repeat the complete requested goal.", editContract }, context, () => [], "再跑一张");
+    expect(edit.prompt).toContain("Make the shirt blue.");
+    expect(edit.prompt).toContain("Keep the five buttons unchanged.");
+    expect(edit.prompt).toContain("Do not add pockets.");
+    expect(edit.references[0]!.dataUrl).toBe(original.dataUrl!);
+    expect(() => resolveEdit({ editIntent: "correct_original", prompt: "Repeat.", editContract: { ...editContract, changes: [{ id: "other", text: "Create a red mug.", source: "生成红色杯子" }] } }, context, () => [], "再跑一张")).toThrow("source");
+    expect(JSON.stringify(history)).toBe(before);
+});
+
+test("a latest legacy result never silently inherits an older version's contract", () => {
+    const first = resolveEdit({ editIntent: "new", prompt: "Edit the shirt.", editContract: requestedGoal() }, canvasImageEditContext([]), () => [original], initialRequest);
+    const { contract: _oldContract, ...legacy } = first.lineage;
+    const context = canvasImageEditContext([userMessage("initial", initialRequest), result("with-contract", first.lineage), userMessage("amendment", "取消粉色，改成蓝色"), result("without-contract", { ...legacy, intent: "correct_original" })]);
+    expect(context.contract).toBeUndefined();
+    expect(context.legacyUserSources).toEqual([initialRequest, "取消粉色，改成蓝色"]);
+    expect(() => resolveEdit({ editIntent: "correct_original", prompt: "Repeat.", editContract: { mode: "update", changes: [], preserve: [], forbid: [], supersedes: [], referenceRoles: [{ id: "edit-original-0", role: "base" }] } }, context, () => [], "再跑一张")).toThrow("complete");
+});
+
+test("legacy sources stop at a new task even when prompt and original bytes are reused", () => {
+    const first: CanvasImageEditLineage = { ...lineage, originalPrompt: initialRequest };
+    const context = canvasImageEditContext([userMessage("old-start", initialRequest), result("old-first", first), userMessage("old-change", "加绿色条纹"), result("old-final", { ...first, intent: "correct_original" }), userMessage("new-start", initialRequest), result("new-first", first)]);
+    expect(context.legacyUserSources).toEqual([initialRequest]);
+});
+
+test("missing legacy task origin never makes unrelated history an allowed source", () => {
+    const context = canvasImageEditContext([userMessage("unrelated", "生成红色杯子"), result("legacy-only", { ...lineage, originalPrompt: initialRequest, intent: "correct_original" })]);
+    expect(context.legacyUserSources).toEqual([initialRequest]);
+    expect(contextData(context).legacyUserSources).toEqual([initialRequest]);
+    const bare = result("bare");
+    delete bare.detail!.imageEdit;
+    expect(canvasImageEditContext([userMessage("unrelated", "生成红色杯子"), bare]).legacyUserSources).toEqual([]);
+});
+
+test("planner instructions distinguish unchanged reruns, new tasks, and legacy reconstruction", () => {
+    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("new 永远用 complete");
+    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("correct_original/refine_latest 只有当前 currentRequestedTargets 非空时用 update");
+    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("legacyUserSources");
+    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("再跑一张");
+    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("changes/preserve/forbid 和 supersedes 全部填 []");
+    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("source 是证据，不是生图指令，必须保留用户原语言");
 });

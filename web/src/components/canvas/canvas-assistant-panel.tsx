@@ -58,10 +58,12 @@ import { CANVAS_ASSISTANT_SYSTEM_PROMPT } from "@/lib/canvas/canvas-assistant-pr
 import { CANVAS_ASSISTANT_OUTPUT_POLICY, CANVAS_ENGLISH_IMAGE_PROMPT_SYSTEM, IMAGE_GENERATION_PROMPT_DESCRIPTION, canvasAssistantDisplayMessage, ensureEnglishImagePrompt } from "@/lib/canvas/canvas-assistant-output";
 import { createCanvasSelectionPromptSync } from "@/lib/canvas/canvas-selection-prompt";
 import { canvasImageEditContext, imageEditContextDescription, IMAGE_EDIT_TOOL_PROPERTIES, resolveCanvasImageEdit, type CanvasImageEditContext, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
+import { CanvasEditContractError } from "@/lib/canvas/canvas-image-edit-contract";
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
 
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
 const ONLINE_AGENT_MAX_STEPS = 4;
+const IMAGE_TARGETS_INCOMPLETE_MESSAGE = "未能完整接续这次生图要求，本次尚未提交图片生成。请明确要沿用的上一版，或补充本次需要保留和修改的内容。";
 const JSON_RECORD_SCHEMA = { type: "object", additionalProperties: true };
 const POSITION_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"], additionalProperties: false };
 const VIEWPORT_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, k: { type: "number" } }, required: ["x", "y", "k"], additionalProperties: false };
@@ -224,7 +226,7 @@ type OnlineAgentTab = "setup" | "chat" | "history" | "log";
 type OnlineAgentLog = { id: string; time: string; title: string; data?: unknown };
 type OnlineAgentLogContext = { model: string; running: boolean; confirmTools: boolean; messages: number; nodes: number; connections: number };
 type OnlineLoopContext = { step: number };
-type OnlineTurnContext = { userPrompt: string; references: CanvasAssistantReference[]; historyReferences?: CanvasAssistantReference[]; hiddenPrompts?: string[]; imageEditContext?: CanvasImageEditContext; settings: AgentGenerationSettings; videoSize: string; config: AiConfig; canvasSnapshot: CanvasAgentSnapshot; autoContext: boolean };
+type OnlineTurnContext = { userPrompt: string; references: CanvasAssistantReference[]; historyReferences?: CanvasAssistantReference[]; hiddenPrompts?: string[]; imageEditContext?: CanvasImageEditContext; settings: AgentGenerationSettings; videoSize: string; config: AiConfig; canvasSnapshot: CanvasAgentSnapshot; autoContext: boolean; writeOperationAttempted?: boolean; imageContractRepairUsed?: boolean; finishAfterImageRepair?: boolean; imageRepairReferences?: CanvasAssistantReference[] };
 type OnlineToolResult = { ok: true; message: string; data?: unknown; mediaWorkflow?: CanvasAgentMediaWorkflow } | { ok: false; message: string; data?: unknown };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
 type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: ToolResponseResult["responsesOutputItems"]; assistantId: string; step: number; turn: OnlineTurnContext };
@@ -655,7 +657,56 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const assistantTurn = toolResponseToInput({ toolCalls, claudeAssistantContent, responsesOutputItems });
         const nextMessages: ResponseInputMessage[] = [...messages, ...assistantTurn, ...toolResults.map((item) => ({ role: "tool" as const, tool_call_id: item.toolCallId, content: JSON.stringify(item.result) }))];
         if (toolResults.some((item) => !item.result.ok)) {
+            const failed = toolResults.find(item => !item.result.ok);
+            const failure = objectDetail(failed?.result.data);
+            const original = toolCalls.find(call => call.id === failed?.toolCallId);
+            // A model may correct one proven preflight mode mismatch. This is not
+            // a provider retry: nothing in this turn may have attempted a write.
+            const canRepair = original?.function.name === "canvas_generate_image"
+                && failure.code === "IMAGE_EDIT_CONTRACT_INVALID" && failure.phase === "image_preflight" && failure.submitted === false
+                && (failure.expectedMode === "complete" || failure.expectedMode === "update")
+                && !turn.writeOperationAttempted && !turn.imageContractRepairUsed
+                && toolCalls.filter(isWritableToolCall).length === 1
+                && toolResults.every(item => item === failed || (item.result.ok && ONLINE_READ_TOOLS.has(item.name)));
+            if (canRepair && original) {
+                turn.imageContractRepairUsed = true;
+                const repairMessages: ResponseInputMessage[] = [...nextMessages, { role: "system", content:
+                    "内部提交前校验：上一条图片调用尚未执行，没有提交生图。只允许纠正这一条 canvas_generate_image 的参数一次，不是重试生成。重新核对用户本轮意图与本任务改图上下文：new 始终使用 complete；续作有 currentRequestedTargets 时使用 update；续作无目标时依据已提供的原始及当前任务历史用户要求重建 complete。不得直接换 mode 而保留不完整差量，不得编造 source 或漏掉仍有效的目标。返回且仅返回一个 canvas_generate_image；可纠正 prompt/editContract，editIntent 只允许保持原值或将误判为 new 的同任务重做改为 correct_original。原图和原始要求必须已保存且没有引入其他任务的新参考图。referenceNodeIds/resultImageId、数量、模型、比例、质量等参数必须沿用原调用，不得增加其他工具或任务。无法依据现有资料恢复目标时停止，不要猜测。" }];
+                upsertMessage(sessionId, { id: assistantId, role: "assistant", text: "正在接续上一轮要求，核对完整生成参数…" });
+                let repaired: ToolResponseResult, call: ResponseToolCall;
+                try {
+                    const originalArgs = parseToolArguments(original.function.arguments);
+                    turn.imageRepairReferences = originalArgs.editIntent === "new" || originalArgs.editIntent === "explicit"
+                        ? mediaReferencesForTool(originalArgs, turn).map(ref => ({ ...ref })) : [];
+                    repaired = await requestToolResponse(
+                        { ...turn.config, model: turn.config.textModel || turn.config.model, systemPrompt: "" },
+                        repairMessages, ONLINE_AGENT_TOOLS.filter(tool => tool.function.name === "canvas_generate_image"),
+                        { type: "function", name: "canvas_generate_image" }, undefined, { tool: "canvas-chat" },
+                    );
+                    call = checkedImageContractRepairCall(original, repaired.toolCalls, turn);
+                } catch (error) {
+                    addOnlineLog("图片参数纠正未完成", error instanceof Error ? error.message : error);
+                    upsertMessage(sessionId, { id: assistantId, role: "assistant", text: IMAGE_TARGETS_INCOMPLETE_MESSAGE });
+                    return;
+                }
+                turn.finishAfterImageRepair = true;
+                addOnlineLog("图片提交前参数纠正", { toolCall: call });
+                if (confirmTools) {
+                    const toolMessageId = nanoid();
+                    pendingToolContextRef.current.set(toolMessageId, { messages: repairMessages, toolCalls: [call], claudeAssistantContent: repaired.claudeAssistantContent, responsesOutputItems: repaired.responsesOutputItems, assistantId, step: step + 1, turn });
+                    appendMessage(sessionId, { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls([call]), detail: { status: "pending", step: step + 1, toolCalls: [call], generationSettings: turn.settings, referenceImages: turn.references.map(({ id, title }) => ({ id, title })) } });
+                } else {
+                    await continueOnlineToolLoop(sessionId, assistantId, repairMessages, { ...repaired, toolCalls: [call] }, step + 1, turn);
+                }
+                return;
+            }
             upsertMessage(sessionId, { id: assistantId, role: "assistant", text: toolResults.map((item) => toolResultText(item.result)).join("\n") });
+            return;
+        }
+        // A repaired image call is the only authorized pending operation. Do not
+        // ask the planner for another tool cycle after its result is known.
+        if (turn.finishAfterImageRepair) {
+            upsertMessage(sessionId, { id: assistantId, role: "assistant", text: toolResults.map(item => toolResultText(item.result)).join("\n") });
             return;
         }
         if (step >= ONLINE_AGENT_MAX_STEPS) {
@@ -703,6 +754,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     };
 
     const mediaReferencesForTool = (args: Record<string, unknown>, turn: OnlineTurnContext) => {
+        if (turn.imageRepairReferences) return turn.imageRepairReferences.map(ref => ({ ...ref, dataUrl: ref.dataUrl || "" }));
         const available = new Map<string, CanvasAssistantReference>();
         for (const reference of turn.historyReferences || []) available.set(reference.id, reference);
         for (const reference of [...(turn.imageEditContext?.originals || []), ...(turn.imageEditContext?.results || [])]) available.set(reference.id, reference);
@@ -779,7 +831,17 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 const settings = onlineAgentMediaSettings(mode === "video" ? { ...turn.settings, size: turn.videoSize } : turn.settings, mode, mode === "image" ? { ...args, model: turn.settings.imageModel } : args);
                 const generationPrompt = mode === "image" && !imageModelProfile(settings.imageModel).requiresPrompt ? "" : requireString(args.prompt, "prompt");
                 if (mode === "image") {
-                    const edit = resolveCanvasImageEdit({ ...args, prompt: generationPrompt }, turn.imageEditContext || canvasImageEditContext([]), () => mediaReferencesForTool(args, turn), turn.userPrompt);
+                    let edit: ReturnType<typeof resolveCanvasImageEdit>;
+                    try {
+                        edit = resolveCanvasImageEdit({ ...args, prompt: generationPrompt }, turn.imageEditContext || canvasImageEditContext([]), () => mediaReferencesForTool(args, turn), turn.userPrompt);
+                    } catch (error) {
+                        if (!(error instanceof CanvasEditContractError)) throw error;
+                        return { ok: false, message: IMAGE_TARGETS_INCOMPLETE_MESSAGE, data: {
+                            code: error.code, phase: "image_preflight", submitted: error.submitted,
+                            expectedMode: error.expectedMode, reason: error.message,
+                        } };
+                    }
+                    turn.writeOperationAttempted = true;
                     addOnlineLog("改图底图选择", { intent: edit.lineage.intent, references: edit.references.map(({ id, title, storageKey }) => ({ id, title, storageKey })) });
                     return await runDirectGeneration(sessionId, edit.prompt, settings, edit.references.map(referenceToImage), turn.config, edit.lineage);
                 }
@@ -812,6 +874,9 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 
     const executeOnlineToolCall = async (sessionId: string, toolCall: ResponseToolCall, turn: OnlineTurnContext): Promise<OnlineExecutedToolCall> => {
         try {
+            // For images this irreversible flag is set only after the explicit
+            // preflight above. Every other write attempt closes the repair gate.
+            if (toolCall.function.name !== "canvas_generate_image" && isWritableToolCall(toolCall)) turn.writeOperationAttempted = true;
             const result = await executeOnlineTool(sessionId, toolCall.function.name, parseToolArguments(toolCall.function.arguments), turn);
             return { toolCallId: toolCall.id, name: toolCall.function.name, result };
         } catch (error) {
@@ -1933,6 +1998,30 @@ function toolCallLabel(name: string) {
 
 function toolResultText(result: OnlineToolResult) {
     return result.message;
+}
+
+function checkedImageContractRepairCall(original: ResponseToolCall, calls: ResponseToolCall[], turn: OnlineTurnContext): ResponseToolCall {
+    if (calls.length !== 1 || calls[0].function.name !== "canvas_generate_image") throw new Error("参数纠正必须只返回原图片工具调用");
+    const previous = parseToolArguments(original.function.arguments), corrected = parseToolArguments(calls[0].function.arguments);
+    const editable = ["prompt", "editContract", "editIntent"];
+    for (const [key, value] of Object.entries(corrected)) {
+        if (!editable.includes(key) && JSON.stringify(value) !== JSON.stringify(previous[key])) throw new Error("参数纠正不得改变数量、模型或生成设置");
+    }
+    if (corrected.editIntent !== previous.editIntent) {
+        const context = turn.imageEditContext, known = [...(context?.originals || []), ...(context?.results || [])];
+        const sameAsset = (ref: CanvasAssistantReference) => known.some(item => Boolean(item.storageKey || item.dataUrl) && (item.storageKey || item.dataUrl) === (ref.storageKey || ref.dataUrl));
+        const sameTaskRedo = previous.editIntent === "new" && corrected.editIntent === "correct_original"
+            && context?.originalPrompt && context.originals.length && context.originals.every(ref => ref.storageKey || ref.dataUrl)
+            && [...turn.references, ...(turn.imageRepairReferences || [])].every(sameAsset);
+        if (!sameTaskRedo) throw new Error("参数纠正不能更换任务、底图或替用户选择结果");
+    }
+    // Omitted non-editable options retain the originally requested values.
+    const args = { ...previous };
+    for (const key of editable) {
+        if (key in corrected) args[key] = corrected[key];
+        else delete args[key];
+    }
+    return { ...calls[0], function: { ...calls[0].function, arguments: JSON.stringify(args) } };
 }
 
 function requireStringArray(value: unknown, field: string): string[] {

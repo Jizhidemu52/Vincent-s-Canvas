@@ -110,7 +110,7 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
   }
 }, 25_000);
 
-test("demo recovers the same Mark job with its original mask and bytes, while an unknown submission stays paused", async () => {
+for (const downloadStatus of [503, 403]) test(`demo recovers the same Mark job after polling and download HTTP ${downloadStatus}, while an unknown submission stays paused`, async () => {
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
   let generated = 0;
   let uploads = 0;
@@ -145,7 +145,7 @@ test("demo recovers the same Mark job with its original mask and bytes, while an
     env: { ...process.env, DEMO_STATE_PATH: ":memory:", DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1",
       OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "true", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "false", ROLE_PORTALS_ENABLED: "true", STANDALONE_WEB_DIR: "",
       OPENTOKEN_API_KEY: "", APIMART_API_KEY: "", GPT_IMAGE_2_API_KEY: "",
-      MARK_IMAGE_BASE_URL: `http://127.0.0.1:${provider.port}/v1`, MARK_IMAGE_API_KEY: "fake-mark-recovery-key" },
+      MARK_IMAGE_BASE_URL: `http://127.0.0.1:${provider.port}/v1`, MARK_IMAGE_API_KEY: "fake-mark-recovery-key", DEMO_TEST_RESULT_FAILURE_ONCE: String(downloadStatus) },
   });
   const base = `http://127.0.0.1:${port}`;
   const request = (path: string, method = "GET", body?: unknown) => fetch(base + path, {
@@ -181,14 +181,27 @@ test("demo recovers the same Mark job with its original mask and bytes, while an
     const task = (await submitted.json()).task;
     const paused = await settle(task.id);
     expect(paused.status).toBe("paused"); expect(paused.upstreamTaskId).toBe("unchanged-mark-job");
+    expect(paused.lastFailure).toEqual({ phase: "polling", code: "PROVIDER_POLL_HTTP_ERROR", httpStatus: 503 });
     expect(generated).toBe(1); expect(uploads).toBe(1); expect(polls).toBe(1);
     const recovering = await request(`/api/tasks/${task.id}/recover`, "POST").then(response => response.json());
     expect(recovering.recovered).toBe(true);
     const repeated = await request(`/api/tasks/${task.id}/recover`, "POST").then(response => response.json());
     expect(repeated.recovered).toBe(false);
+    const downloadPaused = await settle(task.id);
+    expect(downloadPaused.status).toBe("paused");
+    expect(downloadPaused.lastFailure).toEqual({ phase: "download", code: "RESULT_DOWNLOAD_HTTP_ERROR", httpStatus: downloadStatus });
+    expect(downloadPaused.upstreamResultUrl).toBeUndefined();
+    expect(JSON.stringify(downloadPaused)).not.toContain("mark-demo-result.invalid");
+    expect(generated).toBe(1); expect(uploads).toBe(1); expect(polls).toBe(2);
+    const downloadRecovery = await request(`/api/tasks/${task.id}/recover`, "POST").then(response => response.json());
+    expect(downloadRecovery.task.upstreamResultUrl).toBeUndefined();
+    expect(downloadRecovery.recovered).toBe(true);
     const completed = await settle(task.id);
     expect(completed.status).toBe("success"); expect(completed.upstreamTaskId).toBe("unchanged-mark-job");
-    expect(generated).toBe(1); expect(uploads).toBe(1); expect(polls).toBe(2);
+    expect(completed.stage).toBe("succeeded"); expect(completed.errorCode).toBeNull(); expect(completed.failureReason).toBeNull();
+    expect(completed.lastFailure).toBeUndefined();
+    const expectedPolls = downloadStatus === 403 ? 3 : 2;
+    expect(generated).toBe(1); expect(uploads).toBe(1); expect(polls).toBe(expectedPolls);
     expect(completed.resultUrls).toHaveLength(1);
     const assetId = completed.resultUrls[0].split("/")[3];
     const variants = await request(`/api/assets/${assetId}/variants`).then(response => response.json());
@@ -198,7 +211,7 @@ test("demo recovers the same Mark job with its original mask and bytes, while an
     expect(new Uint8Array(await originalResponse.arrayBuffer())).toEqual(new Uint8Array(png));
     expect((await request(variants.primary.url)).ok).toBe(true);
     expect((await request(`/api/tasks/${task.id}/recover`, "POST").then(response => response.json())).recovered).toBe(false);
-    expect(generated).toBe(1); expect(polls).toBe(2);
+    expect(generated).toBe(1); expect(polls).toBe(expectedPolls);
 
     const unknown = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), operationType: "image_generation", modelConfigId: input.modelConfigId, prompt: "unknown submission", parameters: {} }).then(response => response.json());
     const unconfirmed = await settle(unknown.task.id);
@@ -206,7 +219,7 @@ test("demo recovers the same Mark job with its original mask and bytes, while an
     const unchanged = await request(`/api/tasks/${unknown.task.id}/recover`, "POST").then(response => response.json());
     expect(unchanged.recovered).toBe(false); expect(unchanged.task.status).toBe("paused");
     expect(unchanged.task.errorCode).toBe("MARK_IMAGE_SUBMISSION_UNKNOWN");
-    expect(generated).toBe(2); expect(uploads).toBe(1); expect(polls).toBe(2);
+    expect(generated).toBe(2); expect(uploads).toBe(1); expect(polls).toBe(expectedPolls);
   } finally {
     child.kill(); await child.exited; provider.stop(true);
   }

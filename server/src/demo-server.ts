@@ -1,5 +1,6 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
 import { singleImageTaskParameters } from "./image-task-policy";
+import { imageTaskApiReplacer, imageTaskFailureDetail, imageTaskPauseReason, type ImageTaskFailureDetail, type ImageTaskFailurePhase } from "./image-task-diagnostics";
 import { assetMetadataSchema } from "./asset-metadata";
 import { appendDemoDownloadReceipt, demoDownloadProjection, demoDownloadReceiptSchema, type DemoDownloadReceipt } from "./demo-asset-receipts";
 import { assignDemoPublicModelNumbers, isSelectableCreativeModel, presentAdminModel, presentPublicModel } from "./model-presentation";
@@ -28,7 +29,7 @@ import { ImageResultVariantsError, imageResultVariantIds, isAuxiliaryImageResult
 import { syncDemoProject } from "./demo-projects";
 import { createDemoBatchTaskInputs } from "./demo-batch-tasks";
 import { buildVideoProviderRequest, getVideoModelCapability, isSupportedVideoModelId, supportedVideoModelIds, type ProviderVideoSource, type SupportedVideoModelId, type VideoProviderParameters, videoTaskStatusPath } from "./video-models";
-import { isPublicHttpsUrl } from "./apimart-upload";
+import { isPublicHttpUrl, isPublicHttpsUrl } from "./apimart-upload";
 import { preflightVideoSources, prepareVideoProviderSources } from "./video-source-preparation";
 import { probeMediaBytes, type MediaMetadata } from "./media-probe";
 import { readDemoRecovery } from "./demo-state-recovery";
@@ -407,9 +408,12 @@ type DemoTask = {
   status: "processing" | "success" | "failed" | "paused";
   submissionStartedAt?: string;
   refundedAt?: string;
-  stage?: "preflight" | "submitted" | "polling" | "downloading" | "succeeded" | "failed";
+  stage?: "preflight" | "submitted" | "polling" | "downloading" | "saving" | "succeeded" | "failed";
   errorCode?: string | null;
   upstreamTaskId?: string | null;
+  /** Persisted only on the server so a failed result download can resume without another poll. */
+  upstreamResultUrl?: string;
+  lastFailure?: ImageTaskFailureDetail;
   providerModel?: SupportedVideoModelId;
   updatedAt?: string;
   resultUrls: string[];
@@ -460,7 +464,7 @@ const json = (
   status = 200,
   extra: Record<string, string> = {},
 ) =>
-  new Response(JSON.stringify(body), {
+  new Response(JSON.stringify(body, imageTaskApiReplacer), {
     status,
     headers: { ...headers, ...extra },
   });
@@ -640,7 +644,10 @@ function pauseDemoTaskForStorageFailure(task: DemoTask) {
 }
 
 function finishDemoTaskFailure(task: DemoTask, error: unknown, patch: Partial<DemoTask>, user?: { creditBalance: number }) {
-  if (error instanceof DemoStorageError) { pauseDemoTaskForStorageFailure(task); return; }
+  if (error instanceof DemoStorageError) {
+    if (patch.lastFailure) task.lastFailure = patch.lastFailure;
+    pauseDemoTaskForStorageFailure(task); return;
+  }
   if (error instanceof ImageResultPersistenceError) patch = { ...patch, status: "paused", errorCode: error.code, failureReason: error.message };
   const refund = patch.status === "failed" && Boolean(user) && !task.refundedAt;
   try {
@@ -672,7 +679,7 @@ async function completeDemoImageTask(task: DemoTask, ownerUserId: string, result
     },
   });
   resultUrl = `/api/assets/${primary.assetId}/content`;
-  updateDemoTask(task, { resultUrls: [resultUrl], status: "success", updatedAt: now() });
+  updateDemoTask(task, { resultUrls: [resultUrl], status: "success", stage: "succeeded", errorCode: null, failureReason: null, lastFailure: undefined, upstreamResultUrl: undefined, updatedAt: now() });
 }
 
 Bun.serve({
@@ -693,7 +700,7 @@ Bun.serve({
     const path = url.pathname;
     const json = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(
       path.startsWith("/api/") && !path.startsWith("/api/admin/") && path !== "/api/models"
-        ? redactDesignerModelData(body, demoModels, sessionUser(request)?.role) : body,
+        ? redactDesignerModelData(body, demoModels, sessionUser(request)?.role) : body, imageTaskApiReplacer,
     ), { status, headers: { ...headers, ...extra } });
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
       const origin = request.headers.get("origin");
@@ -1602,7 +1609,9 @@ Bun.serve({
           updateDemoTask(task, { status: "paused", errorCode: "MARK_IMAGE_SUBMISSION_UNKNOWN", failureReason: "Mark 图片任务缺少已确认的上游任务 ID，保持暂停；为避免重复收费，不会重新提交生成。", updatedAt: now() });
           return json({ task, recovered: false, message: task.failureReason });
         }
-        if (!markImageProvider.apiKey)
+        const expiredResult = task.lastFailure?.phase === "download" && task.lastFailure.code === "RESULT_DOWNLOAD_HTTP_ERROR"
+          && [401, 403, 404, 410].includes(task.lastFailure.httpStatus || 0);
+        if (!markImageProvider.apiKey && (!task.upstreamResultUrl || expiredResult))
           return json({ task, recovered: false, message: "Mark 服务端凭据未配置，保留原任务，未重新提交生成" });
         const sources = (task.sourceUrls || []).map(sourceUrl => {
           const assetId = sourceUrl.match(/^\/api\/assets\/([0-9a-f-]+)\/content$/i)?.[1];
@@ -1612,7 +1621,8 @@ Bun.serve({
           updateDemoTask(task, { status: "paused", errorCode: "MARK_IMAGE_INPUT_UNAVAILABLE", failureReason: "原任务的参考图或蒙版已不可用，无法安全恢复结果保存；保留原上游任务，不会重新生成。", updatedAt: now() });
           return json({ task, recovered: false, message: task.failureReason });
         }
-        updateDemoTask(task, { status: "processing", stage: "polling", errorCode: null, failureReason: null, updatedAt: now() });
+        updateDemoTask(task, { status: "processing", stage: "polling", errorCode: null, failureReason: null,
+          ...(expiredResult ? { upstreamResultUrl: undefined } : {}), updatedAt: now() });
         void runApiMartImageTaskForDemo(task, user, String(markModel.modelId), task.prompt || "", task.parameters || {}, sources as DemoAsset[], MARK_IMAGE_PROVIDER_ID);
         return json({ task, recovered: true, message: "正在查询原 Mark 上游任务并恢复结果保存；不会重新提交生成" });
       }
@@ -2076,18 +2086,26 @@ async function runApiMartImageTaskForDemo(
   preparedInput?: ImageEditInput<DemoAsset>,
 ) {
   const isMarkImage = providerId === MARK_IMAGE_PROVIDER_ID;
+  let phase: ImageTaskFailurePhase = "preflight";
   try {
     const editInput = isMarkImage ? preparedInput || await prepareImageEditInput(sources, parameters, { protocol: "apimart", modelId, operationType: task.operationType }) : undefined;
+    phase = "submission";
     if (!isMarkImage) updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
-    await completeDemoImageTask(task, user.id, await callApiMartImage(modelId, prompt, parameters, sources, providerId, editInput, isMarkImage ? task : undefined), editInput);
+    const resultUrl = await callApiMartImage(modelId, prompt, parameters, sources, providerId, editInput, isMarkImage ? task : undefined);
+    phase = "result_store";
+    if (isMarkImage) updateDemoTask(task, { stage: "saving", updatedAt: now() });
+    await completeDemoImageTask(task, user.id, resultUrl, editInput);
   } catch (error) {
     if (isMarkImage) {
       const paused = Boolean(task.submissionStartedAt || task.upstreamTaskId) && !(error instanceof ApiMartImageProviderFailure);
+      if (phase === "submission") phase = task.stage === "downloading" ? "download"
+        : task.upstreamTaskId ? "polling" : task.submissionStartedAt ? "submission" : "preflight";
       finishDemoTaskFailure(task, error, {
         status: paused ? "paused" : "failed", stage: "failed",
         errorCode: paused ? "MARK_IMAGE_STATUS_UNCERTAIN" : "MARK_IMAGE_FAILED",
+        lastFailure: imageTaskFailureDetail(error, phase),
         failureReason: paused
-          ? "Mark 图片提交后的状态或结果保存尚未确认，任务已暂停；不会重新生成或自动退款，请核查原上游任务。"
+          ? imageTaskPauseReason(phase)
           : error instanceof ApiMartImageProviderFailure
             ? "Mark 图片服务明确返回任务失败；本次积分已退还。"
             : "Mark 图片参数、参考图或上传准备失败；尚未提交生成，请检查输入与服务端配置。",
@@ -2142,7 +2160,7 @@ async function callApiMartImage(
   const isMarkImage = providerId === MARK_IMAGE_PROVIDER_ID;
   const references = isMarkImage && preparedInput ? preparedInput.references : sources;
   const toDataUrl = (source: DemoAsset) => `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString("base64")}`;
-  const urls = await runApiMartImageTask({
+  const urls = isMarkImage && task?.upstreamTaskId && task.upstreamResultUrl ? [task.upstreamResultUrl] : await runApiMartImageTask({
     baseUrl: isMarkImage ? markImageProvider.baseUrl : apiMartBaseUrl,
     apiKey: isMarkImage ? markImageProvider.apiKey : apiMartApiKey,
     modelId,
@@ -2163,13 +2181,15 @@ async function callApiMartImage(
   });
   const first = urls[0];
   if (!first) throw new Error("APIMart 图片任务完成但没有结果图片");
+  if (isMarkImage && !isPublicHttpUrl(first)) throw Object.assign(new Error("原图片结果地址无效，不能恢复下载"), { code: "PROVIDER_RESULT_URL_INVALID" });
+  if (isMarkImage && task) updateDemoTask(task, { upstreamResultUrl: first, stage: "downloading", updatedAt: now() });
   // Polling or download failure must never restart a paid generation.
   return downloadApiMartImage(first);
 }
 
 async function downloadApiMartImage(url: string) {
   const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
-  if (!response.ok) throw new Error(`APIMart 图片下载失败：${response.status}`);
+  if (!response.ok) throw Object.assign(new Error(`APIMart 图片下载失败：${response.status}`), { code: "RESULT_DOWNLOAD_HTTP_ERROR", httpStatus: response.status });
   const mimeType = response.headers.get("content-type")?.split(";")[0] || "image/png";
   return `data:${mimeType};base64,${Buffer.from(await response.arrayBuffer()).toString("base64")}`;
 }

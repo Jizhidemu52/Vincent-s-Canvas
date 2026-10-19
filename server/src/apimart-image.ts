@@ -311,7 +311,9 @@ export function apiMartImageOptions(parameters: Record<string, unknown>, kind: E
 }
 
 /** Only an explicit provider terminal failure is safe to settle as a failed task. */
-export class ApiMartImageProviderFailure extends Error {}
+export class ApiMartImageProviderFailure extends Error {
+  readonly code = "PROVIDER_TERMINAL_FAILURE";
+}
 
 export async function runApiMartImageTask(input: ApiMartImageInput & {
   baseUrl: string;
@@ -368,9 +370,9 @@ export async function runApiMartImageTask(input: ApiMartImageInput & {
     const submit = await (runtime.fetch || fetchProviderSubmission)(`${baseUrl}${request.path}`, {
       method: "POST", headers, body: JSON.stringify(request.payload), redirect: "error", signal: AbortSignal.timeout(180_000),
     });
-    if (!submit.ok) throw new Error(`APIMart 图片任务提交失败：${submit.status} ${await providerMessage(submit, input.apiKey)}`);
+    if (!submit.ok) throw Object.assign(new Error(`APIMart 图片任务提交失败：${submit.status} ${await providerMessage(submit, input.apiKey)}`), { code: "PROVIDER_SUBMISSION_HTTP_ERROR", httpStatus: submit.status });
     taskId = readTaskId(await submit.json());
-    if (!taskId) throw new Error("APIMart 图片任务未返回 task_id；请核查上游状态，不会自动重新提交");
+    if (!taskId) throw Object.assign(new Error("APIMart 图片任务未返回 task_id；请核查上游状态，不会自动重新提交"), { code: "PROVIDER_TASK_ID_MISSING" });
     // A failed persistence callback must stop before GET; the caller retains the submission intent.
     await input.onSubmitted?.(taskId);
   }
@@ -381,19 +383,19 @@ export async function runApiMartImageTask(input: ApiMartImageInput & {
     const statusResponse = await poll(`${baseUrl}/tasks/${encodeURIComponent(taskId)}`, {
       headers: queryHeaders, redirect: "error", signal: AbortSignal.timeout(60_000),
     });
-    if (!statusResponse.ok) throw new Error(`APIMart 图片任务状态查询失败：${statusResponse.status} ${await providerMessage(statusResponse, input.apiKey)}`);
+    if (!statusResponse.ok) throw Object.assign(new Error(`APIMart 图片任务状态查询失败：${statusResponse.status} ${await providerMessage(statusResponse, input.apiKey)}`), { code: "PROVIDER_POLL_HTTP_ERROR", httpStatus: statusResponse.status });
     const statusPayload = await statusResponse.json();
     const status = readStatus(statusPayload);
     if (IMAGE_FAILURE_STATUSES.has(status)) throw new ApiMartImageProviderFailure(redactProviderCredential(readFailureMessage(statusPayload), input.apiKey) || "APIMart 图片任务失败");
     if (status === "completed") {
       const outputs = readOutputUrls(statusPayload);
-      if (!outputs.length) throw new Error("APIMart 图片任务完成但没有结果图片；可恢复查询原任务，不会重新生成");
-      if ((isMarkImageModel(kind) || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0") && outputs.some(url => !isPublicHttpUrl(url))) throw new Error("APIMart 图片任务返回了无效结果地址；可恢复查询原任务，不会重新生成");
+      if (!outputs.length) throw Object.assign(new Error("APIMart 图片任务完成但没有结果图片；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_RESULT_MISSING" });
+      if ((isMarkImageModel(kind) || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0") && outputs.some(url => !isPublicHttpUrl(url))) throw Object.assign(new Error("APIMart 图片任务返回了无效结果地址；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_RESULT_URL_INVALID" });
       return outputs;
     }
-    if (!IMAGE_STATUSES.has(status)) throw new Error(`APIMart 返回了未知任务状态：${status || "缺失"}`);
+    if (!IMAGE_STATUSES.has(status)) throw Object.assign(new Error(`APIMart 返回了未知任务状态：${status || "缺失"}`), { code: "PROVIDER_STATUS_INVALID" });
   }
-  throw new Error("APIMart 图片任务状态查询超时；可恢复查询原任务，不会重新生成");
+  throw Object.assign(new Error("APIMart 图片任务状态查询超时；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_POLL_TIMEOUT" });
 }
 
 function normalizeModelId(kind: ApiMartImageModel, modelId: string) {

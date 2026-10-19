@@ -9,10 +9,14 @@ export type CanvasEditClause = { id: string; text: string; source: string };
 export type CanvasEditContract = Record<Group, CanvasEditClause[]>;
 export const CANVAS_EDIT_CONTRACT_SCHEMA = {
     type: "object",
-    description: "Current requested targets, not approved results. complete provides all targets for new/legacy tasks. update lists ONLY additions or substantive changes; omit unchanged clauses because code inherits them. The full prompt may describe every target, but do not paraphrase or merge unchanged ids in editContract. English text; source is an exact user-request excerpt. Use [[ref:REAL_ID]].",
+    description: "Current requested targets, not approved results. complete provides all targets for new/legacy tasks. update lists ONLY additions or substantive changes; omit unchanged clauses because code inherits them. The full prompt may describe every target, but do not paraphrase or merge unchanged ids in editContract. Only prompt and clause text use English; source must remain a verbatim contiguous excerpt in the user's original language, never a translation or paraphrase. Use [[ref:REAL_ID]].",
     properties: {
         mode: { type: "string", enum: ["complete", "update"], description: "update is a delta, not a rewritten complete contract. Unchanged groups can be empty arrays; saved targets remain active." },
-        ...Object.fromEntries(GROUPS.map(group => [group, { type: "array", description: "In update, include only new or substantively changed clauses. Omit unchanged ids; use [] when nothing changes in this group.", maxItems: 24, items: { type: "object", properties: { id: { type: "string" }, text: { type: "string" }, source: { type: "string" } }, required: ["id", "text", "source"], additionalProperties: false } }])),
+        ...Object.fromEntries(GROUPS.map(group => [group, { type: "array", description: "In update, include only new or substantively changed clauses. Omit unchanged ids; use [] when nothing changes in this group.", maxItems: 24, items: { type: "object", properties: {
+            id: { type: "string" },
+            text: { type: "string", description: "English execution instruction supported by source. Keep requested literal artwork wording in its original language." },
+            source: { type: "string", description: "Copy a verbatim contiguous excerpt from the current user request in its original language. Do not translate, paraphrase, reorder, add words, or join separate excerpts. For legacy continuing tasks without a saved contract, supplied historical user requests are also allowed; explicit supersedes may reuse the replaced clause's saved source. Never cite assistant analysis, image observations, or the English execution prompt. Cite the words supporting this clause, not the whole request as a blanket justification. If the user says 把材质改成棉质针织。, use 棉质针织; not 针织棉面料, 针织棉质, or cotton knit fabric." },
+        }, required: ["id", "text", "source"], additionalProperties: false } }])),
         supersedes: { type: "array", items: { type: "string" }, description: "Existing clause ids explicitly replaced or cancelled by this user request. An identical repeated id/text in the same group is a no-op; changed text or group requires listing it here." },
         referenceRoles: { type: "array", items: { type: "object", properties: { id: { type: "string" }, role: { type: "string", enum: ["base", "shape", "material", "pattern", "color", "composition", "reference"] } }, required: ["id", "role"], additionalProperties: false } },
     },
@@ -23,9 +27,9 @@ export const CANVAS_EDIT_CONTRACT_SCHEMA = {
 export class CanvasEditContractError extends Error {
     readonly code = "IMAGE_EDIT_CONTRACT_INVALID";
     readonly submitted = false;
-    constructor(reason: string) { super(`${reason}；尚未提交图片生成。请按当前目标重新整理工具参数，不要自动重试生图。`); this.name = "CanvasEditContractError"; }
+    constructor(reason: string, readonly expectedMode?: "complete" | "update") { super(`${reason}；尚未提交图片生成。请按当前目标重新整理工具参数，不要自动重试生图。`); this.name = "CanvasEditContractError"; }
 }
-const fail = (message: string): never => { throw new CanvasEditContractError(message); };
+const fail = (message: string, expectedMode?: "complete" | "update"): never => { throw new CanvasEditContractError(message, expectedMode); };
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : fail("缺少完整 editContract");
 const string = (value: unknown, field: string, max = 2000) => typeof value === "string" && value.trim() && value.length <= max ? value.trim() : fail(`${field} 无效`);
 const array = (value: unknown, field: string): unknown[] => Array.isArray(value) && value.length <= 24 ? value : fail(`${field} 必须为有限数组`);
@@ -67,8 +71,8 @@ export function compileCanvasEditContract(input: {
 }): { contract: CanvasEditContract; prompt: string } {
     const raw = object(input.contract), previous = input.continuing ? readCanvasEditContract(input.previous) : undefined;
     if (raw.mode !== "complete" && raw.mode !== "update") fail("editContract.mode 必须为 complete 或 update");
-    if (previous && raw.mode !== "update") fail("已有目标必须 update，并显式 supersedes，不得整份替换丢失历史目标");
-    if (!previous && raw.mode !== "complete") fail("新任务或旧历史无合同，必须提供 complete 当前完整目标，不能只给本轮差量");
+    if (previous && raw.mode !== "update") fail("已有目标必须 update，并显式 supersedes，不得整份替换丢失历史目标", "update");
+    if (!previous && raw.mode !== "complete") fail("新任务或旧历史无合同，必须提供 complete 当前完整目标，不能只给本轮差量", "complete");
     const supersedes = array(raw.supersedes, "supersedes").map(clauseId);
     if (new Set(supersedes).size !== supersedes.length) fail("supersedes 重复");
     const oldIds = new Set(previous ? GROUPS.flatMap(group => previous[group].map(item => item.id)) : []);

@@ -6,6 +6,8 @@ import { createDemoMarkProvider } from "../src/demo-mark-provider";
 import { listAvailableDemoModels } from "../src/demo-provider-configuration";
 import { DemoStateStore, DemoStorageError } from "../src/demo-state-store";
 import { ImageResultPersistenceError } from "../src/image-result-storage";
+import { imageTaskApiReplacer, imageTaskFailureDetail, imageTaskPauseReason, type ImageTaskFailureDetail } from "../src/image-task-diagnostics";
+import { isPublicHttpUrl } from "../src/apimart-upload";
 
 const stores: DemoStateStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
@@ -18,20 +20,25 @@ const productionCode = ts.transpileModule(names.map(name => {
   return declaration.getText(source);
 }).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
 
-type Task = { id: string; requestId: string; ownerUserId: string; status: string; operationType: string; credits: number; parameters: Record<string, unknown>; upstreamTaskId?: string; submissionStartedAt?: string; failureReason?: string };
+type Task = { id: string; requestId: string; ownerUserId: string; status: string; operationType: string; credits: number; parameters: Record<string, unknown>; upstreamTaskId?: string; upstreamResultUrl?: string; submissionStartedAt?: string; failureReason?: string; lastFailure?: ImageTaskFailureDetail };
 type Input = { baseUrl: string; apiKey: string; sourceDataUrls: string[]; maskDataUrl?: string; upstreamTaskId?: string; submissionStarted?: boolean; beforeSubmit?: () => void; onSubmitted?: (id: string) => void };
-function harness(failure?: "preflight" | "submission" | "polling" | "download" | "terminal") {
+function harness(failure?: "prepare" | "preflight" | "submission" | "polling" | "download" | "store" | "terminal") {
   const demoState = new DemoStateStore(":memory:"); stores.push(demoState);
   const inputs: Input[] = [];
   const completed: unknown[][] = [];
   let paid = 0;
+  let downloads = 0;
   const dependencies = {
     demoState, DemoStorageError, ImageResultPersistenceError, ApiMartImageProviderFailure, MARK_IMAGE_PROVIDER_ID,
+    imageTaskFailureDetail, imageTaskPauseReason, isPublicHttpUrl,
     demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
     gptImage2ProviderId: "legacy-apimart", apiMartBaseUrl: "https://legacy.invalid/v1", apiMartApiKey: "legacy-key-must-not-be-used",
     markImageProvider: createDemoMarkProvider({ apiKey: "fake-mark-key", baseUrl: "https://mark.invalid/v1" }),
-    prepareImageEditInput: async (sources: unknown[]) => ({ references: sources }),
-    completeDemoImageTask: async (...args: unknown[]) => { completed.push(args); (args[0] as Task).status = "success"; },
+    prepareImageEditInput: async (sources: unknown[]) => { if (failure === "prepare") throw new Error("invalid local input"); return { references: sources }; },
+    completeDemoImageTask: async (...args: unknown[]) => {
+      if (failure === "store") throw new ImageResultPersistenceError({ assetId: "original", mimeType: "image/png", filename: "original.png" }, new Error("synthetic conversion failure"));
+      completed.push(args); (args[0] as Task).status = "success";
+    },
     runApiMartImageTask: async (input: Input) => {
       inputs.push(input);
       if (failure === "preflight") throw new Error("bad local input");
@@ -46,12 +53,12 @@ function harness(failure?: "preflight" | "submission" | "polling" | "download" |
       if (failure === "terminal") throw new ApiMartImageProviderFailure("provider terminal fake-mark-key");
       return ["https://result.invalid/image.png"];
     },
-    downloadApiMartImage: async () => { if (failure === "download") throw new Error("download unavailable"); return "data:image/png;base64,AQID"; },
+    downloadApiMartImage: async () => { downloads++; if (failure === "download") throw Object.assign(new Error("download unavailable"), { code: "ECONNRESET" }); return "data:image/png;base64,AQID"; },
   };
   const run = new Function(...Object.keys(dependencies), `${productionCode}\nreturn runApiMartImageTaskForDemo;`)(...Object.values(dependencies));
   const task: Task = { id: "task-mark", requestId: "request-mark", ownerUserId: "owner", status: "processing", operationType: "image_generation", credits: 3, parameters: {} };
   const user = { id: "owner", creditBalance: 10 };
-  return { task, user, inputs, completed, paid: () => paid, run: (prepared?: unknown) => run(task, user, "gpt-image-2.5-flare", "prompt", task.parameters, [], MARK_IMAGE_PROVIDER_ID, prepared) };
+  return { task, user, inputs, completed, demoState, paid: () => paid, downloads: () => downloads, clearFailure: () => { failure = undefined; }, run: (prepared?: unknown) => run(task, user, "gpt-image-2.5-flare", "prompt", task.parameters, [], MARK_IMAGE_PROVIDER_ID, prepared) };
 }
 
 describe("read-only demo Mark catalog", () => {
@@ -92,14 +99,42 @@ describe("read-only demo Mark catalog", () => {
       expect(h.task.failureReason).not.toContain("fake-mark-key");
       expect(h.paid()).toBe(1);
       expect(h.completed).toHaveLength(0);
+      expect(h.task.lastFailure?.phase).toBe(failure);
       if (failure !== "submission") expect(h.task.upstreamTaskId).toBe("mark-original-task");
     });
   }
+
+  test("persists a private result URL before download and resumes it without polling, uploading, or submitting again", async () => {
+    const h = harness("download"); await h.run();
+    expect(h.task.lastFailure).toEqual({ phase: "download", code: "ECONNRESET" });
+    const stored = h.demoState.load().tasks[0] as unknown as Task;
+    expect(stored.upstreamResultUrl).toBe("https://result.invalid/image.png");
+    expect(JSON.stringify({ task: stored, history: [{ ...stored }] }, imageTaskApiReplacer)).not.toContain("https://result.invalid");
+    h.clearFailure();
+    await h.run();
+    expect(h.task.status).toBe("success");
+    expect(h.paid()).toBe(1); expect(h.inputs).toHaveLength(1); expect(h.downloads()).toBe(2);
+    expect(h.user.creditBalance).toBe(10);
+  });
 
   test("preflight failure does not mark a paid submission", async () => {
     const h = harness("preflight"); await h.run();
     expect(h.task.status).toBe("failed"); expect(h.task.submissionStartedAt).toBeUndefined();
     expect(h.paid()).toBe(0); expect(h.user.creditBalance).toBe(13);
+  });
+
+  test("recovery preflight and result-store failures retain their real phases and never refund or replay", async () => {
+    const prepare = harness("prepare");
+    prepare.task.upstreamTaskId = "existing-upstream";
+    await prepare.run();
+    expect(prepare.task.lastFailure?.phase).toBe("preflight");
+    expect(prepare.task.status).toBe("paused"); expect(prepare.paid()).toBe(0);
+    const store = harness("store"); await store.run();
+    expect(store.task.lastFailure).toEqual({ phase: "result_store", code: "IMAGE_RESULT_PROCESSING_FAILED" });
+    expect(store.task.status).toBe("paused"); expect(store.task.upstreamResultUrl).toBe("https://result.invalid/image.png");
+    expect(store.user.creditBalance).toBe(10); expect(store.paid()).toBe(1);
+    store.clearFailure(); await store.run();
+    expect(store.task.status).toBe("success"); expect(store.inputs).toHaveLength(1); expect(store.paid()).toBe(1);
   });
 
   test("only explicit upstream terminal failure settles as failed and refunds once", async () => {

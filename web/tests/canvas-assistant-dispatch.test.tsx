@@ -18,6 +18,7 @@ import { isModuleAvailable } from "@/stores/use-module-store";
 import type { BusinessConfig } from "@/services/api/business-config";
 import * as toolRuntime from "@/services/api/tool-runtime";
 import { createAgentMediaWorkflow } from "@/lib/canvas/agent-media-workflow";
+import { CanvasEditContractError } from "@/lib/canvas/canvas-image-edit-contract";
 
 const requireModule = createRequire(new URL("../src/components/canvas/canvas-assistant-panel.tsx", import.meta.url));
 const requireToolConfigModule = createRequire(new URL("../src/hooks/use-tool-config.ts", import.meta.url));
@@ -534,6 +535,29 @@ describe("canvas assistant submission", () => {
         expect(harness.displayedMessages().some(message => message.text.includes("尚未提交图片生成"))).toBe(true);
     });
 
+    test.each(["针织棉面料", "cotton knit fabric"])("planner receives source-copy guidance and rejects %s without a paid repair or image submission", async source => {
+        const editContract = { mode: "complete", changes: [{ id: "knit_material", text: "Use cotton knit fabric.", source }], preserve: [], forbid: [], supersedes: [], referenceRoles: [] };
+        const harness = panelHarness({ replies: [tool("canvas_generate_image", { editIntent: "new", prompt: "Use cotton knit fabric.", editContract })] });
+        await harness.submit("把材质改成棉质针织。");
+        expect(harness.requests.map(request => request.type)).toEqual(["agent"]);
+        expect(harness.assets).toHaveLength(0);
+        expect(harness.imageUploads).toHaveLength(0);
+        expect(harness.displayedMessages().some(message => message.text.includes("尚未提交图片生成"))).toBe(true);
+        expect(JSON.stringify(harness.displayedMessages())).not.toContain("knit_material 的 source");
+        expect(JSON.stringify(harness.messages().filter(message => message.role === "tool"))).toContain("knit_material 的 source 不是已提供的用户要求原文");
+        const planner = harness.requests[0];
+        expect(planner.args[1][0].content).toContain("逐字复制允许来源中的连续原文片段，禁止翻译、改写、重排");
+        expect(planner.args[1][0].content).toContain("新任务只能引用本轮用户需求");
+        expect(planner.args[1][0].content).toContain("不能把整段需求复制给每一项");
+        const schema = planner.args[2].find((item: any) => item.function.name === "canvas_generate_image").function.parameters.properties.editContract;
+        for (const group of ["changes", "preserve", "forbid"]) {
+            const description = schema.properties[group].items.properties.source.description;
+            expect(description).toContain("verbatim contiguous excerpt from the current user request");
+            expect(description).toContain("Do not translate, paraphrase, reorder");
+            expect(description).toContain("not the whole request as a blanket justification");
+        }
+    });
+
     test.each(["stale-number", "missing-count", "lost-negation"])("contract guard blocks %s before provider dispatch and translation", async kind => {
         const selected: CanvasNodeData = { id: "shirt", type: CanvasNodeType.Image, title: "shirt", position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { content: "data:image/png;base64,ORIGINAL" } };
         const user = kind === "lost-negation" ? "不要添加口袋，只生成1张" : "只生成1张，保留七颗纽扣";
@@ -568,6 +592,144 @@ describe("canvas assistant submission", () => {
         const saved = harness.messages().filter(message => message.attachments?.length).at(-1)!;
         expect((saved.detail?.imageEdit as any).contract.changes).toHaveLength(2);
         expect(JSON.stringify((saved.detail?.imageEdit as any).contract)).not.toMatch(/approved|accepted/);
+    });
+
+    const repeatOriginal = { id: "shirt", type: CanvasNodeType.Image, title: "shirt", dataUrl: "data:image/png;base64,ORIGINAL" };
+    const repeatGoal = { changes: [{ id: "pink", text: "Make the shirt pink.", source: "衬衫改粉色" }], preserve: [], forbid: [] };
+    const repeatHistory = (saved = false): CanvasAssistantMessage[] => [
+        { id: "initial-user", role: "user", text: "衬衫改粉色" },
+        { id: "pink-result", role: "assistant", text: "已生成", detail: { status: "completed", imageEdit: { intent: "new", originalReferences: [repeatOriginal], originalPrompt: "衬衫改粉色", editPrompt: "Make the shirt pink.", baseReferences: [repeatOriginal], ...(saved ? { contract: repeatGoal } : {}) } }, attachments: [{ id: "pink", mediaType: "image", name: "pink", url: "data:image/png;base64,PINK" }] },
+    ];
+    const repeatCall = (mode: "complete" | "update", editIntent = "correct_original", patch: Record<string, unknown> = {}) => tool("canvas_generate_image", {
+        editIntent, prompt: "Make the shirt pink.",
+        editContract: { mode, ...(mode === "complete" ? repeatGoal : { changes: [], preserve: [], forbid: [] }), supersedes: [], referenceRoles: [{ id: "edit-original-0", role: "base" }] }, ...patch,
+    });
+
+    test("legacy repeat repairs only the preflight mode once, then submits exactly one image and ends", async () => {
+        const failed = repeatCall("update"), repaired = repeatCall("complete");
+        failed.responsesOutputItems = [{ type: "reasoning", id: "opaque-original", encrypted_content: "opaque-proof" }, { type: "function_call", call_id: failed.toolCalls[0].id, name: "canvas_generate_image", arguments: failed.toolCalls[0].function.arguments }];
+        const harness = panelHarness({ history: repeatHistory(), replies: [failed, repaired, repeatCall("complete")] });
+        await harness.submit("在跑一张");
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent", "edit"]);
+        const correction = harness.requests[1];
+        expect(correction.args[2].map((item: any) => item.function.name)).toEqual(["canvas_generate_image"]);
+        expect(correction.args[3]).toEqual({ type: "function", name: "canvas_generate_image" });
+        expect(correction.args[1]).toContainEqual({ type: "responses_assistant", output: failed.responsesOutputItems });
+        expect(correction.args[1].filter((item: any) => item.role === "tool").map((item: any) => JSON.parse(item.content))).toContainEqual(expect.objectContaining({ ok: false, data: expect.objectContaining({ phase: "image_preflight", submitted: false, expectedMode: "complete" }) }));
+        const edit = harness.requests[2];
+        expect(edit.args[2][0].dataUrl).toBe(repeatOriginal.dataUrl);
+        expect(edit.args[1]).toContain("Make the shirt pink.");
+        expect(harness.messages().find(message => message.attachments?.length && message.id !== "pink-result")?.detail?.imageEdit).toMatchObject({ contract: repeatGoal });
+        expect(JSON.stringify(harness.displayedMessages())).not.toMatch(/完整目标|editContract|必须提供 complete/);
+    });
+
+    test("a repeat misclassified as new can correct its intent without dropping the saved goal", async () => {
+        const harness = panelHarness({ history: repeatHistory(true), replies: [repeatCall("update", "new"), repeatCall("update")] });
+        await harness.submit("再跑一张");
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent", "edit"]);
+        expect(harness.requests[2].args[1]).toContain("Make the shirt pink.");
+        expect(harness.requests[2].args[2][0].dataUrl).toBe(repeatOriginal.dataUrl);
+    });
+
+    test("a corrected mode still validates sources and never silently accepts an incomplete or invented goal", async () => {
+        const invalid = repeatCall("complete", "correct_original", { editContract: { mode: "complete", changes: [{ id: "made-up", text: "Make the shirt green.", source: "改绿色" }], preserve: [], forbid: [], supersedes: [], referenceRoles: [{ id: "edit-original-0", role: "base" }] } });
+        const harness = panelHarness({ history: repeatHistory(), replies: [repeatCall("update"), invalid, repeatCall("complete")] });
+        await harness.submit("再跑一张");
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent"]);
+        expect(harness.assets).toHaveLength(0);
+        expect(harness.displayedMessages().some(item => item.text.includes("尚未提交图片生成"))).toBe(true);
+        expect(JSON.stringify(harness.displayedMessages())).not.toContain("made-up");
+    });
+
+    test("a second mode mismatch ends without a second correction or any image submission", async () => {
+        const harness = panelHarness({ history: repeatHistory(), replies: [repeatCall("update"), repeatCall("update"), repeatCall("complete")] });
+        await harness.submit("再跑一张");
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent"]);
+        expect(harness.assets).toHaveLength(0);
+    });
+
+    test.each(["extra-call", "wrong-tool", "count", "model", "references", "intent", "result"])("rejects a repair which expands the original operation: %s", async kind => {
+        const repaired = repeatCall("complete", kind === "intent" ? "refine_latest" : "correct_original", kind === "count" ? { count: 5 } : kind === "model" ? { model: "other-provider" } : kind === "references" ? { referenceNodeIds: ["another-image"] } : kind === "result" ? { resultImageId: "another-result" } : {});
+        if (kind === "extra-call") repaired.toolCalls.push({ ...repaired.toolCalls[0], id: "unexpected-second" });
+        if (kind === "wrong-tool") repaired.toolCalls[0].function.name = "canvas_generate_video";
+        const harness = panelHarness({ history: repeatHistory(), replies: [repeatCall("update"), repaired] });
+        await harness.submit("再跑一张");
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent"]);
+        expect(harness.assets).toHaveLength(0);
+    });
+
+    test("new references prevent reclassifying a new task as an old-task redo", async () => {
+        const selected: CanvasNodeData = { id: "new-shirt", type: CanvasNodeType.Image, title: "新款", position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { content: "data:image/png;base64,NEW" } };
+        const harness = panelHarness({ selected: [selected], history: repeatHistory(true), replies: [repeatCall("update", "new"), repeatCall("update")] });
+        await harness.submit("用这张新图重新做");
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent"]);
+        expect(harness.assets).toHaveLength(0);
+    });
+
+    test("repair freezes explicit image bytes while the planner waits and retains omitted generation settings", async () => {
+        const selected: CanvasNodeData = { id: "shirt", type: CanvasNodeType.Image, title: "原图", position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { content: repeatOriginal.dataUrl } };
+        const failed = repeatCall("update", "new", { referenceNodeIds: ["shirt"], size: "1:1", count: 1 });
+        const corrected = repeatCall("complete", "new", { editContract: { mode: "complete", ...repeatGoal, supersedes: [], referenceRoles: [{ id: "shirt", role: "base" }] } });
+        const harness = panelHarness({ selected: [selected], replies: [failed, corrected] });
+        const first = Promise.withResolvers<void>(), repair = Promise.withResolvers<void>();
+        harness.pauseReply(first.promise);
+        const pending = harness.submit("衬衫改粉色");
+        await waitFor(() => harness.requests.length === 1);
+        first.resolve();
+        harness.pauseReply(repair.promise);
+        await waitFor(() => harness.requests.length === 2);
+        harness.select([{ ...selected, metadata: { content: "data:image/png;base64,CHANGED-WHILE-WAITING" } }]);
+        repair.resolve();
+        await pending;
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent", "edit"]);
+        expect(harness.requests[2].args[2][0].dataUrl).toBe(repeatOriginal.dataUrl);
+        expect(harness.requests[2].args[0]).toMatchObject({ size: "1024x1024", count: "1" });
+    });
+
+    test("a prior read-only tool does not block the single unsubmitted image repair", async () => {
+        const harness = panelHarness({ history: repeatHistory(), replies: [tool("canvas_get_state", {}), repeatCall("update"), repeatCall("complete")] });
+        await harness.submit("看看画布，再跑一张");
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent", "agent", "edit"]);
+        expect(harness.assets).toHaveLength(1);
+    });
+
+    test("any earlier write in the turn closes the repair gate, even in a previous planner step", async () => {
+        const harness = panelHarness({ history: repeatHistory(), replies: [tool("canvas_create_text_node", { text: "说明" }), repeatCall("update"), repeatCall("complete")] });
+        await harness.submit("添加说明，再跑一张");
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent"]);
+        expect(harness.snapshotRef.current.nodes).toHaveLength(1);
+        expect(harness.assets).toHaveLength(0);
+    });
+
+    test("a mixed or skipped write batch cannot be replayed as part of parameter correction", async () => {
+        const batch = repeatCall("update");
+        batch.toolCalls.push({ ...tool("canvas_create_text_node", { text: "不要执行这个" }).toolCalls[0], id: "skipped-write" });
+        const harness = panelHarness({ history: repeatHistory(), replies: [batch, repeatCall("complete")] });
+        await harness.submit("再跑一张");
+        expect(harness.requests.map(item => item.type)).toEqual(["agent"]);
+        expect(harness.snapshotRef.current.nodes).toHaveLength(0);
+    });
+
+    test.each([new Error("socket hang up"), new CanvasEditContractError("provider-level lookalike", "complete")])("a generation-stage failure never triggers contract correction, even with a misleading error type", async failure => {
+        const harness = panelHarness({ history: repeatHistory(), replies: [repeatCall("complete"), repeatCall("complete")], generate: async () => { throw failure; } });
+        await harness.submit("再跑一张");
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "edit"]);
+        expect(harness.assets).toHaveLength(0);
+    });
+
+    test("repaired calls still require confirmation when tool confirmations are enabled", async () => {
+        const harness = panelHarness({ confirmTools: true, history: repeatHistory(), replies: [repeatCall("update"), repeatCall("complete"), repeatCall("complete")] });
+        await harness.submit("再跑一张");
+        const first = harness.messages().find(item => item.detail?.status === "pending")!;
+        harness.approve(first.id);
+        await waitFor(() => harness.messages().some(item => item.id !== first.id && item.detail?.status === "pending"));
+        const second = harness.messages().find(item => item.id !== first.id && item.detail?.status === "pending")!;
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent"]);
+        await waitFor(() => !harness.composer().props.sending);
+        harness.approve(second.id);
+        await waitFor(() => harness.assets.length === 1);
+        await waitFor(() => !harness.composer().props.sending);
+        expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent", "edit"]);
     });
 
     test("uses the explicit video tool and preserves duration, aspect ratio, quality, audio, and reference data", async () => {

@@ -92,6 +92,21 @@ test("source provenance, duplicate ids and non-English instructions fail closed"
     for (const changes of [[clause("fabric", "Make the shirt pink.", "用户从未说过")], [clause("fabric", "改粉色", "衬衫改粉色")], [clause("buttons", "Make the shirt pink.", "衬衫改粉色")]]) expect(() => compile(input({ contract: contract({ changes }) }))).toThrow();
 });
 
+test.each(["针织棉面料", "针织棉质", "cotton knit fabric", "棉质针织面料"])("knit material source must be a contiguous original-language excerpt, not %s", source => {
+    const makeInput = (source: string) => input({
+        userPrompt: "把材质改成棉质针织。", draftPrompt: "Use cotton knit fabric.", references: [],
+        contract: contract({ changes: [clause("knit_material", "Use cotton knit fabric.", source)], preserve: [], forbid: [], referenceRoles: [] }),
+    });
+    const valid = compile(makeInput("棉质针织"));
+    expect(valid.contract.changes[0]!.source).toBe("棉质针织");
+    const invalid = makeInput(source), before = JSON.stringify(invalid);
+    let error: unknown;
+    try { compile(invalid); } catch (caught) { error = caught; }
+    expect(error).toMatchObject({ code: "IMAGE_EDIT_CONTRACT_INVALID", submitted: false });
+    expect((error as Error).message).toContain("knit_material 的 source 不是已提供的用户要求原文");
+    expect(JSON.stringify(invalid)).toBe(before);
+});
+
 test("omitted numeric clause is detected against the whole user turn", () => {
     expect(() => compile(input({ contract: contract({ preserve: [] }) }))).toThrow("数量");
     expect(() => compile(input({ contract: contract({ preserve: [clause("buttons", "Cream buttons.", "保留七颗米白纽扣")] }) }))).toThrow("数量");

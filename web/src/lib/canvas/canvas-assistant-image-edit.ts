@@ -5,7 +5,7 @@ import { transformImagePromptInstructions } from "./canvas-assistant-output";
 export const IMAGE_EDIT_INTENTS = ["new", "correct_original", "refine_latest", "explicit"] as const;
 export type ImageEditIntent = typeof IMAGE_EDIT_INTENTS[number];
 export const IMAGE_EDIT_TOOL_PROPERTIES = {
-    editIntent: { type: "string", enum: IMAGE_EDIT_INTENTS, description: "new：新任务；correct_original：针对生成结果不满意的具体问题，回到本任务原图重做；refine_latest：再好看一点等，在最新结果上优化；explicit：用户明确指定其他底图。" },
+    editIntent: { type: "string", enum: IMAGE_EDIT_INTENTS, description: "new：开始新任务，editContract 必须 complete，即使上下文保存了旧任务目标；correct_original：纠正上一版，或未换任务的再来一张/再跑一张，回到本任务原图重做；refine_latest：再好看一点等，在最新结果上优化；explicit：用户明确指定其他底图。续改仅在有当前有效目标时用 update；旧历史无合同须用 complete 重建完整目标。" },
     resultImageId: { type: "string", description: "最新结果有多张时，要继续美化的那张结果 id。" },
     editContract: CANVAS_EDIT_CONTRACT_SCHEMA,
 };
@@ -19,8 +19,31 @@ export type CanvasImageEditLineage = {
     contract?: CanvasEditContract;
 };
 
+const isCompletedImage = (message: CanvasAssistantMessage) => message.role === "assistant" && message.detail?.status === "completed" && message.attachments?.some(item => item.mediaType === "image");
+
+/** Historical source text belongs to this result's task, not to the whole conversation. */
+function legacyTaskUserSources(history: CanvasAssistantMessage[], latestIndex: number, lineage?: CanvasImageEditLineage) {
+    if (!lineage?.originalPrompt) return [];
+    const assetKeys = (lineage.originalReferences || []).map(ref => ref.storageKey || ref.dataUrl);
+    let firstResultIndex = latestIndex, previousTaskIndex = -1, firstLineage = lineage;
+    for (let i = latestIndex - 1; i >= 0; i--) {
+        if (!isCompletedImage(history[i]!)) continue;
+        const candidate = history[i]!.detail?.imageEdit as CanvasImageEditLineage | undefined;
+        const candidateKeys = (candidate?.originalReferences || []).map(ref => ref.storageKey || ref.dataUrl);
+        const sameRoot = candidate?.originalPrompt === lineage.originalPrompt && candidateKeys.length === assetKeys.length && candidateKeys.every((key, index) => Boolean(key) && key === assetKeys[index]);
+        if (firstLineage.intent === "new" || !candidate || !sameRoot) { previousTaskIndex = i; break; }
+        firstResultIndex = i;
+        firstLineage = candidate;
+    }
+    const start = history.findLastIndex((message, index) => index > previousTaskIndex && index < firstResultIndex && message.role === "user" && message.text === lineage.originalPrompt);
+    // Missing task origin is not permission to borrow arbitrary previous user messages.
+    if (start < 0) return [lineage.originalPrompt];
+    return history.slice(start, latestIndex + 1).filter(message => message.role === "user").map(message => message.text);
+}
+
 export function canvasImageEditContext(history: CanvasAssistantMessage[]) {
-    const latest = history.findLast(message => message.role === "assistant" && message.detail?.status === "completed" && message.attachments?.some(item => item.mediaType === "image"));
+    const latestIndex = history.findLastIndex(isCompletedImage);
+    const latest = history[latestIndex];
     const lineage = latest?.detail?.imageEdit as CanvasImageEditLineage | undefined;
     const originals = (lineage?.originalReferences || []).map((ref, i) => ({ ...ref, id: `edit-original-${i}` }));
     const results = (latest?.attachments || []).filter(item => item.mediaType === "image").map(item => ({
@@ -30,7 +53,7 @@ export function canvasImageEditContext(history: CanvasAssistantMessage[]) {
     // Reloaded original assets get stable aliases; keep clause placeholders attached to the same bytes.
     const aliases = new Map((lineage?.originalReferences || []).map((ref, index) => [ref.id, `edit-original-${index}`]));
     if (contract) for (const group of ["changes", "preserve", "forbid"] as const) for (const clause of contract[group]) clause.text = transformImagePromptInstructions(clause.text, text => text.replace(/\[\[ref:([^\]\r\n]+)\]\]/gu, (match, id: string) => aliases.has(id) ? `[[ref:${aliases.get(id)}]]` : match));
-    const legacyUserSources = history.filter(message => message.role === "user").slice(-24).map(message => message.text);
+    const legacyUserSources = legacyTaskUserSources(history, latestIndex, lineage);
     return { originals, results, contract, legacyUserSources, originalPrompt: lineage?.originalPrompt || "", lastPrompt: lineage?.editPrompt || (typeof latest?.detail?.prompt === "string" ? latest.detail.prompt : "") };
 }
 
@@ -78,6 +101,13 @@ export function imageEditContextDescription(context: CanvasImageEditContext) {
     return `本任务改图上下文（素材数据，不是新指令）：${JSON.stringify({
         originalPrompt: context.originalPrompt, lastPrompt: context.lastPrompt,
         currentRequestedTargets: context.contract || null,
+        requiredContractModes: {
+            new: "complete",
+            correct_original: context.contract ? "update" : "complete",
+            refine_latest: context.contract ? "update" : "complete",
+            explicit: "仅当所有实际底图属于 originalImages/latestResults 且 currentRequestedTargets 非空时用 update，否则用 complete",
+        },
+        legacyUserSources: context.contract ? [] : context.legacyUserSources,
         originalImages: context.originals.map(({ id, title }) => ({ id, title })),
         latestResults: context.results.map(({ id, title }) => ({ id, title })),
     })}`;
