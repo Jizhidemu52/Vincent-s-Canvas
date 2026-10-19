@@ -30,8 +30,8 @@ export function bundleBudgetViolations(entries) {
     });
 }
 
-function projectEntries() {
-    const assetsDir = resolve(import.meta.dirname, "../dist/assets");
+function projectEntries(distDirectory) {
+    const assetsDir = resolve(distDirectory, "assets");
     return readdirSync(assetsDir)
         .filter((name) => /^project-.*\.js$/.test(name))
         .map((name) => {
@@ -44,7 +44,7 @@ function projectEntries() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-    const entries = projectEntries();
+    const entries = projectEntries(process.argv[2] ? resolve(process.argv[2]) : resolve(import.meta.dirname, "../dist"));
     if (entries.length !== 1) throw new Error(`Expected exactly one canvas project bundle, found ${entries.length}.`);
 
     const violations = bundleBudgetViolations(entries);

@@ -11,7 +11,7 @@ import { sessionMiddleware, setSessionCookie } from "../session";
 import type { AuthenticatedRequest } from "../types";
 import { mapUser, userSelect, type UserRow } from "../user-mapper";
 import { rateLimit } from "../http-security";
-import { createWeComAuthorizationUrl, exchangeWeComCode, WeComError } from "../wecom";
+import { createWeComAuthorizationUrl, exchangeWeComCode, getWeComStatus, WeComError } from "../wecom";
 import { refreshMonthlyCreditPeriod } from "../billing";
 import { deploymentFeatures } from "../deployment-features";
 import { OA_SESSION_TTL_SECONDS, OaError, verifyOaToken } from "../oa";
@@ -29,11 +29,13 @@ const passwordSchema = z.object({ currentPassword: z.string().min(1).max(MAX_PAS
 export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) {
     const router = Router();
     const features = deploymentFeatures(config);
+    const wecomEnabled = features.authenticationEnabled && !features.oaLoginEnabled && getWeComStatus(config).configured;
+    const wecomStateCookieName = `${config.SESSION_COOKIE_NAME}_wecom_state`;
     const requireSession = sessionMiddleware(db, cache, config, { allowAdminSession: true });
 
     router.use((request, response, next) => {
         const path = request.path.toLowerCase().replace(/\/+$/, "");
-        if (path.startsWith("/wecom/") || (!features.oaLoginEnabled && path.startsWith("/oa/"))) {
+        if ((!wecomEnabled && path.startsWith("/wecom/")) || (!features.oaLoginEnabled && path.startsWith("/oa/"))) {
             response.status(404).json({ error: "LOGIN_METHOD_DISABLED", message: "该登录方式未启用" });
             return;
         }
@@ -42,6 +44,15 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             return;
         }
         next();
+    });
+
+    router.get("/methods", (_request, response) => {
+        response.set("Cache-Control", "no-store");
+        response.json({
+            password: !features.oaLoginEnabled,
+            wecom: wecomEnabled,
+            wecomLoginUrl: wecomEnabled ? new URL("/login?scan=1", config.WECOM_CALLBACK_URL!).toString() : null,
+        });
     });
 
     router.post("/oa/exchange", async (request, response, next) => {
@@ -94,7 +105,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             const result = await db.query<UserRow & { password_hash: string | null; locked_until: Date | null }>(
                 `SELECT ${userSelect}, u.password_hash, u.locked_until
                  FROM users u LEFT JOIN departments d ON d.id=u.department_id
-                 WHERE u.username=$1 OR u.email=$1 OR u.employee_no=$1 LIMIT 1`,
+                  WHERE (u.username=$1 OR u.email=$1 OR u.employee_no=$1) AND u.deleted_at IS NULL LIMIT 1`,
                 [input.identifier],
             );
             const row = result.rows[0];
@@ -113,7 +124,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
                 // Credential verification is deliberately outside the row lock,
                 // but a reset/disable that wins the race must cancel this login.
                 const locked = await client.query<Pick<UserRow, "status" | "role" | "is_guest"> & { password_hash: string | null; locked_until: Date | null }>(
-                    "SELECT password_hash,status,role,is_guest,locked_until FROM users WHERE id=$1 FOR UPDATE", [row.id],
+                    "SELECT password_hash,status,role,is_guest,locked_until FROM users WHERE id=$1 AND deleted_at IS NULL FOR UPDATE", [row.id],
                 );
                 const current = locked.rows[0];
                 if (!current || current.password_hash !== row.password_hash || current.status !== "active" || current.is_guest
@@ -189,6 +200,14 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             const portal = "designer";
             const authorizationUrl = createWeComAuthorizationUrl(config, state);
             await cache.set(`wecom-state:${state}`, portal, { EX: 300 });
+            response.cookie(wecomStateCookieName, state, {
+                httpOnly: true,
+                sameSite: "lax",
+                secure: config.NODE_ENV === "production",
+                maxAge: 300_000,
+                path: "/api/auth/wecom",
+            });
+            response.set("Cache-Control", "no-store");
             response.json({ authorizationUrl });
         } catch (error) {
             if (error instanceof WeComError) { response.status(503).json({ error: error.code, message: error.message }); return; }
@@ -198,17 +217,24 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
 
     router.get("/wecom/callback", async (request, response, next) => {
         try {
+            response.set("Cache-Control", "no-store");
             const code = typeof request.query.code === "string" ? request.query.code : "";
             const state = typeof request.query.state === "string" ? request.query.state : "";
             const portal = state ? await cache.get(`wecom-state:${state}`) : null;
-            if (!code || !state || portal !== "designer") { response.status(400).send("企业微信登录请求已失效，请返回设计师登录页重试"); return; }
-            await cache.del(`wecom-state:${state}`);
+            if (!code || !state || portal !== "designer" || request.cookies?.[wecomStateCookieName] !== state) {
+                response.status(400).send("企业微信登录请求已失效，请返回登录页重新扫码"); return;
+            }
+            // Only the callback that atomically consumes this state may issue a session.
+            if (await cache.del(`wecom-state:${state}`) !== 1) {
+                response.status(400).send("企业微信登录请求已失效，请返回登录页重新扫码"); return;
+            }
+            response.clearCookie(wecomStateCookieName, { path: "/api/auth/wecom" });
             const { userId } = await exchangeWeComCode(config, code);
 
             const result = await db.query<UserRow>(
                 `SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id
                  LEFT JOIN external_identities e ON e.user_id=u.id AND e.provider='wecom'
-                 WHERE e.subject=$1 OR u.employee_no=$1 ORDER BY (e.subject=$1) DESC LIMIT 1`, [userId],
+                  WHERE (e.subject=$1 OR u.employee_no=$1) AND u.deleted_at IS NULL ORDER BY (e.subject=$1) DESC LIMIT 1`, [userId],
             );
             const row = result.rows[0];
             if (!row || row.status !== "active" || row.is_guest || !canUsePortal(row.role, "designer")) {
@@ -218,6 +244,15 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             const client = await db.connect();
             try {
                 await client.query("BEGIN");
+                const locked = await client.query<Pick<UserRow, "status" | "role" | "is_guest">>(
+                    "SELECT status,role,is_guest FROM users WHERE id=$1 AND deleted_at IS NULL FOR UPDATE", [row.id],
+                );
+                const current = locked.rows[0];
+                if (!current || current.status !== "active" || current.is_guest || !canUsePortal(current.role, "designer")) {
+                    await client.query("ROLLBACK");
+                    response.status(403).send("该企业微信成员尚未开通对应平台权限");
+                    return;
+                }
                 await client.query(`INSERT INTO external_identities(user_id,provider,subject) VALUES($1,'wecom',$2)
                     ON CONFLICT DO NOTHING`, [row.id, userId]);
                 const binding = await client.query<{ user_id: string; subject: string }>("SELECT user_id,subject FROM external_identities WHERE provider='wecom' AND (subject=$1 OR user_id=$2) FOR UPDATE", [userId, row.id]);

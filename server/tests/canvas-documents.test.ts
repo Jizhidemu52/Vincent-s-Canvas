@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import express from "express";
 import type { AddressInfo } from "node:net";
+import { Readable } from "node:stream";
 import { Database as Sqlite } from "bun:sqlite";
 import type { Database } from "../src/db";
 import type { AuthenticatedRequest, SessionUser } from "../src/types";
@@ -133,6 +134,8 @@ test("formal original-media HTTP keeps bytes unchanged and rejects another emplo
         }
         const record = records.get(values[0]);
         if (sql.startsWith("UPDATE assets SET status='ready'")) { if (record) record.ready = true; return { rows: [] }; }
+      // Thumbnail generation has its own real-codec integration coverage.
+      if (sql.includes("SELECT object_key,thumbnail_256_key,thumbnail_1024_key FROM assets")) return { rows: [] };
         if (sql.includes("status='pending'")) {
             expect(sql).toContain("owner_user_id=$2");
             return { rows: record && !record.ready && record.owner === values[1] ? [record] : [] };
@@ -147,26 +150,32 @@ test("formal original-media HTTP keeps bytes unchanged and rejects another emplo
     const storage = {
         configured: true,
         put: async (key: string, bytes: Uint8Array) => { objects.set(key, new Uint8Array(bytes)); },
-        get: async (key: string) => { storageReads++; const bytes = objects.get(key)!; return { ContentLength: bytes.byteLength, Body: { transformToByteArray: async () => bytes } }; },
+        head: async (key: string) => { storageReads++; return { ContentLength: objects.get(key)!.byteLength, ETag: '"original-fixture"' }; },
+        get: async (key: string) => { storageReads++; const bytes = objects.get(key)!; return { ContentLength: bytes.byteLength, ETag: '"original-fixture"', Body: Readable.from([bytes]) }; },
     } as unknown as ObjectStorage;
     const app = express().use(express.json());
     app.use((req, _res, next) => { (req as AuthenticatedRequest).auth = actor(req.get("test-actor") || "employee-a"); next(); });
     app.use("/assets", createAssetsRouter(db, storage));
     await serve(app, async origin => {
-        const original = new Uint8Array([137, 80, 78, 71, 0, 255, 1, 2, 3]);
+        // FFmpeg-encoded and decoded 1x1 RGBA PNG, not just a magic-byte prefix.
+        const original = new Uint8Array(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAADUlEQVR4nGP8z8DwHwAFBQIAgJbjwgAAAABJRU5ErkJggg==", "base64"));
         const reserved = await fetch(`${origin}/assets/upload-request`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filename: "原图.png", mimeType: "image/png", byteSize: original.byteLength }) });
         const { assetId: id } = await reserved.json();
         const upload = (employee: string) => fetch(`${origin}/assets/${id}/upload`, { method: "PUT", headers: { "content-type": "image/png", "test-actor": employee }, body: original });
         expect((await upload("employee-b")).status).toBe(404);
         expect(objects.size).toBe(0);
         expect((await upload("employee-a")).status).toBe(204);
-        const foreign = await fetch(`${origin}/assets/${id}/content`, { headers: { "test-actor": "employee-b" } });
+        const foreign = await fetch(`${origin}/assets/${id}/content`, { headers: { "test-actor": "employee-b", "if-none-match": '"original-fixture"' } });
         expect(foreign.status).toBe(404);
         expect(storageReads).toBe(0);
         const own = await fetch(`${origin}/assets/${id}/content`);
         expect(own.status).toBe(200);
-        expect(own.headers.get("cache-control")).toContain("no-store");
+        expect(own.headers.get("cache-control")).toBe("private, no-cache");
+        expect(own.headers.get("etag")).toBe('"original-fixture"');
+        expect(own.headers.get("vary")).toContain("Cookie");
+        expect(own.headers.get("x-content-type-options")).toBe("nosniff");
         expect(await own.bytes()).toEqual(original);
+        expect(storageReads).toBe(2);
         expect([...objects.keys()][0]).toStartWith("users/employee-a/");
     });
 });
@@ -182,7 +191,7 @@ async function serve(app: express.Express, run: (origin: string) => Promise<void
 // This remains an isolated SQL-contract test, not a PostgreSQL migration test.
 function databaseFixture() {
     const sqlite = new Sqlite(":memory:");
-    sqlite.run("CREATE TABLE canvas_documents(owner_user_id TEXT,external_id TEXT,revision INTEGER,deleted INTEGER,document TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner_user_id,external_id))");
+    sqlite.run("CREATE TABLE canvas_documents(owner_user_id TEXT,external_id TEXT,revision INTEGER,deleted INTEGER,document TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,title TEXT,document_created_at TEXT,document_updated_at TEXT,node_count INTEGER,connection_count INTEGER,cover_url TEXT,PRIMARY KEY(owner_user_id,external_id))");
     const allowedAssets = new Set([assetId]);
     const db = { query: async (sql: string, parameters: unknown[] = []) => {
         if (sql.includes("FROM assets a")) {
@@ -224,7 +233,8 @@ test("canvas API isolates employees, CAS-conflicts concurrent stale writes and n
         expect((await api("PUT", "canvas-1", { baseRevision: 0, document }, "employee-b", "employee-a")).status).toBe(403);
         const first = await api("PUT", "canvas-1", { baseRevision: 0, document });
         expect(first.status).toBe(200);
-        expect(first.body.document).toMatchObject({ id: "canvas-1", revision: 1, deleted: false, document });
+        expect(first.body.document).toMatchObject({ id: "canvas-1", revision: 1, deleted: false });
+        expect(first.body.document).not.toHaveProperty("document");
         const listed = await api("GET");
         expect(listed.headers.get("cache-control")).toBe("no-store");
         expect(listed.body.documents).toEqual([{ id: document.id, revision: 1, deleted: false, updatedAt: first.body.document.updatedAt,
@@ -232,7 +242,7 @@ test("canvas API isolates employees, CAS-conflicts concurrent stale writes and n
                 nodeCount: 2, connectionCount: 1, cover: { content: document.nodes[0]!.metadata.content } } }]);
         const detail = await api("GET", document.id);
         expect(detail.headers.get("cache-control")).toBe("no-store");
-        expect(detail.body).toEqual(first.body);
+        expect(detail.body).toEqual({ document: { ...first.body.document, document } });
         expect((await api("GET", document.id, undefined, "employee-a", "employee-b")).status).toBe(403);
         expect((await api("GET", document.id, undefined, "employee-b")).body.document).toEqual({ id: document.id, revision: 0, deleted: true, document: null, updatedAt: "1970-01-01T00:00:00.000Z" });
         expect((await api("GET", "", undefined, "employee-b")).body.documents).toEqual([]);
@@ -240,8 +250,8 @@ test("canvas API isolates employees, CAS-conflicts concurrent stale writes and n
         expect(concurrent.map(result => result.status).sort()).toEqual([200, 409]);
         expect(concurrent.find(result => result.status === 409)?.body.document.revision).toBe(2);
         const deleted = await api("PUT", "canvas-1", { baseRevision: 2, document: null });
-        expect(deleted.body.document).toMatchObject({ revision: 3, deleted: true, document: null });
-        expect((await api("GET", "canvas-1")).body).toEqual(deleted.body);
+        expect(deleted.body.document).toMatchObject({ revision: 3, deleted: true });
+        expect((await api("GET", "canvas-1")).body).toEqual({ document: { ...deleted.body.document, document: null } });
         for (const revision of [0, 1, 3]) expect((await api("PUT", "canvas-1", { baseRevision: revision, document })).status).toBe(409);
         const missing = await api("PUT", "missing", { baseRevision: 9, document: null });
         expect(missing.status).toBe(409);
@@ -283,8 +293,10 @@ test("formal summaries keep sixty 5000-node projects small while detail returns 
             expect(response.status).toBe(200);
             const saved = await response.json() as { document: CanvasDocumentEnvelope };
             expectedSummaries.set(document.id, expectedCanvasSummary(document));
-            fullListBytes += Buffer.byteLength(JSON.stringify(saved.document)) + (index ? 1 : 0);
-            if (index === 37) selectedEnvelope = saved.document;
+            expect(saved.document).not.toHaveProperty("document");
+            expect(Buffer.byteLength(JSON.stringify(saved))).toBeLessThan(256);
+            fullListBytes += Buffer.byteLength(JSON.stringify({ ...saved.document, document })) + (index ? 1 : 0);
+            if (index === 37) selectedEnvelope = { ...saved.document, document };
         }
         const response = await fetch(`${origin}/api/canvas-documents`, { headers });
         expect(response.status).toBe(200);
@@ -328,7 +340,9 @@ test("formal writes enforce permission for assets present only in compact histor
         fixture.allowAsset(compactHistoryAssetId);
         const saved = await put();
         expect(saved.status).toBe(200);
-        expect((await saved.json()).document.document).toEqual(document);
+        expect((await saved.json()).document).not.toHaveProperty("document");
+        const loaded = await fetch(`${origin}/api/canvas-documents/${document.id}`, { headers: { "X-Canvas-Owner-Id": "employee-a" } }).then(response => response.json());
+        expect(loaded.document.document).toEqual(document);
     }); } finally { fixture.sqlite.close(); }
 });
 

@@ -42,7 +42,7 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
                 `SELECT ${userSelect}, s.id AS session_id, s.auth_provider
                  FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN departments d ON d.id=u.department_id
                  WHERE s.token_hash=$1 AND ($2::uuid IS NULL OR s.id=$2::uuid) AND s.revoked_at IS NULL
-                   AND s.expires_at>now() AND u.status='active'`,
+                   AND s.expires_at>now() AND u.status='active' AND u.deleted_at IS NULL`,
                 [tokenHash, cachedId],
             );
             let row = result.rows[0];
@@ -57,13 +57,19 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
                 response.status(options.unauthenticatedStatus ?? 401).json({ error: "SESSION_EXPIRED", message: "登录已失效，请重新登录" });
                 return;
             }
-            if (features.authenticationEnabled && await getCreditsEnabled(db, features.creditsEnabled)) await refreshMonthlyCreditPeriod(db, row.id);
-            const refreshed = await db.query<UserRow & { session_id: string; auth_provider: string }>(
-                `SELECT ${userSelect}, s.id AS session_id, s.auth_provider
-                 FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN departments d ON d.id=u.department_id
-                 WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'`, [row.session_id],
-            );
-            row = refreshed.rows[0];
+            // Compare with the database clock, not the API host's clock. Most requests
+            // need neither the policy lookup, a row-locking transaction, nor a reread.
+            if (row.credit_period_start !== row.current_credit_period_start
+                && features.authenticationEnabled && await getCreditsEnabled(db, features.creditsEnabled)) {
+                await refreshMonthlyCreditPeriod(db, row.id);
+                const refreshed = await db.query<UserRow & { session_id: string; auth_provider: string }>(
+                    `SELECT ${userSelect}, s.id AS session_id, s.auth_provider
+                     FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN departments d ON d.id=u.department_id
+                     WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'
+                       AND u.deleted_at IS NULL`, [row.session_id],
+                );
+                row = refreshed.rows[0];
+            }
             if (!row || (row.is_guest && !allowGuest) || !acceptsProvider(row)) {
                 await cache.del(cacheKey);
                 response.clearCookie(config.SESSION_COOKIE_NAME, { path: "/" });

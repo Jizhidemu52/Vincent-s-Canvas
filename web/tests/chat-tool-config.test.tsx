@@ -18,7 +18,7 @@ function elements(node: unknown): ReactElement<any>[] {
     return [element, ...elements(element.props.children)];
 }
 
-function chatPageHarness(initial: BusinessConfig) {
+function chatPageHarness(initial: BusinessConfig, savedImageModelId?: string) {
     type State = BusinessConfig & { status: "ready" | "loading" | "error"; error: string | null; refresh: () => Promise<void> };
     let refreshes = 0;
     let directModelReads = 0;
@@ -54,7 +54,7 @@ function chatPageHarness(initial: BusinessConfig) {
         "react-router-dom": { useNavigate: () => () => undefined },
         "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: true, creditsEnabled: false } },
         "@/lib/deferred-persist-queue": { createDeferredPersistQueue: () => ({ schedule() {}, flush() {}, clear() {} }) },
-        "./chat-session-storage": { chatSessionStorage: { load: async () => [{ id: "session", title: "new", messages: [], updatedAt: "now", chatModelId: "saved-old-model" }], save: async () => undefined } },
+        "./chat-session-storage": { chatSessionStorage: { load: async () => [{ id: "session", title: "new", messages: [], updatedAt: "now", chatModelId: "saved-old-model", imageModelId: savedImageModelId }], save: async () => undefined } },
         "@/services/api/creative-chat": { requestCreativeChatPlan: async (config: { model: string; textModel: string }) => { plannedConfigs.push(config); return { kind: "discussion", content: "已收到" }; } },
         "@/stores/use-user-store": { useUserStore: Object.assign((select: Function) => select(userState), { getState: () => userState }) },
         "@/stores/use-config-store": { useConfigStore: (select: Function) => select({ updateConfig() {} }), useEffectiveConfig: () => config },
@@ -233,5 +233,42 @@ test("switching the mounted chat image picker updates GPT, Nano2.1, and official
         const halfK = await page.settle();
         expect(select(halfK, "图片清晰度").props.value).toBe("0.5k");
         expect(select(halfK, "出图模型").props.value).toBe("mark-nano-official-uuid");
+    } finally { page.dispose(); }
+});
+
+test("the mounted chat excludes promptless fusion while preserving provider-specific image choices and stale-session fallback", async () => {
+    const blend = { ...model("opaque-fusion-id", "generate"), name: "多图融合", imageParameterProfile: "blend" as const };
+    const open = { ...model("open-gpt2", "generate"), name: "gpt-image-2", parameterModelId: "gpt-image-2" };
+    const apimart = { ...model("apimart-gpt2", "generate"), name: "aplmart-gpt2", parameterModelId: "gpt-image-2", imageParameterProfile: "pixel" as const };
+    const page = chatPageHarness({ models: [model("chat", "chat"), blend, open, apimart], tools: [tool("gpt-chat", "chat")], prices: [] }, blend.id);
+    try {
+        const initial = await page.settle();
+        const picker = select(initial, "出图模型");
+        expect(elements(picker).filter(element => element.type === "option").map(element => element.props.value)).toEqual(["open-gpt2", "apimart-gpt2"]);
+        expect(picker.props.value).toBe("apimart-gpt2");
+        picker.props.onChange({ target: { value: "open-gpt2" } });
+        expect(select(await page.settle(), "出图模型").props.value).toBe("open-gpt2");
+        page.set({ tools: [tool("gpt-chat", "chat"), tool("gpt-chat-image", "apimart-gpt2")] });
+        const bound = select(await page.settle(), "出图模型");
+        expect(bound.props.value).toBe("apimart-gpt2");
+        expect(bound.props.disabled).toBe(true);
+    } finally { page.dispose(); }
+});
+
+test("an administrative promptless image binding cannot fall back to another provider or block discussion", async () => {
+    const page = chatPageHarness({ models: [model("chat", "chat"), { ...model("opaque-fusion-id", "generate"), imageParameterProfile: "blend" }, model("other-image", "generate")],
+        tools: [tool("gpt-chat", "chat"), tool("gpt-chat-image", "opaque-fusion-id")], prices: [] }, "other-image");
+    try {
+        const initial = await page.settle();
+        const picker = select(initial, "出图模型");
+        expect(picker.props.value).toBe("");
+        expect(picker.props.disabled).toBe(true);
+        expect(elements(picker).filter(element => element.type === "option").map(element => element.props.value)).toEqual([""]);
+        draftInput(initial).props.onChange({ target: { value: "只讨论设计思路" } });
+        const ready = await page.settle();
+        expect(sendButton(ready).props.disabled).toBe(false);
+        sendButton(ready).props.onClick();
+        await page.settle();
+        expect(page.plannedConfigs.at(-1)).toMatchObject({ model: "chat", textModel: "chat" });
     } finally { page.dispose(); }
 });

@@ -5,7 +5,7 @@ import type { AppConfig } from "../src/config";
 import type { Cache, Database } from "../src/db";
 import { createAuthRouter } from "../src/routes/auth";
 
-test("retired WeCom routes reject requests before touching identity services", async () => {
+test("unconfigured WeCom routes reject requests before touching identity services", async () => {
   const cache = { get: async () => "admin" } as unknown as Cache;
   const db = { query: () => { throw new Error("Must reject before database or upstream access"); } } as unknown as Database;
   const app = express();

@@ -25,6 +25,7 @@ test("Worker stores raw before mask loading, yields one strict result and real w
   const assets: Array<ImageResultAsset & { key: string }> = [];
   const events: unknown[] = [];
   const api = functions(["storeResults", "saveResultAsset"], {
+    scheduleAssetThumbnails: () => {}, assertTaskExecution: async () => {},
     randomUUID, imageResultExtension, storeImageResult, prepareImageEditInput,
     classifyDesignDirection: () => ({ primaryDirection: "other", secondaryDirections: [], ruleVersion: 1, evidence: [] }),
     recordAssetEvent: async (_db: unknown, event: unknown) => { events.push(event); },
@@ -62,12 +63,15 @@ test("Worker pauses a completed provider result on processing error without refu
   const queries: string[] = [];
   let paid = 0, refunds = 0, queued = 0;
   class VideoSubmissionClaimLost extends Error {}
+  class VideoTaskPending extends Error {}
+  class TaskExecutionLost extends Error {}
   const api = functions(["runTask"], {
-    TASK_LEASE_SECONDS: 180, config: { TASK_MOCK_MODE: "false" }, VideoSubmissionClaimLost,
+    randomUUID, TASK_LEASE_SECONDS: 180, config: { TASK_MOCK_MODE: "false" }, VideoSubmissionClaimLost, VideoTaskPending, TaskExecutionLost,
     db: { query: async (sql: string) => { queries.push(sql); return { rows: [task] }; } },
     cache: { incr: async () => 1, expire: async () => {}, decr: async () => {}, zAdd: async () => { queued++; } },
     createGenerationTiming: () => ({ measure: async (_stage: string, call: () => unknown) => call(), finish: () => {} }),
-    startTaskLeaseHeartbeat: () => () => {}, readProviderSubmissionDiagnostics: () => undefined,
+    acquireModelLease: async () => ({ slotToken: "fixture-slot" }), releaseModelLease: async () => {},
+    startTaskLeaseHeartbeat: () => ({ assertOwned() {}, stop: async () => {} }), assertTaskExecution: async () => {}, readProviderSubmissionDiagnostics: () => undefined,
     executeProvider: async () => { paid++; return [{ bytes: png, mimeType: "image/png" }]; },
     storeResults: async () => { throw new Error("strict mask dimensions mismatch"); },
     settleReservation: async () => { refunds++; },

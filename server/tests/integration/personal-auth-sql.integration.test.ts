@@ -46,7 +46,7 @@ integration("personal password authentication in isolated PostgreSQL", () => {
         await database.query("INSERT INTO credit_policy(singleton,credits_enabled) VALUES(true,false) ON CONFLICT(singleton) DO UPDATE SET credits_enabled=false");
         const query = async (sql: string, values: unknown[] = []) => {
             const result = await database.query(sql, values);
-            if (afterIdentityRead && sql.includes("WHERE u.username=$1 OR u.email=$1")) {
+            if (afterIdentityRead && sql.includes("u.username=$1 OR u.email=$1")) {
                 const pause = afterIdentityRead; afterIdentityRead = undefined; await pause();
             }
             return { ...result, rowCount: result.affectedRows ?? result.rows.length };
@@ -79,6 +79,24 @@ integration("personal password authentication in isolated PostgreSQL", () => {
     }
     const change = (cookie: string, newPassword: string, currentPassword = initialPassword) => request("/api/auth/change-password", cookie, { currentPassword, newPassword });
     const stored = async (id: string) => (await db.query("SELECT password_hash,must_change_password FROM users WHERE id=$1", [id])).rows[0];
+
+    test("an active account tombstone rejects every identifier and invalidates an existing session", async () => {
+        const user = await actor();
+        const cookie = await login(user.username);
+        await db.query("UPDATE users SET deleted_at=now() WHERE id=$1", [user.id]);
+        for (const identifier of [user.username, user.email, user.employeeNo]) {
+            expect((await request("/api/auth/login", undefined, { identifier, password: initialPassword, portal: "designer" })).status).toBe(401);
+        }
+        expect((await request("/api/auth/session", cookie)).status).toBe(401);
+        expect((await db.query("SELECT count(*)::int AS count FROM sessions WHERE user_id=$1", [user.id])).rows[0].count).toBe(1);
+    });
+
+    test("deletion after password identity lookup is rechecked inside the session transaction", async () => {
+        const user = await actor();
+        afterIdentityRead = async () => { await db.query("UPDATE users SET deleted_at=now() WHERE id=$1", [user.id]); };
+        expect((await request("/api/auth/login", undefined, { identifier: user.username, password: initialPassword, portal: "designer" })).status).toBe(401);
+        expect((await db.query("SELECT count(*)::int AS count FROM sessions WHERE user_id=$1", [user.id])).rows[0].count).toBe(0);
+    });
 
     test("username, email and employee number resolve the same personal identity; anonymous and wrong portals stay closed", async () => {
         const user = await actor();

@@ -52,7 +52,12 @@ function gateResult(features: Features, user: LocalUser | null, admin: boolean, 
         "@/lib/standalone-access": { shouldBypassStandaloneAuthGate },
         "@/lib/deployment-features": { deploymentFeatures: features },
     });
-    return AuthGate({ admin, passwordChange, children: "protected content" }) as ReactElement<any>;
+    const boundary = AuthGate({ admin, passwordChange, children: "protected content" }) as ReactElement<any>;
+    // AuthGate separates the standalone bypass from the hook-using session gate.
+    // Render that actual inner component before asserting its routing decision.
+    return typeof boundary.type === "function" && boundary.type !== Navigate
+        ? (boundary.type as (props: any) => ReactElement<any>)(boundary.props)
+        : boundary;
 }
 
 const visitor: LocalUser = {

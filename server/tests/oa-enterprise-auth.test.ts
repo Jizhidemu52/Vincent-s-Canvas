@@ -163,7 +163,7 @@ test("verified OA exchange uses only upstream identity and issues an HttpOnly tw
 });
 
 test("OA identity mapping never reuses privileged, disabled or guest accounts", async () => {
-  for (const override of [{ role: "super_admin" }, { status: "disabled" }, { is_guest: true }]) {
+  for (const override of [{ role: "super_admin" }, { status: "disabled" }, { is_guest: true }, { deleted_at: new Date() }]) {
     let writes = 0;
     const client = { query: async (sql: string) => {
       if (sql.startsWith("INSERT") || sql.startsWith("UPDATE")) writes++;

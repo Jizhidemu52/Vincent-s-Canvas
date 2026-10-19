@@ -406,8 +406,9 @@ export async function settleReservation(
   requestId: string,
   outcome: "capture" | "release",
   actorId?: string,
+  existingClient?: PoolClient,
 ) {
-  return withTransaction(db, async (client) => {
+  const settle = async (client: PoolClient) => {
     const result = await client.query<{
       id: string;
       user_id: string;
@@ -564,7 +565,8 @@ export async function settleReservation(
       [reservation.id],
     );
     return { status: "released", duplicate: false };
-  });
+  };
+  return existingClient ? settle(existingClient) : withTransaction(db, settle);
 }
 
 export class BillingError extends Error {

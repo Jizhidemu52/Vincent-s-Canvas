@@ -11,6 +11,8 @@ description: 启动 Web、API、Worker、PostgreSQL、Redis 和对象存储
 
 正式 API 设置 `AUTH_ENABLED=true`、`OA_LOGIN_ENABLED=false`，可选 `ROLE_PORTALS_ENABLED=true` 显示账号入口；`CREDITS_ENABLED=false` 作为首次未保存策略的默认值。执行全部迁移（含 `030_credit_policy.sql`）及受控管理员初始化后，管理员从 `/admin/login` 登录，在“账号额度”创建个人账号；个人从 `/login` 登录，首次必须改密码。身份验证完成后才载入业务缓存，账号之间按用户分区；切换身份整页重新初始化，不读取旧共用缓存。
 
+上述独立账号模式完整配置 `WECOM_CORP_ID`、`WECOM_AGENT_ID`、`WECOM_SECRET`、`WECOM_CALLBACK_URL` 后，`/login` 同时提供企业微信扫码。`GET /api/auth/methods` 返回可用方式及回调同源的 `wecomLoginUrl`；扫码先进入该地址，再由 `/api/auth/wecom/start?portal=designer` 返回 `authorizationUrl`，确保五分钟 state cookie 与回调同源。回调校验浏览器 cookie 与 Redis state，并原子消费，禁止重放；仅允许已有启用的 designer 账号，沿用企业微信绑定或 `employee_no` 匹配，不自动创建账号，不允许管理员扫码，也不改变密码或首次改密要求。OA 模式与免登录试用均不启用此扫码链路。
+
 “账号额度 → 积分计费总开关”可以随时关闭或开启计费。仅超级管理员可修改，部门管理员只读；关闭保留余额和板块价格，新任务不扣分。已提交任务按提交时快照结算／退款，不被中途切换开关改价。每个新任务在服务端重新读取开关，已打开页面刷新后显示最新状态。
 
 “编辑账号 → 当前可用积分”设置绝对余额；“本月临时加减”在余额上追加；“每月固定额度”控制下一自然月重置。板块费用在“板块 API 配置”编辑，0 表示免费，留空继承操作价与模型价；对话按每次成功模型调用计费，工具续答可能产生多次调用。演示服务不解锁共享管理员或模拟正式持久化。
@@ -53,6 +55,12 @@ curl http://localhost:3000/api/health
 
 首次管理员登录后必须修改初始密码；这只用于维护，不是用户创作的前置步骤。开发环境需要模拟生成时可暂时设置 `TASK_MOCK_MODE=true`，它仍会走 Redis 队列、Worker、对象存储和历史，只是不调用外部模型。真实调用仍可能收费，入口应限制在受信网络。
 
+### 聊天反向代理
+
+独立对话与画布对话共用 `POST /api/chat/responses`，后端单次上游模型请求的超时设置为 180 秒。仓库 `nginx.conf` 仅对此路径设置 `proxy_read_timeout 240s`、`proxy_send_timeout 240s`、`proxy_buffering off` 和 `proxy_next_upstream off`，避免代理先于后端超时、缓存流式正文或重新提交可能已计费的 POST；其他 API、素材路由和安全头不变。读取超时按两次读取之间的间隔计算，不是整段流式会话的总时长。
+
+若容器前还有宝塔、Nginx 或其他网关，必须在每一层对同一路径对齐读取／发送超时、关闭响应缓冲和自动重试；只更新容器不能覆盖外层仍为 60 秒的限制。优先使用站点级精确路径配置，不修改影响其他站点的全局代理文件；保留该层已有的转发目标、请求头、安全头和日志脱敏。修改后在对应层执行 `nginx -t` 并重载，通过 `nginx -T` 检查生效配置，再用无收费的延迟首包和 SSE 测试确认。关闭缓冲不会缩短模型推理耗时；遇到 504 时原供应商请求仍可能正在执行，不能据此自动重发。
+
 ## 网页参考图采集
 
 `POST /api/reference-import/scan` 接收 `{ url }`，`POST /api/reference-import/image` 仅接收扫描返回的 `{ scanId, imageId }`，均要求现有会话、同源请求和匹配的 `X-Canvas-Owner-Id`；正式服务受 `assets` 模块开关保护。预览不创建素材，确认入库复用既有素材上传接口。
@@ -66,6 +74,8 @@ API、Worker 和本机演示服务仍运行于 Bun；对话及已接入的图片
 该传输每次尝试使用独立连接，显式继承服务进程的 `HTTP_PROXY` / `HTTPS_PROXY`、对应小写变量以及 `NO_PROXY` / `no_proxy`；同名大小写变量同时设置时，小写优先。HTTPS 模型地址使用 `HTTPS_PROXY` / `https_proxy`，代理 URL 支持 `http://` 和 `https://`。未配置适用代理或地址匹配 `NO_PROXY` 时直连；显式代理连接失败时直接报错，绝不自动回退直连，也不跟随提交重定向。
 
 代理转发 HTTPS 模型请求时，`CONNECT` 只建立到目标地址的隧道，不携带模型业务 API Key、`Authorization` 或请求体；如代理 URL 自带凭据，只用于代理认证。目标 TLS 证书和身份验证通过后才发送模型业务 POST。只有明确的初始 TLS 证书错误或 `ECONNRESET`，且已确认模型业务HTTP请求尚未发送时，才允许重试一次。模型业务 HTTP 已发出、阶段未知、超时、响应解析或下载失败均不重放生成提交；不要关闭证书校验。
+
+原生 Node 提交传输使用 OpenSSL 的 `?X25519MLKEM768:DEFAULT` 分组配置：只延后首次 ClientHello 的推测性 ML-KEM keyshare，仍保留全部默认 supported groups、TLS 1.3 与证书验证；需要该分组的服务端仍可通过 HelloRetryRequest 协商。用于处理目标网络上默认大握手首包停滞的问题，不修改全局 TLS／代理设置，也不增加业务重提次数。说明见 [OpenSSL 分组文档](https://docs.openssl.org/3.5/man3/SSL_CTX_set1_curves/)。
 
 非视频任务执行报错后不再自动重试整个任务；若服务重启时发现已在执行但结果不明的任务，则暂停并保留待核查状态，普通恢复按钮不能直接重新提交。已发出请求但遇网络故障时，上游仍可能已经执行，请先核查结果，避免重复计费。视频仍沿用原上游任务 ID 恢复查询。
 
@@ -101,6 +111,10 @@ Vite 会把 `/api` 代理到 `http://localhost:3100`，因此还需要启动 API
 
 ## 质量检查
 
+仓库根目录可运行 `bun run dev` 同时启动演示 API 和 Vite；`Ctrl+C` 关闭本次子进程，不终止已存在的其他服务。根目录 `bun run check` 统一运行 Biome、两端构建和测试；前端构建会重新生成 `web/dist`。首次分别安装根目录、`server` 与 `web` 的锁定依赖，或使用 README 中的启动入口。下列命令可用于单独检查。
+
+根目录 `bun run format server/src/某文件.ts web/src/某文件.tsx` 使用 Biome 定向格式化前后端文件，`bun run format:check <文件路径>` 只检查；未对遗留仓库执行全量重排。`lint` 包含 React Hooks 调用位置检查，测试子进程不自动加载应用 `.env`。GitHub 的后端检查额外安装临时 PGlite 运行时，并使用隔离 Redis service 执行新增 SQL 迁移和 30 个模拟视频任务测试，不调用真实模型。
+
 ```bash
 cd server
 bun run build
@@ -112,3 +126,13 @@ bun test
 ```
 
 推送到 `main` 后，GitHub Actions 还会运行真实 PostgreSQL/Redis 集成、Compose 恢复演练、40 人并发和跨账号隔离测试。
+
+## 分页、缩略图与调度协议
+
+素材、任务、批次和历史列表接受 `limit`（默认 60，最大 200）与不透明 `cursor`，返回 `nextCursor`／`hasMore`。筛选变化时从第一页重新开始，不能把某一页当作全量总数。完整素材／任务／历史在对应 `/:id` 接口获取；任务轮询使用 `?ids=`（最多 200）或 `by-request` 精确恢复，不能通过扫描最新一页判断旧任务不存在。
+
+`POST /api/assets/batch` 一次接受 1–50 个唯一 UUID，`action` 为 `delete`、`download`、`add-to-canvas` 或 `move-project`；移动还需目标 `projectId`。后端先核对整批权限和项目归属。`GET /api/assets/:id/thumb?w=256` 或 `w=1024` 同样鉴权；缺失派生图时先返回原件并排队补建，不能把首次回退原件视为已经完成缩略图。
+
+后台 ffmpeg／ffprobe 在限制尺寸、字节、时间和并发的条件下生成 WebP，失败不影响原件。正式旧素材的 `bun src/backfill-asset-thumbnails.ts --limit=100` 默认仅预览；只有显式增加 `--apply` 才写入缩略图对象与字段。本轮开发未运行目标环境补建或迁移。
+
+正式服务需先按正常流程执行 `032`–`036` 及所有前置迁移。模型限流由 PostgreSQL 持久占位与 Redis 有序集合共同维护；视频轮询让出本地执行名额，但不释放仍在上游运行的模型配额。待核查任务保留原上游身份，不能删除占位后盲目重提。PGlite／fakeredis 本地模拟验证不替代正式 PostgreSQL 多进程锁、Redis 故障、S3 和目标负载验收。

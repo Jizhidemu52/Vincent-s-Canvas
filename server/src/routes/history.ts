@@ -3,11 +3,13 @@ import { z } from "zod";
 
 import { writeAudit } from "../audit";
 import type { Database } from "../db";
+import { makeCursorPage, parseCursorPage } from "../cursor-pagination";
 import { requireRole } from "../rbac";
 import type { AuthenticatedRequest, SessionUser } from "../types";
 
 const select = `h.id,h.task_id AS "taskId",h.user_id AS "userId",u.display_name AS "userName",h.department_id AS "departmentId",d.name AS "departmentName",h.project_id AS "projectId",h.operation_type AS "operationType",h.model_config_id AS "modelConfigId",m.name AS "modelName",h.prompt,h.parameters,h.source_urls AS "sourceUrls",h.result_urls AS "resultUrls",h.credits,h.rmb_cost::float8 AS "rmbCost",h.status,h.failure_reason AS "failureReason",h.created_at AS "createdAt"`;
 const joins = `FROM generation_history h JOIN users u ON u.id=h.user_id LEFT JOIN departments d ON d.id=h.department_id LEFT JOIN model_configs m ON m.id=h.model_config_id`;
+const summarySelect = `h.id,h.task_id AS "taskId",h.user_id AS "userId",u.display_name AS "userName",h.department_id AS "departmentId",d.name AS "departmentName",h.project_id AS "projectId",h.operation_type AS "operationType",h.model_config_id AS "modelConfigId",m.name AS "modelName",left(h.prompt,240) AS prompt,h.credits,h.rmb_cost::float8 AS "rmbCost",h.status,h.failure_reason AS "failureReason",h.created_at AS "createdAt",to_char(h.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "cursorCreatedAt"`;
 const exportLimit = 50_000;
 
 const adminHistoryQuerySchema = z
@@ -18,8 +20,8 @@ const adminHistoryQuerySchema = z
     operationType: z.string().trim().min(1).max(80).optional(),
     from: z.string().datetime({ offset: true }).optional(),
     to: z.string().datetime({ offset: true }).optional(),
-    page: z.coerce.number().int().min(1).default(1),
-    pageSize: z.coerce.number().int().min(1).max(200).default(50),
+    limit: z.coerce.number().int().min(1).max(200).default(60),
+    cursor: z.string().max(1200).optional(),
   })
   .refine(
     (value) =>
@@ -37,14 +39,20 @@ export function createHistoryRouter(db: Database) {
   router.get("/", async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const result = await db.query(
-        `SELECT ${select} ${joins} WHERE h.user_id=$1 ORDER BY h.created_at DESC LIMIT 1000`,
-        [actor.id],
-      );
-      response.json({ history: result.rows });
+      const page = await readHistoryPage(db, request.query, { where: "WHERE h.user_id=$1", values: [actor.id] });
+      response.json({ history: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore });
     } catch (error) {
       next(error);
     }
+  });
+  router.get("/:id", async (request, response, next) => {
+    try {
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const id = z.string().uuid().parse(request.params.id);
+      const result = await db.query(`SELECT ${select} ${joins} WHERE h.id=$1 AND h.user_id=$2`, [id, actor.id]);
+      if (!result.rows[0]) { response.status(404).json({ error: "NOT_FOUND", message: "历史不存在或无权访问" }); return; }
+      response.json({ history: result.rows[0] });
+    } catch (error) { next(error); }
   });
   return router;
 }
@@ -67,19 +75,15 @@ export function createAdminHistoryRouter(db: Database) {
         filter.values,
       );
       const total = summary.rows[0]?.total ?? 0;
-      const offset = (query.page - 1) * query.pageSize;
-      const values = [...filter.values, query.pageSize, offset];
-      const result = await db.query(
-        `SELECT ${select} ${joins} ${filter.where} ORDER BY h.created_at DESC LIMIT $${values.length - 1} OFFSET $${values.length}`,
-        values,
-      );
+      const page = await readHistoryPage(db, query, filter);
       response.json({
-        history: result.rows,
+        history: page.items,
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
         total,
         totalCredits: summary.rows[0]?.totalCredits ?? 0,
         totalRmbCost: summary.rows[0]?.totalRmbCost ?? 0,
-        page: query.page,
-        pageSize: query.pageSize,
+        limit: query.limit,
       });
     } catch (error) {
       next(error);
@@ -163,7 +167,32 @@ export function createAdminHistoryRouter(db: Database) {
     }
   });
 
+  router.get("/:id", async (request, response, next) => {
+    try {
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const id = z.string().uuid().parse(request.params.id);
+      const values: unknown[] = [id];
+      const scope = actor.role === "department_admin" ? (values.push(actor.departmentId), "AND h.department_id=$2") : "";
+      const result = await db.query(`SELECT ${select} ${joins} WHERE h.id=$1 ${scope}`, values);
+      if (!result.rows[0]) { response.status(404).json({ error: "NOT_FOUND", message: "历史不存在或无权访问" }); return; }
+      response.json({ history: result.rows[0] });
+    } catch (error) { next(error); }
+  });
   return router;
+}
+
+async function readHistoryPage(db: Database, query: unknown, filter: { where: string; values: unknown[] }) {
+  const { cursor, limit } = parseCursorPage(query);
+  const values = [...filter.values];
+  let where = filter.where;
+  if (cursor) {
+    values.push(cursor.createdAt, z.string().uuid().parse(cursor.id));
+    where += `${where ? " AND" : "WHERE"} (h.created_at,h.id)<($${values.length - 1}::timestamptz,$${values.length}::uuid)`;
+  }
+  values.push(limit + 1);
+  const result = await db.query(`SELECT ${summarySelect} ${joins} ${where} ORDER BY h.created_at DESC,h.id DESC LIMIT $${values.length}`, values);
+  const page = makeCursorPage(result.rows, limit, (row) => ({ createdAt: row.cursorCreatedAt as string, id: row.id as string }));
+  return { ...page, items: page.items.map(({ cursorCreatedAt: _cursor, ...row }) => row) };
 }
 
 export function parseAdminHistoryQuery(value: unknown) {
@@ -195,7 +224,7 @@ export function buildAdminHistoryFilter(
 }
 
 function historyFilterDetail(query: AdminHistoryQuery) {
-  const { page: _page, pageSize: _pageSize, ...filters } = query;
+  const { limit: _limit, cursor: _cursor, ...filters } = query;
   return filters;
 }
 

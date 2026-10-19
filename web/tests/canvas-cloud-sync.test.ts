@@ -37,7 +37,8 @@ function harness(initial: CanvasProject[] = [], cloud: CloudCanvasDocument[] = [
             const saved = envelope(document, (current?.revision || 0) + 1, id);
             remote.set(id, saved);
             state.afterCommit?.(id, document);
-            return clone(saved);
+            const { document: _document, ...acknowledgement } = saved;
+            return clone(acknowledgement);
         },
         portable: async (input: CanvasProject) => {
             const result = clone(input);

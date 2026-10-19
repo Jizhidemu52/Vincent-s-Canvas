@@ -9,7 +9,10 @@ import { shouldBypassStandaloneModuleGate } from "@/lib/standalone-access";
 
 export function ModuleGate({ children, moduleKey }: { children: ReactNode; moduleKey: ModuleKey | ((search: string) => ModuleKey) }) {
     if (shouldBypassStandaloneModuleGate(standaloneEdition)) return <>{children}</>;
+    return <EnabledModuleGate moduleKey={moduleKey}>{children}</EnabledModuleGate>;
+}
 
+function EnabledModuleGate({ children, moduleKey }: { children: ReactNode; moduleKey: ModuleKey | ((search: string) => ModuleKey) }) {
     const location = useLocation();
     const status = useModuleStore((state) => state.status);
     const refresh = useModuleStore((state) => state.refresh);

@@ -1,4 +1,6 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
+import { ZodError } from "zod";
+import { demoTaskSummary, pageDemoRecords, parseDemoTaskFilters } from "./demo-list-pagination";
 import { singleImageTaskParameters } from "./image-task-policy";
 import { imageTaskApiReplacer, imageTaskFailureDetail, imageTaskPauseReason, type ImageTaskFailureDetail, type ImageTaskFailurePhase } from "./image-task-diagnostics";
 import { assetMetadataSchema } from "./asset-metadata";
@@ -9,7 +11,7 @@ import { openAiImageParameters } from "./openai-image-parameters";
 import { ImageEditInputError, prepareImageEditInput, type ImageEditInput } from "./image-edit-input";
 import { deploymentFeatures } from "./deployment-features";
 import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
-import { resolveStandaloneStaticPath } from "./demo-standalone-web";
+import { serveStandaloneWeb } from "./demo-standalone-web";
 import { ApiMartImageProviderFailure, apiMartImageModel, runApiMartImageTask } from "./apimart-image";
 import { createDemoMarkProvider } from "./demo-mark-provider";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
@@ -26,7 +28,10 @@ import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./
 import { decodeInlineImageResult } from "./demo-task-result-assets";
 import { ImageResultPersistenceError, imageResultExtension, storeImageResult } from "./image-result-storage";
 import { ImageResultVariantsError, imageResultVariantIds, isAuxiliaryImageResult, resolveImageResultVariants, type ImageResultAsset } from "./image-result-variants";
-import { syncDemoProject } from "./demo-projects";
+import { DemoAssetProjectStore } from "./demo-asset-projects";
+import { demoAssetContentResponse, demoAssetPage, demoAssetThumbnail, scheduleDemoAssetThumbnails } from "./demo-asset-library";
+import { allowedAssetMimeTypes, normalizeAssetMime, validateAssetUpload, AssetMediaError } from "./asset-delivery";
+import { assetBatchSchema } from "./asset-query";
 import { createDemoBatchTaskInputs } from "./demo-batch-tasks";
 import { buildVideoProviderRequest, getVideoModelCapability, isSupportedVideoModelId, supportedVideoModelIds, type ProviderVideoSource, type SupportedVideoModelId, type VideoProviderParameters, videoTaskStatusPath } from "./video-models";
 import { isPublicHttpUrl, isPublicHttpsUrl } from "./apimart-upload";
@@ -380,6 +385,7 @@ const demoToolConfigurations: Array<{ toolKey: ToolKey; modelConfigId: string | 
   configurationVersion: 0,
 }));
 type DemoAsset = {
+  deletedAt?: string;
   downloadReceipts?: DemoDownloadReceipt[];
   /** Set only from a provider result by this server, never from upload metadata. */
   upstreamUrl?: string;
@@ -435,6 +441,7 @@ const demoPublicVideoAssetAccess = new Map<string, { assetId: string; expiresAt:
 const demoTasks = new Map<string, DemoTask>();
 const demoStatePath = process.env.DEMO_STATE_PATH?.trim() || fileURLToPath(new URL("../.data/local-demo.sqlite", import.meta.url));
 const demoState = new DemoStateStore<DemoAsset, DemoTask>(demoStatePath);
+const assetProjects = new DemoAssetProjectStore(demoStatePath);
 const canvasDocuments = new DemoCanvasDocumentStore(demoStatePath);
 const promptTemplates = new DemoPromptTemplateStore(demoStatePath);
 const oaStore = features.oaLoginEnabled ? new DemoOaStore(demoStatePath) : null;
@@ -449,7 +456,7 @@ if (!demoState.isInitialized()) {
 }
 demoState.recoverInterruptedTasks();
 const recoveredState = demoState.load();
-for (const asset of recoveredState.assets) demoAssets.set(asset.id, asset);
+for (const asset of recoveredState.assets) if (!asset.deletedAt) demoAssets.set(asset.id, asset);
 for (const task of recoveredState.tasks) demoTasks.set(task.id, task);
 console.info(`Loaded ${demoAssets.size} local assets and ${demoTasks.size} tasks from durable storage.`);
 const internalAiConfig: DemoInternalAiConfig = {
@@ -611,18 +618,29 @@ function revokeProviderVideoSources(accessTokens: string[]) {
   for (const accessToken of accessTokens) demoPublicVideoAssetAccess.delete(accessToken);
 }
 
-function publicDemoAssetResponse(asset: DemoAsset) {
-  return new Response(Uint8Array.from(asset.bytes).buffer, {
-    headers: {
-      "content-type": asset.mimeType,
-      "cache-control": "private, no-store",
-    },
-  });
+function publicDemoAssetResponse(asset: DemoAsset, request?: Request) {
+  return demoAssetContentResponse(asset, request);
 }
 
 function saveDemoAsset(asset: DemoAsset) {
   demoState.save({ assets: [asset] });
   demoAssets.set(asset.id, asset);
+  scheduleDemoAssetThumbnails(asset);
+}
+
+function describeDemoAsset(asset: DemoAsset) {
+  const task = asset.taskId ? demoTasks.get(asset.taskId) : undefined;
+  const owner = demoOwner(asset.ownerUserId);
+  const kind = asset.mimeType.startsWith('image/') ? 'image' : asset.mimeType.startsWith('video/') ? 'video' : asset.mimeType.startsWith('text/') || asset.mimeType === 'application/json' ? 'text' : 'other';
+  return { id: asset.id, ownerUserId: asset.ownerUserId, ownerName: owner?.displayName || asset.ownerUserId,
+    departmentId: owner?.departmentId || null, departmentName: owner?.departmentName || null,
+    projectId: asset.projectId || null, projectName: null,
+    taskId: asset.taskId || null, filename: asset.filename, mimeType: asset.mimeType, byteSize: asset.bytes.byteLength, kind,
+    source: task ? 'generation' : 'upload', operationType: task?.operationType || null, prompt: task?.prompt || null,
+    modelName: demoModels.find(model => model.id === task?.modelConfigId)?.name || null, status: 'ready', visibilityScope: 'private',
+    metadata: asset.metadata || {}, createdAt: asset.createdAt, ...demoDownloadProjection(asset),
+    contentUrl: `/api/assets/${asset.id}/content`, thumbnailUrl: kind === 'image' ? `/api/assets/${asset.id}/thumb?w=256` : null,
+    previewUrl: kind === 'image' ? `/api/assets/${asset.id}/thumb?w=1024` : null };
 }
 
 /** Keep running-task aliases, but expose changes only after the whole transaction commits. */
@@ -688,6 +706,8 @@ Bun.serve({
   hostname: demoHost,
   idleTimeout: DEMO_STREAM_IDLE_TIMEOUT_SECONDS,
   error(error) {
+    if (error instanceof ZodError)
+      return json({ error: "VALIDATION_ERROR", message: "请求参数格式不正确" }, 400);
     if (error instanceof DemoToolConfigurationError)
       return json({ error: error.code, message: error.message }, error.status);
     if (error instanceof DemoStorageError)
@@ -706,14 +726,9 @@ Bun.serve({
       const origin = request.headers.get("origin");
       if (origin && origin !== url.origin) return json({ message: "拒绝跨站写请求" }, 403);
     }
-    if (standaloneWebDirectory && request.method === "GET" && !path.startsWith("/api/")) {
-      const requestedPath = resolveStandaloneStaticPath(standaloneWebDirectory, path);
-      if (requestedPath) {
-        const requestedFile = Bun.file(requestedPath);
-        if (await requestedFile.exists()) return new Response(requestedFile, { headers: { "referrer-policy": "no-referrer", ...(requestedPath.endsWith("index.html") ? { "cache-control": "no-store" } : {}) } });
-      }
-      const indexFile = Bun.file(resolveStandaloneStaticPath(standaloneWebDirectory, "/")!);
-      if (await indexFile.exists()) return new Response(indexFile, { headers: { "referrer-policy": "no-referrer", "cache-control": "no-store" } });
+    if (standaloneWebDirectory) {
+      const staticResponse = await serveStandaloneWeb(request, standaloneWebDirectory);
+      if (staticResponse) return staticResponse;
     }
     if (path === "/api/health")
       return json({ status: "ok", mode: "local-demo" });
@@ -884,7 +899,7 @@ Bun.serve({
             return Boolean(asset?.bytes.byteLength && (asset.ownerUserId === user.id || canManageDemoOwner(user, asset.ownerUserId)));
           });
           return result.ok
-            ? json({ document: result.document }, 200, responseHeaders)
+            ? json({ document: { id: result.document.id, revision: result.document.revision, deleted: result.document.deleted, updatedAt: result.document.updatedAt } }, 200, responseHeaders)
             : json({ error: "CANVAS_REVISION_CONFLICT", message: "画布已在其他设备更新或删除，请保留本地副本后重新同步。", document: result.document }, 409, responseHeaders);
         }
         return json({ error: "METHOD_NOT_ALLOWED", message: "不支持此画布操作" }, 405);
@@ -904,7 +919,8 @@ Bun.serve({
       });
     if (path === "/api/projects/sync" && request.method === "POST") {
       try {
-        return json(syncDemoProject(await request.json()));
+        if (request.headers.has('X-Canvas-Owner-Id')) assertCanvasOwner(request.headers.get('X-Canvas-Owner-Id'), user.id);
+        return json({ project: assetProjects.sync(user.id, await request.json()) });
       } catch (error) {
         return json(
           {
@@ -1032,9 +1048,9 @@ Bun.serve({
         projectId?: string;
         metadata?: Record<string, unknown>;
       };
-      if (!input.mimeType || !/^(image|video|audio|text)\//.test(input.mimeType))
+      if (!input.mimeType || !allowedAssetMimeTypes.has(normalizeAssetMime(input.mimeType)))
         return json(
-          { error: "INVALID_ASSET", message: "仅支持图片、视频、音频或文本素材" },
+          { error: "INVALID_ASSET", message: "不支持的文件类型" },
           400,
         );
       if (
@@ -1051,12 +1067,13 @@ Bun.serve({
         : undefined;
       if (existing)
         return json({ assetId: existing.id, uploadUrl: existing.bytes.byteLength ? null : `/api/assets/${existing.id}/content-upload`, reused: true }, 201);
+      if (input.projectId && !assetProjects.owns(user.id, input.projectId)) return json({ error: 'PROJECT_FORBIDDEN', message: '无权将素材加入此项目' }, 403);
       const assetId = crypto.randomUUID();
       saveDemoAsset({
         id: assetId,
         ownerUserId: user.id,
         filename: input.filename || "source-image",
-        mimeType: input.mimeType,
+        mimeType: normalizeAssetMime(input.mimeType),
         bytes: new Uint8Array(),
         createdAt: now(),
         clientReferenceId: input.clientReferenceId,
@@ -1086,8 +1103,13 @@ Bun.serve({
       const currentAsset = demoAssets.get(assetId);
       if (!currentAsset || currentAsset.ownerUserId !== user.id)
         return json({ error: "NOT_FOUND", message: "上传素材不存在" }, 404);
-      saveDemoAsset({ ...currentAsset, bytes, ...(currentAsset.mimeType.startsWith("text/")
-        ? { metadata: { ...currentAsset.metadata, content: new TextDecoder().decode(bytes) } } : {}) });
+      let mimeType: string;
+      try { mimeType = await validateAssetUpload(bytes, currentAsset.mimeType); }
+      catch (error) { if (error instanceof AssetMediaError) return json({ error: error.code, message: error.message }, error.status); throw error; }
+      const latestAsset = demoAssets.get(assetId);
+      if (!latestAsset || latestAsset.ownerUserId !== user.id) return json({ error: 'NOT_FOUND', message: '上传素材不存在' }, 404);
+      saveDemoAsset({ ...latestAsset, bytes, mimeType, ...(mimeType.startsWith("text/") || mimeType === 'application/json'
+        ? { metadata: { ...latestAsset.metadata, content: new TextDecoder().decode(bytes) } } : {}) });
       return empty();
     }
     if (
@@ -1100,7 +1122,14 @@ Bun.serve({
           { error: "NOT_FOUND", message: "素材不存在或无权访问" },
           404,
         );
-      return publicDemoAssetResponse(asset);
+      return publicDemoAssetResponse(asset, request);
+    }
+    if (/^\/api\/assets\/[^/]+\/thumb$/.test(path) && request.method === 'GET') {
+      const width = url.searchParams.get('w') || '256';
+      if (width !== '256' && width !== '1024') return json({ error: 'INVALID_WIDTH', message: '缩略图仅支持256或1024' }, 400);
+      const asset = demoAssets.get(path.split('/')[3]!);
+      if (!asset || !asset.mimeType.startsWith('image/') || !asset.bytes.length || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId))) return json({ error: 'NOT_FOUND', message: '素材不存在或无权访问' }, 404);
+      return demoAssetContentResponse(demoAssetThumbnail(asset, Number(width) as 256 | 1024), request);
     }
     if (path === "/api/generation-capabilities" && request.method === "GET") {
       const capabilityTool = url.searchParams.get("toolKey") || "video";
@@ -1566,12 +1595,18 @@ Bun.serve({
       void runInternalAiSeamlessTask(task, user, source, parameters);
       return json({ task }, 201);
     }
-    if (path === "/api/tasks" && request.method === "GET")
-      return json({
-        tasks: Array.from(demoTasks.values())
-          .filter((task) => task.ownerUserId === user.id)
-          .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-      });
+    if (path === "/api/tasks" && request.method === "GET") {
+      const query = Object.fromEntries(url.searchParams);
+      const filters = parseDemoTaskFilters(query);
+      const owned = [...demoTasks.values()].filter(task => task.ownerUserId === user.id && (!filters.operationType || task.operationType === filters.operationType));
+      if (filters.ids) return json({ tasks: owned.filter(task => filters.ids!.includes(task.id)), nextCursor: null, hasMore: false });
+      const page = pageDemoRecords(owned, query);
+      return json({ tasks: page.items.map(demoTaskSummary), nextCursor: page.nextCursor, hasMore: page.hasMore });
+    }
+    if (path === "/api/tasks/batches" && request.method === "GET") {
+      const page = pageDemoRecords([], Object.fromEntries(url.searchParams));
+      return json({ batches: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore });
+    }
     const encodedTaskRequestId = path.match(/^\/api\/tasks\/by-request\/([^/]+)$/)?.[1];
     if (encodedTaskRequestId && request.method === "GET") {
       const responseHeaders = { "cache-control": "private, no-store" };
@@ -1659,26 +1694,52 @@ Bun.serve({
       return new Response(null, { status: 204 });
     }
 
+    if (path === '/api/assets/batch' && request.method === 'POST') {
+      const parsed = assetBatchSchema.safeParse(await request.json().catch(() => null));
+      if (!parsed.success) return json({ error: 'INVALID_INPUT', message: '批量操作需选择1至50个不重复素材；移动时需指定项目' }, 400);
+      const input = parsed.data;
+      const assets = input.assetIds.map(id => demoAssets.get(id));
+      if (assets.some(asset => !asset || !asset.bytes.length || asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId))) return json({ error: 'BATCH_FORBIDDEN', message: '部分素材不存在或无权操作，整批未修改' }, 403);
+      const permitted = assets as DemoAsset[];
+      if (input.action === 'move-project' && !assetProjects.owns(user.id, input.projectId!)) return json({ error: 'PROJECT_FORBIDDEN', message: '无权将素材移入此项目，整批未修改' }, 403);
+      if (input.action === 'delete' || input.action === 'move-project') {
+        const updated = permitted.map(asset => input.action === 'delete' ? { ...asset, deletedAt: now() } : { ...asset, projectId: input.projectId });
+        demoState.save({ assets: updated });
+        for (const asset of updated) { if (asset.deletedAt) demoAssets.delete(asset.id); else demoAssets.set(asset.id, asset); }
+      }
+      return json({ action: input.action, assetIds: input.assetIds, count: permitted.length,
+        assets: input.action === 'download' || input.action === 'add-to-canvas' ? permitted.map(describeDemoAsset) : [] });
+    }
+    if (path === '/api/assets/summary' && request.method === 'GET') {
+      const assets = [...demoAssets.values()].filter(asset => asset.ownerUserId === user.id && asset.bytes.length && !isAuxiliaryImageResult(asset.metadata));
+      return json({ ...demoAssetPage(assets.map(describeDemoAsset), { limit: 12 }), total: assets.length });
+    }
+    if (/^\/api\/assets\/[^/]+$/.test(path) && (request.method === 'GET' || request.method === 'DELETE')) {
+      const asset = demoAssets.get(path.split('/')[3]!);
+      if (!asset || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId))) return json({ error: 'NOT_FOUND', message: '素材不存在或无权访问' }, 404);
+      if (request.method === 'DELETE') { demoState.save({ assets: [{ ...asset, deletedAt: now() }] }); demoAssets.delete(asset.id); return empty(); }
+      return json({ asset: describeDemoAsset(asset) });
+    }
+    if (path === '/api/projects' && request.method === 'GET') return json({ projects: assetProjects.list(user.id) });
     if ((path === "/api/assets" || path === "/api/admin/assets") && request.method === "GET") {
       const adminView = path === "/api/admin/assets";
       if (adminView && !user.role.includes("admin")) return json({ message: "无权访问管理素材" }, 403);
-      return json({ assets: [...demoAssets.values()].filter((asset) => (adminView ? canManageDemoOwner(user, asset.ownerUserId) : asset.ownerUserId === user.id) && asset.bytes.byteLength && !isAuxiliaryImageResult(asset.metadata)).map((asset) => {
-        const task = asset.taskId ? demoTasks.get(asset.taskId) : undefined;
-        const owner = demoOwner(asset.ownerUserId);
-        return { id: asset.id, ownerUserId: asset.ownerUserId, ownerName: owner?.displayName || asset.ownerUserId, departmentId: owner?.departmentId || null,
-          departmentName: owner?.departmentName || null, projectId: asset.projectId || null, projectName: null, taskId: asset.taskId || null,
-          filename: asset.filename, mimeType: asset.mimeType, byteSize: asset.bytes.byteLength, kind: asset.mimeType.startsWith("image/") ? "image" : asset.mimeType.startsWith("video/") ? "video" : asset.mimeType.startsWith("text/") ? "text" : "other",
-          source: task ? "generation" : "upload", operationType: task?.operationType || null, prompt: task?.prompt || null,
-          modelName: demoModels.find((model) => model.id === task?.modelConfigId)?.name || null, status: "ready", visibilityScope: "private",
-          metadata: asset.metadata || {}, createdAt: asset.createdAt, ...demoDownloadProjection(asset) };
-      }).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) });
+      try {
+        return json(demoAssetPage([...demoAssets.values()].filter(asset => (adminView ? canManageDemoOwner(user, asset.ownerUserId) : asset.ownerUserId === user.id) && asset.bytes.byteLength && !isAuxiliaryImageResult(asset.metadata)).map(describeDemoAsset), Object.fromEntries(url.searchParams)));
+      } catch { return json({ error: 'INVALID_PAGINATION', message: '素材分页或筛选参数无效' }, 400); }
     }
     if (path === "/api/history" && request.method === "GET") {
-      return json({ history: [...demoTasks.values()].filter((task) => task.ownerUserId === user.id).map((task) => ({
+      const page = pageDemoRecords([...demoTasks.values()].filter(task => task.ownerUserId === user.id), Object.fromEntries(url.searchParams));
+      return json({ history: page.items.map((task) => demoTaskSummary({
         ...task, taskId: task.id, userId: user.id, userName: user.displayName, departmentId: user.departmentId || null,
         departmentName: user.departmentName || null, modelName: demoModels.find((model) => model.id === task.modelConfigId)?.name || "",
         prompt: task.prompt || "", parameters: task.parameters || {}, sourceUrls: task.sourceUrls || [], credits: task.status === "success" ? task.credits : 0, rmbCost: 0,
-      })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) });
+      })), nextCursor: page.nextCursor, hasMore: page.hasMore });
+    }
+    const historyId = path.match(/^\/api\/history\/([0-9a-f-]+)$/i)?.[1];
+    if (historyId && request.method === "GET") {
+      const task = demoTasks.get(historyId);
+      return task?.ownerUserId === user.id ? json({ history: task }) : json({ error: "NOT_FOUND", message: "历史不存在或无权访问" }, 404);
     }
     if (!user.role.includes("admin")) {
       if (path === "/api/projects") return json({ projects: [] });
@@ -1793,19 +1854,16 @@ Bun.serve({
       });
     if (path.startsWith("/api/admin/audit-logs"))
       return json({ auditLogs: [] });
-    if (path === "/api/admin/history")
-      return json({
-        history: [],
-        total: 0,
-        totalCredits: 0,
-        totalRmbCost: 0,
-        page: 1,
-        pageSize: 20,
-      });
+    if (path === "/api/admin/history" && request.method === "GET") {
+      const page = pageDemoRecords([], Object.fromEntries(url.searchParams));
+      return json({ history: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore, total: 0, totalCredits: 0, totalRmbCost: 0 });
+    }
     if (path === "/api/admin/history/options")
       return json({ users: [], models: [], operations: [] });
-    if (path === "/api/admin/tasks") return json({ tasks: [] });
-    if (path === "/api/admin/tasks/batches") return json({ batches: [] });
+    if (["/api/admin/tasks", "/api/admin/tasks/batches"].includes(path) && request.method === "GET") {
+      const page = pageDemoRecords([], Object.fromEntries(url.searchParams));
+      return json({ [path.endsWith("/batches") ? "batches" : "tasks"]: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore });
+    }
     if (path === "/api/admin/groups") return json({ groups: [] });
     if (path === "/api/admin/workflows") return json({ workflows: [] });
     if (

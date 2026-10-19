@@ -42,6 +42,7 @@ export default function TeamPage() {
   const [history, setHistory] = useState<TeamHistory[]>([]);
   const [auditLogs, setAuditLogs] = useState<TeamAuditLog[]>([]);
   const [assets, setAssets] = useState<ServerAsset[]>([]);
+  const [assetTotal, setAssetTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [pendingAction, setPendingAction] = useState("");
@@ -61,6 +62,7 @@ export default function TeamPage() {
       if (result.overview) setOverview(result.overview);
       if (result.history) setHistory(result.history);
       if (result.assets) setAssets(result.assets);
+      if (result.assetTotal !== undefined) setAssetTotal(result.assetTotal);
       if (result.auditLogs) setAuditLogs(result.auditLogs);
       if (result.managedCredits) setManagedCredits(result.managedCredits);
       setLoadError(result.errors.join("；"));
@@ -68,7 +70,7 @@ export default function TeamPage() {
     finally { if (sequence === requestSequence.current) setLoading(false); }
   };
   useEffect(() => {
-    setMyCredits(undefined); setManagedCredits(undefined); setOverview(undefined); setHistory([]); setAssets([]); setAuditLogs([]); setLoadError("");
+    setMyCredits(undefined); setManagedCredits(undefined); setOverview(undefined); setHistory([]); setAssets([]); setAssetTotal(0); setAuditLogs([]); setLoadError("");
     void refresh();
     return () => { requestSequence.current++; };
   }, [user?.id, user?.groupId, user?.groupRole]);
@@ -164,7 +166,7 @@ export default function TeamPage() {
             { title: "个人本月剩余", dataIndex: "creditBalance" }, { title: "每月固定额度", dataIndex: "monthlyCreditLimit" },
           ]} /></section>
 
-          <section><div className="mb-3 flex items-end justify-between"><div><h2 className="text-lg font-semibold">最近成果</h2><p className="text-sm text-[var(--muted-foreground)]">组长可确认采用、最终交付、待定或废弃</p></div><Tag>{assets.length} 张</Tag></div>
+          <section><div className="mb-3 flex items-end justify-between"><div><h2 className="text-lg font-semibold">最近成果</h2><p className="text-sm text-[var(--muted-foreground)]">组长可确认采用、最终交付、待定或废弃</p></div><Tag>共 {assetTotal} 个 · 显示最近 {assets.length} 个</Tag></div>
             {assets.length ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{assets.slice(0, 12).map((asset) => <article key={asset.id} className="wb-surface overflow-hidden">
               {asset.kind === "image" ? <img src={`/api/assets/${asset.id}/content`} alt={asset.filename} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" /> : <div className="flex aspect-[4/3] items-center justify-center bg-[var(--muted)] text-[var(--muted-foreground)]">{asset.kind}</div>}
               <div className="space-y-3 p-3"><div className="flex items-start justify-between gap-2"><div><div className="break-all font-medium">{asset.filename}</div><div className="text-xs text-[var(--muted-foreground)]">{asset.ownerName} · {asset.modelName || "未记录模型"}</div></div><Tag color="orange">{statusLabel[asset.resultStatus] || asset.resultStatus}</Tag></div><p className="line-clamp-3 min-h-[60px] text-sm leading-5 text-[var(--muted-foreground)]">{asset.prompt || "未记录提示词"}</p><div className="grid grid-cols-2 gap-2"><Button className="!h-10" loading={pendingAction === `asset:${asset.id}:asset.adopted`} disabled={Boolean(pendingAction) || asset.resultStatus === "adopted"} icon={<CheckCircle2 className="size-3.5" />} onClick={() => void setResult(asset, "asset.adopted")}>确认采用</Button><Button className="!h-10" loading={pendingAction === `asset:${asset.id}:asset.delivered`} disabled={Boolean(pendingAction) || asset.resultStatus === "delivered"} type="primary" icon={<Clock3 className="size-3.5" />} onClick={() => void setResult(asset, "asset.delivered")}>最终交付</Button><Button className="!h-10" loading={pendingAction === `asset:${asset.id}:asset.pending`} disabled={Boolean(pendingAction) || asset.resultStatus === "pending"} icon={<RotateCcw className="size-3.5" />} onClick={() => void setResult(asset, "asset.pending")}>标记待定</Button><Button className="!h-10" loading={pendingAction === `asset:${asset.id}:asset.rejected`} disabled={Boolean(pendingAction) || asset.resultStatus === "rejected"} danger icon={<XCircle className="size-3.5" />} onClick={() => void setResult(asset, "asset.rejected")}>标记废弃</Button></div></div>

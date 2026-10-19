@@ -1,19 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { resolveImageUrl } from "@/services/image-storage";
+import { useImagePreview, type PreviewImage } from "@/hooks/use-image-preview";
 
 /** History thumbnails do not open original image blobs until they enter the scroller. */
-export function ImageLogThumbnail({ image }: { image: { storageKey?: string; dataUrl: string } }) {
+export function ImageLogThumbnail({ image }: { image: PreviewImage }) {
     const ref = useRef<HTMLSpanElement>(null);
-    const [url, setUrl] = useState(image.storageKey ? "" : image.dataUrl);
+    const source = `${image.storageKey || ""}\n${image.dataUrl}`;
+    const [visibleSource, setVisibleSource] = useState<string | null>(null);
+    const url = useImagePreview(image, 256, !image.storageKey || visibleSource === source);
     useEffect(() => {
-        let active = true;
-        setUrl(image.storageKey ? "" : image.dataUrl);
-        const load = () => void resolveImageUrl(image.storageKey, image.dataUrl).then(value => { if (active) setUrl(value); }).catch(() => undefined);
         if (!image.storageKey) return;
-        if (typeof IntersectionObserver === "undefined") { load(); return () => { active = false; }; }
-        const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); load(); } }, { rootMargin: "100px" });
+        if (typeof IntersectionObserver === "undefined") { setVisibleSource(source); return; }
+        const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); setVisibleSource(source); } }, { rootMargin: "100px" });
         if (ref.current) observer.observe(ref.current);
-        return () => { active = false; observer.disconnect(); };
-    }, [image.storageKey, image.dataUrl]);
+        return () => observer.disconnect();
+    }, [image.storageKey, source]);
     return <span ref={ref} className="block size-9 shrink-0 overflow-hidden rounded-md bg-muted">{url ? <img src={url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" /> : null}</span>;
 }

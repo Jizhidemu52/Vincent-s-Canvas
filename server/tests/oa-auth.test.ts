@@ -17,7 +17,7 @@ async function serve(app: express.Express, run: (origin: string) => Promise<void
   finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
 }
 
-test("password-login mode keeps OA and QR routes disabled when OA is not enabled", async () => {
+test("password-login mode keeps OA disabled and unconfigured QR routes closed", async () => {
   const db = { query: async () => { throw new Error("Unexpected database access"); } } as unknown as Database;
   const app = express().use(express.json()).use(cookieParser());
   app.use("/auth", createAuthRouter(db, cache, config));
@@ -76,6 +76,7 @@ test.each(["false", "true"] as const)("AUTH_ENABLED=%s only permits unfinished o
     });
     expect(storedUser.must_change_password).toBe(true);
     expect(statements.every(sql => sql.trimStart().startsWith("SELECT"))).toBe(true);
-    expect(statements.some(sql => sql.includes("FROM credit_policy"))).toBe(authenticationEnabled === "true");
+    // Current-period sessions no longer need a policy read just to authenticate.
+    expect(statements.some(sql => sql.includes("FROM credit_policy"))).toBe(false);
   }
 });

@@ -1,7 +1,8 @@
 import { App, Button, Input } from "antd";
-import { LockKeyhole, ShieldCheck, UserRound } from "lucide-react";
-import { useRef, useState } from "react";
+import { LockKeyhole, QrCode, ShieldCheck, UserRound } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
+import { getAuthMethods, getWeComLoginUrl, type AuthMethods } from "@/services/api/auth";
 import { useUserStore } from "@/stores/use-user-store";
 
 export default function LoginPage() {
@@ -11,6 +12,42 @@ export default function LoginPage() {
     const [password, setPassword] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const submittingRef = useRef(false);
+    const [authMethods, setAuthMethods] = useState<AuthMethods | null>(null);
+    const [wecomOpening, setWecomOpening] = useState(false);
+    const [wecomError, setWecomError] = useState<string | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        const scanRequested = new URLSearchParams(window.location.search).get("scan") === "1";
+        const prepareLogin = async () => {
+            try {
+                const methods = await getAuthMethods();
+                if (!active) return;
+                setAuthMethods(methods);
+                if (!scanRequested || submittingRef.current) return;
+                if (!methods.wecom || !methods.wecomLoginUrl) {
+                    setWecomError("企业微信扫码登录暂不可用，请使用个人账号登录");
+                    return;
+                }
+                setWecomOpening(true);
+                // The state cookie must be created on the configured callback origin,
+                // including its protocol and port, not an alternate entry address.
+                const loginUrl = new URL(methods.wecomLoginUrl, window.location.href);
+                if (loginUrl.origin !== window.location.origin) {
+                    window.location.replace(loginUrl.href);
+                    return;
+                }
+                const { authorizationUrl } = await getWeComLoginUrl("designer");
+                if (active) window.location.assign(authorizationUrl);
+            } catch (error) {
+                if (active && scanRequested) setWecomError(error instanceof Error ? error.message : "企业微信登录暂不可用");
+            } finally {
+                if (active) setWecomOpening(false);
+            }
+        };
+        void prepareLogin();
+        return () => { active = false; };
+    }, []);
 
     const submit = async () => {
         if (submittingRef.current) return;
@@ -35,13 +72,22 @@ export default function LoginPage() {
                 <div><div className="text-xs text-[var(--muted-foreground)]">个人创作工作台</div><h1 className="text-xl font-semibold">登录你的账号</h1></div>
             </div>
             <p className="mt-4 text-sm text-[var(--muted-foreground)]">每人使用独立账号，作品、聊天记录和积分按账号分别管理。账号由管理员开通。</p>
+            {authMethods?.wecom && authMethods.wecomLoginUrl && !wecomError && <div className="mt-6">
+                <Button size="large" block icon={<QrCode className="size-4" />} loading={wecomOpening} disabled={submitting} onClick={() => window.location.assign(authMethods.wecomLoginUrl!)}>企业微信扫码登录</Button>
+            </div>}
+            {wecomOpening && <p role="status" className="mt-3 text-sm text-[var(--muted-foreground)]">正在打开企业微信扫码登录</p>}
+            {wecomError && <div className="mt-4 space-y-2">
+                <p role="alert" className="text-sm">{wecomError}</p>
+                {(!authMethods || authMethods.wecom) && <Button onClick={() => window.location.reload()}>重试扫码登录</Button>}
+                <Button type="link" onClick={() => window.location.replace("/login")}>返回密码登录</Button>
+            </div>}
             <form className="mt-6 space-y-3" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
                 <label htmlFor="personal-login-identifier" className="block text-sm font-medium">个人账号</label>
-                <Input id="personal-login-identifier" size="large" value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder="账号、邮箱或工号" autoComplete="username" disabled={submitting} />
+                <Input id="personal-login-identifier" size="large" value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder="账号、邮箱或工号" autoComplete="username" disabled={submitting || wecomOpening} />
                 <label htmlFor="personal-login-password" className="block text-sm font-medium">登录密码</label>
-                <Input.Password id="personal-login-password" size="large" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" autoComplete="current-password" disabled={submitting} />
-                <Button htmlType="submit" type="primary" size="large" block loading={submitting} icon={<LockKeyhole className="size-4" />}>登录工作台</Button>
-                <Button size="large" block icon={<ShieldCheck className="size-4" />} disabled={submitting} onClick={() => window.location.assign("/admin/login")}>管理员入口</Button>
+                <Input.Password id="personal-login-password" size="large" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" autoComplete="current-password" disabled={submitting || wecomOpening} />
+                <Button htmlType="submit" type="primary" size="large" block loading={submitting} disabled={wecomOpening} icon={<LockKeyhole className="size-4" />}>登录工作台</Button>
+                <Button size="large" block icon={<ShieldCheck className="size-4" />} disabled={submitting || wecomOpening} onClick={() => window.location.assign("/admin/login")}>管理员入口</Button>
             </form>
         </section>
     </main>;

@@ -91,7 +91,7 @@ test("failed writes leave the caller's in-memory attachments intact and allow a 
     expect(await storage.load("user-a", () => null)).toEqual(saved);
 });
 
-function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mode = "chat", creativeChat = true, creativeModelId = "gpt-6-astra", imageModels = [{ modelId: "gpt-image-2.5-flare", capabilities: ["generate", "edit"] }], taskFailure = "", plan = Promise.resolve<any>({ kind: "discussion", content: "只讨论设计" }), taskResult = Promise.resolve([{ id: "result", sourceTaskId: "task-result", dataUrl: "data:image/png;base64,cmVzdWx0" }]) } = {}) {
+function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mode = "chat", creativeChat = true, creativeModelId = "gpt-6-astra", imageModels = [{ id: "fixture-image", name: "gpt-image-2.5-flare", modelId: "gpt-image-2.5-flare", creditCost: 0, rmbCost: 0, capabilities: ["generate", "edit"] }], taskFailure = "", plan = Promise.resolve<any>({ kind: "discussion", content: "只讨论设计" }), taskResult = Promise.resolve([{ id: "result", sourceTaskId: "task-result", dataUrl: "data:image/png;base64,cmVzdWx0" }]) } = {}) {
     const source = readFileSync(new URL("../src/pages/chat/index.tsx", import.meta.url), "utf8");
     const ast = ts.createSourceFile("chat.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     let initializer: ts.Expression | undefined;
@@ -236,7 +236,7 @@ test("discussion succeeds without a configured image model and never submits an 
 });
 
 test("only an image decision requires a capable image model, and it does not fall back to another operation", async () => {
-    const page = pageSendHarness({ imageModels: [{ modelId: "generate-only", capabilities: ["generate"] }], plan: Promise.resolve({ kind: "image", action: "edit", prompt: "只改花瓣", content: "", references: [] }) });
+    const page = pageSendHarness({ imageModels: [{ id: "fixture-generate", name: "Generate only", modelId: "generate-only", creditCost: 0, rmbCost: 0, capabilities: ["generate"] }], plan: Promise.resolve({ kind: "image", action: "edit", prompt: "只改花瓣", content: "", references: [] }) });
     await page.send();
     expect(page.plannerCalls).toHaveLength(1);
     expect(page.taskOptions).toEqual([]);

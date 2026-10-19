@@ -3,8 +3,11 @@ import { prepareVideoProviderSources } from "./video-source-preparation";
 
 export class VideoProviderFailure extends Error {}
 export class VideoSubmissionClaimLost extends Error {}
+export class VideoTaskPending extends Error {
+  constructor(public readonly nextPollMs = 2_000) { super("视频仍在生成，等待下一次状态查询"); }
+}
 
-export async function runApiMartVideoTask(input: {
+export type ApiMartVideoInput = {
   baseUrl: string;
   apiKey: string;
   modelId: string;
@@ -15,11 +18,16 @@ export async function runApiMartVideoTask(input: {
   submissionStarted?: boolean;
   beforeSubmit: () => Promise<boolean>;
   onSubmitted: (id: string) => Promise<void>;
-}, runtime: { fetch?: (url: string, init?: RequestInit) => Promise<Response>; sleep?: (ms: number) => Promise<unknown> } = {}) {
+};
+type VideoRuntime = { fetch?: (url: string, init?: RequestInit) => Promise<Response>; sleep?: (ms: number) => Promise<unknown> };
+
+/** Exactly one submission OR status query. Workers persist/schedule between steps. */
+export async function stepApiMartVideoTask(input: ApiMartVideoInput, runtime: VideoRuntime = {}): Promise<
+  { status: "pending"; upstreamTaskId: string } | { status: "completed"; upstreamTaskId: string; url: string }
+> {
   if (!input.apiKey.trim()) throw new Error("APIMart 视频服务端凭据未配置");
   if (!isSupportedVideoModelId(input.modelId)) throw new Error("当前 APIMart 视频模型尚不支持");
   const request = runtime.fetch || fetch;
-  const sleep = runtime.sleep || Bun.sleep;
   const baseUrl = input.baseUrl.replace(/\/$/, "");
   const headers = { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" };
   let upstreamId = input.upstreamTaskId;
@@ -40,21 +48,32 @@ export async function runApiMartVideoTask(input: {
     upstreamId = created.data?.[0]?.task_id;
     if (!upstreamId) throw new Error("视频服务未返回任务编号；请核查上游状态，不会自动重复提交");
     await input.onSubmitted(upstreamId);
+    return { status: "pending", upstreamTaskId: upstreamId };
   }
+  const response = await request(`${baseUrl}${videoTaskStatusPath(upstreamId)}`, { headers, signal: AbortSignal.timeout(60_000) });
+  if (!response.ok) throw new Error(`APIMart 视频状态查询失败（${response.status}）`);
+  const result = await response.json() as { data?: { status?: string; error?: { message?: string }; result?: { videos?: unknown[] } } };
+  if (["failed", "cancelled", "canceled"].includes(result.data?.status || "")) throw new VideoProviderFailure(result.data?.error?.message || "视频生成失败");
+  if (result.data?.status !== "completed") return { status: "pending", upstreamTaskId: upstreamId };
+  for (const video of result.data.result?.videos || []) {
+    const item = video as { url?: string | string[]; video_url?: string; output_url?: string } | null;
+    const url = typeof video === "string" ? video : item && typeof item === "object" ? (Array.isArray(item.url) ? item.url[0] : item.url) || item.video_url || item.output_url : null;
+    if (typeof url === "string" && /^https?:\/\//i.test(url)) return { status: "completed", upstreamTaskId: upstreamId, url };
+  }
+  throw new Error("视频任务完成但没有可下载结果；可稍后重新查询原任务");
+}
+
+/** Demo/single-request callers retain the blocking convenience API. */
+export async function runApiMartVideoTask(input: ApiMartVideoInput, runtime: VideoRuntime = {}) {
+  const sleep = runtime.sleep || Bun.sleep;
+  const pending = { ...input };
   const deadline = Date.now() + 20 * 60_000;
   while (Date.now() < deadline) {
-    await sleep(2_000);
-    const response = await request(`${baseUrl}${videoTaskStatusPath(upstreamId)}`, { headers, signal: AbortSignal.timeout(60_000) });
-    if (!response.ok) throw new Error(`APIMart 视频状态查询失败（${response.status}）`);
-    const result = await response.json() as { data?: { status?: string; error?: { message?: string }; result?: { videos?: unknown[] } } };
-    if (["failed", "cancelled", "canceled"].includes(result.data?.status || "")) throw new VideoProviderFailure(result.data?.error?.message || "视频生成失败");
-    if (result.data?.status !== "completed") continue;
-    for (const video of result.data.result?.videos || []) {
-      const item = video as { url?: string | string[]; video_url?: string; output_url?: string } | null;
-      const url = typeof video === "string" ? video : item && typeof item === "object" ? (Array.isArray(item.url) ? item.url[0] : item.url) || item.video_url || item.output_url : null;
-      if (typeof url === "string" && /^https?:\/\//i.test(url)) return url;
-    }
-    throw new Error("视频任务完成但没有可下载结果；可稍后重新查询原任务");
+    if (pending.upstreamTaskId) await sleep(2_000);
+    const result = await stepApiMartVideoTask(pending, runtime);
+    if (result.status === "completed") return result.url;
+    pending.upstreamTaskId = result.upstreamTaskId;
+    pending.submissionStarted = true;
   }
   throw new Error("视频状态查询超时；可恢复查询原任务，不会重新生成");
 }

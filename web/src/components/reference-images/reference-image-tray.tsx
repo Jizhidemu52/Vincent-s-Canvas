@@ -59,7 +59,7 @@ export function ReferenceImageTray({ references, fixedReferenceKey, validation, 
                         onDrop={() => drop(item.referenceKey)}
                         className={`group relative size-24 shrink-0 overflow-hidden rounded-md border bg-stone-50 transition dark:bg-stone-900 ${draggingKey === item.referenceKey ? "border-blue-400 opacity-50" : "border-stone-200 dark:border-stone-800"}`}
                     >
-                        <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
+                        <img src={item.dataUrl} alt={item.name} loading="lazy" decoding="async" className="size-full object-cover" />
                         <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-medium text-white">{imageReferenceLabel(index)}</span>
                         <Tag className="absolute bottom-1 left-1 m-0 max-w-[70px] truncate border-0 bg-black/65 px-1.5 py-0.5 text-[10px] text-white">{item.originLabel}</Tag>
                         {item.referenceKey !== fixedReferenceKey ? <><span className="absolute right-1 bottom-1 rounded bg-black/65 p-1 text-white" aria-hidden="true"><GripVertical className="size-3" /></span>

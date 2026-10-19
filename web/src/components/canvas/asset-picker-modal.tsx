@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Empty, Input, Modal, Pagination, Spin, Tag } from "antd";
 import { Search } from "lucide-react";
 
@@ -7,7 +7,7 @@ import { isSupportedServerAsset, serverAssetToLocal } from "@/lib/server-asset-l
 import { needsCanvasAssetPreviewResolution, resolveCanvasAssetPreview } from "@/lib/canvas/canvas-asset-preview";
 import { resolveImageUrl } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
-import { listServerAssets } from "@/services/api/server-assets";
+import { fetchServerAsset, listServerAssets } from "@/services/api/server-assets";
 import { canUserAccessAsset, serverAssetIdFromAsset, useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -72,7 +72,7 @@ function PickerCard({ asset, selected, onClick }: { asset: Asset; selected?: boo
             onClick={onClick}
         >
             {cover ? (
-                <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" />
+                <img src={cover} alt={asset.title} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />
             ) : (
                 <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-3 text-center text-xs leading-5 text-stone-500 dark:bg-stone-800 dark:text-stone-400">{asset.title}</div>
             )}
@@ -98,19 +98,30 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
     const [kindFilter, setKindFilter] = useState("all");
     const [page, setPage] = useState(1);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [nextCursor, setNextCursor] = useState<string | null>(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [inserting, setInserting] = useState(false);
+    const queryScope = JSON.stringify([open, ownerId, refreshRevision, deferredKeyword, kindFilter, selectionMode]);
+    const queryScopeRef = useRef(queryScope);
+    queryScopeRef.current = queryScope;
+    const pageController = useRef<AbortController | null>(null);
 
     useEffect(() => {
+        pageController.current?.abort();
+        pageController.current = null;
+        setLoadingMore(false);
         if (!open || !ownerId) return;
         const controller = new AbortController();
-        const isCurrent = () => !controller.signal.aborted && useUserStore.getState().user?.id === ownerId;
+        const isCurrent = () => !controller.signal.aborted && queryScopeRef.current === queryScope && useUserStore.getState().user?.id === ownerId;
         setServerState((current) => ({ ownerId, assets: current?.ownerId === ownerId ? current.assets : [], loading: true, error: "" }));
-        void listServerAssets(controller.signal).then(({ assets }) => {
-            if (isCurrent()) setServerState({ ownerId, assets: assets.filter(isSupportedServerAsset).map(serverAssetToLocal), loading: false, error: "" });
+        setNextCursor(null);
+        void listServerAssets({ q: deferredKeyword || undefined, kind: selectionMode === "multiple-images" ? "image" : kindFilter === "all" ? undefined : kindFilter as "image" | "video" | "text" }, controller.signal).then(({ assets, nextCursor: cursor }) => {
+            if (isCurrent()) { setServerState({ ownerId, assets: assets.filter(isSupportedServerAsset).map(serverAssetToLocal), loading: false, error: "" }); setNextCursor(cursor || null); }
         }).catch((error: unknown) => {
             if (isCurrent()) setServerState((current) => ({ ownerId, assets: current?.ownerId === ownerId ? current.assets : [], loading: false, error: error instanceof Error ? error.message : "素材加载失败，请重试" }));
         });
-        return () => controller.abort();
-    }, [open, ownerId, refreshRevision]);
+        return () => { controller.abort(); pageController.current?.abort(); pageController.current = null; };
+    }, [open, ownerId, refreshRevision, deferredKeyword, kindFilter, selectionMode]);
 
     useEffect(() => { setSelectedIds(new Set()); }, [open, ownerId, selectionMode]);
 
@@ -149,7 +160,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
             : { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, title: asset.title, mimeType: asset.data.mimeType, imageName: typeof asset.metadata?.imageName === "string" ? asset.metadata.imageName : undefined, imageVersion: typeof asset.metadata?.imageVersion === "number" ? asset.metadata.imageVersion : undefined };
     };
 
-    const handleInsert = (asset: Asset) => {
+    const handleInsert = async (asset: Asset) => {
         const currentUser = useUserStore.getState().user;
         if (!open || !ownerId || currentUser?.id !== ownerId || !canUserAccessAsset(asset, currentUser, serverAssetIds.has(asset.id))) return;
         if (selectionMode === "multiple-images") {
@@ -160,7 +171,30 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
             });
             return;
         }
-        onInsert?.(toPayload(asset));
+        if (inserting) return;
+        if (asset.kind === "text" && serverAssetIds.has(asset.id)) {
+            setInserting(true);
+            try {
+                const { asset: full } = await fetchServerAsset(asset.id);
+                if (queryScopeRef.current === queryScope && useUserStore.getState().user?.id === ownerId) onInsert?.(toPayload(serverAssetToLocal(full)));
+            } catch (error) { setServerState(current => current ? { ...current, error: error instanceof Error ? error.message : "素材详情读取失败" } : current); }
+            finally { setInserting(false); }
+        } else onInsert?.(toPayload(asset));
+    };
+
+    const loadMore = async () => {
+        if (!open || !ownerId || !nextCursor || loading || loadingMore || pageController.current) return;
+        const controller = new AbortController();
+        pageController.current = controller;
+        const isCurrent = () => !controller.signal.aborted && queryScopeRef.current === queryScope && useUserStore.getState().user?.id === ownerId;
+        setLoadingMore(true);
+        try {
+            const result = await listServerAssets({ cursor: nextCursor, q: deferredKeyword || undefined, kind: selectionMode === "multiple-images" ? "image" : kindFilter === "all" ? undefined : kindFilter as "image" | "video" | "text" }, controller.signal);
+            if (!isCurrent()) return;
+            setServerState(current => current?.ownerId === ownerId ? { ...current, assets: [...current.assets, ...result.assets.filter(isSupportedServerAsset).filter(asset => !current.assets.some(item => item.id === asset.id)).map(serverAssetToLocal)] } : current);
+            setNextCursor(result.nextCursor || null);
+        } catch (error) { if (isCurrent()) setServerState(current => current ? { ...current, error: error instanceof Error ? error.message : "素材加载失败" } : current); }
+        finally { if (pageController.current === controller) { pageController.current = null; setLoadingMore(false); } }
     };
 
     const confirmMultiple = () => {
@@ -208,7 +242,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
             {visible.length ? (
                 <div className="grid grid-cols-4 gap-3">
                     {visible.map((asset) => (
-                        <PickerCard key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} onClick={() => handleInsert(asset)} />
+                        <PickerCard key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} onClick={() => void handleInsert(asset)} />
                     ))}
                 </div>
             ) : loading ? (
@@ -222,6 +256,8 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
                     <Pagination size="small" current={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} showSizeChanger={false} />
                 </div>
             )}
+            {nextCursor ? <Button block loading={loadingMore} onClick={() => void loadMore()}>加载更多素材</Button> : null}
+            {inserting ? <p role="status" className="text-sm text-muted-foreground">正在读取完整文本…</p> : null}
         </div>
     );
 }

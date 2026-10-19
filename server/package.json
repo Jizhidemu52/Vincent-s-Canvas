@@ -16,11 +16,15 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1084.0",
     "@aws-sdk/s3-request-presigner": "^3.1084.0",
+    "@lezer/json": "1.0.3",
     "argon2": "^0.44.0",
+    "content-disposition": "^3.0.0",
     "cookie-parser": "^1.4.7",
     "express": "^5.1.0",
+    "file-type": "^22.2.0",
     "helmet": "^8.1.0",
     "ipaddr.js": "^2.5.0",
+    "negotiator": "^1.1.0",
     "parse5": "^8.0.1",
     "pg": "^8.16.3",
     "redis": "^5.8.2",
@@ -29,8 +33,10 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/content-disposition": "^0.5.9",
     "@types/cookie-parser": "^1.4.9",
     "@types/express": "^5.0.3",
+    "@types/negotiator": "^0.6.5",
     "@types/pg": "^8.15.5",
     "typescript": "^5.9.3"
   }

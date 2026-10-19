@@ -17,6 +17,7 @@ export type ServerAsset = {
     source: string;
     operationType: string | null;
     prompt: string | null;
+    canRecreate?: boolean;
     modelName: string | null;
     status: string;
     visibilityScope: "private" | "company";
@@ -27,7 +28,14 @@ export type ServerAsset = {
     downloadCount: number;
     firstDownloadedAt: string | null;
     eventCount: number;
+    contentUrl?: string;
+    thumbnailUrl?: string | null;
+    previewUrl?: string | null;
 };
+export type AssetListQuery = { limit?: number; cursor?: string; kind?: "image" | "video" | "text" | "other"; q?: string; projectId?: string; ownerUserId?: string };
+export type ServerAssetPage = { assets: ServerAsset[]; nextCursor: string | null; hasMore: boolean };
+export type AssetBatchAction = "delete" | "download" | "add-to-canvas" | "move-project";
+export type AssetBatchResult = { action: AssetBatchAction; assetIds: string[]; count: number; assets: ServerAsset[] };
 export type ServerProject = { id: string; externalId: string; name: string; ownerName: string; departmentName: string | null; status: string; taskCount: number; assetCount: number; credits: number; updatedAt: string };
 export type UserProject = { id: string; externalId: string; name: string; status: string; createdAt: string; updatedAt: string };
 export type ServerAssetVariant = { assetId: string; url: string; mimeType: string; filename: string };
@@ -48,8 +56,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
 
-export const listServerAssets = (signal?: AbortSignal) => request<{ assets: ServerAsset[] }>("/api/assets", { signal });
-export const listAdminServerAssets = () => request<{ assets: ServerAsset[] }>("/api/admin/assets");
+function assetListUrl(path: string, query: AssetListQuery) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+    return params.size ? `${path}?${params}` : path;
+}
+export const listServerAssets = (queryOrSignal: AssetListQuery | AbortSignal = {}, signal?: AbortSignal) => {
+    const isSignal = "aborted" in queryOrSignal;
+    return request<ServerAssetPage>(assetListUrl("/api/assets", isSignal ? {} : queryOrSignal), { signal: isSignal ? queryOrSignal : signal });
+};
+export const listAdminServerAssets = (query: AssetListQuery = {}, signal?: AbortSignal) => request<ServerAssetPage>(assetListUrl("/api/admin/assets", query), { signal });
+export const listAdminAssetOwners = (signal?: AbortSignal) => request<{ owners: Array<{ value: string; label: string }> }>("/api/admin/assets/owners", { signal });
+export const fetchServerAsset = (id: string, signal?: AbortSignal) => request<{ asset: ServerAsset }>(`/api/assets/${encodeURIComponent(id)}`, { signal });
+export const getServerAssetOverview = () => request<ServerAssetPage & { total: number }>("/api/assets/summary");
+export const batchServerAssets = (action: AssetBatchAction, assetIds: string[], projectId?: string) =>
+    request<AssetBatchResult>("/api/assets/batch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, assetIds, projectId }) });
 export const listAdminServerProjects = () => request<{ projects: ServerProject[] }>("/api/admin/projects");
 export const listServerProjects = (signal?: AbortSignal) => request<{ projects: UserProject[] }>("/api/projects", { signal });
 

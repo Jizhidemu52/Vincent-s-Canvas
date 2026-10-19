@@ -47,8 +47,15 @@ afterEach(() => { globalThis.window = originalWindow; globalThis.document = orig
 
 describe("admin/team interaction guards", () => {
     test("project supervision retains successful data when the independent assets read fails", async () => {
+        const options: any[] = [];
         const harness = componentHarness("../src/pages/admin/components/admin-assets-panel.tsx", "AdminAssetsPanel", {
-            "@/services/api/server-assets": { listAdminServerAssets: async () => { throw new Error("素材暂不可用"); }, listAdminServerProjects: async () => ({ projects: [{ id: "project" }] }) },
+            "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user: { id: "admin-a" } }) },
+            "@/components/infinite-load-more": { InfiniteLoadMore: "InfiniteLoadMore" },
+            "@tanstack/react-query": {
+                useInfiniteQuery: (value: any) => { options.push(value); return { data: undefined, error: new Error("素材暂不可用"), isFetching: false }; },
+                useQuery: (value: any) => { options.push(value); return { data: value.queryKey[0] === "admin-asset-projects" ? { projects: [{ id: "project" }] } : { owners: [{ value: "designer-on-next-page", label: "未加载页设计师" }] }, isFetching: false }; },
+            },
+            "@/services/api/server-assets": { listAdminServerAssets: async () => { throw new Error("素材暂不可用"); }, listAdminServerProjects: async () => ({ projects: [{ id: "project" }] }), listAdminAssetOwners: async () => ({ owners: [] }) },
         });
         harness.render(); await settle();
         const rendered = harness.render();
@@ -57,6 +64,13 @@ describe("admin/team interaction guards", () => {
         expect(tables[0].props.loading).toBe(false);
         expect(tables.every((element) => element.props.scroll.x > 0)).toBe(true);
         expect(rendered.find((element) => element.type === "Alert")!.props.description).toContain("素材暂不可用");
+        const ownerSelect = rendered.find(element => element.props["aria-label"] === "按设计师筛选素材")!;
+        expect(ownerSelect.props.options).toContainEqual({ value: "designer-on-next-page", label: "未加载页设计师" });
+        expect(options[0].queryKey).toEqual(["admin-assets", "admin-a", "all"]);
+        expect(options[0].retry).toBe(false);
+        ownerSelect.props.onChange("designer-on-next-page");
+        harness.render();
+        expect(options.at(-3).queryKey).toEqual(["admin-assets", "admin-a", "designer-on-next-page"]);
         harness.unmount();
     });
 
@@ -101,25 +115,32 @@ describe("admin/team interaction guards", () => {
         harness.unmount();
     });
 
-    test("task polling skips hidden documents, overlaps, and inactive tabs", async () => {
-        const timers = new Map<number, () => void>();
-        globalThis.window = { setInterval(callback: () => void) { timers.set(1, callback); return 1; }, clearInterval(id: number) { timers.delete(id); } } as unknown as Window & typeof globalThis;
+    test("task cursor queries are account-scoped and skip hidden documents and inactive tabs", async () => {
         globalThis.document = { hidden: false } as Document;
-        const pending = deferred<any>();
-        let reads = 0;
+        const options: any[] = [];
+        const requested: unknown[] = [];
         const harness = componentHarness("../src/pages/admin/components/task-history-panels.tsx", "TaskManagementPanel", {
-            "@/services/api/task-history": { listAdminTasks: () => { reads++; return pending.promise; }, listAdminBatches: async () => ({ batches: [] }) },
+            "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user: { id: "admin-a" } }) },
+            "@/components/infinite-load-more": { InfiniteLoadMore: "InfiniteLoadMore" },
+            "@tanstack/react-query": { useInfiniteQuery: (value: any) => { options.push(value); return { data: { pages: [{ tasks: [], batches: [] }] }, isPending: false, isFetching: false, dataUpdatedAt: 0, refetch() {} }; } },
+            "@/services/api/task-history": { listAdminTasks: async (query: unknown) => { requested.push(query); return { tasks: [], nextCursor: null }; }, listAdminBatches: async () => ({ batches: [], nextCursor: null }) },
         });
         harness.render({ active: true });
-        timers.get(1)!(); timers.get(1)!();
-        expect(reads).toBe(1);
-        pending.resolve({ tasks: [] }); await settle();
+        expect(options[0].queryKey).toEqual(["admin-tasks", "admin-a"]);
+        expect(options[1].queryKey).toEqual(["admin-batches", "admin-a"]);
+        expect(options[0].enabled).toBe(true);
+        expect(options[0].refetchInterval()).toBe(10_000);
+        expect(options[0].retry).toBe(false);
+        expect(options[0].refetchInterval({ state: { status: "error" } })).toBe(false);
         (globalThis.document as any).hidden = true;
-        timers.get(1)!(); expect(reads).toBe(1);
-        (globalThis.document as any).hidden = false;
-        timers.get(1)!(); await settle(); expect(reads).toBe(2);
+        expect(options[0].refetchInterval()).toBe(false);
+        await options[0].queryFn({ pageParam: "next-page-cursor" });
+        expect(requested).toEqual([{ cursor: "next-page-cursor", limit: 60 }]);
+        expect(options[0].getNextPageParam({ nextCursor: "more" })).toBe("more");
+        expect(options[0].getNextPageParam({ nextCursor: null })).toBeUndefined();
         harness.render({ active: false });
-        expect(timers.size).toBe(0);
+        expect(options[2].enabled).toBe(false);
+        expect(options[3].enabled).toBe(false);
         harness.unmount();
     });
 });

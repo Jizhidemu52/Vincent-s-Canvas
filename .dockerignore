@@ -15,6 +15,7 @@ web/out
 **/.env.*
 **/node_modules
 **/dist
+**/dist-*
 .worktrees
 .playwright-cli
 output

@@ -51,7 +51,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "multiple-im
     let selectionMode = initialMode;
     const inserted: any[] = [];
     const batches: any[][] = [];
-    const requests: Array<{ path: string; init: RequestInit; succeed: (assets: ServerAsset[]) => void; fail: (message: string) => void }> = [];
+    const requests: Array<{ path: string; init: RequestInit; succeed: (assets: ServerAsset[], nextCursor?: string | null) => void; fail: (message: string) => void }> = [];
     const userState = () => ({ user: ownerId ? { id: ownerId, role: "designer", departmentId: null } : null });
     const userStore = Object.assign((select: Function) => select(userState()), { getState: userState });
     const permissions: Record<string, any> = {};
@@ -61,7 +61,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "multiple-im
         () => ({ createClientId: () => "not-used" }), apiModule, apiModule.exports,
         (path: string, init: RequestInit) => new Promise<Response>((resolve) => {
             requests.push({ path, init,
-                succeed: (assets) => resolve(Response.json({ assets })),
+                succeed: (assets, nextCursor) => resolve(Response.json({ assets, nextCursor })),
                 fail: (message) => resolve(Response.json({ msg: message }, { status: 503 })),
             });
         }),
@@ -83,7 +83,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "multiple-im
         return active.values[index].value;
     };
     const dependencies: Record<string, any> = {
-        react: { ...React, useState, useMemo, useDeferredValue: (value: unknown) => value,
+        react: { ...React, useState, useMemo, useRef: (value: unknown) => useMemo(() => ({ current: value }), []), useDeferredValue: (value: unknown) => value,
             useEffect: (effect: EffectCallback, dependencies?: DependencyList) => {
                 const owner = active;
                 const index = owner.cursor++;
@@ -126,6 +126,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "multiple-im
         render, cards, nodes, inserted, batches, requests,
         assets: () => cards().map(card => card.props.asset as Asset),
         refresh: () => buttons().find(node => node.props.children === "刷新")!.props.onClick(),
+        loadMore: () => buttons().find(node => node.props.children === "加载更多素材")!.props.onClick(),
         confirm: () => buttons().find(node => node.props.type === "primary")!.props,
         search: (keyword: string) => nodes().find(node => node.type === "Input")!.props.onChange({ target: { value: keyword } }),
         setOwner: (value: string | null) => { ownerId = value; },
@@ -267,5 +268,21 @@ describe("shared asset picker server-backed materials", () => {
         expect(picker.requests).toEqual([]);
         picker.setOpen(true); picker.render();
         expect(picker.requests).toHaveLength(1);
+    });
+
+    test("an obsolete next page cannot mix into a changed filter or replace its cursor", async () => {
+        const picker = harness(); picker.render();
+        picker.requests[0]!.succeed([serverAsset("first")], "old-next"); await picker.settle();
+        picker.loadMore(); picker.render();
+        expect(picker.requests[1]!.path).toContain("cursor=old-next");
+        picker.search("fresh"); picker.render();
+        expect(picker.requests[1]!.init.signal?.aborted).toBe(true);
+        picker.requests[2]!.succeed([serverAsset("fresh-current")], "fresh-next"); await picker.settle();
+        picker.requests[1]!.succeed([serverAsset("fresh-stale")], "stale-cursor"); await picker.settle();
+        expect(picker.assets().map(asset => asset.id)).toEqual(["fresh-current"]);
+        picker.loadMore(); picker.render();
+        expect(picker.requests[3]!.path).toContain("cursor=fresh-next");
+        expect(picker.requests[3]!.path).toContain("q=fresh");
+        picker.requests[3]!.succeed([]); await picker.settle();
     });
 });

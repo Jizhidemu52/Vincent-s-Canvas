@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Form, Input, Modal, Select } from "antd";
+import { Alert, Button, Form, Input, Modal, Select } from "antd";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { getBusinessConfig, type PublicModel } from "@/services/api/business-config";
@@ -25,6 +25,8 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
     const [form] = Form.useForm<FormValues>();
     const [models, setModels] = useState<PublicModel[]>([]);
     const [assets, setAssets] = useState<ServerAsset[]>([]);
+    const [assetCursor, setAssetCursor] = useState<string | null>(null);
+    const [loadingMoreAssets, setLoadingMoreAssets] = useState(false);
     const { pending: saving, run } = useAsyncAction(`prompt-editor:${initial?.id || "new"}`);
     const [optionError, setOptionError] = useState("");
     const [optionsLoading, setOptionsLoading] = useState(false);
@@ -47,7 +49,8 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
         let active = true;
         const controller = new AbortController();
         setModels([]); setAssets([]); setOptionError(""); setOptionsLoading(true);
-        void Promise.allSettled([getBusinessConfig(), listServerAssets(controller.signal)]).then(([modelResult, assetResult]) => {
+        setAssetCursor(null);
+        void Promise.allSettled([getBusinessConfig(), listServerAssets({ kind: "image" }, controller.signal)]).then(([modelResult, assetResult]) => {
             if (!active) return;
             if (modelResult.status === "fulfilled") {
                 setModels(modelResult.value.models);
@@ -59,7 +62,7 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
                     }
                 }
             }
-            if (assetResult.status === "fulfilled") setAssets(assetResult.value.assets.filter((asset) => asset.kind === "image" && asset.status === "ready"));
+            if (assetResult.status === "fulfilled") { setAssets(assetResult.value.assets.filter((asset) => asset.kind === "image" && asset.status === "ready")); setAssetCursor(assetResult.value.nextCursor || null); }
             if (modelResult.status === "rejected" || assetResult.status === "rejected") setOptionError("模型或参考图选项加载失败，已有选择仍保留；可关闭后重新打开以重试。");
             setOptionsLoading(false);
         });
@@ -72,6 +75,17 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
         } : { targetTool: "image-generation", quantity: 1, quality: "auto", imageOptions: "{}", tags: [], referenceAssetIds: [] });
         return () => { active = false; controller.abort(); };
     }, [form, initial, open]);
+
+    const loadMoreAssets = async () => {
+        if (!assetCursor || loadingMoreAssets) return;
+        setLoadingMoreAssets(true);
+        try {
+            const page = await listServerAssets({ cursor: assetCursor, kind: "image" });
+            setAssets(previous => [...previous, ...page.assets.filter(asset => asset.kind === "image" && asset.status === "ready" && !previous.some(item => item.id === asset.id))]);
+            setAssetCursor(page.nextCursor || null);
+        } catch (error) { setOptionError(error instanceof Error ? error.message : "参考图加载失败"); }
+        finally { setLoadingMoreAssets(false); }
+    };
 
     const save = () => run(async () => {
         const values = await form.validateFields();
@@ -99,6 +113,7 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
                     <Form.Item name="modelConfigId" label="模型快照"><Select allowClear showSearch optionFilterProp="label" placeholder="可不指定，由复用时选择" onChange={value => emitModelUsage("change", value)} options={models.map((model) => ({ value: model.id, label: `${modelLabelWithUsage(model.name, model.publicDescription)}${deploymentFeatures.creditsEnabled ? ` · ${model.creditCost} 模型积分` : ""}` }))} /></Form.Item>
                     <Form.Item name="referenceAssetIds" label="参考图"><Select mode="multiple" allowClear maxTagCount="responsive" placeholder="从我的素材选择" options={assets.map((asset) => ({ value: asset.id, label: asset.filename }))} /></Form.Item>
                 </div>
+                {assetCursor ? <Button className="mb-4" loading={loadingMoreAssets} disabled={saving} onClick={() => void loadMoreAssets()}>加载更多参考图</Button> : null}
                 <Form.Item name="imageOptions" hidden><Input /></Form.Item>
                 <div className={imageProfile ? "hidden" : "grid gap-x-4 md:grid-cols-3"}>
                     <Form.Item name="size" label="尺寸/比例"><Input maxLength={40} placeholder="例如 1:1 或 1024x1024" /></Form.Item>

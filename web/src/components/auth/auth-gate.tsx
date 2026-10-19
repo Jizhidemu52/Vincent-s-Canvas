@@ -11,7 +11,10 @@ import { deploymentFeatures } from "@/lib/deployment-features";
 
 export function AuthGate({ children, admin = false, passwordChange = false }: { children: ReactNode; admin?: boolean; passwordChange?: boolean }) {
     if (shouldBypassStandaloneAuthGate(standaloneEdition, admin)) return <>{children}</>;
+    return <AuthenticatedGate admin={admin} passwordChange={passwordChange}>{children}</AuthenticatedGate>;
+}
 
+function AuthenticatedGate({ children, admin, passwordChange }: { children: ReactNode; admin: boolean; passwordChange: boolean }) {
     const location = useLocation();
     const user = useUserStore((state) => state.user);
     const status = useUserStore((state) => state.status);

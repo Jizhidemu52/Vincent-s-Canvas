@@ -8,6 +8,19 @@ export class CanvasDocumentError extends Error {
 export type CanvasDocumentEnvelope = {
     id: string; revision: number; deleted: boolean; document: Record<string, unknown> | null; updatedAt: string;
 };
+export type CanvasDocumentAcknowledgement = Omit<CanvasDocumentEnvelope, "document">;
+
+export function canvasDocumentMetadata(document: Record<string, unknown> | null) {
+    const nodes = (document?.nodes ?? []) as Array<{ type: string; metadata?: { content?: string } }>;
+    return {
+        title: String(document?.title ?? ""),
+        createdAt: document?.createdAt as string | null ?? null,
+        updatedAt: document?.updatedAt as string | null ?? null,
+        nodeCount: nodes.length,
+        connectionCount: (document?.connections as unknown[] | undefined)?.length ?? 0,
+        coverUrl: nodes.find(node => node.type === "image" && node.metadata?.content)?.metadata?.content ?? null,
+    };
+}
 export type CanvasDocumentSummary = Omit<CanvasDocumentEnvelope, "document"> & {
     summary: { id: string; title: string; createdAt: string; updatedAt: string; nodeCount: number; connectionCount: number; cover: { content?: string; storageKey?: string } | null } | null;
 };

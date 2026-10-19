@@ -92,13 +92,13 @@ test.each([false, true])("the restored page writes the original task result into
     globalThis.fetch = (async (url, init) => {
         requests.push({ url: String(url), method: init?.method || "GET" });
         if (String(url) === "/api/tasks/original-task") return Response.json({ task });
-        if (String(url) === "/api/tasks") return Response.json({ tasks: [{ ...task, id: "wrong-task", requestId: "another-request:0" }, task] });
+        if (String(url) === `/api/tasks/by-request/${encodeURIComponent(task.requestId)}`) return Response.json({ task });
         throw new Error(`Unexpected request: ${url}`);
     }) as typeof fetch;
     const page = await recoveryPageHarness({ pending: { ...pending, resolution: "4k", ...(hasTaskId ? { taskId: task.id } : {}) } });
     await page.completed;
     const saved = page.database.get("user-a") as any[];
-    expect(requests).toEqual([{ url: hasTaskId ? "/api/tasks/original-task" : "/api/tasks", method: "GET" }]);
+    expect(requests).toEqual([{ url: hasTaskId ? "/api/tasks/original-task" : `/api/tasks/by-request/${encodeURIComponent(task.requestId)}`, method: "GET" }]);
     expect(saved[0]).toEqual(page.initial[0]);
     expect(saved[1].id).toBe("original-session");
     expect(saved[1].messages).toHaveLength(2);

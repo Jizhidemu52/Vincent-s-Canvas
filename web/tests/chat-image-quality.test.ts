@@ -21,6 +21,20 @@ const models = [
     { id: "mark-sunburst-id", modelId: "mark-sunburst-id", name: "aplmart-gpt2.5-sunburst", imageParameterProfile: "quality-resolution", capabilities: ["generate", "edit"] },
     { id: "mark-nano-id", modelId: "mark-nano-id", name: "aplmart-nano2.1", imageParameterProfile: "resolution-1k", capabilities: ["generate", "edit"] },
 ] as any[];
+
+test.each(["blend", "midjourney-blend"])("chat rejects promptless %s profiles and safely falls back from saved selections", profile => {
+    const blend = { ...models[0], id: "opaque-fusion-id", modelId: "opaque-fusion-id", name: "多图融合", imageParameterProfile: profile, capabilities: ["generate"] };
+    const open = { ...models[0], id: "open-gpt2", modelId: "open-gpt2", name: "gpt-image-2", parameterModelId: "gpt-image-2" };
+    const apimart = { ...models[0], id: "apimart-gpt2", modelId: "apimart-gpt2", name: "aplmart-gpt2", parameterModelId: "gpt-image-2" };
+    const available = [blend, open, apimart];
+    expect(preferredChatImageModel(available, [blend.id])?.id).toBe("apimart-gpt2");
+    expect(preferredChatImageModel(available, [blend.id], "generate")?.id).toBe("apimart-gpt2");
+    expect(preferredChatImageModel(available, [blend.id, open.id], "generate")?.id).toBe("open-gpt2");
+    expect(preferredChatImageModel(available, [apimart.id], "edit")?.id).toBe("apimart-gpt2");
+    expect(preferredChatImageModel([blend], [blend.id])).toBeUndefined();
+    expect(preferredChatImageModel([blend], [blend.id], "generate")).toBeUndefined();
+    expect(available.map(model => model.id)).toEqual(["opaque-fusion-id", "open-gpt2", "apimart-gpt2"]);
+});
 const source = readFileSync(new URL("../src/pages/chat/index.tsx", import.meta.url), "utf8");
 const ast = ts.createSourceFile("chat.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let sendExpression: ts.Expression | undefined;
@@ -123,6 +137,15 @@ test("quality and image-model availability do not block a discussion", async () 
     expect(page.calls).toEqual([]);
     expect(page.sessionsRef.current[0]!.messages.at(-1).content).toBe("只讨论");
     expect(page.config.quality).toBe("4k");
+});
+
+test("the actual send path never submits a promptless image model even when it is the only configured choice", async () => {
+    const blend = { ...models[0], id: "opaque-fusion-id", modelId: "opaque-fusion-id", name: "多图融合", imageParameterProfile: "blend", capabilities: ["generate"] };
+    const page = sendHarness({ quality: "", imageModels: [blend] });
+    await page.send();
+    expect(page.calls).toEqual([]);
+    expect(page.sessionsRef.current[0]!.messages.at(-1).content).toContain("尚未配置可用的图片生成服务");
+    expect(page.sessionsRef.current[0]!.messages.at(-1).pendingImageTask).toBeUndefined();
 });
 
 function qualitySelect({ ready = true, sending = false, modelsLoading = false, model = models[0], pending = false, control = "quality", bound = false, quality = "high", resolution = undefined as string | undefined } = {}) {

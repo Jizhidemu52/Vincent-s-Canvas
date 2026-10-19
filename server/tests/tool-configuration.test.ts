@@ -64,7 +64,15 @@ function fixture() {
     release() {},
   };
   const db = { ...client, connect: async () => client } as unknown as Database;
-  const cache = { zAdd: async () => { queues++; return 1; } };
+  const cache = {
+    zAdd: async () => { queues++; return 1; },
+    eval: async (_script: string, options: { keys: string[]; arguments: string[] }) => {
+      expect(options.keys).toEqual(["tasks:queue", "tasks:delayed", "tasks:delayed:priority"]);
+      expect(Number(options.arguments[1])).toBeLessThanOrEqual(Number(options.arguments[2]));
+      queues++;
+      return 1;
+    },
+  };
   const bind = (key: ToolConfiguration["toolKey"], values: Partial<ToolConfiguration> = {}) => {
     const row = { toolKey: key, modelConfigId: modelId, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1, ...values };
     configurations.set(key, row);

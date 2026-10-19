@@ -27,33 +27,59 @@ async function api<T>(path: string, cookie: string) {
   return { response, body };
 }
 
+async function pagedApi<T>(path: string, cookie: string, key: keyof T) {
+  const url = new URL(path, baseUrl);
+  url.searchParams.set("limit", "200");
+  const first = await api<T & { nextCursor: string | null; hasMore: boolean }>(`${url.pathname}${url.search}`, cookie);
+  if (!first.response.ok) return first;
+  const items = [...(first.body[key] as unknown[])];
+  const seen = new Set<string>();
+  let cursor = first.body.nextCursor;
+  while (cursor) {
+    if (seen.has(cursor)) throw new Error(`${path} repeated a pagination cursor`);
+    seen.add(cursor);
+    url.searchParams.set("cursor", cursor);
+    const page = await api<T & { nextCursor: string | null; hasMore: boolean }>(`${url.pathname}${url.search}`, cookie);
+    if (!page.response.ok) throw new Error(`${path} next page failed: ${page.response.status}`);
+    items.push(...(page.body[key] as unknown[]));
+    cursor = page.body.nextCursor;
+  }
+  return { response: first.response, body: { ...first.body, [key]: items, nextCursor: null, hasMore: false } as T & { nextCursor: null; hasMore: false } };
+}
+
 const [cookieA, cookieB] = config.sessionCookies;
 const [userA, userB] = config.userIds;
 const [tasksA, tasksB, historyA, historyB, assetsA, assetsB] =
   await Promise.all([
-    api<{ tasks: Array<{ id: string; userId: string }> }>(
+    pagedApi<{ tasks: Array<{ id: string; userId: string }> }>(
       "/api/tasks",
       cookieA!,
+      "tasks",
     ),
-    api<{ tasks: Array<{ id: string; userId: string }> }>(
+    pagedApi<{ tasks: Array<{ id: string; userId: string }> }>(
       "/api/tasks",
       cookieB!,
+      "tasks",
     ),
-    api<{ history: Array<{ id: string; userId: string }> }>(
+    pagedApi<{ history: Array<{ id: string; userId: string }> }>(
       "/api/history",
       cookieA!,
+      "history",
     ),
-    api<{ history: Array<{ id: string; userId: string }> }>(
+    pagedApi<{ history: Array<{ id: string; userId: string }> }>(
       "/api/history",
       cookieB!,
+      "history",
     ),
-    api<{ assets: Array<{ id: string; ownerUserId: string }> }>(
+    pagedApi<{ assets: Array<{ id: string; ownerUserId: string }> }>(
       "/api/assets",
       cookieA!,
+      "assets",
     ),
-    api<{ assets: Array<{ id: string; ownerUserId: string }> }>(
+    pagedApi<{ assets: Array<{ id: string; ownerUserId: string }> }>(
       "/api/assets",
       cookieB!,
+      "assets",
     ),
   ]);
 
@@ -113,21 +139,22 @@ if (ownerContent.response.status !== 200 || ownerContent.body.byteLength === 0)
   throw new Error("Designer B could not read their own generated asset");
 
 const [adminTasks, adminHistory, adminAssets] = await Promise.all([
-  api<{ tasks: Array<{ userId: string }> }>(
+  pagedApi<{ tasks: Array<{ userId: string }> }>(
     "/api/admin/tasks",
     config.adminCookie,
+    "tasks",
   ),
-  api<{
+  pagedApi<{
     history: Array<{ userId: string }>;
     total: number;
     totalCredits: number;
     totalRmbCost: number;
-    page: number;
-    pageSize: number;
-  }>("/api/admin/history", config.adminCookie),
-  api<{ assets: Array<{ ownerUserId: string }> }>(
+    limit: number;
+  }>("/api/admin/history", config.adminCookie, "history"),
+  pagedApi<{ assets: Array<{ ownerUserId: string }> }>(
     "/api/admin/assets",
     config.adminCookie,
+    "assets",
   ),
 ]);
 if (
@@ -152,8 +179,8 @@ if (
   adminHistory.body.total < adminHistory.body.history.length ||
   adminHistory.body.totalCredits <= 0 ||
   adminHistory.body.totalRmbCost < 0 ||
-  adminHistory.body.page !== 1 ||
-  adminHistory.body.pageSize !== 50
+  adminHistory.body.limit !== 200 ||
+  adminHistory.body.nextCursor !== null
 )
   throw new Error("Admin history pagination metadata is invalid");
 if (
@@ -171,16 +198,17 @@ const firstHistoryPage = await api<{
     operationType: string;
   }>;
   total: number;
-  page: number;
-  pageSize: number;
+  limit: number;
+  nextCursor: string | null;
+  hasMore: boolean;
 }>(
-  `/api/admin/history?userId=${userA}&projectId=load-test&operationType=image_generation&from=2020-01-01T00%3A00%3A00.000Z&to=2030-01-01T00%3A00%3A00.000Z&page=1&pageSize=1`,
+  `/api/admin/history?userId=${userA}&projectId=load-test&operationType=image_generation&from=2020-01-01T00%3A00%3A00.000Z&to=2030-01-01T00%3A00%3A00.000Z&limit=1`,
   config.adminCookie,
 );
 if (
   firstHistoryPage.response.status !== 200 ||
-  firstHistoryPage.body.page !== 1 ||
-  firstHistoryPage.body.pageSize !== 1 ||
+  firstHistoryPage.body.limit !== 1 ||
+  !firstHistoryPage.body.hasMore || !firstHistoryPage.body.nextCursor ||
   firstHistoryPage.body.total < 2 ||
   firstHistoryPage.body.history.length !== 1 ||
   firstHistoryPage.body.history[0]?.userId !== userA ||
@@ -192,12 +220,12 @@ if (
 const secondHistoryPage = await api<{
   history: Array<{ id: string; userId: string }>;
   total: number;
-  page: number;
-  pageSize: number;
-}>(`/api/admin/history?userId=${userA}&page=2&pageSize=1`, config.adminCookie);
+  limit: number;
+  nextCursor: string | null;
+}>(`/api/admin/history?userId=${userA}&projectId=load-test&operationType=image_generation&from=2020-01-01T00%3A00%3A00.000Z&to=2030-01-01T00%3A00%3A00.000Z&limit=1&cursor=${encodeURIComponent(firstHistoryPage.body.nextCursor!)}`, config.adminCookie);
 if (
   secondHistoryPage.response.status !== 200 ||
-  secondHistoryPage.body.page !== 2 ||
+  secondHistoryPage.body.limit !== 1 ||
   secondHistoryPage.body.history.length !== 1 ||
   secondHistoryPage.body.history[0]?.userId !== userA ||
   secondHistoryPage.body.history[0]?.id === firstHistoryPage.body.history[0]?.id

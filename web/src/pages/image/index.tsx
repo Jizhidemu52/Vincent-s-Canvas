@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { Link, useSearchParams } from "react-router-dom";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
@@ -10,6 +11,7 @@ import { GenerationElapsed } from "@/components/generation-elapsed";
 import { upsertGenerationLog } from "@/lib/generation-log-update";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
 import { useImageCopyEditor } from "@/hooks/use-image-copy-editor";
+import { useImagePreview } from "@/hooks/use-image-preview";
 import { imageCopyEditorNode } from "@/lib/image-edit-copy";
 import { canvasImageDownloadFileName, canvasImageReferenceIdentity } from "@/lib/canvas/canvas-image-filename";
 import { workbenchSubmissions } from "@/lib/submission-gate";
@@ -765,7 +767,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea aria-label="图像提示词" value={prompt} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} rows={6} disabled={running || !requiresPrompt} placeholder={requiresPrompt ? toolModeConfig.placeholder : "这个模型直接合成参考图，不需要填写文字"} />
+                                <Input.TextArea aria-label="图像提示词" value={prompt} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={6} disabled={running || !requiresPrompt} placeholder={requiresPrompt ? `${toolModeConfig.placeholder}（Ctrl/⌘ + Enter 提交）` : "这个模型直接合成参考图，不需要填写文字"} />
                             </div> : <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。</p>}
 
                             <ReferenceImageTray
@@ -931,9 +933,10 @@ function ResultImageCard({
     onSaveAsset: (image: GeneratedImage, index: number) => void;
     onSavePrompt: (image: GeneratedImage) => void;
 }) {
+    const previewUrl = useImagePreview(image);
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <Image src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="aspect-square object-cover" onClick={() => onSelect(image)} />
+            <Image src={previewUrl || undefined} preview={{ src: image.dataUrl }} alt={`生成结果 ${index + 1}`} loading="lazy" decoding="async" className="aspect-square object-cover" onClick={() => onSelect(image)} />
             <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 {image.imageName ? <div className="truncate text-xs font-medium" title={`${image.imageName}_v${image.imageVersion || 1}`}>{image.imageName}_v{image.imageVersion || 1}</div> : null}
                 <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">

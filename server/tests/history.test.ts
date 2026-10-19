@@ -10,17 +10,16 @@ describe("admin history query contract", () => {
   test("validates pagination and time boundaries", () => {
     expect(
       parseAdminHistoryQuery({
-        page: "2",
-        pageSize: "100",
+        limit: "100",
         from: "2026-07-01T00:00:00.000Z",
         to: "2026-07-31T23:59:59.999Z",
       }),
     ).toMatchObject({
-      page: 2,
-      pageSize: 100,
+      limit: 100,
     });
-    expect(() => parseAdminHistoryQuery({ page: "0" })).toThrow();
-    expect(() => parseAdminHistoryQuery({ pageSize: "201" })).toThrow();
+    expect(parseAdminHistoryQuery({}).limit).toBe(60);
+    expect(() => parseAdminHistoryQuery({ limit: "0" })).toThrow();
+    expect(() => parseAdminHistoryQuery({ limit: "201" })).toThrow();
     expect(() => parseAdminHistoryQuery({ from: "not-a-date" })).toThrow();
     expect(() =>
       parseAdminHistoryQuery({

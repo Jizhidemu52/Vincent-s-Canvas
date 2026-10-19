@@ -13,6 +13,10 @@ on:
       - "nginx.conf"
       - ".env.example"
       - ".github/workflows/production-ci.yml"
+      - "package.json"
+      - "bun.lock"
+      - "biome.json"
+      - "tools/**"
   pull_request:
     paths:
       - "server/**"
@@ -24,12 +28,27 @@ on:
       - "nginx.conf"
       - ".env.example"
       - ".github/workflows/production-ci.yml"
+      - "package.json"
+      - "bun.lock"
+      - "biome.json"
+      - "tools/**"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+
   backend-integration:
     runs-on: ubuntu-latest
     services:
@@ -83,7 +102,19 @@ jobs:
       - name: Install local media inspector
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: bun run build
-      - run: bun test
+      - name: Install isolated SQL fixture runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_dir="$RUNNER_TEMP/canvas-pglite"
+          mkdir -p "$fixture_dir"
+          printf '{"private":true,"type":"module"}\n' > "$fixture_dir/package.json"
+          bun add --cwd "$fixture_dir" --exact @electric-sql/pglite@0.5.10
+      - name: Test backend, SQL migrations and 30 mock video tasks
+        run: bun --no-env-file test
+        env:
+          PGLITE_RUNTIME_PATH: ${{ runner.temp }}/canvas-pglite
+          QUEUE_TEST_REDIS_URL: redis://127.0.0.1:6379
       - name: Run PostgreSQL and Redis identity integration
         shell: bash
         run: |

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 type PublicModel = { id: string; modelId: string; parameterModelId?: string; capabilities: string[] };
 
 test("demo defaults every chat entry to Sonnet Messages and SSE regardless of stale client model choices", async () => {
-  const calls: Array<{ path: string; headers: Headers; body: any }> = [];
+  const calls: Array<{ path: string; headers: Headers; body: any; raw: string }> = [];
   const assistantContent = [
     { type: "thinking", thinking: "", signature: "opaque-demo-signature" },
     { type: "tool_use", id: "read-1", name: "read_node", input: { id: "knit" } },
@@ -12,8 +12,9 @@ test("demo defaults every chat entry to Sonnet Messages and SSE regardless of st
   const events = 'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Original knit preserved."}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n';
   const provider = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     const path = new URL(request.url).pathname;
-    const body = await request.json();
-    calls.push({ path, headers: request.headers, body });
+    const raw = await request.text();
+    const body = JSON.parse(raw);
+    calls.push({ path, headers: request.headers, body, raw });
     if (path === "/mark/v1/messages" && request.headers.get("authorization") === "Bearer isolated-mark-key") {
       return body.stream ? new Response(events, { headers: { "content-type": "text/event-stream" } })
         : Response.json({ type: "message", role: "assistant", content: assistantContent, stop_reason: "tool_use" });
@@ -42,7 +43,7 @@ test("demo defaults every chat entry to Sonnet Messages and SSE regardless of st
     method: body === undefined ? "GET" : "POST", headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const chat = (modelId: string, extra: Record<string, unknown> = {}) => request("/api/chat/responses", {
-    modelId, toolKey: "gpt-chat", input: [{ role: "user", content: "Inspect this knit." }], tools: [], ...extra,
+    modelId, toolKey: "gpt-chat", input: [{ role: "user", content: "Inspect this knit. 中文🧶" }], tools: [], ...extra,
   });
   try {
     let ready = false;
@@ -73,11 +74,13 @@ test("demo defaults every chat entry to Sonnet Messages and SSE regardless of st
     expect(calls[0]!.path).toBe("/mark/v1/messages");
     expect(calls[0]!.headers.get("anthropic-version")).toBe("2023-06-01");
     expect(calls[0]!.headers.get("x-api-key")).toBeNull();
-    expect(calls[0]!.body).toEqual({ model: "claude-sonnet-5-5", max_tokens: 4096, messages: [{ role: "user", content: "Inspect this knit." }], tools: [{ name: "read_node", input_schema: tools[0]!.parameters }], tool_choice: { type: "any" } });
-    const stream = await chat(sonnet.id, { claude: { stream: true, maxTokens: 100_000 }, input: [{ type: "claude_assistant", content: assistantContent }, { type: "function_call_output", call_id: "read-1", output: "Cable knit" }] });
+    expect(calls[0]!.body).toEqual({ model: "claude-sonnet-5-5", max_tokens: 4096, messages: [{ role: "user", content: "Inspect this knit. 中文🧶" }], tools: [{ name: "read_node", input_schema: tools[0]!.parameters }], tool_choice: { type: "any" } });
+    expect(calls[0]!.raw).toContain("中文🧶");
+    const stream = await chat(sonnet.id, { claude: { stream: true, maxTokens: 100_000 }, input: [{ type: "claude_assistant", content: assistantContent }, { type: "function_call_output", call_id: "read-1", output: "Cable knit 中文🧶" }] });
     expect(stream.headers.get("content-type")).toContain("text/event-stream");
     expect(await stream.text()).toBe(events);
-    expect(calls[1]!.body).toEqual({ model: "claude-sonnet-5-5", max_tokens: 16384, stream: true, messages: [{ role: "assistant", content: assistantContent }, { role: "user", content: [{ type: "tool_result", tool_use_id: "read-1", content: "Cable knit" }] }] });
+    expect(calls[1]!.body).toEqual({ model: "claude-sonnet-5-5", max_tokens: 16384, stream: true, messages: [{ role: "assistant", content: assistantContent }, { role: "user", content: [{ type: "tool_result", tool_use_id: "read-1", content: "Cable knit 中文🧶" }] }] });
+    expect(calls[1]!.raw).toContain("中文🧶");
     expect(await (await chat(markAstra.id)).json()).toMatchObject({ claudeAssistantContent: assistantContent });
     expect(await (await chat(openTokenAstra.id, { toolKey: "canvas-chat" })).json()).toMatchObject({ claudeAssistantContent: assistantContent });
     expect(await (await chat("forged-client-model", { toolKey: undefined })).json()).toMatchObject({ claudeAssistantContent: assistantContent });

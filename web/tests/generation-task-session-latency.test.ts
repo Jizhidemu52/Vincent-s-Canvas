@@ -57,7 +57,7 @@ function controlledNetwork(phase: "initial" | "final", options: { task?: QueuedT
             if (phase === "final" && sessions.length === 1) pending.resolve(Response.json({ user: employee }));
             return pending.promise;
         }
-        if (path === `/api/tasks/${task.id}` || (path === "/api/tasks" && method === "GET")) {
+        if (path === `/api/tasks/${task.id}` || (path.startsWith("/api/tasks?") && method === "GET")) {
             // Let the first real hydration finish, so finally must start a distinct final refresh.
             if (phase === "final") await useUserStore.getState().hydrateSession();
             if (options.abort) {
@@ -65,7 +65,8 @@ function controlledNetwork(phase: "initial" | "final", options: { task?: QueuedT
                 throw new DOMException("请求已取消", "AbortError");
             }
             if (options.pollError) throw options.pollError;
-            return Response.json(path === "/api/tasks" ? { tasks: [task] } : { task });
+            if (path.startsWith("/api/tasks?")) expect(new URL(path, "http://test.local").searchParams.get("ids")).toBe(task.id);
+            return Response.json(path.startsWith("/api/tasks?") ? { tasks: [task] } : { task });
         }
         throw new Error(`Unexpected HTTP ${method} ${path}`);
     }) as typeof fetch;

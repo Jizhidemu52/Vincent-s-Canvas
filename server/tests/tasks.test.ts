@@ -30,7 +30,7 @@ describe("task queue priority", () => {
       return { rows: [] };
     } };
     const queued: string[] = [];
-    const cache = { zAdd: async (_key: string, value: { value: string }) => (queued.push(value.value), 1) };
+    const cache = { eval: async (_script: string, value: { arguments: string[] }) => (queued.push(value.arguments[0]!), 1) };
     expect(await transitionTask(database as never, cache as never, task.id, "resume")).toBeNull();
     expect(await transitionBatchTasks(database as never, cache as never, "batch-1", "resume")).toBe(0);
     expect(queued).toEqual([]);
@@ -50,7 +50,7 @@ describe("task queue priority", () => {
       writes.push(sql);
       return { rows: [{ id: task.id }] };
     } };
-    const cache = { zAdd: async (_key: string, value: { value: string }) => (queued.push(value.value), 1) };
+    const cache = { eval: async (_script: string, value: { arguments: string[] }) => (queued.push(value.arguments[0]!), 1) };
     expect(await transitionTask(database as never, cache as never, task.id, "resume")).not.toBeNull();
     expect(queued).toEqual([task.id]);
     expect(writes).toHaveLength(1);
@@ -62,11 +62,11 @@ describe("task queue priority", () => {
     const writes: Array<{ score: number; value: string }> = [];
     const database = {
       query: async (sql: string) => ({ rows: sql.startsWith("SELECT") ? [
-          { id: "normal", priority: "normal", queued_at: "2026-09-05T00:00:00.000Z" },
-          { id: "urgent", priority: "urgent", queued_at: "2026-09-05T00:01:00.000Z" },
+          { id: "normal", priority: "normal", queued_at: "2026-09-05T00:00:00.000Z", available_at: "2026-09-05T00:00:00.000Z" },
+          { id: "urgent", priority: "urgent", queued_at: "2026-09-05T00:01:00.000Z", available_at: "2026-09-05T00:01:00.000Z" },
         ] : [] }),
     };
-    const cache = { zAdd: async (_key: string, member: { score: number; value: string }) => (writes.push(member), 1) };
+    const cache = { eval: async (_script: string, value: { arguments: string[] }) => (writes.push({ value: value.arguments[0]!, score: Number(value.arguments[3]) }), 1) };
 
     await expect(restoreWaitingTasksToQueue(database as never, cache as never)).resolves.toBe(2);
     expect(writes.map((item) => item.value)).toEqual(["normal", "urgent"]);

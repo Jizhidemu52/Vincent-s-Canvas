@@ -65,7 +65,9 @@ sqlTest("real PostgreSQL SQL preserves featured order and explicit empty selecti
     const configured = await request("/api/admin/model-configuration/mark-images", "PUT", platformInput);
     const configuredBody = await configured.json();
     expect(configured.status).toBe(200);
-    expect(configuredBody.models).toHaveLength(9);
+    expect(configuredBody.models.map((model: { modelId: string }) => model.modelId).sort()).toEqual(
+      MARK_PLATFORM_MODELS.map((model) => model.modelId).sort(),
+    );
     const modelId = (upstream: string) => String(configuredBody.models.find((model: { modelId: string }) => model.modelId === upstream).id);
     const getFeatured = async () => {
       const response = await request(featuredPath);

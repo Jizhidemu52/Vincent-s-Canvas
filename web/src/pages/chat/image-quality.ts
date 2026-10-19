@@ -1,11 +1,16 @@
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { readImageOptions } from "@/lib/image-advanced-settings";
 import { preferredImageModel } from "@/lib/default-image-model";
+import type { PublicModel } from "@/services/api/business-config";
 
-type ImageModel = { id?: string; modelId: string; capabilities: string[] };
-export function preferredChatImageModel<T extends ImageModel>(models: T[], preferred: (string | undefined)[], action?: "generate" | "edit"): T | undefined {
-    const available = action ? models.filter(model => model.capabilities.includes(action)) : models;
-    return preferredImageModel(available, preferred);
+/** Conversation tasks always carry a prompt; reference-only fusion belongs to its own workbench. */
+export function filterChatImageModels<T extends PublicModel>(models: T[], action?: "generate" | "edit"): T[] {
+    return models.filter(model => imageModelProfile(model.modelId, models).requiresPrompt
+        && (action ? model.capabilities.includes(action) : model.capabilities.some(capability => capability === "generate" || capability === "edit")));
+}
+
+export function preferredChatImageModel<T extends PublicModel>(models: T[], preferred: (string | undefined)[], action?: "generate" | "edit"): T | undefined {
+    return preferredImageModel(filterChatImageModels(models, action), preferred);
 }
 
 export function chatImageQualitySettings(profile: ReturnType<typeof imageModelProfile>, requested?: string, requestedResolution?: string) {

@@ -22,12 +22,24 @@ export default defineConfig(({ mode }) => {
             // A deploy is a complete immutable asset set. Keeping old hashed files
             // here made local packages grow by hundreds of megabytes after rebuilds.
             emptyOutDir: true,
-            chunkSizeWarningLimit: 1500,
+            chunkSizeWarningLimit: 800,
+            rollupOptions: {
+                output: {
+                    onlyExplicitManualChunks: true,
+                    manualChunks(id) {
+                        const path = id.replaceAll("\\", "/");
+                        if (/\/node_modules\/(react|react-dom|scheduler)\//.test(path)) return "vendor-react";
+                        if (/\/node_modules\/(antd|@ant-design\/[^/]+|@rc-component\/[^/]+|rc-[^/]+)\//.test(path)) return "vendor-antd";
+                        // Keep the small strict-JSON parser usable without loading the editor.
+                        if (/\/node_modules\/(@codemirror\/[^/]+|@uiw\/react-codemirror)\//.test(path)) return "vendor-codemirror";
+                    },
+                },
+            },
         },
         server: {
             proxy: {
                 // Preserve the browser-facing Host so the API's same-origin write guard can verify Origin.
-                "/api": { target: env.VITE_API_PROXY_TARGET || "http://127.0.0.1:3100", changeOrigin: false },
+                "/api": { target: process.env.VITE_API_PROXY_TARGET || env.VITE_API_PROXY_TARGET || "http://127.0.0.1:3100", changeOrigin: false },
             },
         },
         resolve: {

@@ -8,7 +8,7 @@ const file = await Bun.file(new URL("../src/worker.ts", import.meta.url)).text()
 const source = ts.createSourceFile("worker.ts", file, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 const node = source.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === "executeApiMartImage")!;
 const code = ts.transpileModule(node.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
-const newTask = () => ({ id: "image-task", user_id: "owner", model_id: "gpt-image-2.5-flare", base_url: "https://example.test/v1", operation_type: "inpaint",
+const newTask = () => ({ id: "image-task", execution_token: "execution-one", user_id: "owner", model_id: "gpt-image-2.5-flare", base_url: "https://example.test/v1", operation_type: "inpaint",
   prompt: "edit", parameters: { inputArchive: { maskReferenceIndex: 1 }, quality: "xhigh", resolution: "4k" }, source_urls: ["original", "mask", "texture"], upstream_task_id: null as string | null, upstream_submission_started_at: null as string | null });
 
 function harness(claim = true) {
@@ -47,6 +47,9 @@ test("Worker isolates PNG mask and persists Mark upstream ID before polling; all
   expect(task.upstream_submission_started_at).not.toBeNull();
   expect(results).toHaveLength(2);
   expect(h.statements[0]!.sql).toContain("upstream_submission_started_at IS NULL");
+  expect(h.statements[0]!.sql).toContain("execution_token=$2");
+  expect(h.statements[0]!.sql).toContain("lease_expires_at>now()");
+  expect(h.statements[0]!.values).toEqual(["image-task", "execution-one"]);
 });
 
 test("Worker resumes original upstream image without loading or uploading reference assets again", async () => {

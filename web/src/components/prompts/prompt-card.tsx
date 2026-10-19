@@ -8,7 +8,7 @@ function PromptCover({ item }: { item: Prompt }) {
     if (!item.coverUrl) {
         return <div className="flex aspect-[4/3] w-full items-center justify-center bg-orange-50 text-xs font-medium text-orange-700 dark:bg-stone-900 dark:text-orange-300">暂无封面</div>;
     }
-    return <img src={item.coverUrl} alt={item.title} className="aspect-[4/3] w-full object-cover" />;
+    return <img src={item.coverUrl} alt={item.title} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />;
 }
 
 export function PromptCard({

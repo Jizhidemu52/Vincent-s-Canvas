@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { writeAudit } from "../audit";
 import type { Cache, Database } from "../db";
+import { makeCursorPage, parseCursorPage } from "../cursor-pagination";
 import { requireRole } from "../rbac";
 import {
   BillingError,
@@ -46,6 +47,7 @@ const batchSchema = base.extend({
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
 const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
+const taskSummarySelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",left(t.prompt,240) AS prompt,t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
 const batchSelect = `b.id,b.tool_key AS "toolKey",b.model_config_id AS "modelConfigId",b.request_id AS "requestId",b.user_id AS "userId",u.display_name AS "userName",b.department_id AS "departmentId",b.project_id AS "projectId",b.operation_type AS "operationType",m.name AS "modelName",b.priority,b.status,b.total_items AS "totalItems",b.completed_items AS "completedItems",b.failed_items AS "failedItems",stats.waiting_items AS "waitingItems",stats.processing_items AS "processingItems",stats.paused_items AS "pausedItems",stats.cancelled_items AS "cancelledItems",stats.planned_credits AS "plannedCredits",stats.consumed_credits AS "consumedCredits",stats.consumed_rmb_cost AS "consumedRmbCost",b.created_at AS "createdAt",b.updated_at AS "updatedAt"`;
 const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COUNT(*) FILTER (WHERE t.status='waiting')::int AS waiting_items,
@@ -279,11 +281,8 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
   router.get("/", async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const result = await db.query(
-        `SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.user_id=$1 ORDER BY t.queued_at DESC LIMIT 500`,
-        [actor.id],
-      );
-      response.json({ tasks: result.rows });
+      const page = await readTaskPage(db, request.query, ["t.user_id=$1"], [actor.id]);
+      response.json({ tasks: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore });
     } catch (error) {
       next(error);
     }
@@ -292,11 +291,8 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
   router.get("/batches", async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const result = await db.query(
-        `SELECT ${batchSelect} FROM batch_tasks b JOIN users u ON u.id=b.user_id LEFT JOIN model_configs m ON m.id=b.model_config_id ${batchStatsJoin} WHERE b.user_id=$1 ORDER BY b.created_at DESC LIMIT 500`,
-        [actor.id],
-      );
-      response.json({ batches: result.rows });
+      const page = await readBatchPage(db, request.query, ["b.user_id=$1"], [actor.id]);
+      response.json({ batches: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore });
     } catch (error) {
       next(error);
     }
@@ -456,15 +452,12 @@ export function createAdminTasksRouter(db: Database, cache: Cache) {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const values: unknown[] = [];
-      const scope =
+      const clauses =
         actor.role === "department_admin"
-          ? (values.push(actor.departmentId), "WHERE t.department_id=$1")
-          : "";
-      const result = await db.query(
-        `SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id ${scope} ORDER BY t.queued_at DESC LIMIT 1000`,
-        values,
-      );
-      response.json({ tasks: result.rows });
+          ? (values.push(actor.departmentId), ["t.department_id=$1"])
+          : [];
+      const page = await readTaskPage(db, request.query, clauses, values);
+      response.json({ tasks: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore });
     } catch (error) {
       next(error);
     }
@@ -474,18 +467,27 @@ export function createAdminTasksRouter(db: Database, cache: Cache) {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const values: unknown[] = [];
-      const scope =
+      const clauses =
         actor.role === "department_admin"
-          ? (values.push(actor.departmentId), "WHERE b.department_id=$1")
-          : "";
-      const result = await db.query(
-        `SELECT ${batchSelect} FROM batch_tasks b JOIN users u ON u.id=b.user_id LEFT JOIN model_configs m ON m.id=b.model_config_id ${batchStatsJoin} ${scope} ORDER BY b.created_at DESC LIMIT 1000`,
-        values,
-      );
-      response.json({ batches: result.rows });
+          ? (values.push(actor.departmentId), ["b.department_id=$1"])
+          : [];
+      const page = await readBatchPage(db, request.query, clauses, values);
+      response.json({ batches: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore });
     } catch (error) {
       next(error);
     }
+  });
+
+  router.get("/:id", async (request, response, next) => {
+    try {
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const id = z.string().uuid().parse(request.params.id);
+      const values: unknown[] = [id];
+      const scope = actor.role === "department_admin" ? (values.push(actor.departmentId), "AND t.department_id=$2") : "";
+      const result = await db.query(`SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.id=$1 ${scope}`, values);
+      if (!result.rows[0]) { response.status(404).json({ error: "NOT_FOUND", message: "任务不存在或无权访问" }); return; }
+      response.json({ task: result.rows[0] });
+    } catch (error) { next(error); }
   });
 
   router.post("/batches/:id/:action", async (request, response, next) => {
@@ -595,6 +597,35 @@ function pastTense(action: QueueTaskAction) {
     : action === "resume"
       ? "resumed"
       : "cancelled";
+}
+
+function appendCursor(clauses: string[], values: unknown[], column: string, idColumn: string, cursor: { createdAt: string; id: string } | null) {
+  if (!cursor) return;
+  values.push(cursor.createdAt, z.string().uuid().parse(cursor.id));
+  clauses.push(`(${column},${idColumn})<($${values.length - 1}::timestamptz,$${values.length}::uuid)`);
+}
+
+async function readTaskPage(db: Database, query: unknown, clauses: string[], values: unknown[]) {
+  const page = parseCursorPage(query);
+  const filters = z.object({ ids: z.string().max(7500).optional(), operationType: z.string().min(1).max(80).optional() }).parse(query);
+  const ids = filters.ids ? z.array(z.string().uuid()).min(1).max(200).parse(filters.ids.split(",")) : null;
+  if (ids) { values.push(ids); clauses.push(`t.id=ANY($${values.length}::uuid[])`); }
+  if (filters.operationType) { values.push(filters.operationType); clauses.push(`t.operation_type=$${values.length}`); }
+  if (!ids) appendCursor(clauses, values, "t.queued_at", "t.id", page.cursor);
+  const limit = ids?.length ?? page.limit;
+  values.push(limit + 1);
+  const result = await db.query(`SELECT ${ids ? taskSelect : taskSummarySelect},to_char(t.queued_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "cursorCreatedAt" FROM tasks t JOIN users u ON u.id=t.user_id ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY t.queued_at DESC,t.id DESC LIMIT $${values.length}`, values);
+  const output = makeCursorPage(result.rows, limit, (row) => ({ createdAt: row.cursorCreatedAt as string, id: row.id as string }));
+  return { ...output, items: output.items.map(({ cursorCreatedAt: _cursor, ...row }) => row) };
+}
+
+async function readBatchPage(db: Database, query: unknown, clauses: string[], values: unknown[]) {
+  const { cursor, limit } = parseCursorPage(query);
+  appendCursor(clauses, values, "b.created_at", "b.id", cursor);
+  values.push(limit + 1);
+  const result = await db.query(`SELECT ${batchSelect},to_char(b.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "cursorCreatedAt" FROM batch_tasks b JOIN users u ON u.id=b.user_id LEFT JOIN model_configs m ON m.id=b.model_config_id ${batchStatsJoin} ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY b.created_at DESC,b.id DESC LIMIT $${values.length}`, values);
+  const output = makeCursorPage(result.rows, limit, (row) => ({ createdAt: row.cursorCreatedAt as string, id: row.id as string }));
+  return { ...output, items: output.items.map(({ cursorCreatedAt: _cursor, ...row }) => row) };
 }
 
 function mockSvg(id: string) {

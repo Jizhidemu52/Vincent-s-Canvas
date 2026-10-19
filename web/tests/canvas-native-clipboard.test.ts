@@ -12,13 +12,15 @@ import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { createCanvasSelectionGenerationSync } from "@/lib/canvas/canvas-selection-prompt";
 import { runCanvasGeneration } from "@/pages/canvas/canvas-shared-generation-runtime";
 import { defaultConfig } from "@/stores/use-config-store";
+import { isCanvasAudioFile } from "@/pages/canvas/use-canvas-clipboard-drop";
 import { CanvasNodeType, type CanvasNodeData, type CanvasConnection, type CanvasNodeGroup } from "@/types/canvas";
 
 // Execute the page's real keyboard/copy/paste/import callbacks, without mounting its unrelated editor UI.
 // Only the image storage boundary and React state setters are supplied by this harness.
-const source = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
+const source = ["project.tsx", "use-canvas-clipboard-drop.ts", "use-canvas-shortcuts.ts"]
+    .map(file => readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8")).join("\n");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const callbackNames = new Set(["duplicateNodes", "copySelectedNodes", "pasteCopiedNodes", "createImageFileNode", "createTextNodeFromClipboard", "pasteSystemClipboard"]);
+const callbackNames = new Set(["duplicateNodes", "copySelectedNodes", "pasteCopiedNodes", "createImageFileNode", "createTextNodeFromClipboard", "pasteSystemClipboard", "handleDrop"]);
 const declarations: ts.Node[] = [];
 let selectionEffect: ts.Node;
 function containsIdentifier(node: ts.Node, names: string[]): boolean {
@@ -29,13 +31,14 @@ function collect(node: ts.Node) {
     if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useEffect"
         && containsIdentifier(node, ["syncSelectedGenerationRef"])) selectionEffect = node;
     else if (ts.isVariableStatement(node) && node.declarationList.declarations.some(item => ts.isIdentifier(item.name) && callbackNames.has(item.name.text))) declarations.push(node);
-    else if (ts.isFunctionDeclaration(node) && ["createCanvasNode", "imageMetadata"].includes(node.name?.text || "")) declarations.push(node);
+    else if (ts.isFunctionDeclaration(node) && ["createCanvasNode", "imageMetadata", "useCanvasClipboardDrop", "useCanvasShortcuts", "handleCanvasShortcut"].includes(node.name?.text || "")) declarations.push(node);
+    else if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useCanvasShortcuts") declarations.push(node);
     else if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useEffect"
         && containsIdentifier(node, ["handleKeyDown", "bindCanvasClipboardEvents"])) declarations.push(node);
     else ts.forEachChild(node, collect);
 }
 collect(ast);
-const code = ts.transpileModule(declarations.map(node => node.getText(ast)).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText
+const code = ts.transpileModule(declarations.map(node => node.getText(ast).replace(/^export\s+/, "")).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText
     .replace('import("@/lib/canvas/canvas-system-clipboard")', "({ then: callback => { callback(clipboardModule); return { catch: () => {} }; } })");
 const selectionCode = ts.transpileModule(selectionEffect!.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
 
@@ -77,15 +80,17 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const noop = () => {};
     const update = <T>(ref: { current: T }) => (value: T | ((current: T) => T)) => { ref.current = typeof value === "function" ? (value as (current: T) => T)(ref.current) : value; };
     const env = {
-        ...clipboard, ...nodeCopy, clipboardModule: clipboard, shouldIgnoreCanvasShortcut, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success", assertCanvasImageUploadSize,
+        ...clipboard, ...nodeCopy, clipboardModule: clipboard, shouldIgnoreCanvasShortcut, isCanvasAudioFile, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success", assertCanvasImageUploadSize,
         window: target, navigator: {}, // HTTP/permissionless path: no navigator.clipboard exists.
         useCallback: (callback: unknown) => callback,
+        useRef: (current: unknown) => ({ current }), useLayoutEffect: (run: () => void) => run(),
         flushPendingHistory: () => true,
         useEffect: (effect: () => (() => void) | void) => { const dispose = effect(); if (dispose) disposers.push(dispose); },
         nanoid: () => `fixture-${++nextId}`,
         syncSelectedGenerationRef, projectId: "clipboard-test",
         nodesRef, connectionsRef, groupsRef, selectedNodeIdsRef, generationRequestsRef, generationDispatchLocksRef, clipboardRef: { current: null },
         getCanvasCenter: () => ({ x: 300, y: 200 }),
+        screenToCanvas: (x: number, y: number) => ({ x, y }), createVideoFileNode: noop, createAudioFileNode: noop,
         setNodes: update(nodesRef), setConnections: update(connectionsRef), setGroups: update(groupsRef),
         setSelectedNodeIds: (value: Set<string>) => { selectedNodeIdsRef.current = value; queueMicrotask(runSelectionEffect); }, commitSelectedNodeIds: update(selectedNodeIdsRef),
         setSelectedConnectionId: noop, setDialogNodeId: noop, setContextMenu: noop,

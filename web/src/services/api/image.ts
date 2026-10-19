@@ -9,7 +9,7 @@ import { generationDraftInput } from "./generation-history";
 import { imageAdvancedParameters, readImageOptions } from "@/lib/image-advanced-settings";
 import { resolveToolConfig } from "./tool-runtime";
 import { createClientId } from "@/lib/client-id";
-import { parseStrictJson } from "@/lib/strict-json";
+import { parseCreateImageArguments, parseStrictJson } from "@/lib/strict-json";
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -192,7 +192,9 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
     const result = await requestServerResponse(config, toResponseInput(withSystemMessage(config, messages)), tools.map(toResponseTool), toolChoice, options, onDelta);
     // Non-streaming/Responses providers can return raw argument strings without using the SSE boundary.
     if (Array.isArray(result.toolCalls)) for (const call of result.toolCalls) {
-        if (typeof call.function?.arguments === "string") parseStrictJson(call.function.arguments);
+        if (typeof call.function?.arguments !== "string") continue;
+        if (call.function.name === "create_image") call.function.arguments = JSON.stringify(parseCreateImageArguments(call.function.arguments));
+        else parseStrictJson(call.function.arguments);
     }
     if (result.content) onDelta?.(result.content);
     return result;
@@ -258,7 +260,10 @@ export async function readClaudeSseResponse(response: Response, onDelta?: (text:
         if (done) break;
     }
     if (state.buffer.trim()) consumeClaudeSseEvent(state.buffer, state, onDelta, onToolCallStart);
-    const blocks: ClaudeAssistantContent = Array.from(state.blocks.entries()).sort(([left], [right]) => left - right).map(([, item]) => ({ ...item.block, ...(item.inputJson ? { input: parseStrictJson(item.inputJson) } : {}) }));
+    const blocks: ClaudeAssistantContent = Array.from(state.blocks.entries()).sort(([left], [right]) => left - right).map(([, item]) => {
+        const parseArguments = item.block.type === "tool_use" && item.block.name === "create_image" ? parseCreateImageArguments : parseStrictJson;
+        return { ...item.block, ...(item.inputJson ? { input: parseArguments(item.inputJson) } : {}) };
+    });
     const toolCalls: ResponseToolCall[] = blocks.flatMap((block) => block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string" ? [{
         id: block.id,
         type: "function" as const,
@@ -276,7 +281,7 @@ function consumeClaudeSseEvent(event: string, state: ClaudeSseState, onDelta?: (
     const raw = event.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
     if (!raw || raw === "[DONE]") return;
     let payload: { type?: string; index?: number; content_block?: Record<string, unknown>; delta?: { type?: string; text?: string; thinking?: string; signature?: string; partial_json?: string; stop_reason?: string | null }; error?: { message?: string } };
-    try { payload = JSON.parse(raw); } catch { return; }
+    payload = parseStrictJson(raw) as typeof payload;
     const index = payload.index ?? 0;
     if (payload.type === "error") throw new Error(payload.error?.message || "Claude 流式响应失败");
     if (payload.type === "content_block_start") {

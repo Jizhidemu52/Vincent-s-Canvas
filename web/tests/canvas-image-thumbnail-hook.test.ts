@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
-import type { ImageThumbnailEdge } from "@/lib/canvas/canvas-image-thumbnail";
+import { canvasServerThumbnailUrl, type ImageThumbnailEdge } from "@/lib/canvas/canvas-image-thumbnail";
 import type { ImageThumbnailLease } from "@/lib/image-thumbnail-cache";
 
 const code = ts.transpileModule(readFileSync(new URL("../src/components/canvas/use-canvas-image-thumbnail.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
@@ -20,6 +20,7 @@ function harness(thumbnail: () => Promise<ImageThumbnailLease | null>) {
         },
         "@/services/image-storage": { resolveImageUrl: async () => { originalCalls++; return "blob:original"; } },
         "@/services/image-thumbnails": { acquireImageThumbnail: () => { thumbnailCalls++; return thumbnail(); } },
+        "@/lib/canvas/canvas-image-thumbnail": { canvasServerThumbnailUrl },
     };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name], module, module.exports);
     const node: CanvasNodeData = { id: "node", type: CanvasNodeType.Image, title: "原图", position: { x: 0, y: 0 }, width: 400, height: 300, metadata: { storageKey: "image:original", content: "blob:persisted-original", naturalWidth: 4000, naturalHeight: 3000 } };

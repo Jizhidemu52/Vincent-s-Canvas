@@ -41,7 +41,10 @@ function mockServer(config: BusinessConfig, taskError = false) {
         if (path === "/api/tasks/batch") return Response.json({ batchId: "batch-1", tasks: [{ id: "task-1", itemIndex: 0 }], failures: [] });
         const task = { id: "task-1", status: "success", resultUrls: ["/api/assets/result/content"], failureReason: null };
         if (path === "/api/tasks/task-1") return Response.json({ task });
-        if (path === "/api/tasks") return Response.json({ tasks: [task] });
+        if (path.startsWith("/api/tasks?")) {
+            expect(new URL(path, "http://test.local").searchParams.get("ids")).toBe(task.id);
+            return Response.json({ tasks: [task] });
+        }
         // Successful generations refresh balances; a stable session permits consecutive requests.
         if (path === "/api/auth/session") return Response.json({ user: { id: "employee-a", status: "active", role: "designer" } });
         if (path === "/api/chat/responses") return Response.json({ content: "已完成", toolCalls: [] });

@@ -53,14 +53,15 @@ test("open canvas HTTP persists whole documents with owner headers, revisions an
     const first = await put(a, source.id, 0, source);
     expect(first.status).toBe(200);
     const firstBody = await first.json() as any;
-    expect(firstBody.document).toMatchObject({ id: source.id, revision: 1, deleted: false, document: source });
+    expect(firstBody.document).toMatchObject({ id: source.id, revision: 1, deleted: false });
+    expect(firstBody.document).not.toHaveProperty("document");
     const listed = await request("/api/canvas-documents", a);
     expect(listed.headers.get("cache-control")).toBe("no-store");
     expect(await listed.json()).toEqual({ documents: [{ id: source.id, revision: 1, deleted: false, updatedAt: firstBody.document.updatedAt,
       summary: { id: source.id, title: source.title, createdAt: source.createdAt, updatedAt: source.updatedAt, nodeCount: 1, connectionCount: 0, cover: { content: assetUrl } } }] });
     const detail = await request(`/api/canvas-documents/${source.id}`, a);
     expect(detail.headers.get("cache-control")).toBe("no-store");
-    expect(await detail.json()).toEqual(firstBody);
+    expect(await detail.json()).toEqual({ document: { ...firstBody.document, document: source } });
     expect((await request(`/api/canvas-documents/${source.id}`, a, {}, b.user.id)).status).toBe(403);
     expect((await request(`/api/canvas-documents/${source.id}`, b)).status).toBe(403);
     expect((await request("/api/canvas-documents", b)).status).toBe(403);
@@ -76,10 +77,10 @@ test("open canvas HTTP persists whole documents with owner headers, revisions an
     const deletedResponse = await put(a, source.id, 2, null);
     expect(deletedResponse.status).toBe(200);
     const deleted = await deletedResponse.json() as any;
-    expect(deleted.document).toMatchObject({ revision: 3, deleted: true, document: null });
+    expect(deleted.document).toMatchObject({ revision: 3, deleted: true });
     handle.kill(); await handle.exited; handle = start(); await ready();
     expect(await request("/api/canvas-documents", a).then(r => r.json())).toEqual({ documents: [{ id: source.id, revision: 3, deleted: true, summary: null, updatedAt: deleted.document.updatedAt }] });
-    expect(await request(`/api/canvas-documents/${source.id}`, a).then(r => r.json())).toEqual(deleted);
+    expect(await request(`/api/canvas-documents/${source.id}`, a).then(r => r.json())).toEqual({ document: { ...deleted.document, document: null } });
     expect(await request("/api/canvas-documents/missing", a).then(r => r.json())).toEqual({ document: { id: "missing", revision: 0, deleted: true, document: null, updatedAt: "1970-01-01T00:00:00.000Z" } });
     for (const revision of [0, 2, 3]) expect((await put(a, source.id, revision, source)).status).toBe(409);
     const downloaded = await request(assetUrl, a);

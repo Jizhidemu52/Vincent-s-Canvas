@@ -1,5 +1,5 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
-import { CanvasRevisionConflict, type CloudCanvasDocument, type CloudCanvasSummary } from "@/services/api/canvas-documents";
+import { CanvasRevisionConflict, type CloudCanvasAcknowledgement, type CloudCanvasDocument, type CloudCanvasSummary } from "@/services/api/canvas-documents";
 import { encodeCanvasProject, parseCanvasProject, serializeCanvasProject } from "./canvas-project-codec";
 import { mapCanvasAsyncPool } from "./canvas-async-pool";
 
@@ -13,7 +13,7 @@ export type CanvasCloudBaseline = Record<string, BaselineEntry>;
 type Dependencies = {
     list: () => Promise<CloudCanvasSummary[]>;
     get: (id: string) => Promise<CloudCanvasDocument>;
-    put: (id: string, revision: number, document: CanvasProject | null) => Promise<CloudCanvasDocument>;
+    put: (id: string, revision: number, document: CanvasProject | null) => Promise<CloudCanvasAcknowledgement>;
     portable: (project: CanvasProject) => Promise<CanvasProject>;
     saveBaseline: (value: CanvasCloudBaseline) => Promise<void>;
     newId: () => string;
@@ -132,7 +132,7 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
                 }
                 const copy = copyOf(source, plan);
                 const portableCopy = copyOf(cloudSource, plan);
-                let saved: CloudCanvasDocument;
+                let saved: CloudCanvasAcknowledgement;
                 try { saved = await io.put(copy.id, 0, portableCopy); }
                 catch (error) {
                     if (!(error instanceof CanvasRevisionConflict)) throw error;
@@ -157,7 +157,7 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
             async function write(id: string, local: CanvasProject | null, revision: number) {
                 const encoded = snapshot(local);
                 const portable = local ? await io.portable(structuredClone(local)) : null;
-                let saved: CloudCanvasDocument;
+                let saved: CloudCanvasAcknowledgement;
                 try { saved = await io.put(id, revision, portable); }
                 catch (error) {
                     if (!(error instanceof CanvasRevisionConflict)) throw error;

@@ -1,0 +1,16 @@
+{
+    "$schema": "https://biomejs.dev/schemas/2.4.8/schema.json",
+    "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+    "files": { "ignoreUnknown": true },
+    "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 4, "lineWidth": 120 },
+    "assist": { "enabled": false },
+    "css": { "parser": { "tailwindDirectives": true } },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "recommended": false,
+            "correctness": { "useHookAtTopLevel": "error", "noInvalidUseBeforeDeclaration": "error" },
+            "suspicious": { "noDuplicateJsxProps": "error", "noDuplicateObjectKeys": "error" }
+        }
+    }
+}

@@ -3,6 +3,7 @@ import type { CanvasProjectSummary } from "@/lib/canvas/canvas-project-summary";
 import { decodeCanvasProject, encodeCanvasProject, type EncodedCanvasProject } from "@/lib/canvas/canvas-project-codec";
 
 export type CloudCanvasDocument = { id: string; revision: number; deleted: boolean; document: CanvasProject | null; updatedAt: string };
+export type CloudCanvasAcknowledgement = Omit<CloudCanvasDocument, "document">;
 export type CloudCanvasSummary = Omit<CloudCanvasDocument, "document"> & { summary: CanvasProjectSummary | null };
 type EncodedCloudDocument = Omit<CloudCanvasDocument, "document"> & { document: EncodedCanvasProject | null };
 const decodeDocument = (value: EncodedCloudDocument): CloudCanvasDocument => ({ ...value, document: value.document ? decodeCanvasProject(value.document) : null });
@@ -23,4 +24,4 @@ export const listCloudCanvases = (owner: string) => request<{ documents: CloudCa
 export const getCloudCanvas = (owner: string, id: string) =>
     request<{ document: EncodedCloudDocument }>(owner, `/${encodeURIComponent(id)}`).then(result => decodeDocument(result.document));
 export const putCloudCanvas = (owner: string, id: string, baseRevision: number, document: CanvasProject | null) =>
-    request<{ document: EncodedCloudDocument }>(owner, `/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ baseRevision, document: document ? encodeCanvasProject(document) : null }) }).then(result => decodeDocument(result.document));
+    request<{ document: CloudCanvasAcknowledgement }>(owner, `/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ baseRevision, document: document ? encodeCanvasProject(document) : null }) }).then(result => result.document);

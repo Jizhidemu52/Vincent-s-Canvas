@@ -37,12 +37,21 @@ function dependencies(fixture: Fixture = {}) {
       if (sql.includes("FROM tool_api_configurations")) return { rows: fixture.toolBinding ? [fixture.toolBinding] : [] };
       if (sql.includes("FROM model_configs")) return { rows: fixture.model === null ? [] : [{ id: modelId, name: "Wan", modelId: "wan2.7", capabilities: ["video"], enabled: true, providerEnabled: true, workflowConfigId: null, ...fixture.model }] };
       if (sql.includes("FROM assets")) return { rows: fixture.asset === null ? [] : [fixture.asset || { id: assetId, mimeType: "image/png", byteSize: 512, status: "ready" }] };
-      if (sql.startsWith("SELECT id,request_id")) return { rows: fixture.task ? [{ ...fixture.task, operation_type: fixture.task.operationType }] : [] };
+      if (sql.startsWith("SELECT id,request_id")) return { rows: fixture.task ? [{ ...fixture.task, operation_type: fixture.task.operationType, upstream_task_id: fixture.task.upstreamTaskId, upstream_submission_started_at: fixture.task.submissionStartedAt }] : [] };
       if (sql.includes("FROM tasks")) return { rows: fixture.task ? [fixture.task] : [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
   };
-  const cache = { zAdd: async (key: string, member: unknown) => { queued.push({ key, member }); return 1; } };
+  const cache = {
+    zAdd: async (key: string, member: unknown) => { queued.push({ key, member }); return 1; },
+    eval: async (_script: string, options: { keys: string[]; arguments: string[] }) => {
+      expect(options.keys).toEqual(["tasks:queue", "tasks:delayed", "tasks:delayed:priority"]);
+      const [id, availableAt, now, score] = options.arguments;
+      expect(Number(availableAt)).toBeLessThanOrEqual(Number(now));
+      queued.push({ key: options.keys[0], member: { value: id, score: Number(score) } });
+      return 1;
+    },
+  };
   return { database, cache, writes, queued, reads };
 }
 
@@ -250,7 +259,10 @@ describe("production generation routes", () => {
     expect(deps.writes[0]).toContain("UPDATE tasks SET status='waiting'");
     expect(deps.writes.some((sql) => /credit|INSERT INTO tasks/i.test(sql))).toBe(false);
     const assignments = deps.writes[0]!.split(/\bSET\b/i)[1]!.split(/\bWHERE\b/i)[0]!;
-    expect(assignments).not.toMatch(/upstream_task_id/i);
+    expect(assignments).not.toMatch(/(?:^|,)\s*upstream_task_id\s*=/i);
+    expect(assignments).toContain("available_at=now()");
+    expect(assignments).toContain("execution_token=NULL");
+    expect(assignments).toContain("poll_deadline_at=CASE WHEN");
   });
 
   test("an unknown video submission cannot be reset through recovery", async () => {

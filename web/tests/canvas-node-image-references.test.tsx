@@ -254,18 +254,19 @@ test("canvas badges follow the node edit references while quick generation keeps
     const ast = ts.createSourceFile("project.tsx", readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     let factory: ts.Node | undefined;
     const visit = (node: ts.Node) => {
-        if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "activeResourceReferenceByNodeId" && node.initializer && ts.isCallExpression(node.initializer)) factory = node.initializer.arguments[0];
+        if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "resourceReferencesForActiveNode" && node.initializer && ts.isCallExpression(node.initializer)) factory = node.initializer.arguments[0];
         ts.forEachChild(node, visit);
     };
     visit(ast);
     expect(factory).toBeDefined();
     const nodeById = new Map(nodes.map(node => [node.id, node]));
-    const bindings = { assistantOpen: false, quickGenerateOpen: false, resourceContextNodeId: source.id, nodes, nodeById, connections,
+    const bindings = { assistantOpen: false, quickGenerateOpen: false, dialogNodeId: null, nodes, nodeById, connections,
         mentionReferenceIndex: createCanvasMentionReferenceIndex(nodes, connections), globalResourceReferenceIndex: createCanvasResourceReferenceIndex(nodes),
         resolveCanvasNodeImageReferences, canvasImageReferenceMentions, CanvasNodeType, quickGenerateReferences: [{ canvasNodeId: "pattern" }, { canvasNodeId: "color" }] };
     const labels = (quickGenerateOpen: boolean) => {
         const input = { ...bindings, quickGenerateOpen };
-        const references = new Function(...Object.keys(input), `return (${factory!.getText(ast)})();`)(...Object.values(input)) as Map<string, { label: string }>;
+        const code = ts.transpileModule(`const resolve = ${factory!.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+        const references = new Function(...Object.keys(input), `${code} return resolve(${JSON.stringify(source.id)});`)(...Object.values(input)) as Map<string, { label: string }>;
         return [...references].map(([id, reference]) => [id, reference.label]);
     };
     expect(labels(false)).toEqual([["original", "图片1"], ["color", "图片2"], ["pattern", "图片3"]]);

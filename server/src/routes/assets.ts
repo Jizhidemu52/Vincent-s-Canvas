@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 import express, { Router, type Response } from "express";
 import { z } from "zod";
+import type { PoolClient } from "pg";
 
 import {
   AssetEventError,
   listAssetEvents,
   recordAssetEvent,
   reverseAssetEvent,
+  projectAssetEvents,
+  type AssetEventRecord,
   type AssetEventType,
 } from "../asset-events";
 import { writeAudit } from "../audit";
@@ -17,10 +20,13 @@ import type { Database } from "../db";
 import { ObjectStorage } from "../object-storage";
 import { requireRole } from "../rbac";
 import type { AuthenticatedRequest, SessionUser } from "../types";
+import { allowedAssetMimeTypes, normalizeAssetMime, validateAssetUpload, AssetMediaError, streamAssetContent } from "../asset-delivery";
+import { assetBatchSchema, assetListMetadataFields, assetPage, parseAssetListQuery } from "../asset-query";
+import { scheduleAssetThumbnails } from "../asset-thumbnails";
 
 const createSchema = z.object({
   filename: z.string().trim().min(1).max(255),
-  mimeType: z.string().min(1).max(120),
+  mimeType: z.string().min(1).max(120).transform(normalizeAssetMime).refine(value => allowedAssetMimeTypes.has(value), "不支持的文件类型"),
   byteSize: z.number().int().min(1).max(200 * 1024 * 1024),
   kind: z.enum(["image", "video", "text", "other"]).default("image"),
   projectId: z.string().uuid().nullish(),
@@ -47,6 +53,11 @@ const reverseSchema = z.object({ idempotencyKey: z.string().trim().min(8).max(16
 const assetSelect = `a.id,a.owner_user_id AS "ownerUserId",u.display_name AS "ownerName",a.department_id AS "departmentId",d.name AS "departmentName",a.project_id AS "projectId",p.name AS "projectName",a.task_id AS "taskId",a.filename,a.mime_type AS "mimeType",a.byte_size::int AS "byteSize",a.kind,a.source,a.operation_type AS "operationType",a.prompt,m.name AS "modelName",a.status,a.visibility_scope AS "visibilityScope",a.metadata,a.deleted_at AS "deletedAt",a.created_at AS "createdAt"`;
 const primaryImageAssetClause = `NOT (COALESCE(a.metadata->'imageResult'->>'version','')='1' AND COALESCE(a.metadata->'imageResult'->>'role','') IN ('provider-original','export'))`;
 const variantAssetSelect = `a.id,a.owner_user_id AS "ownerUserId",a.task_id AS "taskId",a.filename,a.mime_type AS "mimeType",a.status,a.metadata,a.deleted_at AS "deletedAt"`;
+const assetUrls = `'/api/assets/'||a.id||'/content' AS "contentUrl",CASE WHEN a.kind='image' THEN '/api/assets/'||a.id||'/thumb?w=256' END AS "thumbnailUrl",CASE WHEN a.kind='image' THEN '/api/assets/'||a.id||'/thumb?w=1024' END AS "previewUrl"`;
+const lightAssetSelect = assetSelect.replace('a.prompt,', `(COALESCE(NULLIF(btrim(a.prompt),''),NULLIF(btrim(a.metadata->>'prompt'),''),NULLIF(btrim(a.metadata->>'recreatePath'),''),NULLIF(btrim(a.metadata->>'content'),'')) IS NOT NULL) AS "canRecreate",NULL::text AS prompt,`).replace('a.metadata,',
+  `jsonb_strip_nulls(jsonb_build_object(${assetListMetadataFields.map(key => `'${key}',a.metadata->'${key}'`).join(',')})) AS metadata,`)
+  .replace('a.created_at AS "createdAt"', `to_char(a.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "createdAt"`);
+const assetJoins = "FROM assets a JOIN users u ON u.id=a.owner_user_id LEFT JOIN departments d ON d.id=a.department_id LEFT JOIN projects p ON p.id=a.project_id LEFT JOIN model_configs m ON m.id=a.model_config_id";
 
 export function accessClause(actor: SessionUser, alias = "a") {
   if (actor.role === "super_admin") return { sql: "TRUE", values: [] as unknown[] };
@@ -61,14 +72,40 @@ export function accessClause(actor: SessionUser, alias = "a") {
   };
 }
 
-async function withProjections(db: Database, rows: Array<Record<string, unknown>>) {
-  const projections = await listAssetEvents(db, rows.map((row) => String(row.id)));
+async function withProjections(db: Database, rows: Array<Record<string, unknown>>, light = false) {
+  const ids = rows.map(row => String(row.id));
+  const projections = light ? new Map<string, { projection: ReturnType<typeof projectAssetEvents> }>() : await listAssetEvents(db, ids);
+  if (light && ids.length) {
+    const events = await db.query<AssetEventRecord>(`SELECT id,asset_id AS "assetId",event_type AS "eventType",first_effective AS "firstEffective",source_event_id AS "sourceEventId",occurred_at AS "occurredAt" FROM asset_events WHERE asset_id=ANY($1::uuid[]) ORDER BY sequence_no`, [ids]);
+    const grouped = new Map<string, AssetEventRecord[]>();
+    for (const event of events.rows) { const list = grouped.get(event.assetId) || []; list.push(event); grouped.set(event.assetId, list); }
+    for (const id of ids) projections.set(id, { projection: projectAssetEvents(grouped.get(id) || []) });
+  }
   return rows.map((row) => ({
     ...row,
     ...(projections.get(String(row.id))?.projection ?? {
       resultStatus: "unused", usabilityScore: 0, downloadCount: 0, firstDownloadedAt: null, eventCount: 0,
     }),
   }));
+}
+
+async function listAssets(db: Database, actor: SessionUser, query: Record<string, unknown>, admin = false) {
+  const input = parseAssetListQuery(query);
+  const access = admin ? { sql: actor.role === 'department_admin' ? 'a.department_id=$1' : 'TRUE', values: actor.role === 'department_admin' ? [actor.departmentId] : [] } : accessClause(actor);
+  const values: unknown[] = [...access.values];
+  const where = ['a.deleted_at IS NULL', primaryImageAssetClause, access.sql];
+  const parameter = (value: unknown) => { values.push(value); return `$${values.length}`; };
+  if (input.cursor) where.push(`(a.created_at,a.id)<(${parameter(input.cursor.time)}::timestamptz,${parameter(input.cursor.id)}::uuid)`);
+  if (input.kind) where.push(`a.kind=${parameter(input.kind)}`);
+  if (input.projectId) where.push(`a.project_id=${parameter(input.projectId)}::uuid`);
+  if (input.ownerUserId) where.push(`a.owner_user_id=${parameter(input.ownerUserId)}::uuid`);
+  if (input.q) {
+    const term = parameter(`%${input.q.replace(/[\\%_]/g, '\\$&')}%`);
+    where.push(`(a.filename ILIKE ${term} OR a.metadata->>'title' ILIKE ${term} OR a.metadata->>'tags' ILIKE ${term} OR a.metadata->>'source' ILIKE ${term} OR a.metadata->>'content' ILIKE ${term} OR a.prompt ILIKE ${term})`);
+  }
+  const result = await db.query<{ id: string; createdAt: string }>(`SELECT ${lightAssetSelect},${assetUrls} ${assetJoins} WHERE ${where.join(' AND ')} ORDER BY a.created_at DESC,a.id DESC LIMIT ${parameter(input.limit + 1)}`, values);
+  const page = assetPage(result.rows, input.limit);
+  return { ...page, assets: await withProjections(db, page.assets, true) };
 }
 
 function sendAssetEventError(response: Response, error: unknown) {
@@ -86,12 +123,19 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
   router.get("/", async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
+      response.json(await listAssets(db, actor, request.query));
+    } catch (error) { next(error); }
+  });
+
+  router.get('/summary', async (request, response, next) => {
+    try {
+      const actor = (request as unknown as AuthenticatedRequest).auth;
       const access = accessClause(actor);
-      const result = await db.query(
-        `SELECT ${assetSelect} FROM assets a JOIN users u ON u.id=a.owner_user_id LEFT JOIN departments d ON d.id=a.department_id LEFT JOIN projects p ON p.id=a.project_id LEFT JOIN model_configs m ON m.id=a.model_config_id WHERE a.deleted_at IS NULL AND ${primaryImageAssetClause} AND ${access.sql} ORDER BY a.created_at DESC LIMIT 2000`,
-        access.values,
-      );
-      response.json({ assets: await withProjections(db, result.rows) });
+      const [page, count] = await Promise.all([
+        listAssets(db, actor, { limit: 12 }),
+        db.query<{ total: number }>(`SELECT count(*)::int AS total FROM assets a WHERE a.deleted_at IS NULL AND ${primaryImageAssetClause} AND ${access.sql}`, access.values),
+      ]);
+      response.json({ ...page, total: count.rows[0]?.total || 0 });
     } catch (error) { next(error); }
   });
 
@@ -158,11 +202,14 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
         response.status(400).json({ error: "SIZE_MISMATCH", message: "上传文件大小与申请不一致" });
         return;
       }
-      await storage.put(asset.object_key, body, asset.mime_type);
-      await db.query("UPDATE assets SET status='ready',updated_at=now() WHERE id=$1", [request.params.id]);
+      const actualMime = await validateAssetUpload(body, asset.mime_type);
+      const kind = actualMime.startsWith('image/') ? 'image' : actualMime.startsWith('video/') ? 'video' : actualMime.startsWith('text/') || actualMime === 'application/json' ? 'text' : 'other';
+      await storage.put(asset.object_key, body, actualMime);
+      await db.query("UPDATE assets SET status='ready',mime_type=$2,kind=$3,updated_at=now() WHERE id=$1", [request.params.id, actualMime, kind]);
+      if (kind === 'image') scheduleAssetThumbnails(db, storage, request.params.id);
       response.status(204).end();
     } catch (error) {
-      if (error instanceof CanvasDocumentError) response.status(error.status).json({ error: error.code, message: error.message });
+      if (error instanceof CanvasDocumentError || error instanceof AssetMediaError) response.status(error.status).json({ error: error.code, message: error.message });
       else next(error);
     }
   });
@@ -204,13 +251,71 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       );
       const asset = result.rows[0];
       if (!asset) { response.status(404).end(); return; }
-      const object = await storage.get(asset.object_key);
-      response.type(asset.mime_type);
-      response.setHeader("content-disposition", `inline; filename*=UTF-8''${encodeURIComponent(asset.filename)}`);
-      if (object.ContentLength) response.setHeader("content-length", String(object.ContentLength));
-      const bytes = await object.Body?.transformToByteArray();
-      response.send(Buffer.from(bytes ?? []));
+      await streamAssetContent(request, response, storage, asset);
     } catch (error) { next(error); }
+  });
+
+  router.get('/:id/thumb', async (request, response, next) => {
+    try {
+      const width = z.enum(['256','1024']).default('256').parse(request.query.w);
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const access = accessClause(actor);
+      const shifted = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 1}`);
+      const result = await db.query<{ object_key: string; thumbnail_key: string | null; mime_type: string; filename: string }>(
+        `SELECT object_key,thumbnail_${width}_key AS thumbnail_key,mime_type,filename FROM assets a WHERE a.id=$1 AND a.kind='image' AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}`, [request.params.id, ...access.values]);
+      const asset = result.rows[0];
+      if (!asset) { response.status(404).end(); return; }
+      if (!asset.thumbnail_key) scheduleAssetThumbnails(db, storage, request.params.id);
+      await streamAssetContent(request, response, storage, asset.thumbnail_key ? { object_key: asset.thumbnail_key, mime_type: 'image/webp', filename: `${asset.filename}.thumb-${width}.webp` } : asset);
+    } catch (error) { next(error); }
+  });
+
+  router.get('/:id', async (request, response, next) => {
+    try {
+      const id = z.string().uuid().parse(request.params.id);
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const access = accessClause(actor);
+      const shifted = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 1}`);
+      const result = await db.query(`SELECT ${assetSelect},${assetUrls} ${assetJoins} WHERE a.id=$1 AND a.deleted_at IS NULL AND ${shifted}`, [id, ...access.values]);
+      if (!result.rows[0]) { response.status(404).json({ error: 'NOT_FOUND', message: '素材不存在或无权访问' }); return; }
+      response.json({ asset: (await withProjections(db, result.rows))[0] });
+    } catch (error) { next(error); }
+  });
+
+  router.post('/batch', async (request, response, next) => {
+    let client: PoolClient | undefined;
+    try {
+      const input = assetBatchSchema.parse(request.body);
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const mutating = input.action === 'delete' || input.action === 'move-project';
+      client = await db.connect();
+      await client.query('BEGIN');
+      const access = mutating ? {
+        sql: `(a.owner_user_id=$1 OR $2='super_admin' OR ($2='department_admin' AND a.department_id=$3 AND $3::uuid IS NOT NULL))`,
+        values: [actor.id, actor.role, actor.departmentId],
+      } : accessClause(actor);
+      const shifted = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 1}`);
+      const allowed = await client.query<{ id: string }>(`SELECT a.id FROM assets a WHERE a.id=ANY($1::uuid[]) AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted} FOR UPDATE OF a`, [input.assetIds, ...access.values]);
+      if (allowed.rows.length !== input.assetIds.length) {
+        await client.query('ROLLBACK');
+        response.status(403).json({ error: 'BATCH_FORBIDDEN', message: '部分素材不存在或无权操作，整批未修改' }); return;
+      }
+      if (input.action === 'move-project') {
+        const project = await client.query("SELECT p.id FROM projects p WHERE p.id=$1 AND p.status='active' AND (p.owner_user_id=$2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$2)) FOR SHARE OF p", [input.projectId, actor.id]);
+        if (!project.rows[0]) { await client.query('ROLLBACK'); response.status(403).json({ error: 'PROJECT_FORBIDDEN', message: '无权将素材移入此项目，整批未修改' }); return; }
+        await client.query('UPDATE assets SET project_id=$2,updated_at=now() WHERE id=ANY($1::uuid[])', [input.assetIds, input.projectId]);
+      }
+      if (input.action === 'delete') await client.query("UPDATE assets SET deleted_at=now(),purge_after=now()+interval '30 days',updated_at=now() WHERE id=ANY($1::uuid[])", [input.assetIds]);
+      let assets: Record<string, unknown>[] = [];
+      if (!mutating) {
+        const result = await client.query(`SELECT ${input.action === 'download' ? 'a.id,a.filename,a.mime_type AS "mimeType"' : assetSelect},${assetUrls} ${assetJoins} WHERE a.id=ANY($1::uuid[]) ORDER BY array_position($1::uuid[],a.id)`, [input.assetIds]);
+        assets = result.rows;
+      }
+      if (mutating) await writeAudit(client, { actor, action: `asset.batch_${input.action}`, targetType: 'asset', result: 'success', detail: { assetIds: input.assetIds, projectId: input.projectId }, ip: request.ip });
+      await client.query('COMMIT');
+      response.json({ action: input.action, assetIds: input.assetIds, assets, count: input.assetIds.length });
+    } catch (error) { if (client) await client.query('ROLLBACK').catch(() => undefined); next(error); }
+    finally { client?.release(); }
   });
 
   router.get("/:id/events", async (request, response, next) => {
@@ -336,13 +441,32 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
 export function createAdminAssetsRouter(db: Database) {
   const router = Router();
   router.use(requireRole("super_admin", "department_admin"));
+  router.use((_request, response, next) => { response.set("Cache-Control", "private, no-store"); next(); });
+  router.get("/owners", async (request, response, next) => {
+    try {
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const values = actor.role === "department_admin" ? [actor.departmentId] : [];
+      const scope = actor.role === "department_admin" ? "a.department_id=$1" : "TRUE";
+      const result = await db.query<{ value: string; label: string }>(
+        `SELECT DISTINCT u.id AS value,u.display_name AS label FROM assets a JOIN users u ON u.id=a.owner_user_id
+         WHERE a.deleted_at IS NULL AND ${primaryImageAssetClause} AND ${scope} ORDER BY label,value`, values);
+      response.json({ owners: result.rows });
+    } catch (error) { next(error); }
+  });
   router.get("/", async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const values: unknown[] = [];
-      const where = `WHERE ${primaryImageAssetClause}${actor.role === "department_admin" ? (values.push(actor.departmentId), " AND a.department_id=$1") : ""}`;
-      const result = await db.query(`SELECT ${assetSelect} FROM assets a JOIN users u ON u.id=a.owner_user_id LEFT JOIN departments d ON d.id=a.department_id LEFT JOIN projects p ON p.id=a.project_id LEFT JOIN model_configs m ON m.id=a.model_config_id ${where} ORDER BY a.created_at DESC LIMIT 5000`, values);
-      response.json({ assets: await withProjections(db, result.rows) });
+      const { ownerUserId } = parseAssetListQuery(request.query);
+      if (ownerUserId && actor.role === "department_admin") {
+        const allowed = await db.query(
+          `SELECT 1 FROM assets a WHERE a.owner_user_id=$1 AND a.department_id=$2
+           AND a.deleted_at IS NULL AND ${primaryImageAssetClause} LIMIT 1`, [ownerUserId, actor.departmentId]);
+        if (!allowed.rows.length) {
+          response.status(403).json({ error: "FORBIDDEN", message: "该设计师不在可查看的素材范围内" });
+          return;
+        }
+      }
+      response.json(await listAssets(db, actor, request.query, true));
     } catch (error) { next(error); }
   });
   router.post("/:assetId/events/:eventId/reverse", async (request, response, next) => {

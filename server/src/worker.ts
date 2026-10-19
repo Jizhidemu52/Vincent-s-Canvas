@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import { createCache, createDatabase, type Cache, type Database } from "./db";
 import { decryptSecret } from "./security";
 import { settleReservation } from "./billing";
+import { withTransaction } from "./db-transaction";
+import { popReadyTask, scheduleQueuedTask } from "./task-queue";
+import { acquireModelLease, releaseModelLease, startTaskLeaseHeartbeat, TaskExecutionLost, type TaskLease } from "./model-concurrency";
 import { TASK_LEASE_SECONDS, canAutomaticallyRetryTask, queueScore, recalculateBatch, restoreWaitingTasksToQueue, type TaskPriority } from "./tasks";
 import { ObjectStorage } from "./object-storage";
 import {
@@ -13,7 +16,8 @@ import {
 } from "./workflow-runtime";
 import {
   buildOpenAiAudioRequest,
-  runApiMartVideoTask,
+  stepApiMartVideoTask,
+  VideoTaskPending,
   VideoProviderFailure,
   VideoSubmissionClaimLost,
 } from "./media-runtime";
@@ -28,6 +32,7 @@ import { fetchProviderResult } from "./provider-result";
 import { inlineProviderImageDataUrl } from "./provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-input";
 import { imageResultExtension, storeImageResult } from "./image-result-storage";
+import { scheduleAssetThumbnails } from "./asset-thumbnails";
 
 type WorkRow = {
   id: string;
@@ -42,6 +47,9 @@ type WorkRow = {
   parameters: Record<string, unknown>;
   source_urls: string[];
   attempts: number;
+  execution_token: string;
+  started_at: string | null;
+  poll_deadline_at: string | null;
   upstream_task_id: string | null;
   upstream_submission_started_at: string | null;
   priority: TaskPriority;
@@ -72,59 +80,68 @@ let stopping = false;
 let reconcilingQueue = false;
 
 async function nextTask() {
-  const result = await cache.zPopMin("tasks:queue");
-  return result?.value ?? null;
+  return popReadyTask(cache);
 }
 
 async function runTask(taskId: string) {
+  const executionToken = randomUUID();
   const claimed = await db.query<WorkRow>(
-    `UPDATE tasks SET status='processing',started_at=COALESCE(started_at,now()),attempts=attempts+1,
+    `UPDATE tasks SET status='processing',started_at=COALESCE(started_at,now()),execution_token=$3,
         lease_expires_at=now()+($2::int * interval '1 second'),updated_at=now()
-        WHERE id=$1 AND status='waiting' RETURNING id,request_id,batch_id,prompt,source_urls,attempts,priority,model_config_id`,
-    [taskId, TASK_LEASE_SECONDS],
+        WHERE id=$1 AND available_at<=now() AND (status='waiting'
+          OR (status='processing' AND execution_token IS NULL AND upstream_task_id IS NOT NULL))
+        RETURNING id`,
+    [taskId, TASK_LEASE_SECONDS, executionToken],
   );
   if (!claimed.rows[0]) return;
   const details = await db.query<WorkRow>(
-    `SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.parameters,t.source_urls,t.attempts,t.upstream_task_id,t.upstream_submission_started_at,t.priority,m.model_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
-        FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id AND w.enabled=true WHERE t.id=$1`,
-    [taskId],
+    `SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.priority,m.model_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
+        FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id AND w.enabled=true WHERE t.id=$1 AND t.execution_token=$2`,
+    [taskId, executionToken],
   );
-  const task = details.rows[0]!;
-  const semaphoreKey = task.model_config_id
-    ? `model:${task.model_config_id}:running`
-    : "model:none:running";
-  const running = await cache.incr(semaphoreKey);
-  await cache.expire(semaphoreKey, 600);
-  if (running > (task.concurrency_limit ?? 5)) {
-    await cache.decr(semaphoreKey);
-    await db.query(
-      "UPDATE tasks SET status='waiting',lease_expires_at=NULL,updated_at=now() WHERE id=$1 AND status='processing'",
-      [task.id],
-    );
-    await cache.zAdd("tasks:queue", {
-      score: queueScore(task.priority, Date.now() + 1_000),
-      value: task.id,
-    });
-    return;
+  const task = details.rows[0];
+  if (!task) return;
+  let modelLease: TaskLease | null = null;
+  try {
+    modelLease = await acquireModelLease(db, cache, { taskId, executionToken, modelConfigId: task.model_config_id, limit: task.concurrency_limit ?? 5 });
+    if (!modelLease) {
+      await deferTask(task, 2_000, false);
+      return;
+    }
+  } catch (error) {
+    // Admission errors never become paid attempts. Redis/database recovery can
+    // restore this durable deadline without immediately spinning on the task.
+    await deferTask(task, 5_000, Boolean(task.upstream_task_id)).catch(() => undefined);
+    throw error;
   }
-  const stopLeaseHeartbeat = startTaskLeaseHeartbeat(taskId);
-  const timing = createGenerationTiming({ taskId, modelConfigId: task.model_config_id, attempt: task.attempts, runtime: "worker" });
+  const heartbeat = startTaskLeaseHeartbeat(db, cache, modelLease, TASK_LEASE_SECONDS);
+  const timing = createGenerationTiming({ taskId, modelConfigId: task.model_config_id, attempt: task.attempts + (task.upstream_submission_started_at ? 0 : 1), runtime: "worker" });
   let outcome: GenerationTimingOutcome = "failed";
   let providerProducedResult = false;
+  let keepModelSlot = false;
   try {
+    const attempted = await db.query<{ attempts: number }>(
+      `UPDATE tasks SET attempts=attempts+CASE WHEN upstream_task_id IS NULL AND upstream_submission_started_at IS NULL THEN 1 ELSE 0 END
+       WHERE id=$1 AND execution_token=$2 AND status='processing' RETURNING attempts`, [taskId, executionToken],
+    );
+    if (!attempted.rows[0]) throw new TaskExecutionLost("任务执行权已改变");
+    task.attempts = attempted.rows[0].attempts;
     if (config.TASK_MOCK_MODE === "true" && (task.operation_type === "video_generation" || task.operation_type === "audio_generation"))
       throw new Error("模拟模式不提供真实视频或音频，请配置真实服务后生成");
+    heartbeat.assertOwned();
     const providerResults =
       config.TASK_MOCK_MODE === "true"
         ? [{ bytes: Buffer.from(mockSvg(task.id)), mimeType: "image/svg+xml" }]
         : await timing.measure("provider_execution", () => executeProvider(task, timing));
     providerProducedResult = true;
+    heartbeat.assertOwned();
+    await assertTaskExecution(task);
     const resultUrls = await timing.measure("result_store", () => storeResults(task, providerResults));
     await timing.measure("task_finalize", async () => {
-      await settleReservation(db, task.request_id, "capture");
-      const client = await db.connect();
-      try {
-        await client.query("BEGIN");
+      await withTransaction(db, async client => {
+        const owned = await client.query("SELECT id FROM tasks WHERE id=$1 AND execution_token=$2 AND status='processing' FOR UPDATE", [task.id, executionToken]);
+        if (!owned.rows[0]) throw new TaskExecutionLost("任务执行权已改变，不能重复结算");
+        await settleReservation(db, task.request_id, "capture", undefined, client);
         await client.query(
           "UPDATE tasks SET status='success',result_urls=$1,lease_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$2",
           [JSON.stringify(resultUrls), task.id],
@@ -134,69 +151,88 @@ async function runTask(taskId: string) {
                 SELECT id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,'success' FROM tasks WHERE id=$1 ON CONFLICT(task_id) DO NOTHING`,
           [task.id],
         );
-        await client.query("COMMIT");
-      } catch (error) {
-        await client.query("ROLLBACK");
-        throw error;
-      } finally {
-        client.release();
-      }
+      });
     });
     outcome = "success";
   } catch (error) {
-    if (error instanceof VideoSubmissionClaimLost) { outcome = "paused"; return; }
+    if (error instanceof VideoTaskPending) {
+      // Keep the model's upstream-inflight reservation, release only this
+      // execution slot. A later short invocation queries the persisted ID.
+      keepModelSlot = true;
+      await deferTask(task, error.nextPollMs, true);
+      outcome = "retry";
+      return;
+    }
+    if (error instanceof VideoSubmissionClaimLost || error instanceof TaskExecutionLost) {
+      keepModelSlot = true; outcome = "paused"; return;
+    }
     const transportDiagnostics = readProviderSubmissionDiagnostics(error);
     const reason =
       error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
     if (providerProducedResult) {
       // Local processing/storage failures must not replay paid work or claim it never happened.
       await db.query(
-        "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND status='processing'",
-        [`${reason}；上游已返回结果，不能直接恢复或重新生成，请先检查已保存素材。`, task.id],
+        "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND execution_token=$3 AND status='processing'",
+        [`${reason}；上游已返回结果，不能直接恢复或重新生成，请先检查已保存素材。`, task.id, executionToken],
       );
       outcome = "paused";
     } else if (task.upstream_submission_started_at && !(error instanceof VideoProviderFailure) && !(error instanceof ApiMartImageProviderFailure)) {
+      keepModelSlot = true;
       // Keep the original reservation while upstream work may still exist. Recovery only polls its persisted ID.
       await db.query(
-        "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND status='processing'",
-        [task.upstream_task_id ? `${reason}；已暂停，可恢复查询原任务，不会重新生成` : `${reason}；提交状态待核实，不会自动重新生成`, task.id],
+        "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND execution_token=$3 AND status='processing'",
+        [task.upstream_task_id ? `${reason}；已暂停，可恢复查询原任务，不会重新生成` : `${reason}；提交状态待核实，不会自动重新生成`, task.id, executionToken],
       );
       outcome = "paused";
     } else if (canAutomaticallyRetryTask(task.operation_type, task.upstream_submission_started_at, task.attempts)) {
-      await db.query(
-        "UPDATE tasks SET status='waiting',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2",
-        [reason, task.id],
-      );
-      await cache.zAdd("tasks:queue", {
-        score: queueScore(task.priority, Date.now() + task.attempts * 5_000),
-        value: task.id,
-      });
+      await releaseModelLease(db, cache, modelLease);
+      await deferTask(task, task.attempts * 5_000, false, reason);
       outcome = "retry";
     } else {
-      await settleReservation(db, task.request_id, "release").catch(
-        () => undefined,
-      );
-      await db.query(
+      await withTransaction(db, async client => {
+        const owned = await client.query("SELECT id FROM tasks WHERE id=$1 AND execution_token=$2 AND status='processing' FOR UPDATE", [task.id, executionToken]);
+        if (!owned.rows[0]) throw new TaskExecutionLost("任务执行权已改变，不能重复退款");
+        await settleReservation(db, task.request_id, "release", undefined, client);
+        await client.query(
         "UPDATE tasks SET status='failed',failure_reason=$1,lease_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$2",
         [reason, task.id],
       );
-      await db.query(
+        await client.query(
         `INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,status,failure_reason)
                 SELECT id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,'[]',0,0,'failed',$2 FROM tasks WHERE id=$1 ON CONFLICT(task_id) DO NOTHING`,
         [task.id, reason],
       );
-      await db.query(
+        await client.query(
         `INSERT INTO audit_logs(actor_user_id,action,target_type,target_id,result,detail)
                 SELECT user_id,'task.failed','task',id::text,'failed',jsonb_build_object('reason',$2::text,'attempts',attempts) || $3::jsonb FROM tasks WHERE id=$1`,
         [task.id, reason, JSON.stringify(transportDiagnostics ? { transport: transportDiagnostics } : {})],
       );
+      });
     }
   } finally {
     timing.finish(outcome);
-    stopLeaseHeartbeat();
-    await cache.decr(semaphoreKey);
+    await heartbeat.stop();
+    if (!keepModelSlot) await releaseModelLease(db, cache, modelLease);
+    await db.query("UPDATE tasks SET execution_token=NULL WHERE id=$1 AND execution_token=$2", [task.id, executionToken]);
     if (task.batch_id) await recalculateBatch(db, task.batch_id);
   }
+}
+
+async function deferTask(task: WorkRow, milliseconds: number, polling: boolean, reason: string | null = null) {
+  const changed = await db.query<{ available_at: string }>(
+    `UPDATE tasks SET status=$1,available_at=clock_timestamp()+($2::int * interval '1 millisecond'),
+        execution_token=NULL,lease_expires_at=NULL,failure_reason=COALESCE($3,failure_reason),updated_at=now()
+     WHERE id=$4 AND execution_token=$5 AND status='processing' RETURNING available_at`,
+    [polling ? "processing" : "waiting", milliseconds, reason, task.id, task.execution_token],
+  );
+  if (!changed.rows[0]) throw new TaskExecutionLost("任务执行权已改变，不能重新排队");
+  const due = new Date(changed.rows[0].available_at).getTime();
+  await scheduleQueuedTask(cache, task.id, queueScore(task.priority, due), due);
+}
+
+async function assertTaskExecution(task: WorkRow) {
+  const current = await db.query("SELECT id FROM tasks WHERE id=$1 AND execution_token=$2 AND status='processing' AND lease_expires_at>now()", [task.id, task.execution_token]);
+  if (!current.rows[0]) throw new TaskExecutionLost("任务执行租约已失效");
 }
 
 import { openAiImageParameters } from "./openai-image-parameters";
@@ -332,13 +368,14 @@ async function executeApiMartImage(
     upstreamTaskId: task.upstream_task_id,
     submissionStarted: Boolean(task.upstream_submission_started_at),
     beforeSubmit: async () => {
-      const claimed = await db.query("UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id", [task.id]);
+      const claimed = await db.query("UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND execution_token=$2 AND lease_expires_at>now() AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id", [task.id, task.execution_token]);
       if (!claimed.rows[0]) throw new VideoSubmissionClaimLost();
       task.upstream_submission_started_at = new Date().toISOString();
     },
     onSubmitted: async (id) => {
       task.upstream_task_id = id;
-      await db.query("UPDATE tasks SET upstream_task_id=$1,updated_at=now() WHERE id=$2", [id, task.id]);
+      const persisted = await db.query("UPDATE tasks SET upstream_task_id=$1,updated_at=now() WHERE id=$2 AND (upstream_task_id IS NULL OR upstream_task_id=$1) RETURNING id", [id, task.id]);
+      if (!persisted.rows[0]) throw new VideoSubmissionClaimLost("原上游任务身份已改变");
     },
   });
   return Promise.all(outputUrls.map(url => fetchProviderResult(url)));
@@ -377,29 +414,36 @@ async function executeOpenAiAudio(
 
 async function executeApiMartVideo(task: WorkRow, credentials: Record<string, string>) {
   if (!storage.configured) throw new Error("公司对象存储尚未配置，不能保存生成视频");
+  if (task.upstream_task_id && task.poll_deadline_at && new Date(task.poll_deadline_at).getTime() <= Date.now()) {
+    throw new Error("视频状态查询超时；可恢复查询原任务，不会重新生成");
+  }
   const sources = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id);
   const providerSources: ProviderVideoSource[] = [];
   for (const source of sources) {
     providerSources.push({ ...source, ...await probeMediaBytes(source.bytes, source.mimeType), publicUrl: source.mimeType.startsWith("image/") ? undefined : await storage.signedDownloadUrl(source.objectKey, 1800) });
   }
-  const url = await runApiMartVideoTask({
+  const result = await stepApiMartVideoTask({
     baseUrl: task.base_url!, apiKey: credentials.apiKey || "", modelId: task.model_id!, prompt: task.prompt,
     parameters: task.parameters, sources: providerSources, upstreamTaskId: task.upstream_task_id,
     submissionStarted: Boolean(task.upstream_submission_started_at),
     beforeSubmit: async () => {
       const claimed = await db.query(
-        "UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id",
-        [task.id],
+        "UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND execution_token=$2 AND lease_expires_at>now() AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id",
+        [task.id, task.execution_token],
       );
       if (claimed.rows[0]) task.upstream_submission_started_at = new Date().toISOString();
       return Boolean(claimed.rows[0]);
     },
     onSubmitted: async (id) => {
       task.upstream_task_id = id;
-      await db.query("UPDATE tasks SET upstream_task_id=$1,updated_at=now() WHERE id=$2", [id, task.id]);
+      // Even a stale execution may persist the one already-submitted identity;
+      // it may never replace a different ID or submit another generation.
+      const persisted = await db.query("UPDATE tasks SET upstream_task_id=$1,poll_deadline_at=COALESCE(poll_deadline_at,now()+interval '20 minutes'),updated_at=now() WHERE id=$2 AND (upstream_task_id IS NULL OR upstream_task_id=$1) RETURNING id", [id, task.id]);
+      if (!persisted.rows[0]) throw new VideoSubmissionClaimLost("原上游任务身份已改变");
     },
   });
-  const response = await fetch(url, { signal: AbortSignal.timeout(180_000) });
+  if (result.status === "pending") throw new VideoTaskPending();
+  const response = await fetch(result.url, { signal: AbortSignal.timeout(180_000) });
   if (!response.ok) throw new Error(`视频下载失败（${response.status}）`);
   const contentType = response.headers.get("content-type")?.split(";")[0] || "video/mp4";
   const mimeType = contentType === "application/octet-stream" ? "video/mp4" : contentType;
@@ -612,18 +656,6 @@ async function loadSourceAssets(urls: string[], userId: string, concurrency = 4)
   return assets;
 }
 
-function startTaskLeaseHeartbeat(taskId: string) {
-  const interval = setInterval(() => {
-    void db
-      .query(
-        "UPDATE tasks SET lease_expires_at=now()+($2::int * interval '1 second'),updated_at=now() WHERE id=$1 AND status='processing'",
-        [taskId, TASK_LEASE_SECONDS],
-      )
-      .catch((error) => console.error(`Unable to renew task lease ${taskId}`, error));
-  }, Math.floor((TASK_LEASE_SECONDS * 1_000) / 3));
-  return () => clearInterval(interval);
-}
-
 async function loadSourceAsset(url: string, userId: string): Promise<SourceAsset> {
   const match = url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i);
   if (!match) throw new Error("参考图不是公司素材地址");
@@ -667,6 +699,7 @@ async function storeResults(
         },
         save: async (role, image, metadata) => saveResultAsset(task, index, image, role, metadata),
         updateMetadata: async (asset, metadata) => {
+            await assertTaskExecution(task);
           await db.query("UPDATE assets SET metadata=COALESCE(metadata,'{}'::jsonb) || $1::jsonb,updated_at=now() WHERE id=$2 AND owner_user_id=$3", [JSON.stringify(metadata), asset.assetId, task.user_id]);
         },
       });
@@ -675,6 +708,7 @@ async function storeResults(
         idempotencyKey: `task:${task.id}:asset:${primary.assetId}:generated`,
         metadata: { resultIndex: index, operationType: task.operation_type },
       });
+        scheduleAssetThumbnails(db, storage, primary.assetId);
       urls.push(`/api/assets/${primary.assetId}/content`);
       continue;
     }
@@ -690,6 +724,7 @@ async function storeResults(
 }
 
 async function saveResultAsset(task: WorkRow, index: number, result: { bytes: Uint8Array; mimeType: string }, role: string, metadata: Record<string, unknown>) {
+      await assertTaskExecution(task);
     const id = randomUUID();
     const extension =
       result.mimeType.startsWith("image/")

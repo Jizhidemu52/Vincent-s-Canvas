@@ -96,6 +96,18 @@ test("marks a workbook as shortened when it is sampled across worksheets", async
     expect(attachment.textContent).toContain("[工作表：Requirements]");
 });
 
+test.each(["xlsx", "biff8"] as const)("preserves Chinese, date formatting and cached formula results in %s", async (bookType) => {
+    const workbook = XLSX.utils.book_new();
+    const sheet = XLSX.utils.aoa_to_sheet([["款号", "日期", "合计"], ["碎花衬衫", 45949, 12]]);
+    sheet.B2.z = "yyyy-mm-dd";
+    sheet.C2.f = "6*2";
+    XLSX.utils.book_append_sheet(workbook, sheet, "订单");
+    const extension = bookType === "xlsx" ? "xlsx" : "xls";
+    const attachment = await parseChatAttachment(new File([XLSX.write(workbook, { type: "array", bookType })], `订单.${extension}`));
+    expect(attachment.textContent).toContain("[工作表：订单]");
+    expect(attachment.textContent).toContain("碎花衬衫\t2025-10-19\t12");
+});
+
 test("extracts actual PDF attachment text and preserves page boundaries", async () => {
     const { PDFDocument } = await import("pdf-lib");
     const pdf = await PDFDocument.create();

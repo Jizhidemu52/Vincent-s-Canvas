@@ -52,7 +52,7 @@ function mockServer(models: PublicModel[], tools: PublicToolConfiguration[] = []
         if (path === "/api/tasks" && init?.method === "POST") return Response.json({ task: { id: "task-1", status: "queued" } });
         const task = { id: "task-1", status: "success", resultUrls: ["/api/assets/result/content"] };
         if (path === "/api/tasks/task-1") return Response.json({ task });
-        if (path === "/api/tasks") return Response.json({ tasks: [task] });
+        if (path.startsWith("/api/tasks?")) return Response.json({ tasks: [task] });
         if (path === "/api/auth/session") return Response.json({ user: { id: "employee-a", status: "active", role: "designer" } });
         throw new Error(`Unexpected request ${path}`);
     }) as typeof fetch;

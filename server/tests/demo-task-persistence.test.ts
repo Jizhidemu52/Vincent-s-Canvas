@@ -27,6 +27,10 @@ function harness(options: { path?: string; process?: Parameters<typeof storeImag
   const downloads: string[] = [];
   const deps = {
     demoState, demoAssets, demoTasks, DemoStorageError, decodeInlineImageResult,
+    scheduleDemoAssetThumbnails: (asset: { id: string }) => {
+      // Derived previews must never be scheduled before their original is durable.
+      expect(demoState.load().assets.some((saved) => saved.id === asset.id)).toBe(true);
+    },
     storeImageResult: (input: Parameters<typeof storeImageResult>[0]) => storeImageResult({ ...input, ...(options.process ? { process: options.process } : {}) }),
     ImageResultPersistenceError, imageResultExtension,
     now: () => new Date().toISOString(), console: { error() {} },

@@ -1,18 +1,17 @@
 import { Router } from "express";
-import { CanvasDocumentError, assertCanvasOwner, missingCanvasDocument, parseCanvasDocumentWrite } from "../canvas-document";
+import { CanvasDocumentError, assertCanvasOwner, canvasDocumentMetadata, missingCanvasDocument, parseCanvasDocumentWrite } from "../canvas-document";
 import type { Database } from "../db";
 import type { AuthenticatedRequest } from "../types";
 import { accessClause } from "./assets";
 
 const columns = `external_id AS id,revision::double precision AS revision,deleted,document,updated_at AS "updatedAt"`;
+const acknowledgementColumns = `external_id AS id,revision::double precision AS revision,deleted,updated_at AS "updatedAt"`;
 // Project listing never sends graph/history JSON to the API process or browser.
 const summaryColumns = `external_id AS id,revision::double precision AS revision,deleted,updated_at AS "updatedAt",
     CASE WHEN deleted THEN NULL ELSE jsonb_build_object(
-        'id',external_id,'title',document->>'title','createdAt',document->>'createdAt','updatedAt',document->>'updatedAt',
-        'nodeCount',jsonb_array_length(document->'nodes'),'connectionCount',jsonb_array_length(document->'connections'),
-        'cover',(SELECT jsonb_build_object('content',node->'metadata'->>'content')
-            FROM jsonb_array_elements(document->'nodes') AS node
-            WHERE node->>'type'='image' AND coalesce(node->'metadata'->>'content','')<>'' LIMIT 1)
+        'id',external_id,'title',title,'createdAt',document_created_at,'updatedAt',document_updated_at,
+        'nodeCount',node_count,'connectionCount',connection_count,
+        'cover',CASE WHEN cover_url IS NULL THEN NULL ELSE jsonb_build_object('content',cover_url) END
     ) END AS summary`;
 
 export function createCanvasDocumentsRouter(db: Database) {
@@ -54,12 +53,15 @@ export function createCanvasDocumentsRouter(db: Database) {
                 if (new Set(accessible.rows.map(row => row.id)).size !== assetIds.length) throw new CanvasDocumentError("CANVAS_ASSET_FORBIDDEN", "画布包含不存在或无权读取的素材", 403);
             }
             const json = document === null ? null : JSON.stringify(document);
+            const metadata = canvasDocumentMetadata(document);
+            const summaryValues = [metadata.title, metadata.createdAt, metadata.updatedAt, metadata.nodeCount, metadata.connectionCount, metadata.coverUrl];
             // Both branches are atomic CAS writes. A tombstone can never become live again.
             const result = baseRevision === 0
-                ? await db.query(`INSERT INTO canvas_documents(owner_user_id,external_id,revision,deleted,document)
-                    VALUES($1,$2,1,$3,$4::jsonb) ON CONFLICT(owner_user_id,external_id) DO NOTHING RETURNING ${columns}`, [actor.id, id, document === null, json])
-                : await db.query(`UPDATE canvas_documents SET revision=revision+1,deleted=$4,document=$5::jsonb,updated_at=now()
-                    WHERE owner_user_id=$1 AND external_id=$2 AND revision=$3 AND (NOT deleted OR $4=true) RETURNING ${columns}`, [actor.id, id, baseRevision, document === null, json]);
+                ? await db.query(`INSERT INTO canvas_documents(owner_user_id,external_id,revision,deleted,document,title,document_created_at,document_updated_at,node_count,connection_count,cover_url)
+                    VALUES($1,$2,1,$3,$4::jsonb,$5,$6,$7,$8,$9,$10) ON CONFLICT(owner_user_id,external_id) DO NOTHING RETURNING ${acknowledgementColumns}`, [actor.id, id, document === null, json, ...summaryValues])
+                : await db.query(`UPDATE canvas_documents SET revision=revision+1,deleted=$4,document=$5::jsonb,updated_at=now(),
+                    title=$6,document_created_at=$7,document_updated_at=$8,node_count=$9,connection_count=$10,cover_url=$11
+                    WHERE owner_user_id=$1 AND external_id=$2 AND revision=$3 AND (NOT deleted OR $4=true) RETURNING ${acknowledgementColumns}`, [actor.id, id, baseRevision, document === null, json, ...summaryValues]);
             if (!result.rows[0]) {
                 const current = await db.query(`SELECT ${columns} FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2`, [actor.id, id]);
                 response.status(409).json({ error: "CANVAS_REVISION_CONFLICT", message: "云端画布已有更新，请保留本地改动并重新同步", document: current.rows[0] ?? missingCanvasDocument(id) });

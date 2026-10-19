@@ -9,7 +9,8 @@ type Entry = { nodes: CanvasNodeData[]; connections: unknown[]; groups: unknown[
 type History = { past: Entry[]; future: Entry[] };
 
 // Exercise the page's real command callbacks without mounting unrelated editor services.
-const source = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
+const source = readFileSync(new URL("../src/pages/canvas/use-canvas-history.ts", import.meta.url), "utf8")
+    + "\n" + readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const helperNames = new Set(["boundedCanvasHistory", "canvasHistoryForSave"]);
 const callbackNames = new Set(["flushPendingHistory", "duplicateNodes", "undoCanvas", "redoCanvas"]);

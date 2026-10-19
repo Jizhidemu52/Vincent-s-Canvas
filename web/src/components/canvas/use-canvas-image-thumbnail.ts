@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { resolveImageUrl } from "@/services/image-storage";
 import { acquireImageThumbnail } from "@/services/image-thumbnails";
-import type { ImageThumbnailEdge } from "@/lib/canvas/canvas-image-thumbnail";
+import { canvasServerThumbnailUrl, type ImageThumbnailEdge } from "@/lib/canvas/canvas-image-thumbnail";
 import type { ImageThumbnailLease } from "@/lib/image-thumbnail-cache";
 import type { CanvasNodeData } from "@/types/canvas";
 
@@ -18,6 +18,11 @@ export function useCanvasImageThumbnail(node: CanvasNodeData, edge: ImageThumbna
         let lease: ImageThumbnailLease | null = null;
         void (async () => {
             try {
+                const serverThumbnail = canvasServerThumbnailUrl(content, edge);
+                if (serverThumbnail) {
+                    setPreview({ source, url: serverThumbnail, thumbnail: true });
+                    return;
+                }
                 if (edge && storageKey && width && height) {
                     lease = await acquireImageThumbnail({ storageKey, edge, width, height }, controller.signal);
                     if (controller.signal.aborted) { lease?.release(); return; }

@@ -26,7 +26,8 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 | `demo_state_metadata` | `key` 主键、`value`；`initialized` 防止旧恢复文件重复覆盖新数据 |
 | `demo_oa_users` | `id` 内部用户主键、唯一 `subject` 对应 OA `userid`、`display_name` 对应姓名；同名不合并，Token 更新不改变内部 ID |
 | `demo_oa_sessions` | `token_hash` 平台会话 SHA-256 主键、`user_id`、`expires_at` 毫秒时间；有效期两小时，不保存 OA Token |
-| `demo_canvas_documents` | `(owner_user_id,external_id)` 联合主键、`revision` 正整数、`deleted`、`document_json`、`updated_at`；文档与删除墓碑按员工持久保存 |
+| `demo_canvas_documents` | `(owner_user_id,external_id)` 联合主键、`revision` 正整数、`deleted`、`document_json`、`updated_at`；额外保存标题、文档时间、节点数、连线数和封面，列表不解码整张画布 |
+| `demo_asset_projects` | 按员工保存项目 UUID、外部画布标识、名称和更新时间；项目同步与素材批量移动使用同一持久身份 |
 | `demo_library_publications` | `id` 主键、`author_id`、`department_id`、`request_id`、`status`、`created_at`、`fields_json`；`(author_id,request_id)` 唯一，JSON 保存显式发布内容与图片快照元数据 |
 | `demo_library_media` | `object_key` 主键、`mime_type`、`bytes` 原始 BLOB；共享原图独立于作者的 `demo_assets` |
 | `demo_library_deliveries` | `operation_key` 主键、`fields_json`；保存已签发的下载与私有素材复制操作，不等于已收到成功收据 |
@@ -83,7 +84,9 @@ OA 登录请求向固定 HTTPS 用户信息接口发送 Bearer Token，仅使用
 
 OA 员工模式的前端同步整张画布：节点位置与尺寸、连线、编辑内容、参考媒体、画布内聊天、最多 50 步撤销／重做历史和视口。文件沿用素材存储：正式环境为 S3／MinIO，演示环境为 `demo_assets.bytes`；同步上传保留文件原字节，不缩放或再次编码，文档只保存可访问的服务端素材引用，不持久化浏览器 `blob:`、媒体 data URL 或本地 `storageKey`。文档请求上限为 20 MiB。
 
-`GET /api/canvas-documents` 只列当前员工的文档和墓碑；`PUT /api/canvas-documents/:id` 使用 `baseRevision` 比较并交换版本，初次写入从 0 开始，`document:null` 表示删除。两者都要求 `X-Canvas-Owner-Id` 严格等于当前会话员工，并在保存时检查引用素材权限。SQLite 使用 `IMMEDIATE` 事务执行原子版本比较；冲突返回 409 和当前版本，前端保留完整冲突副本。真实删除墓碑不得以原 ID 复活，即使版本匹配；需要保留旧设备的改动时创建新 ID 的副本。
+`GET /api/canvas-documents` 只列当前员工的文档和墓碑；`?summary=1` 仅返回摘要，打开时通过 `GET /api/canvas-documents/:id` 获取完整内容。`PUT /api/canvas-documents/:id` 使用 `baseRevision` 比较并交换版本，初次写入从 0 开始，`document:null` 表示删除；成功仅返回 `{document:{id,revision,deleted,updatedAt}}`，不重复返回整张画布。所有接口要求 `X-Canvas-Owner-Id` 严格等于当前会话员工，并在保存时检查引用素材权限。SQLite 使用 `IMMEDIATE` 事务执行原子版本比较；冲突返回 409 和当前完整版本，前端保留冲突副本。真实删除墓碑不得以原 ID 复活，即使版本匹配；需要保留旧设备的改动时创建新 ID 的副本。
+
+`034_canvas_document_summaries.sql` 新增 `title`、`document_created_at`、`document_updated_at`、`node_count`、`connection_count`、`cover_url`。迁移一次性从现有 JSON 派生；之后保存正文与摘要在同一次原子写入完成，列表不再遍历节点。删除墓碑同步清空摘要。SQLite 在启动时以事务完成相同的派生字段初始化。
 
 本地提交先于云端提交；断网或同步失败保留缓存和待同步改动，恢复后重试并显示同步状态。旧匿名／共用本地画布不自动迁入员工账号，须由用户导出后导入。此机制不是实时协作或无限历史；非 OA／standalone 模式仍使用本地画布。新迁移在正式 PostgreSQL、S3／MinIO 联动及真实 OA 员工入口尚需目标部署环境验证。
 
@@ -106,6 +109,10 @@ SQLite 适配器在同一事务保存快照、分享、收据及接收人的 `de
 
 ## 任务执行与恢复字段
 
+`036_task_scheduling.sql` 新增 `available_at`（下一次可领取时间）、`execution_token`（本轮执行权）、`model_slot_token`／`model_slot_expires_at`（模型占位）和 `poll_deadline_at`（原视频查询截止时间），并建立等待／轮询／模型占位索引。Redis 就绪队列与延迟队列分开，未到期任务不会被提前弹出；模型并发使用有序集合租约与心跳，PostgreSQL 保留权威占位，Redis 丢失后可重建。
+
+视频提交取得上游 ID 后，释放本地执行名额并在到期后单次查询，仍保留模型的在途占位；不会因释放本地 Worker 而突破模型并发限制。恢复只查询原 ID。已提交但结果不确定的任务保留占位和待核查状态，不自动重新提交；这可能有意阻塞后续同模型任务，须先核实原任务。
+
 `018_task_execution_lease.sql` 为 `tasks` 新增 `lease_expires_at timestamptz`，并建立仅覆盖 `processing` 任务的租约索引。Worker 领取任务时写入租约；完成、失败或回队时清除。启动恢复只将租约缺失或已过期的执行中任务回队，避免立即抢占仍有效的执行。
 
 `020_video_upstream_identity.sql` 为 `tasks` 新增以下可空字段：
@@ -116,6 +123,16 @@ SQLite 适配器在同一事务保存快照、分享、收据及接收人的 `de
 | `upstream_submission_started_at` | `timestamptz` | 标记已开始提交；无返回 ID 时保留提交不确定状态，防止自动重复生成 |
 
 恢复查询不等于重新生成。已开始提交的视频发生不确定网络错误时保留原任务和预留额度，暂停后核实上游状态；只有明确失败或完成才能按对应流程结算。
+
+## 账号删除与会话快路径
+
+`032_users_deleted_at.sql` 新增 `users.deleted_at timestamptz`。密码、企业微信、OA 身份及会话读取均拒绝已软删除账号；已有被删的外部身份不因再次登录而自动创建替代账号。积分周期按北京时间月份计算，当前周期会话直接读取余额；只有确实跨周期的账号才进入刷新事务。
+
+## 素材与列表索引
+
+`033_performance_indexes.sql` 增加素材任务关联、预留额度用户／状态、批次用户时间、公司素材和个人／管理任务与历史游标索引。`035_asset_thumbnails.sql` 为素材增加 `thumbnail_256_key`、`thumbnail_1024_key`，以及全库／员工／部门／项目的 `(created_at DESC,id DESC)` 未删除素材索引。缩略图是派生 WebP 对象，原文件和原图下载不变。
+
+列表默认每页 60 条、最多 200 条，按时间与 ID 稳定排序；游标保留 PostgreSQL 微秒精度，避免同一毫秒内跳过记录。任务恢复按已知 ID 或请求 ID 精确查询，不依赖最新一页。索引迁移使用项目现有事务迁移流程，不使用 `CONCURRENTLY`；应在维护窗口运行并先备份。本次代码更新不等于目标服务器已经执行这些迁移。
 
 ## 访客身份约束
 

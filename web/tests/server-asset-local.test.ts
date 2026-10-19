@@ -24,3 +24,9 @@ test("text stays text and unsupported audio/other records cannot masquerade as i
     expect(isSupportedServerAsset(asset({ kind: "other", mimeType: "audio/wav" }))).toBe(false);
     expect(() => serverAssetToLocal(asset({ kind: "other" }))).toThrow();
 });
+
+test("light summaries retain recreate availability and detail metadata keeps legacy prompts", () => {
+    expect(serverAssetToLocal(asset({ canRecreate: true, prompt: null })).metadata?.canRecreate).toBe(true);
+    expect(serverAssetToLocal(asset({ prompt: null, metadata: { prompt: '保留旧版提示词' } })).metadata?.prompt).toBe('保留旧版提示词');
+    expect(serverAssetToLocal(asset({ prompt: '采用完整详情', metadata: { prompt: '旧记录' } })).metadata?.prompt).toBe('采用完整详情');
+});

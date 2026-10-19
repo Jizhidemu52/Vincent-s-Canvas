@@ -68,6 +68,94 @@ test("APIMart Sonnet streaming preserves native thinking signatures and tool res
   expect(calls).toBe(1);
 });
 
+for (const thinking of [undefined, false, true]) {
+  test(`APIMart Sonnet preserves native Unicode and upstream thinking defaults in both response modes (thinking=${thinking})`, async () => {
+    const text = '中文针织 🧶🧵，引号 "，反斜杠 \\，字面转义 \\u4e2d，换行\n，行分隔\u2028，孤立代理\ud800';
+    const schema = {
+      type: "object", properties: { "材质": { type: "string", description: text, enum: ["棉质针织🧶", "棉麻"] } },
+      required: ["材质"], additionalProperties: false,
+    };
+    const assistant = [
+      { type: "thinking", thinking: "", signature: `opaque-signature:${text}` },
+      { type: "redacted_thinking", data: `opaque-data:${text}` },
+      { type: "tool_use", id: "inspect-1", name: "inspect_images", input: { "材质": "棉质针织🧶" } },
+    ];
+    const expected = structuredClone({
+      model: "claude-sonnet-5-5", system: text, max_tokens: 2048,
+      messages: [
+        { role: "user", content: [{ type: "text", text }, { type: "image", source: { type: "base64", media_type: "image/png", data: "AQID" } }] },
+        { role: "assistant", content: assistant },
+        { role: "user", content: [{ type: "tool_result", tool_use_id: "inspect-1", content: text }] },
+      ],
+      tools: [{ name: "inspect_images", description: text, input_schema: schema }], tool_choice: { type: "auto" },
+    });
+    const payloads: Record<string, unknown>[] = [];
+    globalThis.fetch = (async (url, init) => {
+      expect(String(url)).toBe("http://apimart.test/v1/messages");
+      const encoded = String(init?.body);
+      expect(encoded).toContain("中文针织 🧶🧵");
+      const payload = JSON.parse(encoded);
+      expect(encoded).toBe(JSON.stringify(payload));
+      expect(payload).not.toHaveProperty("thinking");
+      expect(payload).not.toHaveProperty("output_config");
+      payloads.push(payload);
+      expect(payload).toEqual({ ...expected, ...(payload.stream ? { stream: true } : {}) });
+      if (payload.stream) return new Response('data: {"type":"message_stop"}\n\n', { headers: { "content-type": "text/event-stream" } });
+      return Response.json({ type: "message", content: [{ type: "text", text: "OK" }], stop_reason: "end_turn" });
+    }) as typeof fetch;
+    const input = {
+      input: [
+        { role: "system" as const, content: text },
+        { role: "user" as const, content: [{ type: "input_text" as const, text }, { type: "input_image" as const, image_url: "data:image/png;base64,AQID" }] },
+        { type: "claude_assistant" as const, content: assistant },
+        { type: "function_call_output" as const, call_id: "inspect-1", output: text },
+      ],
+      tools: [{ type: "function" as const, name: "inspect_images", description: text, parameters: schema }],
+      claude: { thinking },
+    };
+    expect((await requestChatCompletion(model, credentials, input)).content).toBe("OK");
+    expect(await (await requestClaudeStream(model, credentials, input)).text()).toContain("message_stop");
+    expect(payloads).toHaveLength(2);
+    expect(payloads[0]).not.toHaveProperty("stream");
+    expect(payloads[1]).toEqual({ ...payloads[0], stream: true });
+  });
+}
+
+test.each([false, true])("native Anthropic Sonnet keeps its existing Unicode and thinking defaults (stream=%s)", async stream => {
+  let calls = 0;
+  globalThis.fetch = (async (_url, init) => {
+    calls++;
+    const encoded = String(init?.body);
+    expect(encoded).toContain("中文🧶");
+    const payload = JSON.parse(encoded);
+    expect(payload).not.toHaveProperty("thinking");
+    expect(payload).not.toHaveProperty("output_config");
+    if (stream) return new Response('data: {"type":"message_stop"}\n\n');
+    return Response.json({ content: [{ type: "text", text: "OK" }] });
+  }) as typeof fetch;
+  const request = stream ? requestClaudeStream : requestChatCompletion;
+  await request({ ...model, protocol: "anthropic" }, credentials, { input: [{ role: "user", content: "中文🧶" }], tools: [], claude: { thinking: false } });
+  expect(calls).toBe(1);
+});
+
+test.each([
+  { protocol: "anthropic", model_id: "claude-sonnet-5", thinking: { type: "disabled" } },
+  { protocol: "openai-chat", model_id: "claude-sonnet-5-5", thinking: undefined },
+  { protocol: "apimart", model_id: "gpt-6-astra", thinking: undefined },
+  { protocol: "apimart", model_id: "gpt-6-sol", thinking: undefined },
+])("other models and provider protocols keep their existing request encoding: %j", async target => {
+  globalThis.fetch = (async (_url, init) => {
+    expect(String(init?.body)).toContain("中文🧶");
+    const payload = JSON.parse(String(init?.body));
+    expect(payload.thinking).toEqual(target.thinking);
+    expect(payload).not.toHaveProperty("output_config");
+    return target.protocol === "anthropic"
+      ? Response.json({ content: [{ type: "text", text: "OK" }] })
+      : Response.json({ choices: [{ message: { content: "OK" }, finish_reason: "stop" }] });
+  }) as typeof fetch;
+  expect((await requestChatCompletion({ ...model, ...target }, credentials, { input: [{ role: "user", content: "中文🧶" }], tools: [], claude: { thinking: false } })).content).toBe("OK");
+});
+
 test.each([false, true])("APIMart Sonnet errors never leak credentials or replay submission (stream=%s)", async stream => {
   let calls = 0;
   globalThis.fetch = (async () => { calls++; return Response.json({ error: { type: "apimart_error", message: `Authorization: Bearer ${credentials.apiKey}` } }, { status: 401 }); }) as unknown as typeof fetch;

@@ -16,6 +16,7 @@ export type Cache = {
     incr(key: string): Promise<number>;
     decr(key: string): Promise<number>;
     expire(key: string, seconds: number): Promise<number>;
+    eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown>;
 };
 
 export function createDatabase(connectionString: string) {

@@ -19,7 +19,7 @@ describe("admin and team overview loading", () => {
         const requests = pendingRequests();
         const result = loadAdminOverview();
         expect(requests).toHaveLength(4);
-        expect(requests.map((request) => request.url)).toContain("/api/admin/history?page=1&pageSize=1");
+        expect(requests.map((request) => request.url)).toContain("/api/admin/history?limit=1");
         requests[0].respond({ users: [{ id: "account" }], totalUsedCredits: 0 });
         requests[1].respond({ departments: [{ id: "department" }] });
         requests[2].respond({ message: "审计暂不可用" }, 503);

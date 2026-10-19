@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { DemoOaStore } from "../src/demo-oa-store";
 
 const temporaryPrefix = "canvas-demo-library-http-";
-const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jB1sAAAAASUVORK5CYII=", "base64");
+// Two independently encoded, decoded 1x1 RGBA PNGs have the same byte length.
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAADUlEQVR4nGP8z8DwHwAFBQIAgJbjwgAAAABJRU5ErkJggg==", "base64");
+const replacementPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAADUlEQVR4nGNk+M/wHwAEBgIAe2BNVAAAAABJRU5ErkJggg==", "base64");
 type Employee = ReturnType<DemoOaStore["login"]>;
 
 async function createHarness() {
@@ -121,10 +123,15 @@ test("demo library persists independent publication and reader copies, authentic
     expect((await h.request(entryPath, h.b)).status).toBe(200);
     expect((await h.request(`${entryPath}/stats`, h.b)).status).toBe(403);
     expect((await h.post(`${entryPath}/moderate`, h.b, { reason: "伪造管理员" })).status).toBe(403);
-    // Existing private upload endpoint permits same-size replacement, even corrupt bytes.
-    // This must never corrupt the independent already-published snapshot.
-    const sourceReplacement = new Uint8Array(original.byteLength).fill(7);
+    // A valid replacement must not change the independent published snapshot;
+    // corrupt same-length input remains rejected without changing the source.
+    expect((await h.request(source.uploadUrl, h.a, { method: "PUT", body: new Uint8Array(original.byteLength).fill(7) })).status).toBe(415);
+    expect(await h.request(`/api/assets/${source.assetId}/content`, h.a).then(r => r.bytes())).toEqual(original);
+    const sourceReplacement = new Uint8Array(replacementPng);
+    expect(sourceReplacement.byteLength).toBe(original.byteLength);
+    expect(sourceReplacement).not.toEqual(original);
     expect((await h.request(source.uploadUrl, h.a, { method: "PUT", body: sourceReplacement })).status).toBe(204);
+    expect(await h.request(`/api/assets/${source.assetId}/content`, h.a).then(r => r.bytes())).toEqual(sourceReplacement);
     expect(await h.request(image.contentUrl, h.b).then(r => r.bytes())).toEqual(original);
     const reuseResponse = await h.post(`${imagePath}/reuse`, h.b, { requestId: "reuse-001" });
     expect(reuseResponse.status).toBe(200);

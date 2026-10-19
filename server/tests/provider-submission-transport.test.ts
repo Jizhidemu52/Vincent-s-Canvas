@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { createConnection, createServer as createTcpServer, type Socket } from "node:net";
 import { createServer as createHttpsServer } from "node:https";
 import { createServer as createHttpServer } from "node:http";
@@ -42,6 +43,7 @@ afterAll(async () => {
 });
 
 type ConnectionAttempt = { attempt: number; phase: "initial_tls" | "http_started"; elapsedMs: number; connectMs?: number; code?: string };
+type ClientHello = { recordBytes: number; supportedGroups: number[]; keyShareGroups: number[] };
 type DeadlineFixtureResult = {
   finished: boolean;
   exitCode: number | null;
@@ -50,7 +52,14 @@ type DeadlineFixtureResult = {
   closedConnections: number;
   closedBeforeRequest: number;
   requests: number;
+  posts: number;
   connects: number;
+  baselineHello?: ClientHello;
+  clientHellos: ClientHello[];
+  tlsProtocols: string[];
+  receivedBodyBytes: number;
+  receivedBodySha256?: string;
+  contentLength?: number;
   body: string;
   head: { status?: number; connectionAttempts?: ConnectionAttempt[]; error?: { code: string; phase: string; attempts: number; connectionAttempts: ConnectionAttempt[] } } | null;
 };
@@ -62,23 +71,38 @@ async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unk
     import { createServer as createHttpsServer } from 'node:https';
     import { createServer as createHttpServer } from 'node:http';
     import { createServer as createTcpServer, createConnection } from 'node:net';
+    import { connect as connectTls } from 'node:tls';
     import { spawn } from 'node:child_process';
+    import { createHash } from 'node:crypto';
     import { fileURLToPath } from 'node:url';
     let raw = ''; for await (const chunk of process.stdin) raw += chunk;
     const config = JSON.parse(raw);
-    const counts = { connections: 0, endedConnections: 0, closedConnections: 0, closedBeforeRequest: 0, requests: 0, connects: 0 };
+    const counts = { connections: 0, endedConnections: 0, closedConnections: 0, closedBeforeRequest: 0, requests: 0, posts: 0, connects: 0 };
+    const clientHellos = [], tlsProtocols = [];
+    let receivedBodyBytes = 0, receivedBodySha256, contentLength;
+    let baselineHello, resolveBaselineHello;
     const sockets = new Set();
     const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
-    const backend = createHttpsServer({ cert: config.cert, key: config.key }, (request, response) => {
+    const compactHello = config.mode === 'compact-client-hello';
+    const backend = createHttpsServer({ cert: config.cert, key: config.key, ...(compactHello ? { minVersion: 'TLSv1.3' } : {}) }, (request, response) => {
       counts.requests++;
+      if (request.method === 'POST') counts.posts++;
+      tlsProtocols.push(request.socket.getProtocol());
       counts.closedBeforeRequest = counts.closedConnections;
-      request.resume();
-      request.on('end', () => setTimeout(() => {
+      contentLength = Number(request.headers['content-length']);
+      const received = [];
+      request.on('data', chunk => received.push(chunk));
+      request.on('end', () => {
+        const bytes = Buffer.concat(received);
+        receivedBodyBytes += bytes.length;
+        receivedBodySha256 = createHash('sha256').update(bytes).digest('hex');
+        setTimeout(() => {
         if (config.mode === 'slow-close') { request.socket.destroy(); return; }
         response.writeHead(200, { 'content-type': 'text/plain' });
         response.write('slow ');
         setTimeout(() => response.end('response'), 300);
-      }, 450));
+        }, 450);
+      });
     });
     const backendPort = await listen(backend);
     function pipeToBackend(socket, established = false, head = Buffer.alloc(0)) {
@@ -95,7 +119,42 @@ async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unk
     }
     const isProxy = config.mode.startsWith('proxy-');
     const front = isProxy ? createHttpServer() : createTcpServer(socket => {
-      if (config.mode === 'slow-close' || (['recover', 'late-tls'].includes(config.mode) && counts.connections > 1)) pipeToBackend(socket);
+      if (compactHello) {
+        // Model a path that drops a large first TLS record, without making any
+        // claim about which real network component caused the production stall.
+        let hello = Buffer.alloc(0);
+        const readHello = chunk => {
+          hello = Buffer.concat([hello, chunk]);
+          if (hello.length < 5 || hello.length < 5 + hello.readUInt16BE(3)) return;
+          socket.pause(); socket.removeListener('data', readHello);
+          const observed = { recordBytes: 5 + hello.readUInt16BE(3), supportedGroups: [], keyShareGroups: [] };
+          // Inspect the real ClientHello's supported_groups and key_share
+          // extensions; no TLS encryption or handshake is implemented here.
+          let offset = 5 + 4 + 2 + 32;
+          offset += 1 + hello[offset];
+          offset += 2 + hello.readUInt16BE(offset);
+          offset += 1 + hello[offset];
+          const extensionsEnd = offset + 2 + hello.readUInt16BE(offset); offset += 2;
+          while (offset + 4 <= extensionsEnd) {
+            const type = hello.readUInt16BE(offset), length = hello.readUInt16BE(offset + 2); offset += 4;
+            const extension = hello.subarray(offset, offset + length); offset += length;
+            if (type === 10) for (let index = 2; index < extension.length; index += 2) observed.supportedGroups.push(extension.readUInt16BE(index));
+            if (type === 51) for (let index = 2; index + 4 <= extension.length;) {
+              observed.keyShareGroups.push(extension.readUInt16BE(index));
+              index += 4 + extension.readUInt16BE(index + 2);
+            }
+          }
+          if (resolveBaselineHello) {
+            const resolve = resolveBaselineHello; resolveBaselineHello = undefined;
+            resolve(observed); socket.resume(); return;
+          }
+          clientHellos.push(observed);
+          if (observed.recordBytes > 1200) { socket.resume(); return; }
+          pipeToBackend(socket, false, hello);
+        };
+        socket.on('data', readHello);
+      }
+      else if (['slow-close', 'large-body'].includes(config.mode) || (['recover', 'late-tls'].includes(config.mode) && counts.connections > 1)) pipeToBackend(socket);
       else if (config.mode === 'late-tls') {
         const pending = [];
         const holdClientHello = chunk => pending.push(chunk);
@@ -126,10 +185,25 @@ async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unk
       }
     });
     const frontPort = await listen(front);
+    if (compactHello) {
+      // Independently capture native OpenSSL's unmodified defaults so removing
+      // any supported group in the worker cannot satisfy the size regression.
+      let captureDeadline;
+      const captured = new Promise((resolve, reject) => {
+        resolveBaselineHello = resolve;
+        captureDeadline = setTimeout(() => reject(new Error('Native ClientHello capture timed out')), 2000);
+      });
+      const baseline = connectTls({ host: '127.0.0.1', port: frontPort });
+      baseline.on('error', () => {});
+      baselineHello = await captured.finally(() => clearTimeout(captureDeadline));
+      baseline.destroy();
+    }
     const env = { ...process.env };
     for (const key of ['HTTP_PROXY','HTTPS_PROXY','NO_PROXY','http_proxy','https_proxy','no_proxy']) delete env[key];
     if (isProxy) env.HTTPS_PROXY = 'http://fixture-user:fixture-secret@127.0.0.1:' + frontPort;
-    const input = { url: 'https://127.0.0.1:' + (isProxy ? backendPort : frontPort) + '/submit', method: 'POST', headers: { authorization: 'Bearer fixture-model-key' }, body: Buffer.from('private paid job').toString('base64') };
+    const requestBody = config.mode === 'large-body' ? Buffer.alloc(1024 * 1024) : Buffer.from('private paid job');
+    if (config.mode === 'large-body') for (let index = 0; index < requestBody.length; index++) requestBody[index] = index % 251;
+    const input = { url: 'https://127.0.0.1:' + (isProxy ? backendPort : frontPort) + '/submit', method: 'POST', headers: { authorization: 'Bearer fixture-model-key' }, body: requestBody.toString('base64') };
     if (Object.hasOwn(config, 'connectTimeoutMs')) input.connectTimeoutMs = config.connectTimeoutMs;
     const child = spawn(process.execPath, [fileURLToPath(config.worker)], { env, stdio: ['pipe','pipe','ignore'] });
     let output = '', finished = true;
@@ -141,7 +215,7 @@ async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unk
     // Observe TCP closure before cleanup can satisfy any closure assertion.
     await new Promise(resolve => setTimeout(resolve, 50));
     const separator = output.indexOf('\\n');
-    const result = { finished, exitCode, ...counts, head: separator < 0 ? null : JSON.parse(output.slice(0, separator)), body: separator < 0 ? '' : output.slice(separator + 1) };
+    const result = { finished, exitCode, ...counts, baselineHello, clientHellos, tlsProtocols, receivedBodyBytes, receivedBodySha256, contentLength, head: separator < 0 ? null : JSON.parse(output.slice(0, separator)), body: separator < 0 ? '' : output.slice(separator + 1) };
     for (const socket of sockets) socket.destroy();
     backend.closeAllConnections(); backend.close(); front.close();
     process.stdout.end(JSON.stringify(result) + '\\n');
@@ -156,6 +230,41 @@ async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unk
 }
 
 describe("provider submission transport", () => {
+  test("authorized TLS submits one exact 1MiB HTTP body", async () => {
+    const result = await runConnectionDeadlineFixture("large-body", 500);
+    const expected = Buffer.alloc(1024 * 1024);
+    for (let index = 0; index < expected.length; index++) expected[index] = index % 251;
+    expect(result.finished).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.head?.status).toBe(200);
+    expect(result.requests).toBe(1);
+    expect(result.posts).toBe(1);
+    expect(result.connections).toBe(1);
+    expect(result.contentLength).toBe(expected.length);
+    expect(result.receivedBodyBytes).toBe(expected.length);
+    expect(result.receivedBodySha256).toBe(createHash("sha256").update(expected).digest("hex"));
+    expect(result.tlsProtocols).toEqual(["TLSv1.3"]);
+  });
+
+  test("a compact ClientHello crosses a size-sensitive path without removing PQC groups or downgrading TLS", async () => {
+    const result = await runConnectionDeadlineFixture("compact-client-hello", 500);
+    expect(result.baselineHello!.recordBytes).toBeGreaterThan(1200);
+    expect(result.baselineHello!.keyShareGroups).toContain(4588); // X25519MLKEM768
+    expect(result.finished).toBe(true);
+    expect(result.head?.error).toBeUndefined();
+    expect(result.head?.status).toBe(200);
+    expect(result.body).toBe("slow response");
+    expect(result.requests).toBe(1);
+    expect(result.posts).toBe(1);
+    expect(result.head!.connectionAttempts).toHaveLength(1);
+    expect(result.clientHellos).toHaveLength(1);
+    expect(result.clientHellos[0]!.recordBytes).toBeLessThanOrEqual(1200);
+    expect(result.clientHellos[0]!.supportedGroups).toEqual(result.baselineHello!.supportedGroups);
+    expect(result.clientHellos[0]!.supportedGroups).toContain(4588);
+    expect(result.clientHellos[0]!.keyShareGroups).not.toContain(4588);
+    expect(result.tlsProtocols).toEqual(["TLSv1.3"]);
+  });
+
   for (const mode of ["tls-blackhole", "proxy-connect-blackhole", "proxy-tls-blackhole"]) {
     test(`pre-HTTP deadline bounds ${mode}, closes its sockets and never submits or bypasses a proxy`, async () => {
       const result = await runConnectionDeadlineFixture(mode, 150);

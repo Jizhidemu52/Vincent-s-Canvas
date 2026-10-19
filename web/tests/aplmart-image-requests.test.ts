@@ -44,7 +44,11 @@ beforeEach(() => {
         }
         if (path === "/api/tasks" && init?.method === "POST") return Response.json({ task: { id: "task-1", status: "queued" } });
         if (path === "/api/tasks/task-1") return Response.json({ task: { id: "task-1", status: "success", resultUrls: ["/api/assets/result/content"] } });
-        if (path === "/api/tasks") return Response.json({ tasks: batchTasks.length ? batchTasks : [{ id: "task-1", status: "success", resultUrls: ["/api/assets/result/content"] }] });
+        if (path.startsWith("/api/tasks?")) {
+            const ids = new URL(path, "http://test.local").searchParams.get("ids")?.split(",");
+            expect(ids).toEqual(batchTasks.map(task => task.id));
+            return Response.json({ tasks: batchTasks.filter(task => ids!.includes(task.id)) });
+        }
         if (path === "/api/auth/session") return Response.json({ user: { id: "qa-user", status: "active", role: "designer" } });
         throw new Error(`Unexpected request: ${path}`);
     }) as typeof fetch;

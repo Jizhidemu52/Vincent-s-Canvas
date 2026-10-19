@@ -112,37 +112,33 @@ describe("read-only chat image recovery", () => {
         expect(calls).toHaveLength(1);
     });
 
-    test("a missing task ID selects only the exact root requestId plus :0 from the list", async () => {
+    test("a missing task ID queries the exact root requestId plus :0 independently of list pagination", async () => {
         respond((url) => {
-            expect(url).toBe("/api/tasks");
-            return { tasks: [
-                { ...originalTask, id: "wrong-suffix", requestId: "chat-request:1" },
-                { ...originalTask, id: "wrong-prefix", requestId: "prefix-chat-request:0" },
-                originalTask,
-            ] };
+            expect(url).toBe("/api/tasks/by-request/chat-request%3A0");
+            return { task: originalTask };
         });
         expect(await recoverChatImageTask({ ...pending, taskId: undefined })).toMatchObject({ kind: "success", task: { id: "original-task" } });
-        expect(calls).toEqual([{ url: "/api/tasks", method: "GET" }]);
+        expect(calls).toEqual([{ url: "/api/tasks/by-request/chat-request%3A0", method: "GET" }]);
     });
 
-    test("a list without an exact requestId match stops without submitting anything", async () => {
-        respond(() => ({ tasks: [{ ...originalTask, requestId: "chat-request:1" }] }));
+    test("an exact request lookup with mismatched identity stops without submitting anything", async () => {
+        respond(() => ({ task: { ...originalTask, requestId: "chat-request:1" } }));
         const result = await recoverChatImageTask({ ...pending, taskId: undefined });
         expect(result.kind).toBe("needs_attention");
         if (result.kind !== "needs_attention") throw new Error("Expected needs_attention");
-        expect(result.content).toContain("chat-request");
+        expect(result.content).toContain("标识不匹配");
         expect(result.content).toContain("请勿重复生成");
         expect(calls).toHaveLength(1);
     });
 
-    test("after list lookup, waiting and processing poll only the original ID and notify once per status", async () => {
+    test("after exact request lookup, waiting and processing poll only the original ID and notify once per status", async () => {
         const saved: string[] = [];
         const statuses = ["waiting", "processing", "processing", "success"];
         respond((url) => {
             const status = statuses.shift();
             if (!status) throw new Error("Unexpected extra poll");
             const task = { ...originalTask, status };
-            return url === "/api/tasks" ? { tasks: [task] } : { task };
+            return { task };
         });
         const result = await recoverChatImageTask({ ...pending, taskId: undefined }, {
             onTask: async (task) => { saved.push(`${task.id}:${task.status}`); },
@@ -150,7 +146,7 @@ describe("read-only chat image recovery", () => {
         expect(result.kind).toBe("success");
         expect(saved).toEqual(["original-task:waiting", "original-task:processing", "original-task:success"]);
         expect(calls).toEqual([
-            { url: "/api/tasks", method: "GET" },
+            { url: "/api/tasks/by-request/chat-request%3A0", method: "GET" },
             { url: "/api/tasks/original-task", method: "GET" },
             { url: "/api/tasks/original-task", method: "GET" },
             { url: "/api/tasks/original-task", method: "GET" },

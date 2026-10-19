@@ -80,7 +80,7 @@ export function SeamlessStitchPage() {
         if (historyBusyRef.current) return;
         historyBusyRef.current = true;
         try {
-            const tasks = await listQueuedTasks();
+            const tasks = await listQueuedTasks(undefined, "seamless_stitch");
             if (!mountedRef.current) return;
             setHistory(tasks.filter((task) => task.operationType === "seamless_stitch").slice(0, 20));
             setHistoryError("");

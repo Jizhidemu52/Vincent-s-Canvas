@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 
 import { requestChatCompletion } from "../src/routes/chat";
+import { readProviderSubmissionDiagnostics } from "../src/provider-submission-transport";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -180,6 +181,24 @@ test("Mark chat reports malformed JSON without resubmission", async () => {
     let calls = 0;
     globalThis.fetch = (async () => { calls++; return new Response("not-json", { headers: { "content-type": "application/json" } }); }) as unknown as typeof fetch;
     await expect(requestChatCompletion(model, credentials, plainInput)).rejects.toMatchObject({ code: "APIMART_CHAT_INVALID_RESPONSE" });
+    expect(calls).toBe(1);
+});
+
+test.each(["gpt-6-astra", "gpt-6-sol"])("Mark preserves response-stream transport diagnostics without replaying %s", async modelId => {
+    const transportError = Object.assign(new Error("Response stream interrupted"), {
+        code: "PROVIDER_RESPONSE_STREAM_ERROR", phase: "response", attempts: 1,
+    });
+    const error = new Error("JSON body read interrupted", { cause: transportError });
+    let calls = 0;
+    globalThis.fetch = (async () => {
+        calls++;
+        return new Response(new ReadableStream<Uint8Array>({ pull(controller) { controller.error(error); } }), {
+            headers: { "content-type": "application/json" },
+        });
+    }) as unknown as typeof fetch;
+    const received = await requestChatCompletion({ ...model, model_id: modelId }, credentials, plainInput).catch(error => error);
+    expect(received).toBe(error);
+    expect(readProviderSubmissionDiagnostics(received)).toEqual({ code: "PROVIDER_RESPONSE_STREAM_ERROR", phase: "response", attempts: 1 });
     expect(calls).toBe(1);
 });
 

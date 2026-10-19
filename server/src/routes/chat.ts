@@ -6,12 +6,13 @@ import type { AppConfig } from "../config";
 import type { Database } from "../db";
 import { resolveToolExecution } from "../tool-configuration";
 import { decryptSecret } from "../security";
-import { fetchProviderSubmission } from "../provider-submission-transport";
+import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "../provider-submission-transport";
 import type { AuthenticatedRequest } from "../types";
 import { beginUsageChat, finishUsageChat } from "../usage-analytics";
 import { beginChatBilling, ChatStreamOutcome, finishChatBilling } from "../chat-billing";
 import { getCreditsEnabled } from "../credit-policy";
 import { deploymentFeatures } from "../deployment-features";
+import { DuplicateJsonKeyError, parseStrictJson } from "../strict-json";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInput =
@@ -161,9 +162,18 @@ export function createChatRouter(db: Database, config: AppConfig) {
         } catch (error) {
             if (billingReservationId) await finishChatBilling(db, billingReservationId, false).catch((releaseError) => console.error("Chat credit release failed", { reservationId: billingReservationId, code: releaseError?.code }));
             if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "failed").catch(() => undefined);
+            const diagnostics = readProviderSubmissionDiagnostics(error);
+            if (diagnostics) console.error("Chat provider transport failed", diagnostics);
             if (disconnected()) return;
             if (response.headersSent) {
-                response.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "对话流已中断，请重试。" } })}\n\n`);
+                response.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "对话流已中断，请求已发出，结果待核查，不会自动重新提交。请联系管理员核查上游记录后，再决定是否重新发送。" } })}\n\n`);
+                return;
+            }
+            if (diagnostics) {
+                const notSubmitted = diagnostics.phase === "initial_tls" || diagnostics.phase === "preflight";
+                next(new ChatProtocolError("UPSTREAM_REQUEST_FAILED", notSubmitted
+                    ? "连接对话模型服务失败，模型业务请求尚未发送。请联系管理员检查服务端网络、代理或运行环境后再试。"
+                    : "对话模型连接中断，请求可能已发出，结果待核查，不会自动重新提交。请联系管理员核查上游记录后，再决定是否重新发送。"));
                 return;
             }
             next(error);
@@ -203,7 +213,28 @@ async function requestClaudeCompletion(
         signal: AbortSignal.timeout(180000),
     });
     if (!upstream.ok) throw await upstreamError("Claude Provider", upstream, model.protocol === "apimart");
-    return readClaudeResponse(await upstream.json() as ClaudeResponse);
+    return readClaudeResponse(await readNativeChatPayload(upstream) as ClaudeResponse);
+}
+
+async function readNativeChatPayload(upstream: Response): Promise<Record<string, unknown>> {
+    // Native Claude/Gemini arguments are nested objects, not strings. Parsing the
+    // envelope with Response.json() first would irreversibly lose duplicate keys.
+    // Read failures retain their transport diagnostics; only JSON errors map here.
+    const raw = await upstream.text();
+    let parsed: unknown;
+    try {
+        parsed = parseStrictJson(raw);
+    } catch (error) {
+        if (error instanceof DuplicateJsonKeyError) {
+            throw new ChatProtocolError("CHAT_RESPONSE_DUPLICATE_KEYS", "模型响应包含重复 JSON 键，无法确认完整要求，已停止工具执行；不会自动重新提交。");
+        }
+        if (!(error instanceof SyntaxError)) throw error;
+        throw new ChatProtocolError("CHAT_RESPONSE_INVALID_JSON", "模型未返回有效 JSON 对象，已停止工具执行；不会自动重新提交。");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new ChatProtocolError("CHAT_RESPONSE_INVALID_JSON", "模型未返回有效 JSON 对象，已停止工具执行；不会自动重新提交。");
+    }
+    return parsed as Record<string, unknown>;
 }
 
 export async function requestClaudeStream(
@@ -409,7 +440,10 @@ async function readApiMartChatPayload(upstream: Response): Promise<Record<string
         throw new ChatProtocolError("APIMART_CHAT_UNEXPECTED_STREAM", "Mark 对话服务未遵循非流式请求；本次请求不会重新提交。");
     }
     let received: unknown;
-    try { received = await upstream.json(); } catch { throw invalidApiMartChatResponse(); }
+    try { received = await upstream.json(); } catch (error) {
+        if (readProviderSubmissionDiagnostics(error)) throw error;
+        throw invalidApiMartChatResponse();
+    }
     if (!received || typeof received !== "object" || Array.isArray(received)) throw invalidApiMartChatResponse();
     const envelope = received as Record<string, unknown>;
     if (envelope.error || (envelope.code !== undefined && envelope.code !== 200)) throw invalidApiMartChatResponse();
@@ -529,7 +563,7 @@ async function requestGeminiCompletion(
     });
     if (!upstream.ok) throw await upstreamError("Gemini Provider", upstream);
 
-    return readGeminiResponse(await upstream.json() as GeminiResponse);
+    return readGeminiResponse(await readNativeChatPayload(upstream) as GeminiResponse);
 }
 
 export function buildGeminiGenerateUrl(baseUrl: string, modelId: string) {

@@ -54,7 +54,12 @@ function harness(records: Task[], afterRead?: (record: Task) => void) {
     throw new Error(`Unexpected fixture query: ${sql}`);
   };
   const db = { query, connect: async () => ({ query, release() {} }) };
-  const cache = { zRem: async (_key: string, id: string) => (removed.push(id), 1), zAdd: async (_key: string, member: { value: string }) => (queued.push(member.value), 1) };
+  const cache = {
+    eval: async (_script: string, options: { arguments: string[] }) => {
+      (options.arguments.length === 1 ? removed : queued).push(options.arguments[0]!); return 1;
+    },
+    zAdd: async (_key: string, member: { value: string }) => (queued.push(member.value), 1),
+  };
   return { records, writes, settled, removed, queued, reservations,
     cancel: (id = records[0]!.id) => transitionTask(db as never, cache as never, id, "cancel", false),
     resume: (id = records[0]!.id) => transitionTask(db as never, cache as never, id, "resume", false),

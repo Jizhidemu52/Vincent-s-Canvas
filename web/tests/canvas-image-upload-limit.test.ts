@@ -2,9 +2,21 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
+import { isCanvasAudioFile } from "@/pages/canvas/use-canvas-clipboard-drop";
 
 const source = ts.createSourceFile("project.tsx", readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function callback(name: string, scope: Record<string, unknown>): (...args: any[]) => any {
+    if (name === "handleDrop") {
+        const hook = ts.createSourceFile("drop.ts", readFileSync(new URL("../src/pages/canvas/use-canvas-clipboard-drop.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
+        let action: ts.Node | undefined;
+        const find = (node: ts.Node) => { if (ts.isReturnStatement(node) && node.expression && ts.isCallExpression(node.expression) && node.expression.expression.getText(hook) === "useCallback") action = node.expression.arguments[0]; ts.forEachChild(node, find); };
+        find(hook);
+        if (!action) throw new Error("Missing extracted drop callback");
+        const code = ts.transpileModule(`const run = ${action.getText(hook)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+        const message = scope.message as { error: unknown; warning?: unknown };
+        const latest = { current: { screenToCanvas: scope.screenToCanvas, createImage: scope.createImageFileNode, createVideo: scope.createVideoFileNode, createAudio: scope.createAudioFileNode, error: message.error, warning: message.warning } };
+        return new Function("latest", "isCanvasAudioFile", `${code} return run;`)(latest, isCanvasAudioFile);
+    }
     let expression: ts.Expression | undefined;
     const visit = (node: ts.Node) => {
         if (ts.isVariableDeclaration(node) && node.name.getText(source) === name && node.initializer && ts.isCallExpression(node.initializer)) expression = node.initializer.arguments[0];

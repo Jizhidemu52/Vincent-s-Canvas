@@ -87,6 +87,11 @@ function requestOnce(input, body, attempts) {
         agent,
         rejectUnauthorized: true,
         secureOptions: constants.SSL_OP_NO_RENEGOTIATION,
+        // Keep the initial ClientHello compact by deferring the speculative
+        // ML-KEM share until a HelloRetryRequest, while preserving every default
+        // supported group, TLS version and certificate check.
+        // https://docs.openssl.org/3.5/man3/SSL_CTX_set1_curves/
+        ecdhCurve: "?X25519MLKEM768:DEFAULT",
       });
       request.on("error", failAttempt);
       request.once("response", (response) => {

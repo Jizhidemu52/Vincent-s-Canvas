@@ -71,13 +71,18 @@ export type AdminHistoryFilters = {
 };
 
 export type AdminHistoryPage = {
-    history: ServerHistory[];
+    history: ServerHistorySummary[];
     total: number;
     totalCredits: number;
     totalRmbCost: number;
-    page: number;
-    pageSize: number;
+    nextCursor: string | null;
+    hasMore: boolean;
+    limit: number;
 };
+export type ServerTaskSummary = Omit<ServerTask, "parameters" | "sourceUrls">;
+export type ServerHistorySummary = Omit<ServerHistory, "parameters" | "sourceUrls" | "resultUrls">;
+export type CursorPageOptions = { cursor?: string; limit?: number };
+export type CursorPage = { nextCursor: string | null; hasMore: boolean };
 
 export type AdminHistoryOptions = {
     users: Array<{ value: string; label: string }>;
@@ -103,9 +108,11 @@ async function post<T>(path: string): Promise<T> {
 }
 
 export type TaskControlAction = "pause" | "resume" | "cancel";
-export const listAdminTasks = () => get<{ tasks: ServerTask[] }>("/api/admin/tasks");
-export const listAdminBatches = () => get<{ batches: ServerBatch[] }>("/api/admin/tasks/batches");
-export const listAdminHistory = (filters: AdminHistoryFilters & { page?: number; pageSize?: number } = {}) => get<AdminHistoryPage>(`/api/admin/history?${serializeApiParams(filters)}`);
+export const listAdminTasks = (options: CursorPageOptions = {}) => get<CursorPage & { tasks: ServerTaskSummary[] }>(`/api/admin/tasks?${serializeApiParams(options)}`);
+export const listAdminBatches = (options: CursorPageOptions = {}) => get<CursorPage & { batches: ServerBatch[] }>(`/api/admin/tasks/batches?${serializeApiParams(options)}`);
+export const listAdminHistory = (filters: AdminHistoryFilters & CursorPageOptions = {}) => get<AdminHistoryPage>(`/api/admin/history?${serializeApiParams(filters)}`);
+export const getAdminTask = (id: string) => get<{ task: ServerTask }>(`/api/admin/tasks/${encodeURIComponent(id)}`);
+export const getAdminHistory = (id: string) => get<{ history: ServerHistory }>(`/api/admin/history/${encodeURIComponent(id)}`);
 export const listAdminHistoryOptions = () => get<AdminHistoryOptions>("/api/admin/history/options");
 export const controlAdminTask = (id: string, action: TaskControlAction) => post<void>(`/api/admin/tasks/${id}/${action}`);
 export const controlAdminBatch = (id: string, action: TaskControlAction) => post<{ changed: number }>(`/api/admin/tasks/batches/${id}/${action}`);

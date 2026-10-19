@@ -356,8 +356,9 @@ export function getImageGenerationModels() {
     return request<{ models: ImageGenerationModel[] }>("/api/models").then(({ models }) => selectImageGenerationModels(models));
 }
 
-export async function listQueuedTasks(signal?: AbortSignal) {
-    const result = await request<{ tasks: QueuedTask[] }>("/api/tasks", { signal });
+export async function listQueuedTasks(signal?: AbortSignal, operationType?: string) {
+    const query = new URLSearchParams({ limit: "60", ...(operationType ? { operationType } : {}) });
+    const result = await request<{ tasks: QueuedTask[] }>(`/api/tasks?${query}`, { signal });
     return result.tasks;
 }
 
@@ -399,7 +400,6 @@ async function resolvePublicModel(modelId: string, operationType: string, toolKe
 }
 
 async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks: QueuedTask[]) => void, haltOnPaused = false) {
-    const wanted = new Set(ids);
     for (;;) {
         if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
         const tasks = haltOnPaused
@@ -408,7 +408,7 @@ async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks
                 if (!task) throw new Error(`原任务 ${id} 不存在或无权访问`);
                 return task;
             }))
-            : (await request<{ tasks: QueuedTask[] }>("/api/tasks")).tasks.filter((task) => wanted.has(task.id));
+            : (await request<{ tasks: QueuedTask[] }>(`/api/tasks?${new URLSearchParams({ ids: ids.join(",") })}`, { signal })).tasks;
         onPoll?.(tasks);
         const paused = haltOnPaused ? tasks.find((task) => task.status === "paused") : undefined;
         if (paused) throw new QueuedTaskPausedError(paused);

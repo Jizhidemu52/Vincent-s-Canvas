@@ -11,7 +11,7 @@ import { buildCreativeImageCatalog, type CreativeImageLineage } from "@/lib/crea
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
 import { createChatStreamBuffer } from "./chat-stream-buffer";
 import { chatSessionStorage } from "./chat-session-storage";
-import { chatImageQualitySettings, chatImageRequestOptions, preferredChatImageModel, resolveChatImageQuality } from "./image-quality";
+import { chatImageQualitySettings, chatImageRequestOptions, filterChatImageModels, preferredChatImageModel, resolveChatImageQuality } from "./image-quality";
 import { useImageModelProfile } from "@/lib/image-model-settings";
 import { modelLabelWithUsage } from "@/lib/model-picker-options";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -192,7 +192,7 @@ export default function ChatPage() {
     const selectedModel = selected?.modelId || "";
     // The conversation chooses whether an image task is needed. Demo-only
     // models must never be picked for a real provider task.
-    const imageModels = useMemo(() => modelsStatus === "ready" ? models.filter((item) => chatImageEnabled && imageBinding?.enabled !== false && (!imageBinding?.modelConfigId || item.id === imageBinding.modelConfigId) && !item.modelId.startsWith("demo-") && item.capabilities.some((capability) => ["generate", "edit"].includes(capability))) : [], [models, modelsStatus, imageBinding, chatImageEnabled]);
+    const imageModels = useMemo(() => modelsStatus === "ready" ? filterChatImageModels(models.filter((item) => chatImageEnabled && imageBinding?.enabled !== false && (!imageBinding?.modelConfigId || item.id === imageBinding.modelConfigId) && !item.modelId.startsWith("demo-"))) : [], [models, modelsStatus, imageBinding, chatImageEnabled]);
     const preferredImageModel = preferredChatImageModel(imageModels, [activeSession?.imageModelId, config.imageModel, config.model]);
     const qualityProfile = useImageModelProfile(preferredImageModel?.modelId || "");
     const imageQualitySettings = chatImageQualitySettings(qualityProfile, activeSession?.imageQuality, activeSession?.imageResolution);

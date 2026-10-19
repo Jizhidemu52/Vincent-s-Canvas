@@ -1,0 +1,16 @@
+{
+    "name": "vincent-canvas-development",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "bun tools/dev.mjs",
+        "dev:api": "bun tools/dev.mjs --api-only",
+        "check": "bun tools/check.mjs",
+        "lint": "biome lint web/src server/src shared tools --error-on-warnings",
+        "format": "biome format --write",
+        "format:check": "biome format"
+    },
+    "devDependencies": {
+        "@biomejs/biome": "2.4.8"
+    }
+}

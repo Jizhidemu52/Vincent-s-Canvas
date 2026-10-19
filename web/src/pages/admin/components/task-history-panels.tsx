@@ -1,9 +1,12 @@
-import { Alert, App, Button, DatePicker, Input, Select, Space, Table, Tag, Tooltip } from "antd";
+import { Alert, App, Button, DatePicker, Drawer, Input, Select, Space, Table, Tag, Tooltip } from "antd";
 import { Download, Pause, Play, RefreshCw, Search, XCircle } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { saveAs } from "file-saver";
 import dayjs from "dayjs";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
+import { useUserStore } from "@/stores/use-user-store";
+import { InfiniteLoadMore } from "@/components/infinite-load-more";
 
 import {
     availableBatchActions,
@@ -11,14 +14,16 @@ import {
     controlAdminBatch,
     controlAdminTask,
     exportAdminHistory,
+    getAdminHistory,
+    getAdminTask,
     listAdminBatches,
     listAdminHistory,
     listAdminHistoryOptions,
     listAdminTasks,
     type AdminHistoryFilters,
     type ServerBatch,
-    type ServerHistory,
-    type ServerTask,
+    type ServerHistorySummary,
+    type ServerTaskSummary,
     type TaskControlAction,
 } from "@/services/api/task-history";
 
@@ -43,41 +48,31 @@ const statusText: Record<string, string> = {
 
 export function TaskManagementPanel({ active = true }: { active?: boolean }) {
     const { message } = App.useApp();
-    const [tasks, setTasks] = useState<ServerTask[]>([]);
-    const [batches, setBatches] = useState<ServerBatch[]>([]);
-    const [loading, setLoading] = useState(true);
+    const userId = useUserStore(state => state.user?.id);
+    const [detailId, setDetailId] = useState<string | null>(null);
     const [acting, setActing] = useState("");
-    const [error, setError] = useState("");
-    const [updatedAt, setUpdatedAt] = useState("");
-    const requestSequence = useRef(0);
-    const refreshing = useRef(false);
     const actingRef = useRef("");
-
-    const refresh = useCallback(async (background = false) => {
-        if (refreshing.current) return;
-        refreshing.current = true;
-        const sequence = ++requestSequence.current;
-        if (!background) setLoading(true);
-        try {
-            const [taskResult, batchResult] = await Promise.all([listAdminTasks(), listAdminBatches()]);
-            if (sequence !== requestSequence.current) return;
-            setTasks(taskResult.tasks);
-            setBatches(batchResult.batches);
-            setError("");
-            setUpdatedAt(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
-        } catch (error) {
-            if (sequence === requestSequence.current) setError(error instanceof Error ? error.message : "任务加载失败");
-        } finally {
-            if (sequence === requestSequence.current) { refreshing.current = false; setLoading(false); }
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!active) return;
-        void refresh();
-        const timer = window.setInterval(() => { if (!document.hidden) void refresh(true); }, 10_000);
-        return () => { window.clearInterval(timer); requestSequence.current++; refreshing.current = false; };
-    }, [active, refresh]);
+    const tasksQuery = useInfiniteQuery({
+        queryKey: ["admin-tasks", userId], initialPageParam: undefined as string | undefined,
+        queryFn: ({ pageParam }) => listAdminTasks({ cursor: pageParam, limit: 60 }),
+        getNextPageParam: page => page.nextCursor ?? undefined,
+        enabled: active, retry: false, refetchOnWindowFocus: false,
+        refetchInterval: query => document.hidden || query?.state.status === "error" ? false : 10_000,
+    });
+    const batchesQuery = useInfiniteQuery({
+        queryKey: ["admin-batches", userId], initialPageParam: undefined as string | undefined,
+        queryFn: ({ pageParam }) => listAdminBatches({ cursor: pageParam, limit: 60 }),
+        getNextPageParam: page => page.nextCursor ?? undefined,
+        enabled: active, retry: false, refetchOnWindowFocus: false,
+        refetchInterval: query => document.hidden || query?.state.status === "error" ? false : 10_000,
+    });
+    const tasks = tasksQuery.data?.pages.flatMap(page => page.tasks) ?? [];
+    const batches = batchesQuery.data?.pages.flatMap(page => page.batches) ?? [];
+    const loading = tasksQuery.isPending || batchesQuery.isPending;
+    const error = tasksQuery.error?.message || batchesQuery.error?.message || "";
+    const lastUpdate = Math.max(tasksQuery.dataUpdatedAt, batchesQuery.dataUpdatedAt);
+    const updatedAt = lastUpdate ? new Date(lastUpdate).toLocaleTimeString("zh-CN", { hour12: false }) : "";
+    const refresh = () => Promise.all([tasksQuery.refetch(), batchesQuery.refetch()]);
 
     const runBatchAction = async (batch: ServerBatch, action: TaskControlAction) => {
         const key = `batch:${batch.id}:${action}`;
@@ -96,7 +91,7 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
         }
     };
 
-    const runTaskAction = async (task: ServerTask, action: TaskControlAction) => {
+    const runTaskAction = async (task: ServerTaskSummary, action: TaskControlAction) => {
         const key = `task:${task.id}:${action}`;
         if (actingRef.current) return;
         actingRef.current = key;
@@ -128,6 +123,10 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
                 size="small"
                 loading={loading}
                 dataSource={batches}
+                pagination={false}
+                footer={() => <><p>已载入 {batches.length} 条</p><InfiniteLoadMore hasMore={Boolean(batchesQuery.hasNextPage)} loading={batchesQuery.isFetching} error={batchesQuery.error}
+                    disabled={!active} resetKey={JSON.stringify(["batches", userId])} pageKey={batchesQuery.data?.pages.at(-1)?.nextCursor}
+                    label="加载更多批次" endLabel="没有更多批次" onLoadMore={() => batchesQuery.fetchNextPage({ cancelRefetch: false })} /></>}
                 scroll={{ x: 1500 }}
                 title={() => "批量任务整体进度"}
                 columns={[
@@ -175,6 +174,10 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
                 size="small"
                 loading={loading}
                 dataSource={tasks}
+                pagination={false}
+                footer={() => <><p>已载入 {tasks.length} 条</p><InfiniteLoadMore hasMore={Boolean(tasksQuery.hasNextPage)} loading={tasksQuery.isFetching} error={tasksQuery.error}
+                    disabled={!active} resetKey={JSON.stringify(["tasks", userId])} pageKey={tasksQuery.data?.pages.at(-1)?.nextCursor}
+                    label="加载更多任务" endLabel="没有更多任务" onLoadMore={() => tasksQuery.fetchNextPage({ cancelRefetch: false })} /></>}
                 scroll={{ x: 1250 }}
                 title={() => "逐图任务状态"}
                 columns={[
@@ -185,7 +188,7 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
                     {
                         title: "状态",
                         width: 95,
-                        render: (_, row: ServerTask) => <Tag color={statusColor[row.status]}>{statusText[row.status] || row.status}</Tag>,
+                        render: (_, row: ServerTaskSummary) => <Tag color={statusColor[row.status]}>{statusText[row.status] || row.status}</Tag>,
                     },
                     { title: "积分", dataIndex: "credits", width: 70 },
                     { title: "重试", dataIndex: "attempts", width: 65 },
@@ -195,10 +198,12 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
                         title: "控制",
                         fixed: "right",
                         width: 130,
-                        render: (_, row: ServerTask) => <TaskControls actions={availableTaskActions(row.status)} loadingKey={acting} keyPrefix={`task:${row.id}`} onAction={(action) => void runTaskAction(row, action)} />,
+                        render: (_, row: ServerTaskSummary) => <TaskControls actions={availableTaskActions(row.status)} loadingKey={acting} keyPrefix={`task:${row.id}`} onAction={(action) => void runTaskAction(row, action)} />,
                     },
+                    { title: "详情", width: 70, render: (_, row: ServerTaskSummary) => <Button type="link" onClick={() => setDetailId(row.id)}>查看</Button> },
                 ]}
             />
+            {detailId ? <RecordDetails kind="task" id={detailId} onClose={() => setDetailId(null)} /> : null}
         </div>
     );
 }
@@ -229,40 +234,23 @@ function actionLabel(action: TaskControlAction) {
 
 export function HistoryManagementPanel() {
     const { message } = App.useApp();
-    const [history, setHistory] = useState<ServerHistory[]>([]);
+    const userId = useUserStore(state => state.user?.id);
+    const [detailId, setDetailId] = useState<string | null>(null);
     const [designers, setDesigners] = useState<Array<{ value: string; label: string }>>([]);
     const [models, setModels] = useState<Array<{ value: string; label: string }>>([]);
     const [operations, setOperations] = useState<Array<{ value: string; label: string }>>([]);
-    const [loading, setLoading] = useState(true);
     const [exporting, setExporting] = useState(false);
     const [filters, setFilters] = useWorkbenchField<AdminHistoryFilters>("history:filters", {});
     const [projectDraft, setProjectDraft] = useWorkbenchField("history:projectDraft", "");
-    const [page, setPage] = useWorkbenchField("history:page", 1);
-    const [pageSize, setPageSize] = useWorkbenchField("history:pageSize", 50);
-    const [total, setTotal] = useState(0);
-    const requestSequence = useRef(0);
-
-    const refresh = async (nextFilters = filters, nextPage = page, nextPageSize = pageSize) => {
-        const sequence = ++requestSequence.current;
-        setLoading(true);
-        try {
-            const result = await listAdminHistory({ ...nextFilters, page: nextPage, pageSize: nextPageSize });
-            if (sequence !== requestSequence.current) return;
-            setHistory(result.history);
-            setTotal(result.total);
-            setPage(result.page);
-            setPageSize(result.pageSize);
-        } catch (error) {
-            if (sequence !== requestSequence.current) return;
-            message.error(error instanceof Error ? error.message : "历史加载失败");
-        } finally {
-            if (sequence === requestSequence.current) setLoading(false);
-        }
-    };
-    useEffect(() => {
-        void refresh(filters, page, pageSize);
-        return () => { requestSequence.current++; };
-    }, [filters, page, pageSize]);
+    const historyQuery = useInfiniteQuery({
+        queryKey: ["admin-history", userId, filters], initialPageParam: undefined as string | undefined,
+        queryFn: ({ pageParam }) => listAdminHistory({ ...filters, cursor: pageParam, limit: 60 }),
+        getNextPageParam: page => page.nextCursor ?? undefined,
+        retry: false, refetchOnWindowFocus: false,
+    });
+    const history = historyQuery.data?.pages.flatMap(page => page.history) ?? [];
+    const total = historyQuery.data?.pages[0]?.total ?? 0;
+    const loading = historyQuery.isPending;
 
     useEffect(() => {
         let cancelled = false;
@@ -278,7 +266,6 @@ export function HistoryManagementPanel() {
     }, []);
 
     const updateFilters = (patch: Partial<AdminHistoryFilters>) => {
-        setPage(1);
         setFilters((current) => {
             const next = { ...current, ...patch };
             return Object.fromEntries(Object.entries(next).filter(([, value]) => value)) as AdminHistoryFilters;
@@ -330,24 +317,17 @@ export function HistoryManagementPanel() {
                 </Button>
             </div>
             <div className="wb-surface min-w-0 max-w-full overflow-hidden">
+                {historyQuery.error ? <Alert type="warning" title="历史加载失败" description={historyQuery.error.message} action={<Button onClick={() => void historyQuery.refetch()}>重试</Button>} /> : null}
                 <Table
                     rowKey="id"
                     size="small"
                     loading={loading}
                     dataSource={history}
                     scroll={{ x: 1500 }}
-                    pagination={{
-                        current: page,
-                        pageSize,
-                        total,
-                        showSizeChanger: true,
-                        pageSizeOptions: [20, 50, 100, 200],
-                        showTotal: (value) => `共 ${value} 条`,
-                        onChange: (nextPage, nextPageSize) => {
-                            setPage(nextPageSize === pageSize ? nextPage : 1);
-                            setPageSize(nextPageSize);
-                        },
-                    }}
+                    pagination={false}
+                    footer={() => <><p>已载入 {history.length} / {total} 条</p><InfiniteLoadMore hasMore={Boolean(historyQuery.hasNextPage)} loading={historyQuery.isFetching} error={historyQuery.error}
+                        resetKey={JSON.stringify([userId, filters])} pageKey={historyQuery.data?.pages.at(-1)?.nextCursor}
+                        label="加载更多历史" endLabel="没有更多历史" onLoadMore={() => historyQuery.fetchNextPage({ cancelRefetch: false })} /></>}
                     columns={[
                         { title: "时间", dataIndex: "createdAt", width: 180 },
                         { title: "设计师", dataIndex: "userName", width: 120, fixed: "left" },
@@ -356,13 +336,29 @@ export function HistoryManagementPanel() {
                         { title: "操作", dataIndex: "operationType", width: 130 },
                         { title: "模型", dataIndex: "modelName", width: 140 },
                         { title: "积分", dataIndex: "credits", width: 70 },
-                        { title: "成本", width: 100, render: (_, row: ServerHistory) => `￥${row.rmbCost.toFixed(4)}` },
-                        { title: "状态", width: 90, render: (_, row: ServerHistory) => <Tag color={row.status === "success" ? "green" : "red"}>{statusText[row.status] || row.status}</Tag> },
+                        { title: "成本", width: 100, render: (_, row: ServerHistorySummary) => `￥${row.rmbCost.toFixed(4)}` },
+                        { title: "状态", width: 90, render: (_, row: ServerHistorySummary) => <Tag color={row.status === "success" ? "green" : "red"}>{statusText[row.status] || row.status}</Tag> },
                         { title: "提示词", dataIndex: "prompt", width: 220, ellipsis: true },
                         { title: "失败原因", dataIndex: "failureReason", width: 180, ellipsis: true },
+                        { title: "详情", width: 70, render: (_, row: ServerHistorySummary) => <Button type="link" onClick={() => setDetailId(row.id)}>查看</Button> },
                     ]}
                 />
             </div>
+            {detailId ? <RecordDetails kind="history" id={detailId} onClose={() => setDetailId(null)} /> : null}
         </div>
     );
+}
+
+function RecordDetails({ kind, id, onClose }: { kind: "task" | "history"; id: string; onClose: () => void }) {
+    const userId = useUserStore(state => state.user?.id);
+    const query = useQuery({ queryKey: ["admin-record", userId, kind, id], queryFn: async () => kind === "task" ? (await getAdminTask(id)).task : (await getAdminHistory(id)).history });
+    return <Drawer open onClose={onClose} title={kind === "task" ? "任务详情" : "生成历史详情"} size="large">
+        {query.isPending ? <p role="status">正在读取完整详情…</p> : query.error ? <Alert type="error" title="详情加载失败" description={query.error.message} /> : <>
+            <p className="mb-3 break-all text-xs text-[var(--muted-foreground)]">{id}</p>
+            <h3>提示词</h3><p className="mb-4 whitespace-pre-wrap break-words">{query.data?.prompt || "（无）"}</p>
+            <h3>参数</h3><pre className="mb-4 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(query.data?.parameters ?? {}, null, 2)}</pre>
+            <h3>原图</h3>{(query.data?.sourceUrls ?? []).map((url, index) => <p className="break-all" key={`${url}-${index}`}>{/^https?:\/\/|^\/api\//i.test(url) ? <a href={url} target="_blank" rel="noopener noreferrer">{url}</a> : url}</p>)}
+            <h3 className="mt-4">结果</h3>{(query.data?.resultUrls ?? []).map((url, index) => <p className="break-all" key={`${url}-${index}`}>{/^https?:\/\/|^\/api\//i.test(url) ? <a href={url} target="_blank" rel="noopener noreferrer">{url}</a> : url}</p>)}
+        </>}
+    </Drawer>;
 }

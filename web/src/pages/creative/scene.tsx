@@ -98,7 +98,7 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                 </nav>
                 {view === "example" ? <div className="cs-example">
                     <div className="cs-example-heading"><span className="cs-eyebrow">WHAT YOU CAN CREATE</span><h2>{summary.input}<ArrowRight size={21} />{summary.output}</h2><p>{summary.example}</p></div>
-                    <figure className="cs-example-image"><img src={`/creative-scenes/v2/${preset.id}.png`} alt={`${preset.title}：${summary.input}转为${summary.output}的概念示意`} /><figcaption><span>{summary.input}</span><ArrowRight size={17} /><span>{summary.output}</span></figcaption></figure>
+                    <figure className="cs-example-image"><img src={`/creative-scenes/v2/${preset.id}.webp`} alt={`${preset.title}：${summary.input}转为${summary.output}的概念示意`} loading="lazy" decoding="async" /><figcaption><span>{summary.input}</span><ArrowRight size={17} /><span>{summary.output}</span></figcaption></figure>
                     <div className="cs-example-foot"><span>AI 功能示意 · 非模型实测</span><p>{summary.limit}</p></div>
                 </div> : view === "history" ? <div className="cs-history">
                     <h2>最近任务</h2><p className="cs-help">仅显示当前账号在「{preset.title}」中已结束的任务，保存在本机浏览器。</p>

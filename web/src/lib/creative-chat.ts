@@ -265,6 +265,29 @@ function imageIds(value: unknown, max: number): string[] {
     return value as string[];
 }
 
+/** Repair representation only: never split, truncate, invent, or drop a constraint. */
+function preservedConstraints(value: unknown): string[] {
+    const invalid = (detail: string) => new Error(`模型返回的保留约束${detail}，未提交图片任务`);
+    let normalized = value;
+    if (typeof normalized === "string") {
+        const text = normalized.trim();
+        if (!text) throw invalid("为空文本（没有保留项应返回 []）");
+        if (/^[\[{"]/.test(text)) {
+            try { normalized = parseStrictJson(text); }
+            catch { throw invalid("不是有效的字符串数组"); }
+            // Decode one serialization layer only. An encoded object or another
+            // encoded array is not a literal garment requirement.
+            if (typeof normalized === "string" && /^[\[{"]/.test(normalized.trim())) throw invalid("存在多重编码");
+        }
+        if (typeof normalized === "string") normalized = [normalized];
+    }
+    if (!Array.isArray(normalized)) throw invalid("必须是文字或文字列表");
+    if (normalized.length > MAX_PRESERVED_CONSTRAINTS) throw invalid(`超过 ${MAX_PRESERVED_CONSTRAINTS} 项`);
+    if (normalized.some(item => typeof item !== "string" || !item.trim())) throw invalid("包含空项或非文字内容");
+    if (normalized.some(item => item.length > MAX_CONSTRAINT_LENGTH)) throw invalid(`单项超过 ${MAX_CONSTRAINT_LENGTH} 字符`);
+    return normalized as string[];
+}
+
 /** Only this read operation can precede the final decision; unknown tools fail closed. */
 export function parseCreativeChatInspection(result: ToolResponseResult, catalog: CreativeImageCatalogEntry[]): string[] | null {
     const value = validatedCall(result);
@@ -296,8 +319,7 @@ export function parseCreativeChatPlan(result: ToolResponseResult, references: Re
     if (args.action !== "generate" && args.action !== "edit") throw new Error("图片工具操作无效，未提交图片任务");
     if (typeof args.prompt !== "string" || !args.prompt.trim() || args.prompt.length > MAX_CREATIVE_PROMPT_LENGTH) throw new Error("图片提示词必须为 1 至 20000 个字符，未提交图片任务");
     const auxiliaryIds = args.reference_image_ids === undefined ? [] : imageIds(args.reference_image_ids, MAX_CREATIVE_CHAT_REFERENCES - 1);
-    const preserve = args.preserve;
-    if (!Array.isArray(preserve) || preserve.length > MAX_PRESERVED_CONSTRAINTS || preserve.some((item) => typeof item !== "string" || !item.trim() || item.length > MAX_CONSTRAINT_LENGTH)) throw new Error("保留约束格式无效，未提交图片任务");
+    const preserve = preservedConstraints(args.preserve);
     if (args.action === "generate") {
         if (args.target_image_id !== undefined || auxiliaryIds.length) throw new Error("全新生成不能指定目标图或参考图，未提交图片任务");
         const execution = compileCreativeChatExecutionPrompt({ prompt: args.prompt, preserve, references: [], referenceRoles: args.reference_roles, supersededConstraints: args.superseded_constraints });

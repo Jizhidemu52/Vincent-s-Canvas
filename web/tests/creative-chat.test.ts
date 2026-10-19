@@ -250,6 +250,25 @@ describe("creative chat plan validation", () => {
         expect(parseCreativeChatPlan({ content: "", toolCalls: [editTool("reference", "按参考图设计新海报")] }, references)).toMatchObject({ kind: "image", action: "edit", references });
     });
 
+    test.each([
+        ["single string", "保留服装主体、原有配色与面料质感", ["保留服装主体、原有配色与面料质感"]],
+        ["JSON-encoded array", '["保留服装主体","不添加品牌标志"]', ["保留服装主体", "不添加品牌标志"]],
+        ["JSON-encoded string", '"保留原有配色"', ["保留原有配色"]],
+        ["paragraph", "保留服装主体；\n不得新增文字、Logo。", ["保留服装主体；\n不得新增文字、Logo。"]],
+    ])("normalizes %s preserve without losing or splitting its requirements", (_label, preserve, expected) => {
+        const references = resolveCreativeChatReferences([], user("提取模特的衣服，让一个欧洲女模特穿着，然后衣服改成hm风格的", [image("garment")]));
+        const plan = parseCreativeChatPlan({ content: "", toolCalls: [tool("edit", "提取参考服装，改为 H&M 风格，由欧洲成年女模特穿着。", "create_image", { target_image_id: "garment", preserve })] }, references);
+        expect(plan).toMatchObject({ kind: "image", action: "edit", references, lineage: { parentImageId: "garment", preservedConstraints: expected } });
+        if (plan.kind !== "image") throw new Error("expected image plan");
+        for (const constraint of expected as string[]) expect(plan.prompt).toContain(constraint);
+    });
+
+    test.each([null, {}, 7, "", "   ", "[7]", '["保留领口",null]', '["保留领口",', '{"preserve":"保留领口"}', '"[\\"保留领口\\"]"'])
+    ("rejects ambiguous preserve representation %j instead of silently using no constraints", (preserve) => {
+        const references = resolveCreativeChatReferences([], user("修改", [image("garment")]));
+        expect(() => parseCreativeChatPlan({ content: "", toolCalls: [tool("edit", "只改颜色", "create_image", { target_image_id: "garment", preserve })] }, references)).toThrow("保留约束");
+    });
+
     test("completely new generation needs no image reference", () => {
         expect(parseCreativeChatPlan({ content: "", toolCalls: [tool("generate", "全新创作一张日落海报，不参考之前图片")] }, [])).toMatchObject({ kind: "image", action: "generate", references: [] });
     });
@@ -330,6 +349,26 @@ describe("creative chat bounded natural-conversation service", () => {
         expect(requests).toHaveLength(1);
         expect(requests[0]!.url).toBe("/api/chat/responses");
         expect(requests[0]!.body).toMatchObject({ toolChoice: "auto", tools: [{ type: "function", name: "create_image", strict: false }, { type: "function", name: "inspect_images", strict: false }] });
+    });
+
+    test.each(["保留原服装主体与针织质感，不添加品牌标志", '["保留原服装主体","保留针织质感","不添加品牌标志"]'])
+    ("model-wearing edit accepts lossless preserve representation with one planner call: %s", async (preserve) => {
+        const fixture = installImagePreviewFixture(image("preview").dataUrl);
+        const requests: string[] = [];
+        try {
+            globalThis.fetch = withModelConfig(async (url, init) => {
+                requests.push(String(url));
+                expect(String(init?.body)).toContain("提取模特的衣服，让一个欧洲女模特穿着，然后衣服改成hm风格的");
+                return Response.json({ content: "我会以这件针织衫为基础调整款式，再让欧洲女模特穿上。", toolCalls: [tool("edit", "提取参考服装，调整为 H&M 风格，欧洲成年女模特穿着。", "create_image", { target_image_id: "garment", preserve })] });
+            });
+            const plan = await requestCreativeChatPlan(config, [], user("提取模特的衣服，让一个欧洲女模特穿着，然后衣服改成hm风格的", [image("garment")]));
+            expect(plan).toMatchObject({ kind: "image", action: "edit", references: [{ id: "garment", dataUrl: image("garment").dataUrl }] });
+            if (plan.kind !== "image") throw new Error("expected image plan");
+            expect(plan.prompt).toContain("保留原服装主体");
+            expect(plan.prompt).toContain("针织质感");
+            expect(plan.prompt).toContain("不添加品牌标志");
+            expect(requests).toEqual(["/api/chat/responses"]);
+        } finally { fixture.restore(); }
     });
 
     test("a textless document upload is read and answered naturally, without enabling image execution", async () => {

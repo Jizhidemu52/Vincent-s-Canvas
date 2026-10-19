@@ -5,6 +5,7 @@ import type { Cache, Database } from "./db";
 import { withTransaction } from "./db-transaction";
 import { preflightStoredVideoTask } from "./stored-video-preflight";
 import { resolveToolExecution, type ToolConfiguration } from "./tool-configuration";
+import { removeQueuedTask, scheduleQueuedTask } from "./task-queue";
 
 export type TaskPriority = "normal" | "priority" | "urgent";
 export type QueueTaskAction = "pause" | "resume" | "cancel";
@@ -56,27 +57,27 @@ export function queueScore(priority: TaskPriority, timestamp = Date.now()) {
 /**
  * Redis is an acceleration layer, not the task source of truth. Rebuild its
  * waiting members from Postgres after a worker restart, and return only
- * expired video/known upstream leases to waiting for their submission-state guards.
- * Other interrupted work is paused because its upstream outcome is unknown.
+ * expired known-upstream leases to parked polling, and safe pre-submit work to
+ * waiting. Other interrupted work is paused because its outcome is unknown.
  */
 export async function restoreWaitingTasksToQueue(db: Database, cache: Cache) {
   await db.query(
     `UPDATE tasks
-        SET status=CASE WHEN operation_type='video_generation' OR upstream_task_id IS NOT NULL THEN 'waiting' ELSE 'paused' END,
-            failure_reason=CASE WHEN operation_type='video_generation' OR upstream_task_id IS NOT NULL THEN failure_reason
+        SET status=CASE WHEN upstream_task_id IS NOT NULL THEN 'processing'
+              WHEN upstream_submission_started_at IS NULL AND (operation_type='video_generation' OR attempts=0) THEN 'waiting' ELSE 'paused' END,
+            failure_reason=CASE WHEN upstream_task_id IS NOT NULL OR (upstream_submission_started_at IS NULL AND (operation_type='video_generation' OR attempts=0)) THEN failure_reason
               ELSE '执行中断，原上游提交状态待核实；已暂停，不能直接恢复或自动重新生成' END,
-            lease_expires_at=NULL,updated_at=now()
-      WHERE status='processing' AND (lease_expires_at IS NULL OR lease_expires_at <= now())`,
+            execution_token=NULL,lease_expires_at=NULL,updated_at=now()
+      WHERE status='processing' AND (execution_token IS NOT NULL OR upstream_task_id IS NULL)
+        AND (lease_expires_at IS NULL OR lease_expires_at <= now())`,
   );
-  const pending = await db.query<{ id: string; priority: TaskPriority; queued_at: string }>(
-    "SELECT id,priority,queued_at FROM tasks WHERE status='waiting' ORDER BY queued_at,id",
+  const pending = await db.query<{ id: string; priority: TaskPriority; queued_at: string; available_at: string }>(
+    `SELECT id,priority,queued_at,available_at FROM tasks WHERE status='waiting'
+       OR (status='processing' AND execution_token IS NULL AND upstream_task_id IS NOT NULL) ORDER BY queued_at,id`,
   );
   for (let offset = 0; offset < pending.rows.length; offset += 64) {
     await Promise.all(pending.rows.slice(offset, offset + 64).map((task) =>
-      cache.zAdd("tasks:queue", {
-        score: queueScore(task.priority, new Date(task.queued_at).getTime()),
-        value: task.id,
-      }),
+      scheduleQueuedTask(cache, task.id, queueScore(task.priority, new Date(task.queued_at).getTime()), new Date(task.available_at).getTime()),
     ));
   }
   return pending.rows.length;
@@ -118,8 +119,9 @@ export async function enqueueTask(
         credits: number;
         rmbCost: number;
         priority: TaskPriority;
+        availableAt: string;
       }>(
-        `SELECT id,request_id AS "requestId",status,priority,credits,rmb_cost::float8 AS "rmbCost" FROM tasks WHERE request_id=$1 AND user_id=$2`,
+        `SELECT id,request_id AS "requestId",status,priority,available_at AS "availableAt",credits,rmb_cost::float8 AS "rmbCost" FROM tasks WHERE request_id=$1 AND user_id=$2`,
         [input.requestId, input.userId],
       );
       if (!existing.rows[0])
@@ -128,6 +130,7 @@ export async function enqueueTask(
         task: existing.rows[0],
         shouldQueue: existing.rows[0].status === "waiting",
         queuePriority: existing.rows[0].priority,
+        queueAvailableAt: new Date(existing.rows[0].availableAt).getTime(),
       };
     }
     const execution = input.toolConfiguration ?? await resolveToolExecution(client, input);
@@ -166,13 +169,11 @@ export async function enqueueTask(
       },
       shouldQueue: true,
       queuePriority: input.priority,
+      queueAvailableAt: Date.now(),
     };
   });
   if (task.shouldQueue) {
-    await cache.zAdd("tasks:queue", {
-      score: queueScore(task.queuePriority),
-      value: task.task.id,
-    });
+    await scheduleQueuedTask(cache, task.task.id, queueScore(task.queuePriority), task.queueAvailableAt);
   }
   return task.task;
 }
@@ -242,18 +243,15 @@ export async function transitionTask(
       [taskId],
     );
     if (!changed.rows[0]) return null;
-    await cache.zRem("tasks:queue", taskId);
+    await removeQueuedTask(cache, taskId);
   } else if (action === "resume") {
     const changed = await db.query(
-      "UPDATE tasks SET status='waiting',queued_at=now(),updated_at=now() WHERE id=$1 AND status='paused' AND (operation_type='video_generation' OR upstream_task_id IS NOT NULL OR attempts=0) RETURNING id",
+      "UPDATE tasks SET status='waiting',queued_at=now(),available_at=now(),execution_token=NULL,poll_deadline_at=CASE WHEN operation_type='video_generation' AND upstream_task_id IS NOT NULL THEN now()+interval '20 minutes' ELSE poll_deadline_at END,updated_at=now() WHERE id=$1 AND status='paused' AND (operation_type='video_generation' OR upstream_task_id IS NOT NULL OR attempts=0) RETURNING id",
       [taskId],
     );
     if (!changed.rows[0]) return null;
     try {
-      await cache.zAdd("tasks:queue", {
-        score: queueScore(task.priority),
-        value: taskId,
-      });
+      await scheduleQueuedTask(cache, taskId, queueScore(task.priority));
     } catch (error) {
       await db
         .query(
@@ -294,7 +292,7 @@ export async function transitionTask(
           .catch(() => undefined);
       throw error;
     }
-    await cache.zRem("tasks:queue", taskId);
+    await removeQueuedTask(cache, taskId);
   }
 
   if (recalculate && task.batch_id) await recalculateBatch(db, task.batch_id);

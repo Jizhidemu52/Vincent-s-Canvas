@@ -53,7 +53,16 @@ sqlTest("credit policy is authorized, durable and read on every new task without
     const queued: string[] = [];
     let queueFails = false;
     // There is no worker and no network provider. Observe committed queue delivery only.
-    const cache = { zAdd: async (_key: string, item: { value: string }) => { if (queueFails) throw new Error("Fixture queue unavailable"); queued.push(item.value); return 1; } } as unknown as Cache;
+    const cache = {
+      zAdd: async (_key: string, item: { value: string }) => { if (queueFails) throw new Error("Fixture queue unavailable"); queued.push(item.value); return 1; },
+      eval: async (_script: string, options: { keys: string[]; arguments: string[] }) => {
+        expect(options.keys).toEqual(["tasks:queue", "tasks:delayed", "tasks:delayed:priority"]);
+        expect(Number(options.arguments[1])).toBeLessThanOrEqual(Number(options.arguments[2]));
+        if (queueFails) throw new Error("Fixture queue unavailable");
+        queued.push(options.arguments[0]!);
+        return 1;
+      },
+    } as unknown as Cache;
     const app = express();
     app.use(express.json());
     app.use((request, response, next) => {

@@ -13,7 +13,7 @@ const integration = process.env.RUN_INTEGRATION_TESTS === "true" ? describe : de
 const schema = `billing_concurrency_${randomUUID().replaceAll("-", "")}`;
 const migrations = fileURLToPath(new URL("../../src/migrations", import.meta.url));
 // No worker or provider is involved. Only Redis delivery after the real commit is replaced.
-const cache = { zAdd: async () => 1 } as unknown as Cache;
+const cache = { eval: async () => 1, zAdd: async () => 1 } as unknown as Cache;
 
 function barrier(participants = 2) {
   let arrivals = 0;

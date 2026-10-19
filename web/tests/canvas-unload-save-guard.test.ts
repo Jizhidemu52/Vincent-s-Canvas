@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 
-const source = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
+const source = readFileSync(new URL("../src/pages/canvas/use-canvas-persistence.ts", import.meta.url), "utf8");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let effect = "";
 function visit(node: ts.Node) {

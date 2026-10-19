@@ -13,10 +13,14 @@ env:
   IMAGE_NAME: ghcr.io/jizhidemu52/vincent-s-canvas
 
 jobs:
+  verify:
+    uses: ./.github/workflows/production-ci.yml
+
   meta:
     runs-on: ubuntu-latest
     outputs:
       tags: ${{ steps.meta.outputs.tags }}
+      api-tags: ${{ steps.api-meta.outputs.tags }}
       labels: ${{ steps.meta.outputs.labels }}
     steps:
       - id: meta
@@ -26,20 +30,35 @@ jobs:
           tags: |
             type=ref,event=tag
             type=sha,prefix=
+      - id: api-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}-api
+          tags: |
+            type=ref,event=tag
+            type=sha,prefix=
 
   build:
-    needs: meta
+    needs: [meta, verify]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
+        target: [web, api]
+        arch: [amd64, arm64]
         include:
-          - platform: linux/amd64
-            arch: amd64
+          - arch: amd64
+            platform: linux/amd64
             runner: ubuntu-latest
-          - platform: linux/arm64
-            arch: arm64
+          - arch: arm64
+            platform: linux/arm64
             runner: ubuntu-24.04-arm
+          - target: web
+            dockerfile: Dockerfile
+            suffix: ""
+          - target: api
+            dockerfile: server/Dockerfile
+            suffix: "-api"
     steps:
       - uses: actions/checkout@v7
 
@@ -55,11 +74,12 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
           labels: ${{ needs.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=app-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=app-${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE_NAME }}${{ matrix.suffix }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.target }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}-${{ matrix.arch }}
 
       - name: Export digest
         shell: bash
@@ -70,7 +90,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ matrix.arch }}
+          name: digests-${{ matrix.target }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -80,6 +100,13 @@ jobs:
       - meta
       - build
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: web
+            suffix: ""
+          - target: api
+            suffix: "-api"
     steps:
       - uses: docker/setup-buildx-action@v3
 
@@ -92,13 +119,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: ${{ runner.temp }}/digests
-          pattern: digests-*
+          pattern: digests-${{ matrix.target }}-*
           merge-multiple: true
 
       - name: Create multi-arch manifest
         shell: bash
         env:
-          TAGS: ${{ needs.meta.outputs.tags }}
+          TAGS: ${{ matrix.target == 'api' && needs.meta.outputs.api-tags || needs.meta.outputs.tags }}
+          TARGET_IMAGE: ${{ env.IMAGE_NAME }}${{ matrix.suffix }}
         run: |
           tag_args=()
           while IFS= read -r tag; do
@@ -109,7 +137,7 @@ jobs:
 
           digest_args=()
           while IFS= read -r digest_file; do
-            digest_args+=("${IMAGE_NAME}@sha256:${digest_file}")
+            digest_args+=("${TARGET_IMAGE}@sha256:${digest_file}")
           done < <(find "$RUNNER_TEMP/digests" -type f -printf '%f\n' | sort)
 
           docker buildx imagetools create "${tag_args[@]}" "${digest_args[@]}"

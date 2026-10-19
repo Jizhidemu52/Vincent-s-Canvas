@@ -5,7 +5,8 @@ import { restoreAgentMediaWorkflow } from "@/lib/canvas/agent-media-workflow";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasNodeData } from "@/types/canvas";
 
 // Run the exact page-owned helpers with only the media-storage boundary stubbed.
-const source = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
+const source = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8")
+    + "\n" + readFileSync(new URL("../src/pages/canvas/use-canvas-history.ts", import.meta.url), "utf8");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const names = new Set([
     "createCanvasHydrationContext", "memoCanvasHydration", "mapCanvasHydration", "uploadCanvasHydrationImage",

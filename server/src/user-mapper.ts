@@ -8,6 +8,7 @@ export type UserRow = {
     is_guest?: boolean;
     credit_balance: number; credit_limit: number; monthly_credit_limit: number;
     temporary_credit_adjustment: number; credit_period_start: string; credit_reset_at: string;
+    current_credit_period_start?: string;
 };
 
 export function mapUser(row: UserRow): SessionUser {
@@ -33,4 +34,5 @@ export const userSelect = `u.id, u.username, u.display_name, u.email, u.employee
     (SELECT gm.member_role FROM group_memberships gm JOIN designer_groups g ON g.id=gm.group_id
       WHERE gm.user_id=u.id AND gm.ended_at IS NULL AND g.status='active' LIMIT 1) AS group_role,
     u.credit_balance, u.credit_limit, u.monthly_credit_limit, u.temporary_credit_adjustment,
-    u.credit_period_start::text, (u.credit_period_start + INTERVAL '1 month')::date::text AS credit_reset_at`;
+    u.credit_period_start::text, (u.credit_period_start + INTERVAL '1 month')::date::text AS credit_reset_at,
+    date_trunc('month', timezone('Asia/Shanghai', now()))::date::text AS current_credit_period_start`;

@@ -1,9 +1,11 @@
 import { BookmarkPlus, Check, Copy, Download, LoaderCircle, PencilLine, Plus, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
+import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Select, Space, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useModuleEnabled } from "@/stores/use-module-store";
+import { InfiniteLoadMore } from "@/components/infinite-load-more";
 
 import { useCopyText } from "@/hooks/use-copy-text";
 import { imageModelDisplayName } from "@/lib/model-display";
@@ -14,6 +16,8 @@ import { imageCopyEditorNode } from "@/lib/image-edit-copy";
 import { needsCanvasAssetPreviewResolution, resolveCanvasAssetPreview } from "@/lib/canvas/canvas-asset-preview";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
 import { createClientId } from "@/lib/client-id";
+import { createZip } from "@/lib/zip";
+import { loadCanvasProject, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { cn } from "@/lib/utils";
@@ -22,10 +26,13 @@ import { canUserAccessAsset, useAssetStore, type Asset, type AssetKind, type Ima
 import { useUserStore } from "@/stores/use-user-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
 import { buildAssetSearchIndex, searchAssetIndex } from "./asset-search";
+import { assetCanvasNodes, assetCanvasViewport, selectAssetRange } from "./asset-batch";
 import {
     deleteServerAsset,
     updateServerAssetMetadata,
     fetchServerAssetContent,
+    fetchServerAsset,
+    batchServerAssets,
     listServerAssets,
     listServerProjects,
     recordServerAssetDownload,
@@ -62,7 +69,7 @@ const kindOptions = [
 ];
 
 export default function AssetsPage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const navigate = useNavigate();
     const referenceImportEnabled = useModuleEnabled("reference-import");
     const copyText = useCopyText();
@@ -71,26 +78,46 @@ export default function AssetsPage() {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInputRef = useRef<HTMLInputElement>(null);
     const batchImageInputRef = useRef<HTMLInputElement>(null);
-    const refreshRevisionRef = useRef(0);
-    const assetRequestRef = useRef<AbortController | null>(null);
     const localAssets = useAssetStore((state) => state.assets);
-    const [serverAssetResponse, setServerAssetResponse] = useState<{ userId: string; assets: ServerAsset[] } | null>(null);
-    const [serverLoading, setServerLoading] = useState(true);
-    const [serverError, setServerError] = useState("");
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const selectionAnchor = useRef<string | null>(null);
+    const [batchTarget, setBatchTarget] = useState<"canvas" | "project" | null>(null);
+    const [targetId, setTargetId] = useState<string>();
+    const canvasProjects = useCanvasStore(state => state.projects);
+    const unloadedCanvasProjects = useCanvasStore(state => state.unloadedProjects);
     const [assetAction, setAssetAction] = useState("");
     const assetActionRef = useRef(false);
     const [serverProjects, setServerProjects] = useState<UserProject[]>([]);
     const user = useUserStore((state) => state.user);
-    const serverAssets = useMemo(() => serverAssetResponse?.userId === user?.id ? serverAssetResponse?.assets || [] : [], [serverAssetResponse, user?.id]);
-    const serverAssetIds = useMemo(() => new Set(serverAssets.map(asset => asset.id)), [serverAssets]);
     const addAsset = useAssetStore((state) => state.addAsset);
     const updateAsset = useAssetStore((state) => state.updateAsset);
     const removeAsset = useAssetStore((state) => state.removeAsset);
     const [keyword, setKeyword] = useWorkbenchField("assets:keyword", "");
     const deferredKeyword = useDeferredValue(keyword);
     const [kindFilter, setKindFilter] = useWorkbenchField<AssetKind | "all">("assets:kind", "all");
-    const [page, setPage] = useWorkbenchField("assets:page", 1);
-    const [pageSize, setPageSize] = useWorkbenchField("assets:pageSize", 12);
+    const assetPages = useInfiniteQuery({
+        queryKey: ["asset-library", user?.id, deferredKeyword, kindFilter],
+        initialPageParam: undefined as string | undefined,
+        queryFn: ({ pageParam, signal }) => listServerAssets({ limit: 60, cursor: pageParam,
+            q: deferredKeyword || undefined, kind: kindFilter === "all" ? undefined : kindFilter }, signal),
+        getNextPageParam: last => last.hasMore ? last.nextCursor || undefined : undefined,
+        enabled: Boolean(user?.id),
+        staleTime: 10_000,
+        gcTime: 60_000,
+        retry: false,
+        refetchOnWindowFocus: false,
+    });
+    const serverAssets = useMemo(() => {
+        const unique = new Map<string, ServerAsset>();
+        for (const page of assetPages.data?.pages || []) for (const asset of page.assets) {
+            if (isSupportedServerAsset(asset)) unique.set(asset.id, asset);
+        }
+        return [...unique.values()];
+    }, [assetPages.data]);
+    const serverAssetIds = useMemo(() => new Set(serverAssets.map(asset => asset.id)), [serverAssets]);
+    const serverAssetResponse = assetPages.data?.pages.at(-1);
+    const serverLoading = assetPages.isFetching;
+    const serverError = assetPages.error instanceof Error ? assetPages.error.message : assetPages.isError ? "公司素材加载失败" : "";
     const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
     const editingServerAsset = Boolean(editingAsset && serverAssetIds.has(editingAsset.id));
     const { pending: savingAsset, run: runSave } = useAsyncAction(`asset-save:${editingAsset?.id || "new"}`);
@@ -125,40 +152,20 @@ export default function AssetsPage() {
     const title = Form.useWatch("title", form) || "";
     const tags = Form.useWatch("tags", form) || [];
     const content = Form.useWatch("content", form) || "";
-    const refreshServerAssets = async () => {
-        const revision = ++refreshRevisionRef.current;
-        const requestUserId = user?.id;
-        assetRequestRef.current?.abort();
-        if (!requestUserId) { setServerAssetResponse(null); setServerLoading(false); return; }
-        const controller = new AbortController();
-        assetRequestRef.current = controller;
-        setServerLoading(true);
-        setServerError("");
-        try {
-            const result = await listServerAssets(controller.signal);
-            if (revision !== refreshRevisionRef.current || useUserStore.getState().user?.id !== requestUserId) return;
-            // The library currently renders image/video/text. Audio references remain available to video tasks.
-            const supported = result.assets.filter(isSupportedServerAsset);
-            setServerAssetResponse({ userId: requestUserId, assets: supported });
-            setPreviewAsset((current) => {
-                if (!current) return current;
-                const refreshed = supported.find((asset) => asset.id === current.id);
-                return refreshed ? serverAssetToLocal(refreshed) : current;
-            });
-        }
-        catch (error) { if (revision === refreshRevisionRef.current) setServerError(error instanceof Error ? error.message : "公司素材加载失败"); }
-        finally { if (revision === refreshRevisionRef.current) setServerLoading(false); }
+    const refreshServerAssets = async (cursor?: string) => {
+        if (!user?.id) return;
+        if (cursor) await assetPages.fetchNextPage();
+        else await assetPages.refetch();
     };
     useEffect(() => {
-        setServerAssetResponse(null);
         setPreviewAsset(null);
         setEditingAsset(null);
         setDeletingAsset(null);
         setProjectAsset(null);
         setIsAssetOpen(false);
-        void refreshServerAssets();
-        return () => { refreshRevisionRef.current += 1; assetRequestRef.current?.abort(); };
-    }, [user?.id]);
+        setSelectedIds(new Set()); selectionAnchor.current = null;
+        setBatchTarget(null);
+    }, [user?.id, deferredKeyword, kindFilter]);
     useEffect(() => {
         const controller = new AbortController();
         setServerProjects([]);
@@ -170,13 +177,10 @@ export default function AssetsPage() {
     const assets = useMemo(() => [...serverAssets.map(serverAssetToLocal), ...localAssets.filter((asset) => !serverAssetIds.has(asset.id) && !serverAssetIds.has(metadataString(asset, "serverAssetId")))], [localAssets, serverAssetIds, serverAssets]);
     const validAssets = useMemo(() => assets.filter((asset) => canUserAccessAsset(asset, user, serverAssetIds.has(asset.id)) && (asset.kind === "text" || asset.kind === "image" || asset.kind === "video")), [assets, user, serverAssetIds]);
 
-    const searchIndex = useMemo(() => buildAssetSearchIndex(validAssets), [validAssets]);
-    const filteredAssets = useMemo(() => searchAssetIndex(searchIndex, deferredKeyword, kindFilter), [searchIndex, deferredKeyword, kindFilter]);
+    const searchIndex = useMemo(() => buildAssetSearchIndex(validAssets.filter(asset => !serverAssetIds.has(asset.id))), [validAssets, serverAssetIds]);
+    const filteredAssets = useMemo(() => [...validAssets.filter(asset => serverAssetIds.has(asset.id)), ...searchAssetIndex(searchIndex, deferredKeyword, kindFilter)], [validAssets, serverAssetIds, searchIndex, deferredKeyword, kindFilter]);
 
-    const visibleAssets = useMemo(() => {
-        const start = (page - 1) * pageSize;
-        return filteredAssets.slice(start, start + pageSize);
-    }, [filteredAssets, page, pageSize]);
+    const visibleAssets = filteredAssets;
 
     const runAssetAction = async (label: string, run: () => Promise<void>) => {
         if (assetActionRef.current) return;
@@ -187,11 +191,62 @@ export default function AssetsPage() {
         finally { assetActionRef.current = false; setAssetAction(""); }
     };
 
-    useEffect(() => {
-        if (serverLoading || keyword !== deferredKeyword) return;
-        const maxPage = Math.max(1, Math.ceil(filteredAssets.length / pageSize));
-        setPage((value) => Math.min(value, maxPage));
-    }, [filteredAssets.length, pageSize, serverLoading, keyword, deferredKeyword, setPage]);
+    const readAssetDetail = async (asset: Asset) => {
+        if (!serverAssetIds.has(asset.id)) return asset;
+        const ownerId = user?.id;
+        const result = await fetchServerAsset(asset.id);
+        if (useUserStore.getState().user?.id !== ownerId) throw new Error("账号已切换，请重新打开素材");
+        return serverAssetToLocal(result.asset);
+    };
+    const openDetail = (asset: Asset) => void runAssetAction("正在读取素材详情…", async () => setPreviewAsset(await readAssetDetail(asset)));
+    const toggleSelection = (id: string, shift: boolean) => {
+        try { setSelectedIds(selectAssetRange(selectedIds, filteredAssets.map(asset => asset.id), id, selectionAnchor.current, shift)); selectionAnchor.current = id; }
+        catch (error) { message.warning(error instanceof Error ? error.message : "无法选择素材"); }
+    };
+    const selectedAssets = validAssets.filter(asset => selectedIds.has(asset.id));
+    const executeBatch = async (action: "delete" | "download" | "add-to-canvas" | "move-project") => {
+        const requestOwnerId = user?.id;
+        const selected = [...selectedAssets];
+        if (!selected.length || selected.length > 50) throw new Error("请选择 1 至 50 个素材");
+        const serverIds = selected.filter(asset => serverAssetIds.has(asset.id)).map(asset => asset.id);
+        if (action === "move-project" && serverIds.length !== selected.length) throw new Error("本地素材请先上传后再移动到项目");
+        const result = serverIds.length ? await batchServerAssets(action, serverIds, action === "move-project" ? targetId : undefined) : null;
+        if (useUserStore.getState().user?.id !== requestOwnerId) throw new Error("账号已切换，已停止后续操作");
+        if (action === "delete") {
+            selected.filter(asset => !serverAssetIds.has(asset.id)).forEach(asset => removeAsset(asset.id));
+            setSelectedIds(new Set()); await refreshServerAssets(); message.success(`已删除 ${selected.length} 个素材`);
+        } else if (action === "move-project") {
+            setSelectedIds(new Set()); await refreshServerAssets(); setBatchTarget(null); message.success(`已移动 ${selected.length} 个素材`);
+        } else if (action === "download") {
+            const files: { name: string; data: Blob }[] = [];
+            for (const [index, asset] of selected.entries()) {
+                setAssetAction(`正在下载 ${index + 1} / ${selected.length}…`);
+                const descriptor = result?.assets.find(item => item.id === asset.id);
+                let blob: Blob;
+                if (descriptor) blob = await fetchServerAssetContent(asset.id);
+                else if (asset.kind === "text") blob = new Blob([asset.data.content], { type: "text/plain" });
+                else { const url = await resolveCanvasAssetPreview(asset, { resolveImage: resolveImageUrl, resolveMedia: resolveMediaUrl }); if (!url) throw new Error("本地素材文件不可用"); const response = await fetch(url); if (!response.ok) throw new Error("本地素材读取失败"); blob = await response.blob(); }
+                if (useUserStore.getState().user?.id !== requestOwnerId) throw new Error("账号已切换，下载已停止");
+                const filename = descriptor?.filename || `${asset.title}.${asset.kind === "text" ? "txt" : blob.type.split("/")[1] || "bin"}`;
+                files.push({ name: `${index + 1}-${filename.replace(/[\\/\x00-\x1f]/g, "_")}`, data: blob });
+            }
+            const zip = await createZip(files);
+            if (useUserStore.getState().user?.id !== requestOwnerId) throw new Error("账号已切换，下载已停止");
+            saveAs(zip, "选中素材.zip"); message.success(`已打包 ${files.length} 个原始文件`);
+        } else {
+            const detailed = selected.map(asset => { const full = result?.assets.find(item => item.id === asset.id); return full ? serverAssetToLocal(full) : asset; });
+            const target = targetId && targetId !== "new" ? await loadCanvasProject(targetId) : null;
+            if (targetId && targetId !== "new" && !target) throw new Error("目标画布不存在或无权访问");
+            if (useUserStore.getState().user?.id !== requestOwnerId) throw new Error("账号已切换，已停止加入画布");
+            const offsetY = target?.nodes.length ? Math.max(...target.nodes.map(node => node.position.y + node.height)) + 60 : 0;
+            const nodes = assetCanvasNodes(detailed, offsetY);
+            const store = useCanvasStore.getState();
+            const canvasId = target?.id || store.importProject({ title: "素材选集", nodes,
+                viewport: assetCanvasViewport(nodes, { width: window.innerWidth, height: window.innerHeight }) });
+            if (target) store.updateProject(target.id, { nodes: [...target.nodes, ...nodes] });
+            setBatchTarget(null); navigate(`/canvas/${canvasId}`);
+        }
+    };
 
     const openCreate = () => {
         setEditingAsset(null);
@@ -272,7 +327,7 @@ export default function AssetsPage() {
 
     const copyAssetText = async (asset: Asset) => {
         if (asset.kind !== "text") return;
-        copyText(asset.data.content, "文本已复制");
+        await runAssetAction("正在读取文本…", async () => { const full = await readAssetDetail(asset); if (full.kind === "text") copyText(full.data.content, "文本已复制"); });
     };
 
     const downloadImage = async (asset: Asset) => {
@@ -308,7 +363,15 @@ export default function AssetsPage() {
             message.warning("暂无素材可导出");
             return;
         }
-        await exportAssets(validAssets);
+        const ownerId = user?.id;
+        const detailed = new Map<string, Asset>();
+        const serverIds = validAssets.filter(asset => serverAssetIds.has(asset.id)).map(asset => asset.id);
+        for (let start = 0; start < serverIds.length; start += 50) {
+            const result = await batchServerAssets("add-to-canvas", serverIds.slice(start, start + 50));
+            if (useUserStore.getState().user?.id !== ownerId) throw new Error("账号已切换，导出已停止");
+            result.assets.forEach(asset => detailed.set(asset.id, serverAssetToLocal(asset)));
+        }
+        await exportAssets(validAssets.map(asset => detailed.get(asset.id) || asset));
         const recorded = await Promise.allSettled(
             validAssets.filter((asset) => serverAssetIds.has(asset.id)).map((asset) => recordServerAssetEvent(asset.id, "asset.exported", { channel: "asset-package" })),
         );
@@ -352,7 +415,7 @@ export default function AssetsPage() {
     };
 
     const replicateAsset = async (asset: Asset) => {
-        const url = buildRecreateUrl(asset);
+        const url = buildRecreateUrl(await readAssetDetail(asset));
         if (!url) {
             message.warning("这个素材没有可复刻的提示词记录");
             return;
@@ -413,7 +476,13 @@ export default function AssetsPage() {
     };
 
     return (
-        <div className="wb-page flex h-full flex-col overflow-hidden">
+        <div className="wb-page flex h-full flex-col overflow-hidden" tabIndex={0} aria-label="素材库" onKeyDown={event => {
+            const target = event.target as HTMLElement;
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && !target.closest('input:not([type="checkbox"]),textarea,[contenteditable="true"],[role="dialog"]') && !isAssetOpen && !previewAsset && !batchTarget) {
+                event.preventDefault(); setSelectedIds(new Set(visibleAssets.slice(0, 50).map(asset => asset.id)));
+                if (visibleAssets.length > 50) message.info("当前页超过 50 个素材，已选择前 50 个");
+            }
+        }}>
             <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
                 <div className="mx-auto max-w-7xl pb-6">
                     <header className="wb-header">
@@ -437,11 +506,9 @@ export default function AssetsPage() {
                             value={keyword}
                             placeholder="搜索标题、内容、标签或来源"
                             onChange={(event) => {
-                                setPage(1);
                                 setKeyword(event.target.value);
                             }}
                             onSearch={(value) => {
-                                setPage(1);
                                 setKeyword(value);
                             }}
                         />
@@ -458,7 +525,6 @@ export default function AssetsPage() {
                                             checked={kindFilter === option.value}
                                             className={cn("prompt-filter-tag", kindFilter === option.value && "is-active")}
                                             onChange={() => {
-                                                setPage(1);
                                                 setKindFilter(option.value as AssetKind | "all");
                                             }}
                                         >
@@ -468,9 +534,9 @@ export default function AssetsPage() {
                                 </div>
                             </div>
                             <div className="wb-toolbar">
-                                <span className="text-sm text-muted-foreground">共 {filteredAssets.length} 个素材</span>
+                                <span className="text-sm text-muted-foreground">已加载 {filteredAssets.length} 个素材{serverAssetResponse?.hasMore ? " · 还有更多" : ""}</span>
                                 {referenceImportEnabled ? <Button onClick={() => navigate("/reference-import")}>网页采集</Button> : null}
-                                <Button icon={<Download className="size-4" />} disabled={Boolean(assetAction) || !validAssets.length} onClick={() => void runAssetAction("正在整理导出文件…", exportAllAssets)}>导出素材</Button>
+                                <Button icon={<Download className="size-4" />} disabled={Boolean(assetAction) || !validAssets.length} onClick={() => void runAssetAction("正在整理导出文件…", exportAllAssets)}>导出已加载素材</Button>
                                 <Button icon={<Upload className="size-4" />} disabled={Boolean(assetAction)} onClick={() => assetInputRef.current?.click()}>导入素材包</Button>
                             </div>
                         </div>
@@ -485,33 +551,36 @@ export default function AssetsPage() {
                             <AssetCard
                                 key={asset.id}
                                 asset={asset}
-                                onOpen={() => setPreviewAsset(asset)}
-                                onEdit={() => openEdit(asset)}
+                                selected={selectedIds.has(asset.id)}
+                                onSelect={shift => toggleSelection(asset.id, shift)}
+                                onOpen={() => openDetail(asset)}
+                                onEdit={() => void runAssetAction("正在读取素材详情…", async () => openEdit(await readAssetDetail(asset)))}
                                 onCopy={copyAssetText}
                                 onDownload={downloadImage}
-                                onReplicate={() => void replicateAsset(asset)}
+                                onReplicate={() => void runAssetAction("正在读取复刻参数…", () => replicateAsset(asset))}
                                 onDelete={() => setDeletingAsset(asset)}
                             />
                         ))}
                     </div>
 
-                    {!visibleAssets.length && !serverLoading ? <div className="wb-surface wb-empty"><Upload className="size-8" /><strong>{keyword || kindFilter !== "all" ? "没有找到匹配素材" : "先收好你的第一份素材"}</strong><p>{keyword || kindFilter !== "all" ? "试试更短的关键词，或清除筛选查看全部内容。" : "上传常用参考图，或新增文本素材。生成的作品也会出现在这里。"}</p>{keyword || kindFilter !== "all" ? <Button onClick={() => { setKeyword(""); setKindFilter("all"); setPage(1); }}>清除筛选</Button> : <Button type="primary" disabled={Boolean(assetAction)} onClick={() => batchImageInputRef.current?.click()}>上传图片</Button>}</div> : null}
-
-                    <div className="flex justify-center">
-                        <Pagination
-                            current={page}
-                            pageSize={pageSize}
-                            total={filteredAssets.length}
-                            showSizeChanger
-                            pageSizeOptions={[12, 24, 48, 96]}
-                            onChange={(nextPage, nextPageSize) => {
-                                setPage(nextPage);
-                                setPageSize(nextPageSize);
-                            }}
-                        />
-                    </div>
+                    {!visibleAssets.length && !serverLoading ? <div className="wb-surface wb-empty"><Upload className="size-8" /><strong>{keyword || kindFilter !== "all" ? "没有找到匹配素材" : "先收好你的第一份素材"}</strong><p>{keyword || kindFilter !== "all" ? "试试更短的关键词，或清除筛选查看全部内容。" : "上传常用参考图，或新增文本素材。生成的作品也会出现在这里。"}</p>{keyword || kindFilter !== "all" ? <Button onClick={() => { setKeyword(""); setKindFilter("all"); }}>清除筛选</Button> : <Button type="primary" disabled={Boolean(assetAction)} onClick={() => batchImageInputRef.current?.click()}>上传图片</Button>}</div> : null}
+                    <InfiniteLoadMore hasMore={Boolean(assetPages.hasNextPage)} loading={serverLoading} error={assetPages.error}
+                        disabled={Boolean(assetAction)} resetKey={JSON.stringify([user?.id, deferredKeyword, kindFilter])}
+                        pageKey={serverAssetResponse?.nextCursor} label="加载更多素材" endLabel="已显示全部已加载素材"
+                        onLoadMore={() => assetPages.fetchNextPage({ cancelRefetch: false })} />
                 </div>
             </main>
+            {selectedIds.size ? <div role="toolbar" aria-label="素材批量操作" className="flex flex-wrap items-center justify-center gap-2 border-t bg-background px-4 py-3">
+                <span className="mr-2 text-sm">已选 {selectedIds.size} / 50</span>
+                <Button disabled={Boolean(assetAction)} onClick={() => setSelectedIds(new Set())}>取消选择</Button>
+                <Button disabled={Boolean(assetAction)} icon={<Download className="size-4" />} onClick={() => void runAssetAction("正在准备批量下载…", () => executeBatch("download"))}>批量下载</Button>
+                <Button disabled={Boolean(assetAction)} onClick={() => { setBatchTarget("canvas"); setTargetId("new"); }}>加入画布</Button>
+                <Button disabled={Boolean(assetAction) || selectedAssets.some(asset => !serverAssetIds.has(asset.id))} onClick={() => { setBatchTarget("project"); setTargetId(undefined); }}>移动到项目</Button>
+                <Button danger disabled={Boolean(assetAction)} icon={<Trash2 className="size-4" />} onClick={() => modal.confirm({ title: `删除选中的 ${selectedIds.size} 个素材？`, content: "公司素材将移入30天可恢复的删除状态；本地素材会从素材库移除。任一公司素材无权限时整批不执行。", okText: "删除", cancelText: "取消", okButtonProps: { danger: true }, onOk: () => runAssetAction("正在批量删除…", () => executeBatch("delete")) })}>批量删除</Button>
+            </div> : null}
+            <Modal title={batchTarget === "canvas" ? "批量加入画布" : "批量移动到项目"} open={Boolean(batchTarget)} confirmLoading={Boolean(assetAction)} okButtonProps={{ disabled: !targetId }} onCancel={() => { if (!assetAction) setBatchTarget(null); }} onOk={() => void runAssetAction("正在批量处理…", () => executeBatch(batchTarget === "canvas" ? "add-to-canvas" : "move-project"))} okText="确认" cancelText="取消">
+                <Select className="w-full" aria-label="批量操作目标" value={targetId} onChange={setTargetId} options={batchTarget === "canvas" ? [{ value: "new", label: "创建新画布" }, ...[...canvasProjects, ...unloadedCanvasProjects].map(project => ({ value: project.id, label: project.title }))] : serverProjects.map(project => ({ value: project.id, label: project.name }))} placeholder="请选择目标项目" />
+            </Modal>
 
             <Modal title={editingAsset ? "编辑素材" : "新增素材"} open={isAssetOpen} width={980} onCancel={() => { if (!savingAsset) setIsAssetOpen(false); }} onOk={() => void runSave(saveAsset)} confirmLoading={savingAsset} cancelButtonProps={{ disabled: savingAsset }} closable={!savingAsset} keyboard={!savingAsset} maskClosable={!savingAsset} okText="保存" cancelText="取消" destroyOnHidden>
                 {editingServerAsset ? <p className="mb-4 text-sm text-muted-foreground">修改标题、标签、来源说明和备注将保存到服务端；原始文件和生成记录保持不变。</p> : null}
@@ -706,7 +775,7 @@ function AssetDetailPreview({ asset }: { asset: Asset }) {
     const source = useResolvedAssetMedia(asset);
     if (!source) return <AssetPlaceholder asset={asset} />;
     if (asset.kind === "video") return <AssetPlaceholder asset={asset} />;
-    return <Image src={source} alt={asset.title} className="rounded-lg" />;
+    return <Image src={metadataString(asset, "previewUrl") || source} preview={{ src: asset.kind === "image" ? asset.data.dataUrl : source }} alt={asset.title} className="rounded-lg" />;
 }
 
 function ResolvedAssetVideo({ asset, className, controls = false }: { asset: Extract<Asset, { kind: "video" }>; className?: string; controls?: boolean }) {
@@ -716,6 +785,8 @@ function ResolvedAssetVideo({ asset, className, controls = false }: { asset: Ext
 
 function AssetCard({
     asset,
+    selected,
+    onSelect,
     onOpen,
     onEdit,
     onCopy,
@@ -724,6 +795,8 @@ function AssetCard({
     onDelete,
 }: {
     asset: Asset;
+    selected: boolean;
+    onSelect: (shift: boolean) => void;
     onOpen: () => void;
     onEdit: () => void;
     onCopy: (asset: Asset) => void;
@@ -735,7 +808,7 @@ function AssetCard({
     return (
         <Card
             hoverable
-            className="wb-surface overflow-hidden"
+            className={cn("wb-surface relative overflow-hidden", selected && "ring-2 ring-primary")}
             styles={{ body: { padding: 0 } }}
             cover={
                 <button type="button" className="block w-full text-left" onClick={onOpen}>
@@ -747,6 +820,9 @@ function AssetCard({
                 </button>
             }
         >
+            <label className="absolute left-3 top-3 z-10 flex size-7 items-center justify-center rounded bg-background/90" onClick={event => event.stopPropagation()}>
+                <input type="checkbox" aria-label={`选择${asset.title}`} checked={selected} onChange={() => undefined} onClick={event => onSelect(event.shiftKey)} className="size-4 cursor-pointer accent-primary" />
+            </label>
             <button type="button" className="block w-full text-left" onClick={onOpen}>
                 <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -999,7 +1075,7 @@ function resultStatusLabel(status: string) {
 }
 
 function canReplicate(asset: Asset) {
-    return Boolean(metadataString(asset, "recreatePath") || (metadataString(asset, "prompt") || (asset.kind === "text" ? asset.data.content : "")).trim());
+    return Boolean(asset.metadata?.canRecreate || metadataString(asset, "recreatePath") || (metadataString(asset, "prompt") || (asset.kind === "text" ? asset.data.content : "")).trim());
 }
 
 function buildRecreateUrl(asset: Asset) {

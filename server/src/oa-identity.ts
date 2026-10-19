@@ -8,13 +8,15 @@ export async function resolveOaUser(client: PoolClient, identity: { id: string; 
     // Concurrent first logins for one external identity share a transaction lock.
     // Hash collisions only serialize unrelated identities, never merge identities.
     await client.query("SELECT pg_advisory_xact_lock(hashtext('oa'),hashtext($1))", [identity.id]);
-    const existing = await client.query<UserRow>(
-        `SELECT ${userSelect} FROM external_identities e JOIN users u ON u.id=e.user_id
+    const existing = await client.query<UserRow & { deleted_at: Date | null }>(
+        `SELECT ${userSelect},u.deleted_at FROM external_identities e JOIN users u ON u.id=e.user_id
          LEFT JOIN departments d ON d.id=u.department_id
          WHERE e.provider='oa' AND e.subject=$1 FOR UPDATE OF u`, [identity.id],
     );
     let row = existing.rows[0];
-    if (row && (row.role !== "designer" || row.status !== "active" || row.is_guest)) {
+    // Keep the tombstone visible: filtering it out would provision a replacement
+    // identity instead of denying a previously deleted employee account.
+    if (row && (row.deleted_at || row.role !== "designer" || row.status !== "active" || row.is_guest)) {
         throw new OaError("OA_ACCOUNT_FORBIDDEN", "该 OA 用户未获准使用创作端", 403);
     }
     const userId = row?.id ?? randomUUID();
@@ -29,7 +31,7 @@ export async function resolveOaUser(client: PoolClient, identity: { id: string; 
         `UPDATE users SET display_name=$2,last_login_at=now(),must_change_password=false,
          failed_login_count=0,locked_until=NULL,updated_at=now() WHERE id=$1`, [userId, identity.name],
     );
-    const result = await client.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`, [userId]);
+    const result = await client.query<UserRow & { deleted_at: Date | null }>(`SELECT ${userSelect},u.deleted_at FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1 AND u.deleted_at IS NULL`, [userId]);
     row = result.rows[0];
     if (!row) throw new Error("OA account creation failed");
     return row;

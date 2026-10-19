@@ -1,8 +1,20 @@
 import { isIP } from "node:net";
+import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
 
 export const APIMART_VIDEO_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const APIMART_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const extensions: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+
+function uploadTransportFailure(cause: unknown, purposeName: "图片" | "视频") {
+  const diagnostics = readProviderSubmissionDiagnostics(cause);
+  const errorName = cause instanceof Error ? cause.name : "";
+  const detail = diagnostics?.phase === "http_started" || diagnostics?.phase === "response" ? "连接中断"
+    : errorName === "TimeoutError" ? "超时" : "失败";
+  // The upload POST is not the paid generation POST. Preserve bounded transport
+  // evidence, but never carry its generic submission warning into user text.
+  return Object.assign(new Error(`APIMart 参考图上传${detail}，尚未提交${purposeName}生成`, { cause }), diagnostics || {},
+    errorName === "TimeoutError" || errorName === "AbortError" ? { name: errorName } : {});
+}
 
 export function isApiMartImageMimeType(mimeType: string) {
   return Object.hasOwn(extensions, mimeType);
@@ -35,12 +47,17 @@ export async function uploadApiMartImage(input: {
   const filename = input.filename?.split(/[\\/]/).pop()?.replace(/[\u0000-\u001f\u007f]/g, "") || `reference.${extensions[input.mimeType]}`;
   const form = new FormData();
   form.append("file", file, filename);
-  const response = await (runtime.fetch || fetch)(`${input.baseUrl.replace(/\/+$/, "")}/uploads/images`, {
+  const response = await (runtime.fetch || fetchProviderSubmission)(`${input.baseUrl.replace(/\/+$/, "")}/uploads/images`, {
     method: "POST", headers: { authorization: `Bearer ${input.apiKey}` }, body: form,
     redirect: "error", signal: AbortSignal.timeout(180_000),
+  }).catch((error: unknown) => {
+    throw uploadTransportFailure(error, purposeName);
   });
   if (!response.ok) throw new Error(`APIMart 参考图上传失败（${response.status}），尚未提交${purposeName}生成`);
-  const result = await response.json().catch(() => null) as { url?: unknown } | null;
+  const result = await response.json().catch((error: unknown) => {
+    if (error instanceof SyntaxError) return null;
+    throw uploadTransportFailure(error, purposeName);
+  }) as { url?: unknown } | null;
   if (typeof result?.url !== "string" || !isPublicHttpsUrl(result.url)) throw new Error(`APIMart 参考图上传未返回公开 HTTPS 地址，尚未提交${purposeName}生成`);
   return result.url;
 }

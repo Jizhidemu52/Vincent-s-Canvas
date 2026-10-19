@@ -69,15 +69,79 @@ cd ..
 .\Build-LAN.ps1
 ```
 
-按 [Windows 本地部署说明](README-本地部署.md) 配置 `server/.env`，再运行：
+按下方“Windows 本地与局域网配置”配置 `server/.env`。仅在本机使用时运行：
 
 ```powershell
-.\Start-LAN.bat
+.\Start-Local.bat
 ```
 
 使用启动脚本实际显示的地址。默认免登录试用不等于企业隔离环境，仅向受信网络开放；不要把本地可访问视为生产部署完成。更新前先备份，已有服务按部署手册安排重启，不强制覆盖本地修改。
 
+## Windows 本地与局域网配置
+
+### 凭据与首次构建
+
+Windows 10 / 11 上的运行电脑需能访问模型服务商，并安装 Bun、兼容的 Node.js，以及媒体处理所需的 FFmpeg / ffprobe。第一次按上方命令安装锁定依赖和构建；后续也可双击 `Build-LAN.bat`，成品生成在 `web/dist`。完整前端包含后台代码，不代表 Windows 单机服务开放正式管理员权限。
+
+若 `server/.env` 不存在，复制 `server/.env.example` 为该文件；不要覆盖已有配置。按实际使用的平台填写服务端凭据。例如 OpenToken：
+
+```ini
+OPENTOKEN_BASE_URL=https://cn2.gw.opentoken.io/v1
+OPENTOKEN_API_KEY=在运行电脑填入自己的真实Key
+```
+
+模型 Key 只保存在运行电脑的 `server/.env`，不要发送到群聊、前端或 GitHub。设计师列表显示已启用且可用的模型；已接入的 APIMart 与 OpenToken 图片型号保留明确展示名称及独立配置身份，不把未配置服务当作可用。所有使用者消耗运行电脑的模型额度，关闭内部积分不代表外部调用免费。
+
+### 选择启动方式
+
+| 用途 | 入口 | 访问与存储边界 |
+| --- | --- | --- |
+| 本机成品试用 | `Start-Local.bat` | 仅监听 `127.0.0.1:5188`，不改防火墙；服务端使用已有 `server/.data/local-demo.sqlite` |
+| 受信局域网试用 | `Start-LAN.bat` | 使用脚本实际打印的实体网卡地址；同事必须在允许的局域网内，运行电脑保持开机 |
+| 企业 OA 试点 | `Start-LAN.ps1 -CompanyOa` | 管理员先配置可信 OA 接口；从“企业微信 → 公司 OA → 画布”进入，不新增画布扫码步骤 |
+| 正式 PostgreSQL / Redis / S3 部署 | `docker compose up -d --build` | 先按[生产部署手册](docs/manual/production-deployment.md)准备配置、迁移、HTTPS、网络限制与备份 |
+
+`Start-LAN` 会检查构建与部署模式，选择已连接的实体以太网或 Wi-Fi 网卡并排除 VPN / WSL 虚拟网卡，健康检查通过后才显示就绪；重复启动复用现有实例，不自动重启或切换试用／企业模式。若需要防火墙管理员权限，先确认使用受信网络；脚本限制到所选网卡、本机地址和本地子网，并不代表正式公司白名单已验收。日志在 `server/.data/lan-server.out.log` 和 `lan-server.err.log`。
+
+默认试用无需登录，使用共用创作身份，不保证员工隔离；试用画布保存在浏览器，任务和生成素材保存在 SQLite。企业 OA 模式须校验员工身份，按员工保存画布、原图、素材与任务；旧共用数据不会自动迁入个人账号。独立聊天、创意草稿和个人模板仍有浏览器保存边界。正式后端的独立密码／企业微信和积分功能不等于上述 Windows 演示入口，详见[身份与存储说明](docs/content/docs/backend/backend-database.mdx)。
+
+### 更新与备份
+
+更新前导出重要浏览器内容，并备份 `server/.env`、`server/.data`。SQLite 备份需先停服后复制整个数据目录，不能运行中只拷贝 `.sqlite` 主文件；正式 PostgreSQL 与对象存储要联合备份。
+
+```powershell
+git pull --ff-only origin main
+cd web
+bun install --frozen-lockfile
+cd ..\server
+bun install --frozen-lockfile
+cd ..
+.\Build-LAN.ps1
+```
+
+不要强制覆盖本地改动。服务端或 Key 变更后，等待当前生成结束，安排停止本项目旧服务，再按原模式启动；重复双击局域网脚本不会重启旧实例。前端刷新不代替服务端更新。中断的任务不自动重新提交付费生成；企业会话失效应从 OA 重新进入。
+
+### 常见问题与安全边界
+
+- **同事打不开**：确认同一受信局域网、使用脚本打印的地址而不是 `127.0.0.1` 或旧 IP，检查运行电脑休眠和受控防火墙规则。
+- **网页能开但生成失败**：检查相应服务端 Key、模型配置、余额和上游网络；修改凭据后重启本项目服务。界面可访问不等于上游可用。
+- **等待很久**：先比较运行电脑与同事电脑的同规格任务和网络；生成耗时可能来自上游模型、额度、排队或 Wi-Fi，不能只凭页面等待推断故障。
+- **正式公司入口**：由 IT 确认服务器、HTTPS 域名、出口 IP / 网段和可信身份接入，限制网页、API、媒体及后端端口，并实测公司外拒绝访问。局域网 HTTP 仅用于受信试用；已下载或缓存的图片无法远程收回。
+- 不上传未获授权的客户机密、个人信息或图片。企业画布离开前确认已同步；换设备前导出本地内容。部署技术说明不替代使用授权。
+
 ## 文档与项目结构
+
+开发与部署入口分开使用，不会互相切换现有服务：
+
+| 用途 | 入口 | 边界 |
+| --- | --- | --- |
+| 源码热更新 | 根目录 `bun install --frozen-lockfile` 后 `bun dev` | 本机 Vite `3000` + API `3100`，独立 `dev-local.sqlite`；仍可能调用真实收费模型 |
+| 本机成品试用 | 构建后 `Start-Local.bat` | 仅 `127.0.0.1:5188`，现有本机数据不变 |
+| 局域网 / 正式环境 | `Start-LAN.bat` / `docker compose up -d --build` | 按对应部署文档配置身份、存储、网络与备份 |
+
+首次开发还需在 `web/`、`server/` 分别执行 `bun install --frozen-lockfile`。根目录 `bun check` 执行高置信度 lint、两端类型检查、前端正式构建（含包体预算）与测试，会重建 `web/dist`；正在使用成品服务时应安排维护窗口。通过 `DEV_API_PORT` / `DEV_WEB_PORT` 可更换开发端口，开发启动器不会杀掉已有服务。
+
+`bun run format <文件路径>` / `bun run format:check <文件路径>` 分别定向格式化或检查前后端文件；不要求为局部修改重排整个仓库。
 
 - 使用：[操作手册](docs/manual/user-guide.md) · [功能介绍](docs/content/docs/overview/features.mdx) · [文档导航](docs/index.md)
 - 部署：[Windows](README-本地部署.md) · [Linux](docs/manual/linux-deployment.md) · [宝塔离线安装](docs/manual/baota-offline-installation.md) · [安装与更新](docs/manual/installation-guide.md)

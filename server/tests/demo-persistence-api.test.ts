@@ -161,7 +161,8 @@ test("open demo retains designer assets while blocking legacy administrator logi
   const demo = await createHarness();
   try {
     await demo.start();
-    const uploaded = await demo.json<UploadRequest>("/api/assets/upload-request", "POST", { filename: "oversight.txt", mimeType: "text/plain", byteSize: 3, projectId: "integration-project" }, 201);
+    const { project } = await demo.json<{ project: { id: string } }>("/api/projects/sync", "POST", { externalId: "integration-project", name: "集成测试项目" });
+    const uploaded = await demo.json<UploadRequest>("/api/assets/upload-request", "POST", { filename: "oversight.txt", mimeType: "text/plain", byteSize: 3, projectId: project.id }, 201);
     expect((await demo.request(uploaded.uploadUrl!, { method: "PUT", body: "abc" })).status).toBe(204);
     expect((await demo.request("/api/admin/assets")).status).toBe(403);
     expect((await demo.request("/api/auth/login", { method: "POST", body: JSON.stringify({ identifier: "admin", portal: "admin", password: "Canvas2026!#" }) })).status).toBe(404);
@@ -194,7 +195,10 @@ test("real demo HTTP uploads, metadata and unfinished upload reservations surviv
     expect(new Uint8Array(await content.arrayBuffer())).toEqual(bytes);
     const assets = await demo.json<{ assets: ListedAsset[] }>("/api/assets");
     expect(assets.assets).toHaveLength(1);
-    expect(assets.assets[0]).toMatchObject({ id: uploaded.assetId, filename: uploadInput.filename, byteSize: bytes.byteLength, metadata: { ...updatedMetadata, content: new TextDecoder().decode(bytes) } });
+    expect(assets.assets[0]).toMatchObject({ id: uploaded.assetId, filename: uploadInput.filename, byteSize: bytes.byteLength, metadata: { title: updatedMetadata.title, tags: updatedMetadata.tags, source: updatedMetadata.source } });
+    expect(assets.assets[0]?.metadata).not.toHaveProperty("note");
+    expect(assets.assets[0]?.metadata).not.toHaveProperty("content");
+    expect((await demo.json<{ asset: ListedAsset }>(`/api/assets/${uploaded.assetId}`)).asset.metadata).toEqual({ ...updatedMetadata, content: new TextDecoder().decode(bytes) });
     expect(await demo.json<UploadRequest>("/api/assets/upload-request", "POST", uploadInput, 201)).toEqual({ assetId: uploaded.assetId, uploadUrl: null, reused: true });
     expect((await demo.request(`/api/assets/${reservation.assetId}/content`)).status).toBe(404);
     const resumed = await demo.json<UploadRequest>("/api/assets/upload-request", "POST", reservationInput, 201);
@@ -274,7 +278,7 @@ test("delayed metadata and upload bodies cannot overwrite each other's committed
         deferred.release();
         expect((await deferred.response).status).toBe(204);
         expect(new Uint8Array(await (await demo.request(`/api/assets/${upload.assetId}/content`)).arrayBuffer())).toEqual(bytes);
-        expect((await demo.json<{ assets: ListedAsset[] }>("/api/assets")).assets.find((item) => item.id === upload.assetId)?.metadata).toEqual({ ...metadata, content: new TextDecoder().decode(bytes) });
+        expect((await demo.json<{ asset: ListedAsset }>(`/api/assets/${upload.assetId}`)).asset.metadata).toEqual({ ...metadata, content: new TextDecoder().decode(bytes) });
       } finally { await deferred.cancel(); }
     }
     await demo.start();
@@ -282,7 +286,8 @@ test("delayed metadata and upload bodies cannot overwrite each other's committed
     expect(persisted.assets).toHaveLength(2);
     for (const item of persisted.assets) {
       expect(new Uint8Array(await (await demo.request(`/api/assets/${item.id}/content`)).arrayBuffer())).toEqual(bytes);
-      expect(item.metadata).toEqual({ ...metadata, content: new TextDecoder().decode(bytes) });
+      expect(item.metadata).toEqual({ title: metadata.title, tags: metadata.tags, source: metadata.source });
+      expect((await demo.json<{ asset: ListedAsset }>(`/api/assets/${item.id}`)).asset.metadata).toEqual({ ...metadata, content: new TextDecoder().decode(bytes) });
     }
     expect(demo.providerRequests).toEqual([]);
   } finally { await demo.close(); }
@@ -307,14 +312,14 @@ test("SQLite rejected writes return 503 and leave both original asset bytes and 
       expect(rejectedMetadata.status).toBe(503);
       expect(await rejectedMetadata.json()).toMatchObject({ error: "LOCAL_STORAGE_UNAVAILABLE" });
       expect(new Uint8Array(await (await demo.request(`/api/assets/${upload.assetId}/content`)).arrayBuffer())).toEqual(originalBytes);
-      expect((await demo.json<{ assets: ListedAsset[] }>("/api/assets")).assets[0]?.metadata).toEqual({ ...originalMetadata, content: new TextDecoder().decode(originalBytes) });
+      expect((await demo.json<{ asset: ListedAsset }>(`/api/assets/${upload.assetId}`)).asset.metadata).toEqual({ ...originalMetadata, content: new TextDecoder().decode(originalBytes) });
     } finally {
       try { storageFault.exec("DROP TRIGGER IF EXISTS test_reject_asset_updates"); }
       finally { storageFault.close(true); }
     }
     await demo.start();
     expect(new Uint8Array(await (await demo.request(`/api/assets/${upload.assetId}/content`)).arrayBuffer())).toEqual(originalBytes);
-    expect((await demo.json<{ assets: ListedAsset[] }>("/api/assets")).assets[0]?.metadata).toEqual({ ...originalMetadata, content: new TextDecoder().decode(originalBytes) });
+    expect((await demo.json<{ asset: ListedAsset }>(`/api/assets/${upload.assetId}`)).asset.metadata).toEqual({ ...originalMetadata, content: new TextDecoder().decode(originalBytes) });
     expect(demo.providerRequests).toEqual([]);
   } finally { await demo.close(); }
 }, 60_000);
@@ -327,9 +332,9 @@ test("real demo variants HTTP preserves downloads and relations across restart, 
     await demo.stop();
     const taskId = crypto.randomUUID();
     const createdAt = new Date().toISOString();
-    const original = { id: crypto.randomUUID(), ownerUserId: user.id, taskId, filename: "provider-original.png", mimeType: "image/png", bytes: new Uint8Array([137, 80, 78, 71, 0, 255, 1, 2]), createdAt };
-    const primary = { id: crypto.randomUUID(), ownerUserId: user.id, taskId, filename: "strict-result.png", mimeType: "image/png", bytes: new Uint8Array([137, 80, 78, 71, 3, 254, 4, 5]), createdAt };
-    const exported = { id: crypto.randomUUID(), ownerUserId: user.id, taskId, filename: "requested-copy.webp", mimeType: "image/webp", bytes: new Uint8Array([82, 73, 70, 70, 6, 253, 7, 8]), createdAt };
+    const original = { id: crypto.randomUUID(), ownerUserId: user.id, taskId, filename: "provider-original.png", mimeType: "image/png", bytes: new Uint8Array(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAADUlEQVR4nGP8z8DwHwAFBQIAgJbjwgAAAABJRU5ErkJggg==", "base64")), createdAt };
+    const primary = { id: crypto.randomUUID(), ownerUserId: user.id, taskId, filename: "strict-result.png", mimeType: "image/png", bytes: new Uint8Array(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAADUlEQVR4nGNk+M/wHwAEBgIAe2BNVAAAAABJRU5ErkJggg==", "base64")), createdAt };
+    const exported = { id: crypto.randomUUID(), ownerUserId: user.id, taskId, filename: "requested-copy.webp", mimeType: "image/webp", bytes: new Uint8Array(Buffer.from("UklGRjwAAABXRUJQVlA4IDAAAAAQAgCdASoBAAEAAgA0JaACdLoB+AH4AAPIAP7mad/7WgODVf5n//vvhRHbr/MUAAA=", "base64")), createdAt };
     const foreign = { id: crypto.randomUUID(), ownerUserId: crypto.randomUUID(), taskId, filename: "another-employee.png", mimeType: "image/png", bytes: new Uint8Array([9, 10, 11]), createdAt };
     const forged = { ...primary, id: crypto.randomUUID(), filename: "bad-relation.png" };
     const reference = (asset: typeof original) => ({ assetId: asset.id, mimeType: asset.mimeType, filename: asset.filename });
@@ -357,7 +362,8 @@ test("real demo variants HTTP preserves downloads and relations across restart, 
       expect(await response.json()).toEqual({ primary: expectedVariant(primary), original: expectedVariant(original), export: expectedVariant(exported), maskComposited: true, warning });
       const listed = (await demo.json<{ assets: ListedAsset[] }>("/api/assets")).assets;
       expect(listed.map(asset => asset.id).sort()).toEqual([primary.id, forged.id].sort());
-      expect(listed.find(asset => asset.id === primary.id)?.metadata).toEqual(savedPrimary.metadata);
+      expect(listed.find(asset => asset.id === primary.id)?.metadata).not.toHaveProperty("imageResult");
+      expect((await demo.json<{ asset: ListedAsset }>(`/api/assets/${primary.id}`)).asset.metadata).toEqual(savedPrimary.metadata);
       const recovered = await demo.json<{ task: ApiTask & { resultUrls: string[] } }>(`/api/tasks/${taskId}`);
       expect(recovered.task.resultUrls).toEqual([`/api/assets/${primary.id}/content`]);
       expect(recovered.task.status).toBe("success");
@@ -365,7 +371,10 @@ test("real demo variants HTTP preserves downloads and relations across restart, 
         const content = await demo.request(`/api/assets/${asset.id}/content`);
         expect(content.status).toBe(200);
         expect(content.headers.get("content-type")).toBe(asset.mimeType);
-        expect(content.headers.get("cache-control")).toBe("private, no-store");
+        expect(content.headers.get("cache-control")).toBe("private, no-cache");
+        expect(content.headers.get("etag")).toMatch(/^"[0-9a-f]{64}"$/);
+        expect(content.headers.get("vary")).toBe("Cookie");
+        expect(content.headers.get("x-content-type-options")).toBe("nosniff");
         expect(new Uint8Array(await content.arrayBuffer())).toEqual(asset.bytes);
       }
       for (const suffix of ["content", "variants"]) expect((await demo.request(`/api/assets/${foreign.id}/${suffix}`)).status).toBe(404);

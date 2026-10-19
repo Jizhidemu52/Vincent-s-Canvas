@@ -32,6 +32,8 @@ const resetSchema = z.object({ password: z.string().min(1) });
 const creditSchema = z.object({ requestId: z.string().min(8).max(200), scope: z.literal("temporary").default("temporary"), amount: z.number().int().min(-1_000_000).max(1_000_000).refine((value) => value !== 0), reason: z.string().trim().min(2).max(300) });
 const setCreditSchema = z.object({ requestId: z.string().min(8).max(200), balance: creditValueSchema, reason: z.string().trim().min(2).max(300) });
 
+const existingAccountCondition = "u.deleted_at IS NULL";
+
 export function createAccountsRouter(db: Database) {
     const router = Router();
     router.use(requireRole("super_admin", "department_admin"));
@@ -41,9 +43,13 @@ export function createAccountsRouter(db: Database) {
             const actor = (request as unknown as AuthenticatedRequest).auth;
             const values: unknown[] = [];
             const where = actor.role === "department_admin" ? (values.push(actor.departmentId), "WHERE u.department_id=$1 AND u.role='designer'") : "";
-            let result = await db.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id ${where} ORDER BY u.created_at DESC`, values);
-            for (const row of result.rows) await refreshMonthlyCreditPeriod(db, row.id, actor.id);
-            result = await db.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id ${where} ORDER BY u.created_at DESC`, values);
+            const accountWhere = `${where ? `${where} AND` : "WHERE"} ${existingAccountCondition}`;
+            let result = await db.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id ${accountWhere} ORDER BY u.created_at DESC`, values);
+            const staleRows = result.rows.filter(row => row.credit_period_start !== row.current_credit_period_start);
+            for (const row of staleRows) await refreshMonthlyCreditPeriod(db, row.id, actor.id);
+            if (staleRows.length) {
+                result = await db.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id ${accountWhere} ORDER BY u.created_at DESC`, values);
+            }
             const usage = await db.query<{ total_used_credits: string }>(
                 `SELECT COALESCE(SUM(r.credits),0)::text AS total_used_credits
                    FROM credit_reservations r JOIN users u ON u.id=r.user_id
@@ -100,7 +106,7 @@ export function createAccountsRouter(db: Database) {
         try {
             const input = updateSchema.parse(request.body);
             const user = await withTransaction(db, async client => {
-                const currentResult = await client.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1 FOR NO KEY UPDATE OF u`, [request.params.id]);
+                const currentResult = await client.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1 AND ${existingAccountCondition} FOR NO KEY UPDATE OF u`, [request.params.id]);
                 const current = currentResult.rows[0] && mapUser(currentResult.rows[0]);
                 if (!current) throw new BillingError("NOT_FOUND", "账号不存在");
                 if (!canManageUser(actor, current)) throw new BillingError("FORBIDDEN", "不能管理该账号");
@@ -152,7 +158,7 @@ export function createAccountsRouter(db: Database) {
             const input = resetSchema.parse(request.body);
             const passwordError = validatePassword(input.password);
             if (passwordError) { response.status(400).json({ error: "WEAK_PASSWORD", message: passwordError }); return; }
-            const targetResult = await db.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1`, [request.params.id]);
+            const targetResult = await db.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1 AND ${existingAccountCondition}`, [request.params.id]);
             const target = targetResult.rows[0] && mapUser(targetResult.rows[0]);
             if (!target) { response.status(404).json({ error: "NOT_FOUND", message: "账号不存在" }); return; }
             if (!canManageUser(actor, target)) { response.status(403).json({ error: "FORBIDDEN", message: "不能重置该账号" }); return; }
@@ -176,7 +182,7 @@ export function createAccountsRouter(db: Database) {
         try {
             const input = request.method === "PUT" ? setCreditSchema.parse(request.body) : creditSchema.parse(request.body);
             const user = await withTransaction(db, async client => {
-                const targetResult = await client.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1 FOR NO KEY UPDATE OF u`, [request.params.id]);
+                const targetResult = await client.query<UserRow>(`SELECT ${userSelect} FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE u.id=$1 AND ${existingAccountCondition} FOR NO KEY UPDATE OF u`, [request.params.id]);
                 const target = targetResult.rows[0] && mapUser(targetResult.rows[0]);
                 if (!target) throw new BillingError("NOT_FOUND", "账号不存在");
                 if (!canManageUser(actor, target)) throw new BillingError("FORBIDDEN", "不能调整该账号额度");

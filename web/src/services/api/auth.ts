@@ -32,6 +32,12 @@ export class AuthRequestError extends Error {
     }
 }
 
+export type AuthMethods = {
+    password: boolean;
+    wecom: boolean;
+    wecomLoginUrl: string | null;
+};
+
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(path, {
@@ -60,6 +66,21 @@ export async function loginWithPassword(identifier: string, password: string, po
 
 export async function getCurrentSession() {
     return requestIdentity("/api/auth/session");
+}
+
+export async function getAuthMethods() {
+    return apiRequest<AuthMethods>("/api/auth/methods", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+}
+
+export async function getWeComLoginUrl(portal: "designer" | "admin" = "designer") {
+    const result = await apiRequest<{ authorizationUrl: string }>(`/api/auth/wecom/start?portal=${portal}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(15_000),
+    });
+    if (!result?.authorizationUrl || typeof result.authorizationUrl !== "string") {
+        throw new AuthRequestError("认证服务未返回企业微信扫码地址", 200);
+    }
+    return result;
 }
 
 export async function exchangeOaToken(token: string) {

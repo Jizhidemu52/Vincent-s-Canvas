@@ -8,7 +8,8 @@ type Entry = { nodes: CanvasNodeData[]; connections: CanvasConnection[]; groups?
 type History = { past: Entry[]; future: Entry[] };
 
 // Run page-owned history transitions without mounting the full editor or browser storage.
-const source = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
+const source = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8")
+    + "\n" + readFileSync(new URL("../src/pages/canvas/use-canvas-history.ts", import.meta.url), "utf8");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const names = new Set(["boundedCanvasHistory", "canvasHistoryForSave"]);
 const code = ts.transpileModule(ast.statements.filter(statement => ts.isFunctionDeclaration(statement) && names.has(statement.name?.text || "")).map(statement => statement.getText(ast)).join("\n"), {

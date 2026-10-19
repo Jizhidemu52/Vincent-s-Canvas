@@ -24,6 +24,7 @@ export function PublishDialog({ onClose, onPublished }: { onClose: () => void; o
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [assetError, setAssetError] = useState("");
     const [assetLoading, setAssetLoading] = useState(false);
+    const [assetCursor, setAssetCursor] = useState<string | null>(null);
     const [acknowledged, setAcknowledged] = useState(false);
     const [busy, setBusy] = useState(false);
     const busyRef = useRef(false);
@@ -43,13 +44,15 @@ export function PublishDialog({ onClose, onPublished }: { onClose: () => void; o
         return () => { mounted.current = false; filesRef.current.forEach(item => URL.revokeObjectURL(item.preview)); window.removeEventListener("beforeunload", warn); };
     }, []);
 
-    const loadAssets = async () => {
+    const loadAssets = async (cursor?: string) => {
         if (!ownerId || assetLoading) return;
         setAssetLoading(true); setAssetError("");
         try {
-            const result = await listServerAssets(AbortSignal.timeout(20_000));
+            const result = await listServerAssets({ cursor, kind: "image" }, AbortSignal.timeout(20_000));
             if (mounted.current && useUserStore.getState().user?.id === ownerId) {
-                setAssets(result.assets.filter(asset => asset.ownerUserId === ownerId && asset.kind === "image" && asset.status === "ready" && supportedTypes.has(asset.mimeType) && asset.byteSize <= 20 * 1024 * 1024));
+                const next = result.assets.filter(asset => asset.ownerUserId === ownerId && asset.kind === "image" && asset.status === "ready" && supportedTypes.has(asset.mimeType) && asset.byteSize <= 20 * 1024 * 1024);
+                setAssets(previous => cursor ? [...previous, ...next.filter(asset => !previous.some(item => item.id === asset.id))] : next);
+                setAssetCursor(result.nextCursor || null);
             }
         } catch (error) { if (mounted.current) setAssetError(error instanceof Error ? error.message : "私有图片加载失败"); }
         finally { if (mounted.current) setAssetLoading(false); }
@@ -113,6 +116,7 @@ export function PublishDialog({ onClose, onPublished }: { onClose: () => void; o
                 <div className="mb-3 grid grid-cols-3 gap-2">{files.map(item => <div key={item.id} className="relative overflow-hidden rounded-lg border border-border"><img className="h-24 w-full object-contain" src={item.preview} alt={item.file.name} /><div className="truncate p-1 text-xs" title={item.file.name}>{item.file.name}</div><button type="button" disabled={busy} aria-label={`移除 ${item.file.name}`} className="absolute right-1 top-1 rounded-full bg-background p-1" onClick={() => { URL.revokeObjectURL(item.preview); setFiles(current => current.filter(file => file.id !== item.id)); setAcknowledged(false); }}><X size={14} /></button></div>)}</div>
                 <Select className="w-full" mode="multiple" value={selectedIds} loading={assetLoading} maxCount={12 - files.length} placeholder="或从我的私有图片选择" optionFilterProp="label" onOpenChange={open => { if (open && !assets.length) void loadAssets(); }} options={assets.map(asset => ({ value: asset.id, label: `${asset.filename} · ${formatBytes(asset.byteSize)}` }))} onChange={ids => { dirty.current = true; setSelectedIds(ids); setAcknowledged(false); }} />
                 {assetError && <Alert className="mt-2" type="warning" title={assetError} action={<Button size="small" onClick={() => void loadAssets()}>重试</Button>} />}
+                {assetCursor ? <Button className="mt-2" block loading={assetLoading} onClick={() => void loadAssets(assetCursor)}>加载更多私有图片</Button> : null}
             </Form>
             <aside className="space-y-4 rounded-xl bg-muted/40 p-4">
                 <div><div className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">发布前核对 · 全公司设计师可见</div><h3 className="break-words text-lg font-semibold">{title}</h3></div>
@@ -120,7 +124,7 @@ export function PublishDialog({ onClose, onPublished }: { onClose: () => void; o
                 {thought && <section><h4 className="mb-1 text-sm font-medium">设计思路</h4><p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm">{thought}</p></section>}
                 {prompt && <section><h4 className="mb-1 text-sm font-medium">提示词</h4><p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs">{prompt}</p></section>}
                 {!!tags.length && <div>{tags.map(tag => <Tag key={tag}>{tag}</Tag>)}</div>}
-                {!!selectedIds.length && <div className="grid grid-cols-2 gap-2">{assets.filter(asset => selectedIds.includes(asset.id)).map(asset => <figure key={asset.id}><img src={`/api/assets/${encodeURIComponent(asset.id)}/content`} className="h-24 w-full rounded-md object-contain" alt={asset.filename} /><figcaption className="truncate text-xs">{asset.filename}</figcaption></figure>)}</div>}
+                {!!selectedIds.length && <div className="grid grid-cols-2 gap-2">{assets.filter(asset => selectedIds.includes(asset.id)).map(asset => <figure key={asset.id}><img src={asset.thumbnailUrl || `/api/assets/${encodeURIComponent(asset.id)}/content`} className="h-24 w-full rounded-md object-contain" alt={asset.filename} /><figcaption className="truncate text-xs">{asset.filename}</figcaption></figure>)}</div>}
                 <Alert type="info" showIcon title="只分享本次选中的内容" description="不会公开整个画布、聊天记录、未选图片或隐藏提示词。原始素材保持私有。" />
                 <p className="text-xs leading-5 text-muted-foreground">同事可下载原图、复制提示词、添加到自己的画布。你可查看浏览量与人数，以及下载、复用同事的姓名和部门。撤回只能阻止后续访问，无法收回已下载或已复用的副本。</p>
                 <Checkbox checked={acknowledged} disabled={busy} onChange={event => setAcknowledged(event.target.checked)}>我已核对公开内容，并确认有权分享这些内容</Checkbox>

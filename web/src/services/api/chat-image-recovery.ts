@@ -1,4 +1,4 @@
-import { getQueuedTask, listQueuedTasks, recoverQueuedTask, type QueuedTask } from "@/services/api/generation-tasks";
+import { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedTask, type QueuedTask } from "@/services/api/generation-tasks";
 import type { CreativeImageLineage } from "@/lib/creative-chat";
 
 export type PendingChatImageTask = {
@@ -30,7 +30,7 @@ export async function recoverChatImageTask(
     const requestId = `${pending.requestId}:0`;
     let task = pending.taskId
         ? await getQueuedTask(pending.taskId, signal)
-        : (await listQueuedTasks(signal)).find((candidate) => candidate.requestId === requestId);
+        : await getQueuedTaskByRequestId(requestId, signal);
     const taskId = pending.taskId || task?.id;
     let previousStatus: string | undefined;
 

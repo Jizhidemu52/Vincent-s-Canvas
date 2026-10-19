@@ -29,7 +29,7 @@ test("task and chat HTTP requests bind the displayed employee instead of trustin
     await requestImageQuestion({ ...defaultConfig, model: "test-model" }, [{ role: "user", content: "test" }], () => undefined);
     expect(requests).toEqual([
         { path: "/api/tasks/task-a", owner: "employee-a" },
-        { path: "/api/tasks", owner: "employee-a" },
+        { path: "/api/tasks?limit=60", owner: "employee-a" },
         { path: "/api/models", owner: null },
         { path: "/api/chat/responses", owner: "employee-a" },
     ]);

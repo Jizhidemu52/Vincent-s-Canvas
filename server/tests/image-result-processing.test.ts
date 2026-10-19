@@ -23,9 +23,11 @@ function png(rgba: number[] | Uint8Array, width = 4, height = 1, pixelFormat = "
 function rgba(image: { bytes: Uint8Array }) {
   return codec(["-i", "pipe:0", "-frames:v", "1", "-threads", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"], image.bytes);
 }
-const original = png([10, 20, 30, 255, 77, 88, 99, 0, 1, 2, 3, 255, 200, 0, 100, 64]);
-const generated = png([250, 240, 230, 255, 0, 1, 2, 255, 90, 80, 70, 200, 0, 200, 100, 192]);
-const mask = png([0, 0, 0, 255, 255, 255, 255, 255, 100, 99, 98, 0, 0, 0, 0, 128]);
+// Fixed 4x1 RGBA inputs avoid launching synchronous subprocesses while Bun loads
+// this module after the HTTP suites. Actual decode/encode work still runs below.
+const original = { mimeType: "image/png", bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAYAAAD5PA/NAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAAGklEQVR4nGPkEpH77+ziyrhl1YL/x/8lOgIAM2oHblsijkgAAAAASUVORK5CYII=", "base64") };
+const generated = { mimeType: "image/png", bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAYAAAD5PA/NAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAAGklEQVR4nGP89eHZfzZBGYYof5eTyyrkfgAASSYH7r6GSqYAAAAASUVORK5CYII=", "base64") };
+const mask = { mimeType: "image/png", bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAYAAAD5PA/NAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAAGklEQVR4nGNkYGD4////f4bUlGTGOXPnNQAAPDIHgiSEJS4AAAAASUVORK5CYII=", "base64") };
 const editInput = { references: [original], mask };
 const expectedComposite = [10, 20, 30, 255, 77, 88, 99, 0, 90, 80, 70, 200, 100, 100, 100, 128];
 
@@ -45,6 +47,12 @@ const orientedFixtures = [
 ].map(({ base64, ...metadata }) => ({ ...metadata, bytes: Buffer.from(base64, "base64") }));
 
 describe("local image result processing", () => {
+  test("fixed inputs retain exact RGBA values, including transparent colors and feathered alpha", () => {
+    expect([...rgba(original)]).toEqual([10, 20, 30, 255, 77, 88, 99, 0, 1, 2, 3, 255, 200, 0, 100, 64]);
+    expect([...rgba(generated)]).toEqual([250, 240, 230, 255, 0, 1, 2, 255, 90, 80, 70, 200, 0, 200, 100, 192]);
+    expect([...rgba(mask)]).toEqual([0, 0, 0, 255, 255, 255, 255, 255, 100, 99, 98, 0, 0, 0, 0, 128]);
+  });
+
   test("does not re-encode, copy or mutate unrequested results", async () => {
     const before = Buffer.from(generated.bytes);
     const output = await processImageResult({ result: generated, parameters: {} });
