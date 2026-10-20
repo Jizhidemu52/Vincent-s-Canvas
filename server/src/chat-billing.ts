@@ -46,6 +46,8 @@ export class ChatStreamOutcome {
     private stopped = false;
     private failed = false;
     private output = false;
+    private terminalPending = false;
+    private ended = false;
 
     push(chunk: Uint8Array) {
         this.pending += this.decoder.decode(chunk, { stream: true });
@@ -53,11 +55,18 @@ export class ChatStreamOutcome {
         while ((newline = this.pending.indexOf("\n")) >= 0) {
             const line = this.pending.slice(0, newline).trimEnd();
             this.pending = this.pending.slice(newline + 1);
+            // A data line is not a complete SSE event: its final blank line
+            // may arrive in a later chunk, including split CRLF bytes.
+            if (!line) {
+                this.ended ||= this.terminalPending;
+                this.terminalPending = false;
+                continue;
+            }
             if (!line.startsWith("data:")) continue;
             try {
                 const event = JSON.parse(line.slice(5).trim());
-                if (event.type === "message_stop") this.stopped = true;
-                if (event.type === "error") this.failed = true;
+                if (event.type === "message_stop") { this.stopped = true; this.terminalPending = true; }
+                if (event.type === "error") { this.failed = true; this.terminalPending = true; }
                 if (event.type === "content_block_start" && event.content_block?.type === "tool_use") this.output = true;
                 if (event.type === "content_block_start" && event.content_block?.type === "text" && event.content_block.text?.trim()) this.output = true;
                 if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text?.trim()) this.output = true;
@@ -67,5 +76,6 @@ export class ChatStreamOutcome {
         if (this.pending.length > 1_000_000) throw new BillingError("CHAT_STREAM_INVALID", "对话流格式无效");
     }
 
-    get successful() { return this.stopped && this.output && !this.failed; }
+    get terminal() { return this.ended; }
+    get successful() { return this.ended && this.stopped && this.output && !this.failed; }
 }

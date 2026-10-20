@@ -92,7 +92,7 @@ test("open demo ignores legacy OpenToken selections and uses the shared Sonnet d
       { role: "user", content: [{ type: "tool_result", tool_use_id: "read-1", content: "node contents" }] },
     ] });
     expect(upstreamCalls.at(-1)!.body.thinking).toBeUndefined();
-    expect(upstreamCalls.at(-1)!.body.output_config).toBeUndefined();
+    expect(upstreamCalls.at(-1)!.body.output_config).toEqual({ effort: "low" });
 
     const callCount = upstreamCalls.length;
     expect((await chat("unknown-model")).status).toBe(200);

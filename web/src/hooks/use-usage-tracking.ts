@@ -14,12 +14,11 @@ export function useUsageTracking() {
     const user = useUserStore(state => state.user), status = useUserStore(state => state.status);
     const flags = useModuleStore(state => state.flags), moduleStatus = useModuleStore(state => state.status);
     const tools = useBusinessConfigStore(state => state.tools);
-    // Password accounts do not enable the OA-only analytics collection contract.
-    const usageEnabled = !deploymentFeatures.authenticationEnabled || deploymentFeatures.oaLoginEnabled;
-    const owner = usageEnabled && status === "authenticated" && user?.status === "active" ? user.id : null;
+    // Authenticated deployments collect per-account usage; trial stays local-only.
+    const owner = status === "authenticated" && user?.status === "active" ? user.id : null;
     const board = usageBoardForLocation(location.pathname, location.search);
     const allowed = Boolean(owner && moduleStatus === "ready" && usageBoardAvailable(board, flags, tools));
-    useEffect(() => { setUsageOwner(owner, deploymentFeatures.oaLoginEnabled); }, [owner]);
+    useEffect(() => { setUsageOwner(owner, deploymentFeatures.authenticationEnabled); }, [owner]);
     useEffect(() => {
         if (!allowed || !owner || !board) return;
         recordUsage({ eventId: crypto.randomUUID(), occurredAt: new Date().toISOString(), boardKey: board, action: "visit" }, `${owner}:${location.key}:${board}`);

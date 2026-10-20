@@ -78,8 +78,25 @@ describe("creative chat reference selection", () => {
 });
 
 describe("creative chat model context", () => {
+    test("text-only planning carries the current saved prompt and branch metadata without any historical preview", () => {
+        const history: CreativeChatMessage[] = [
+            user("原件", [image("source")]),
+            { ...generated("target"), generatedImages: [{ ...image("target"), prompt: "实际执行：只改配色，保留春日文字与20厘米版宽。", lineage: { parentImageId: "source", sourceImageIds: ["source"], preservedConstraints: ["春日文字", "20厘米版宽"] } }] },
+        ];
+        const messages = buildCreativeChatRequestMessages(history, user("先讨论这版配色"));
+        const parts = messages.flatMap((message) => Array.isArray(message.content) ? message.content : []);
+        expect(parts.filter((part) => part.type === "image_url")).toEqual([]);
+        const text = JSON.stringify(messages);
+        expect(text).toContain("实际执行：只改配色，保留春日文字与20厘米版宽。");
+        expect(text).toContain("parent_image_id");
+        expect(text).toContain("preserved_constraints");
+        expect(text).toContain("先讨论这版配色");
+    });
+
     test("keeps earlier constraints and documents and labels each bounded preview by stable image ID", () => {
-        const messages = buildCreativeChatRequestMessages([user("蓝底，中文字必须是春日", [image("old-upload")]), generated("new-result")], user("花瓣更细", [{ id: "brief", kind: "text", name: "工艺.pdf", mimeType: "application/pdf", textContent: "印花宽度为 20cm" }]));
+        const history = [user("蓝底，中文字必须是春日", [image("old-upload")]), generated("new-result")];
+        const current = user("花瓣更细", [{ id: "brief", kind: "text", name: "工艺.pdf", mimeType: "application/pdf", textContent: "印花宽度为 20cm" }]);
+        const messages = buildCreativeChatRequestMessages(history, current, resolveCreativeChatReferences(history, current));
         const text = JSON.stringify(messages);
         expect(text).toContain("蓝底，中文字必须是春日");
         expect(text).toContain("印花宽度为 20cm");
@@ -197,7 +214,7 @@ describe("creative chat persistent image identity and branches", () => {
 
     test("working prompt and constraint details have a shared budget with truthful truncation flags", () => {
         const history = Array.from({ length: 60 }, (_, index): CreativeChatMessage => ({ role: "assistant", content: "已生成", generatedImages: [{ ...image(`large-${index}`), prompt: "P".repeat(20_000), lineage: { sourceImageIds: [], preservedConstraints: Array.from({ length: 20 }, () => "C".repeat(400)) } }] }));
-        const messages = buildCreativeChatRequestMessages(history, user("继续"));
+        const messages = buildCreativeChatRequestMessages(history, user("继续"), resolveCreativeChatReferences(history, user("继续")));
         const text = JSON.stringify(messages);
         expect(text.length).toBeLessThan(60_000);
         expect(text).toContain('prompt_truncated\\\":true');
@@ -339,6 +356,54 @@ describe("creative chat bounded natural-conversation service", () => {
     afterEach(() => { globalThis.fetch = originalFetch; });
     const config = { model: "gpt-6-astra", textModel: "gpt-6-astra", systemPrompt: "" } as AiConfig;
 
+    test.each([
+        "这个画布提示词是什么发给我",
+        "我刚才改了哪些要求？",
+        "这版和上一版的设计方向有什么不同？",
+    ])("answers an ordinary follow-up through one planner request without reading historical pixels: %s", async text => {
+        const requests: string[] = [];
+        let payload: { input: unknown } | undefined;
+        const history: CreativeChatMessage[] = [
+            ...Array.from({ length: 5 }, (_, index): CreativeChatMessage => ({ role: "assistant", content: "已生成", generatedImages: [{ id: `old-${index}`, dataUrl: `/api/assets/old-${index}/content` }] })),
+            { role: "assistant", content: "已修改", generatedImages: [{ id: "target", dataUrl: "/api/assets/target/content", prompt: "实际执行：服装改浅紫，领口与缝线不变。", lineage: { parentImageId: "old-4", sourceImageIds: ["old-4"], preservedConstraints: ["领口与缝线不变"] } }] },
+        ];
+        globalThis.fetch = withModelConfig(async (url, init) => {
+            requests.push(String(url));
+            if (String(url) !== "/api/chat/responses") throw new Error("Must not read image assets or create image tasks for a text reply");
+            payload = JSON.parse(String(init?.body));
+            return Response.json({ content: "这是模型根据对话与已保存执行记录给出的正常文字回答。", toolCalls: [] });
+        });
+        expect(await requestCreativeChatPlan(config, history, user(text), { selectedImageId: "target" })).toEqual({ kind: "discussion", content: "这是模型根据对话与已保存执行记录给出的正常文字回答。" });
+        expect(requests).toEqual(["/api/chat/responses"]);
+        const input = JSON.stringify(payload!.input);
+        expect(input).toContain(text);
+        expect(input).toContain("实际执行：服装改浅紫，领口与缝线不变。");
+        expect(input).toContain("parent_image_id");
+        expect(input).not.toContain('"type":"input_image"');
+        expect(input).not.toContain("/api/assets/");
+    });
+
+    test("a new upload is the only first-round preview and inspection loads only requested IDs", async () => {
+        const loaded: string[] = [];
+        const fixture = installImagePreviewFixture(image("preview").dataUrl, (source, done) => { loaded.push(source); queueMicrotask(done); });
+        const requests: Array<{ url: string; body: { input: unknown } }> = [];
+        const history = [generated("ancestor"), generated("unrelated"), generated("target")];
+        globalThis.fetch = withModelConfig(async (url, init) => {
+            const body = JSON.parse(String(init?.body));
+            requests.push({ url: String(url), body });
+            if (requests.length === 1) return Response.json({ content: "", toolCalls: [inspectTool(["target", "fresh"])] });
+            return Response.json({ content: "", toolCalls: [editTool("target", "仅采用新图配色，保留目标版型", ["fresh"], ["目标版型"])] });
+        });
+        try {
+            const plan = await requestCreativeChatPlan(config, history, user("仅采用刚上传的颜色，修改之前那件", [image("fresh")]));
+            expect(loaded).toEqual([image("fresh").dataUrl, image("target").dataUrl]);
+            expect(JSON.stringify(requests[0]!.body.input).match(/"type":"input_image"/g)).toHaveLength(1);
+            expect(JSON.stringify(requests[1]!.body.input).match(/"type":"input_image"/g)).toHaveLength(2);
+            expect(requests.map(entry => entry.url)).toEqual(["/api/chat/responses", "/api/chat/responses"]);
+            expect(plan).toMatchObject({ kind: "image", references: [{ id: "target", dataUrl: image("target").dataUrl }, { id: "fresh", dataUrl: image("fresh").dataUrl }] });
+        } finally { fixture.restore(); }
+    });
+
     test("requests one auto tool decision and never calls task or image endpoints", async () => {
         const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
         globalThis.fetch = withModelConfig(async (url, init) => {
@@ -402,23 +467,30 @@ describe("creative chat bounded natural-conversation service", () => {
         const instructions = ["把这件连衣裙做成干净的展示图", "颜色再浅一点，领口别动", "让女模特穿上"];
         const targets = ["garment", "result-1", "result-2"];
         const prompts = ["连衣裙平铺展示，保留原领口与版型", "连衣裙平铺展示，颜色调浅，保留原领口与版型", "女模特穿着浅色连衣裙，保留原领口与版型"];
+        let turn = 0;
+        let round = 0;
         try {
             globalThis.fetch = withModelConfig(async (url, init) => {
-                const index = requests.length;
                 const payload = JSON.parse(String(init?.body));
                 requests.push({ url: String(url), input: payload.input });
-                expect(JSON.stringify(payload.input)).toContain(instructions[index]!);
-                if (index > 0) expect(JSON.stringify(payload.input)).toContain(prompts[index - 1]!);
-                return Response.json({ content: "", toolCalls: [editTool(targets[index]!, prompts[index]!, [], ["原领口与版型"])] });
+                expect(JSON.stringify(payload.input)).toContain(instructions[turn]!);
+                if (turn > 0) expect(JSON.stringify(payload.input)).toContain(prompts[turn - 1]!);
+                if (turn > 0 && round++ === 0) {
+                    expect(JSON.stringify(payload.input)).not.toContain('"type":"input_image"');
+                    return Response.json({ content: "", toolCalls: [inspectTool([targets[turn]!])] });
+                }
+                return Response.json({ content: "", toolCalls: [editTool(targets[turn]!, prompts[turn]!, [], ["原领口与版型"])] });
             });
             for (let index = 0; index < instructions.length; index += 1) {
+                turn = index;
+                round = 0;
                 const current = { id: `user-${index}`, ...user(instructions[index]!, index ? [] : [image("garment")]) };
                 const plan = await requestCreativeChatPlan(config, history, current);
                 expect(plan).toMatchObject({ kind: "image", action: "edit", references: [{ id: targets[index] }], lineage: { parentImageId: targets[index], sourceImageIds: [targets[index]], preservedConstraints: ["原领口与版型"] } });
                 if (plan.kind !== "image") throw new Error("expected an executable edit");
                 history.push(current, { id: `assistant-${index}`, role: "assistant", content: "已完成", generatedImages: [{ ...image(`result-${index + 1}`), prompt: plan.prompt, lineage: plan.lineage }] });
             }
-            expect(requests.map((request) => request.url)).toEqual(["/api/chat/responses", "/api/chat/responses", "/api/chat/responses"]);
+            expect(requests.map((request) => request.url)).toEqual(Array(5).fill("/api/chat/responses"));
         } finally { fixture.restore(); }
     });
 
@@ -428,9 +500,11 @@ describe("creative chat bounded natural-conversation service", () => {
     ])("the planner may use a fresh upload as target or auxiliary from natural instructions: $instruction", async ({ instruction, target, auxiliary }) => {
         const fixture = installImagePreviewFixture(image("preview").dataUrl);
         let payloadText = "";
+        let calls = 0;
         try {
             globalThis.fetch = withModelConfig(async (_url, init) => {
                 payloadText = String(init?.body);
+                if (++calls === 1 && target !== "fresh") return Response.json({ content: "", toolCalls: [inspectTool([target, ...auxiliary])] });
                 return Response.json({ content: "", toolCalls: [editTool(target, "依据本轮要求调整服装颜色，保留版型", auxiliary, ["服装版型"])] });
             });
             const plan = await requestCreativeChatPlan(config, [generated("previous-garment")], user(instruction, [image("fresh")]));
@@ -438,6 +512,7 @@ describe("creative chat bounded natural-conversation service", () => {
             expect(payloadText).toContain(instruction);
             expect(payloadText).toContain("previous-garment");
             expect(payloadText).toContain("fresh");
+            expect(calls).toBe(target === "fresh" ? 1 : 2);
         } finally { fixture.restore(); }
     });
 
@@ -451,16 +526,19 @@ describe("creative chat bounded natural-conversation service", () => {
                 requests.push(JSON.parse(String(init?.body)));
                 return Response.json(requests.length === 1
                     ? { content: "收到文件，要求是调浅颜色并保留领口、版型和胸前图案。", toolCalls: [] }
-                    : { content: "", toolCalls: [editTool("garment-result", "将服装深蓝改浅蓝，保留圆领、宽松版型、左胸小花图案", [], ["圆领", "宽松版型", "左胸小花图案"])] });
+                    : requests.length === 2
+                        ? { content: "", toolCalls: [inspectTool(["garment-result"])] }
+                        : { content: "", toolCalls: [editTool("garment-result", "将服装深蓝改浅蓝，保留圆领、宽松版型、左胸小花图案", [], ["圆领", "宽松版型", "左胸小花图案"])] });
             });
             const readPlan = await requestCreativeChatPlan(config, [initial], documentTurn);
             expect(readPlan.kind).toBe("discussion");
             const history = [initial, documentTurn, { role: "assistant" as const, content: readPlan.content }];
             const editPlan = await requestCreativeChatPlan(config, history, user("按刚上传的要求改"));
             expect(editPlan).toMatchObject({ kind: "image", references: [{ id: "garment-result" }], lineage: { parentImageId: "garment-result", sourceImageIds: ["garment-result"], preservedConstraints: ["圆领", "宽松版型", "左胸小花图案"] } });
-            expect(requests).toHaveLength(2);
+            expect(requests).toHaveLength(3);
             expect(requests[0]!.tools.map((entry) => entry.name)).toEqual(["inspect_images"]);
             expect(requests[1]!.tools.map((entry) => entry.name)).toContain("create_image");
+            expect(requests[2]!.tools.map((entry) => entry.name)).toEqual(["create_image"]);
             expect(JSON.stringify(requests[1]!.input)).toContain("修改要求.docx");
             expect(JSON.stringify(requests[1]!.input)).toContain("将深蓝改为浅蓝。维持圆领、宽松版型和左胸的小花图案。");
             expect(JSON.stringify(requests[1]!.input)).toContain("按刚上传的要求改");
@@ -506,15 +584,17 @@ describe("creative chat bounded natural-conversation service", () => {
         const fixture = installImagePreviewFixture(previewUrl);
         const requests: Array<{ url: string; method: string }> = [];
         let plannerBody: unknown;
+        let plannerCalls = 0;
         try {
             globalThis.fetch = withModelConfig(async (url, init) => {
                 requests.push({ url: String(url), method: init?.method || "GET" });
                 if (String(url) === "/api/assets/source-1/content") return new Response("original-image-bytes", { headers: { "content-type": "image/png" } });
                 plannerBody = JSON.parse(String(init?.body));
+                if (++plannerCalls === 1) return Response.json({ content: "", toolCalls: [inspectTool(["source-1"])] });
                 return Response.json({ content: "", toolCalls: [editTool("source-1", "保留中文文字，只将花瓣改细")] });
             });
             const plan = await requestCreativeChatPlan(config, [{ role: "assistant", content: "已生成", generatedImages: [{ id: "source-1", dataUrl: "/api/assets/source-1/content" }] }], user("花瓣改细"));
-            expect(requests).toEqual([{ url: "/api/assets/source-1/content", method: "GET" }, { url: "/api/chat/responses", method: "POST" }]);
+            expect(requests).toEqual([{ url: "/api/chat/responses", method: "POST" }, { url: "/api/assets/source-1/content", method: "GET" }, { url: "/api/chat/responses", method: "POST" }]);
             expect(JSON.stringify(plannerBody)).toContain(previewUrl);
             expect(JSON.stringify(plannerBody)).not.toContain("/api/assets/source-1/content");
             expect(fixture.canvas).toMatchObject({ width: 1024, height: 512 });
@@ -586,24 +666,29 @@ describe("creative chat bounded natural-conversation service", () => {
         }
     });
 
-    test("a parallel historical preview failure marks only that image unavailable and preserves the fresh original", async () => {
+    test("a requested historical preview failure marks only that image unavailable and preserves the fresh original", async () => {
         const loads: Array<{ loaded: () => void; failed: () => void }> = [];
         const fixture = installImagePreviewFixture(image("preview").dataUrl, (_source, loaded, failed) => loads.push({ loaded, failed }));
         const controller = new AbortController();
         let payload = "";
+        let requests = 0;
         globalThis.fetch = withModelConfig(async (_url, init) => {
             payload = String(init?.body);
+            if (++requests === 1) return Response.json({ content: "", toolCalls: [inspectTool(["old", "fresh"])] });
             return Response.json({ content: "", toolCalls: [editTool("fresh", "修改刚上传的新图")] });
         });
         const planning = requestCreativeChatPlan(config, [generated("old")], user("修改刚上传的新图", [image("fresh")]), { signal: controller.signal });
         try {
             await previewBoundaryTick();
+            expect(loads).toHaveLength(1);
+            loads[0]!.loaded();
+            await previewBoundaryTick();
             expect(loads).toHaveLength(2);
-            loads[0]!.failed();
-            loads[1]!.loaded();
+            loads[1]!.failed();
             expect(await planning).toMatchObject({ kind: "image", references: [{ id: "fresh", dataUrl: image("fresh").dataUrl }], lineage: { parentImageId: "fresh" } });
             expect(payload).toContain("历史原图暂时无法读取");
             expect(payload.match(/"type":"input_image"/g)).toHaveLength(1);
+            expect(requests).toBe(2);
         } finally {
             controller.abort();
             await planning.catch(() => {});
@@ -669,11 +754,12 @@ describe("creative chat bounded natural-conversation service", () => {
         globalThis.fetch = withModelConfig(async (url, init) => {
             requests.push(String(url));
             if (String(url) === "/api/assets/source/content") return new Response("not found", { status: 404 });
+            if (requests.length === 1) return Response.json({ content: "", toolCalls: [inspectTool(["source"])] });
             plannerPayload = String(init?.body);
             return Response.json({ content: "这张原图暂时读不到，请再发一次，我就能继续修改。", toolCalls: [] });
         });
         expect(await requestCreativeChatPlan(config, [{ role: "assistant", content: "已生成", generatedImages: [{ id: "source", dataUrl: "/api/assets/source/content" }] }], { ...user("修改"), editTargetImageId: "source" })).toEqual({ kind: "discussion", content: "这张原图暂时读不到，请再发一次，我就能继续修改。" });
-        expect(requests).toEqual(["/api/assets/source/content", "/api/chat/responses"]);
+        expect(requests).toEqual(["/api/chat/responses", "/api/assets/source/content", "/api/chat/responses"]);
         expect(plannerPayload).toContain("历史原图暂时无法读取");
         expect(plannerPayload).toContain("失效历史候选");
         expect(plannerPayload).not.toContain('"type":"input_image"');
@@ -720,7 +806,8 @@ describe("creative chat bounded natural-conversation service", () => {
             expect(requests[1]!.body.input).toContainEqual(expect.objectContaining({ type: "function_call", call_id: "inspect-1", name: "inspect_images" }));
             expect(requests[1]!.body.input).toContainEqual(expect.objectContaining({ type: "function_call_output", call_id: "inspect-1" }));
             const previewCount = JSON.stringify(requests[1]!.body.input).match(/"type":"input_image"/g)?.length;
-            expect(previewCount).toBe(5);
+            expect(previewCount).toBe(1);
+            expect(JSON.stringify(requests[0]!.body.input)).not.toContain('"type":"input_image"');
             expect(plan).toMatchObject({ kind: "image", references: [{ id: "old-branch", dataUrl: image("old-branch").dataUrl }], lineage: { parentImageId: "old-branch", sourceImageIds: ["old-branch"], preservedConstraints: ["春日文字", "20厘米版宽"] } });
             expect(phases).toEqual(["正在理解需求与图片上下文…", "正在查看指定图片，确认修改对象…"]);
         } finally { fixture.restore(); }

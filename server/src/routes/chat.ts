@@ -59,13 +59,37 @@ const schema = z.object({
     }).optional(),
 });
 
+const CHAT_REQUEST_TIMEOUT_MESSAGE = "对话模型请求在 180 秒内未完成，已超时；本轮对话未完成，不会自动重新提交。";
+
+/** Inspect only typed metadata, never messages; bounded traversal tolerates cyclic causes. */
+function chatErrorMetadata(error: unknown) {
+    const metadata = { code: "UNCLASSIFIED_ERROR", name: "UnknownError", timeout: false };
+    const seen = new Set<object>();
+    try {
+        for (let depth = 0; depth < 8 && error && typeof error === "object" && !seen.has(error); depth++) {
+            seen.add(error);
+            const record = error as Record<string, unknown>;
+            if (record.name === "TimeoutError") return { code: "CHAT_REQUEST_TIMEOUT", name: "TimeoutError", timeout: true };
+            if (depth === 0) {
+                if (error instanceof ChatProtocolError) metadata.name = "ChatProtocolError";
+                else if (typeof record.name === "string" && ["Error", "TypeError", "SyntaxError", "RangeError", "AbortError", "AggregateError", "ZodError"].includes(record.name)) metadata.name = record.name;
+            }
+            if (metadata.code === "UNCLASSIFIED_ERROR" && typeof record.code === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(record.code)) metadata.code = record.code;
+            error = record.cause;
+        }
+    } catch { /* Malformed diagnostic properties must not replace the original error. */ }
+    return metadata;
+}
+
 export function createChatRouter(db: Database, config: AppConfig) {
     const router = Router();
     const features = deploymentFeatures(config);
 
     router.post("/responses", async (request, response, next) => {
+        const startedAt = performance.now();
         let usageRequestId: string | undefined;
         let billingReservationId: string | null = null;
+        let providerInFlight = false;
         const socket = request.socket;
         const hadRemoteAddress = Boolean(socket?.remoteAddress);
         // Bun 1.3.x can lose its native socket without setting destroyed or
@@ -112,20 +136,34 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 enabled: features.authenticationEnabled && await getCreditsEnabled(db, features.creditsEnabled), execution,
             });
             if (disconnected()) throw new ChatProtocolError("CHAT_REQUEST_CANCELLED", "对话请求已中断，本次不扣积分");
-            if (features.oaLoginEnabled && !(request as AuthenticatedRequest).allowsAnonymousCreation) {
+            if (features.authenticationEnabled && !(request as AuthenticatedRequest).allowsAnonymousCreation) {
                 usageRequestId = await beginUsageChat(db, { userId: actor.id, modelConfigId: execution.modelConfigId, boardKey: execution.toolKey, input: input.input });
             }
+            providerInFlight = true;
             if (isClaudeMessagesModel(model) && input.claude?.stream) {
                 const upstream = await requestClaudeStream(model, credentials, input);
                 response.setHeader("content-type", "text/event-stream; charset=utf-8");
                 response.setHeader("cache-control", "no-cache");
                 const streamOutcome = new ChatStreamOutcome();
-                for await (const chunk of upstream.body!) {
-                    if (disconnected()) break;
-                    streamOutcome.push(chunk);
-                    response.write(chunk);
+                const reader = upstream.body!.getReader();
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done || disconnected()) break;
+                        streamOutcome.push(value);
+                        response.write(value);
+                        // Forward the complete terminal event before ending an
+                        // upstream HTTP stream that may otherwise remain open.
+                        if (streamOutcome.terminal) break;
+                    }
+                } finally {
+                    // Cleanup failure cannot invalidate a completed reply or
+                    // replace the actual read failure; never replay this request.
+                    try { await reader.cancel(); } catch { /* Best-effort cleanup only. */ }
+                    reader.releaseLock();
                 }
                 if (!disconnected() && !streamOutcome.successful) throw new ChatProtocolError("CHAT_STREAM_INCOMPLETE", "对话流未完整返回有效回复，本次不扣积分");
+                providerInFlight = false;
                 if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "success");
                 if (!disconnected()) await writeAudit(db, {
                     actor,
@@ -142,6 +180,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 return;
             }
             const resultPayload = await requestChatCompletion(model, credentials, input);
+            providerInFlight = false;
             if (!resultPayload.content.trim() && !resultPayload.toolCalls.length) throw new ChatProtocolError("CHAT_RESPONSE_EMPTY", "模型未返回有效回复，本次不扣积分");
             if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "success");
 
@@ -160,13 +199,31 @@ export function createChatRouter(db: Database, config: AppConfig) {
             billingReservationId = null;
             response.json(resultPayload);
         } catch (error) {
-            if (billingReservationId) await finishChatBilling(db, billingReservationId, false).catch((releaseError) => console.error("Chat credit release failed", { reservationId: billingReservationId, code: releaseError?.code }));
+            if (billingReservationId) await finishChatBilling(db, billingReservationId, false).catch((releaseError) => {
+                const { code, name } = chatErrorMetadata(releaseError);
+                console.error("Chat credit release failed", { code, name, phase: "credit_release", elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)) });
+            });
             if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "failed").catch(() => undefined);
             const diagnostics = readProviderSubmissionDiagnostics(error);
-            if (diagnostics) console.error("Chat provider transport failed", diagnostics);
+            const metadata = chatErrorMetadata(error);
+            console.error("Chat request failed", {
+                code: metadata.timeout ? metadata.code : diagnostics?.code || metadata.code,
+                name: metadata.name,
+                phase: diagnostics?.phase || (response.headersSent ? "response" : "request"),
+                elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+            });
             if (disconnected()) return;
             if (response.headersSent) {
-                response.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: "对话流已中断，请求已发出，结果待核查，不会自动重新提交。请联系管理员核查上游记录后，再决定是否重新发送。" } })}\n\n`);
+                const failure = metadata.timeout
+                    ? { code: "CHAT_REQUEST_TIMEOUT", message: CHAT_REQUEST_TIMEOUT_MESSAGE }
+                    : error instanceof ChatProtocolError && error.code === "CHAT_STREAM_INCOMPLETE"
+                        ? { code: "CHAT_STREAM_INCOMPLETE", message: "对话流未完整返回有效回复，本轮对话未完成，不会自动重新提交。" }
+                        : { code: "CHAT_STREAM_INTERRUPTED", message: "对话流已中断，请求已发出，结果待核查，不会自动重新提交。请联系管理员核查上游记录后，再决定是否重新发送。" };
+                response.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: failure })}\n\n`);
+                return;
+            }
+            if (metadata.timeout) {
+                response.status(504).json({ error: "CHAT_REQUEST_TIMEOUT", message: CHAT_REQUEST_TIMEOUT_MESSAGE });
                 return;
             }
             if (diagnostics) {
@@ -174,6 +231,12 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 next(new ChatProtocolError("UPSTREAM_REQUEST_FAILED", notSubmitted
                     ? "连接对话模型服务失败，模型业务请求尚未发送。请联系管理员检查服务端网络、代理或运行环境后再试。"
                     : "对话模型连接中断，请求可能已发出，结果待核查，不会自动重新提交。请联系管理员核查上游记录后，再决定是否重新发送。"));
+                return;
+            }
+            if (providerInFlight && !(error instanceof ChatProtocolError)) {
+                // The global unknown-error handler logs raw errors. Provider
+                // failures are already recorded as safe metadata above.
+                response.status(500).json({ error: "INTERNAL_ERROR", message: "服务器处理失败" });
                 return;
             }
             next(error);
@@ -325,9 +388,9 @@ export function buildClaudeMessagesRequest(
 }
 
 function claudeThinkingParameters(options: { modelId?: string; maxTokens: number; thinking?: boolean }) {
-    // APIMart's Messages contract does not specify this alias's thinking mode.
-    // Keep the upstream default instead of guessing adaptive or legacy budgets.
-    if (options.modelId?.toLowerCase() === "claude-sonnet-5-5") return {};
+    // Preserve this alias's thinking mode; an explicit fast-chat choice only
+    // lowers effort. Omitted/true keeps the upstream default without overrides.
+    if (options.modelId?.toLowerCase() === "claude-sonnet-5-5") return options.thinking === false ? { output_config: { effort: "low" } } : {};
     // OpenToken does not document a thinking override for this alias. Use its
     // default instead of guessing Claude 5 or legacy budget semantics.
     if (options.modelId?.toLowerCase() === "claude-fable-5-1") return {};
@@ -441,7 +504,7 @@ async function readApiMartChatPayload(upstream: Response): Promise<Record<string
     }
     let received: unknown;
     try { received = await upstream.json(); } catch (error) {
-        if (readProviderSubmissionDiagnostics(error)) throw error;
+        if (readProviderSubmissionDiagnostics(error) || chatErrorMetadata(error).timeout) throw error;
         throw invalidApiMartChatResponse();
     }
     if (!received || typeof received !== "object" || Array.isArray(received)) throw invalidApiMartChatResponse();

@@ -30,6 +30,7 @@ function harness(path: string, exportName: string, dependencies: Record<string, 
     const equal = (first: unknown[], second?: unknown[]) => Boolean(second && first.length === second.length && first.every((value, index) => Object.is(value, second[index])));
     const Form = Object.assign(function MockForm() {}, {
         Item: "FormItem",
+        useWatch: (name: string, form: any) => form.getFieldValue(name),
         useForm() {
             const index = cursor++;
             if (!state[index]) {
@@ -50,6 +51,7 @@ function harness(path: string, exportName: string, dependencies: Record<string, 
         "lucide-react": new Proxy({}, { get: (_, key) => String(key) }),
         "file-saver": { saveAs() {} }, papaparse: {},
         "react-router-dom": { Link: "Link", Navigate: "Navigate", useNavigate: () => () => {}, useSearchParams: () => [new URLSearchParams(), () => {}] },
+        "@/services/api/auth": { getAuthMethods: async () => ({ password: true, wecom: false, wecomLoginUrl: null }) },
         ...dependencies,
     };
     const module = { exports: {} as any };
@@ -74,7 +76,7 @@ describe("account credit contracts", () => {
         const panel = harness("../src/pages/admin/index.tsx", "default", {
             "@/stores/use-user-store": { isAdminRole: () => true, useUserStore: (select: Function) => select({ user: { id: "admin", role: "super_admin" } }) },
             "@/stores/use-module-store": { useModuleStore: (select: Function) => select({ flags: { performance: false } }) },
-            "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: false } },
+            "@/lib/deployment-features": { deploymentFeatures: { authenticationEnabled: true, oaLoginEnabled: false } },
             "./admin-overview": { loadAdminOverview: async () => ({ accounts: [{ id: "person", role: "designer", displayName: "设计师", creditLimit: 100, creditBalance: 0, monthlyCreditLimit: 100 }], totalUsedCredits: 0, departments: [], auditLogs: [], errors: [] }), resolveAdminTab: () => "accounts" },
             "@/services/api/admin-accounts": { createAccount: async (input: any) => { created.push(input); return { user: input }; } },
         });
@@ -84,7 +86,8 @@ describe("account credit contracts", () => {
             await accountForm.props.onFinish({ loginName: "disabled-person", name: "待启用账号", password: "Test-Only-Password123!", role: "designer", status: "disabled", quotaRemaining: 0, monthlyCreditLimit: 0 });
             expect(created[0].status).toBe("disabled");
             expect(tree.find(element => element.props.label === "累计已用积分")?.props.value).toBe("0");
-            expect(tree.some(element => element.type === "Alert" && element.props.title === "使用分析仅在企业 OA 模式启用")).toBe(true);
+            const usageTab = tree.find(element => element.type === "Tabs")?.props.items.find((item: any) => item.key === "usage-analysis");
+            expect(usageTab?.children.type).toBe("LazyPanel");
         } finally { panel.dispose(); }
     });
 

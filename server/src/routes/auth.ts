@@ -262,8 +262,8 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
                     response.status(409).send("该企业微信成员与内部账号的绑定发生冲突，请联系超级管理员处理");
                     return;
                 }
-                await client.query(`INSERT INTO sessions(id,user_id,token_hash,ip_address,user_agent,expires_at)
-                    VALUES($1,$2,$3,$4,$5,now()+($6 * interval '1 second'))`, [session.id, row.id, hashToken(session.token), request.ip, request.get("user-agent"), config.SESSION_TTL_SECONDS]);
+                await client.query(`INSERT INTO sessions(id,user_id,token_hash,ip_address,user_agent,expires_at,auth_provider)
+                    VALUES($1,$2,$3,$4,$5,now()+($6 * interval '1 second'),'wecom')`, [session.id, row.id, hashToken(session.token), request.ip, request.get("user-agent"), config.SESSION_TTL_SECONDS]);
                 await client.query("UPDATE users SET last_login_at=now(),failed_login_count=0,locked_until=NULL WHERE id=$1", [row.id]);
                 await client.query("COMMIT");
             } catch (error) {
@@ -274,8 +274,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
             setSessionCookie(response, config, session.token);
             const user = mapUser(row);
             await writeAudit(db, { actor: user, action: "auth.wecom_login", targetType: "session", targetId: session.id, result: "success", ip: request.ip });
-            const destination = user.mustChangePassword ? "/change-password" : "/";
-            response.redirect(302, destination);
+            response.redirect(302, "/");
         } catch (error) {
             if (error instanceof WeComError) {
                 await writeAudit(db, { action: "auth.wecom_callback", targetType: "external_identity", result: "failed", detail: { code: error.code }, ip: request.ip }).catch(() => undefined);

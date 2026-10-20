@@ -60,7 +60,7 @@ async function start(origin: string) {
     return { state, cookie: cookie.split(";", 1)[0]!, fullCookie: cookie, response, authorizationUrl };
 }
 
-function upstreamIdentity() {
+function upstreamIdentity(userPayload: Record<string, unknown> = { errcode: 0, userid: "employee-17" }) {
     const originalFetch = globalThis.fetch;
     const calls: URL[] = [];
     const mock = spyOn(globalThis, "fetch").mockImplementation(((input: any, init?: any) => {
@@ -69,7 +69,7 @@ function upstreamIdentity() {
             calls.push(url);
             return Promise.resolve(Response.json(url.pathname.endsWith("/gettoken")
                 ? { errcode: 0, access_token: "fixture-token" }
-                : { errcode: 0, userid: "employee-17" }));
+                : userPayload));
         }
         return originalFetch(input, init);
     }) as typeof fetch);
@@ -139,7 +139,7 @@ test("QR callback rejects absent, mismatched, expired and non-designer browser s
     });
 });
 
-test("QR login keeps the existing identity mapping, password and onboarding destination", async () => {
+test("QR login marks the trusted session as WeCom and bypasses local onboarding without changing credentials", async () => {
     const upstream = upstreamIdentity();
     try {
         for (const must_change_password of [false, true]) {
@@ -148,7 +148,7 @@ test("QR login keeps the existing identity mapping, password and onboarding dest
                 const login = await start(origin);
                 const response = await callback(origin, login.state, login.cookie);
                 expect(response.status).toBe(302);
-                expect(response.headers.get("location")).toBe(must_change_password ? "/change-password" : "/");
+                expect(response.headers.get("location")).toBe("/");
                 expect(response.headers.getSetCookie().some(value => value.startsWith("session=") && value.includes("HttpOnly"))).toBe(true);
                 expect(response.headers.getSetCookie().some(value => value.startsWith("session_wecom_state=;") && value.includes("Path=/api/auth/wecom"))).toBe(true);
                 const identity = f.queries.find(q => q.sql.includes("LEFT JOIN external_identities"))!;
@@ -158,7 +158,8 @@ test("QR login keeps the existing identity mapping, password and onboarding dest
                 const session = f.queries.find(q => q.sql.startsWith("INSERT INTO sessions"))!;
                 expect(session.parameters?.[1]).toBe(designer.id);
                 expect(session.parameters?.[5]).toBe(config.SESSION_TTL_SECONDS);
-                expect(session.sql).not.toContain("auth_provider");
+                expect(session.sql).toContain("auth_provider");
+                expect(session.sql).toContain("'wecom'");
                 const userWrites = f.queries.filter(q => /^(INSERT INTO|UPDATE) users/.test(q.sql));
                 expect(userWrites).toHaveLength(1);
                 expect(userWrites[0]!.sql).not.toContain("password");
@@ -168,6 +169,24 @@ test("QR login keeps the existing identity mapping, password and onboarding dest
         }
         expect(upstream.calls).toHaveLength(4);
     } finally { upstream.restore(); }
+});
+
+test("failed WeCom identity exchange cannot bind an account or issue an exempt session", async () => {
+    for (const payload of [{ errcode: 40029, errmsg: "invalid code" }, { errcode: 0 }]) {
+        const upstream = upstreamIdentity(payload);
+        try {
+            const f = fixture();
+            await serve(f.db, f.cache, config, async origin => {
+                const login = await start(origin);
+                const response = await callback(origin, login.state, login.cookie);
+                expect(response.status).toBe(502);
+                expect(response.headers.getSetCookie().some(value => value.startsWith("session="))).toBe(false);
+                expect(f.queries.some(q => q.sql.includes("LEFT JOIN external_identities"))).toBe(false);
+                expect(f.queries.some(q => /^(INSERT INTO|UPDATE) (users|sessions|external_identities)/.test(q.sql))).toBe(false);
+                expect(f.writes.some(write => write.key.startsWith("session:"))).toBe(false);
+            });
+        } finally { upstream.restore(); }
+    }
 });
 
 test("QR callback never issues a session to missing, disabled, deleted, guest or privileged users", async () => {

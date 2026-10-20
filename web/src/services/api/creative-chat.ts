@@ -60,7 +60,7 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
     // This is a structural permission boundary, not keyword-based intent classification.
     // Textless uploads may be read and discussed, but their contents cannot authorize image execution.
     const allowImageCreation = Boolean(current.content.trim());
-    let references = resolveCreativeChatReferences(history, current, selectedImageId, catalog);
+    let references = resolveCreativeChatReferences(history, current, selectedImageId, catalog).filter(item => currentImageIds.has(item.id));
     const previewCache = new Map<string, ReferenceImage>();
     // Originals remain authoritative for editing; temporary previews never enter lineage or storage.
     const previewsFor = async (originals: ReferenceImage[]) => {
@@ -103,7 +103,7 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
     const inspectionIds = parseCreativeChatInspection(result, catalog);
     if (inspectionIds) {
         // Requested images get the detail budget first, allowing text-directed return to an old branch.
-        const nextIds = [...new Set([...inspectionIds, ...references.map((item) => item.id)])].slice(0, MAX_CREATIVE_CHAT_REFERENCES);
+        const nextIds = inspectionIds;
         references = nextIds.map((id) => {
             const { name, type, dataUrl, storageKey } = catalog.find((item) => item.id === id)!;
             return { id, name, type, dataUrl, ...(storageKey ? { storageKey } : {}) };

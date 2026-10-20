@@ -4,18 +4,21 @@ import { z } from "zod";
 
 import { writeAudit } from "../audit";
 import { adjustCredits, BillingError, ensureMonthlyCreditPeriod, refreshMonthlyCreditPeriod, setCreditBalance } from "../billing";
+import type { AppConfig } from "../config";
 import type { Database } from "../db";
 import { withTransaction } from "../db-transaction";
+import { deploymentFeatures } from "../deployment-features";
 import { canManageUser, requireRole } from "../rbac";
 import { hashPassword, validatePassword } from "../security";
 import type { AuthenticatedRequest, UserRole } from "../types";
 import { mapUser, userSelect, type UserRow } from "../user-mapper";
+import { getWeComStatus } from "../wecom";
 
 const creditValueSchema = z.number().int().nonnegative().max(2_147_483_647);
 const accountSchema = z.object({
     username: z.string().trim().min(1).max(80), displayName: z.string().trim().min(1).max(100),
     email: z.string().email().nullish(), employeeNo: z.string().trim().min(1).max(80).nullish(),
-    password: z.string().min(1), role: z.enum(["super_admin", "department_admin", "designer"]).default("designer"),
+    password: z.string().optional(), role: z.enum(["super_admin", "department_admin", "designer"]).default("designer"),
     status: z.enum(["active", "disabled"]).default("active"),
     departmentId: z.string().uuid().nullish(), creditBalance: creditValueSchema.default(0),
     creditLimit: creditValueSchema.default(0),
@@ -34,8 +37,13 @@ const setCreditSchema = z.object({ requestId: z.string().min(8).max(200), balanc
 
 const existingAccountCondition = "u.deleted_at IS NULL";
 
-export function createAccountsRouter(db: Database) {
+export function createAccountsRouter(db: Database, config?: AppConfig) {
     const router = Router();
+    const features = deploymentFeatures(config);
+    const wecomEnabled = features.authenticationEnabled && !features.oaLoginEnabled && Boolean(config && getWeComStatus(config).configured);
+    const isPasswordlessWeComAccount = (account: z.infer<typeof accountSchema>) => wecomEnabled
+        && account.role === "designer" && Boolean(account.employeeNo)
+        && (account.password === undefined || account.password === "");
     router.use(requireRole("super_admin", "department_admin"));
 
     router.get("/", async (request, response, next) => {
@@ -63,7 +71,8 @@ export function createAccountsRouter(db: Database) {
         const actor = (request as unknown as AuthenticatedRequest).auth;
         try {
             const input = accountSchema.parse(request.body);
-            const passwordError = validatePassword(input.password);
+            const passwordless = isPasswordlessWeComAccount(input);
+            const passwordError = passwordless ? null : validatePassword(input.password ?? "");
             if (passwordError) { response.status(400).json({ error: "WEAK_PASSWORD", message: passwordError }); return; }
             if (actor.role === "department_admin" && (input.role !== "designer" || input.departmentId !== actor.departmentId)) {
                 response.status(403).json({ error: "FORBIDDEN", message: "部门管理员只能创建本部门设计师" }); return;
@@ -81,9 +90,9 @@ export function createAccountsRouter(db: Database) {
             let createdRow: UserRow;
             try {
                 await client.query("BEGIN");
-                const inserted = await client.query<{ id: string }>(`INSERT INTO users(username,display_name,email,employee_no,password_hash,role,status,department_id,credit_balance,credit_limit,monthly_credit_limit,created_by)
-                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-                    [input.username, input.displayName, input.email ?? null, input.employeeNo ?? null, await hashPassword(input.password), input.role, input.status, input.departmentId ?? null, input.creditBalance, input.creditLimit, input.monthlyCreditLimit ?? input.creditLimit, actor.id]);
+                const inserted = await client.query<{ id: string }>(`INSERT INTO users(username,display_name,email,employee_no,password_hash,role,status,department_id,credit_balance,credit_limit,monthly_credit_limit,created_by,must_change_password)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+                    [input.username, input.displayName, input.email ?? null, input.employeeNo ?? null, passwordless ? null : await hashPassword(input.password!), input.role, input.status, input.departmentId ?? null, input.creditBalance, input.creditLimit, input.monthlyCreditLimit ?? input.creditLimit, actor.id, !passwordless]);
                 await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
                     VALUES($1,$2,$3,'adjustment',$4,$4,'account',$5,'账号初始额度')`, [`account-create:${inserted.rows[0].id}`, inserted.rows[0].id, actor.id, input.creditBalance, inserted.rows[0].id]);
                 const selected = await client.query<UserRow>(
@@ -216,7 +225,8 @@ export function createAccountsRouter(db: Database) {
                 const failures: Array<{ index: number; message: string }> = [];
                 let created = 0;
                 for (const [index, account] of accounts.entries()) {
-                    const passwordError = validatePassword(account.password);
+                    const passwordless = isPasswordlessWeComAccount(account);
+                    const passwordError = passwordless ? null : validatePassword(account.password ?? "");
                     if (passwordError || account.role === "super_admin" || account.creditBalance > account.creditLimit || (actor.role === "department_admin" && (account.role !== "designer" || account.departmentId !== actor.departmentId))) {
                         failures.push({ index, message: passwordError ?? "账号权限或积分设置不合法" }); continue;
                     }
@@ -224,9 +234,9 @@ export function createAccountsRouter(db: Database) {
                     // accounts only together with the batch's required audit.
                     await client.query("SAVEPOINT bulk_account");
                     try {
-                        const inserted = await client.query<{ id: string }>(`INSERT INTO users(username,display_name,email,employee_no,password_hash,role,status,department_id,credit_balance,credit_limit,monthly_credit_limit,created_by)
-                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, [account.username, account.displayName, account.email ?? null, account.employeeNo ?? null,
-                            await hashPassword(account.password), account.role, account.status, account.departmentId ?? null, account.creditBalance, account.creditLimit, account.monthlyCreditLimit ?? account.creditLimit, actor.id]);
+                        const inserted = await client.query<{ id: string }>(`INSERT INTO users(username,display_name,email,employee_no,password_hash,role,status,department_id,credit_balance,credit_limit,monthly_credit_limit,created_by,must_change_password)
+                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`, [account.username, account.displayName, account.email ?? null, account.employeeNo ?? null,
+                            passwordless ? null : await hashPassword(account.password!), account.role, account.status, account.departmentId ?? null, account.creditBalance, account.creditLimit, account.monthlyCreditLimit ?? account.creditLimit, actor.id, !passwordless]);
                         await client.query(`INSERT INTO credit_ledger(request_id,user_id,actor_user_id,entry_type,amount,balance_after,reference_type,reference_id,reason)
                             VALUES($1,$2,$3,'adjustment',$4,$4,'account',$5,'批量导入初始额度')`, [`account-import:${randomUUID()}`, inserted.rows[0].id, actor.id, account.creditBalance, inserted.rows[0].id]);
                         created += 1;

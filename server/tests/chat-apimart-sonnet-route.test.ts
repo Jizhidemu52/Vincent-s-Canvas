@@ -29,6 +29,7 @@ async function withChatRoute(
             encrypted_credentials: encryptSecret(JSON.stringify({ apiKey: "private-provider-token" }), encryptionKey),
         }] };
         if (sql.includes("INSERT INTO audit_logs")) return { rows: [] };
+        if (sql.startsWith("INSERT INTO usage_chat_requests") || sql.startsWith("UPDATE usage_chat_requests")) return { rows: [] };
         throw new Error(`Unexpected fixture SQL: ${sql}`);
     } } as unknown as Database;
     const settlements: boolean[] = [];
@@ -67,7 +68,7 @@ async function withChatRoute(
     }
 }
 
-test.each([false, true])("APIMart Sonnet honors requested JSON mode and preserves tool continuation (thinking=%s)", async thinking => {
+test.each([false, true, undefined])("APIMart Sonnet honors requested JSON mode and preserves tool continuation (thinking=%s)", async thinking => {
     const tools = [{ type: "function", name: "inspect_images", parameters: { type: "object", properties: { imageIds: { type: "array", items: { type: "string" } } } } }];
     await withChatRoute("apimart", body => {
         // The upstream sends SSE only when requested; this exposes a wrong route selection.
@@ -84,7 +85,8 @@ test.each([false, true])("APIMart Sonnet honors requested JSON mode and preserve
         expect(calls[0]!.max_tokens).toBe(4096);
         expect(calls[0]!.tools).toEqual([{ name: "inspect_images", input_schema: tools[0]!.parameters }]);
         expect(calls[0]!).not.toHaveProperty("thinking");
-        expect(calls[0]!).not.toHaveProperty("output_config");
+        if (thinking === false) expect(calls[0]!.output_config).toEqual({ effort: "low" });
+        else expect(calls[0]!).not.toHaveProperty("output_config");
         const second = await post({ tools, claude: { stream: false, thinking }, input: [
             { role: "user", content: "检查这件针织衫" },
             { type: "claude_assistant", content: result.claudeAssistantContent },
@@ -100,9 +102,42 @@ test.each([false, true])("APIMart Sonnet honors requested JSON mode and preserve
             { role: "assistant", content: nativeBlocks },
             { role: "user", content: [{ type: "tool_result", tool_use_id: "inspect-1", content: "绞花针织，保留原结构。" }] },
         ]);
+        expect(calls[1]!).not.toHaveProperty("thinking");
+        if (thinking === false) expect(calls[1]!.output_config).toEqual({ effort: "low" });
+        else expect(calls[1]!).not.toHaveProperty("output_config");
         expect(settlements).toEqual([true, true]);
     });
 });
+
+for (const stream of [false, true]) {
+    test.each([false, true, undefined])(`Sonnet effort selection preserves all instructions and tools (stream=${stream}, thinking=%s)`, async thinking => {
+        const constraints = '保留七颗纽扣和原有版型；只改为蓝色；字样 "COTTON" 不变。\n不要删减约束。🧶';
+        const inputSchema = { type: "object", properties: { image_ids: { type: "array", items: { type: "string" } } }, required: ["image_ids"], additionalProperties: false };
+        await withChatRoute("apimart", body => body.stream
+            ? new Response(events, { headers: { "content-type": "text/event-stream" } })
+            : Response.json({ content: [{ type: "text", text: "约束已保留。" }], stop_reason: "end_turn" }), async (post, calls, settlements) => {
+            const response = await post({
+                input: [{ role: "system", content: constraints }, { role: "user", content: "请先检查图片，不要直接生成。" }],
+                tools: [{ type: "function", name: "inspect_images", description: "只读查看原图，不得替换原图。", parameters: inputSchema }],
+                claude: { stream, thinking, maxTokens: 2048 },
+            });
+            expect(response.status).toBe(200);
+            await response.text();
+            expect(calls).toEqual([{
+                model: "claude-sonnet-5-5",
+                system: constraints,
+                messages: [{ role: "user", content: "请先检查图片，不要直接生成。" }],
+                max_tokens: 2048,
+                tools: [{ name: "inspect_images", description: "只读查看原图，不得替换原图。", input_schema: inputSchema }],
+                tool_choice: { type: "auto" },
+                ...(stream ? { stream: true } : {}),
+                ...(thinking === false ? { output_config: { effort: "low" } } : {}),
+            }]);
+            expect(calls[0]!).not.toHaveProperty("thinking");
+            expect(settlements).toEqual([true]);
+        });
+    });
+}
 
 test.each([false, true])("APIMart Sonnet failure is not replayed in another response mode (stream=%s)", async stream => {
     await withChatRoute("apimart", () => Response.json({ error: "Bearer private-provider-token" }, { status: 503 }), async (post, calls, settlements) => {
@@ -128,5 +163,48 @@ test.each(["apimart", "anthropic"])("%s Sonnet honors the requested SSE mode", a
         expect(calls[0]!).not.toHaveProperty("thinking");
         expect(calls[0]!).not.toHaveProperty("output_config");
         expect(settlements).toEqual([true]);
+    });
+});
+
+test.each([
+    { name: "nonempty message_stop", wire: events, splitBytes: false, billable: true },
+    { name: "byte-split CRLF message_stop", wire: events.replaceAll("\n", "\r\n"), splitBytes: true, billable: true },
+    { name: "empty message_stop", wire: 'event: message_stop\ndata: {"type":"message_stop"}\n\n', splitBytes: false, billable: false },
+    { name: "error after text", wire: 'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}\n\nevent: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}\n\n', splitBytes: false, billable: false },
+])("Sonnet finishes and cancels an open upstream on $name without replay", async ({ wire, splitBytes, billable }) => {
+    let controller: ReadableStreamDefaultController<Uint8Array>;
+    let cancellations = 0;
+    const bytes = new TextEncoder().encode(wire);
+    const body = new ReadableStream<Uint8Array>({
+        start(value) {
+            controller = value;
+            if (splitBytes) for (const byte of bytes) value.enqueue(new Uint8Array([byte]));
+            else value.enqueue(bytes);
+            // Deliberately no close(): the provider keeps HTTP alive after SSE completion.
+        },
+        cancel() { cancellations++; },
+    });
+    await withChatRoute("apimart", () => new Response(body, { headers: { "content-type": "text/event-stream" } }), async (post, calls, settlements) => {
+        const response = await post({});
+        const read = response.text();
+        try {
+            const endedBeforeEOF = await Promise.race([
+                read.then(() => true),
+                Bun.sleep(400).then(() => false),
+            ]);
+            expect(endedBeforeEOF).toBe(true);
+            const received = await read;
+            if (billable) expect(received).toBe(wire);
+            else {
+                expect(received).toStartWith(wire);
+                expect(received).toContain("event: error");
+            }
+            expect(cancellations).toBe(1);
+            expect(calls).toHaveLength(1);
+            expect(settlements).toEqual([billable]);
+        } finally {
+            if (!cancellations) controller!.close();
+            await read.catch(() => {});
+        }
     });
 });

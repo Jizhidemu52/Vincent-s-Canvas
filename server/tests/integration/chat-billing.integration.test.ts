@@ -182,8 +182,10 @@ integration("isolated PostgreSQL chat billing", () => {
             mode = "incomplete"; expect(await (await post(randomUUID(), true)).text()).toContain("event: error"); expect(await balance(userId)).toBe(86);
             const statuses = await db.query("SELECT status,count(*)::int AS count FROM credit_reservations WHERE user_id=$1 GROUP BY status", [userId]);
             expect(Object.fromEntries(statuses.rows.map(row => [row.status, row.count]))).toEqual({ captured: 2, released: 3 });
-            // Password authentication alone must not turn on OA personnel analysis.
-            expect((await db.query("SELECT count(*)::int AS count FROM usage_chat_requests WHERE user_id=$1", [userId])).rows[0].count).toBe(0);
+            // Authenticated non-OA chat is tracked even when credits are off or
+            // free; the rejected duplicate must not create another usage record.
+            const usageStatuses = await db.query("SELECT status,count(*)::int AS count FROM usage_chat_requests WHERE user_id=$1 GROUP BY status", [userId]);
+            expect(Object.fromEntries(usageStatuses.rows.map(row => [row.status, row.count]))).toEqual({ success: 4, failed: 3 });
 
             // Inject a real database failure, not a mocked response, after the
             // provider succeeds. Both transports must refund before reporting it.

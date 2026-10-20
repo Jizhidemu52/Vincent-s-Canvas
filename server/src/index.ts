@@ -99,8 +99,8 @@ app.use("/api/auth", createAuthRouter(db, cache, config));
 const requireSession = sessionMiddleware(db, cache, config);
 const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
 const requireUsageSession = sessionMiddleware(db, cache, config, { allowGuest: false, allowAdminSession: true, unauthenticatedStatus: 403 });
-app.use("/api/usage", requireUsageSession, requireAccountReady, createUsageRouter(db, { enabled: features.oaLoginEnabled }));
-app.use("/api/admin/usage", requireUsageSession, requireAccountReady, createAdminUsageRouter(db, config, { enabled: features.oaLoginEnabled }));
+app.use("/api/usage", requireUsageSession, requireAccountReady, createUsageRouter(db, { enabled: features.authenticationEnabled }));
+app.use("/api/admin/usage", requireUsageSession, requireAccountReady, createAdminUsageRouter(db, config, { enabled: features.authenticationEnabled }));
 const designLibrary = new DesignLibraryService(new PostgresDesignLibraryRepository(db), designLibraryObjectStorage(storage));
 app.use("/api/design-library", requireSession, requireAccountReady, async (_request, _response, next) => {
   try { await assertModuleEnabled(db, "design-library"); next(); } catch (error) { next(error); }
@@ -214,7 +214,7 @@ app.use(
   "/api/admin/accounts",
   requireAdminSession,
   requireAccountReady,
-  createAccountsRouter(db),
+  createAccountsRouter(db, config),
 );
 app.use(
   "/api/admin/departments",

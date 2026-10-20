@@ -4,7 +4,7 @@ import { createClientId } from "@/lib/client-id";
 export type Department = { id: string; name: string; code: string; createdAt: string };
 export type AuditLog = { id: string; action: string; targetType: string; targetId: string | null; result: "success" | "denied" | "failed"; detail: Record<string, unknown>; createdAt: string; actorName: string | null; actorRole: ApiUserRole | null; departmentName: string | null };
 export type AccountInput = {
-    username: string; displayName: string; email?: string | null; employeeNo?: string | null; password: string;
+    username: string; displayName: string; email?: string | null; employeeNo?: string | null; password?: string;
     role: ApiUserRole; status?: "active" | "disabled"; departmentId?: string | null; creditBalance: number; creditLimit: number; monthlyCreditLimit?: number;
 };
 export type AccountUpdate = Partial<Pick<ApiUser, "displayName" | "email" | "employeeNo" | "departmentId" | "status" | "creditLimit" | "monthlyCreditLimit">> & { role?: "department_admin" | "designer" };

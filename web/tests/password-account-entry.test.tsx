@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import { create } from "zustand";
 import ts from "typescript";
+import { UsageSession } from "../src/lib/usage-session";
 
 function elements(node: unknown): ReactElement<any>[] {
     if (Array.isArray(node)) return node.flatMap(elements);
@@ -89,22 +90,34 @@ test("password change confirms the updated session and bootstraps either account
     }
 });
 
-test("password identities do not initialize OA analytics storage or collection", () => {
+test.each([true, false])("authenticated usage sync follows authentication=%j, independently of OA", async authenticationEnabled => {
     const source = new URL("../src/stores/use-usage-store.ts", import.meta.url);
     const code = ts.transpileModule(readFileSync(source, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
     let subscription!: (state: unknown) => void;
-    let storageCalls = 0;
+    const sent: unknown[] = [];
+    let state: any = { status: "authenticated", user: { id: "employee-a", status: "active" } };
     const dependencies: Record<string, unknown> = {
         zustand: { create },
-        localforage: { createInstance() { storageCalls++; throw new Error("password mode must not initialize analytics storage"); } },
-        "@/lib/storage-access": {}, "@/lib/usage-session": {}, "@/services/api/usage-client": {},
-        "@/stores/use-user-store": { useUserStore: { subscribe: (listener: (state: unknown) => void) => { subscription = listener; } } },
-        "@/lib/deployment-features": { deploymentFeatures: { authenticationEnabled: true, oaLoginEnabled: false } },
+        localforage: { createInstance: () => ({ ready: async () => undefined, getItem: async () => null, setItem: async () => undefined }) },
+        "@/lib/storage-access": { createStorageAccess: () => ({ run: (operation: Function) => operation() }) },
+        "@/lib/usage-session": { UsageSession },
+        "@/services/api/usage-client": { postUsageEvents: async (events: unknown[]) => { sent.push(...events); return { accepted: events.length, duplicates: 0 }; }, getMyUsage: async () => ({ boards: [], controls: [] }) },
+        "@/stores/use-user-store": { useUserStore: { getState: () => state, subscribe: (listener: (state: unknown) => void) => { subscription = listener; } } },
+        "@/lib/deployment-features": { deploymentFeatures: { authenticationEnabled, oaLoginEnabled: false } },
     };
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name], module, module.exports);
-    subscription({ status: "authenticated", user: { id: "password-a", status: "active" } });
-    subscription({ status: "authenticated", user: { id: "password-b", status: "active" } });
-    expect(storageCalls).toBe(0);
-    expect(module.exports.useUsageStore.getState()).toEqual({ owner: null, counts: {}, storageUnavailable: false });
+    try {
+        subscription(state);
+        const event = { eventId: crypto.randomUUID(), occurredAt: new Date().toISOString(), boardKey: "image", action: "visit" };
+        module.exports.recordUsage(event);
+        await settle(); await module.exports.flushUsage();
+        expect(sent).toEqual(authenticationEnabled ? [event] : []);
+        expect(module.exports.useUsageStore.getState().owner).toBe("employee-a");
+        state = { status: "anonymous", user: null }; subscription(state);
+        expect(module.exports.useUsageStore.getState().owner).toBeNull();
+        module.exports.recordUsage({ ...event, eventId: crypto.randomUUID() });
+        await module.exports.flushUsage();
+        expect(sent).toHaveLength(authenticationEnabled ? 1 : 0);
+    } finally { module.exports.setUsageOwner(null, false); }
 });

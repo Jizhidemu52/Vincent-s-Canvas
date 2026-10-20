@@ -35,7 +35,6 @@ export function recordUsage(event: UsageClientEvent, visitToken?: string) { void
 export function flushUsage() { return session?.flush() ?? Promise.resolve(); }
 // Abort synchronously with identity changes, before a pending timer can submit under the next account's cookie.
 useUserStore.subscribe(state => {
-    const usageEnabled = !deploymentFeatures.authenticationEnabled || deploymentFeatures.oaLoginEnabled;
-    const owner = usageEnabled && state.status === "authenticated" && state.user?.status === "active" ? state.user.id : null;
-    if (owner !== session?.owner) setUsageOwner(owner, deploymentFeatures.oaLoginEnabled);
+    const owner = state.status === "authenticated" && state.user?.status === "active" ? state.user.id : null;
+    if (owner !== session?.owner) setUsageOwner(owner, deploymentFeatures.authenticationEnabled);
 });

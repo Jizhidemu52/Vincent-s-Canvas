@@ -16,10 +16,14 @@ const GUEST_SESSION_TTL_SECONDS = 365 * 24 * 60 * 60;
 export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig, options: { allowGuest?: boolean; allowAdminSession?: boolean; unauthenticatedStatus?: 401 | 403 } = {}) {
     const features = deploymentFeatures(config);
     const allowGuest = !features.oaLoginEnabled && !features.authenticationEnabled && options.allowGuest !== false;
-    const acceptsProvider = (row: UserRow & { auth_provider: string }) => !features.oaLoginEnabled
-        || (row.auth_provider === "oa" && row.role === "designer")
-        || (row.auth_provider === "local" && (options.allowGuest === false
-            || (options.allowAdminSession && (row.role === "super_admin" || row.role === "department_admin"))));
+    const acceptsProvider = (row: UserRow & { auth_provider: string }) => {
+        // A role change must not turn a designer's QR login into an admin session.
+        if (row.auth_provider === "wecom") return !features.oaLoginEnabled && row.role === "designer" && !row.is_guest;
+        return !features.oaLoginEnabled
+            || (row.auth_provider === "oa" && row.role === "designer")
+            || (row.auth_provider === "local" && (options.allowGuest === false
+                || (options.allowAdminSession && (row.role === "super_admin" || row.role === "department_admin"))));
+    };
     return async (request: Request, response: Response, next: NextFunction) => {
         // Internal route policy, never sourced from the request body or headers.
         (request as AuthenticatedRequest).allowsAnonymousCreation = allowGuest;
@@ -84,6 +88,9 @@ export function sessionMiddleware(db: Database, cache: Cache, config: AppConfig,
             }
             const authenticated = request as AuthenticatedRequest;
             authenticated.auth = mapUser(row);
+            // Only the server-verified session source bypasses local onboarding.
+            // Keep the account's stored password requirement for local logins.
+            if (row.auth_provider === "wecom") authenticated.auth.mustChangePassword = false;
             authenticated.sessionId = row.session_id;
             next();
         } catch (error) {

@@ -55,7 +55,7 @@ test("APIMart Sonnet streaming preserves native thinking signatures and tool res
     calls++;
     expect(String(url)).toBe("http://apimart.test/v1/messages");
     expect(JSON.parse(String(init?.body))).toEqual({
-      model: "claude-sonnet-5-5", max_tokens: 8192, stream: true,
+      model: "claude-sonnet-5-5", max_tokens: 8192, stream: true, output_config: { effort: "low" },
       messages: [{ role: "assistant", content: blocks }, { role: "user", content: [{ type: "tool_result", tool_use_id: "read-1", content: "Cable knit" }] }],
       tools: [{ name: tools[0]!.name, description: tools[0]!.description, input_schema: tools[0]!.parameters }], tool_choice: { type: "auto" },
     });
@@ -69,7 +69,7 @@ test("APIMart Sonnet streaming preserves native thinking signatures and tool res
 });
 
 for (const thinking of [undefined, false, true]) {
-  test(`APIMart Sonnet preserves native Unicode and upstream thinking defaults in both response modes (thinking=${thinking})`, async () => {
+  test(`APIMart Sonnet preserves native Unicode and selects effort in both response modes (thinking=${thinking})`, async () => {
     const text = '中文针织 🧶🧵，引号 "，反斜杠 \\，字面转义 \\u4e2d，换行\n，行分隔\u2028，孤立代理\ud800';
     const schema = {
       type: "object", properties: { "材质": { type: "string", description: text, enum: ["棉质针织🧶", "棉麻"] } },
@@ -88,6 +88,7 @@ for (const thinking of [undefined, false, true]) {
         { role: "user", content: [{ type: "tool_result", tool_use_id: "inspect-1", content: text }] },
       ],
       tools: [{ name: "inspect_images", description: text, input_schema: schema }], tool_choice: { type: "auto" },
+      ...(thinking === false ? { output_config: { effort: "low" } } : {}),
     });
     const payloads: Record<string, unknown>[] = [];
     globalThis.fetch = (async (url, init) => {
@@ -97,7 +98,8 @@ for (const thinking of [undefined, false, true]) {
       const payload = JSON.parse(encoded);
       expect(encoded).toBe(JSON.stringify(payload));
       expect(payload).not.toHaveProperty("thinking");
-      expect(payload).not.toHaveProperty("output_config");
+      if (thinking === false) expect(payload.output_config).toEqual({ effort: "low" });
+      else expect(payload).not.toHaveProperty("output_config");
       payloads.push(payload);
       expect(payload).toEqual({ ...expected, ...(payload.stream ? { stream: true } : {}) });
       if (payload.stream) return new Response('data: {"type":"message_stop"}\n\n', { headers: { "content-type": "text/event-stream" } });
@@ -121,7 +123,7 @@ for (const thinking of [undefined, false, true]) {
   });
 }
 
-test.each([false, true])("native Anthropic Sonnet keeps its existing Unicode and thinking defaults (stream=%s)", async stream => {
+test.each([false, true])("native Anthropic Sonnet preserves Unicode and selects low effort without disabling thinking (stream=%s)", async stream => {
   let calls = 0;
   globalThis.fetch = (async (_url, init) => {
     calls++;
@@ -129,7 +131,7 @@ test.each([false, true])("native Anthropic Sonnet keeps its existing Unicode and
     expect(encoded).toContain("中文🧶");
     const payload = JSON.parse(encoded);
     expect(payload).not.toHaveProperty("thinking");
-    expect(payload).not.toHaveProperty("output_config");
+    expect(payload.output_config).toEqual({ effort: "low" });
     if (stream) return new Response('data: {"type":"message_stop"}\n\n');
     return Response.json({ content: [{ type: "text", text: "OK" }] });
   }) as typeof fetch;

@@ -20,6 +20,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
     const secondInstruction = "再让女模特穿上，衣服颜色和版型不变。";
     const discussion = "只讨论这套穿搭适合什么场景，不要生成图片。";
     const discussionAnswer = "这套紫色连衣裙适合简洁的日常穿搭或聚会。本轮只讨论，没有生成图片。";
+    const followUpAnswer = "文件要求保留领型、袖型和裙长，并且不增加花纹或装饰；后续修改继续遵守这些要求。";
     const firstPrompt = "以原款连衣裙为编辑对象，仅将衣服改为紫色，保持原款领型、袖型和裙长，不增加花纹或装饰，其他构图与背景不变。";
     const secondPrompt = "让成年女模特穿上上一轮的紫色连衣裙，衣服紫色、领型、袖型和裙长保持不变，不增加花纹或装饰，服装结构与上一轮一致。";
     const preservedConstraints = ["保留领型、袖型和裙长", "不增加花纹或装饰"];
@@ -36,8 +37,18 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
     let fixtureImages;
     let originalAttachment;
     const readSession = () => tab.evaluate(async key => {
-        const { chatSessionStorage } = await import("/src/pages/chat/chat-session-storage.ts");
-        return (await chatSessionStorage.load(key, () => null))[0];
+        if (!(await indexedDB.databases()).some(item => item.name === "wireless-canvas")) return undefined;
+        return new Promise((resolve, reject) => {
+            const open = indexedDB.open("wireless-canvas");
+            open.onerror = () => reject(open.error);
+            open.onsuccess = () => {
+                const db = open.result;
+                if (!db.objectStoreNames.contains("app_state")) { db.close(); resolve(undefined); return; }
+                const query = db.transaction("app_state", "readonly").objectStore("app_state").get(key);
+                query.onsuccess = () => { db.close(); resolve(query.result?.[0]); };
+                query.onerror = () => { db.close(); reject(query.error); };
+            };
+        });
     }, storageKey);
     const assertNaturalChatControls = async () => {
         check(await tab.getByRole("button", { name: /^(聊天|创作|Agent)$/ }).count() === 0, "Manual chat/create/agent mode buttons still exist");
@@ -75,8 +86,11 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
                 originalAttachment = (await readSession())?.messages[0]?.attachments?.find(item => item.kind === "image");
                 if (!originalAttachment) return json({ message: "Original upload was not persisted before planning" }, 422);
             }
-            const turnIndex = plannerRequests.length - 1;
+            if (plannerRequests.length === 2) return json({ content: "查看上一轮结果以继续修改。", toolCalls: [{ id: "fixture-inspect-previous", type: "function", function: { name: "inspect_images", arguments: JSON.stringify({ image_ids: [resultIds[0]] }) } }] });
+            const turnIndex = plannerRequests.length === 1 ? 0 : plannerRequests.length === 3 ? 1 : 2;
             if (turnIndex < 2) return json({ content: turnIndex === 0 ? "只调整衣服颜色，保留文件要求的版型。" : "沿用上一轮紫色衣服，保留颜色和版型。", toolCalls: [{ id: `fixture-edit-call-${turnIndex + 1}`, type: "function", function: { name: "create_image", arguments: JSON.stringify({ action: "edit", prompt: [firstPrompt, secondPrompt][turnIndex], target_image_id: turnIndex === 0 ? originalAttachment.id : resultIds[0], reference_image_ids: [], preserve: turnIndex === 0 ? preservedConstraints : [...preservedConstraints, "保持上一轮紫色"] }) } }] });
+            if (plannerRequests.length === 5) return json({ content: `实际提示词：\n${taskPosts[1].parameters.inputArchive.prompt}`, toolCalls: [] });
+            if (plannerRequests.length === 6) return json({ content: followUpAnswer, toolCalls: [] });
             return json({ content: discussionAnswer, toolCalls: [] });
         }
         if (request.method() === "POST" && url.pathname === "/api/assets/upload-request") {
@@ -99,7 +113,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         }
         if (url.pathname === "/api/deployment") return json({ authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false });
         if (url.pathname === "/api/auth/session") return json({ user });
-        if (url.pathname === "/api/modules") return json({ modules: ["canvas", "image", "assets", "gpt-chat"].map(moduleKey => ({ moduleKey, enabled: true, updatedAt: "fixture" })) });
+        if (url.pathname === "/api/modules") return json({ modules: ["canvas", "image", "assets", "gpt-chat", "gpt-chat-image"].map(moduleKey => ({ moduleKey, enabled: true, updatedAt: "fixture" })) });
         if (url.pathname === "/api/models") return json({ models, prices: [], tools: [{ toolKey: "gpt-chat", modelConfigId: "fixture-chat", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }] });
         if (url.pathname === "/api/generation-capabilities") return json({ models: [] });
         const taskIndex = taskIds.findIndex(id => url.pathname === `/api/tasks/${id}`);
@@ -149,7 +163,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         check(firstUser.attachments.find(item => item.name === "需求.txt")?.textContent === requirements, "Uploaded TXT requirements were not retained");
         const firstPayload = JSON.stringify(plannerRequests[0]);
         check(firstPayload.includes(requirements) && firstPayload.includes(firstInstruction) && firstPayload.includes(originalAttachment.id) && firstPayload.includes("input_image"), "The first planner request omitted original image, document, or current instruction");
-        check(firstImage.prompt === firstPrompt && firstImage.lineage.parentImageId === originalAttachment.id, "First result lost its actual execution prompt or original parent");
+        check(firstImage.prompt === taskPosts[0].parameters.inputArchive.prompt && firstImage.prompt.includes(firstPrompt) && firstImage.lineage.parentImageId === originalAttachment.id, "First result lost its actual compiled execution prompt or original parent");
         check(JSON.stringify(firstImage.lineage.sourceImageIds) === JSON.stringify([originalAttachment.id]), "First result lineage contains unexpected source images");
         check(await tab.getByRole("button", { name: /^移除 / }).count() === 0, "Sent attachments were not cleared from the composer");
         await assertNaturalChatControls();
@@ -159,16 +173,17 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         await draft.fill(secondInstruction);
         await send.click();
         await waitFor(async () => (await readSession())?.messages.at(-1)?.generatedImages?.[0]?.id === resultIds[1], "Text-only continuation did not persist the second result");
-        check(plannerRequests.length === 2 && taskPosts.length === 2, "Text-only continuation did not produce exactly one additional plan and task");
+        check(plannerRequests.length === 3 && taskPosts.length === 2, "Historical edit did not use exactly one inspection followed by one image task");
         const secondPayload = JSON.stringify(plannerRequests[1]);
         check(secondPayload.includes(originalAttachment.id) && secondPayload.includes(resultIds[0]), "Second planner request omitted the original or previous result identity");
         check(secondPayload.includes(requirements) && secondPayload.includes(firstPrompt) && secondPayload.includes(secondInstruction), "Second planner request omitted the document, previous execution prompt, or current instruction");
-        check((secondPayload.match(/"type":"input_image"/g) || []).length === 2, "Second planner did not receive both original and prior-result previews");
+        check((secondPayload.match(/"type":"input_image"/g) || []).length === 0, "Historical images were eagerly attached to initial continuation planning");
+        check((JSON.stringify(plannerRequests[2]).match(/"type":"input_image"/g) || []).length === 1, "Inspection did not attach only the specifically requested prior result");
         const secondState = await readSession();
         const secondUser = secondState.messages.at(-2);
         const secondImage = secondState.messages.at(-1).generatedImages[0];
         check(secondUser.content === secondInstruction && !secondUser.attachments?.length, "Text-only continuation duplicated an upload or changed the user's text");
-        check(secondImage.prompt === secondPrompt && secondImage.lineage.parentImageId === resultIds[0], "Second result did not descend from the previous result");
+        check(secondImage.prompt === taskPosts[1].parameters.inputArchive.prompt && secondImage.prompt.includes(secondPrompt) && secondImage.lineage.parentImageId === resultIds[0], "Second result did not retain its compiled prompt and previous-result parent");
         check(JSON.stringify(secondImage.lineage.sourceImageIds) === JSON.stringify([resultIds[0]]), "Second result used the wrong source whitelist");
         check(secondImage.lineage.preservedConstraints.includes("保持上一轮紫色"), "Second result lost the retained color constraint");
         const referenceIds = taskPosts.map(submitted => submitted.parameters?.inputArchive?.references.map(item => item.id));
@@ -176,7 +191,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         taskPosts.forEach((submitted, index) => {
             const prompt = [firstPrompt, secondPrompt][index];
             check(submitted.parameters?.count === 1 && submitted.operationType === "inpaint", `Edit ${index + 1} used the wrong operation or result count`);
-            check(submitted.prompt.includes(prompt) && submitted.parameters.inputArchive.prompt === prompt, `Edit ${index + 1} did not receive the full planner prompt`);
+            check(submitted.prompt.includes(prompt) && submitted.parameters.inputArchive.prompt.includes(prompt), `Edit ${index + 1} did not receive the full planner prompt`);
         });
         check(uploads.length === 2 && uploadedBytes.size === 2, "Two edits did not upload exactly their respective target images");
         check(uploadedBytes.get(uploads[0].assetId) === originalAttachment.dataUrl.split(",")[1], "First edit did not upload the stored original bytes");
@@ -187,9 +202,18 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         await send.click();
         await tab.getByText(discussionAnswer, { exact: true }).waitFor({ state: "visible" });
         await waitFor(async () => (await readSession())?.messages.at(-1)?.content === discussionAnswer, "Discussion result did not persist");
-        check(plannerRequests.length === 3 && taskPosts.length === 2 && uploads.length === 2, "Discussion unexpectedly submitted another image task or upload");
+        check(plannerRequests.length === 4 && taskPosts.length === 2 && uploads.length === 2, "Discussion unexpectedly submitted another image task or upload");
+        check(!JSON.stringify(plannerRequests[3]).includes('"type":"input_image"'), "Ordinary discussion resent historical image previews");
+        check(await tab.getByText("查看提示词", { exact: true }).count() === 0, "An unrequested prompt-view UI was added");
+        for (const [index, [question, expected]] of [["这个画布提示词是什么发给我", secondImage.prompt], ["刚才文件里要求保留哪些内容？", followUpAnswer]].entries()) {
+            await draft.fill(question);
+            await send.click();
+            await waitFor(async () => (await readSession())?.messages.at(-1)?.role === "assistant" && (await readSession())?.messages.at(-1)?.content.includes(expected), `Ordinary follow-up failed: ${question}`);
+            check(plannerRequests.length === 5 + index && taskPosts.length === 2 && uploads.length === 2, "Ordinary follow-up bypassed the model, retried, or created an image task");
+            check(!JSON.stringify(plannerRequests.at(-1)).includes('"type":"input_image"'), "Ordinary follow-up eagerly resent historical image previews");
+        }
         const beforeReload = await readSession();
-        check(beforeReload.messages.length === 6, "Three turns did not retain exactly three user/assistant pairs");
+        check(beforeReload.messages.length === 10, "Five turns did not retain exactly five user/assistant pairs");
         check(beforeReload.messages.filter(item => item.role === "user").slice(1).every(item => !item.attachments?.length), "Later text-only turns acquired duplicated attachments");
         await tab.reload({ waitUntil: "domcontentloaded" });
         await draft.waitFor({ state: "visible" });
@@ -199,7 +223,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         const restoredImages = restored.messages.flatMap(item => item.generatedImages || []);
         check(JSON.stringify(restoredImages) === JSON.stringify([firstImage, secondImage]), "Reload changed result bytes, prompts, or lineage");
         check(JSON.stringify(restored.messages[0].attachments) === JSON.stringify(firstUser.attachments), "Reload changed original image or document attachments");
-        check(taskPosts.length === 2 && plannerRequests.length === 3, "Reload resubmitted planning or an image task");
+        check(taskPosts.length === 2 && plannerRequests.length === 6, "Reload resubmitted planning or an image task");
         await tab.getByText(discussionAnswer, { exact: true }).scrollIntoViewIfNeeded();
         await screenshot("natural-chat-after-reload");
 
@@ -217,7 +241,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         check(!unexpected.length, `Unexpected network requests: ${JSON.stringify(unexpected)}`);
         check(!pageErrors.length, `Page errors: ${pageErrors.join("; ")}`);
         check(!consoleErrors.length, `Console errors: ${consoleErrors.join("; ")}`);
-        return { passed: true, mockedBusinessApi: true, fixtureImagesOnly: true, realGenerationRequests: 0, freshSessionWithoutSeededHistory: true, manualModeOrTargetSelections: 0, stubbedPlannerRequests: plannerRequests.length, stubbedImageTaskPosts: taskPosts.length, discussionTaskRequests: 0, taskReferenceIds: referenceIds, originalUploadBytesPreserved: true, priorResultAndOriginalPreviewsInSecondTurn: true, documentAndExecutionPromptInSecondTurn: true, laterAttachmentsNotDuplicated: true, lineageAndAttachmentsSurviveReload: true, reloadResubmissions: 0, mobile: geometry, screenshots, calls, pageErrors, consoleErrors };
+        return { passed: true, mockedBusinessApi: true, fixtureImagesOnly: true, realGenerationRequests: 0, freshSessionWithoutSeededHistory: true, manualModeOrTargetSelections: 0, stubbedPlannerRequests: plannerRequests.length, stubbedImageTaskPosts: taskPosts.length, discussionTaskRequests: 0, ordinaryFollowUpModelCalls: 3, keywordBypasses: 0, additionalUiControls: 0, taskReferenceIds: referenceIds, originalUploadBytesPreserved: true, historicalImagesInspectedOnlyOnDemand: true, documentAndExecutionPromptInSecondTurn: true, laterAttachmentsNotDuplicated: true, lineageAndAttachmentsSurviveReload: true, reloadResubmissions: 0, mobile: geometry, screenshots, calls, pageErrors, consoleErrors };
     } catch (error) {
         await screenshot("natural-chat-failed").catch(() => {});
         const summarizedPlannerRequests = JSON.parse(JSON.stringify(plannerRequests, (_key, value) => typeof value === "string" && value.startsWith("data:image/") ? "[fixture image preview]" : value));

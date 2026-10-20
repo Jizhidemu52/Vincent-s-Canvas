@@ -3,12 +3,12 @@ import { Download, Edit3, FileUp, LogOut, RefreshCw, ShieldCheck, SlidersHorizon
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Form, Input, InputNumber, Select, Skeleton, Space, Table, Tabs, Tag, Typography, Upload } from "antd";
 import { saveAs } from "file-saver";
-import Papa from "papaparse";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
-import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, resetAccountPassword, setAccountCredits, updateAccount, type AccountInput, type AuditLog, type Department } from "@/services/api/admin-accounts";
+import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, resetAccountPassword, setAccountCredits, updateAccount, type AuditLog, type Department } from "@/services/api/admin-accounts";
 import { loadAdminOverview, markPlatformAdminTabLabel, resolveAdminTab } from "./admin-overview";
-import type { ApiUser, ApiUserRole } from "@/services/api/auth";
+import { accountTemplateCsv, parseAccountCsv, prepareNewAccount } from "./account-input";
+import { getAuthMethods, type ApiUser, type ApiUserRole } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import { useModuleStore } from "@/stores/use-module-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -55,8 +55,11 @@ export default function AdminPage() {
     const [creditForm] = Form.useForm<CreditFormValues>();
     const [limitForm] = Form.useForm<LimitFormValues>();
     const [accountForm] = Form.useForm<AccountFormValues>();
+    const accountRole = Form.useWatch("role", accountForm) ?? "designer";
     const navigate = useNavigate();
     const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+    const [wecomEnabled, setWecomEnabled] = useState(false);
+    const passwordlessAccount = wecomEnabled && !editingAccountId && accountRole === "designer";
     const [accounts, setAccounts] = useState<ApiUser[]>([]);
     const [departments, setDepartments] = useState<Department[]>([]);
     const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -102,6 +105,15 @@ export default function AdminPage() {
         if (canManageAccounts) void refreshAccounts();
         return () => { accountsRequest.current++; };
     }, [canManageAccounts, signedInUser?.id, signedInUser?.role, signedInUser?.departmentId]);
+
+    useEffect(() => {
+        let active = true;
+        setWecomEnabled(false);
+        if (canManageAccounts) void getAuthMethods()
+            .then((methods) => { if (active) setWecomEnabled(methods.wecom === true); })
+            .catch(() => { if (active) setWecomEnabled(false); });
+        return () => { active = false; };
+    }, [canManageAccounts, signedInUser?.id]);
 
     const runAction = async (key: string, action: () => Promise<void>) => {
         if (pendingActionRef.current) return;
@@ -169,9 +181,9 @@ export default function AdminPage() {
                 if (values.password) await resetAccountPassword(editingAccountId, values.password);
                 if (editingAccountId === signedInUser?.id) await hydrateSession();
             } else {
-                await createAccount({ username: values.loginName, displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, password: values.password || "", role: values.role, status: values.status === "disabled" ? "disabled" : "active", creditBalance: values.quotaRemaining, creditLimit: Math.max(values.quotaRemaining, values.monthlyCreditLimit), monthlyCreditLimit: values.monthlyCreditLimit });
+                await createAccount(prepareNewAccount({ username: values.loginName, displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, password: values.password, role: values.role, status: values.status === "disabled" ? "disabled" : "active", creditBalance: values.quotaRemaining, creditLimit: Math.max(values.quotaRemaining, values.monthlyCreditLimit), monthlyCreditLimit: values.monthlyCreditLimit }, wecomEnabled));
             }
-            message.success(editingAccountId ? "账号和当前积分余额已更新" : "账号已开通，首次登录必须修改密码");
+            message.success(editingAccountId ? "账号和当前积分余额已更新" : wecomEnabled && values.role === "designer" ? "账号已开通，可直接使用企业微信扫码登录" : "账号已开通，首次登录必须修改密码");
             setEditingAccountId(null);
             accountForm.resetFields();
             accountForm.setFieldsValue({ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 });
@@ -197,26 +209,14 @@ export default function AdminPage() {
     };
 
     const downloadAccountTemplate = () => {
-        const csv = Papa.unparse([{ username: "zhangsan", displayName: "张三", email: "zhangsan@company.com", employeeNo: "D001", password: "Canvas2026Start", role: "designer", departmentCode: departments[0]?.code || "design", creditBalance: 500, creditLimit: 500 }]);
+        const csv = accountTemplateCsv(departments, wecomEnabled);
         saveAs(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }), "设计师账号导入模板.csv");
     };
 
     const importAccountCsv = async (file: File) => {
         await runAction("import", async () => {
         try {
-            const parsed = Papa.parse<Record<string, string>>(await file.text(), { header: true, skipEmptyLines: true });
-            const firstError = parsed.errors[0];
-            if (firstError) throw new Error(`CSV 第 ${(firstError.row ?? 0) + 2} 行格式错误：${firstError.message}`);
-            const accountsToCreate: AccountInput[] = parsed.data.map((row, index) => {
-                const department = departments.find((item) => item.code.toLowerCase() === row.departmentCode?.trim().toLowerCase());
-                if (!department) throw new Error(`CSV 第 ${index + 2} 行的部门编码不存在`);
-                const role = row.role?.trim() === "department_admin" ? "department_admin" : "designer";
-                return {
-                    username: row.username?.trim(), displayName: row.displayName?.trim(), email: row.email?.trim() || null,
-                    employeeNo: row.employeeNo?.trim() || null, password: row.password, role, departmentId: department.id,
-                    creditBalance: Number(row.creditBalance || 0), creditLimit: Number(row.creditLimit || 0),
-                };
-            });
+            const accountsToCreate = parseAccountCsv(await file.text(), departments, wecomEnabled);
             const result = await bulkCreateAccounts(accountsToCreate);
             if (result.failures.length) message.warning(`成功导入 ${result.created} 人，失败 ${result.failures.length} 人；首条失败：${result.failures[0].message}`);
             else message.success(`成功导入 ${result.created} 个账号`);
@@ -362,15 +362,15 @@ export default function AdminPage() {
                                                     <Form.Item name="loginName" label="登录账号" rules={[{ required: true, message: "请输入登录账号" }]}>
                                                         <Input placeholder="例如：张三 / zhangsan / 邮箱 / 工号" disabled={Boolean(editingAccountId)} />
                                                     </Form.Item>
-                                                    <Form.Item name="password" label={editingAccountId ? "新密码（留空不改）" : "初始密码"} rules={editingAccountId ? [] : [{ required: true, message: "请设置初始密码" }]}>
-                                                        <Input.Password placeholder={editingAccountId ? "留空则保持原密码" : "给设计师的初始密码"} />
-                                                    </Form.Item>
+                                                    {!passwordlessAccount && <Form.Item name="password" preserve={false} label={editingAccountId ? "新密码（留空不改）" : "初始密码"} rules={editingAccountId ? [] : [{ required: true, message: "请设置初始密码" }, { min: 12, max: 200, message: "密码需为 12 至 200 位" }, { pattern: /^(?=.*[A-Za-z])(?=.*\d)[\s\S]+$/, message: "密码必须同时包含字母和数字" }]}>
+                                                        <Input.Password placeholder={editingAccountId ? "留空则保持原密码" : "至少 12 位，包含字母和数字"} />
+                                                    </Form.Item>}
                                                     <Form.Item name="name" label="姓名" rules={[{ required: true, message: "请输入姓名" }]}>
                                                         <Input placeholder="设计师姓名" />
                                                     </Form.Item>
                                                      <div className="grid grid-cols-2 gap-3">
                                                         <Form.Item name="email" label="邮箱"><Input placeholder="可用于登录" /></Form.Item>
-                                                        <Form.Item name="employeeNo" label="工号"><Input placeholder="可用于登录" /></Form.Item>
+                                                        <Form.Item name="employeeNo" label={passwordlessAccount ? "企业微信成员账号" : "工号"} rules={passwordlessAccount ? [{ required: true, whitespace: true, message: "请输入企业微信成员账号" }] : []} extra={passwordlessAccount ? "须与企业微信通讯录中的成员账号一致，不是姓名或昵称。" : undefined}><Input placeholder={passwordlessAccount ? "企业微信通讯录成员账号" : "可用于登录"} /></Form.Item>
                                                      </div>
                                                      <Form.Item name="monthlyCreditLimit" label="每月固定额度" extra="下月 1 日按此额度重置；不改变本月当前余额。" rules={[{ required: true }]}>
                                                          <InputNumber className="w-full" min={0} max={1000000} precision={0} />
@@ -417,7 +417,7 @@ export default function AdminPage() {
                                                         ) : null}
                                                     </Space>
                                                 </Form>
-                                                <Typography.Paragraph className="!mb-0 !mt-3 text-xs !text-stone-500">登录账号支持中文或英文，邮箱和工号也可登录。新账号首次登录必须修改密码；停用和重置密码会使既有会话失效。</Typography.Paragraph>
+                                                <Typography.Paragraph className="!mb-0 !mt-3 text-xs !text-stone-500">{wecomEnabled ? "新设计师无需初始密码，填写企业微信成员账号后即可扫码登录。CSV 每批最多 200 人，设计师可不填写部门，旧模板中的设计师密码不会导入；部门管理员仍需设置初始密码。停用和重置密码会使既有会话失效。" : "登录账号支持中文或英文，邮箱和工号也可登录。新账号首次登录必须修改密码；停用和重置密码会使既有会话失效。CSV 每批最多 200 人。"}</Typography.Paragraph>
                                             </Panel>
                                              <Panel title="追加或扣除积分">
                                                 <Form name="admin-credit-adjustment" form={creditForm} layout="vertical" disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ designerId: activeDesigner?.id, amount: 100, reason: "项目补充额度" }} onFinish={submitCreditChange}>
@@ -480,7 +480,7 @@ export default function AdminPage() {
                             {
                                 key: "usage-analysis",
                                 label: "使用分析",
-                                children: isAdmin ? (deploymentFeatures.oaLoginEnabled ? <UsageAnalyticsPanel /> : <Alert type="info" showIcon title="使用分析仅在企业 OA 模式启用" description="当前未启用企业 OA 身份与使用记录采集。独立账号登录不自动开启该采集，也不会发送分析数据。" />) : null,
+                                children: isAdmin ? (deploymentFeatures.authenticationEnabled ? <UsageAnalyticsPanel /> : <Alert type="info" showIcon title="使用分析需要启用账号登录" description="免登录试用只保留本机常用板块，不采集人员使用记录。企业微信、独立账号或 OA 登录模式均支持使用分析。" />) : null,
                             },
                             {
                                 key: "mark-images",

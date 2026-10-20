@@ -72,7 +72,9 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 
 ## 企业 OA 身份与会话
 
-`022_oa_login.sql` 允许 `external_identities.provider='oa'`，`subject` 保存上游已校验的 `userid`；沿用 `(provider,subject)` 和 `(user_id,provider)` 唯一约束。`sessions.auth_provider` 为 `local` 或 `oa`，默认 `local`；企业普通创作拒绝旧非 OA 会话及管理员维护身份，生产管理员接口另保留独立密码认证与角色校验。正式服务启动前须应用迁移；当前局域网 SQLite 服务不运行 PostgreSQL 迁移。
+`022_oa_login.sql` 允许 `external_identities.provider='oa'`，`subject` 保存上游已校验的 `userid`；沿用 `(provider,subject)` 和 `(user_id,provider)` 唯一约束。`037_wecom_session_provider.sql` 将 `sessions.auth_provider` 扩展为 `local`、`oa` 或 `wecom`，默认仍为 `local`。OA 模式的普通创作拒绝非 OA 会话及管理员维护身份，生产管理员接口另保留独立密码认证与角色校验。正式服务启动前须应用相关迁移；当前局域网 SQLite 服务不运行 PostgreSQL 迁移。
+
+非 OA 模式下，新企业微信扫码在服务端完成身份交换、既有账号映射和绑定校验后写入 `wecom` 会话并直接进入主页。仅当前仍为非访客设计师的有效 `wecom` 会话，其返回的 `mustChangePassword` 为 `false`；账号的本地 `password_hash` 和 `must_change_password` 不变，本地密码登录仍执行首次改密要求。旧 `local` 会话不会根据绑定记录重新归类，须重新扫码才能使用新会话规则；停用、软删除、撤销、过期和管理员角色提升仍会使企业微信会话失效。
 
 OA 登录请求向固定 HTTPS 用户信息接口发送 Bearer Token，仅使用返回的 `userid`、`name` 建立普通账号；不接受客户端声明的归属或角色。不存储上游 Token，旧记录不按姓名或首次登录自动转移给员工。
 

@@ -19,6 +19,18 @@ describe("optional chat billing", () => {
 });
 
 describe("billable Claude stream completion", () => {
+    test.each(["\n", "\r\n"])("does not capture before the complete terminal event boundary (%j)", newline => {
+        const stream = new ChatStreamOutcome();
+        stream.push(encode({ type: "content_block_delta", delta: { type: "text_delta", text: "您好" } }));
+        const terminal = new TextEncoder().encode(`event: message_stop${newline}data: {"type":"message_stop"}${newline}${newline}`);
+        for (const byte of terminal.subarray(0, -1)) {
+            stream.push(new Uint8Array([byte]));
+            expect(stream.successful).toBe(false);
+        }
+        stream.push(terminal.subarray(-1));
+        expect(stream.successful).toBe(true);
+    });
+
     test("requires complete nonempty success, even across chunk and UTF-8 boundaries", () => {
         const stream = new ChatStreamOutcome();
         const bytes = new Uint8Array([...encode({ type: "content_block_delta", delta: { type: "text_delta", text: "您好" } }), ...encode({ type: "message_stop" })]);
