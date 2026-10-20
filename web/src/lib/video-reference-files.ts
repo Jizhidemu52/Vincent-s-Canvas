@@ -1,4 +1,5 @@
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { createClientUuid } from "./client-uuid";
 
 /** Probe local input before persisting/uploading it; do not invent dimensions on decode errors. */
 export async function readReferenceMediaFile(file: File): Promise<ReferenceVideo | ReferenceAudio> {
@@ -27,7 +28,7 @@ export async function readReferenceMediaFile(file: File): Promise<ReferenceVideo
             media.onerror = () => finish(new Error(`${file.name} 无法解码，请使用 MP4/MOV 或 WAV/MP3`));
             media.src = url;
         });
-        return { id: crypto.randomUUID(), name: file.name, type: file.type, url: "", bytes: file.size, ...metadata };
+        return { id: createClientUuid(), name: file.name, type: file.type, url: "", bytes: file.size, ...metadata };
     } finally {
         URL.revokeObjectURL(url);
     }

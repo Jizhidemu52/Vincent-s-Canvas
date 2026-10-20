@@ -38,6 +38,18 @@ function page(path: string, exportName: string, dependencies: Record<string, unk
         antd: new Proxy({ App: { useApp: () => ({ message: { success() {}, error() {}, warning() {} }, modal: { confirm() {} } }) }, Input: mockInput, DatePicker: { RangePicker: "RangePicker" } }, { get(target, key) { return key in target ? target[key as keyof typeof target] : String(key); } }),
         ...dependencies,
     };
+    // The extracted action hook uses this page instance's React/runtime too.
+    // Keep its real implementation; never invoke a second React dispatcher.
+    if (path.endsWith("/prompts/index.tsx")) {
+        const hookUrl = new URL("../src/components/prompts/use-prompt-template-actions.tsx", import.meta.url);
+        const requireHook = createRequire(hookUrl);
+        const hookCode = ts.transpileModule(readFileSync(hookUrl, "utf8"), {
+            compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
+        }).outputText;
+        const hookModule = { exports: {} };
+        new Function("require", "module", "exports", hookCode)((name: string) => Object.hasOwn(mocks, name) ? mocks[name] : requireHook(name), hookModule, hookModule.exports);
+        mocks["@/components/prompts/use-prompt-template-actions"] = hookModule.exports;
+    }
     const module = { exports: {} as any };
     new Function("require", "module", "exports", "window", code)((name: string) => Object.hasOwn(mocks, name) ? mocks[name] : requireModule(name), module, module.exports, {
         setTimeout(callback: () => void) { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout(id: number) { timers.delete(id); },

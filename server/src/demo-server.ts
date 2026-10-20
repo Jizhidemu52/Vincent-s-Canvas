@@ -1,4 +1,5 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
+import { readDemoTaskProgress } from "./task-progress";
 import { ZodError } from "zod";
 import { demoTaskSummary, pageDemoRecords, parseDemoTaskFilters } from "./demo-list-pagination";
 import { singleImageTaskParameters } from "./image-task-policy";
@@ -1618,6 +1619,14 @@ Bun.serve({
       const task = [...demoTasks.values()].find((task) => task.requestId === requestId && task.ownerUserId === user.id);
       return task
         ? json({ task }, 200, responseHeaders)
+        : json({ error: "NOT_FOUND", message: "任务不存在或无权访问" }, 404, responseHeaders);
+    }
+    const progressTaskId = path.match(/^\/api\/tasks\/([0-9a-f-]+)\/progress$/i)?.[1];
+    if (progressTaskId && request.method === "GET") {
+      const task = demoTasks.get(progressTaskId);
+      const responseHeaders = { "cache-control": "private, no-store" };
+      return task && task.ownerUserId === user.id
+        ? json({ progress: readDemoTaskProgress(task, demoTasks.values()) }, 200, responseHeaders)
         : json({ error: "NOT_FOUND", message: "任务不存在或无权访问" }, 404, responseHeaders);
     }
     const taskId = path.match(/^\/api\/tasks\/([0-9a-f-]+)$/i)?.[1];

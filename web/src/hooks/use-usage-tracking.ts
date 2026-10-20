@@ -21,7 +21,7 @@ export function useUsageTracking() {
     useEffect(() => { setUsageOwner(owner, deploymentFeatures.authenticationEnabled); }, [owner]);
     useEffect(() => {
         if (!allowed || !owner || !board) return;
-        recordUsage({ eventId: crypto.randomUUID(), occurredAt: new Date().toISOString(), boardKey: board, action: "visit" }, `${owner}:${location.key}:${board}`);
+        recordUsage({ occurredAt: new Date().toISOString(), boardKey: board, action: "visit" }, `${owner}:${location.key}:${board}`);
     }, [allowed, owner, board, location.key]);
     useEffect(() => {
         if (!allowed || !board) return;
@@ -32,7 +32,7 @@ export function useUsageTracking() {
             if (override && !usageBoardAvailable(override, useModuleStore.getState().flags, useBusinessConfigStore.getState().tools)) return;
             const actualBoard = override || board;
             if (!usageBoardAvailable(actualBoard, useModuleStore.getState().flags, useBusinessConfigStore.getState().tools)) return;
-            recordUsage({ eventId: crypto.randomUUID(), occurredAt: new Date().toISOString(), boardKey: actualBoard, action, controlKey, ...(parameters ? { parameters } : {}) });
+            recordUsage({ occurredAt: new Date().toISOString(), boardKey: actualBoard, action, controlKey, ...(parameters ? { parameters } : {}) });
         };
         const event = (action: UsageAction) => (native: Event) => {
             const source = usageElement(native.target);

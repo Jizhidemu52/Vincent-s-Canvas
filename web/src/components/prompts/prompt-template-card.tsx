@@ -1,12 +1,13 @@
 import { Button, Dropdown, Tag, Tooltip } from "antd";
-import { Archive, Copy, Edit3, Ellipsis, Heart, Play, Send, Share2, Trash2 } from "lucide-react";
+import { Archive, Copy, Edit3, Ellipsis, Frame, Heart, Play, Send, Share2, Trash2 } from "lucide-react";
 
 import { promptTargetLabels, type PromptTemplate } from "@/services/api/prompts";
 import { useAsyncAction } from "@/hooks/use-async-action";
 
-export function PromptTemplateCard({ item, editable, canSubmit, onReuse, onEdit, onCopy, onDelete, onFavorite, onSubmit, onPromote, onArchive }: {
+export function PromptTemplateCard({ item, editable, canSubmit, onReuse, onInsertToCanvas, onEdit, onCopy, onDelete, onFavorite, onSubmit, onPromote, onArchive }: {
     item: PromptTemplate; editable?: boolean; canSubmit?: boolean;
     onReuse: (mode: "fill" | "fill_and_generate") => void | Promise<void>;
+    onInsertToCanvas: () => void;
     onEdit?: () => void; onCopy: () => void | Promise<void>; onDelete?: () => void; onFavorite: () => void | Promise<void>; onSubmit?: () => void | Promise<void>; onPromote?: () => void | Promise<void>; onArchive?: () => void;
 }) {
     const { pending, run } = useAsyncAction(`prompt-card:${item.id}`);
@@ -31,9 +32,12 @@ export function PromptTemplateCard({ item, editable, canSubmit, onReuse, onEdit,
                 </div>
                 <p className="mt-4 line-clamp-3 text-sm leading-6 text-muted-foreground">{item.prompt}</p>
                 <div className="mt-3 flex flex-wrap gap-1">{item.category ? <Tag color="orange">{item.category}</Tag> : null}{item.tags.slice(0, 3).map((tag) => <Tag key={tag}>{tag}</Tag>)}</div>
-                <div className="mt-auto flex gap-2 pt-4">
-                    <Button disabled={pending} type="primary" block className="!h-10" onClick={() => void run(() => onReuse("fill"))} icon={<Play className="size-4" />}>仅填入</Button>
-                    <Dropdown disabled={pending} menu={{ items: menu.map((entry) => ({ ...entry, disabled: pending })) }} trigger={["click"]}><Tooltip title="更多操作"><Button disabled={pending} className="!h-10 !w-10" aria-label="更多操作" icon={<Ellipsis className="size-4" />} /></Tooltip></Dropdown>
+                <div className="mt-auto space-y-2 pt-4">
+                    <Tooltip title="仅填入，不自动生成"><Button disabled={pending} type="primary" block className="!h-10" onClick={() => void run(() => onReuse("fill"))} icon={<Send className="size-4" />}>发送到生成页</Button></Tooltip>
+                    <div className="flex gap-2">
+                        <Button disabled={pending} block className="!h-10" onClick={onInsertToCanvas} icon={<Frame className="size-4" />}>插入到画布</Button>
+                        <Dropdown disabled={pending} menu={{ items: menu.map((entry) => ({ ...entry, disabled: pending })) }} trigger={["click"]}><Tooltip title="更多操作"><Button disabled={pending} className="!h-10 !w-10 shrink-0" aria-label="更多操作" icon={<Ellipsis className="size-4" />} /></Tooltip></Dropdown>
+                    </div>
                 </div>
             </div>
         </article>

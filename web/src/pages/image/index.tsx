@@ -8,8 +8,10 @@ import { saveAs } from "file-saver";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { GenerationElapsed } from "@/components/generation-elapsed";
+import { GenerationQueueProgress } from "@/components/generation-queue-progress";
 import { upsertGenerationLog } from "@/lib/generation-log-update";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
+import { useGenerationWorkspace } from "@/hooks/use-generation-workspace";
 import { useImageCopyEditor } from "@/hooks/use-image-copy-editor";
 import { useImagePreview } from "@/hooks/use-image-preview";
 import { imageCopyEditorNode } from "@/lib/image-edit-copy";
@@ -183,7 +185,13 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const inputRevision = useRef(0);
     const previewRevision = useRef(0);
     const logRefreshRevision = useRef(0);
-    const [previewLoading, setPreviewLoading] = useState(false);
+    const {
+        references, setReferences, logs, setLogs, running, setRunning, startedAt, setStartedAt, activeTaskId, setActiveTaskId,
+        previewLoading, setPreviewLoading, logsOpen, setLogsOpen, settingsOpen, setSettingsOpen,
+        promptDialogOpen, setPromptDialogOpen, assetPickerOpen, setAssetPickerOpen,
+        selectedLogIds, setSelectedLogIds, previewLog, setPreviewLog, deleteConfirmOpen, setDeleteConfirmOpen,
+        deletingLogs, deleteSelectedHistory,
+    } = useGenerationWorkspace<ImageReferenceItem, GenerationLog>();
     const restoreBusy = useRef(false);
     const [restoringHistory, setRestoringHistory] = useState(false);
     const config = useConfigStore((state) => state.config);
@@ -205,7 +213,6 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useWorkbenchField(creativePreset ? `creative:${creativePreset.id}:prompt` : `image:${resolveImageToolMode(searchParams.get("tool"))}:prompt`, creativePreset?.prompt || "");
     const historyStore = creativePreset ? creativeLogStore : logStore;
-    const [references, setReferences] = useState<ImageReferenceItem[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const imageEditor = useImageCopyEditor((copy, image) => {
         setResults(current => current.some(result => result.id === copy.assetId) ? current : [...current, { id: copy.assetId, status: "success", image: {
@@ -214,20 +221,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             prompt: copy.node.metadata?.prompt,
         } }]);
     });
-    const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [unclassifiedLogs, setUnclassifiedLogs] = useState<GenerationLog[]>([]);
     const mountedRef = useRef(false);
-    const [running, setRunning] = useState(false);
     const activeSubmissionRef = useRef(false);
-    const [logsOpen, setLogsOpen] = useState(false);
-    const [settingsOpen, setSettingsOpen] = useState(false);
-    const [promptDialogOpen, setPromptDialogOpen] = useState(false);
-    const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [referenceAssetPickerOpen, setReferenceAssetPickerOpen] = useState(false);
-    const [startedAt, setStartedAt] = useState(0);
-    const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
-    const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
-    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [garmentEpoch, setGarmentEpoch] = useState(0);
     const [garmentDraft, setGarmentDraft] = useState<{ scope: string; dirty: boolean; appliedReferences: ReferenceImage[] | null } | null>(null);
 
@@ -450,6 +447,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (!release) { message.info("图片任务正在处理，请勿重复提交"); return; }
 
         setRunning(true);
+        setActiveTaskId(null);
         activeSubmissionRef.current = true;
         resultViewPinnedRef.current = false;
         setPreviewLog(null);
@@ -582,15 +580,18 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         setPreviewLog(null);
     };
 
-    const deleteSelectedLogs = () => {
-        const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
-        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => historyStore.removeItem(id))]).then(refreshLogs).catch((error) => message.error(error instanceof Error ? error.message : "记录删除失败"));
-        if (previewLog && selectedLogIds.includes(previewLog.id)) {
-            setPreviewLog(null);
-            setResults([]);
+    const deleteSelectedLogs = async () => {
+        try {
+            const deleted = await deleteSelectedHistory(async (selected) => {
+                const imageKeys = selected.flatMap(log => log.images.map(image => image.storageKey).filter((key): key is string => Boolean(key)));
+                await Promise.all(selected.map(log => historyStore.removeItem(log.id)));
+                await deleteStoredImages(imageKeys);
+            });
+            if (deleted?.previewRemoved) setResults([]);
+            if (deleted) await refreshLogs();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "记录删除失败");
         }
-        setSelectedLogIds([]);
-        setDeleteConfirmOpen(false);
     };
 
     const saveLog = async (log: GenerationLog) => {
@@ -682,7 +683,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
-            const requestOptions = { operationType: isBlend ? "image_generation" as const : operationType, tool: historyTool };
+            const requestOptions = {
+                operationType: isBlend ? "image_generation" as const : operationType, tool: historyTool,
+                onSubmitted: (taskIds: string[]) => { setActiveTaskId(taskIds[0] || null); },
+            };
             const result = isBlend
                 ? await requestGeneration(snapshot.config, snapshot.text, requestOptions, snapshot.references)
                 : snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
@@ -704,6 +708,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         const release = workbenchSubmissions.acquire(`image:${user?.id}`);
         if (!release) { message.info("图片任务正在处理，请勿重复提交"); return; }
         setRunning(true);
+        setActiveTaskId(null);
         activeSubmissionRef.current = true;
         resultViewPinnedRef.current = false;
         setStartedAt(performance.now());
@@ -819,6 +824,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             {previewLog ? <div className="flex gap-2"><Button size="small" disabled={running || previewLoading} loading={restoringHistory} onClick={() => void restoreHistoryDraft()}>恢复为草稿继续改</Button><Button size="small" disabled={running} onClick={() => { replacePrompt(previewLog.prompt); message.info("仅复制提示词，未恢复模型与参考图"); }}>仅复制提示词</Button></div> : null}
                             {previewLoading ? <span role="status" className="text-sm text-muted-foreground">正在读取记录…</span> : running ? <Tag className="m-0 px-2 py-1">等待 <GenerationElapsed startedAt={startedAt} /></Tag> : null}
                         </div>
+                        <GenerationQueueProgress taskId={activeTaskId} active={running} />
                         {results.length ? (
                             <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
@@ -883,7 +889,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 }}
                 onClose={() => setReferenceAssetPickerOpen(false)}
             />
-            <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
+            <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => { if (!deletingLogs) setDeleteConfirmOpen(false); }} onOk={deleteSelectedLogs} confirmLoading={deletingLogs} cancelButtonProps={{ disabled: deletingLogs }} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedLogIds.length} 条生成记录吗？
             </Modal>
             {imageEditor.node ? <Suspense fallback={<Modal title="编辑原图" open footer={null} onCancel={imageEditor.close}><p role="status">正在读取图片编辑器…</p></Modal>}>

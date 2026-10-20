@@ -2,7 +2,9 @@ import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download,
 import { useEffect, useRef, useState } from "react";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
+import { useGenerationWorkspace } from "@/hooks/use-generation-workspace";
 import { GenerationElapsed } from "@/components/generation-elapsed";
+import { GenerationQueueProgress } from "@/components/generation-queue-progress";
 import { upsertGenerationLog } from "@/lib/generation-log-update";
 import { workbenchSubmissions } from "@/lib/submission-gate";
 import { createDedupedAsyncResolver } from "@/lib/deduped-async-resolver";
@@ -93,6 +95,11 @@ const sharedVideoPoll = createDedupedAsyncResolver<GeneratedVideo, [() => Promis
 class TerminalVideoTaskError extends Error {}
 
 export default function VideoPage() {
+    const ownerId = useUserStore(state => state.user?.id);
+    return <VideoGenerationWorkspace key={ownerId || "local"} />;
+}
+
+function VideoGenerationWorkspace() {
     const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -116,25 +123,20 @@ export default function VideoPage() {
     const configuredModels = useBusinessConfigStore((state) => state.models);
     const user = useUserStore((state) => state.user);
     const [prompt, setPrompt] = useWorkbenchField("video:prompt", "");
-    const [references, setReferences] = useState<ReferenceImage[]>([]);
+    const {
+        references, setReferences, logs, setLogs, running, setRunning, startedAt, setStartedAt, activeTaskId, setActiveTaskId,
+        previewLoading, setPreviewLoading, logsOpen, setLogsOpen, settingsOpen, setSettingsOpen,
+        promptDialogOpen, setPromptDialogOpen, assetPickerOpen, setAssetPickerOpen,
+        selectedLogIds, setSelectedLogIds, previewLog, setPreviewLog, deleteConfirmOpen, setDeleteConfirmOpen,
+        deletingLogs, deleteSelectedHistory,
+    } = useGenerationWorkspace<ReferenceImage, GenerationLog>();
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
     const [audioReferences, setAudioReferences] = useState<ReferenceAudio[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
-    const [logs, setLogs] = useState<GenerationLog[]>([]);
-    const [previewLoading, setPreviewLoading] = useState(false);
     const [previewError, setPreviewError] = useState("");
     const [readingReferences, setReadingReferences] = useState(false);
     const [referenceError, setReferenceError] = useState("");
     const [referencesOpen, setReferencesOpen] = useState(false);
-    const [running, setRunning] = useState(false);
-    const [logsOpen, setLogsOpen] = useState(false);
-    const [settingsOpen, setSettingsOpen] = useState(false);
-    const [promptDialogOpen, setPromptDialogOpen] = useState(false);
-    const [assetPickerOpen, setAssetPickerOpen] = useState(false);
-    const [startedAt, setStartedAt] = useState(0);
-    const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
-    const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
-    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const videoConfig = buildVideoConfig(effectiveConfig, model);
@@ -284,6 +286,7 @@ export default function VideoPage() {
         const release = workbenchSubmissions.acquire(`video:${user?.id}`);
         if (!release) { message.info("视频任务正在处理，请勿重复提交"); return; }
         setRunning(true);
+        setActiveTaskId(null);
         setPreviewLog(null);
         setResults([{ id: nanoid(), status: "pending" }]);
         const batchStartedAt = performance.now();
@@ -402,18 +405,18 @@ export default function VideoPage() {
         setPreviewLog(null);
     };
 
-    const deleteSelectedLogs = () => {
-        const mediaKeys = logs
-            .filter((log) => selectedLogIds.includes(log.id))
-            .map((log) => log.video?.storageKey)
-            .filter((key): key is string => Boolean(key));
-        void Promise.all([deleteStoredMedia(mediaKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(() => refreshLogs()).catch((error) => message.error(error instanceof Error ? error.message : "记录删除失败"));
-        if (previewLog && selectedLogIds.includes(previewLog.id)) {
-            setPreviewLog(null);
-            setResults([]);
+    const deleteSelectedLogs = async () => {
+        try {
+            const deleted = await deleteSelectedHistory(async (selected) => {
+                const mediaKeys = selected.map(log => log.video?.storageKey).filter((key): key is string => Boolean(key));
+                await Promise.all(selected.map(log => logStore.removeItem(log.id)));
+                await deleteStoredMedia(mediaKeys);
+            });
+            if (deleted?.previewRemoved) setResults([]);
+            if (deleted) await refreshLogs();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "记录删除失败");
         }
-        setSelectedLogIds([]);
-        setDeleteConfirmOpen(false);
     };
 
     const saveLog = async (log: GenerationLog) => {
@@ -450,6 +453,7 @@ export default function VideoPage() {
         const task = log.task;
         activeLogIdsRef.current.add(log.id);
         setRunning(true);
+        setActiveTaskId(task.provider === "server" ? task.id : null);
         setStartedAt((value) => value || performance.now());
         setResults([{ id: log.id, status: "pending" }]);
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
@@ -725,6 +729,7 @@ export default function VideoPage() {
                             {previewLog ? <Button size="small" disabled={running || previewLoading} onClick={() => previewGenerationLog(previewLog, true)}>恢复为草稿继续改</Button> : null}
                             {running ? <Tag className="m-0 px-2 py-1">用时 <GenerationElapsed startedAt={startedAt} /></Tag> : null}
                         </div>
+                        <GenerationQueueProgress taskId={activeTaskId} active={running} />
                         {previewError ? <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><p>{previewError}</p>{previewLog ? <Button className="mt-3" onClick={() => previewGenerationLog(previewLog)}>重新读取记录</Button> : null}</div> : null}
                         {results.length ? (
                             <div className="grid gap-4">
@@ -781,7 +786,7 @@ export default function VideoPage() {
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
-            <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
+            <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => { if (!deletingLogs) setDeleteConfirmOpen(false); }} onOk={deleteSelectedLogs} confirmLoading={deletingLogs} cancelButtonProps={{ disabled: deletingLogs }} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedLogIds.length} 条生成记录吗？
             </Modal>
         </div>

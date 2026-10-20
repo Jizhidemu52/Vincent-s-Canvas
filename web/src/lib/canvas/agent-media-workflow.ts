@@ -1,4 +1,5 @@
 import { CanvasNodeType, type CanvasAgentMediaIntent, type CanvasAgentMediaWorkflow, type CanvasAgentMediaWorkflowCandidate, type CanvasAgentMediaWorkflowStageStatus, type CanvasAgentMediaWorkflowVideoResult, type CanvasNodeData } from "@/types/canvas";
+import { createClientUuid } from "@/lib/client-uuid";
 
 export type { CanvasAgentMediaIntent, CanvasAgentMediaWorkflow, CanvasAgentMediaWorkflowCandidate, CanvasAgentMediaWorkflowStageStatus } from "@/types/canvas";
 
@@ -50,7 +51,7 @@ export function classifyAgentMediaIntent(prompt: string): AgentMediaIntent {
 
 export function createAgentMediaWorkflow(input: CreateAgentMediaWorkflowInput): CanvasAgentMediaWorkflow {
     return {
-        id: input.id || crypto.randomUUID(),
+        id: input.id || createClientUuid(),
         intent: input.intent,
         prompt: input.prompt,
         imageModel: input.imageModel,

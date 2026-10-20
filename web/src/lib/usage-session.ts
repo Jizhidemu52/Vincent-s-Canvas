@@ -1,4 +1,5 @@
 import { USAGE_MAX_EVENT_AGE_MS, USAGE_MAX_EVENT_FUTURE_MS, type UsageClientEvent, type UsageEventsResult, type UsageMeResult } from "../../../shared/usage-analytics";
+import { createClientUuid } from "./client-uuid";
 
 export type UsageLocalState = { version: 1; counts: Record<string, number>; pending: UsageClientEvent[]; dropped: Record<string, number> };
 export type UsageSessionDependencies = {
@@ -86,7 +87,7 @@ export class UsageSession {
                     for (const [boardKey, count] of Object.entries(this.state.dropped)) {
                         if (!count || this.state.pending.length >= 50) continue;
                         const reported = Math.min(count, 100000);
-                        this.state.pending.push({ eventId: this.deps.id?.() ?? crypto.randomUUID(), occurredAt: this.deps.now?.() ?? new Date().toISOString(), boardKey, action: "gap", controlKey: "collection-gap", parameters: { droppedEventCount: reported } });
+                        this.state.pending.push({ eventId: this.deps.id?.() ?? createClientUuid(), occurredAt: this.deps.now?.() ?? new Date().toISOString(), boardKey, action: "gap", controlKey: "collection-gap", parameters: { droppedEventCount: reported } });
                         if (count > reported) this.state.dropped[boardKey] = count - reported; else delete this.state.dropped[boardKey];
                     }
                     this.persist();

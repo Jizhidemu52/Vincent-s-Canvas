@@ -43,6 +43,16 @@ export type CanvasStoredImageReference = {
 };
 
 export type CanvasNodeMetadata = {
+    promptTemplateSource?: {
+        templateId: string; versionId: string; version: number; title: string;
+        targetTool: import("@/services/api/prompts").PromptTargetTool;
+        modelConfigId: string | null;
+        modelSnapshot: import("@/services/api/prompts").PromptTemplate["modelSnapshot"];
+        parameters: Record<string, unknown>; referenceAssetIds: string[];
+        sourceTaskId: string | null; sourceAssetId: string | null;
+        resolvedModel: import("@/services/api/prompts").PromptPricingResolution["selectedModel"];
+        warnings: string[];
+    };
     generationOrigin?: { configNodeId?: string; sourceNodeId: string; runId: string; mode: CanvasGenerationMode };
     imageTask?: import("@/lib/canvas/canvas-image-task-recovery").CanvasImageTaskBinding;
     mediaTask?: { requestId: string; taskId?: string; ownerId: string; projectId: string };

@@ -14,6 +14,18 @@ import { requireToolKey, resolveConfiguredToolModel } from "./tool-runtime";
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
 export type ImageGenerationModel = PublicModel;
+export type QueuedTaskProgress = {
+    taskId: string;
+    status: string;
+    runtime: "worker" | "demo";
+    phase: "waiting" | "delayed" | "processing" | "preparing" | "paused" | "complete";
+    queuePosition: number | null;
+    estimatedWaitSeconds: number | null;
+    estimatedRemainingSeconds: number | null;
+    sampleCount: number;
+    estimateReason: string | null;
+    retryAfterSeconds: number | null;
+};
 export type QueuedTask = { id: string; requestId: string; operationType?: string; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
 export class QueuedTaskPausedError extends Error {
     readonly taskId: string;
@@ -319,6 +331,17 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
 
 export async function getQueuedTask(id: string, signal?: AbortSignal) {
     return queryQueuedTask(`/api/tasks/${encodeURIComponent(id)}`, signal);
+}
+
+/** Only the currently displayed generation uses this; history lists do not. */
+export async function getQueuedTaskProgress(id: string, signal?: AbortSignal) {
+    const response = await fetch(`/api/tasks/${encodeURIComponent(id)}/progress`, {
+        credentials: "include", signal, headers: workspaceOwnerHeaders(), cache: "no-store",
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error("暂时无法查询排队状态");
+    const result = await response.json() as { progress: QueuedTaskProgress };
+    return result.progress;
 }
 
 export async function getQueuedTaskByRequestId(requestId: string, signal?: AbortSignal) {

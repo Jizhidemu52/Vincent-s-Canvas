@@ -160,10 +160,17 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     };
     for (const [path, name] of [
         ["@/components/image-settings-panel", "ImageSettingsPanel"], ["@/components/generation-elapsed", "GenerationElapsed"],
+        ["@/components/generation-queue-progress", "GenerationQueueProgress"],
         ["@/components/reference-images/reference-image-tray", "ReferenceImageTray"], ["@/components/model-picker", "ModelPicker"],
         ["@/components/prompts/prompt-select-dialog", "PromptSelectDialog"], ["@/components/canvas/asset-picker-modal", "AssetPickerModal"],
         ["./image-log-thumbnail", "ImageLogThumbnail"], ["../creative/garment-recipe-panel", "GarmentRecipePanel"],
     ]) dependencies[path!] = { [name!]: component(name!) };
+    const workspaceModule = { exports: {} };
+    const workspaceCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use-generation-workspace.ts", import.meta.url), "utf8"), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext },
+    }).outputText;
+    new Function("require", "module", "exports", workspaceCode)((name: string) => dependencies[name], workspaceModule, workspaceModule.exports);
+    dependencies["@/hooks/use-generation-workspace"] = workspaceModule.exports;
     const module = { exports: {} as { ImageGenerationPage: (props?: object) => ReactElement<any> } };
     // Everything under test, including scope filtering and media hydration, uses its real module.
     new Function("require", "module", "exports", "window", code)(
@@ -214,6 +221,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         failedCards() { return elements(render()).filter(item => typeof item.type === "function" && item.type.name === "FailedImageCard"); },
         images() { return elements(render()).filter(item => typeof item.type === "function" && item.type.name === "ResultImageCard").map(item => item.props.image); },
         references() { return elements(render()).find(item => item.type === "ReferenceImageTray")!.props; },
+        queueProgress() { return elements(render()).find(item => item.type === "GenerationQueueProgress")!.props; },
         prompt() { return elements(render()).find(item => item.type === "TextArea")!.props; },
         generate() { return elements(render()).find(item => item.type === "Button" && item.props.type === "primary" && item.props.block)!.props; },
     };
@@ -348,6 +356,23 @@ describe("image workspace isolation", () => {
         expect(page.panels()[0].logs).toHaveLength(1);
         expect(page.requests).toHaveLength(1);
         expect(page.errors).toEqual([]);
+    });
+
+    test("accepted task progress follows the existing submission and stops when its result arrives", async () => {
+        const pending = deferred<Image[]>();
+        const page = pageHarness([], () => pending.promise);
+        await page.settle();
+        page.prompt().onChange({ target: { value: "queue progress" } });
+        page.generate().onClick();
+        expect(page.queueProgress()).toMatchObject({ taskId: null, active: true });
+        page.requests[0]!.args[2].onSubmitted(["task-accepted"]);
+        expect(page.queueProgress()).toMatchObject({ taskId: "task-accepted", active: true });
+        expect(page.requests).toHaveLength(1);
+        pending.resolve([{ id: "result", dataUrl: "data:image/png;base64,YQ==", sourceTaskId: "task-accepted" }]);
+        await page.settle();
+        expect(page.queueProgress()).toMatchObject({ taskId: "task-accepted", active: false });
+        expect(page.images().map(image => image.id)).toEqual(["result"]);
+        expect(page.requests).toHaveLength(1);
     });
 
     test("returning to A before its pending task finishes receives the new result in the remounted workspace", async () => {
@@ -511,7 +536,7 @@ describe("Blend entry semantics", () => {
         expect(page.requests).toHaveLength(allowed ? 1 : 0);
         if (allowed) {
             expect(page.requests[0]!.kind).toBe("generate");
-            expect(page.requests[0]!.args[2]).toEqual({ operationType: "image_generation", tool: "midjourney-blend" });
+            expect(page.requests[0]!.args[2]).toMatchObject({ operationType: "image_generation", tool: "midjourney-blend" });
             expect(page.requests[0]!.args[3]).toHaveLength(count);
             expect(page.errors).toEqual([]);
         } else expect(page.errors).toContain("当前合成模型需要 2–4 张参考图。");

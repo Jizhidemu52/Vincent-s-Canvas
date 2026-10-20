@@ -78,11 +78,20 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
         "react-router-dom": { useSearchParams: () => [new URLSearchParams()] },
         antd: { ...antd, App: { useApp: () => ({ message: { error() {}, warning() {}, success() {}, info() {} }, modal: {} }) } },
     };
+    const workspaceModule = { exports: {} };
+    const workspaceCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use-generation-workspace.ts", import.meta.url), "utf8"), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext },
+    }).outputText;
+    new Function("require", "module", "exports", workspaceCode)((name: string) => dependencies[name], workspaceModule, workspaceModule.exports);
+    dependencies["@/hooks/use-generation-workspace"] = workspaceModule.exports;
     const module = { exports: {} as any };
     new Function("require", "module", "exports", "window", code)((name: string) => dependencies[name] || requireModule(name), module, module.exports, {});
     const render = () => {
         stateIndex = refIndex = effectIndex = 0;
-        const output = kind === "creative" ? module.exports.useSceneWorkspace("style-to-sketch") : module.exports.default();
+        let output = kind === "creative" ? module.exports.useSceneWorkspace("style-to-sketch") : module.exports.default();
+        // Follow the keyed employee boundary to exercise the real page closures.
+        if (kind === "video" && React.isValidElement<any>(output) && typeof output.type === "function")
+            output = (output.type as Function)(output.props);
         pendingEffects.splice(0).forEach(effect => effect());
         return output;
     };

@@ -2,6 +2,7 @@ import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { requestEdit } from "@/services/api/image";
 import type { QueuedTask } from "@/services/api/generation-tasks";
+import { createClientUuid } from "@/lib/client-uuid";
 
 export type RecipeColor = { name: string; hex: string };
 export type RecipeForm = {
@@ -86,7 +87,7 @@ export function createRecipeRun(ownerId: string, form: RecipeForm, references: R
     const frozenForm = { ...copy(form), count: 1 },
         frozenRefs = copy(form.kind === "pattern" ? references : references.slice(0, 1));
     return {
-        id: crypto.randomUUID(),
+        id: createClientUuid(),
         ownerId,
         createdAt: new Date().toISOString(),
         form: frozenForm,
@@ -170,7 +171,7 @@ export class SeriesRecipeRunner {
                 branch.status = "running";
                 branch.error = "";
                 branch.attempts++;
-                branch.requestId = this.deps.createId?.() || crypto.randomUUID();
+                branch.requestId = this.deps.createId?.() || createClientUuid();
                 branch.taskIds = [];
                 branch.submissionStarted = false;
                 try {
@@ -296,7 +297,7 @@ function parseImages(value: unknown, portable: boolean): ReferenceImage[] {
             url = String(image.dataUrl || "");
         const embedded = /^data:image\/(png|jpeg|webp);base64,[A-Za-z\d+/=\s]+$/.test(url);
         if (!embedded && (portable || !/^\/api\/assets\/[\w-]+\/content(?:\?[^#]*)?$/.test(url))) throw new Error("项目必须包含 PNG/JPG/WebP 图片内容，不能引用外部链接");
-        return { id: string(image.id, 100) || crypto.randomUUID(), name: string(image.name, 200, "参考图"), type: embedded ? url.slice(5, url.indexOf(";")) : "image/png", dataUrl: url };
+        return { id: string(image.id, 100) || createClientUuid(), name: string(image.name, 200, "参考图"), type: embedded ? url.slice(5, url.indexOf(";")) : "image/png", dataUrl: url };
     });
 }
 
@@ -333,7 +334,7 @@ export function parseRecipeProject(value: unknown, ownerId: string, portable = f
                 error: !sameOwner && status === "cancelled" ? "原任务属于其他员工，无法在当前账号查询或继续" : string(branch.error, 1000),
             };
         });
-        project.run = { id: string(saved.id, 100) || crypto.randomUUID(), ownerId, createdAt: string(saved.createdAt, 40), form, references: parseImages(saved.references, portable), settings: recipeSettings(record(saved.settings)), branches };
+        project.run = { id: string(saved.id, 100) || createClientUuid(), ownerId, createdAt: string(saved.createdAt, 40), form, references: parseImages(saved.references, portable), settings: recipeSettings(record(saved.settings)), branches };
         if (project.run.references.length > 2 || !project.run.references.length) throw new Error("原任务参考图缺失或数量无效");
     }
     return project;

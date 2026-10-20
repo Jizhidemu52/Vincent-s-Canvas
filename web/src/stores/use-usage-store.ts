@@ -6,6 +6,7 @@ import { getMyUsage, postUsageEvents } from "@/services/api/usage-client";
 import type { UsageClientEvent } from "../../../shared/usage-analytics";
 import { useUserStore } from "@/stores/use-user-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { createClientUuid } from "@/lib/client-uuid";
 
 type UsageStore = { owner: string | null; counts: Record<string, number>; storageUnavailable: boolean };
 export const useUsageStore = create<UsageStore>(() => ({ owner: null, counts: {}, storageUnavailable: false }));
@@ -31,7 +32,14 @@ export function setUsageOwner(owner: string | null, enterprise: boolean) {
         changed: (counts, storageUnavailable) => { if (session === next) useUsageStore.setState({ counts, storageUnavailable }); } });
     session = next;
 }
-export function recordUsage(event: UsageClientEvent, visitToken?: string) { void session?.record(event, visitToken); }
+export function recordUsage(event: Omit<UsageClientEvent, "eventId"> & { eventId?: string }, visitToken?: string) {
+    if (!session) return;
+    // ID generation belongs inside the optional telemetry boundary, not in
+    // React effects. Neither sync failures nor rejected writes may crash work.
+    const unavailable = () => console.warn("Usage event could not be recorded");
+    try { void session.record({ ...event, eventId: event.eventId ?? createClientUuid() }, visitToken).catch(unavailable); }
+    catch { unavailable(); }
+}
 export function flushUsage() { return session?.flush() ?? Promise.resolve(); }
 // Abort synchronously with identity changes, before a pending timer can submit under the next account's cookie.
 useUserStore.subscribe(state => {

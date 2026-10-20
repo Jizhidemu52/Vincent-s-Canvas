@@ -20,6 +20,7 @@ import type { AuthenticatedRequest } from "../types";
 import { resolveToolExecution } from "../tool-configuration";
 import { loadTaskPriceSnapshot } from "../billing";
 import { preflightStoredVideoTask } from "../stored-video-preflight";
+import { readTaskProgress } from "../task-progress";
 
 const base = z.object({
   requestId: z.string().min(8).max(200),
@@ -312,6 +313,20 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
         return;
       }
       response.json({ task: result.rows[0] });
+    } catch (error) { next(error); }
+  });
+
+  router.get("/:id/progress", async (request, response, next) => {
+    response.set("Cache-Control", "private, no-store");
+    try {
+      const id = z.string().uuid().parse(request.params.id);
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const progress = await readTaskProgress(db, cache, id, actor.id);
+      if (!progress) {
+        response.status(404).json({ error: "NOT_FOUND", message: "任务不存在或无权访问" });
+        return;
+      }
+      response.json({ progress });
     } catch (error) { next(error); }
   });
 

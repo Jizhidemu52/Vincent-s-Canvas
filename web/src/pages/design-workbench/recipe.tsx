@@ -11,6 +11,7 @@ import { validateImageReferences } from "@/lib/image-reference-policy";
 import { useImageModelProfile } from "@/lib/image-model-settings";
 import { readFileAsDataUrl } from "@/lib/image-utils";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
+import { createClientUuid } from "@/lib/client-uuid";
 import { requestEdit } from "@/services/api/image";
 import { getQueuedTask, getQueuedTaskByRequestId } from "@/services/api/generation-tasks";
 import { imageToDataUrl } from "@/services/image-storage";
@@ -248,7 +249,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             const old = projectRef.current;
             if (slot === 1 && !old.references[0]) throw new Error("请先上传参考底图");
             const images = [...old.references];
-            images[slot] = { id: crypto.randomUUID(), name: file.name, originalFileName: file.name, type: file.type, dataUrl };
+            images[slot] = { id: createClientUuid(), name: file.name, originalFileName: file.name, type: file.type, dataUrl };
             commit({ ...old, references: images });
             setNotice(`已读取 ${file.name}，原图不会被修改。`);
         });
