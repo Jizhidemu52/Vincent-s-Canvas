@@ -492,7 +492,7 @@ integration("production identity and RBAC", () => {
 
     const bindSeamlessTool = await api<{ tool: { toolKey: string; modelConfigId: string } }>(
       "/api/admin/model-configuration/tool-configurations/seamless-stitch",
-      { method: "PUT", body: JSON.stringify({ modelConfigId: internalSeamlessModel!.id, enabled: true }) },
+      { method: "PUT", body: JSON.stringify({ modelConfigId: internalSeamlessModel!.id, enabled: true, creditCostOverride: null, rmbCostOverride: null }) },
       admin.cookie,
     );
     expect(bindSeamlessTool.response.status).toBe(200);
