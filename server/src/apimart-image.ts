@@ -338,7 +338,9 @@ export async function runApiMartImageTask(input: ApiMartImageInput & {
     queryHeaders["x-apimart-response-version"] = GROK_RESPONSE_VERSION;
   }
   const headers: Record<string, string> = { ...queryHeaders, "content-type": "application/json" };
-  const poll = runtime.fetch || fetch;
+  // Keep polling on the same strict native TLS stack as the initial request.
+  // This GET only reads the persisted upstream job; it cannot resubmit it.
+  const poll = runtime.fetch || fetchProviderSubmission;
   const wait = runtime.sleep || sleep;
   let taskId = input.upstreamTaskId?.trim();
   let pollIntervalMs = kind === "gemini-nano-banana-2.1" ? 3_000 : 2_000;
@@ -381,7 +383,7 @@ export async function runApiMartImageTask(input: ApiMartImageInput & {
   while (Date.now() < deadline) {
     await wait(pollIntervalMs);
     const statusResponse = await poll(`${baseUrl}/tasks/${encodeURIComponent(taskId)}`, {
-      headers: queryHeaders, redirect: "error", signal: AbortSignal.timeout(60_000),
+      method: "GET", headers: queryHeaders, redirect: "error", signal: AbortSignal.timeout(60_000),
     });
     if (!statusResponse.ok) throw Object.assign(new Error(`APIMart 图片任务状态查询失败：${statusResponse.status} ${await providerMessage(statusResponse, input.apiKey)}`), { code: "PROVIDER_POLL_HTTP_ERROR", httpStatus: statusResponse.status });
     const statusPayload = await statusResponse.json();

@@ -14,6 +14,7 @@ import { deploymentFeatures } from "./deployment-features";
 import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
 import { serveStandaloneWeb } from "./demo-standalone-web";
 import { ApiMartImageProviderFailure, apiMartImageModel, runApiMartImageTask } from "./apimart-image";
+import { downloadApiMartImageResult } from "./apimart-image-result";
 import { createDemoMarkProvider } from "./demo-mark-provider";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { listAvailableDemoModels, resolveDemoExternalProviders, videoModelConfigIds } from "./demo-provider-configuration";
@@ -52,6 +53,7 @@ import { readReferenceImportBody, referenceImportFailure, runReferenceImportActi
 import { moduleKeys, moduleIsEnabled, toolDefinitions, type ToolKey } from "../../shared/feature-catalog";
 import { DemoToolConfigurationError, resolveDemoToolConfiguration } from "./demo-tool-configuration";
 import { applyDefaultChatModel, INITIAL_CHAT_MODEL_ID } from "./chat-model-policy";
+import { applyCreativeModelDefaults } from "./creative-model-policy";
 
 const sessions = new Map<string, string>();
 const modules = moduleKeys;
@@ -954,7 +956,7 @@ Bun.serve({
             rmbCost,
             version,
           })),
-        tools: applyDefaultChatModel(demoToolConfigurations),
+        tools: applyCreativeModelDefaults(applyDefaultChatModel(demoToolConfigurations), 0),
       });
     if (path === "/api/chat/responses" && request.method === "POST") {
       const input = (await request.json()) as {
@@ -2041,7 +2043,7 @@ Bun.serve({
     )
       return json({
         tools: toolDefinitions.map((definition) => {
-          const binding = applyDefaultChatModel(demoToolConfigurations).find(
+          const binding = applyCreativeModelDefaults(applyDefaultChatModel(demoToolConfigurations), 0).find(
             (item) => item.toolKey === definition.toolKey,
           );
           const model = demoModels.find(
@@ -2109,7 +2111,7 @@ Bun.serve({
           configurationVersion: 1,
         });
       return json({
-        tool: { ...applyDefaultChatModel(demoToolConfigurations).find(item => item.toolKey === selectedTool), updatedAt: now() },
+        tool: { ...applyCreativeModelDefaults(applyDefaultChatModel(demoToolConfigurations), 0).find(item => item.toolKey === selectedTool), updatedAt: now() },
       });
     }
     if (path === "/api/admin/projects" && request.method === "GET") {
@@ -2255,10 +2257,8 @@ async function callApiMartImage(
 }
 
 async function downloadApiMartImage(url: string) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
-  if (!response.ok) throw Object.assign(new Error(`APIMart 图片下载失败：${response.status}`), { code: "RESULT_DOWNLOAD_HTTP_ERROR", httpStatus: response.status });
-  const mimeType = response.headers.get("content-type")?.split(";")[0] || "image/png";
-  return `data:${mimeType};base64,${Buffer.from(await response.arrayBuffer()).toString("base64")}`;
+  const result = await downloadApiMartImageResult(url);
+  return `data:${result.mimeType};base64,${result.bytes.toString("base64")}`;
 }
 
 async function runVideoTask(

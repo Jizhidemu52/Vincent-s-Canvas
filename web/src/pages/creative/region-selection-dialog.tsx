@@ -5,8 +5,8 @@ import { canvasPixels, loadProcessingImage } from "./image-processing-browser";
 import { selectionHasPixels } from "./image-processing";
 import type { SceneImage } from "./use-scene-workspace";
 
-export function RegionSelectionDialog({ source, initialMask, onClose, onSave }: {
-    source: SceneImage; initialMask?: string; onClose: () => void; onSave: (mask: Blob) => Promise<void>;
+export function RegionSelectionDialog({ source, initialMask, onClose, onSave, purpose = "edit" }: {
+    source: SceneImage; initialMask?: string; onClose: () => void; onSave: (mask: Blob) => Promise<void>; purpose?: "edit" | "layer";
 }) {
     const canvas = useRef<HTMLCanvasElement>(null);
     const last = useRef<{ x: number; y: number } | null>(null);
@@ -58,10 +58,10 @@ export function RegionSelectionDialog({ source, initialMask, onClose, onSave }: 
         } catch (caught) { setError(caught instanceof Error ? caught.message : "选区保存失败"); }
         finally { setSaving(false); }
     };
-    return <Modal open modalRender={modal => <div data-usage-board="creative-selection">{modal}</div>} title="涂选修改区域" onCancel={onClose} width={820} closable={!saving} mask={{ closable: !saving }} keyboard={!saving}
+    return <Modal open modalRender={modal => <div data-usage-board="creative-selection">{modal}</div>} title={purpose === "layer" ? "涂选需要分离的图层" : "涂选修改区域"} onCancel={onClose} width={820} closable={!saving} mask={{ closable: !saving }} keyboard={!saving}
         footer={<><Button onClick={onClose} disabled={saving}>取消</Button><Button type="primary" onClick={() => void save()} loading={saving} disabled={!ready}>保存选区</Button></>}>
         <div className="cs-tool-dialog">
-            <p className="cs-help">蓝色区域交给 AI 修改，选区外在最终合成时保留原图像素。请覆盖完整待改部位并留出衔接空间；它不是模型原生蒙版，选区内的结构与接缝仍需检查。</p>
+            <p className="cs-help">{purpose === "layer" ? "蓝色区域会从原图中提取为独立图层。沿元素可见边缘涂选，使用擦除修整；这里只选择原图像素，不调用模型。" : "蓝色区域交给 AI 修改，选区外在最终合成时保留原图像素。请覆盖完整待改部位并留出衔接空间；它不是模型原生蒙版，选区内的结构与接缝仍需检查。"}</p>
             <div className="cs-tool-controls"><Segmented options={["涂选", "擦除"]} value={mode} onChange={setMode} disabled={saving} />
                 <label className="cs-brush-control">笔刷 {brush}%<Slider min={1} max={25} value={brush} onChange={setBrush} disabled={saving} /></label>
                 <Button disabled={!ready || saving} onClick={() => canvas.current?.getContext("2d")?.clearRect(0, 0, size.width, size.height)}>清空</Button></div>

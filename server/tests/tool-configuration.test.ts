@@ -40,7 +40,7 @@ function fixture() {
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: flags.get(String(values[0])) }] };
       if (sql.startsWith("INSERT INTO tool_api_configurations")) {
         const [key, modelConfigId, enabled, , creditCostOverride, rmbCostOverride] = values as [ToolConfiguration["toolKey"], string | null, boolean, unknown, number | null, number | null];
-        const row = { toolKey: key, modelConfigId, enabled, creditCostOverride, rmbCostOverride, configurationVersion: (configurations.get(key)?.configurationVersion ?? 0) + 1 };
+        const row = { toolKey: key, modelConfigId, enabled, creditCostOverride, rmbCostOverride, configurationVersion: (configurations.get(key)?.configurationVersion ?? 0) + 1, useDefaultModel: false };
         configurations.set(key, row);
         return { rows: [row] };
       }
@@ -98,6 +98,49 @@ async function serve(state = fixture(), role = "super_admin") {
 const post = (url: string, body: unknown, method = "POST") => fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 describe("formal catalog configuration", () => {
+  test("new scene defaults agree across public/admin/task resolution and explicit clearing persists", async () => {
+    const state = fixture();
+    state.bind("creative-local-restyle");
+    state.bind("creative-fabric-change", { modelConfigId: null, creditCostOverride: 0, rmbCostOverride: 0 });
+    const { url } = await serve(state);
+    for (const path of ["/admin/tool-configurations", "/models"]) {
+      const result = await (await fetch(`${url}${path}`)).json();
+      expect(result.tools.find((item: any) => item.toolKey === "creative-fabric-change")).toMatchObject({ modelConfigId: modelId, creditCostOverride: 0, configurationVersion: 1, modelDefaultSourceToolKey: "creative-local-restyle" });
+      if (path === "/models") expect(result.models.some((item: any) => item.id === modelId)).toBe(true);
+    }
+    expect(await resolveToolExecution(state.db, { operationType: "inpaint", toolKey: "creative-fabric-change" })).toMatchObject({ modelConfigId: modelId, creditCostOverride: 0, configurationVersion: 1 });
+    await expect(resolveToolExecution(state.db, { operationType: "inpaint", toolKey: "creative-fabric-change", modelConfigId: secondModelId })).rejects.toMatchObject({ code: "TOOL_MODEL_CHANGED" });
+    state.models[0]!.providerEnabled = false;
+    await expect(resolveToolExecution(state.db, { operationType: "inpaint", toolKey: "creative-fabric-change" })).rejects.toMatchObject({ code: "MODEL_DISABLED" });
+    state.models[0]!.providerEnabled = true;
+    // Include a first admin INSERT: version 1 must not look like an untouched seed row.
+    for (const toolKey of ["creative-fabric-change", "creative-pattern-fill"]) {
+      const saved = await post(`${url}/admin/tool-configurations/${toolKey}`, { modelConfigId: null, enabled: true, creditCostOverride: 0, rmbCostOverride: 0 }, "PUT");
+      expect(saved.status).toBe(200);
+      const result = await (await fetch(`${url}/models`)).json();
+      expect(result.tools.find((item: any) => item.toolKey === toolKey).modelConfigId).toBeNull();
+      expect(await resolveToolExecution(state.db, { operationType: "inpaint", toolKey, modelConfigId: secondModelId })).toMatchObject({ modelConfigId: secondModelId });
+    }
+  });
+
+  test("all 16 new AI scenes enqueue through the existing task and billing pipeline", async () => {
+    const state = fixture();
+    state.bind("image-edit", { creditCostOverride: 99 });
+    state.bind("image");
+    const { url } = await serve(state);
+    const added = toolDefinitions.filter(tool => ["creative-series-extension", "creative-bestseller-proposal", "creative-detail-to-style", "creative-fabric-to-style", "creative-reference-to-style", "creative-style-fusion", "creative-outfit-design", "creative-apply-pattern", "creative-pattern-fill", "creative-fabric-change", "creative-remove-decoration", "creative-sketch-to-style", "creative-pattern-create", "creative-pattern-fusion", "creative-seamless-pattern", "creative-pattern-layers"].includes(tool.toolKey));
+    expect(added).toHaveLength(16);
+    for (const tool of added) {
+      const response = await post(`${url}/tasks`, { requestId: `new-${tool.toolKey}`, projectId: "creative", operationType: tool.operationType, toolKey: tool.toolKey, prompt: "fixture only", sourceUrls: tool.operationType === "inpaint" ? ["source"] : [] });
+      expect(response.status).toBe(201);
+    }
+    expect(state.queues).toBe(16);
+    expect(state.reservations).toHaveLength(16);
+    expect(state.reservations.map(values => (values[6] as any).toolKey).sort()).toEqual(added.map(tool => tool.toolKey).sort());
+    expect(state.reservations.every(values => (values[6] as any).creditCostOverride === null)).toBe(true);
+    expect(() => normalizeTaskTool({ operationType: "inpaint", toolKey: "creative-pattern-vectorization" })).toThrow("未知功能");
+  });
+
   test("chat model belongs only to gpt-chat while canvas switches and prices remain independent", async () => {
     const state = fixture();
     state.bind("gpt-chat");
@@ -179,17 +222,17 @@ describe("formal catalog configuration", () => {
     expect((await post(`${url}/admin/tool-configurations/image-edit`, { modelConfigId: modelId, enabled: true, creditCostOverride: -1, rmbCostOverride: 0 }, "PUT")).status).toBe(400);
   });
 
-  test("migration constraints and non-destructive seeds exactly cover the shared catalog", () => {
+  test("legacy migration seeds remain complete and non-destructive before creative expansion", () => {
     const original = readFileSync(new URL("../src/migrations/026_formal_module_configuration.sql", import.meta.url), "utf8");
     const migration = readFileSync(new URL("../src/migrations/027_midjourney_blend_module.sql", import.meta.url), "utf8");
     const keys = (value: string) => [...value.matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
     const toolCheck = /CHECK \(tool_key IN \(([\s\S]*?)\)\)/.exec(migration)![1]!;
     const moduleCheck = /CHECK \(module_key IN \(([\s\S]*?)\)\)/.exec(migration)![1]!;
     const arrays = [...original.matchAll(/unnest\(ARRAY\[([\s\S]*?)\]\)/g)];
-    expect(keys(toolCheck)).toEqual(toolDefinitions.map(tool => tool.toolKey).sort());
-    expect(keys(moduleCheck)).toEqual([...moduleKeys].sort());
-    expect(keys(arrays[0]![1]!)).toEqual(moduleKeys.filter(key => key !== "midjourney-blend").sort());
-    expect(keys(arrays[1]![1]!)).toEqual(toolDefinitions.map(tool => tool.toolKey).filter(key => key !== "midjourney-blend").sort());
+    expect(keys(toolCheck).every(key => toolDefinitions.some(tool => tool.toolKey === key))).toBe(true);
+    expect(keys(moduleCheck).every(key => moduleKeys.some(moduleKey => moduleKey === key))).toBe(true);
+    expect(keys(arrays[0]![1]!)).toEqual(keys(moduleCheck).filter(key => key !== "midjourney-blend"));
+    expect(keys(arrays[1]![1]!)).toEqual(keys(toolCheck).filter(key => key !== "midjourney-blend"));
     expect(migration).toContain("ON CONFLICT(module_key) DO NOTHING");
     expect(migration).toContain("ON CONFLICT(tool_key) DO NOTHING");
     expect(original).toContain("ALTER COLUMN model_config_id DROP NOT NULL");

@@ -1,5 +1,6 @@
 import { getToolDefinition, moduleIsEnabled, resolveToolKey, type ModuleKey } from "../../shared/feature-catalog";
 import { DEFAULT_CHAT_MODEL_TOOL_KEY } from "./chat-model-policy";
+import { applyCreativeModelDefaults } from "./creative-model-policy";
 
 export class DemoToolConfigurationError extends Error {
   constructor(readonly code: string, message: string, readonly status = 400) { super(message); }
@@ -7,7 +8,7 @@ export class DemoToolConfigurationError extends Error {
 
 export function resolveDemoToolConfiguration(
   input: { operationType: string; toolKey?: string; modelConfigId?: string; parameters?: Record<string, unknown> },
-  bindings: Array<{ toolKey: string; modelConfigId: string | null; enabled: boolean }>,
+  bindings: Array<{ toolKey: string; modelConfigId: string | null; enabled: boolean; configurationVersion?: number; useDefaultModel?: boolean }>,
   models: Array<Record<string, unknown>>,
   providers: Array<Record<string, unknown>>,
   flags: Partial<Record<ModuleKey, boolean>>,
@@ -17,7 +18,8 @@ export function resolveDemoToolConfiguration(
   const definition = getToolDefinition(toolKey);
   if (!toolKey || !definition) throw new DemoToolConfigurationError("INVALID_TOOL", "板块标识无效");
   if (!(definition.operations as readonly string[]).includes(input.operationType)) throw new DemoToolConfigurationError("TOOL_OPERATION_MISMATCH", "板块不支持该操作类型");
-  const binding = bindings.find(item => item.toolKey === toolKey);
+  const effectiveBindings = applyCreativeModelDefaults(bindings.some(item => item.toolKey === toolKey) ? bindings : [...bindings, { toolKey, modelConfigId: null, enabled: true, configurationVersion: 0 }], 0);
+  const binding = effectiveBindings.find(item => item.toolKey === toolKey);
   const parentBinding = bindings.find(item => item.toolKey === definition.parent);
   if (!moduleIsEnabled(flags, toolKey) || binding?.enabled === false || parentBinding?.enabled === false) throw new DemoToolConfigurationError("MODULE_DISABLED", "该功能板块已关闭", 403);
   const requested = models.find(model => model.id === input.modelConfigId || model.modelId === input.modelConfigId);

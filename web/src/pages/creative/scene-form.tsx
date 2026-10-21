@@ -2,7 +2,7 @@ import { ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import type { ReferenceImage } from "@/types/image";
 import { useModuleEnabled } from "@/stores/use-module-store";
-import { addSceneColor, getSceneColorSelection, isSceneHexColor, removeSceneColor, setSceneColor, type SceneForm, type SceneSlot, type SceneSlotId } from "./scene-form-model";
+import { addSceneColor, CONCEPT_COUNTS, getSceneColorSelection, isSceneHexColor, OUTFIT_CATEGORIES, removeSceneColor, setSceneColor, type SceneForm, type SceneSlot, type SceneSlotId } from "./scene-form-model";
 
 const StandardColorDialog = lazy(() => import("./standard-color-dialog"));
 
@@ -13,6 +13,8 @@ type SceneFieldsProps = {
     disabled?: boolean;
     sourceImage?: string;
 };
+type TextField = { [K in keyof SceneForm]-?: SceneForm[K] extends string ? K : never }[keyof SceneForm];
+type NumberField = { [K in keyof SceneForm]-?: SceneForm[K] extends number ? K : never }[keyof SceneForm];
 
 function Choices({ id, label, value, options, onChange, disabled }: {
     id: string;
@@ -47,10 +49,45 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
     const colorLibraryEnabled = useModuleEnabled("standard-colors");
     const id = (name: string) => `cs-${sceneId}-${name}`;
     const update = <K extends keyof SceneForm>(key: K, value: SceneForm[K]) => onChange({ ...form, [key]: value });
-    const choice = (key: keyof SceneForm, label: string, options: readonly (string | { value: string; label: string })[]) => <Choices
+    const choice = (key: TextField, label: string, options: readonly (string | { value: string; label: string })[]) => <Choices
         id={id(key)} label={label} value={String(form[key])} options={options} disabled={disabled}
         onChange={(value) => update(key, value as SceneForm[typeof key])}
     />;
+    const countChoice = (key: NumberField, label: string, options: readonly number[]) => <Choices
+        id={id(key)} label={label} value={String(form[key])} options={options.map(value => ({ value: String(value), label: String(value) }))} disabled={disabled}
+        onChange={value => update(key, Number(value))}
+    />;
+    const textField = (key: TextField, label: string, placeholder: string, required = false) => <div className="cs-field">
+        <label className="cs-label" htmlFor={id(key)}>{label}{required && <span className="cs-required" aria-hidden="true"> *</span>}</label>
+        <input id={id(key)} className="cs-input" value={form[key]} onChange={event => update(key, event.target.value as SceneForm[typeof key])} maxLength={1000} placeholder={placeholder} required={required} disabled={disabled} />
+    </div>;
+    const numberField = (key: NumberField, label: string, min: number, max: number, step = 1) => <div className="cs-field">
+        <label className="cs-label" htmlFor={id(key)}>{label}</label>
+        <input id={id(key)} className="cs-input" type="number" value={form[key]} min={min} max={max} step={step} onChange={event => update(key, Number(event.target.value))} disabled={disabled} />
+    </div>;
+    const categoryField = <div className="cs-field">
+        <label className="cs-label" htmlFor={id("category")}>目标服装品类</label>
+        <select id={id("category")} className="cs-select" value={form.category} onChange={event => update("category", event.target.value)} disabled={disabled}>
+            {["按描述判断", "上衣", "衬衫", "针织衫", "外套", "连衣裙", "半裙", "长裤", "短裤", "其他服装"].map(item => <option key={item}>{item}</option>)}
+        </select>
+    </div>;
+    const presentationField = choice("presentation", "展示方式", ["白底平铺", "模特展示", "设计效果图", "参考图一致"]);
+    const boardFields = <>
+        {countChoice("conceptCount", "方案板内款数", CONCEPT_COUNTS)}
+        <p className="cs-help">款数决定一张方案板里的设计数量；生成张数决定独立输出多少张方案板。</p>
+        {presentationField}
+    </>;
+    const fusionFields = <>
+        {textField("fusionRole1", "图一负责什么", "如：整体廓形与比例", true)}
+        {textField("fusionRole2", "图二负责什么", "如：袖型、面料或装饰细节", true)}
+        {numberField("fusionWeight", "图一参考侧重（%）", 10, 90, 10)}
+        <p className="cs-help">图二侧重 {100 - form.fusionWeight}%。侧重用于描述设计偏好，两图指定要素都应出现在结果中。</p>
+        {textField("preserve", "必须保留的元素", "如：图一轮廓与图二花朵形状")}
+    </>;
+    const textureFields = <>
+        {numberField("patternScale", "图案或纹理视觉比例（倍）", .25, 4, .25)}
+        {choice("patternDirection", "图案或纹理方向", ["保持参考方向", "旋转 90°", "旋转 180°", "随衣片自然排列"])}
+    </>;
     const descriptionField = (label: string, placeholder: string, required = false) => <div className="cs-field">
         <label className="cs-label" htmlFor={id("description")}>{label}{required && <span className="cs-required" aria-hidden="true"> *</span>}</label>
         <textarea id={id("description")} className="cs-textarea" value={form.description} onChange={(event) => update("description", event.target.value)} rows={required ? 4 : 2} maxLength={4000} placeholder={placeholder} required={required} disabled={disabled} />
@@ -94,6 +131,125 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
 
     let fields;
     switch (sceneId) {
+        case "series-extension":
+        case "bestseller-proposal":
+            fields = <>
+                {countChoice("referenceCount", "系列参考图数量", [1, 2, 3, 4])}
+                {sceneId === "series-extension" && categoryField}
+                {textField("preserve", "系列共同设计元素", "如：米白粗呢、花朵贴饰与黑色滚边")}
+                {boardFields}
+                {extra(sceneId === "series-extension" ? "如：围绕相同面料发展不同领型与下摆。" : "如：以核心半裙为主，搭配不同上装与配饰。")}
+            </>;
+            break;
+        case "detail-to-style":
+        case "fabric-to-style":
+            fields = <>
+                {categoryField}
+                {textField("targetStyle", "品牌或风格方向", "如：简约通勤、轻松度假", true)}
+                {sceneId === "detail-to-style" && textField("referenceDetail", "需要继承的局部细节", "如：三角翻折袋口与枝条刺绣")}
+                {boardFields}
+                {extra(sceneId === "detail-to-style" ? "如：每款都清楚呈现参考袋口，变化衣身版型。" : "如：面料用于整个衣身，强调轻薄垂感。")}
+            </>;
+            break;
+        case "reference-to-style":
+            fields = <>
+                {choice("referenceMode", "参考改款方式", [{ value: "category", label: "改品类" }, { value: "style", label: "改风格" }, { value: "detail", label: "改部件" }, { value: "custom", label: "自定义" }])}
+                {form.referenceMode === "category" && categoryField}
+                {form.referenceMode === "style" && textField("targetStyle", "目标风格", "如：复古学院风", true)}
+                {form.referenceMode === "detail" && textField("referenceDetail", "参考部件与改动", "如：保留帽子，胸贴袋改为斜插袋", true)}
+                {form.referenceMode === "custom" ? descriptionField("自定义改款要求", "写清要修改的结构、配色、面料与细节。", true) : extra("如：整体比例保持原款，面料不变。")}
+                {textField("preserve", "必须保留的设计", "如：帽子、门襟、面料和原配色")}
+            </>;
+            break;
+        case "style-fusion":
+            fields = <>
+                {categoryField}
+                {fusionFields}
+                {presentationField}
+                {extra("如：图一裙摆结合图二扭结细节，不增加多余装饰。")}
+            </>;
+            break;
+        case "outfit-design":
+            fields = <>
+                <div className="cs-field-row">
+                    <div className="cs-field">
+                        <label className="cs-label" htmlFor={id("outfitCategory")}>搭配品类</label>
+                        <select id={id("outfitCategory")} className="cs-select" value={form.outfitCategory} disabled={disabled} onChange={event => onChange({ ...form, outfitCategory: event.target.value, outfitSubcategory: OUTFIT_CATEGORIES[event.target.value]![0]! })}>
+                            {Object.keys(OUTFIT_CATEGORIES).map(item => <option key={item}>{item}</option>)}
+                        </select>
+                    </div>
+                    <div className="cs-field">
+                        <label className="cs-label" htmlFor={id("outfitSubcategory")}>搭配子类</label>
+                        <select id={id("outfitSubcategory")} className="cs-select" value={form.outfitSubcategory} disabled={disabled} onChange={event => update("outfitSubcategory", event.target.value)}>
+                            {(OUTFIT_CATEGORIES[form.outfitCategory] || []).map(item => <option key={item}>{item}</option>)}
+                        </select>
+                    </div>
+                </div>
+                <p className="cs-help">保留上传单品，新增一件所选子类的搭配款，展示完整套装。</p>
+                {presentationField}
+                {extra("如：新增外套使用原半裙的格纹，版型短而利落。")}
+            </>;
+            break;
+        case "apply-pattern":
+        case "pattern-fill":
+            fields = <>
+                {textField("placement", sceneId === "apply-pattern" ? "定位图案位置" : "铺设衣片", sceneId === "apply-pattern" ? "如：前胸居中" : "如：前后大身，保留领口袖口素色", true)}
+                {textureFields}
+                <p className="cs-help">图案来自图片2；需要严格控制修改范围时，在服装原图上涂选目标区域。</p>
+                {extra("如：图案沿衣褶自然变化，不改变原衣服和人物。")}
+            </>;
+            break;
+        case "fabric-change":
+            fields = <>
+                {countChoice("fabricCount", "面料参考图数量", [1, 2, 3])}
+                {textField("fabricAssignment", "面料与衣片对应关系", "如：面料1用于大身，面料2用于领口袖口", form.fabricCount > 1)}
+                {textureFields}
+                {extra("如：保留所有纽扣与拉链，只调整面料纹理。")}
+            </>;
+            break;
+        case "remove-decoration":
+            fields = <>
+                {choice("removeMode", "去装饰后的底色", [{ value: "original", label: "保留原色" }, { value: "white", label: "变为白色" }])}
+                <p className="cs-help">用周围同类面料补齐印绣花位置；涂选后只将选区内结果合回原图。</p>
+                {extra("如：仅去除胸前印花，保留所有缝线和口袋。")}
+            </>;
+            break;
+        case "sketch-to-style":
+            fields = <>
+                <Choices id={id("useFabricReference")} label="面料来源" value={form.useFabricReference ? "reference" : "description"} options={[{ value: "description", label: "文字描述" }, { value: "reference", label: "面料参考图" }]} disabled={disabled} onChange={value => update("useFabricReference", value === "reference")} />
+                {!form.useFabricReference && textField("fabric", "面料方向", "如：浅蓝色棉麻")}
+                {choice("sketchColor", "配色方式", [{ value: "reference", label: "沿用参考色" }, { value: "random", label: "协调新配色" }])}
+                {presentationField}
+                {extra("如：严格保持线稿的领口、袖口与口袋位置。")}
+            </>;
+            break;
+        case "pattern-create":
+            fields = <>
+                {choice("patternMode", "创作方式", [{ value: "text", label: "文字创作" }, { value: "reference", label: "参考图创作" }, { value: "variation", label: "相似变体" }])}
+                {form.patternMode === "text" ? descriptionField("图案描述", "描述元素、线条、配色、构图与画风。", true) : extra("如：保留枝叶画风，变化花朵与构图。")}
+                {form.patternMode === "variation" && numberField("similarity", "参考相似度方向（%）", 10, 100, 10)}
+                {choice("patternBackground", "图案背景", [{ value: "white", label: "干净白底" }, { value: "original", label: "按设计保留底色" }])}
+                <p className="cs-help">白底结果是普通图片；相似度用于表达设计方向，不是算法测量值。</p>
+            </>;
+            break;
+        case "pattern-fusion":
+            fields = <>
+                {countChoice("referenceCount", "融合参考图数量", [2, 3])}
+                {fusionFields}
+                {form.referenceCount === 3 && <p className="cs-help">第三张图只提供配色，不增加新主体或替换前两张图的职责。</p>}
+                {choice("patternBackground", "图案背景", [{ value: "white", label: "干净白底" }, { value: "original", label: "按设计保留底色" }])}
+                {extra("如：鸟保持完整，花枝围绕主体排列。")}
+            </>;
+            break;
+        case "seamless-pattern":
+            fields = <>
+                {choice("repeatArrangement", "重复排列", [{ value: "straight", label: "直排" }, { value: "half-drop", label: "半落" }, { value: "half-brick", label: "半砖" }])}
+                {choice("boundaryMode", "边界处理", [{ value: "inward", label: "向内修复" }, { value: "outward", label: "向外扩展" }])}
+                <div className="cs-field-row">{numberField("ratioX", "左右边界范围（%）", 0, 30)}{numberField("ratioY", "上下边界范围（%）", 0, 30)}</div>
+                <p className="cs-help">生成单个花型草案，随后进入花型循环工具检查左右、上下和四角接缝。</p>
+                {extra("如：保留中央花朵，只修补跨边叶片。")}
+            </>;
+            break;
         case "text-to-style":
             fields = <>
                 {descriptionField("款式描述", "描述你想设计的服装：关键结构、配色和细节……", true)}
@@ -152,12 +308,14 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
             fields = <>
                 {choice("extractMode", "提取范围", ["单独图案", "完整可见花型"])}
                 {choice("extractBackground", "背景处理", ["白底", "保留底色"])}
+                {choice("extractCraft", "工艺质感", [{ value: "preserve", label: "保留工艺" }, { value: "remove", label: "还原平面图案" }])}
                 <p className="cs-help">「完整可见花型」保留画面内的排列关系，不会自动变成无缝循环图。</p>
                 {extra("如：只提取中央花朵和叶片，不包含服装边缘。")}
             </>;
             break;
         case "pattern-craft":
             fields = <>
+                {choice("craftSource", "工艺依据", [{ value: "description", label: "文字工艺" }, { value: "reference", label: "工艺参考图" }])}
                 {choice("craft", "目标工艺", ["刺绣", "毛巾绣", "提花", "胶印"])}
                 <div className="cs-field">
                     <label className="cs-label" htmlFor={id("craftFabric")}>承载面料</label>

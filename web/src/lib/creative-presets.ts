@@ -14,12 +14,13 @@ export type CreativePreset = {
     readonly description: string;
     readonly group: (typeof creativePresetGroups)[number]["id"];
     readonly tool: "image-generation" | "image-edit";
+    readonly engine?: "ai" | "vector" | "layers";
     readonly prompt?: string;
     readonly garment?: GarmentScenario;
 };
 
 /** Local starting points only: opening a preset never submits a generation task. */
-export const creativePresets: readonly CreativePreset[] = [
+const startingPresets: readonly CreativePreset[] = [
     {
         id: "text-to-style",
         title: "以文生款",
@@ -120,6 +121,39 @@ export const creativePresets: readonly CreativePreset[] = [
         ].join("\n\n"),
     },
 ];
+
+const addedPresets: readonly CreativePreset[] = [
+    { id: "series-extension", title: "系列延伸", description: "提炼参考款的共同语言，生成一张多款方案板。", group: "new", tool: "image-edit", prompt: "保留参考款的系列元素，变化目标品类的廓形与细节，输出单张多款概念方案板；不是生产技术稿。" },
+    { id: "bestseller-proposal", title: "爆款系列提案", description: "围绕核心款规划搭配，组织成系列提案板。", group: "new", tool: "image-edit", prompt: "围绕核心参考款延伸完整搭配，输出单张系列概念提案板，不预测销量，不是生产技术稿。" },
+    { id: "detail-to-style", title: "细节生款", description: "把局部结构应用到新的完整服装款式。", group: "new", tool: "image-edit", prompt: "以局部参考的结构细节为锚点，在指定品类中设计完整服装概念；不是生产技术稿。" },
+    { id: "fabric-to-style", title: "面料生款", description: "从面料颜色与肌理出发，探索适配款式。", group: "new", tool: "image-edit", prompt: "以面料参考的纹理和色彩设计适配款式概念，不推断实测物性，不是生产技术稿。" },
+    { id: "reference-to-style", title: "参考款生款", description: "按品类、风格、部件或自定义要求改造基款。", group: "new", tool: "image-edit", prompt: "以参考款为基底，明确保留项和修改项，生成新的服装概念；不是生产技术稿。" },
+    { id: "style-fusion", title: "款式融合", description: "分别指定两张参考的结构与细节职责。", group: "new", tool: "image-edit", prompt: "将图片1的基款结构与图片2的指定细节融合为一个服装概念，不叠加两件衣服；不是生产技术稿。" },
+    { id: "outfit-design", title: "套装设计", description: "保留已有单品，为它设计协调的搭配服饰。", group: "new", tool: "image-edit", prompt: "保留参考单品并新增指定搭配品类，形成协调套装概念，不是生产技术稿。" },
+    { id: "apply-pattern", title: "贴图案", description: "把指定图案放到服装的目标位置。", group: "restyle", tool: "image-edit", prompt: "图片1提供服装，图片2仅提供图案；在指定位置进行贴图概念设计，不是精确生产定位稿。" },
+    { id: "pattern-fill", title: "花型铺设", description: "控制花型比例与方向，预览整片服装效果。", group: "restyle", tool: "image-edit", prompt: "将图片2的花型在图片1的指定衣片内重复铺设，保留服装结构，输出概念预览，不是生产技术稿。" },
+    { id: "fabric-change", title: "更换面料", description: "按衣片分配最多三张面料，保留原款廓形。", group: "restyle", tool: "image-edit", prompt: "图片1提供服装结构，其余图片仅提供面料；按部位替换材质概念，不是物理仿真或生产技术稿。" },
+    { id: "remove-decoration", title: "去除印绣花", description: "移除装饰并补齐面料，可保留原色或转白。", group: "restyle", tool: "image-edit", prompt: "去除指定印绣花并修复同材质底布，保留服装结构，输出概念效果，不是生产技术稿。" },
+    { id: "sketch-to-style", title: "线稿成款", description: "依据线稿结构，补充面料与穿着效果。", group: "restyle", tool: "image-edit", prompt: "严格参考图片1的可见线稿结构，用指定面料生成服装概念，不是纸样或生产技术稿。" },
+    { id: "sketch-vectorization", title: "线稿矢量化", description: "本地描摹黑白线稿，预览并导出真实 SVG 路径。", group: "restyle", tool: "image-edit", engine: "vector" },
+    { id: "pattern-create", title: "AI 图案", description: "从文字或参考图创作独立图案与相似变体。", group: "pattern", tool: "image-generation", prompt: "依文字或参考创作独立图案概念，遵守元素与背景要求，不是矢量或可直接生产的技术稿。" },
+    { id: "pattern-fusion", title: "图案融合", description: "为两到三张参考分配元素、构图和色彩职责。", group: "pattern", tool: "image-edit", prompt: "按输入图的角色融合图案元素与构图，输出完整图案概念，不是生产技术稿。" },
+    { id: "seamless-pattern", title: "四方连续", description: "生成连续花型草案，再用循环工具检查接缝。", group: "pattern", tool: "image-edit", prompt: "按指定重复关系与边界范围生成连续花型概念草案，需实际平铺检查，不保证直接生产。" },
+    { id: "pattern-layers", title: "图案分层", description: "将图案分为独立图层，调整层序并导出文件。", group: "pattern", tool: "image-edit", engine: "layers" },
+    { id: "pattern-vectorization", title: "图案矢量化", description: "按目标色数本地描摹，导出可编辑彩色 SVG。", group: "pattern", tool: "image-edit", engine: "vector" },
+];
+
+const presetOrder = [
+    "series-extension", "bestseller-proposal", "detail-to-style", "fabric-to-style", "text-to-style", "reference-to-style", "style-fusion", "back-design", "outfit-design",
+    "local-restyle", "garment-colorway", "apply-pattern", "pattern-fill", "fabric-change", "remove-decoration", "sketch-to-style", "style-to-sketch", "sketch-vectorization",
+    "pattern-create", "pattern-fusion", "seamless-pattern", "pattern-craft", "pattern-colorway", "pattern-extract", "accessory-design", "pattern-layers", "pattern-vectorization",
+] as const;
+const presetById = new Map([...startingPresets, ...addedPresets].map(preset => [preset.id, preset]));
+export const creativePresets: readonly CreativePreset[] = presetOrder.map(id => {
+    const preset = presetById.get(id)!;
+    const group = presetOrder.indexOf(id) < 9 ? "new" : presetOrder.indexOf(id) < 18 ? "restyle" : "pattern";
+    return { ...preset, group, engine: preset.engine ?? "ai" };
+});
 
 export function getCreativePreset(id: string | null): CreativePreset | undefined {
     return creativePresets.find((preset) => preset.id === id);

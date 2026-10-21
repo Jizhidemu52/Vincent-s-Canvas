@@ -5,6 +5,7 @@ import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import type { ModuleKey } from "@/services/api/modules";
 import { sceneSummaries } from "./scene-form-model";
+import { SceneIllustration } from "./scene-illustration";
 import "./creative.css";
 
 const workbenches = [
@@ -31,7 +32,7 @@ export default function CreativePage() {
                     <div className="creative-grid">
                         {items.map((preset) => <Link key={preset.id} to={buildCreativePresetHref(preset)} className="creative-card">
                             <div className="creative-cover">
-                                <img src={`/creative-scenes/v2/${preset.id}.webp`} alt={`${sceneSummaries[preset.id]?.input} → ${sceneSummaries[preset.id]?.output}的功能示意`} loading="lazy" decoding="async" />
+                                <SceneIllustration id={preset.id} title={preset.title} />
                                 <div className="creative-cover-flow" aria-hidden="true"><span>{sceneSummaries[preset.id]?.input}</span><ArrowRight size={15} /><span>{sceneSummaries[preset.id]?.output}</span></div>
                             </div>
                             <div className="creative-card-copy"><h3>{preset.title}<ArrowRight size={16} strokeWidth={1.5} /></h3><p>{preset.description}</p></div>
@@ -45,7 +46,7 @@ export default function CreativePage() {
                     <div className="creative-card-copy"><p>{item.mode}</p><h3>{item.title}<ArrowRight size={16} strokeWidth={1.5} /></h3><p>{item.description}</p></div>
                 </Link>)}</div>
             </section> : null}
-            {!presets.length && !availableWorkbenches.length ? <div className="wb-empty"><strong>暂无可用的设计场景</strong><p>管理员启用对应创意板块后，场景会显示在这里。</p></div> : <p className="creative-note">场景封面为 AI 制作的功能示意，不是模型实测结果。AI 工作台点击生成才会提交任务，本地工作台不调用模型。</p>}
+            {!presets.length && !availableWorkbenches.length ? <div className="wb-empty"><strong>暂无可用的设计场景</strong><p>管理员启用对应创意板块后，场景会显示在这里。</p></div> : <p className="creative-note">场景封面为功能示意，不代表模型实测结果。AI 工作台点击生成才会提交任务，本地工作台不调用模型。</p>}
         </div>
     </main>;
 }

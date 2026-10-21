@@ -15,6 +15,7 @@ import { createMarkImageProviderRouter } from "./mark-image-provider";
 import { createFeaturedModelsRouter } from "./featured-models";
 import { withTransaction } from "../db-transaction";
 import { applyDefaultChatModel, DEFAULT_CHAT_MODEL_TOOL_KEY } from "../chat-model-policy";
+import { applyCreativeModelDefaults } from "../creative-model-policy";
 import { readToolConfiguration } from "../tool-configuration";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
@@ -112,7 +113,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     router.get("/tool-configurations", async (_request, response, next) => {
         try {
             const rows = (await db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.enabled,
-                t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion",
+                t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion",(t.updated_by IS NULL) AS "useDefaultModel",
                 m.name AS "modelName",m.model_id AS "modelId",m.capabilities,m.credit_cost AS "modelCreditCost",
                 m.rmb_cost::float8 AS "modelRmbCost",m.enabled AS "modelEnabled",p.id AS "providerId",p.name AS "providerName",
                 p.protocol,p.base_url AS "baseUrl",p.enabled AS "providerEnabled",(p.encrypted_credentials IS NOT NULL) AS "hasCredentials",
@@ -121,12 +122,12 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
                 LEFT JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id`)).rows as Array<Record<string, unknown>>;
             const prices = (await db.query(`SELECT operation_type AS "operationType",credits,rmb_cost::float8 AS "rmbCost",version
                 FROM pricing_rule_versions WHERE status='published'`)).rows as Array<Record<string, unknown>>;
-            response.json({ tools: applyDefaultChatModel(toolDefinitions.map((definition) => ({
+            response.json({ tools: applyCreativeModelDefaults(applyDefaultChatModel(toolDefinitions.map((definition) => ({
                 ...definition,
                 ...(rows.find((row) => row.toolKey === definition.toolKey) || { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 }),
                 capabilities: definition.capabilities,
                 price: prices.find((price) => price.operationType === definition.operationType) || null,
-            }))) });
+            })))) });
         } catch (error) { next(error); }
     });
     router.put("/tool-configurations/:toolKey", async (request, response, next) => {
@@ -219,16 +220,16 @@ export function createPublicModelRouter(db: Database, creditPolicy: boolean | ((
                 db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.id AS "providerId",p.protocol,p.name AS "providerName",p.base_url AS "providerBaseUrl" FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.enabled=true AND p.enabled=true AND (m.workflow_config_id IS NULL OR w.enabled=true) ORDER BY m.public_number NULLS LAST,m.name`),
                 db.query(`SELECT operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version FROM pricing_rule_versions WHERE status='published' ORDER BY operation_type`),
                 db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.enabled,
-                    t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion"
+                    t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion",(t.updated_by IS NULL) AS "useDefaultModel"
                     FROM tool_api_configurations t`),
                 readFeaturedModelIds(db),
             ]);
             const role = (request as AuthenticatedRequest).auth?.role;
-            const effectiveTools = applyDefaultChatModel(toolDefinitions.map(definition => ({
+            const effectiveTools = applyCreativeModelDefaults(applyDefaultChatModel(toolDefinitions.map(definition => ({
                 ...definition,
                 ...(tools.rows.find(tool => tool.toolKey === definition.toolKey) ?? { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 }),
                 ...(!creditsEnabled ? { creditCostOverride: 0 } : {}),
-            })));
+            }))));
             const presentedModels = applyModelPresentation(models.rows, featuredIds);
             const selectedModels = selectCreativeModels(presentedModels);
             const selectedIds = new Set(selectedModels.map(model => model.id));

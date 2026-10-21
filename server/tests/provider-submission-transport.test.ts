@@ -7,6 +7,8 @@ import { createConnection, createServer as createTcpServer, type Socket } from "
 import { createServer as createHttpsServer } from "node:https";
 import { createServer as createHttpServer } from "node:http";
 import { fetchProviderSubmission } from "../src/provider-submission-transport";
+import { downloadApiMartImageResult } from "../src/apimart-image-result";
+import { runApiMartImageTask } from "../src/apimart-image";
 import { startNativeNetworkFixture } from "./fixtures/native-network-fixture";
 
 let fixtureDirectory: string;
@@ -460,6 +462,50 @@ describe("provider submission transport", () => {
       expect(new TextDecoder().decode((await reader.read()).value)).toBe("data: last\n\n");
       expect((await reader.read()).done).toBe(true);
       expect(requests).toBe(1);
+    } finally { server.stop(true); }
+  });
+
+  test("image task polling uses verified native GET for an existing identity without submitting", async () => {
+    let requests = 0;
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", tls: { cert: certificate, key: privateKey }, async fetch(request) {
+      requests++;
+      expect(request.method).toBe("GET");
+      expect(new URL(request.url).pathname).toBe("/v1/tasks/original-task");
+      expect(request.headers.get("authorization")).toBe("Bearer fixture-only");
+      expect((await request.arrayBuffer()).byteLength).toBe(0);
+      return Response.json({ data: { status: "completed", result: { images: [{ url: ["https://result.example/original.png"] }] } } });
+    } });
+    try {
+      expect(await runApiMartImageTask({ baseUrl: `https://127.0.0.1:${server.port}/v1`, apiKey: "fixture-only", modelId: "gpt-image-2", prompt: "unused", parameters: {}, upstreamTaskId: "original-task", submissionStarted: true,
+        beforeSubmit: () => { throw new Error("Cannot submit again"); }, onSubmitted: () => { throw new Error("Cannot replace identity"); },
+      }, { sleep: async () => {} })).toEqual(["https://result.example/original.png"]);
+      expect(requests).toBe(1);
+    } finally { server.stop(true); }
+  });
+
+  test("image result GET uses a verified native socket and preserves binary bytes without credentials", async () => {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL0VQAAAABJRU5ErkJggg==", "base64");
+    let requests = 0;
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", tls: { cert: certificate, key: privateKey }, async fetch(request) {
+      requests++;
+      expect(request.method).toBe("GET");
+      expect(request.headers.has("authorization")).toBe(false);
+      expect(request.headers.has("cookie")).toBe(false);
+      expect((await request.arrayBuffer()).byteLength).toBe(0);
+      return new Response(png, { headers: { "content-type": "image/jpeg" } });
+    } });
+    const runtime = { fetch: (_url: string, init: RequestInit) => fetchProviderSubmission(`https://127.0.0.1:${server.port}/existing-result`, init) };
+    try {
+      const result = await downloadApiMartImageResult("https://result.example/image", 10_000, runtime);
+      expect(result.bytes).toEqual(png);
+      expect(result.mimeType).toBe("image/png");
+      expect(requests).toBe(1);
+      const extraCa = process.env.NODE_EXTRA_CA_CERTS;
+      delete process.env.NODE_EXTRA_CA_CERTS;
+      try {
+        await expect(downloadApiMartImageResult("https://result.example/image", 10_000, runtime)).rejects.toMatchObject({ code: "DEPTH_ZERO_SELF_SIGNED_CERT", phase: "initial_tls" });
+        expect(requests).toBe(1);
+      } finally { process.env.NODE_EXTRA_CA_CERTS = extraCa; }
     } finally { server.stop(true); }
   });
 

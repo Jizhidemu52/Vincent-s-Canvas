@@ -3,6 +3,7 @@ import type { Database } from "./db";
 import { modelSupportsOperation } from "./billing";
 import { assertModuleEnabled } from "./module-flags";
 import { DEFAULT_CHAT_MODEL_TOOL_KEY } from "./chat-model-policy";
+import { applyCreativeModelDefaults, creativeModelDefaultSources } from "./creative-model-policy";
 
 export type ToolConfiguration = {
   toolKey: ToolKey;
@@ -11,6 +12,7 @@ export type ToolConfiguration = {
   creditCostOverride: number | null;
   rmbCostOverride: number | null;
   configurationVersion: number;
+  useDefaultModel?: boolean;
 };
 
 export class ToolConfigurationError extends Error {
@@ -32,9 +34,11 @@ export async function readToolConfiguration(db: Pick<Database, "query">, toolKey
   const result = await db.query<ToolConfiguration>(
     `SELECT tool_key AS "toolKey",model_config_id AS "modelConfigId",enabled,
       credit_cost_override AS "creditCostOverride",rmb_cost_override::float8 AS "rmbCostOverride",
-      configuration_version AS "configurationVersion" FROM tool_api_configurations WHERE tool_key=$1`, [toolKey],
+      configuration_version AS "configurationVersion",(updated_by IS NULL) AS "useDefaultModel" FROM tool_api_configurations WHERE tool_key=$1`, [toolKey],
   );
-  return result.rows[0] ?? { toolKey, modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 };
+  const configuration = result.rows[0] ?? { toolKey, modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 };
+  const sources = await Promise.all(creativeModelDefaultSources(configuration).map(key => readToolConfiguration(db, key)));
+  return applyCreativeModelDefaults([configuration, ...sources])[0]!;
 }
 
 /** Chat always uses the administrator's shared model; image bindings still reject stale parameters. */

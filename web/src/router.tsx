@@ -19,6 +19,8 @@ const DesignLibraryPage = lazy(() => import("@/pages/design-library"));
 const ChatPage = lazy(() => import("@/pages/chat"));
 const CreativePage = lazy(() => import("@/pages/creative"));
 const CreativeScenePage = lazy(() => import("@/pages/creative/scene"));
+const CreativeVectorPage = lazy(() => import("@/pages/creative/vector-workspace"));
+const PatternLayersPage = lazy(() => import("@/pages/creative/pattern-layers"));
 const PatternPlacementPage = lazy(() => import("@/pages/design-workbench/placement"));
 const PatternRepeatPage = lazy(() => import("@/pages/design-workbench/repeat"));
 const SeriesRecipePage = lazy(() => import("@/pages/design-workbench/recipe"));
@@ -79,6 +81,9 @@ export const router = createBrowserRouter([
             { path: "/creative/pattern-placement", element: moduleRoute(PatternPlacementPage, "pattern-placement") },
             { path: "/creative/pattern-repeat", element: moduleRoute(PatternRepeatPage, "pattern-repeat") },
             { path: "/creative/series-recipe", element: moduleRoute(SeriesRecipePage, "series-recipe") },
+            { path: "/creative/sketch-vectorization", element: moduleRoute(CreativeVectorPage, "creative-sketch-vectorization") },
+            { path: "/creative/pattern-vectorization", element: moduleRoute(CreativeVectorPage, "creative-pattern-vectorization") },
+            { path: "/creative/pattern-layers", element: moduleRoute(PatternLayersPage, "creative-pattern-layers") },
             { path: "/creative/:presetId", element: protectedRoute(CreativeScenePage) },
             { path: "/login", element: !standaloneEdition && deploymentFeatures.authenticationEnabled && !deploymentFeatures.oaLoginEnabled ? routeElement(LoginPage) : <Navigate to="/" replace /> },
             { path: "/image", element: moduleRoute(ImagePage, imageModule) },

@@ -4,6 +4,7 @@ import { ApiMartImageProviderFailure, apiMartImageModel, buildApiMartImageReques
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { DemoStateStore, DemoStorageError } from "../src/demo-state-store";
 import { ImageResultPersistenceError } from "../src/image-result-storage";
+import { downloadApiMartImageResult } from "../src/apimart-image-result";
 
 const stores: DemoStateStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
@@ -48,6 +49,20 @@ function createHarness(failurePhase?: FailurePhase) {
   const reads: RecordedRequest[] = [];
   let completed = 0;
   const failure = Object.assign(new Error("unknown certificate verification error"), { code: "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR" });
+  const read = async (url: string, init?: RequestInit) => {
+    const request = { url: String(url), method: init?.method || "GET", init };
+    reads.push(request);
+    if (request.method !== "GET") throw new Error("A paid submission bypassed fetchProviderSubmission");
+    if (request.url === "https://apimart.invalid/v1/tasks/original-task") {
+      if (failurePhase === "polling") throw failure;
+      return Response.json({ data: { status: "completed", result: { images: [{ url: ["https://images.invalid/original.png"] }] } } });
+    }
+    if (request.url === "https://images.invalid/original.png") {
+      if (failurePhase === "download") throw failure;
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } });
+    }
+    throw new Error(`Unexpected mock request: ${request.url}`);
+  };
   const dependencies = {
     demoState, DemoStorageError, ImageResultPersistenceError, demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
     apiMartBaseUrl: "https://apimart.invalid/v1",
@@ -58,24 +73,13 @@ function createHarness(failurePhase?: FailurePhase) {
     sleep: async () => {},
     completeDemoImageTask: async () => { completed++; },
     fetchProviderSubmission: async (url: string, init?: RequestInit) => {
+      if ((init?.method || "GET") === "GET") return read(url, init);
       paid.push({ url: String(url), method: init?.method || "GET", init });
       if (failurePhase === "submission") throw failure;
       return Response.json({ data: [{ task_id: "original-task" }] });
     },
-    fetch: async (url: string, init?: RequestInit) => {
-      const request = { url: String(url), method: init?.method || "GET", init };
-      reads.push(request);
-      if (request.method !== "GET") throw new Error("A paid submission bypassed fetchProviderSubmission");
-      if (request.url === "https://apimart.invalid/v1/tasks/original-task") {
-        if (failurePhase === "polling") throw failure;
-        return Response.json({ data: { status: "completed", result: { images: [{ url: ["https://images.invalid/original.png"] }] } } });
-      }
-      if (request.url === "https://images.invalid/original.png") {
-        if (failurePhase === "download") throw failure;
-        return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } });
-      }
-      throw new Error(`Unexpected mock request: ${request.url}`);
-    },
+    fetch: read,
+    downloadApiMartImageResult: (url: string) => downloadApiMartImageResult(url, 120_000, { fetch: read }),
   };
   const api = new Function(...Object.keys(dependencies), `${productionCode}\nreturn { callGptImage2, runApiMartImageTaskForDemo };`)(...Object.values(dependencies)) as Harness;
   return { api, paid, reads, failure, completed: () => completed };

@@ -9,6 +9,15 @@ const providers = [{ id: "provider", enabled: true }];
 const binding = { toolKey: "creative-garment-colorway" as const, modelConfigId: "model-a", enabled: true };
 
 describe("demo formal tool configuration", () => {
+  test("new scenes inherit only untouched defaults; saved choices and clearing are respected", () => {
+    const source = { toolKey: "image-edit", modelConfigId: "model-a", enabled: true };
+    const fresh = { toolKey: "creative-pattern-layers", modelConfigId: null, enabled: true, configurationVersion: 0 };
+    const input = { operationType: "inpaint", toolKey: fresh.toolKey };
+    expect(resolveDemoToolConfiguration(input, [source, fresh], models, providers, flags).modelConfigId).toBe("model-a");
+    expect(() => resolveDemoToolConfiguration({ ...input, modelConfigId: "model-b" }, [source, fresh], models, providers, flags)).toThrow("配置已更新");
+    expect(resolveDemoToolConfiguration({ ...input, modelConfigId: "model-b" }, [source, { ...fresh, configurationVersion: 1 }], models, providers, flags).modelConfigId).toBe("model-b");
+    expect(() => resolveDemoToolConfiguration(input, [source, { ...fresh, enabled: false }], models, providers, flags)).toThrow("关闭");
+  });
   test("chat ignores canvas and client choices, including shared upstream IDs from other providers", () => {
     const chats = [
       { id: "chat-a", modelId: "same-upstream", providerId: "provider", enabled: true, capabilities: ["chat"] },
@@ -24,8 +33,8 @@ describe("demo formal tool configuration", () => {
     expect(() => resolveDemoToolConfiguration({ operationType: "chat", toolKey: "canvas-chat", modelConfigId: "chat-b" }, configured, chats, chatProviders, flags)).toThrow("未启用");
   });
   test("catalog includes formal AI slots, promoted design tools and no unfinished placeholders", () => {
-    expect(toolDefinitions).toHaveLength(27);
-    expect(new Set(moduleKeys).size).toBe(44);
+    expect(toolDefinitions).toHaveLength(43);
+    expect(new Set(moduleKeys).size).toBe(62);
     expect(moduleKeys).toContain("midjourney-blend");
     expect(moduleKeys).toContain("standard-colors");
     expect(moduleKeys).not.toContain("canvas-ai-upscale");
