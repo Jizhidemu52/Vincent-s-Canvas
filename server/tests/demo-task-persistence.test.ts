@@ -4,6 +4,7 @@ import { DemoStateStore, DemoStorageError } from "../src/demo-state-store";
 import { decodeInlineImageResult } from "../src/demo-task-result-assets";
 import { imageResultExtension, ImageResultPersistenceError, storeImageResult } from "../src/image-result-storage";
 import { resolveImageResultVariants } from "../src/image-result-variants";
+import { downloadApiMartImageResult } from "../src/apimart-image-result";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -25,6 +26,14 @@ function harness(options: { path?: string; process?: Parameters<typeof storeImag
   class DemoVideoTerminalError extends Error {}
   let submissions = 0;
   const downloads: string[] = [];
+  const fetchFixture = async (url: string) => {
+    if (url === "http://seamless.invalid/generate") return Response.json({ data: { data: { list: ["https://result.invalid/temporary.png"] } } });
+    if (url === "https://result.invalid/temporary.png") {
+      downloads.push(url);
+      return new Response(new Uint8Array([0, 255, 1, 2]), { headers: { "content-type": "image/png" } });
+    }
+    throw new Error("Unexpected network request");
+  };
   const deps = {
     demoState, demoAssets, demoTasks, DemoStorageError, decodeInlineImageResult,
     scheduleDemoAssetThumbnails: (asset: { id: string }) => {
@@ -37,14 +46,8 @@ function harness(options: { path?: string; process?: Parameters<typeof storeImag
     demoAccounts: [{ user }], demoOwner: (id: string) => id === user.id ? user : undefined, DemoVideoTerminalError,
     internalAiConfig: { seamlessUrl: "http://seamless.invalid/generate", appKey: "test-only" },
     resolveDemoVideoProvider: () => ({ baseUrl: "https://video-fixture.invalid/v1", apiKey: "fixture-only" }),
-    fetch: async (url: string) => {
-      if (url === "http://seamless.invalid/generate") return Response.json({ data: { data: { list: ["https://result.invalid/temporary.png"] } } });
-      if (url === "https://result.invalid/temporary.png") {
-        downloads.push(url);
-        return new Response(new Uint8Array([0, 255, 1, 2]), { headers: { "content-type": "image/png" } });
-      }
-      throw new Error("Unexpected network request");
-    },
+    fetch: fetchFixture,
+    downloadApiMartImageResult: (url: string) => downloadApiMartImageResult(url, 120_000, { fetch: fetchFixture }),
     callVideoProvider: async (_model: unknown, _prompt: unknown, _parameters: unknown, _sources: unknown, provider: unknown, submitted: (id: string) => void, starting: () => void) => {
       expect(provider).toEqual({ baseUrl: "https://video-fixture.invalid/v1", apiKey: "fixture-only" });
       starting(); submissions++; submitted("upstream-existing"); throw new Error("status check failed");

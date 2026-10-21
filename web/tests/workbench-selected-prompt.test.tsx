@@ -33,9 +33,10 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     const requireModule = createRequire(path);
     const code = ts.transpileModule(readFileSync(path, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     const states: unknown[] = [], refs: Array<{ current: unknown }> = [];
+    const memos: Array<{ deps?: readonly unknown[]; value: unknown }> = [];
     const effects: Array<{ deps?: readonly unknown[]; cleanup?: (() => void) | void }> = [];
     const pendingEffects: Array<() => void> = [];
-    let stateIndex = 0, refIndex = 0, effectIndex = 0, prompt = "当前草稿";
+    let stateIndex = 0, refIndex = 0, memoIndex = 0, effectIndex = 0, prompt = "当前草稿";
     let toolEnabled = true;
     const currentConfig = { ...config };
     const reads: string[] = [], writes: unknown[] = [], submissions: unknown[] = [];
@@ -46,7 +47,14 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
         return [states[index], (value: any) => { states[index] = typeof value === "function" ? value(states[index]) : value; }];
     };
     const dependencies: Record<string, unknown> = {
-        react: { ...React, useState, useRef: (initial: unknown) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: () => unknown) => factory(),
+        react: { ...React, useState, useRef: (initial: unknown) => refs[refIndex++] ||= { current: initial },
+            useMemo(factory: () => unknown, deps?: readonly unknown[]) {
+                const index = memoIndex++, prior = memos[index];
+                if (prior && deps && prior.deps?.length === deps.length && deps.every((value, i) => Object.is(value, prior.deps![i]))) return prior.value;
+                const value = factory();
+                memos[index] = { deps, value };
+                return value;
+            },
             useEffect(effect: () => (() => void) | void, deps?: readonly unknown[]) {
                 const index = effectIndex++, prior = effects[index];
                 if (prior && deps && prior.deps?.length === deps.length && deps.every((value, i) => Object.is(value, prior.deps![i]))) return;
@@ -87,7 +95,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     const module = { exports: {} as any };
     new Function("require", "module", "exports", "window", code)((name: string) => dependencies[name] || requireModule(name), module, module.exports, {});
     const render = () => {
-        stateIndex = refIndex = effectIndex = 0;
+        stateIndex = refIndex = memoIndex = effectIndex = 0;
         let output = kind === "creative" ? module.exports.useSceneWorkspace("style-to-sketch") : module.exports.default();
         // Follow the keyed employee boundary to exercise the real page closures.
         if (kind === "video" && React.isValidElement<any>(output) && typeof output.type === "function")
