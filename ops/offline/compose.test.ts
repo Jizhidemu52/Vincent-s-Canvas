@@ -12,6 +12,8 @@ test("all eight services run offline using seven explicit image references", () 
         expect(service.image).toBeTruthy();
     }
     expect(config.services.api.image).toBe(config.services.worker.image);
+    expect(config.services.minio.image).toBe(`wireless-canvas-minio:${revision}`);
+    expect(config.services["minio-init"].image).toBe(`wireless-canvas-mc:${revision}`);
     expect(config.services.web.ports).toEqual(["127.0.0.1:3300:3000"]);
     expect(config.services.api.environment).toEqual(source.services.api.environment);
     expect(config.volumes).toEqual(source.volumes);

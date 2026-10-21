@@ -105,6 +105,8 @@ docker compose ps
 curl http://localhost:3000/api/health
 ```
 
+MinIO 官方社区镜像与二进制下载源不再可用，仓库改为从官方源码构建原固定版本：服务端 `RELEASE.2025-04-22T22-12-26Z`，初始化和备份客户端 `RELEASE.2025-04-16T18-13-26Z`。构建固定提交、源码 SHA-256 和 Go 工具链，并校验原版本依赖未变化；不更换对象存储产品或数据卷。首次在线构建需要访问 GitHub、Go 依赖源和基础镜像仓库，耗时会增加。镜像内 `/licenses/` 保留许可声明，`/usr/share/minio-source/` 保留对应源码；服务器不能联网构建时使用完整离线镜像包。
+
 首次启动会自动执行 PostgreSQL 迁移、创建 MinIO Bucket、启用对象版本保护，并创建首位超级管理员。
 
 通过公司 HTTPS 网关打开 `https://正式域名/admin/login`，不要把初始管理员密码通过公网裸 HTTP 发送：

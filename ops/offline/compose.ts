@@ -7,6 +7,8 @@ export function offlineCompose(source: { services: Record<string, Service>; [key
         api: `wireless-canvas-server:${revision}`,
         worker: `wireless-canvas-server:${revision}`,
         backup: `wireless-canvas-backup:${revision}`,
+        minio: `wireless-canvas-minio:${revision}`,
+        "minio-init": `wireless-canvas-mc:${revision}`,
     };
     for (const [name, service] of Object.entries(result.services)) {
         if (service.build && !built[name]) throw new Error(`Unmapped build service: ${name}`);

@@ -21,6 +21,7 @@
     "content-disposition": "^3.0.0",
     "cookie-parser": "^1.4.7",
     "express": "^5.1.0",
+    "exifreader": "4.50.0",
     "file-type": "^22.2.0",
     "helmet": "^8.1.0",
     "ipaddr.js": "^2.5.0",

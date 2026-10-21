@@ -70,7 +70,7 @@ function runTool(tool: "ffmpeg" | "ffprobe", args: string[], maxBuffer: number):
 const toolLimits = ["-v", "error", "-max_alloc", "134217728", "-threads", "1"];
 const safeImageInput = ["-protocol_whitelist", "file,pipe", "-format_whitelist", "png_pipe,jpeg_pipe,webp_pipe"];
 
-async function inspect(file: string, mimeType: string): Promise<ImageMetadata> {
+async function inspect(file: string, mimeType: string, bytes: Uint8Array): Promise<ImageMetadata> {
   const output = await runTool("ffprobe", [...toolLimits, ...safeImageInput,
     "-show_entries", "format=format_name:stream=codec_type,width,height,pix_fmt", "-of", "json", file,
   ], 64 * 1024);
@@ -92,8 +92,8 @@ async function inspect(file: string, mimeType: string): Promise<ImageMetadata> {
   let orientation: ImageOrientationProbe;
   try { orientation = JSON.parse(orientationOutput.toString()); }
   catch { throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "无法验证图片显示方向；请先另存为正常方向 PNG 再处理"); }
-  if (hasNonIdentityImageOrientation(orientation)) {
-    throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "图片含旋转或镜像方向信息，无法安全对齐蒙版或转换格式；请先另存为正常方向 PNG，原始结果未被替换");
+  if (hasNonIdentityImageOrientation(orientation, bytes)) {
+    throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "图片含旋转、镜像或无法验证的方向信息，无法安全对齐蒙版或转换格式；请先另存为正常方向 PNG，原始结果未被替换");
   }
   return { width: image.width!, height: image.height!, pixelFormat: image.pix_fmt || "" };
 }
@@ -164,7 +164,7 @@ export async function processImageResult({ result, parameters, editInput }: Imag
       throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "后处理图片必须是非空且不超过 50 MiB 的 PNG、JPEG 或 WebP");
     }
     const file = await localFile(name, image.bytes);
-    return { file, mimeType, metadata: await inspect(file, mimeType) };
+    return { file, mimeType, metadata: await inspect(file, mimeType, image.bytes) };
   };
   const encode = async (pixels: Buffer, metadata: ImageMetadata, target: Format, quality?: number) => {
     const flattened = target === "jpeg" ? flattenWhite(pixels) : { pixels, changed: false };

@@ -78,7 +78,12 @@ services:
       retries: 20
     restart: unless-stopped
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    build:
+      context: .
+      dockerfile: ops/minio/Dockerfile
+      target: minio
+    image: wireless-canvas-minio:RELEASE.2025-04-22T22-12-26Z
+    pull_policy: build
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID}
@@ -92,7 +97,12 @@ services:
       retries: 20
     restart: unless-stopped
   minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    build:
+      context: .
+      dockerfile: ops/minio/Dockerfile
+      target: mc
+    image: wireless-canvas-mc:RELEASE.2025-04-16T18-13-26Z
+    pull_policy: build
     depends_on:
       minio:
         condition: service_healthy

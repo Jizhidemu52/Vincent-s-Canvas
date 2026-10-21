@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rmdir, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadView } from "exifreader";
 
 type ImageEditSource = { bytes: Uint8Array; mimeType: string; filename?: string };
 type ImageEditTarget = { protocol: string; modelId: string; operationType: string; workflow?: boolean };
@@ -17,8 +18,18 @@ type OrientationMetadata = {
 };
 export type ImageOrientationProbe = { frames?: OrientationMetadata[]; streams?: OrientationMetadata[] };
 
-/** Inspect FFprobe-decoded metadata, never parse EXIF bytes ourselves. Rotation alone misses mirrors. */
-export function hasNonIdentityImageOrientation(probe: ImageOrientationProbe) {
+/** Use original EXIF as well as decoder metadata; older FFprobe omits PNG eXIf. */
+export function hasNonIdentityImageOrientation(probe: ImageOrientationProbe, bytes: Uint8Array) {
+  try {
+    // Parse only the orientation, without XMP/GPS/thumbnail work or URL/file I/O.
+    const metadata = loadView(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), {
+      expanded: true, includeTags: { exif: ["Orientation"], file: ["FileType"] },
+    });
+    if (metadata.exif?.Orientation !== undefined && metadata.exif.Orientation.value !== 1) return true;
+  } catch {
+    // Invalid/unreadable metadata must not be mistaken for a normal direction.
+    return true;
+  }
   const identity = [65536, 0, 0, 0, 65536, 0, 0, 0, 1073741824];
   return [...(probe.frames || []), ...(probe.streams || [])].some(item => {
     for (const [key, value] of Object.entries(item.tags || {})) {
@@ -116,8 +127,8 @@ async function inspectEditImage(source: ImageEditSource) {
     if (/(?:9|10|12|14|16|48|64)(?:le|be)?$/.test(image.pix_fmt || "")) {
       throw new ImageEditInputError("严格蒙版编辑仅支持 8 位（8-bit）原图和蒙版，不自动降低高位深图片精度；尚未提交生成");
     }
-    if (hasNonIdentityImageOrientation(decoded)) {
-      throw new ImageEditInputError("原图或蒙版含旋转或镜像方向信息，无法保证蒙版坐标一致；请先另存为正常方向 PNG 再编辑，尚未提交生成");
+    if (hasNonIdentityImageOrientation(decoded, source.bytes)) {
+      throw new ImageEditInputError("原图或蒙版含旋转、镜像或无法验证的方向信息，无法保证蒙版坐标一致；请先另存为正常方向 PNG 再编辑，尚未提交生成");
     }
     return { width: image.width!, height: image.height!, pixelFormat: image.pix_fmt || "" };
   } finally {

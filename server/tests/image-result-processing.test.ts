@@ -4,7 +4,7 @@ import * as childProcess from "node:child_process";
 import { createRequire } from "node:module";
 import ts from "typescript";
 import { processImageResult, ImageResultProcessingError } from "../src/image-result-processing";
-import { prepareImageEditInput } from "../src/image-edit-input";
+import { hasNonIdentityImageOrientation, prepareImageEditInput } from "../src/image-edit-input";
 
 const ffmpeg = process.env.FFMPEG_PATH || "ffmpeg";
 function codec(args: string[], input: Uint8Array) {
@@ -47,6 +47,20 @@ const orientedFixtures = [
 ].map(({ base64, ...metadata }) => ({ ...metadata, bytes: Buffer.from(base64, "base64") }));
 
 describe("local image result processing", () => {
+  test("reads original EXIF when ffprobe omits direction, including a bounded buffer view", () => {
+    // FFmpeg 6.1 returns exactly these empty objects for PNG eXIf orientation.
+    const silentProbe = { frames: [{}], streams: [{}] };
+    for (const fixture of orientedFixtures) {
+      expect(hasNonIdentityImageOrientation(silentProbe, fixture.bytes)).toBe(fixture.orientation !== 1);
+      const padded = Buffer.concat([Buffer.alloc(17, 0xff), fixture.bytes, Buffer.alloc(13, 0xff)]);
+      expect(hasNonIdentityImageOrientation(silentProbe, padded.subarray(17, 17 + fixture.bytes.length))).toBe(fixture.orientation !== 1);
+    }
+    expect(hasNonIdentityImageOrientation(silentProbe, original.bytes)).toBe(false);
+    expect(hasNonIdentityImageOrientation(silentProbe, new Uint8Array([1, 2, 3]))).toBe(true);
+    // Byte-level identity must not hide a decoder-reported transform.
+    expect(hasNonIdentityImageOrientation({ frames: [{ side_data_list: [{ rotation: 180 }] }] }, original.bytes)).toBe(true);
+  });
+
   test("fixed inputs retain exact RGBA values, including transparent colors and feathered alpha", () => {
     expect([...rgba(original)]).toEqual([10, 20, 30, 255, 77, 88, 99, 0, 1, 2, 3, 255, 200, 0, 100, 64]);
     expect([...rgba(generated)]).toEqual([250, 240, 230, 255, 0, 1, 2, 255, 90, 80, 70, 200, 0, 200, 100, 192]);

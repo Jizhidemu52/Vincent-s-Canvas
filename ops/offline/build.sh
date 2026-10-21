@@ -5,11 +5,13 @@ test "$(uname -m)" = x86_64 || { echo 'Build on Linux x86_64'; exit 1; }
 revision=$(git rev-parse HEAD)
 out=${1:?Usage: bash ops/offline/build.sh NEW_ABSOLUTE_OUTPUT_DIRECTORY}
 [[ "$out" = /* ]] || { echo 'Output must be an absolute new directory'; exit 1; }
-bun test ops/offline/compose.test.ts
+bun test ./ops/offline/compose.test.ts
 bun ops/offline/prepare.ts "$revision" "$out"
 docker build --platform linux/amd64 -t "wireless-canvas-web:$revision" -f Dockerfile .
 docker build --platform linux/amd64 -t "wireless-canvas-server:$revision" -f server/Dockerfile .
 docker build --platform linux/amd64 -t "wireless-canvas-backup:$revision" -f ops/backup/Dockerfile .
+docker build --platform linux/amd64 --target minio -t "wireless-canvas-minio:$revision" -f ops/minio/Dockerfile .
+docker build --platform linux/amd64 --target mc -t "wireless-canvas-mc:$revision" -f ops/minio/Dockerfile .
 mapfile -t images < "$out/images.txt"
 for ref in "${images[@]}"; do
   case "$ref" in wireless-canvas-*) ;; *) docker pull --platform linux/amd64 "$ref" ;; esac
