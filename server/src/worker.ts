@@ -24,6 +24,7 @@ import {
 import { recordAssetEvent } from "./asset-events";
 import { classifyDesignDirection } from "./design-direction";
 import { ApiMartImageProviderFailure, runApiMartImageTask } from "./apimart-image";
+import { downloadApiMartImageResult } from "./apimart-image-result";
 import { videoSourceMetadata, type ProviderVideoSource } from "./video-models";
 import { probeMediaBytes } from "./media-probe";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
@@ -378,7 +379,7 @@ async function executeApiMartImage(
       if (!persisted.rows[0]) throw new VideoSubmissionClaimLost("原上游任务身份已改变");
     },
   });
-  return Promise.all(outputUrls.map(url => fetchProviderResult(url)));
+  return Promise.all(outputUrls.map(url => downloadApiMartImageResult(url, 60_000)));
 }
 
 async function executeOpenAiAudio(

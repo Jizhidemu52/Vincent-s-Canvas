@@ -13,6 +13,7 @@ import { requireToolKey, resolveConfiguredToolModel } from "./tool-runtime";
 
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
+export type ImageSubmissionModel = { modelConfigId: string; modelName: string };
 export type ImageGenerationModel = PublicModel;
 export type QueuedTaskProgress = {
     taskId: string;
@@ -26,7 +27,7 @@ export type QueuedTaskProgress = {
     estimateReason: string | null;
     retryAfterSeconds: number | null;
 };
-export type QueuedTask = { id: string; requestId: string; operationType?: string; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
+export type QueuedTask = { id: string; requestId: string; modelConfigId?: string; operationType?: string; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
 export class QueuedTaskPausedError extends Error {
     readonly taskId: string;
     readonly canRecover: boolean;
@@ -98,7 +99,7 @@ export function createImageTaskRequests(input: {
     }));
 }
 
-export async function requestQueuedImages(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
+export async function requestQueuedImages(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[], model?: ImageSubmissionModel) => void | Promise<void> }) {
     input.signal?.throwIfAborted();
     const ownerId = useUserStore.getState().user?.id;
     if (!ownerId) throw new Error("当前账号不可用");
@@ -164,12 +165,13 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
     if (rejected) throw rejected.reason instanceof Error ? rejected.reason : new Error("任务提交失败");
     const ids = submitted.map((result) => (result as PromiseFulfilledResult<{ task: { id: string } }>).value.task.id);
     try {
-        await input.onSubmitted?.(ids);
+        await input.onSubmitted?.(ids, { modelConfigId: model.id, modelName: model.name });
         void refreshSessionBalance();
         const tasks = await waitForTasks(ids, input.signal, undefined, true);
         const failed = tasks.find((task) => task.status === "failed" || task.status === "cancelled");
         if (failed) throw new QueuedTaskFailedError(failed);
-        return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id })));
+        return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id,
+            sourceModelConfigId: task.modelConfigId || model.id, sourceModelName: task.modelConfigId && task.modelConfigId !== model.id ? task.modelConfigId : model.name })));
     } catch (error) {
         if (input.signal?.aborted && (input.cancelOnAbort?.() ?? true)) await cancelTasks(ids);
         throw error;

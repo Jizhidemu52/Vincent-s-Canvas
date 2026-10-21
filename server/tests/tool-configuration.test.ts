@@ -40,7 +40,7 @@ function fixture() {
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: flags.get(String(values[0])) }] };
       if (sql.startsWith("INSERT INTO tool_api_configurations")) {
         const [key, modelConfigId, enabled, , creditCostOverride, rmbCostOverride] = values as [ToolConfiguration["toolKey"], string | null, boolean, unknown, number | null, number | null];
-        const row = { toolKey: key, modelConfigId, enabled, creditCostOverride, rmbCostOverride, configurationVersion: (configurations.get(key)?.configurationVersion ?? 0) + 1 };
+        const row = { toolKey: key, modelConfigId, enabled, creditCostOverride, rmbCostOverride, configurationVersion: (configurations.get(key)?.configurationVersion ?? 0) + 1, useDefaultModel: false };
         configurations.set(key, row);
         return { rows: [row] };
       }
@@ -50,6 +50,11 @@ function fixture() {
         let selected = values.length ? models.filter(model => model.id === values[0] || model.modelId === values[0]) : models;
         if (sql.includes("m.enabled=true")) selected = selected.filter(model => model.enabled && model.providerEnabled && (!model.workflowConfigId || model.workflowEnabled));
         return { rows: selected };
+      }
+      if (sql.startsWith("UPDATE model_configs SET")) {
+        const model = models.find(item => item.id === values[10]);
+        if (model) model.capabilities = values[5] as string[];
+        return { rows: [] };
       }
       if (sql.startsWith("INSERT INTO audit_logs")) return { rows: [] };
       if (sql.startsWith("INSERT INTO tasks")) { tasks.set(String(values[1]), { id: String(values[0]) }); return { rows: [{ id: values[0] }] }; }
@@ -98,24 +103,78 @@ async function serve(state = fixture(), role = "super_admin") {
 const post = (url: string, body: unknown, method = "POST") => fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 describe("formal catalog configuration", () => {
-  test("chat model belongs only to gpt-chat while canvas switches and prices remain independent", async () => {
+  test("new scene defaults agree across public/admin/task resolution and explicit clearing persists", async () => {
     const state = fixture();
-    state.bind("gpt-chat");
-    state.bind("canvas-chat", { modelConfigId: secondModelId, creditCostOverride: 7, rmbCostOverride: 0.5 });
+    state.bind("creative-local-restyle");
+    state.bind("creative-fabric-change", { modelConfigId: null, creditCostOverride: 0, rmbCostOverride: 0 });
     const { url } = await serve(state);
     for (const path of ["/admin/tool-configurations", "/models"]) {
       const result = await (await fetch(`${url}${path}`)).json();
-      expect(result.tools.find((item: any) => item.toolKey === "canvas-chat")).toMatchObject({ modelConfigId: modelId, creditCostOverride: 7, rmbCostOverride: 0.5 });
+      expect(result.tools.find((item: any) => item.toolKey === "creative-fabric-change")).toMatchObject({ modelConfigId: modelId, creditCostOverride: 0, configurationVersion: 1, modelDefaultSourceToolKey: "creative-local-restyle" });
       if (path === "/models") expect(result.models.some((item: any) => item.id === modelId)).toBe(true);
     }
-    const saved = await post(`${url}/admin/tool-configurations/canvas-chat`, { modelConfigId: secondModelId, enabled: false, creditCostOverride: 9, rmbCostOverride: 0 }, "PUT");
+    expect(await resolveToolExecution(state.db, { operationType: "inpaint", toolKey: "creative-fabric-change" })).toMatchObject({ modelConfigId: modelId, creditCostOverride: 0, configurationVersion: 1 });
+    await expect(resolveToolExecution(state.db, { operationType: "inpaint", toolKey: "creative-fabric-change", modelConfigId: secondModelId })).rejects.toMatchObject({ code: "TOOL_MODEL_CHANGED" });
+    state.models[0]!.providerEnabled = false;
+    await expect(resolveToolExecution(state.db, { operationType: "inpaint", toolKey: "creative-fabric-change" })).rejects.toMatchObject({ code: "MODEL_DISABLED" });
+    state.models[0]!.providerEnabled = true;
+    // Include a first admin INSERT: version 1 must not look like an untouched seed row.
+    for (const toolKey of ["creative-fabric-change", "creative-pattern-fill"]) {
+      const saved = await post(`${url}/admin/tool-configurations/${toolKey}`, { modelConfigId: null, enabled: true, creditCostOverride: 0, rmbCostOverride: 0 }, "PUT");
+      expect(saved.status).toBe(200);
+      const result = await (await fetch(`${url}/models`)).json();
+      expect(result.tools.find((item: any) => item.toolKey === toolKey).modelConfigId).toBeNull();
+      expect(await resolveToolExecution(state.db, { operationType: "inpaint", toolKey, modelConfigId: secondModelId })).toMatchObject({ modelConfigId: secondModelId });
+    }
+  });
+
+  test("all 16 new AI scenes enqueue through the existing task and billing pipeline", async () => {
+    const state = fixture();
+    state.bind("image-edit", { creditCostOverride: 99 });
+    state.bind("image");
+    const { url } = await serve(state);
+    const added = toolDefinitions.filter(tool => ["creative-series-extension", "creative-bestseller-proposal", "creative-detail-to-style", "creative-fabric-to-style", "creative-reference-to-style", "creative-style-fusion", "creative-outfit-design", "creative-apply-pattern", "creative-pattern-fill", "creative-fabric-change", "creative-remove-decoration", "creative-sketch-to-style", "creative-pattern-create", "creative-pattern-fusion", "creative-seamless-pattern", "creative-pattern-layers"].includes(tool.toolKey));
+    expect(added).toHaveLength(16);
+    for (const tool of added) {
+      const response = await post(`${url}/tasks`, { requestId: `new-${tool.toolKey}`, projectId: "creative", operationType: tool.operationType, toolKey: tool.toolKey, prompt: "fixture only", sourceUrls: tool.operationType === "inpaint" ? ["source"] : [] });
+      expect(response.status).toBe(201);
+    }
+    expect(state.queues).toBe(16);
+    expect(state.reservations).toHaveLength(16);
+    expect(state.reservations.map(values => (values[6] as any).toolKey).sort()).toEqual(added.map(tool => tool.toolKey).sort());
+    expect(state.reservations.every(values => (values[6] as any).creditCostOverride === null)).toBe(true);
+    expect(() => normalizeTaskTool({ operationType: "inpaint", toolKey: "creative-pattern-vectorization" })).toThrow("未知功能");
+  });
+
+  test.each(["canvas-chat", "creative-planner"] as const)("chat model belongs only to gpt-chat while %s switches and prices remain independent", async chatTool => {
+    const state = fixture();
+    state.bind("gpt-chat");
+    state.bind(chatTool, { modelConfigId: secondModelId, creditCostOverride: 7, rmbCostOverride: 0.5 });
+    const { url } = await serve(state);
+    for (const path of ["/admin/tool-configurations", "/models"]) {
+      const result = await (await fetch(`${url}${path}`)).json();
+      expect(result.tools.find((item: any) => item.toolKey === chatTool)).toMatchObject({ modelConfigId: modelId, creditCostOverride: 7, rmbCostOverride: 0.5 });
+      if (path === "/models") expect(result.models.some((item: any) => item.id === modelId)).toBe(true);
+    }
+    const saved = await post(`${url}/admin/tool-configurations/${chatTool}`, { modelConfigId: secondModelId, enabled: false, creditCostOverride: 9, rmbCostOverride: 0 }, "PUT");
     expect(saved.status).toBe(200);
     expect((await saved.json()).tool).toMatchObject({ modelConfigId: modelId, enabled: false, creditCostOverride: 9 });
-    expect(state.configurations.get("canvas-chat")).toMatchObject({ modelConfigId: null, enabled: false, creditCostOverride: 9 });
+    expect(state.configurations.get(chatTool)).toMatchObject({ modelConfigId: null, enabled: false, creditCostOverride: 9 });
     expect(state.configurations.get("gpt-chat")?.modelConfigId).toBe(modelId);
     await post(`${url}/admin/tool-configurations/gpt-chat`, { modelConfigId: secondModelId, enabled: true, creditCostOverride: null, rmbCostOverride: null }, "PUT");
     const refreshed = await (await fetch(`${url}/models`)).json();
-    expect(refreshed.tools.find((item: any) => item.toolKey === "canvas-chat")).toMatchObject({ modelConfigId: secondModelId, enabled: false, creditCostOverride: 9 });
+    expect(refreshed.tools.find((item: any) => item.toolKey === chatTool)).toMatchObject({ modelConfigId: secondModelId, enabled: false, creditCostOverride: 9 });
+  });
+
+  test("administrator can preserve vision and tool capabilities on an existing LLM", async () => {
+    const { url, state } = await serve();
+    const changed = await post(`${url}/admin/models/${modelId}`, { capabilities: ["chat", "vision", "tools"] }, "PATCH");
+    expect(changed.status).toBe(200);
+    expect((await changed.json()).model.capabilities).toEqual(["chat", "vision", "tools"]);
+    expect(state.statements.find(item => item.sql.startsWith("UPDATE model_configs SET"))?.values[5]).toEqual(["chat", "vision", "tools"]);
+    const rejected = await post(`${url}/admin/models/${modelId}`, { capabilities: ["unknown-capability"] }, "PATCH");
+    expect(rejected.status).toBe(400);
+    expect(state.statements.filter(item => item.sql.startsWith("UPDATE model_configs SET"))).toHaveLength(1);
   });
 
   test.each(["designer", "department_admin"])("%s cannot mutate the shared chat default", async role => {
@@ -179,17 +238,17 @@ describe("formal catalog configuration", () => {
     expect((await post(`${url}/admin/tool-configurations/image-edit`, { modelConfigId: modelId, enabled: true, creditCostOverride: -1, rmbCostOverride: 0 }, "PUT")).status).toBe(400);
   });
 
-  test("migration constraints and non-destructive seeds exactly cover the shared catalog", () => {
+  test("legacy migration seeds remain complete and non-destructive before creative expansion", () => {
     const original = readFileSync(new URL("../src/migrations/026_formal_module_configuration.sql", import.meta.url), "utf8");
     const migration = readFileSync(new URL("../src/migrations/027_midjourney_blend_module.sql", import.meta.url), "utf8");
     const keys = (value: string) => [...value.matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
     const toolCheck = /CHECK \(tool_key IN \(([\s\S]*?)\)\)/.exec(migration)![1]!;
     const moduleCheck = /CHECK \(module_key IN \(([\s\S]*?)\)\)/.exec(migration)![1]!;
     const arrays = [...original.matchAll(/unnest\(ARRAY\[([\s\S]*?)\]\)/g)];
-    expect(keys(toolCheck)).toEqual(toolDefinitions.map(tool => tool.toolKey).sort());
-    expect(keys(moduleCheck)).toEqual([...moduleKeys].sort());
-    expect(keys(arrays[0]![1]!)).toEqual(moduleKeys.filter(key => key !== "midjourney-blend").sort());
-    expect(keys(arrays[1]![1]!)).toEqual(toolDefinitions.map(tool => tool.toolKey).filter(key => key !== "midjourney-blend").sort());
+    expect(keys(toolCheck).every(key => toolDefinitions.some(tool => tool.toolKey === key))).toBe(true);
+    expect(keys(moduleCheck).every(key => moduleKeys.some(moduleKey => moduleKey === key))).toBe(true);
+    expect(keys(arrays[0]![1]!)).toEqual(keys(moduleCheck).filter(key => key !== "midjourney-blend"));
+    expect(keys(arrays[1]![1]!)).toEqual(keys(toolCheck).filter(key => key !== "midjourney-blend"));
     expect(migration).toContain("ON CONFLICT(module_key) DO NOTHING");
     expect(migration).toContain("ON CONFLICT(tool_key) DO NOTHING");
     expect(original).toContain("ALTER COLUMN model_config_id DROP NOT NULL");
@@ -202,11 +261,12 @@ describe("authoritative scoped execution", () => {
     const state = fixture();
     state.bind("gpt-chat", { creditCostOverride: 2 });
     state.bind("canvas-chat", { modelConfigId: secondModelId, creditCostOverride: 7, configurationVersion: 5 });
-    for (const toolKey of [undefined, "gpt-chat", "canvas-chat"]) {
+    state.bind("creative-planner", { modelConfigId: secondModelId, creditCostOverride: 11, configurationVersion: 3 });
+    for (const toolKey of [undefined, "gpt-chat", "canvas-chat", "creative-planner"]) {
       for (const selected of [undefined, secondModelId, state.models[1]!.modelId, "forged-model"]) {
         const result = await resolveToolExecution(state.db, { operationType: "chat", toolKey, modelId: selected });
         expect(result.modelConfigId).toBe(modelId);
-        expect(result.creditCostOverride).toBe(toolKey === "canvas-chat" ? 7 : 2);
+        expect(result.creditCostOverride).toBe(toolKey === "canvas-chat" ? 7 : toolKey === "creative-planner" ? 11 : 2);
       }
     }
     state.models[1]!.modelId = state.models[0]!.modelId;
@@ -217,10 +277,10 @@ describe("authoritative scoped execution", () => {
     expect((await resolveToolExecution(state.db, { operationType: "chat", toolKey: "canvas-chat" })).modelConfigId).toBe(secondModelId);
   });
 
-  test("an absent or unavailable shared chat model never falls back to client or canvas choices", async () => {
+  test.each(["canvas-chat", "creative-planner"] as const)("an absent or unavailable shared chat model never falls back to client or %s choices", async chatTool => {
     const state = fixture();
-    const input = { operationType: "chat", toolKey: "canvas-chat", modelId: secondModelId };
-    state.bind("canvas-chat", { modelConfigId: secondModelId });
+    const input = { operationType: "chat", toolKey: chatTool, modelId: secondModelId };
+    state.bind(chatTool, { modelConfigId: secondModelId });
     await expect(resolveToolExecution(state.db, input)).rejects.toMatchObject({ code: "CHAT_MODEL_NOT_CONFIGURED", status: 503 });
     state.bind("gpt-chat");
     for (const field of ["enabled", "providerEnabled"] as const) {

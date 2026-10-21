@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { requestQueuedImages } from "../src/services/api/generation-tasks";
+import { requestQueuedImages, type ImageSubmissionModel } from "../src/services/api/generation-tasks";
 import { useUserStore } from "../src/stores/use-user-store";
 import type { ReferenceImage } from "../src/types/image";
+import { generatePlannedPatternLayer } from "../src/pages/creative/pattern-layers-model";
 
 const originalFetch = globalThis.fetch;
 const globals = globalThis as unknown as Record<string, unknown>;
@@ -22,6 +23,51 @@ const baseInput = { modelId: "gpt-image-2.5", prompt: "保留中文字，调整�
 const reference: ReferenceImage = { id: "reference-1", name: "reference.png", type: "image/png", dataUrl: "data:image/png;base64,QQ==" };
 
 describe("queued image preparation cancellation", () => {
+    test.each(["upload", "accepted"])("a pattern workspace abandoned during %s blocks only unsubmitted work", async stage => {
+        globals.window = { location: { pathname: "/creative/pattern-layers" } };
+        let current = true;
+        let saved = false;
+        const taskPosts: RequestInit[] = [];
+        const accepted: string[] = [];
+        const cancellationRequests: string[] = [];
+        globalThis.fetch = (async (url, init) => {
+            const path = String(url);
+            if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [model] });
+            if (path === "/api/assets/upload-request") {
+                expect(saved).toBe(true);
+                if (stage === "upload") current = false;
+                return Response.json({ assetId: "pattern-source", uploadUrl: null });
+            }
+            if (path === "/api/tasks" && init?.method === "POST") {
+                taskPosts.push(init);
+                if (stage === "accepted") current = false;
+                return Response.json({ task: { id: "original-pattern-task" } });
+            }
+            if (path.endsWith("/cancel")) cancellationRequests.push(path);
+            if (path === "/api/tasks/original-pattern-task") return Response.json({ task: { id: "original-pattern-task", requestId: "pattern-request:0", status: "success", resultUrls: ["/api/assets/pattern-mask/content"], failureReason: null } });
+            if (path === "/api/auth/session") return Response.json({}, { status: 401 });
+            throw new Error(`Unexpected request ${path}`);
+        }) as typeof fetch;
+        const result = generatePlannedPatternLayer({
+            sourceId: reference.id, targetLabel: "红花", imageModelId: model.id, imageModelName: model.name, imageRequestId: "pattern-request",
+            isCurrent: () => current,
+            analyze: async () => ({ summary: "提取红花", prompt: "只输出红花的黑白蒙版", observations: [], preserve: [], warnings: [], modelId: "planner", modelName: "Planner", requestId: "plan-request" }),
+            persist: async () => { saved = true; },
+            generate: (trace, onSubmissionStarted) => requestQueuedImages({ ...baseInput, tool: "creative-pattern-layers", prompt: trace.plan.prompt, requestId: trace.imageRequestId, references: [reference], onSubmissionStarted, onSubmitted: ids => { accepted.push(...ids); } }),
+        });
+        if (stage === "upload") {
+            await expect(result).rejects.toThrow("当前分层工程已变化");
+            expect(taskPosts).toHaveLength(0);
+            expect(accepted).toEqual([]);
+        } else {
+            expect((await result).result[0]?.sourceTaskId).toBe("original-pattern-task");
+            expect(taskPosts).toHaveLength(1);
+            expect(taskPosts[0]?.signal).toBeUndefined();
+            expect(accepted).toEqual(["original-pattern-task"]);
+        }
+        expect(cancellationRequests).toEqual([]);
+    });
+
     test("an already-aborted user turn does not even resolve the model", async () => {
         const controller = new AbortController();
         controller.abort();
@@ -83,6 +129,7 @@ describe("queued image preparation cancellation", () => {
         const controller = new AbortController();
         const taskPosts: RequestInit[] = [];
         let submittedCalls = 0;
+        let submittedModel: ImageSubmissionModel | undefined;
         globalThis.fetch = (async (url, init) => {
             const path = String(url);
             if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [model] });
@@ -94,12 +141,14 @@ describe("queued image preparation cancellation", () => {
             if (path === "/api/auth/session") return Response.json({ message: "no session in test" }, { status: 401 });
             throw new Error(`unexpected request ${path}`);
         }) as typeof fetch;
-        const result = await requestQueuedImages({ ...baseInput, signal: controller.signal, onSubmitted: () => { submittedCalls += 1; } });
+        const result = await requestQueuedImages({ ...baseInput, signal: controller.signal, onSubmitted: (ids, actualModel) => { expect(ids).toEqual(["task-1"]); submittedCalls += 1; submittedModel = actualModel; } });
         expect(taskPosts).toHaveLength(1);
         expect(taskPosts[0]!.signal).toBe(controller.signal);
         expect(submittedCalls).toBe(1);
+        expect(submittedModel).toEqual({ modelConfigId: model.id, modelName: model.name });
         expect(result[0]!.sourceTaskId).toBe("task-1");
         expect(result[0]!.dataUrl).toBe("/api/assets/result-1/content");
+        expect(result[0]).toMatchObject({ sourceModelConfigId: model.id, sourceModelName: model.name });
     });
 
     test("the saved requestId reaches the task POST and polling waits for onSubmitted persistence", async () => {

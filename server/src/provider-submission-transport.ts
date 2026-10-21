@@ -67,7 +67,9 @@ function submissionError(message: string, details: { code: string; phase: string
   return Object.assign(new Error(`${description}（${status}）`), details);
 }
 
-/** A submission-only transport. Parsing, polling and downloads stay outside it.
+/** Transport for one provider request, including an unauthenticated result GET.
+ * Callers own parsing, polling and result materialization; this transport never
+ * decides to start another generation after a request has been sent.
  * HTTPS uses a fresh native Node socket with verified pre-HTTP TLS phases.
  * Explicit proxy/NO_PROXY environment settings are respected; redirects and
  * fallback from a failing configured proxy to direct access are not allowed.

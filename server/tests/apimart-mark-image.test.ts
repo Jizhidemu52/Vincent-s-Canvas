@@ -136,7 +136,7 @@ describe("Mark APIMart image contracts", () => {
     let calls = 0;
     await runApiMartImageTask({ ...base, upstreamTaskId: "task_saved", submissionStarted: true, sourceDataUrls: ["unavailable-source"], parameters: { quality: "old-invalid-value" },
       beforeSubmit: async () => { throw new Error("Must not reclaim"); }, onSubmitted: async () => { throw new Error("Must not resubmit"); },
-    }, { sleep: async () => {}, fetch: async (url, init) => { calls++; expect(url).toEndWith("/tasks/task_saved"); expect(init?.method).not.toBe("POST"); return json(completed); } });
+    }, { sleep: async () => {}, fetch: async (url, init) => { calls++; expect(url).toEndWith("/tasks/task_saved"); expect(init?.method).toBe("GET"); expect(init?.body).toBeUndefined(); expect(init?.redirect).toBe("error"); return json(completed); } });
     expect(calls).toBe(1);
   });
 

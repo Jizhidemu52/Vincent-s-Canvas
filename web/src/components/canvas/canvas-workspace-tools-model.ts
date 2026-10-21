@@ -31,9 +31,18 @@ const embeddedModules: Partial<Record<ModuleKey, readonly ModuleKey[]>> = {
     canvas: moduleDefinitions.filter(item => item.parent === "canvas").map(item => item.moduleKey),
     team: ["performance"],
 };
+// Planning is a shared step inside every AI creative scene, with no standalone page.
+// Local vector workspaces do not use the planner.
+const creativePlannerHosts = new Set(moduleDefinitions
+    .filter(item => item.parent === "creative" && item.kind === "ai" && item.moduleKey.startsWith("creative-") && item.moduleKey !== "creative-planner")
+    .map(item => item.moduleKey));
 
 function moduleCapabilities(moduleKey: ModuleKey | undefined, access: WorkspaceToolAccess) {
-    return (moduleKey ? embeddedModules[moduleKey] ?? [] : [])
+    const capabilities: readonly ModuleKey[] = moduleKey ? [
+        ...(embeddedModules[moduleKey] ?? []),
+        ...(creativePlannerHosts.has(moduleKey) ? ["creative-planner" as const] : []),
+    ] : [];
+    return capabilities
         .filter(key => isModuleAvailable(access.flags, access.bindings, key))
         // Photo sampling lives inside the standard-color dialog.
         .filter(key => key !== "photo-color-picker" || isModuleAvailable(access.flags, access.bindings, "standard-colors"))

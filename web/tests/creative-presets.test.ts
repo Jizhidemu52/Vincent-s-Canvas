@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { buildCreativePresetHref, CREATIVE_REQUIREMENT_PLACEHOLDER, creativePresetGroups, creativePresets, getCreativePreset } from "@/lib/creative-presets";
 
 describe("creative design presets", () => {
-    test("offers nine uniquely addressable presets across the three design groups", () => {
-        expect(creativePresets).toHaveLength(9);
+    test("offers 27 uniquely addressable presets with nine in each design group", () => {
+        expect(creativePresets).toHaveLength(27);
         expect(new Set(creativePresets.map((preset) => preset.id)).size).toBe(creativePresets.length);
         expect(creativePresetGroups.map((group) => group.title)).toEqual(["新款设计", "改款设计", "图案设计"]);
         for (const preset of creativePresets) {
@@ -13,8 +13,13 @@ describe("creative design presets", () => {
             expect(creativePresetGroups.some((group) => group.id === preset.group)).toBe(true);
             expect(getCreativePreset(preset.id)).toBe(preset);
             expect(["image-generation", "image-edit"]).toContain(preset.tool);
-            expect(Boolean(preset.garment) !== Boolean(preset.prompt)).toBe(true);
+            if (preset.engine === "ai") expect(Boolean(preset.garment) !== Boolean(preset.prompt)).toBe(true);
+            else expect(preset.prompt).toBeUndefined();
         }
+        for (const group of creativePresetGroups) expect(creativePresets.filter(preset => preset.group === group.id)).toHaveLength(9);
+        expect(creativePresets.filter(preset => preset.engine === "ai")).toHaveLength(24);
+        expect(creativePresets.filter(preset => preset.engine === "vector").map(preset => preset.id)).toEqual(["sketch-vectorization", "pattern-vectorization"]);
+        expect(creativePresets.filter(preset => preset.engine === "layers").map(preset => preset.id)).toEqual(["pattern-layers"]);
     });
 
     test.each([null, "", "unknown", "constructor", "__proto__"])("unknown identifier %j cannot select a preset", (id) => {
@@ -45,7 +50,7 @@ describe("creative design presets", () => {
 
     test("tasks requiring user choices expose the same explicit placeholder without inventing a garment", () => {
         const required = creativePresets.filter((preset) => preset.prompt?.includes(CREATIVE_REQUIREMENT_PLACEHOLDER));
-        expect(required.map((preset) => preset.id)).toEqual(["text-to-style", "pattern-colorway", "pattern-craft"]);
+        expect(required.map((preset) => preset.id).sort()).toEqual(["text-to-style", "pattern-colorway", "pattern-craft"].sort());
         expect(getCreativePreset("text-to-style")!.prompt).not.toMatch(/连衣裙|衬衫|夹克|西装|圆领|长袖/);
     });
 

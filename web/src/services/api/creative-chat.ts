@@ -20,7 +20,7 @@ export function assertCreativeChatReferenceSource(value: string, origin = typeof
     if (url.origin !== (origin || fallbackOrigin) || !/^\/api\/assets\/[^/]+\/content$/.test(url.pathname) || url.search || url.hash || url.username || url.password) throw new Error("创作参考图仅支持当前站点素材，请先上传外部图片");
 }
 
-async function createPlanningPreview(reference: ReferenceImage, signal?: AbortSignal): Promise<ReferenceImage> {
+export async function createPlanningPreview(reference: ReferenceImage, signal?: AbortSignal): Promise<ReferenceImage> {
     signal?.throwIfAborted();
     assertCreativeChatReferenceSource(reference.dataUrl);
     const dataUrl = await imageToDataUrl(reference);

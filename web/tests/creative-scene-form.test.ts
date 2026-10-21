@@ -2,9 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SceneFields, SceneUploads } from "@/pages/creative/scene-form";
-import { addSceneColor, buildScenePrompt, cloneSceneForm, createSceneForm, getSceneColorSelection, getSceneSlots, removeSceneColor, sceneSummaries, setSceneColor, validateSceneForm, type SceneForm } from "@/pages/creative/scene-form-model";
+import { addSceneColor, buildScenePrompt, cloneSceneForm, createSceneForm, getSceneColorSelection, getSceneSlots, removeSceneColor, sceneSummaries, SCENE_SLOT_IDS, setSceneColor, supportsSceneSelection, validateSceneForm, type SceneForm } from "@/pages/creative/scene-form-model";
 import type { StandardColorSelection } from "@/lib/standard-colors";
 import type { ReferenceImage } from "@/types/image";
+import { creativePresets } from "@/lib/creative-presets";
 
 const primary: ReferenceImage = { id: "main", name: "主体.png", type: "image/png", dataUrl: "data:image/png;base64,cHJpbWFyeQ==" };
 const secondary: ReferenceImage = { id: "reference", name: "参考.png", type: "image/png", dataUrl: "data:image/png;base64,c2Vjb25kYXJ5" };
@@ -93,8 +94,8 @@ describe("standard color selections for clothing photos", () => {
 });
 
 describe("creative scene input roles", () => {
-    test("offers nine scene summaries and independent editable defaults", () => {
-        expect(Object.keys(sceneSummaries)).toEqual(sceneIds);
+    test("offers 27 scene summaries and independent editable defaults", () => {
+        expect(Object.keys(sceneSummaries).sort()).toEqual(creativePresets.map(preset => preset.id).sort());
         const original = createSceneForm("garment-colorway");
         original.colors.push("#FFFFFF");
         expect(createSceneForm("garment-colorway").colors).toHaveLength(3);
@@ -321,5 +322,154 @@ describe("specialized form presentation", () => {
         expect(markup).toContain('aria-label="移除图案图"');
         const controls = render(true).match(/<(?:input|button)\b[^>]*>/g) ?? [];
         expect(controls.every((control) => control.includes('disabled=""'))).toBe(true);
+    });
+});
+
+describe("expanded creative design workflows", () => {
+    const allImages = { primary, secondary, tertiary: { ...secondary, id: "third" }, quaternary: { ...secondary, id: "fourth" } };
+    const validForm = (sceneId: string, patch: Partial<SceneForm> = {}) => formFor(sceneId, { description: "保留核心元素，设计协调的新方案", category: "衬衫", targetStyle: "简约通勤", change: "改为荷叶领", ...patch });
+
+    test("all 24 AI workflows validate and produce different prompts; local tools do not submit prompts", () => {
+        const prompts = creativePresets.filter(preset => preset.engine === "ai").map(preset => {
+            const form = validForm(preset.id);
+            expect(validateSceneForm(preset.id, form, allImages)).toBeNull();
+            const prompt = buildScenePrompt(preset.id, form);
+            expect(prompt.length).toBeGreaterThan(100);
+            return prompt;
+        });
+        expect(new Set(prompts).size).toBe(24);
+        for (const preset of creativePresets.filter(preset => preset.engine !== "ai")) {
+            expect(buildScenePrompt(preset.id, validForm(preset.id))).toBe("");
+        }
+    });
+
+    test("series references and fabric references preserve all four ordered roles", () => {
+        for (const sceneId of ["series-extension", "bestseller-proposal"]) {
+            const form = validForm(sceneId, { referenceCount: 4, conceptCount: 9 });
+            expect(getSceneSlots(sceneId, form).map(slot => slot.id)).toEqual([...SCENE_SLOT_IDS]);
+            expect(validateSceneForm(sceneId, form, images)).toContain("系列参考图 3");
+            expect(buildScenePrompt(sceneId, form)).toContain("图内清楚展示 9");
+            expect(buildScenePrompt(sceneId, form)).toContain("不是 9 个独立文件");
+            expect(validateSceneForm(sceneId, { ...form, referenceCount: 5 }, allImages)).toContain("1–4");
+            expect(validateSceneForm(sceneId, { ...form, conceptCount: 5 }, allImages)).toContain("款数");
+        }
+        const fabric = validForm("fabric-change", { fabricCount: 3, fabricAssignment: "面料1用于大身，面料2用于领口，面料3用于袖口" });
+        expect(getSceneSlots("fabric-change", fabric).map(slot => slot.id)).toEqual([...SCENE_SLOT_IDS]);
+        expect(validateSceneForm("fabric-change", { ...fabric, fabricAssignment: " " }, allImages)).toContain("哪些衣片");
+        expect(buildScenePrompt("fabric-change", fabric)).toContain(fabric.fabricAssignment);
+    });
+
+    test("reference modes consume only their active direction", () => {
+        const form = validForm("reference-to-style", { category: "长裤", targetStyle: "学院风", referenceDetail: "加一层荷叶边", description: "自定义改款标记" });
+        const terms = { category: "转为长裤", style: "目标风格为学院风", detail: "加一层荷叶边", custom: "自定义改款标记" };
+        for (const referenceMode of ["category", "style", "detail", "custom"] as const) {
+            expect(buildScenePrompt("reference-to-style", { ...form, referenceMode })).toContain(terms[referenceMode]);
+            expect(validateSceneForm("reference-to-style", { ...form, referenceMode }, images)).toBeNull();
+        }
+        expect(validateSceneForm("reference-to-style", { ...form, referenceMode: "category", category: "按描述判断" }, images)).toContain("品类");
+        expect(validateSceneForm("reference-to-style", { ...form, referenceMode: "style", targetStyle: " " }, images)).toContain("风格");
+        expect(validateSceneForm("reference-to-style", { ...form, referenceMode: "detail", referenceDetail: " " }, images)).toContain("部件");
+        expect(validateSceneForm("reference-to-style", { ...form, referenceMode: "custom", description: " " }, images)).toContain("自定义");
+        expect(buildScenePrompt("reference-to-style", { ...form, referenceMode: "custom" })).not.toContain("学院风");
+    });
+
+    test("fusion requires two roles and the third pattern reference only supplies colors", () => {
+        for (const sceneId of ["style-fusion", "pattern-fusion"]) {
+            const form = validForm(sceneId, { fusionRole1: "主体轮廓", fusionRole2: "细节结构", fusionWeight: 70, referenceCount: 3 });
+            const prompt = buildScenePrompt(sceneId, form);
+            expect(prompt).toContain("图片1负责：主体轮廓");
+            expect(prompt).toContain("图片2负责：细节结构");
+            expect(prompt).toContain("图一 70%，图二 30%");
+            expect(prompt).toContain("不是像素混合");
+            expect(validateSceneForm(sceneId, { ...form, fusionRole2: " " }, allImages)).toContain("职责");
+            expect(validateSceneForm(sceneId, { ...form, fusionWeight: 100 }, allImages)).toContain("10–90");
+            if (sceneId === "pattern-fusion") {
+                expect(getSceneSlots(sceneId, form).map(slot => slot.id)).toEqual(["primary", "secondary", "tertiary"]);
+                expect(prompt).toContain("图片3只提供配色");
+            } else expect(getSceneSlots(sceneId, form)).toHaveLength(2);
+        }
+    });
+
+    test("dependent garment inputs enforce category, style and parent-child combinations", () => {
+        for (const sceneId of ["detail-to-style", "fabric-to-style"]) {
+            expect(validateSceneForm(sceneId, validForm(sceneId, { targetStyle: " " }), images)).toContain("风格");
+            expect(validateSceneForm(sceneId, validForm(sceneId, { category: "按描述判断" }), images)).toContain("品类");
+        }
+        const outfit = validForm("outfit-design", { outfitCategory: "下装", outfitSubcategory: "半裙" });
+        expect(validateSceneForm("outfit-design", outfit, images)).toBeNull();
+        expect(buildScenePrompt("outfit-design", outfit)).toContain("下装 > 半裙");
+        expect(validateSceneForm("outfit-design", { ...outfit, outfitSubcategory: "外套" }, images)).toContain("子类");
+    });
+
+    test("optional material and craft references create a required second role only when selected", () => {
+        const sketch = validForm("sketch-to-style");
+        expect(getSceneSlots("sketch-to-style", sketch)).toHaveLength(1);
+        expect(validateSceneForm("sketch-to-style", { ...sketch, useFabricReference: true }, { primary })).toContain("面料参考图");
+        expect(getSceneSlots("sketch-to-style", { ...sketch, useFabricReference: true })).toHaveLength(2);
+        expect(buildScenePrompt("sketch-to-style", sketch)).not.toContain("图片2");
+        const craft = validForm("pattern-craft", { craftSource: "reference" });
+        expect(validateSceneForm("pattern-craft", craft, { primary })).toContain("工艺参考图");
+        expect(buildScenePrompt("pattern-craft", craft)).toContain("图片2");
+        expect(buildScenePrompt("pattern-extract", validForm("pattern-extract", { extractCraft: "remove" }))).toContain("平面");
+    });
+
+    test("pattern creation changes its input contract and does not promise transparent backgrounds", () => {
+        const text = validForm("pattern-create");
+        expect(getSceneSlots("pattern-create", text)).toHaveLength(0);
+        expect(validateSceneForm("pattern-create", { ...text, description: " " }, {})).toContain("图案");
+        const variation = { ...text, patternMode: "variation" as const, similarity: 60 };
+        expect(getSceneSlots("pattern-create", variation)).toHaveLength(1);
+        expect(validateSceneForm("pattern-create", variation, {})).toContain("参考图");
+        expect(validateSceneForm("pattern-create", { ...variation, similarity: NaN }, images)).toContain("10–100");
+        expect(buildScenePrompt("pattern-create", variation)).toContain("60%");
+        expect(buildScenePrompt("pattern-create", text)).toContain("白底不是透明通道");
+    });
+
+    test("placement scales and seamless parameters are bounded and actually reach the prompt", () => {
+        expect(supportsSceneSelection("pattern-extract")).toBe(false);
+        for (const sceneId of ["apply-pattern", "pattern-fill", "fabric-change"]) {
+            const form = validForm(sceneId, { patternScale: .5, patternDirection: "旋转 90°", placement: "前后大身" });
+            expect(buildScenePrompt(sceneId, form)).toContain("0.5");
+            expect(buildScenePrompt(sceneId, form)).toContain("旋转 90°");
+            expect(validateSceneForm(sceneId, { ...form, patternScale: 0 }, allImages)).toContain("0.25–4");
+            expect(supportsSceneSelection(sceneId)).toBe(true);
+        }
+        const repeat = validForm("seamless-pattern", { repeatArrangement: "half-brick", boundaryMode: "outward", ratioX: 12, ratioY: 24 });
+        const prompt = buildScenePrompt("seamless-pattern", repeat);
+        for (const term of ["半砖", "向外扩展", "左右边界调整范围 12%", "上下边界调整范围 24%", "实际平铺检查"]) expect(prompt).toContain(term);
+        expect(validateSceneForm("seamless-pattern", { ...repeat, ratioY: 31 }, allImages)).toContain("0–30");
+    });
+
+    test("new AI scenes expose usable specialized controls and disable every mutable input while generating", () => {
+        const labels: Record<string, string[]> = {
+            "series-extension": ["系列参考图数量", "方案板内款数", "系列共同设计元素"],
+            "bestseller-proposal": ["方案板内款数", "展示方式"],
+            "detail-to-style": ["品牌或风格方向", "需要继承的局部细节"],
+            "fabric-to-style": ["品牌或风格方向", "目标服装品类"],
+            "reference-to-style": ["参考改款方式", "自定义改款要求"],
+            "style-fusion": ["图一负责什么", "图二负责什么", "图一参考侧重"],
+            "outfit-design": ["搭配品类", "搭配子类"],
+            "apply-pattern": ["定位图案位置", "视觉比例"],
+            "pattern-fill": ["铺设衣片", "纹理方向"],
+            "fabric-change": ["面料参考图数量", "面料与衣片对应关系"],
+            "remove-decoration": ["去装饰后的底色", "保留原色", "变为白色"],
+            "sketch-to-style": ["面料来源", "沿用参考色"],
+            "pattern-create": ["创作方式", "图案描述", "图案背景"],
+            "pattern-fusion": ["融合参考图数量", "图一负责什么"],
+            "seamless-pattern": ["重复排列", "半砖", "边界处理", "左右边界范围"],
+        };
+        for (const [sceneId, expected] of Object.entries(labels)) {
+            const markup = fields(sceneId, {}, true);
+            for (const label of expected) expect(markup).toContain(label);
+            const controls = markup.match(/<(?:input|textarea|select|button)\b[^>]*>/g) ?? [];
+            expect(controls.length).toBeGreaterThan(0);
+            expect(controls.every(control => control.includes('disabled=""'))).toBe(true);
+        }
+        expect(fields("sketch-to-style", { useFabricReference: true })).not.toContain('id="cs-sketch-to-style-fabric"');
+        expect(fields("pattern-create", { patternMode: "variation" })).toContain('type="number"');
+        const fourSlots = getSceneSlots("series-extension", validForm("series-extension", { referenceCount: 4 }));
+        const markup = renderToStaticMarkup(createElement(SceneUploads, { slots: fourSlots, images: allImages, onImage: () => {} }));
+        expect(markup.match(/type="file"/g)).toHaveLength(4);
+        expect(markup).toContain('aria-label="上传系列参考图 4"');
     });
 });

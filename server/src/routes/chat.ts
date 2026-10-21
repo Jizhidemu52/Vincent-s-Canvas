@@ -24,7 +24,7 @@ type ResponseInput =
 type ResponseTool = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string }; thoughtSignature?: string };
 type ChatCompletionResult = { content: string; toolCalls: ToolCall[]; stopReason?: string; claudeAssistantContent?: Array<Record<string, unknown>>; responsesOutputItems?: Array<Record<string, unknown>> };
-type ChatModel = { model_id: string; base_url: string; protocol: string; encrypted_credentials: string | null };
+type ChatModel = { model_id: string; base_url: string; protocol: string; encrypted_credentials: string | null; capabilities?: string[] };
 /** Shared by explicit administrator analysis selection and the execution adapter. */
 export const CHAT_COMPLETION_PROTOCOLS = ["openai", "custom", "apimart", "gemini", "anthropic", "openai-chat"] as const;
 
@@ -42,9 +42,24 @@ export const chatFunctionToolsSchema = z.array(z.object({
     strict: z.boolean().optional(),
 }).strict()).max(100).default([]);
 
+// createClientId also supports non-secure LAN HTTP where randomUUID is absent.
+export const chatRequestIdSchema = z.string().min(8).max(160).regex(/^[a-zA-Z0-9:_-]+$/);
+
+/** Public provenance contains only the resolved configuration UUID and validated client request ID. */
+export function chatExecutionHeaders(modelConfigId: string, requestId?: string): Record<string, string> {
+    return {
+        ...(z.string().uuid().safeParse(modelConfigId).success ? { "x-chat-model-config-id": modelConfigId } : {}),
+        ...(chatRequestIdSchema.safeParse(requestId).success ? { "x-chat-request-id": requestId! } : {}),
+    };
+}
+
+export function chatInputContainsImages(input: unknown[]): boolean {
+    return input.some(item => item !== null && typeof item === "object" && "content" in item
+        && Array.isArray(item.content) && item.content.some(part => part !== null && typeof part === "object" && part.type === "input_image"));
+}
+
 const schema = z.object({
-    // createClientId also supports non-secure LAN HTTP where randomUUID is absent.
-    requestId: z.string().min(8).max(160).regex(/^[a-zA-Z0-9:_-]+$/).optional(),
+    requestId: chatRequestIdSchema.optional(),
     modelId: z.string().min(1).max(200).optional(),
     toolKey: z.string().min(1).max(100).optional(),
     input: z.array(z.unknown()).max(200),
@@ -112,7 +127,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
 
             const actor = (request as unknown as AuthenticatedRequest).auth;
             const result = await db.query<ChatModel>(
-                `SELECT m.model_id,p.base_url,p.protocol,p.encrypted_credentials
+                `SELECT m.model_id,m.capabilities,p.base_url,p.protocol,p.encrypted_credentials
                  FROM model_configs m JOIN providers p ON p.id=m.provider_id
                  WHERE m.id=$1
                    AND m.enabled=true AND p.enabled=true AND 'chat'=ANY(m.capabilities)
@@ -124,10 +139,16 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 response.status(400).json({ error: "MODEL_DISABLED", message: "管理员尚未启用该对话模型" });
                 return;
             }
+            if (execution.toolKey === "creative-planner" && chatInputContainsImages(input.input) && !model.capabilities?.includes("vision")) {
+                response.status(400).json({ error: "MODEL_VISION_REQUIRED", message: "创意参考图分析需要支持视觉理解的统一对话模型，请管理员检查模型能力配置" });
+                return;
+            }
             if (!model.encrypted_credentials || !config.PROVIDER_ENCRYPTION_KEY) {
                 response.status(503).json({ error: "PROVIDER_NOT_CONFIGURED", message: "对话模型服务端凭据未配置" });
                 return;
             }
+
+            for (const [name, value] of Object.entries(chatExecutionHeaders(execution.modelConfigId, input.requestId))) response.setHeader(name, value);
 
             const credentials = JSON.parse(decryptSecret(model.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as Record<string, string>;
             billingReservationId = await beginChatBilling(db, {

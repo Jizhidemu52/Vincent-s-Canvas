@@ -30,7 +30,7 @@ function harness(claim = true) {
       }
       return ["https://example.test/result-1.png", "https://example.test/result-2.png"];
     },
-    fetchProviderResult: async (url: string) => ({ url, bytes, mimeType: "image/png" }),
+    downloadApiMartImageResult: async (url: string, timeoutMs: number) => { expect(timeoutMs).toBe(60_000); return { url, bytes, mimeType: "image/png" }; },
   };
   const execute = new Function(...Object.keys(dependencies), `${code};return executeApiMartImage`)(...Object.values(dependencies));
   return { execute, statements, calls, loaded: () => loaded };
