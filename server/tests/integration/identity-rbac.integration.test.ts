@@ -461,15 +461,24 @@ integration("production identity and RBAC", () => {
       "integration-internal-app-key",
     );
 
+    const configuredModels = await api<{
+      models: Array<{ id: string; modelId: string; creditCost: number }>;
+    }>("/api/admin/model-configuration/models", {}, admin.cookie);
+    expect(configuredModels.response.status).toBe(200);
+    const configuredSeamlessModel = configuredModels.body.models.find((model) => model.modelId === "sflxjj");
+    expect(configuredSeamlessModel).toBeDefined();
     const publicModels = await api<{
       models: Array<{ id: string; modelId: string; creditCost: number }>;
       prices: Array<{ operationType: string; credits: number }>;
     }>("/api/models", {}, chineseLogin.cookie);
     expect(publicModels.response.status).toBe(200);
     const internalSeamlessModel = publicModels.body.models.find(
-      (model) => model.modelId === "sflxjj",
+      (model) => model.id === configuredSeamlessModel!.id,
     );
-    expect(internalSeamlessModel?.creditCost).toBe(0);
+    // Creation uses the configuration identity; upstream identity stays admin-only.
+    expect(internalSeamlessModel).toMatchObject({
+      id: configuredSeamlessModel!.id, modelId: configuredSeamlessModel!.id, creditCost: 0,
+    });
     expect(
       publicModels.body.prices.find(
         (price) => price.operationType === "seamless_stitch",
@@ -489,7 +498,9 @@ integration("production identity and RBAC", () => {
     expect(bindSeamlessTool.response.status).toBe(200);
     expect(bindSeamlessTool.body.tool).toMatchObject({ toolKey: "seamless-stitch", modelConfigId: internalSeamlessModel!.id });
     const boundPublicModels = await api<{ tools: Array<{ toolKey: string; modelConfigId: string }> }>("/api/models", {}, chineseLogin.cookie);
-    expect(boundPublicModels.body.tools).toContainEqual({ toolKey: "seamless-stitch", modelConfigId: internalSeamlessModel!.id });
+    expect(boundPublicModels.body.tools).toContainEqual(expect.objectContaining({
+      toolKey: "seamless-stitch", modelConfigId: internalSeamlessModel!.id, enabled: true,
+    }));
 
     const audioProvider = await api<{ provider: { id: string } }>(
       "/api/admin/model-configuration/providers",
@@ -884,13 +895,17 @@ integration("production identity and RBAC", () => {
     expect(audioSubmission.response.status).toBe(201);
     expect(audioSubmission.body.task.credits).toBe(13);
     const designerTasks = await api<{
-      tasks: Array<{ id: string; parameters: Record<string, unknown> }>;
+      tasks: Array<{ id: string; parameters?: Record<string, unknown> }>;
     }>("/api/tasks", {}, chineseLogin.cookie);
-    expect(
-      designerTasks.body.tasks.find(
-        (task) => task.id === audioSubmission.body.task.id,
-      )?.parameters,
-    ).toEqual(audioParameters);
+    expect(designerTasks.response.status).toBe(200);
+    const audioSummary = designerTasks.body.tasks.find((task) => task.id === audioSubmission.body.task.id);
+    expect(audioSummary).toBeDefined();
+    expect(audioSummary!.parameters).toBeUndefined();
+    const audioDetail = await api<{ task: { parameters: Record<string, unknown> } }>(
+      `/api/tasks/${audioSubmission.body.task.id}`, {}, chineseLogin.cookie,
+    );
+    expect(audioDetail.response.status).toBe(200);
+    expect(audioDetail.body.task.parameters).toEqual({ ...audioParameters, tool: "canvas-audio" });
     const cancelAudio = await api(
       `/api/tasks/${audioSubmission.body.task.id}/cancel`,
       { method: "POST" },
