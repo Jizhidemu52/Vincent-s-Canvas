@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { initializeCanvas, readPsd, writePsd } from "ag-psd";
-import { buildLayerMaskPrompt, layerMaskCoverage, partitionPatternLayers, type PatternLayer } from "@/pages/creative/pattern-layers-model";
+import { buildLayerMaskPrompt, generatePlannedPatternLayer, layerMaskCoverage, partitionPatternLayers, rememberPatternLayerPlan, type PatternLayer, type PatternLayerAiTrace } from "@/pages/creative/pattern-layers-model";
 
 const source = { width: 3, height: 2, data: new Uint8ClampedArray([
     255,0,0,255, 0,255,0,200, 0,0,255,255,
@@ -45,5 +45,66 @@ describe("editable pattern layers", () => {
     test("requires an explicit target and forbids recoloring artwork in the mask task", () => {
         expect(() => buildLayerMaskPrompt(" ")).toThrow();
         expect(buildLayerMaskPrompt("花朵")).toContain("不要输出原图颜色");
+    });
+});
+
+describe("planned pattern layer generation", () => {
+    const plan = { summary: "提取红色花朵", prompt: `已识别前景红色花朵。\n${buildLayerMaskPrompt("红色花朵")}`, observations: ["原图包含红花与绿叶"], preserve: ["保留花瓣孔洞"], warnings: [], modelId: "configured-llm-uuid", modelName: "Configured LLM", requestId: "analysis-request" };
+    const identity = { sourceId: "source", targetLabel: "红色花朵", imageModelId: "configured-image-uuid", imageModelName: "Configured image", imageRequestId: "image-request" };
+
+    test("persists the actual plan and distinct model identities before using its final prompt for the image", async () => {
+        const events: string[] = [];
+        let saved: PatternLayerAiTrace | undefined;
+        const result = await generatePlannedPatternLayer({ ...identity, isCurrent: () => true,
+            analyze: async () => { events.push("analysis"); return plan; },
+            persist: async trace => { events.push("persist"); saved = JSON.parse(JSON.stringify(trace)); },
+            generate: async trace => { events.push("image"); expect(saved).toEqual(trace); expect(trace.plan.prompt).toBe(plan.prompt); return ["mask-result"]; },
+        });
+        expect(events).toEqual(["analysis", "persist", "image"]);
+        expect(result.result).toEqual(["mask-result"]);
+        expect(result.trace).toMatchObject({ ...identity, plan });
+        const restoredLayer = JSON.parse(JSON.stringify({ ...layer("红色花朵"), aiTrace: result.trace })) as PatternLayer;
+        expect(restoredLayer.aiTrace?.plan).toEqual(plan);
+    });
+
+    test("analysis failure never persists a fake plan or submits an image", async () => {
+        let saved = false, generated = false;
+        await expect(generatePlannedPatternLayer({ ...identity, isCurrent: () => true,
+            analyze: async () => { throw new Error("LLM unavailable"); },
+            persist: async () => { saved = true; }, generate: async () => { generated = true; },
+        })).rejects.toThrow("LLM unavailable");
+        expect(saved).toBe(false); expect(generated).toBe(false);
+    });
+
+    test("accepted-task updates keep one history entry while later attempts retain earlier plans", () => {
+        const original = { ...identity, plan, createdAt: 1 };
+        const updated = { ...original, imageModelName: "Updated actual model" };
+        const next = { ...original, imageRequestId: "next-image-request", createdAt: 2 };
+        const history = rememberPatternLayerPlan(rememberPatternLayerPlan([original], updated), next);
+        expect(history).toEqual([updated, next]);
+        expect(JSON.parse(JSON.stringify(history))).toEqual(history);
+    });
+
+    test("empty LLM instructions and failed trace persistence both block image submission", async () => {
+        let generated = false;
+        for (const invalidPlan of [true, false]) {
+            await expect(generatePlannedPatternLayer({ ...identity, isCurrent: () => true,
+                analyze: async () => invalidPlan ? { ...plan, prompt: " " } : plan,
+                persist: async () => { throw new Error("storage unavailable"); }, generate: async () => { generated = true; },
+            })).rejects.toThrow(invalidPlan ? "LLM 未返回有效分层指令" : "storage unavailable");
+        }
+        expect(generated).toBe(false);
+    });
+
+    test("navigation or account changes during analysis or persistence cannot start an image", async () => {
+        for (const changeDuring of ["analysis", "persist"]) {
+            let current = true, generated = false;
+            await expect(generatePlannedPatternLayer({ ...identity, isCurrent: () => current,
+                analyze: async () => { if (changeDuring === "analysis") current = false; return plan; },
+                persist: async () => { if (changeDuring === "persist") current = false; },
+                generate: async () => { generated = true; },
+            })).rejects.toThrow("当前分层工程已变化");
+            expect(generated).toBe(false);
+        }
     });
 });

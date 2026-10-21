@@ -123,6 +123,13 @@
 .cs-result-message > p { overflow-wrap: anywhere; }
 .cs-result-limit { color: var(--muted-foreground); font-size: 10px; margin-top: 17px; line-height: 1.7; }
 .cs-empty { min-height: 370px; display: flex; flex-direction: column; justify-content: center; align-items: center; color: var(--muted-foreground); text-align: center; }
+.cs-model-flow { display: grid; gap: 16px; padding: 18px 0; border-top: 1px solid var(--border); }
+.cs-model-flow strong { display: block; font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.cs-design-plan { padding: 18px 0; border-bottom: 1px solid var(--border); margin-bottom: 20px; font-size: 12px; line-height: 1.8; }
+.cs-design-plan h3 { margin: 0 0 6px; font-size: 14px; font-weight: 500; }
+.cs-design-plan details { margin-top: 8px; }
+.cs-design-plan summary { cursor: pointer; color: var(--muted-foreground); }
+.cs-design-plan pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding-top: 10px; }
 .cs-empty > svg { opacity: .5; }
 .cs-empty h3 { font-size: 15px; font-weight: 500; margin: 20px 0 7px; color: var(--foreground); }
 .cs-empty p { font-size: 11px; line-height: 1.8; margin: 0; }

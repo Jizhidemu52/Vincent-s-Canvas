@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { navigationTools } from "../src/constant/navigation-tools";
 import { usageDestinations } from "../src/lib/usage-navigation";
+import { creativePresets } from "../src/lib/creative-presets";
 import { moduleDefinitions, type ModuleKey } from "../../shared/feature-catalog";
 import { canvasWorkspaceTools, filterCanvasWorkspaceTools } from "../src/components/canvas/canvas-workspace-tools-model";
 
@@ -54,5 +55,28 @@ describe("canvas workspace tools", () => {
         expect(filterCanvasWorkspaceTools(disabled, "照片取色")).toEqual([]);
         expect(filterCanvasWorkspaceTools(disabled, "音频生成")).toEqual([]);
         expect(filterCanvasWorkspaceTools(entries, "", "AI 工作台").every(item => item.group === "AI 工作台")).toBe(true);
+    });
+
+    test("shared creative planning is searchable in all AI hosts and respects its independent availability", () => {
+        const plannerHosts = creativePresets.filter(item => !["sketch-vectorization", "pattern-vectorization"].includes(item.id)).map(item => `creative-${item.id}`);
+        const entries = canvasWorkspaceTools(access);
+        const matches = filterCanvasWorkspaceTools(entries, "提示词规划");
+        expect(matches.map(item => item.moduleKey).sort()).toEqual([...plannerHosts].sort());
+        expect(matches).toHaveLength(25);
+        expect(matches.every(item => item.path.startsWith("/creative/") && item.capabilities.some(capability => capability.moduleKey === "creative-planner"))).toBe(true);
+        for (const moduleKey of ["creative-sketch-vectorization", "creative-pattern-vectorization", "series-recipe"] as const) {
+            expect(entries.find(item => item.moduleKey === moduleKey)?.capabilities).not.toContainEqual(expect.objectContaining({ moduleKey: "creative-planner" }));
+        }
+        for (const restricted of [
+            { ...access, flags: { ...flags, "creative-planner": false } },
+            { ...access, bindings: [{ toolKey: "creative-planner", enabled: false }] },
+        ]) {
+            const available = canvasWorkspaceTools(restricted);
+            expect(filterCanvasWorkspaceTools(available, "提示词规划")).toEqual([]);
+            expect(available.some(item => item.moduleKey === "creative-pattern-layers")).toBe(true);
+            expect(available.some(item => item.moduleKey === "creative-sketch-vectorization")).toBe(true);
+        }
+        expect(filterCanvasWorkspaceTools(canvasWorkspaceTools({ ...access, flags: { ...flags, creative: false } }), "提示词规划")).toEqual([]);
+        expect(filterCanvasWorkspaceTools(canvasWorkspaceTools({ ...access, bindings: [{ toolKey: "gpt-chat", enabled: false }] }), "提示词规划")).toHaveLength(25);
     });
 });

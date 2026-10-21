@@ -3,7 +3,7 @@ import { applyToolModel, requireToolKey, resolveConfiguredToolModel } from "../s
 import { requestGeneration, requestEdit, requestImageQuestion, requestBatchEdit } from "../src/services/api/image";
 import { createVideoGenerationTask, requestVideoGeneration } from "../src/services/api/video";
 import { requestAudioGeneration } from "../src/services/api/audio";
-import { createQueuedMediaTaskPayloads, submitQueuedMediaTask } from "../src/services/api/generation-tasks";
+import { createQueuedMediaTaskPayloads, submitQueuedMediaTask, type ImageSubmissionModel } from "../src/services/api/generation-tasks";
 import { defaultConfig } from "../src/stores/use-config-store";
 import { useUserStore } from "../src/stores/use-user-store";
 import { useBusinessConfigStore } from "../src/stores/use-business-config-store";
@@ -113,11 +113,14 @@ describe("formal tool model consumption", () => {
 
     test("generation binds before normalization and sends one immutable model snapshot plus first-class toolKey", async () => {
         const requests = mockServer(business(binding("creative-text-to-style", image.id)));
-        await requestGeneration({ ...defaultConfig, model: "nano-banana-2", imageModel: "nano-banana-2", size: "3:4", quality: "low", count: "1" }, "连衣裙", { tool: "creative-text-to-style" });
+        let submittedModel: ImageSubmissionModel | undefined;
+        const generated = await requestGeneration({ ...defaultConfig, model: "nano-banana-2", imageModel: "nano-banana-2", size: "3:4", quality: "low", count: "1" }, "连衣裙", { tool: "creative-text-to-style", onSubmitted: (_ids, actualModel) => { submittedModel = actualModel; } });
         const post = requests.find(item => item.path === "/api/tasks" && item.body)?.body;
         expect(requests.filter(item => item.path === "/api/models")).toHaveLength(1);
         expect(post).toMatchObject({ toolKey: "creative-text-to-style", modelConfigId: image.id, operationType: "image_generation", parameters: { tool: "creative-text-to-style", size: "1152x1536", quality: "low" } });
         expect(post?.parameters.resolution).toBeUndefined();
+        expect(submittedModel).toEqual({ modelConfigId: image.id, modelName: image.name });
+        expect(generated[0]).toMatchObject({ sourceModelConfigId: image.id, sourceModelName: image.name });
     });
 
     test.each(["generation", "edit", "batch"].flatMap(operation => ["missing", "stale"].map(cache => ({ operation, cache }))))("$operation uses the fresh anonymous model profile with a $cache UI cache without replacing it", async ({ operation, cache }) => {

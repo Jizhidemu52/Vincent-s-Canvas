@@ -51,6 +51,11 @@ function fixture() {
         if (sql.includes("m.enabled=true")) selected = selected.filter(model => model.enabled && model.providerEnabled && (!model.workflowConfigId || model.workflowEnabled));
         return { rows: selected };
       }
+      if (sql.startsWith("UPDATE model_configs SET")) {
+        const model = models.find(item => item.id === values[10]);
+        if (model) model.capabilities = values[5] as string[];
+        return { rows: [] };
+      }
       if (sql.startsWith("INSERT INTO audit_logs")) return { rows: [] };
       if (sql.startsWith("INSERT INTO tasks")) { tasks.set(String(values[1]), { id: String(values[0]) }); return { rows: [{ id: values[0] }] }; }
       if (sql.startsWith("UPDATE tasks") || sql.startsWith("UPDATE batch_tasks")) return { rows: [] };
@@ -141,24 +146,35 @@ describe("formal catalog configuration", () => {
     expect(() => normalizeTaskTool({ operationType: "inpaint", toolKey: "creative-pattern-vectorization" })).toThrow("未知功能");
   });
 
-  test("chat model belongs only to gpt-chat while canvas switches and prices remain independent", async () => {
+  test.each(["canvas-chat", "creative-planner"] as const)("chat model belongs only to gpt-chat while %s switches and prices remain independent", async chatTool => {
     const state = fixture();
     state.bind("gpt-chat");
-    state.bind("canvas-chat", { modelConfigId: secondModelId, creditCostOverride: 7, rmbCostOverride: 0.5 });
+    state.bind(chatTool, { modelConfigId: secondModelId, creditCostOverride: 7, rmbCostOverride: 0.5 });
     const { url } = await serve(state);
     for (const path of ["/admin/tool-configurations", "/models"]) {
       const result = await (await fetch(`${url}${path}`)).json();
-      expect(result.tools.find((item: any) => item.toolKey === "canvas-chat")).toMatchObject({ modelConfigId: modelId, creditCostOverride: 7, rmbCostOverride: 0.5 });
+      expect(result.tools.find((item: any) => item.toolKey === chatTool)).toMatchObject({ modelConfigId: modelId, creditCostOverride: 7, rmbCostOverride: 0.5 });
       if (path === "/models") expect(result.models.some((item: any) => item.id === modelId)).toBe(true);
     }
-    const saved = await post(`${url}/admin/tool-configurations/canvas-chat`, { modelConfigId: secondModelId, enabled: false, creditCostOverride: 9, rmbCostOverride: 0 }, "PUT");
+    const saved = await post(`${url}/admin/tool-configurations/${chatTool}`, { modelConfigId: secondModelId, enabled: false, creditCostOverride: 9, rmbCostOverride: 0 }, "PUT");
     expect(saved.status).toBe(200);
     expect((await saved.json()).tool).toMatchObject({ modelConfigId: modelId, enabled: false, creditCostOverride: 9 });
-    expect(state.configurations.get("canvas-chat")).toMatchObject({ modelConfigId: null, enabled: false, creditCostOverride: 9 });
+    expect(state.configurations.get(chatTool)).toMatchObject({ modelConfigId: null, enabled: false, creditCostOverride: 9 });
     expect(state.configurations.get("gpt-chat")?.modelConfigId).toBe(modelId);
     await post(`${url}/admin/tool-configurations/gpt-chat`, { modelConfigId: secondModelId, enabled: true, creditCostOverride: null, rmbCostOverride: null }, "PUT");
     const refreshed = await (await fetch(`${url}/models`)).json();
-    expect(refreshed.tools.find((item: any) => item.toolKey === "canvas-chat")).toMatchObject({ modelConfigId: secondModelId, enabled: false, creditCostOverride: 9 });
+    expect(refreshed.tools.find((item: any) => item.toolKey === chatTool)).toMatchObject({ modelConfigId: secondModelId, enabled: false, creditCostOverride: 9 });
+  });
+
+  test("administrator can preserve vision and tool capabilities on an existing LLM", async () => {
+    const { url, state } = await serve();
+    const changed = await post(`${url}/admin/models/${modelId}`, { capabilities: ["chat", "vision", "tools"] }, "PATCH");
+    expect(changed.status).toBe(200);
+    expect((await changed.json()).model.capabilities).toEqual(["chat", "vision", "tools"]);
+    expect(state.statements.find(item => item.sql.startsWith("UPDATE model_configs SET"))?.values[5]).toEqual(["chat", "vision", "tools"]);
+    const rejected = await post(`${url}/admin/models/${modelId}`, { capabilities: ["unknown-capability"] }, "PATCH");
+    expect(rejected.status).toBe(400);
+    expect(state.statements.filter(item => item.sql.startsWith("UPDATE model_configs SET"))).toHaveLength(1);
   });
 
   test.each(["designer", "department_admin"])("%s cannot mutate the shared chat default", async role => {
@@ -245,11 +261,12 @@ describe("authoritative scoped execution", () => {
     const state = fixture();
     state.bind("gpt-chat", { creditCostOverride: 2 });
     state.bind("canvas-chat", { modelConfigId: secondModelId, creditCostOverride: 7, configurationVersion: 5 });
-    for (const toolKey of [undefined, "gpt-chat", "canvas-chat"]) {
+    state.bind("creative-planner", { modelConfigId: secondModelId, creditCostOverride: 11, configurationVersion: 3 });
+    for (const toolKey of [undefined, "gpt-chat", "canvas-chat", "creative-planner"]) {
       for (const selected of [undefined, secondModelId, state.models[1]!.modelId, "forged-model"]) {
         const result = await resolveToolExecution(state.db, { operationType: "chat", toolKey, modelId: selected });
         expect(result.modelConfigId).toBe(modelId);
-        expect(result.creditCostOverride).toBe(toolKey === "canvas-chat" ? 7 : 2);
+        expect(result.creditCostOverride).toBe(toolKey === "canvas-chat" ? 7 : toolKey === "creative-planner" ? 11 : 2);
       }
     }
     state.models[1]!.modelId = state.models[0]!.modelId;
@@ -260,10 +277,10 @@ describe("authoritative scoped execution", () => {
     expect((await resolveToolExecution(state.db, { operationType: "chat", toolKey: "canvas-chat" })).modelConfigId).toBe(secondModelId);
   });
 
-  test("an absent or unavailable shared chat model never falls back to client or canvas choices", async () => {
+  test.each(["canvas-chat", "creative-planner"] as const)("an absent or unavailable shared chat model never falls back to client or %s choices", async chatTool => {
     const state = fixture();
-    const input = { operationType: "chat", toolKey: "canvas-chat", modelId: secondModelId };
-    state.bind("canvas-chat", { modelConfigId: secondModelId });
+    const input = { operationType: "chat", toolKey: chatTool, modelId: secondModelId };
+    state.bind(chatTool, { modelConfigId: secondModelId });
     await expect(resolveToolExecution(state.db, input)).rejects.toMatchObject({ code: "CHAT_MODEL_NOT_CONFIGURED", status: 503 });
     state.bind("gpt-chat");
     for (const field of ["enabled", "providerEnabled"] as const) {

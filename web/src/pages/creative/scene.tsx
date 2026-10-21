@@ -81,17 +81,20 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                         {traceEnabled && preset.id === "style-to-sketch" && <div className="cs-local-tool"><button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTraceImage(ws.images.primary!)}>已有线稿转 SVG<ArrowRight size={14} /></button><p className="cs-help">也可先生成线稿，再从结果卡导出矢量路径。</p></div>}
                     </section>}
                     <section className="cs-business-section"><h2 className="cs-section-label"><span>{slots.length ? "02" : "01"}</span>{preset.id.includes("colorway") ? "选择配色方式" : preset.id === "pattern-craft" ? "选择工艺效果" : preset.id === "text-to-style" ? "描述你的设计" : preset.id === "style-to-sketch" ? "线稿要求" : preset.id === "local-restyle" ? "指定修改部位" : preset.id === "back-design" ? "构思背面结构" : preset.id === "accessory-design" ? "定义辅料外观" : "设计要求"}</h2><SceneFields sceneId={preset.id} form={ws.form} onChange={ws.setForm} disabled={ws.running} sourceImage={ws.images.primary?.dataUrl} /></section>
+                    <section className="cs-model-flow" aria-label="模型工作流程">
+                        <div><span className="cs-label">理解与规划 · LLM</span><strong>{ws.plannerModel?.name || "未配置设计分析模型"}</strong><p className="cs-help">读取设计要求和参考图，整理本次出图指令。沿用后台统一对话模型。</p></div>
+                        <div><label className="cs-label">图像生成 · 出图模型</label><ModelPicker toolKey={`creative-${preset.id}` as ToolKey} config={ws.config} value={ws.model} onChange={value => ws.updateConfig("imageModel", value)} capability="image" fullWidth disabled={ws.running} /></div>
+                    </section>
                     <details className="cs-output-settings"><summary><span>出图设置</span><span>{imageSizeLabel(ws.config.size)} · {imageQualityLabel(ws.config.quality)} · {ws.count} 张<ChevronDown size={13} /></span></summary>
-                        <label className="cs-label">生成模型</label><ModelPicker toolKey={`creative-${preset.id}` as ToolKey} config={ws.config} value={ws.model} onChange={value => ws.updateConfig("imageModel", value)} capability="image" fullWidth disabled={ws.running} />
                         <ImageSettingsPanel config={ws.config} referenceCount={Object.values(ws.images).filter(Boolean).length} onConfigChange={ws.updateConfig} theme={theme} showTitle={false} />
                     </details>
-                    <details className="cs-prompt-preview" open={promptOpen} onToggle={event => setPromptOpen(event.currentTarget.open)}><summary>{ws.selectedPrompt !== null ? "所选结果的原始提示词" : "查看本次设计指令"}<ChevronDown size={12} /></summary><pre aria-label="设计提示词">{ws.selectedPrompt ?? `${buildScenePrompt(preset.id, ws.form)}${ws.selection ? `\n\n${selectionPrompt.replace("图片2", "最后一张图片")}` : ""}`}</pre>{ws.selectedPrompt !== null && <p className="cs-help">仅显示原提示词，未改变当前设计要求、模型或参考图。</p>}</details>
+                    <details className="cs-prompt-preview" open={promptOpen} onToggle={event => setPromptOpen(event.currentTarget.open)}><summary>{ws.selectedPrompt !== null ? "所选结果的最终出图指令" : "查看提交给 LLM 的设计要求"}<ChevronDown size={12} /></summary><pre aria-label="设计提示词">{ws.selectedPrompt ?? `${buildScenePrompt(preset.id, ws.form)}${ws.selection ? `\n\n${selectionPrompt.replace("图片2", "最后一张图片")}` : ""}`}</pre>{ws.selectedPrompt !== null && <p className="cs-help">仅显示该任务实际使用的指令，未改变当前设计要求、模型或参考图。</p>}</details>
                 </fieldset>}
                 <div className="cs-submit-panel">
                     {ws.error && <p className="cs-error" role="alert">{ws.error}</p>}
                     {!ws.error && ws.validation && <p className="cs-validation">{ws.validation}</p>}
                     <button type="button" className="cs-generate" disabled={ws.loading || ws.running || Boolean(ws.validation) || ws.quotaBlocked} onClick={submit}>{ws.running ? <><LoaderCircle size={16} className="animate-spin" />{ws.recoveringResultId ? "正在恢复原任务" : "正在生成"}<GenerationElapsed startedAt={ws.startedAt} /></> : <><Sparkles size={16} />生成{preset.title === "以文生款" ? "款式" : preset.title === "款生线稿" ? "线稿" : preset.title === "花型提取" ? "图案" : "设计"}<span>{ws.count} 张</span></>}</button>
-                    <p className="cs-submit-note">{deploymentFeatures.creditsEnabled ? `预计 ${ws.estimatedCredits} 积分 · ` : ""}点击后提交模型任务</p>
+                    <p className="cs-submit-note" role={ws.running ? "status" : undefined}>{ws.running && ws.phase ? ws.phase : `${deploymentFeatures.creditsEnabled ? `预计 ${ws.estimatedCredits} 积分 · ` : ""}先由 LLM 理解设计，再交给出图模型生成`}</p>
                 </div>
             </aside>
             <section className="cs-stage" aria-label="设计预览与结果">
@@ -111,6 +114,11 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                     </button>) : <div className="cs-empty"><History size={26} /><h3>还没有生成记录</h3><p>完成一次设计后，会在这里保存参数和结果。</p></div>}
                 </div> : <div className="cs-results">
                     <div className="cs-results-heading"><h2>{ws.recoveringResultId ? "正在恢复原任务" : ws.running ? "正在创作" : "设计结果"}</h2>{ws.activeLog && <><span>{new Date(ws.activeLog.createdAt).toLocaleString("zh-CN")}</span><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || ws.previewing} onClick={() => { void ws.restoreLog(ws.activeLog!); setPromptOpen(true); }}>恢复为草稿继续改</button></>}</div>
+                    {ws.activeLog?.planning && <section className="cs-design-plan" aria-label="LLM 设计分析">
+                        <h3>{ws.activeLog.planning.status === "success" ? "设计分析已完成" : ws.activeLog.planning.status === "failed" ? "设计分析未完成 · 未提交出图" : ws.running ? "正在理解设计" : "设计分析中断 · 未提交出图"}</h3>
+                        <p className="cs-help">LLM：{ws.activeLog.planning.modelName} · 出图：{ws.activeImageModelName}</p>
+                        {ws.activeLog.planning.plan ? <><p>{ws.activeLog.planning.plan.summary}</p><details><summary>查看分析依据与最终出图指令</summary>{!!ws.activeLog.planning.plan.observations.length && <p>参考分析：{ws.activeLog.planning.plan.observations.join("；")}</p>}{!!ws.activeLog.planning.plan.preserve.length && <p>保留要求：{ws.activeLog.planning.plan.preserve.join("；")}</p>}{!!ws.activeLog.planning.plan.warnings.length && <p>待检查：{ws.activeLog.planning.plan.warnings.join("；")}</p>}<pre>{ws.activeLog.prompt}</pre></details></> : <p>{ws.activeLog.planning.error || (ws.running ? ws.phase : "本次未保存完成的分析结果；不会自动再次调用模型。")}</p>}
+                    </section>}
                     {ws.previewing && <p className="cs-help" role="status">正在读取所选结果…</p>}
                     {ws.activeLog?.operation === "recolor" && <p className="cs-help cs-operation-note">{ws.activeLog.prompt}</p>}
                     {!ws.results.length ? <div className="cs-empty"><Sparkles size={28} /><h3>让设计从这里开始</h3><p>在左侧完成{slots.length ? "素材和" : ""}设计要求，点击生成。</p><button type="button" onClick={() => setView("example")}><RotateCcw size={14} />看看功能示例</button></div> : <div className="cs-result-grid">{ws.results.map((result, index) => <article key={result.id} className="cs-result-card">

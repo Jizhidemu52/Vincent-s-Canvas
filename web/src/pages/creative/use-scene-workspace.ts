@@ -11,10 +11,12 @@ import { validateImageReferences } from "@/lib/image-reference-policy";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { workbenchSubmissions } from "@/lib/submission-gate";
 import { requestEdit, requestGeneration } from "@/services/api/image";
+import { requestCreativeScenePlan, type CreativeScenePlan } from "@/services/api/creative-scene-plan";
+import { getCreativePreset } from "@/lib/creative-presets";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { freezeLocalInput, restoreLocalInput } from "@/services/generation-local-inputs";
 import { restoreGenerationDraft } from "@/services/api/generation-history";
-import { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedMedia, QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError } from "@/services/api/generation-tasks";
+import { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedMedia, QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError, type ImageSubmissionModel } from "@/services/api/generation-tasks";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { modelOptionName, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -34,13 +36,15 @@ export type SceneImage = ReferenceImage & {
 export type SceneImages = Partial<Record<SceneSlotId, SceneImage>>;
 export type SceneParameters = Pick<AiConfig, "model" | "imageModel" | "size" | "quality" | "count" | "imageOptions">;
 export type SceneSelection = { sourceId: string; mask: SceneImage };
-export type SceneResult = { id: string; status: "pending" | "success" | "failed"; taskId?: string; requestId?: string; recoveryAllowed?: boolean; image?: SceneImage; uncompositedImage?: SceneImage; error?: string };
+export type SceneResult = { id: string; status: "pending" | "success" | "failed"; taskId?: string; requestId?: string; modelConfigId?: string; modelName?: string; recoveryAllowed?: boolean; image?: SceneImage; uncompositedImage?: SceneImage; error?: string };
+export type ScenePlanning = { status: "pending" | "success" | "failed"; requestId: string; modelId: string; modelName: string; plan?: CreativeScenePlan; error?: string };
 export type SceneLog = {
     inputArchiveVersion?: 1;
     id: string; ownerId: string; sceneId: string; createdAt: number; prompt: string;
     form: SceneForm; referenceImages: SceneImages; config: SceneParameters;
     results: SceneResult[]; images: SceneImage[]; durationMs: number; successCount: number; failCount: number;
     selection?: SceneSelection | null; operation?: "ai" | "recolor";
+    planning?: ScenePlanning;
 };
 type SceneDraft = { form: SceneForm; images: SceneImages; config: SceneParameters; selection?: SceneSelection | null; systemPromptOverride?: string };
 
@@ -129,10 +133,10 @@ export async function recoverSceneTaskResult(log: SceneLog, result: SceneResult,
             image = { ...raw, ...composited, type: composited.mimeType, dataUrl: composited.url, name: "恢复的选区合成.png" };
         } catch (caught) {
             assertCurrent();
-            return { id: result.id, taskId, requestId: result.requestId, status: "failed", recoveryAllowed: true, uncompositedImage: raw, error: `原任务结果已取回，但选区合成未完成：${errorText(caught)}。可下载未合成图；恢复不会重新生成。` };
+            return { ...result, id: result.id, taskId, requestId: result.requestId, status: "failed", recoveryAllowed: true, uncompositedImage: raw, error: `原任务结果已取回，但选区合成未完成：${errorText(caught)}。可下载未合成图；恢复不会重新生成。` };
         }
     }
-    return { id: result.id, taskId, requestId: result.requestId, status: "success", recoveryAllowed: false, image };
+    return { ...result, id: result.id, taskId, requestId: result.requestId, status: "success", recoveryAllowed: false, image, error: undefined, uncompositedImage: undefined };
 }
 
 /** Only these image settings may enter a local draft or history record. */
@@ -205,6 +209,7 @@ export function useSceneWorkspace(sceneId: string) {
     const scopeRef = useRef(scope);
     scopeRef.current = scope;
     const epoch = useRef(0);
+    const planningController = useRef<AbortController | null>(null);
     const inputEpoch = useRef<Record<SceneSlotId, number>>(Object.fromEntries(slots.map(slot => [slot, 0])) as Record<SceneSlotId, number>);
     const viewEpoch = useRef(0);
     const [loadedScope, setLoadedScope] = useState<string | null>();
@@ -222,6 +227,7 @@ export function useSceneWorkspace(sceneId: string) {
     const [previewing, setPreviewing] = useState(false);
     const [results, setResults] = useState<SceneResult[]>([]);
     const [running, setRunning] = useState(false);
+    const [phase, setPhase] = useState("");
     const [recoveringResultId, setRecoveringResultId] = useState<string | null>(null);
     const [restoring, setRestoring] = useState(false);
     const [uploadCount, setUploadCount] = useState(0);
@@ -230,6 +236,9 @@ export function useSceneWorkspace(sceneId: string) {
     const loading = loadedScope !== scope || restoring;
     const toolKey = `creative-${sceneId}` as ToolKey;
     const toolEnabled = useToolEnabled(toolKey);
+    const plannerEnabled = useToolEnabled("creative-planner");
+    const plannerConfig = useToolConfig({ ...effectiveConfig, model: effectiveConfig.textModel }, "creative-planner");
+    const plannerModel = models.find(item => item.id === plannerConfig.model || item.modelId === modelOptionName(plannerConfig.model));
     const selectionEnabled = useModuleEnabled("creative-selection");
     const selectedConfig = useToolConfig({ ...effectiveConfig, ...parameters, model: parameters.imageModel || parameters.model || effectiveConfig.imageModel || effectiveConfig.model }, toolKey);
     const model = selectedConfig.model;
@@ -244,7 +253,9 @@ export function useSceneWorkspace(sceneId: string) {
     const operationType = editing ? "inpaint" as const : "image_generation" as const;
     const selectedModel = models.find(item => item.id === model || item.modelId === modelOptionName(model) || item.name === model);
     const estimateValue = estimate({ toolKey, modelId: modelOptionName(model), operationType, quantity: count });
-    const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimateValue.configured && user.creditBalance < estimateValue.credits);
+    const planningEstimate = estimate({ toolKey: "creative-planner", modelId: modelOptionName(plannerConfig.model), operationType: "chat", quantity: 1 });
+    const estimatedCredits = estimateValue.credits + planningEstimate.credits;
+    const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimateValue.configured && planningEstimate.configured && user.creditBalance < estimatedCredits);
     const referenceValidation = validateImageReferences(model, references);
     const validation = loading ? "正在读取当前板块的数据"
         : !toolEnabled ? "当前创意场景已停用，原有草稿和结果仍保留"
@@ -253,6 +264,9 @@ export function useSceneWorkspace(sceneId: string) {
         : !user || user.status !== "active" ? "当前设计师账号不可用"
         : businessStatus === "error" ? "模型配置加载失败，请刷新页面重试"
         : businessStatus !== "ready" ? "正在加载可用模型"
+        : !plannerEnabled ? "设计分析模型已停用，请联系管理员启用创意设计规划"
+        : !plannerModel ? "尚未接入设计分析模型，请在后台配置统一对话模型"
+        : references.length && !plannerModel.capabilities.includes("vision") ? "当前设计分析模型不支持识图，请在后台选择支持视觉理解的 LLM"
         : !selectedModel ? "请选择当前已启用的图像模型"
         : !profile.requiresPrompt ? "当前场景需要理解设计描述，请选择支持提示词的模型"
         : editing && (profile.kind === "midjourney" || !selectedModel.capabilities.includes("edit")) ? "当前场景需要支持图像编辑的模型"
@@ -261,8 +275,8 @@ export function useSceneWorkspace(sceneId: string) {
         : references.some(image => !image.dataUrl) ? "部分参考图的本地文件已不可用，请重新上传"
         : selection && (!selectionMatchesSource(selection, images.primary) || !selection.mask.dataUrl) ? "选区与原图不匹配或文件不可用，请清除后重新涂选"
         : selection && images.primary && !selectionSizeMatches(config.size, images.primary) ? "选区合成需要保持原图比例，请在出图设置中选择相同比例或自适应"
-        : deploymentFeatures.creditsEnabled && !estimateValue.configured ? "当前模型或操作的计费配置不可用"
-        : quotaBlocked ? `额度不足，预计需要 ${estimateValue.credits} 积分`
+        : deploymentFeatures.creditsEnabled && (!estimateValue.configured || !planningEstimate.configured) ? "当前分析或出图模型的计费配置不可用"
+        : quotaBlocked ? `额度不足，预计需要 ${estimatedCredits} 积分`
         : validateSceneForm(sceneId, form, images);
 
     useEffect(() => {
@@ -273,7 +287,7 @@ export function useSceneWorkspace(sceneId: string) {
         const revision = ++epoch.current;
         setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setLogs([]); setResults([]); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false);
         setSystemPromptOverride(undefined);
-        setParameters(sceneParameters(configRef.current)); setRunning(false); setRecoveringResultId(null); setRestoring(false); setUploadCount(0); setStartedAt(0); setError(null); setDraftReady(false);
+        setParameters(sceneParameters(configRef.current)); setRunning(false); setPhase(""); setRecoveringResultId(null); setRestoring(false); setUploadCount(0); setStartedAt(0); setError(null); setDraftReady(false);
         if (!scope) { setLoadedScope(null); return () => { epoch.current += 1; }; }
         void (async () => {
             try {
@@ -300,7 +314,7 @@ export function useSceneWorkspace(sceneId: string) {
                 if (revision === epoch.current) setError(`本地草稿或记录读取失败：${errorText(caught)}`);
             } finally { if (revision === epoch.current) setLoadedScope(scope); }
         })();
-        return () => { epoch.current += 1; };
+        return () => { epoch.current += 1; planningController.current?.abort(); planningController.current = null; };
     }, [scope, sceneId, storage]);
 
     useEffect(() => {
@@ -465,13 +479,14 @@ export function useSceneWorkspace(sceneId: string) {
         const revision = epoch.current;
         const requestConfig = { ...config, count: "1" };
         const snapshot: SceneDraft = { form: cloneSceneForm(form), images: { ...images }, config: sceneParameters(config), selection };
-        const pending: SceneResult[] = Array.from({ length: count }, () => ({ id: nanoid(), requestId: createClientId(), status: "pending" }));
+        const pending: SceneResult[] = Array.from({ length: count }, () => ({ id: nanoid(), status: "pending" }));
+        let planning: ScenePlanning = { status: "pending", requestId: createClientId(), modelId: plannerModel!.id, modelName: plannerModel!.name };
         const start = performance.now();
         const logId = nanoid(), createdAt = Date.now();
         const storageWarnings: string[] = [];
         const isCurrent = () => revision === epoch.current && scopeRef.current === scope && useUserStore.getState().user?.id === user.id && storage.isCurrent();
         viewEpoch.current += 1;
-        setRunning(true); setError(null); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false); setResults(pending); setStartedAt(start);
+        setRunning(true); setPhase("正在准备设计素材"); setError(null); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false); setResults(pending); setStartedAt(start);
         const updateResult = (index: number, result: SceneResult) => {
             pending[index] = result;
             if (isCurrent()) setResults([...pending]);
@@ -480,7 +495,7 @@ export function useSceneWorkspace(sceneId: string) {
             const completed = [...pending];
             const successes = completed.flatMap(result => result.status === "success" && result.image ? [result.image] : []);
             return { id: logId, ownerId: user.id, sceneId, createdAt, prompt, form: snapshot.form, referenceImages: snapshot.images,
-                config: snapshot.config, selection: snapshot.selection, operation: "ai", inputArchiveVersion: 1, results: completed, images: successes,
+                config: snapshot.config, selection: snapshot.selection, planning, operation: "ai", inputArchiveVersion: 1, results: completed, images: successes,
                 durationMs: performance.now() - start, successCount: successes.length, failCount: completed.filter(result => result.status === "failed").length };
         };
         const showLog = (log: SceneLog) => {
@@ -505,6 +520,34 @@ export function useSceneWorkspace(sceneId: string) {
             // Preparing a guide is local and may outlive navigation or an account change.
             // Do not start a paid request for a workspace that is no longer active.
             if (!isCurrent()) return;
+            const analysisLog = makeLog();
+            showLog(analysisLog);
+            await persistSceneLog(storage, scope, analysisLog);
+            if (!isCurrent()) return;
+            const controller = new AbortController();
+            planningController.current = controller;
+            let plan: CreativeScenePlan;
+            try {
+                plan = await requestCreativeScenePlan(plannerConfig, {
+                    sceneId, sceneTitle: getCreativePreset(sceneId)?.title || sceneId, brief: prompt,
+                    references: requestReferences.map((reference, index) => {
+                        const slot = sceneSlots.filter(item => snapshot.images[item.id])[index];
+                        return { ...reference, slotId: slot?.id || "selection-guide", role: slot ? `${slot.label}：${slot.hint}` : "最后一张蓝色选区示意，仅说明修改位置，不是要保留的图案或颜色" };
+                    }),
+                    ...(snapshot.selection ? { selection: selectionPrompt.replace("图片2", "最后一张图片") } : {}),
+                }, { requestId: planning.requestId, signal: controller.signal, onPhase: value => { if (isCurrent()) setPhase(value); } });
+            } finally { if (planningController.current === controller) planningController.current = null; }
+            planning = { status: "success", requestId: plan.requestId, modelId: plan.modelId, modelName: plan.modelName, plan };
+            prompt = plan.prompt;
+            if (!isCurrent()) throw new Error("当前场景已变化，设计分析结果已停止执行，未提交出图");
+            // Allocate image request identities only after the LLM produced a valid plan.
+            // A failed or interrupted analysis can never be mistaken for an image task.
+            pending.forEach((item, index) => { pending[index] = { ...item, requestId: createClientId() }; });
+            const plannedLog = makeLog();
+            showLog(plannedLog);
+            await persistSceneLog(storage, scope, plannedLog);
+            if (!isCurrent()) return;
+            setPhase(`正在使用 ${selectedModel!.name} 出图`);
             await Promise.all(pending.map(async (item, index) => {
                 const itemStart = performance.now();
                 try {
@@ -514,9 +557,9 @@ export function useSceneWorkspace(sceneId: string) {
                         showLog(submitting);
                         await persistSceneLog(storage, scope, submitting);
                         if (!isCurrent()) throw new Error("当前场景已变化，未提交新的模型任务");
-                    }, onSubmitted: async (taskIds: string[]) => {
+                    }, onSubmitted: async (taskIds: string[], actualModel?: ImageSubmissionModel) => {
                         if (!taskIds[0]) throw new Error("任务提交后未返回原任务编号");
-                        updateResult(index, { ...pending[index]!, taskId: taskIds[0], recoveryAllowed: true });
+                        updateResult(index, { ...pending[index]!, taskId: taskIds[0], ...actualModel, recoveryAllowed: true });
                         const accepted = makeLog();
                         showLog(accepted);
                         // Persist the accepted task before polling so refreshes and download failures retain its identity.
@@ -541,12 +584,12 @@ export function useSceneWorkspace(sceneId: string) {
                             const stored = await uploadImage(composited);
                             image = { ...image, ...stored, dataUrl: stored.url, type: stored.mimeType, name: `选区合成-${index + 1}.png` };
                         } catch (caught) {
-                            const result: SceneResult = { id: item.id, requestId: item.requestId, taskId: source.sourceTaskId || pending[index]?.taskId, status: "failed", recoveryAllowed: true, uncompositedImage: raw, error: `选区合成未完成：${errorText(caught)}。AI 原始结果已保留，可下载检查。` };
+                            const result: SceneResult = { ...pending[index]!, id: item.id, requestId: item.requestId, taskId: source.sourceTaskId || pending[index]?.taskId, status: "failed", recoveryAllowed: true, uncompositedImage: raw, error: `选区合成未完成：${errorText(caught)}。AI 原始结果已保留，可下载检查。` };
                             updateResult(index, result); return result;
                         }
                     }
                     image.durationMs = performance.now() - itemStart;
-                    const result: SceneResult = { id: item.id, requestId: item.requestId, taskId: source.sourceTaskId || pending[index]?.taskId, status: "success", recoveryAllowed: false, image };
+                    const result: SceneResult = { ...pending[index]!, id: item.id, requestId: item.requestId, taskId: source.sourceTaskId || pending[index]?.taskId, status: "success", recoveryAllowed: false, image };
                     updateResult(index, result);
                     return result;
                 } catch (caught) {
@@ -561,8 +604,16 @@ export function useSceneWorkspace(sceneId: string) {
             }
             try { await persistSceneLog(storage, scope, log); }
             catch (caught) { if (isCurrent()) setError(`生成结果仍保留在页面，但本地记录保存失败：${errorText(caught)}`); }
-        } catch (caught) { if (isCurrent()) { setError(errorText(caught)); setResults(pending.map(item => failedSceneResult(item, caught))); } }
-        finally { release(); if (revision === epoch.current) setRunning(false); }
+        } catch (caught) {
+            if (planning.status !== "success") planning = { ...planning, status: "failed", error: errorText(caught) };
+            pending.forEach((item, index) => { pending[index] = { ...failedSceneResult(item, caught), ...(!item.requestId ? { recoveryAllowed: false } : {}) }; });
+            const failed = makeLog();
+            showLog(failed);
+            if (isCurrent()) setError(planning.status === "failed" ? `设计分析未完成，未提交出图：${errorText(caught)}` : errorText(caught));
+            try { await persistSceneLog(storage, scope, failed); }
+            catch { /* The original failure remains visible; never submit another model request. */ }
+        }
+        finally { release(); if (revision === epoch.current) { setRunning(false); setPhase(""); } }
     };
 
     const download = async (image: SceneImage, index = 0) => {
@@ -578,7 +629,9 @@ export function useSceneWorkspace(sceneId: string) {
     };
 
     const updateForm: typeof setForm = (value) => { if (running) return; viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setForm(value); };
-    return { form, setForm: updateForm, images, setImage, selection, saveSelection, clearSelection: () => { if (!running) { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setSelection(null); setError(null); } }, saveLocalResult, config, updateConfig, model, profile, count, running, loading,
-        uploading: uploadCount > 0, logs, activeLog, selectedPrompt, previewing, previewLog, selectResultPrompt, results, generate, recoverResult, recoveringResultId, restoreLog, reset, error, validation,
-        quotaBlocked, estimatedCredits: estimateValue.credits, download, startedAt };
+    const actualImageModelNames = [...new Set(activeLog?.results.flatMap(result => result.modelName ? [result.modelName] : result.modelConfigId ? [result.modelConfigId] : []) || [])];
+    const activeImageModelName = actualImageModelNames.join("、") || models.find(item => item.id === activeLog?.config.imageModel || item.modelId === activeLog?.config.imageModel)?.name || activeLog?.config.imageModel;
+    return { form, setForm: updateForm, images, setImage, selection, saveSelection, clearSelection: () => { if (!running) { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setSelection(null); setError(null); } }, saveLocalResult, config, updateConfig, model, selectedModel, plannerModel, profile, count, running, phase, loading,
+        uploading: uploadCount > 0, logs, activeLog, activeImageModelName, selectedPrompt, previewing, previewLog, selectResultPrompt, results, generate, recoverResult, recoveringResultId, restoreLog, reset, error, validation,
+        quotaBlocked, estimatedCredits, download, startedAt };
 }

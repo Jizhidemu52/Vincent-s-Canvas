@@ -101,7 +101,7 @@ describe("server-synchronized usage estimates", () => {
             prices: [{ ...config.prices[0], operationType: definition.operationType }],
             tools: [{ ...config.tools[0], toolKey: definition.toolKey }],
         };
-        if (definition.toolKey === "canvas-chat") board.tools.push({ ...config.tools[0], toolKey: "gpt-chat" });
+        if (definition.operationType === "chat" && definition.toolKey !== "gpt-chat") board.tools.push({ ...config.tools[0], toolKey: "gpt-chat" });
         const input = { operationType: definition.operationType, toolKey: definition.toolKey, quantity: 2 };
         expect(estimateServerUsage(board, input)).toEqual({ credits: 10, rmbCost: 0.7, configured: true });
         board.tools[0].creditCostOverride = 7; board.tools[0].rmbCostOverride = 0.5;
@@ -122,22 +122,27 @@ describe("server-synchronized usage estimates", () => {
         expect(estimateServerUsage({ ...config, prices: [], tools: [{ ...config.tools[0], creditCostOverride: 4 }] }, { operationType: "image_generation", toolKey: "image" }).configured).toBe(false);
     });
 
-    test("canvas chat inherits only the unified model while preserving its own switch and price", () => {
+    test.each(["canvas-chat", "creative-planner"] as const)("%s inherits only the unified model while preserving its own switch and price", toolKey => {
         deploymentFeatures.creditsEnabled = true;
         const textModel = { ...config.models[0], id: "managed", modelId: "managed-chat", capabilities: ["chat"] };
         const stale = { ...textModel, id: "stale", modelId: "stale-chat", creditCost: 100, rmbCost: 100 };
         const unified: BusinessConfig = { models: [stale, textModel], prices: [], tools: [
             { ...config.tools[0], toolKey: "gpt-chat", modelConfigId: textModel.id, enabled: false, creditCostOverride: 99 },
-            { ...config.tools[0], toolKey: "canvas-chat", modelConfigId: stale.id, creditCostOverride: 7, rmbCostOverride: 0.8 },
+            { ...config.tools[0], toolKey, modelConfigId: stale.id, creditCostOverride: 7, rmbCostOverride: 0.8 },
         ] };
-        expect(resolveToolModel(unified, "canvas-chat", stale.modelId)).toBe(textModel);
-        expect(estimateServerUsage(unified, { operationType: "chat", toolKey: "canvas-chat" })).toEqual({ credits: 7, rmbCost: 0.8, configured: true });
+        expect(resolveToolModel(unified, toolKey, stale.modelId)).toBe(textModel);
+        expect(estimateServerUsage(unified, { operationType: "chat", toolKey })).toEqual({ credits: 7, rmbCost: 0.8, configured: true });
         expect(resolveToolModel(unified, "gpt-chat", stale.modelId)).toBeUndefined();
         unified.tools[0]!.modelConfigId = null;
-        expect(resolveToolModel(unified, "canvas-chat", textModel.modelId)).toBeUndefined();
+        expect(resolveToolModel(unified, toolKey, textModel.modelId)).toBeUndefined();
+        expect(estimateServerUsage(unified, { operationType: "chat", toolKey })).toEqual({ credits: 0, rmbCost: 0, configured: false });
         unified.tools[0]!.modelConfigId = textModel.id;
         unified.tools[1]!.enabled = false;
-        expect(resolveToolModel(unified, "canvas-chat", textModel.modelId)).toBeUndefined();
+        expect(resolveToolModel(unified, toolKey, textModel.modelId)).toBeUndefined();
+        expect(estimateServerUsage(unified, { operationType: "chat", toolKey }).configured).toBe(false);
+        unified.tools[1]!.enabled = true;
+        unified.tools.push({ ...config.tools[0], toolKey: toolKey === "canvas-chat" ? "canvas" : "creative", enabled: false });
+        expect(estimateServerUsage(unified, { operationType: "chat", toolKey }).configured).toBe(false);
     });
 });
 

@@ -1,7 +1,7 @@
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageModelProfile, imageModelSettingsError, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
-import { requestQueuedImageBatch, requestQueuedImages, type QueuedBatchItem } from "@/services/api/generation-tasks";
+import { requestQueuedImageBatch, requestQueuedImages, type ImageSubmissionModel, type QueuedBatchItem } from "@/services/api/generation-tasks";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
@@ -31,10 +31,10 @@ export type ResponseFunctionTool = {
     function: { name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 };
 
-export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: Array<Record<string, unknown>> };
+export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: Array<Record<string, unknown>>; modelConfigId?: string; requestId?: string };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
+type RequestOptions = { requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[], model?: ImageSubmissionModel) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "responses_assistant"; output: Array<Record<string, unknown>> } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -221,8 +221,12 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
         const payload = (await response.json().catch(() => ({}))) as { message?: string };
         throw new Error(payload.message || `对话请求失败：${response.status}`);
     }
-    if (response.headers.get("content-type")?.includes("text/event-stream")) return readClaudeSseResponse(response, onDelta, options?.onToolCallStart);
-    return response.json() as Promise<ToolResponseResult>;
+    const modelConfigId = response.headers.get("x-chat-model-config-id");
+    const actualRequestId = response.headers.get("x-chat-request-id");
+    const result: ToolResponseResult = response.headers.get("content-type")?.includes("text/event-stream")
+        ? await readClaudeSseResponse(response, onDelta, options?.onToolCallStart)
+        : await response.json() as ToolResponseResult;
+    return { ...result, ...(modelConfigId ? { modelConfigId } : {}), ...(actualRequestId ? { requestId: actualRequestId } : {}) };
 }
 
 export function isClaudeModel(modelId: string) {

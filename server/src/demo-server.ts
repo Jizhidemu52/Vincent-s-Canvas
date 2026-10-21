@@ -23,7 +23,7 @@ import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
 import { resolveDemoHost } from "./demo-network-config";
 import { isOpenTokenImageModel, runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
 import { createGenerationTiming } from "./generation-timing";
-import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, chatFunctionToolsSchema, isClaudeMessagesModel, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
+import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, chatExecutionHeaders, chatFunctionToolsSchema, chatInputContainsImages, chatRequestIdSchema, isClaudeMessagesModel, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
 import { fetchProviderSubmission } from "./provider-submission-transport";
 import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
 import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./demo-video-sources";
@@ -52,7 +52,7 @@ import { verifyOaToken, OaError, OA_SESSION_TTL_SECONDS } from "./oa";
 import { readReferenceImportBody, referenceImportFailure, runReferenceImportAction } from "./routes/reference-import";
 import { moduleKeys, moduleIsEnabled, toolDefinitions, type ToolKey } from "../../shared/feature-catalog";
 import { DemoToolConfigurationError, resolveDemoToolConfiguration } from "./demo-tool-configuration";
-import { applyDefaultChatModel, INITIAL_CHAT_MODEL_ID } from "./chat-model-policy";
+import { applyDefaultChatModel, INITIAL_CHAT_MODEL_ID, usesSharedChatModel } from "./chat-model-policy";
 import { applyCreativeModelDefaults } from "./creative-model-policy";
 
 const sessions = new Map<string, string>();
@@ -960,6 +960,7 @@ Bun.serve({
       });
     if (path === "/api/chat/responses" && request.method === "POST") {
       const input = (await request.json()) as {
+        requestId?: string;
         modelId?: string;
         toolKey?: string;
         input?: DemoResponseInput[];
@@ -969,9 +970,13 @@ Bun.serve({
         gemini?: { maxOutputTokens: number };
         claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
       };
+      const requestId = chatRequestIdSchema.optional().parse(input.requestId);
       const chatTool = resolveDemoToolConfiguration({ operationType: "chat", toolKey: input.toolKey, modelConfigId: input.modelId }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
       const selectedConfig = demoModels.find(model => model.id === chatTool.modelConfigId);
       const selectedModel = String(selectedConfig?.modelId || "");
+      if (chatTool.toolKey === "creative-planner" && chatInputContainsImages(input.input || []) && !(selectedConfig?.capabilities as string[] | undefined)?.includes("vision"))
+        return json({ error: "MODEL_VISION_REQUIRED", message: "创意参考图分析需要支持视觉理解的统一对话模型，请管理员检查模型能力配置" }, 400);
+      const executionHeaders = chatExecutionHeaders(chatTool.modelConfigId, requestId);
       const parsedTools = chatFunctionToolsSchema.safeParse(input.tools);
       if (!parsedTools.success) return json({ error: "INVALID_TOOLS", message: "对话只允许已声明的 function 工具；图片生成必须通过图像任务入口" }, 400);
       input.tools = parsedTools.data;
@@ -1010,10 +1015,10 @@ Bun.serve({
             const upstream = await requestClaudeStream(model, { apiKey }, chatInput);
             return new Response(upstream.body, {
               status: upstream.status,
-              headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform" },
+              headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", ...executionHeaders },
             });
           }
-          return json(await requestChatCompletion(model, { apiKey }, chatInput));
+          return json(await requestChatCompletion(model, { apiKey }, chatInput), 200, executionHeaders);
         } catch (error) {
           return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "Chat provider request failed" }, 502);
         }
@@ -1023,11 +1028,15 @@ Bun.serve({
       if (!apiMartApiKey)
         return json({ error: "PROVIDER_NOT_CONFIGURED", message: "本地服务端尚未配置 APIMart 密钥" }, 503);
       try {
-        if (selectedModel !== "gemini-3.1-pro-preview" && input.claude?.stream)
-          return await callDemoClaudeStream(selectedModel, { input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, thinking: input.claude.thinking, maxTokens: input.claude.maxTokens });
+        if (selectedModel !== "gemini-3.1-pro-preview" && input.claude?.stream) {
+          const upstream = await callDemoClaudeStream(selectedModel, { input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, thinking: input.claude.thinking, maxTokens: input.claude.maxTokens });
+          const responseHeaders = new Headers(upstream.headers);
+          for (const [name, value] of Object.entries(executionHeaders)) responseHeaders.set(name, value);
+          return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+        }
         return json(selectedModel === "gemini-3.1-pro-preview"
           ? await callDemoGemini({ input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, webSearch: input.webSearch, gemini: input.gemini })
-          : await callDemoClaude(selectedModel, { input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, stream: input.claude?.stream, thinking: input.claude?.thinking, maxTokens: input.claude?.maxTokens }));
+          : await callDemoClaude(selectedModel, { input: input.input || [], tools: input.tools || [], toolChoice: input.toolChoice, stream: input.claude?.stream, thinking: input.claude?.thinking, maxTokens: input.claude?.maxTokens }), 200, executionHeaders);
       } catch (error) {
         return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "Gemini request failed" }, 502);
       }
@@ -2098,7 +2107,7 @@ Bun.serve({
         creditCostOverride: number | null;
         rmbCostOverride: number | null;
       };
-      if (selectedTool === "canvas-chat") input.modelConfigId = null;
+      if (usesSharedChatModel(selectedTool)) input.modelConfigId = null;
       const existing = demoToolConfigurations.find(
         (item) => item.toolKey === selectedTool,
       );

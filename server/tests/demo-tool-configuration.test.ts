@@ -23,9 +23,9 @@ describe("demo formal tool configuration", () => {
       { id: "chat-a", modelId: "same-upstream", providerId: "provider", enabled: true, capabilities: ["chat"] },
       { id: "chat-b", modelId: "same-upstream", providerId: "second-provider", enabled: true, capabilities: ["chat"] },
     ];
-    const configured = [{ toolKey: "gpt-chat", modelConfigId: "chat-a", enabled: true }, { toolKey: "canvas-chat", modelConfigId: "chat-b", enabled: true }];
+    const configured = [{ toolKey: "gpt-chat", modelConfigId: "chat-a", enabled: true }, { toolKey: "canvas-chat", modelConfigId: "chat-b", enabled: true }, { toolKey: "creative-planner", modelConfigId: "chat-b", enabled: true }];
     const chatProviders = [...providers, { id: "second-provider", enabled: true }];
-    for (const toolKey of [undefined, "gpt-chat", "canvas-chat"]) {
+    for (const toolKey of [undefined, "gpt-chat", "canvas-chat", "creative-planner"]) {
       expect(resolveDemoToolConfiguration({ operationType: "chat", toolKey, modelConfigId: "chat-b" }, configured, chats, chatProviders, flags).modelConfigId).toBe("chat-a");
     }
     expect(() => resolveDemoToolConfiguration({ operationType: "chat", modelConfigId: "chat-b" }, [], chats, chatProviders, flags)).toThrow("尚未配置统一对话模型");
@@ -33,8 +33,9 @@ describe("demo formal tool configuration", () => {
     expect(() => resolveDemoToolConfiguration({ operationType: "chat", toolKey: "canvas-chat", modelConfigId: "chat-b" }, configured, chats, chatProviders, flags)).toThrow("未启用");
   });
   test("catalog includes formal AI slots, promoted design tools and no unfinished placeholders", () => {
-    expect(toolDefinitions).toHaveLength(43);
-    expect(new Set(moduleKeys).size).toBe(62);
+    expect(toolDefinitions).toHaveLength(44);
+    expect(new Set(moduleKeys).size).toBe(63);
+    expect(toolDefinitions.find(tool => tool.toolKey === "creative-planner")).toMatchObject({ operationType: "chat", operations: ["chat"], capabilities: ["chat"], parent: "creative" });
     expect(moduleKeys).toContain("midjourney-blend");
     expect(moduleKeys).toContain("standard-colors");
     expect(moduleKeys).not.toContain("canvas-ai-upscale");
@@ -42,6 +43,16 @@ describe("demo formal tool configuration", () => {
   test("configured model is resolved and unknown keys cannot fall back", () => {
     expect(resolveDemoToolConfiguration({ operationType: "inpaint", toolKey: binding.toolKey, modelConfigId: "image-a" }, [binding], models, providers, flags)).toEqual({ toolKey: binding.toolKey, modelConfigId: "model-a" });
     expect(() => resolveDemoToolConfiguration({ operationType: "inpaint", toolKey: "creative-typo", modelConfigId: "model-a" }, [], models, providers, flags)).toThrow("板块标识无效");
+  });
+  test("planner fails closed for its switch, creative parent, or missing shared binding", () => {
+    const chats = [{ id: "chat-a", modelId: "vision-model", providerId: "provider", enabled: true, capabilities: ["chat", "vision"] }];
+    const shared = { toolKey: "gpt-chat", modelConfigId: "chat-a", enabled: false };
+    const planner = { toolKey: "creative-planner", modelConfigId: "forged-own-model", enabled: true };
+    const input = { operationType: "chat", toolKey: planner.toolKey, modelConfigId: "forged-client-model" };
+    expect(resolveDemoToolConfiguration(input, [shared, planner], chats, providers, flags).modelConfigId).toBe("chat-a");
+    expect(() => resolveDemoToolConfiguration(input, [shared, { ...planner, enabled: false }], chats, providers, flags)).toThrow("关闭");
+    expect(() => resolveDemoToolConfiguration(input, [shared, planner], chats, providers, { ...flags, creative: false })).toThrow("关闭");
+    expect(() => resolveDemoToolConfiguration(input, [{ ...shared, modelConfigId: null }, planner], chats, providers, flags)).toThrow("尚未配置统一对话模型");
   });
   test("changed binding, disabled slot and parent reject before provider submission", () => {
     const input = { operationType: "inpaint", toolKey: binding.toolKey, modelConfigId: "model-b" };

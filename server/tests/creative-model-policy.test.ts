@@ -34,7 +34,7 @@ describe("creative model defaults", () => {
     expect(creativeModelDefaultSources({ toolKey: "creative-seamless-pattern" })).not.toContain("seamless-stitch");
   });
   test("migration checks exactly match the shared tool and module contracts", () => {
-    const sql = readFileSync(new URL("../src/migrations/039_creative_design_tools.sql", import.meta.url), "utf8");
+    const sql = readFileSync(new URL("../src/migrations/040_creative_planner.sql", import.meta.url), "utf8");
     const entries = (key: string) => [...sql.match(new RegExp(`CHECK \\(${key} IN \\(([\\s\\S]*?)\\)\\)`))![1]!.matchAll(/'([^']+)'/g)].map(match => match[1]);
     expect(entries("tool_key").sort()).toEqual(toolDefinitions.map(tool => tool.toolKey).sort());
     expect(entries("module_key").sort()).toEqual([...moduleKeys].sort());

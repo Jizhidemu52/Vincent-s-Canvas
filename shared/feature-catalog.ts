@@ -7,6 +7,7 @@ export const toolDefinitions = [
   { toolKey: "seamless-stitch", label: "无缝拼接", group: "AI 工作台", operationType: "seamless_stitch", operations: ["seamless_stitch"], capabilities: ["edit"], parent: null },
   { toolKey: "midjourney-blend", label: "MJ 多图融合", group: "AI 工作台", operationType: "image_generation", operations: ["image_generation"], capabilities: ["generate"], parent: null },
   { toolKey: "video", label: "视频创作", group: "AI 工作台", operationType: "video_generation", operations: ["video_generation"], capabilities: ["video"], parent: null },
+  { toolKey: "creative-planner", label: "创意需求分析与提示词规划", group: "创意工具", operationType: "chat", operations: ["chat"], capabilities: ["chat"], parent: "creative" },
   { toolKey: "creative-text-to-style", label: "以文生款", group: "创意工具", operationType: "image_generation", operations: ["image_generation", "inpaint"], capabilities: ["generate"], parent: "creative" },
   { toolKey: "creative-style-to-sketch", label: "款生线稿", group: "创意工具", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: "creative" },
   { toolKey: "creative-local-restyle", label: "局部改款", group: "创意工具", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: "creative" },

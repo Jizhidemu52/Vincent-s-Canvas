@@ -8,13 +8,14 @@ const flags = Object.fromEntries(moduleKeys.map(key => [key, true]));
 
 describe("formal feature visibility", () => {
     test("covers existing scenes, promoted design workbenches and distinct canvas capabilities", () => {
-        const creativeTools = toolDefinitions.filter(item => item.toolKey.startsWith("creative-"));
+        const creativeTools = toolDefinitions.filter(item => item.toolKey.startsWith("creative-") && item.operationType !== "chat");
         const aiPresets = creativePresets.filter(preset => preset.engine !== "vector");
         const vectorPresets = creativePresets.filter(preset => preset.engine === "vector");
         expect(creativePresets).toHaveLength(27);
         expect(creativeTools).toHaveLength(25);
         expect(creativeTools.map(item => item.toolKey).sort()).toEqual(aiPresets.map(preset => `creative-${preset.id}`).sort());
         expect(vectorPresets.map(preset => preset.id)).toEqual(["sketch-vectorization", "pattern-vectorization"]);
+        expect(toolDefinitions.find(item => item.toolKey === "creative-planner")).toMatchObject({ operationType: "chat", parent: "creative", capabilities: ["chat"] });
         for (const preset of creativePresets) {
             const definitions = moduleDefinitions.filter(item => item.moduleKey === `creative-${preset.id}`);
             expect(definitions).toHaveLength(1);

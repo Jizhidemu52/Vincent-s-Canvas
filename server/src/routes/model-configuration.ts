@@ -14,12 +14,12 @@ import { toolDefinitions } from "../../../shared/feature-catalog";
 import { createMarkImageProviderRouter } from "./mark-image-provider";
 import { createFeaturedModelsRouter } from "./featured-models";
 import { withTransaction } from "../db-transaction";
-import { applyDefaultChatModel, DEFAULT_CHAT_MODEL_TOOL_KEY } from "../chat-model-policy";
+import { applyDefaultChatModel, DEFAULT_CHAT_MODEL_TOOL_KEY, usesSharedChatModel } from "../chat-model-policy";
 import { applyCreativeModelDefaults } from "../creative-model-policy";
 import { readToolConfiguration } from "../tool-configuration";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
-const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
+const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "vision", "tools", "video", "audio"])).min(1);
 const providerInput = z.object({ name: z.string().trim().min(1).max(100), protocol, baseUrl: z.string().url(), enabled: z.boolean().default(true), credentials: z.record(z.string(), z.string().max(10_000)).optional() });
 const providerUpdate = providerInput.partial();
 const modelInput = z.object({ providerId: z.string().uuid(), workflowConfigId: z.string().uuid().nullish(), replacementModelConfigId: z.string().uuid().nullish(), name: z.string().trim().min(1).max(120), modelId: z.string().trim().min(1).max(200), capabilities, creditCost: z.number().int().nonnegative(), rmbCost: z.number().nonnegative(), concurrencyLimit: z.number().int().min(1).max(100).default(5), enabled: z.boolean().default(true) });
@@ -134,8 +134,8 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
         try {
             const selectedTool = toolKey.parse(request.params.toolKey);
             const input = toolConfigurationInput.parse(request.body);
-            // The canvas slot owns its price and switch, never a second LLM selection.
-            if (selectedTool === "canvas-chat") input.modelConfigId = null;
+            // Shared chat entries own their price and switch, never a second LLM selection.
+            if (usesSharedChatModel(selectedTool)) input.modelConfigId = null;
             const definition = toolDefinitions.find((item) => item.toolKey === selectedTool)!;
             if (input.modelConfigId) {
                 const model = await db.query<{ modelId: string; capabilities: string[] }>(`SELECT m.model_id AS "modelId",m.capabilities FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [input.modelConfigId]);
@@ -157,7 +157,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
                 [selectedTool, input.modelConfigId, input.enabled, actor.id, input.creditCostOverride, input.rmbCostOverride]);
             await writeAudit(db, { actor, action: "tool_api_configuration.updated", targetType: "tool", targetId: selectedTool, result: "success", detail: input, ip: request.ip });
             const saved = result.rows[0];
-            response.json({ tool: selectedTool === "canvas-chat"
+            response.json({ tool: usesSharedChatModel(selectedTool)
                 ? { ...saved, modelConfigId: (await readToolConfiguration(db, DEFAULT_CHAT_MODEL_TOOL_KEY)).modelConfigId }
                 : saved });
         } catch (error) { next(error); }

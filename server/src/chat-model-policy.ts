@@ -1,4 +1,5 @@
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { getToolDefinition } from "../../shared/feature-catalog";
 import type { Database } from "./db";
 
 export const DEFAULT_CHAT_MODEL_TOOL_KEY = "gpt-chat";
@@ -10,11 +11,15 @@ const inheritedModelFields = [
   "workflowConfigId", "workflowName", "workflowEnabled",
 ] as const;
 
-/** Model ownership is shared; a canvas chat's availability, price and version stay independent. */
+export function usesSharedChatModel(toolKey: string) {
+  return toolKey !== DEFAULT_CHAT_MODEL_TOOL_KEY && getToolDefinition(toolKey)?.operationType === "chat";
+}
+
+/** Model ownership is shared; each chat entry's availability, price and version stay independent. */
 export function applyDefaultChatModel<T extends { toolKey: string; modelConfigId?: unknown }>(tools: T[]): T[] {
   const source = tools.find(tool => tool.toolKey === DEFAULT_CHAT_MODEL_TOOL_KEY) as (T & Record<string, unknown>) | undefined;
   return tools.map(tool => {
-    if (tool.toolKey !== "canvas-chat") return tool;
+    if (!usesSharedChatModel(tool.toolKey)) return tool;
     const inherited = Object.fromEntries(inheritedModelFields
       .filter(field => field in tool || (source && field in source))
       .map(field => [field, source?.[field] ?? null]));

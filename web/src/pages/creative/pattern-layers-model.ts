@@ -1,13 +1,43 @@
 import type { PixelImage } from "./image-processing";
+import type { CreativeScenePlan } from "@/services/api/creative-scene-plan";
+
+export type PatternLayerAiTrace = {
+    plan: CreativeScenePlan; sourceId: string; targetLabel: string; createdAt: number;
+    imageModelId: string; imageModelName: string; imageRequestId: string;
+};
 
 export type PatternLayer = {
     id: string; name: string; maskUrl: string; maskMode: "alpha" | "luminance";
     threshold: number; visible: boolean; opacity: number; x: number; y: number;
     sourceTaskId?: string;
+    aiTrace?: PatternLayerAiTrace;
 };
 export type LayerPixels = { name: string; left: number; top: number; image: PixelImage; visible: boolean; opacity: number };
 export const MAX_PATTERN_LAYERS = 8;
 export const MAX_LAYER_PIXELS = 8_000_000;
+
+export function rememberPatternLayerPlan(history: readonly PatternLayerAiTrace[], trace: PatternLayerAiTrace) {
+    return [...history.filter(item => item.imageRequestId !== trace.imageRequestId), trace];
+}
+
+/** A failed or abandoned analysis never falls through to a new image submission. */
+export async function generatePlannedPatternLayer<T>(input: {
+    sourceId: string; targetLabel: string; imageModelId: string; imageModelName: string; imageRequestId: string;
+    isCurrent: () => boolean; analyze: () => Promise<CreativeScenePlan>;
+    persist: (trace: PatternLayerAiTrace) => Promise<void>;
+    generate: (trace: PatternLayerAiTrace, onSubmissionStarted: () => void) => Promise<T>;
+}): Promise<{ trace: PatternLayerAiTrace; result: T }> {
+    const assertCurrent = () => { if (!input.isCurrent()) throw new Error("当前分层工程已变化，未提交新的图片任务"); };
+    assertCurrent();
+    const plan = await input.analyze();
+    assertCurrent();
+    if (!plan.prompt.trim()) throw new Error("LLM 未返回有效分层指令，未提交图片任务");
+    const trace: PatternLayerAiTrace = { plan, sourceId: input.sourceId, targetLabel: input.targetLabel, createdAt: Date.now(),
+        imageModelId: input.imageModelId, imageModelName: input.imageModelName, imageRequestId: input.imageRequestId };
+    await input.persist(trace);
+    assertCurrent();
+    return { trace, result: await input.generate(trace, assertCurrent) };
+}
 
 function validPixels(image: PixelImage) {
     if (!Number.isInteger(image.width) || !Number.isInteger(image.height) || image.width < 1 || image.height < 1 || image.width * image.height > MAX_LAYER_PIXELS || image.data.length !== image.width * image.height * 4) throw new Error("图层图片尺寸无效或超过 800 万像素，请先缩小图片");

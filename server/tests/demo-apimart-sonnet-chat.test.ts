@@ -43,7 +43,7 @@ test("demo defaults every chat entry to Sonnet Messages and SSE regardless of st
     method: body === undefined ? "GET" : "POST", headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const chat = (modelId: string, extra: Record<string, unknown> = {}) => request("/api/chat/responses", {
-    modelId, toolKey: "gpt-chat", input: [{ role: "user", content: "Inspect this knit. 中文🧶" }], tools: [], ...extra,
+    modelId, toolKey: "gpt-chat", requestId: "demo-chat-fixture-request", input: [{ role: "user", content: "Inspect this knit. 中文🧶" }], tools: [], ...extra,
   });
   try {
     let ready = false;
@@ -65,10 +65,13 @@ test("demo defaults every chat entry to Sonnet Messages and SSE regardless of st
     expect(sonnet.modelId).toBe(sonnet.id);
     expect(catalog.tools.find((tool: any) => tool.toolKey === "gpt-chat").modelConfigId).toBe(sonnet.id);
     expect(catalog.tools.find((tool: any) => tool.toolKey === "canvas-chat").modelConfigId).toBe(sonnet.id);
+    expect(catalog.tools.find((tool: any) => tool.toolKey === "creative-planner").modelConfigId).toBe(sonnet.id);
     expect(JSON.stringify(catalog)).not.toMatch(/isolated-mark-key|isolated-opentoken-key|wrong-legacy-key|127\.0\.0\.1/);
     const tools = [{ type: "function", name: "read_node", parameters: { type: "object", properties: { id: { type: "string" } } } }];
     const response = await chat(sonnet.id, { tools, toolChoice: "required", claude: { maxTokens: 4096, thinking: true } });
     expect(response.status).toBe(200);
+    expect(response.headers.get("x-chat-model-config-id")).toBe(sonnet.id);
+    expect(response.headers.get("x-chat-request-id")).toBe("demo-chat-fixture-request");
     expect(await response.json()).toMatchObject({ claudeAssistantContent: assistantContent, toolCalls: [{ id: "read-1", function: { name: "read_node", arguments: '{"id":"knit"}' } }], stopReason: "tool_use" });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.path).toBe("/mark/v1/messages");
@@ -78,6 +81,8 @@ test("demo defaults every chat entry to Sonnet Messages and SSE regardless of st
     expect(calls[0]!.raw).toContain("中文🧶");
     const stream = await chat(sonnet.id, { claude: { stream: true, maxTokens: 100_000 }, input: [{ type: "claude_assistant", content: assistantContent }, { type: "function_call_output", call_id: "read-1", output: "Cable knit 中文🧶" }] });
     expect(stream.headers.get("content-type")).toContain("text/event-stream");
+    expect(stream.headers.get("x-chat-model-config-id")).toBe(sonnet.id);
+    expect(stream.headers.get("x-chat-request-id")).toBe("demo-chat-fixture-request");
     expect(await stream.text()).toBe(events);
     expect(calls[1]!.body).toEqual({ model: "claude-sonnet-5-5", max_tokens: 16384, stream: true, messages: [{ role: "assistant", content: assistantContent }, { role: "user", content: [{ type: "tool_result", tool_use_id: "read-1", content: "Cable knit 中文🧶" }] }] });
     expect(calls[1]!.raw).toContain("中文🧶");
@@ -85,6 +90,20 @@ test("demo defaults every chat entry to Sonnet Messages and SSE regardless of st
     expect(await (await chat(openTokenAstra.id, { toolKey: "canvas-chat" })).json()).toMatchObject({ claudeAssistantContent: assistantContent });
     expect(await (await chat("forged-client-model", { toolKey: undefined })).json()).toMatchObject({ claudeAssistantContent: assistantContent });
     expect(calls.map(call => call.path)).toEqual(Array(5).fill("/mark/v1/messages"));
+    const planner = await chat("forged-client-model", {
+      toolKey: "creative-planner", requestId: "demo-creative-planner-image",
+      input: [{ role: "user", content: [{ type: "input_text", text: "Inspect the knit before drafting its prompt." }, { type: "input_image", image_url: "data:image/png;base64,AQID" }] }],
+    });
+    expect(planner.status).toBe(200);
+    expect(planner.headers.get("x-chat-model-config-id")).toBe(sonnet.id);
+    expect(planner.headers.get("x-chat-request-id")).toBe("demo-creative-planner-image");
+    expect(await planner.json()).toMatchObject({ claudeAssistantContent: assistantContent });
+    expect(calls).toHaveLength(6);
+    expect(calls[5]!.path).toBe("/mark/v1/messages");
+    expect(calls[5]!.body.messages[0].content[1]).toEqual({ type: "image", source: { type: "base64", media_type: "image/png", data: "AQID" } });
+    const invalidRequest = await chat(sonnet.id, { toolKey: "creative-planner", requestId: "bad\r\nrequest" });
+    expect(invalidRequest.status).toBe(400);
+    expect(calls).toHaveLength(6);
   } finally {
     child.kill(); await child.exited; provider.stop(true);
   }
