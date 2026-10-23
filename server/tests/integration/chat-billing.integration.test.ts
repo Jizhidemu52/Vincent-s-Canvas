@@ -116,7 +116,7 @@ integration("isolated PostgreSQL chat billing", () => {
             calls++;
             lastProviderInput = request.body.input;
             if (onProviderCall) { const action = onProviderCall; onProviderCall = null; await action(); }
-            if (mode === "fail") { response.status(400).json({ error: "fixture rejection" }); return; }
+            if (mode === "fail") { response.status(503).json({ error: "fixture failure" }); return; }
             if (mode === "json-failed" || mode === "json-incomplete") {
                 response.json({ status: mode === "json-failed" ? "failed" : "incomplete", output_text: "partial fixture answer" }); return;
             }
@@ -179,56 +179,54 @@ integration("isolated PostgreSQL chat billing", () => {
             await db.query("UPDATE tool_api_configurations SET credit_cost_override=7 WHERE tool_key='gpt-chat'");
             await db.query("UPDATE providers SET protocol='anthropic'");
             mode = "stream"; expect(await (await post(randomUUID(), true)).text()).toContain('"message_stop"'); expect(await balance(userId)).toBe(86);
-            mode = "incomplete"; expect(await (await post(randomUUID(), true)).text()).toContain("event: error"); expect(await balance(userId)).toBe(79);
+            mode = "incomplete"; expect(await (await post(randomUUID(), true)).text()).toContain("event: error"); expect(await balance(userId)).toBe(86);
             const statuses = await db.query("SELECT status,count(*)::int AS count FROM credit_reservations WHERE user_id=$1 GROUP BY status", [userId]);
-            expect(Object.fromEntries(statuses.rows.map(row => [row.status, row.count]))).toEqual({ captured: 3, released: 2 });
+            expect(Object.fromEntries(statuses.rows.map(row => [row.status, row.count]))).toEqual({ captured: 2, released: 3 });
             // Authenticated non-OA chat is tracked even when credits are off or
             // free; the rejected duplicate must not create another usage record.
             const usageStatuses = await db.query("SELECT status,count(*)::int AS count FROM usage_chat_requests WHERE user_id=$1 GROUP BY status", [userId]);
             expect(Object.fromEntries(usageStatuses.rows.map(row => [row.status, row.count]))).toEqual({ success: 4, failed: 3 });
 
             // Inject a real database failure, not a mocked response, after the
-            // provider succeeds. Neither transport may refund already-valid output.
+            // provider succeeds. Both transports must refund before reporting it.
             await database.exec(`CREATE FUNCTION fail_chat_audit_fixture() RETURNS trigger LANGUAGE plpgsql AS $$
                 BEGIN IF NEW.action='chat.completed' THEN RAISE EXCEPTION 'Fixture audit failure'; END IF; RETURN NEW; END $$;
                 CREATE TRIGGER fail_chat_audit_fixture BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION fail_chat_audit_fixture();`);
             for (const streaming of [false, true]) {
-                const balanceBefore = await balance(userId);
                 await db.query("UPDATE providers SET protocol=$1", [streaming ? "anthropic" : "openai"]);
                 mode = streaming ? "stream" : "success";
                 const failedId = randomUUID();
                 const failedResponse = await post(failedId, streaming);
                 if (streaming) expect(await failedResponse.text()).toContain("event: error");
                 else expect(failedResponse.status).toBe(500);
-                expect(await balance(userId)).toBe(balanceBefore - 7);
+                expect(await balance(userId)).toBe(86);
                 const callsAfterFailure = calls;
                 expect((await post(failedId, streaming)).status).toBe(409);
                 expect(calls).toBe(callsAfterFailure);
                 const reservationId = `chat:${userId}:${failedId}`;
-                expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [reservationId])).rows[0].status).toBe("captured");
+                expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [reservationId])).rows[0].status).toBe("released");
                 const entries = await db.query("SELECT entry_type FROM credit_ledger WHERE reference_id=$1 ORDER BY created_at", [reservationId]);
-                expect(entries.rows.map(row => row.entry_type)).toEqual(["hold", "capture"]);
+                expect(entries.rows.map(row => row.entry_type)).toEqual(["hold", "release"]);
             }
             await database.exec("DROP TRIGGER fail_chat_audit_fixture ON audit_logs; DROP FUNCTION fail_chat_audit_fixture();");
 
             await db.query("UPDATE providers SET protocol='openai'");
             for (const failedMode of ["json-failed", "json-incomplete", "item-incomplete"] as const) {
-                const balanceBefore = await balance(userId);
                 mode = failedMode;
                 const failedId = randomUUID();
                 expect((await post(failedId)).status).toBe(400);
-                expect(await balance(userId)).toBe(balanceBefore - 7);
-                expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [`chat:${userId}:${failedId}`])).rows[0].status).toBe("held");
+                expect(await balance(userId)).toBe(86);
+                expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [`chat:${userId}:${failedId}`])).rows[0].status).toBe("released");
             }
             // A tool plan and the following model answer are distinct billable calls.
             mode = "tool";
             expect((await (await post()).json()).toolCalls).toHaveLength(1);
-            expect(await balance(userId)).toBe(37);
+            expect(await balance(userId)).toBe(79);
             mode = "success";
             const continuation = [{ type: "function_call", call_id: "fixture-call", name: "canvas_get_state", arguments: "{}" }, { type: "function_call_output", call_id: "fixture-call", output: "fixture state" }];
             expect((await post(randomUUID(), false, continuation)).status).toBe(200);
             expect(lastProviderInput).toEqual(continuation);
-            expect(await balance(userId)).toBe(30);
+            expect(await balance(userId)).toBe(72);
 
             // Configuration changes during an admitted call affect only the next
             // request: the in-flight hold still captures its original seven credits.
@@ -238,19 +236,19 @@ integration("isolated PostgreSQL chat billing", () => {
                 await db.query("UPDATE tool_api_configurations SET credit_cost_override=19 WHERE tool_key='gpt-chat'");
             };
             expect((await post(snapshotId)).status).toBe(200);
-            expect(await balance(userId)).toBe(23);
+            expect(await balance(userId)).toBe(65);
             expect((await db.query("SELECT status,credits FROM credit_reservations WHERE request_id=$1", [`chat:${userId}:${snapshotId}`])).rows).toEqual([{ status: "captured", credits: 7 }]);
-            expect((await post()).status).toBe(200); expect(await balance(userId)).toBe(23);
+            expect((await post()).status).toBe(200); expect(await balance(userId)).toBe(65);
             await db.query("UPDATE credit_policy SET credits_enabled=true");
             await db.query("UPDATE tool_api_configurations SET credit_cost_override=7 WHERE tool_key='gpt-chat'");
 
             await db.query("UPDATE providers SET protocol='anthropic'");
             mode = "stream-tool";
             expect(await (await post(randomUUID(), true)).text()).toContain('"tool_use"');
-            expect(await balance(userId)).toBe(16);
+            expect(await balance(userId)).toBe(58);
             mode = "stream-error";
             expect(await (await post(randomUUID(), true)).text()).toContain("event: error");
-            expect(await balance(userId)).toBe(9);
+            expect(await balance(userId)).toBe(58);
 
             mode = "stream-hold";
             const cancelledId = randomUUID();
@@ -264,18 +262,13 @@ integration("isolated PostgreSQL chat billing", () => {
                 });
                 socket.on("error", reject);
             });
-            expect(await balance(userId)).toBe(2);
+            expect(await balance(userId)).toBe(51);
             for (let attempt = 0; attempt < 100 && disconnectedSocket!.remoteAddress && !disconnectedSocket!.destroyed; attempt++) await new Promise(done => setTimeout(done, 10));
             expect(!disconnectedSocket!.remoteAddress || disconnectedSocket!.destroyed).toBe(true);
             heldStream.finish!();
-            const cancelledReservation = `chat:${userId}:${cancelledId}`;
-            for (let attempt = 0; attempt < 100; attempt++) {
-                if ((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [cancelledReservation])).rows[0].status === "captured") break;
-                await new Promise(done => setTimeout(done, 10));
-            }
-            expect(await balance(userId)).toBe(2);
-            expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [cancelledReservation])).rows[0].status).toBe("captured");
-            expect((await db.query("SELECT entry_type FROM credit_ledger WHERE reference_id=$1 ORDER BY created_at", [cancelledReservation])).rows.map(row => row.entry_type)).toEqual(["hold", "capture"]);
+            for (let attempt = 0; attempt < 100 && await balance(userId) !== 58; attempt++) await new Promise(done => setTimeout(done, 10));
+            expect(await balance(userId)).toBe(58);
+            expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [`chat:${userId}:${cancelledId}`])).rows[0].status).toBe("released");
         } finally {
             heldStream.finish?.();
             await Promise.all([server, providerServer].map(item => new Promise<void>(done => { item.close(() => done()); item.closeAllConnections(); })));

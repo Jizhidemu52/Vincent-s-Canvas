@@ -10,7 +10,7 @@ import { createGunzip, createInflate, createBrotliDecompress } from "node:zlib";
 import ipaddr from "ipaddr.js";
 
 export class PublicFetchError extends Error {
-  constructor(status, code, message, httpStatus) { super(message); this.status = status; this.code = code; if (httpStatus !== undefined) this.httpStatus = httpStatus; }
+  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
 }
 const fail = (code, message, status = 400) => new PublicFetchError(status, code, message);
 
@@ -73,7 +73,7 @@ export async function requestPinned(url, address, { maxBytes, signal, kind }) {
       // Never allow a DNS second lookup or automatic fallback to another IP.
       autoSelectFamily: false,
       lookup: (_hostname, options, callback) => options?.all ? callback(null, [address]) : callback(null, address.address, address.family),
-      headers: { accept: kind === "html" ? "text/html,application/xhtml+xml" : kind === "provider-media" ? "video/*,audio/*,application/octet-stream" : "image/png,image/jpeg,image/webp,image/gif,application/octet-stream", "accept-encoding": "gzip, deflate, br", "user-agent": "CanvasPublicDownload/1.0", connection: "close" },
+      headers: { accept: kind === "html" ? "text/html,application/xhtml+xml" : "image/png,image/jpeg,image/webp,image/gif", "accept-encoding": "gzip, deflate, br", "user-agent": "CanvasReferenceImport/1.0", connection: "close" },
       maxHeaderSize: 16 * 1024,
     });
     request.once("error", (error) => { agent.destroy(); reject(error); });
@@ -87,13 +87,9 @@ export async function requestPinned(url, address, { maxBytes, signal, kind }) {
       response.destroy();
       return { status, location, mime: "", bytes: Buffer.alloc(0) };
     }
-    if (status < 200 || status >= 300) throw new PublicFetchError(502, "REMOTE_HTTP_ERROR", `远程服务器返回 HTTP ${status}`, status);
+    if (status < 200 || status >= 300) throw fail("REMOTE_HTTP_ERROR", `网页服务器返回 HTTP ${status}，请使用浏览器扩展采集需要登录的页面`, 502);
     const mime = String(response.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
-    const imageType = ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mime);
-    const supported = kind === "html" ? ["text/html", "application/xhtml+xml"].includes(mime)
-      : kind === "provider-media" ? mime.startsWith("video/") || mime.startsWith("audio/") || mime === "application/octet-stream"
-      : imageType || (kind === "provider-image" && mime === "application/octet-stream");
-    if (!supported) throw fail("UNSUPPORTED_TYPE", "远程内容类型不符合下载要求", 415);
+    if (kind === "html" ? !["text/html", "application/xhtml+xml"].includes(mime) : !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mime)) throw fail("UNSUPPORTED_TYPE", kind === "html" ? "该链接不是公开 HTML 网页" : "仅支持 PNG、JPEG、WebP 和 GIF 原图", 415);
     const contentLength = response.headers["content-length"];
     if (contentLength !== undefined && (!/^\d+$/.test(contentLength) || Number(contentLength) > maxBytes)) throw fail("BODY_TOO_LARGE", "远程内容超过大小限制", 413);
     const encoding = String(response.headers["content-encoding"] || "identity").trim().toLowerCase();

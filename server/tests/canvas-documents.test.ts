@@ -8,6 +8,7 @@ import type { AuthenticatedRequest, SessionUser } from "../src/types";
 import { assertCanvasOwner, CanvasDocumentError, parseCanvasDocumentWrite, type CanvasDocumentEnvelope } from "../src/canvas-document";
 import { createCanvasDocumentsRouter } from "../src/routes/canvas-documents";
 import { createAssetsRouter } from "../src/routes/assets";
+import { hashAssetContent } from "../src/asset-content-hash";
 import type { ObjectStorage } from "../src/object-storage";
 import { compactHistoryAssetId, expectedCanvasSummary, largeCanvasDocument } from "./canvas-document-fixtures";
 
@@ -124,20 +125,34 @@ test("upload project association requires ownership or explicit membership befor
 });
 
 test("formal original-media HTTP keeps bytes unchanged and rejects another employee before storage reads or writes", async () => {
-    const records = new Map<string, { owner: string; object_key: string; mime_type: string; byte_size: number; filename: string; ready: boolean }>();
+    const records = new Map<string, { owner: string; object_key: string; mime_type: string; byte_size: number; filename: string; ready: boolean; content_sha256?: string }>();
     const objects = new Map<string, Uint8Array>();
-    let storageReads = 0;
-    const db = { query: async (sql: string, values: any[] = []) => {
+    let storageReads = 0, storageWrites = 0, commits = 0, releases = 0;
+    let inTransaction = false, lockedId: string | undefined;
+    const query = async (sql: string, values: any[] = []) => {
+        if (sql === "BEGIN") { expect(inTransaction).toBe(false); inTransaction = true; return { rows: [] }; }
+        if (sql === "COMMIT" || sql === "ROLLBACK") {
+            expect(inTransaction).toBe(true);
+            if (sql === "COMMIT") commits++;
+            inTransaction = false; lockedId = undefined;
+            return { rows: [] };
+        }
         if (sql.startsWith("INSERT INTO assets")) {
             records.set(values[0], { owner: values[1], object_key: values[4], filename: values[5], mime_type: values[6], byte_size: values[7], ready: false });
             return { rows: [] };
         }
         const record = records.get(values[0]);
-        if (sql.startsWith("UPDATE assets SET status='ready'")) { if (record) record.ready = true; return { rows: [] }; }
+        if (sql.startsWith("UPDATE assets SET status='ready'")) {
+            expect(inTransaction).toBe(true); expect(lockedId).toBe(values[0]);
+            expect(record?.owner).toBe(values[4]);
+            if (record) { record.ready = true; record.mime_type = values[1]; record.content_sha256 = values[3]; }
+            return { rows: [] };
+        }
       // Thumbnail generation has its own real-codec integration coverage.
       if (sql.includes("SELECT object_key,thumbnail_256_key,thumbnail_1024_key FROM assets")) return { rows: [] };
         if (sql.includes("status='pending'")) {
             expect(sql).toContain("owner_user_id=$2");
+            if (sql.includes("FOR UPDATE")) { expect(inTransaction).toBe(true); lockedId = values[0]; }
             return { rows: record && !record.ready && record.owner === values[1] ? [record] : [] };
         }
         if (sql.includes("FROM assets a")) {
@@ -146,10 +161,15 @@ test("formal original-media HTTP keeps bytes unchanged and rejects another emplo
             return { rows: record?.ready && record.owner === values[1] ? [record] : [] };
         }
         throw new Error("Unexpected SQL in original-media test");
-    } } as unknown as Database;
+    };
+    const db = { query, connect: async () => ({ query, release: () => { expect(inTransaction).toBe(false); releases++; } }) } as unknown as Database;
     const storage = {
         configured: true,
-        put: async (key: string, bytes: Uint8Array) => { objects.set(key, new Uint8Array(bytes)); },
+        put: async (key: string, bytes: Uint8Array) => {
+            expect(inTransaction).toBe(true); expect(lockedId).toBeDefined();
+            expect(records.get(lockedId!)?.object_key).toBe(key);
+            storageWrites++; objects.set(key, new Uint8Array(bytes));
+        },
         head: async (key: string) => { storageReads++; return { ContentLength: objects.get(key)!.byteLength, ETag: '"original-fixture"' }; },
         get: async (key: string) => { storageReads++; const bytes = objects.get(key)!; return { ContentLength: bytes.byteLength, ETag: '"original-fixture"', Body: Readable.from([bytes]) }; },
     } as unknown as ObjectStorage;
@@ -165,6 +185,10 @@ test("formal original-media HTTP keeps bytes unchanged and rejects another emplo
         expect((await upload("employee-b")).status).toBe(404);
         expect(objects.size).toBe(0);
         expect((await upload("employee-a")).status).toBe(204);
+        expect(records.get(id)?.content_sha256).toBe(hashAssetContent(original));
+        expect(commits).toBe(1); expect(releases).toBe(1); expect(storageWrites).toBe(1);
+        expect((await upload("employee-a")).status).toBe(404);
+        expect(storageWrites).toBe(1);
         const foreign = await fetch(`${origin}/assets/${id}/content`, { headers: { "test-actor": "employee-b", "if-none-match": '"original-fixture"' } });
         expect(foreign.status).toBe(404);
         expect(storageReads).toBe(0);

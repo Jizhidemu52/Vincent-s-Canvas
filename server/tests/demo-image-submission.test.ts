@@ -4,7 +4,6 @@ import { ApiMartImageProviderFailure, apiMartImageModel, buildApiMartImageReques
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { DemoStateStore, DemoStorageError } from "../src/demo-state-store";
 import { ImageResultPersistenceError } from "../src/image-result-storage";
-import { fetchProviderResult } from "../src/provider-result";
 import { queryProviderTaskStatus } from "../src/provider-status-query";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL0VQAAAABJRU5ErkJggg==", "base64");
@@ -83,10 +82,6 @@ function createHarness(failurePhase?: FailurePhase) {
   };
   const injected = { ...dependencies,
     queryProviderTaskStatus: (url: string, headers: HeadersInit) => queryProviderTaskStatus(url, headers, { fetch: dependencies.fetch, sleep: async () => {} }),
-    fetchProviderResult: (url: string) => fetchProviderResult(url, undefined, async value => {
-      const response = await dependencies.fetch(value);
-      return { bytes: Buffer.from(await response.arrayBuffer()), mime: response.headers.get("content-type") || "", finalUrl: value };
-    }),
   };
   const api = new Function(...Object.keys(injected), `${productionCode}\nreturn { callGptImage2, runApiMartImageTaskForDemo };`)(...Object.values(injected)) as Harness;
   return { api, paid, reads, failure, completed: () => completed };

@@ -116,7 +116,7 @@ app.use(
   "/api/billing",
   requireSession,
   requireAccountReady,
-  createBillingRouter(db),
+  createBillingRouter(db, readCreditsEnabled),
 );
 app.use(
   "/api/models",

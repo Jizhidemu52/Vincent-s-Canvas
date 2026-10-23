@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const missing = ["PGLITE_RUNTIME_PATH", "QUEUE_TEST_REDIS_URL", "RUN_INTEGRATION_TESTS", "RUN_OA_INTEGRATION_TESTS"].filter(key => !process.env[key] || key.startsWith("RUN_") && process.env[key] !== "true");
+const missing = ["PGLITE_RUNTIME_PATH", "QUEUE_TEST_REDIS_URL", "RUN_INTEGRATION_TESTS"].filter(key => !process.env[key] || key.startsWith("RUN_") && process.env[key] !== "true");
 if (missing.length) console.warn(`Integration coverage is partial. Not configured: ${missing.join(", ")}. Skipped cases are counted below; this is not production backend verification.`);
 let totalSkipped = 0;
 for (const [directory, command] of [[".", ["run", "lint"]], ["server", ["run", "build"]], ["web", ["run", "build"]], ["server", ["--no-env-file", "test"]], ["web", ["--no-env-file", "test"]]]) {

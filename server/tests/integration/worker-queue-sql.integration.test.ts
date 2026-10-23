@@ -98,7 +98,6 @@ integration("30 mock videos release worker slots, preserve model inflight quota 
     storage: { configured: true }, loadSourceAssets: async () => { referenceLoads++; return []; },
     stepApiMartVideoTask: (input: ApiMartVideoInput) => stepApiMartVideoTask(input, { fetch: fakeFetch }),
     fetch: fakeFetch,
-    fetchProviderMediaResult: async (url: string) => ({ bytes: Buffer.from(await (await fakeFetch(url)).arrayBuffer()), mimeType: "video/mp4" }),
     storeResults: async (task: { id: string }) => [`/api/assets/${task.id}/content`],
   });
   async function drainReady() {

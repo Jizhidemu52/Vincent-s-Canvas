@@ -45,7 +45,6 @@ export class ChatStreamOutcome {
     private pending = "";
     private stopped = false;
     private failed = false;
-    private rejected = false;
     private output = false;
     private terminalPending = false;
     private ended = false;
@@ -67,7 +66,7 @@ export class ChatStreamOutcome {
             try {
                 const event = JSON.parse(line.slice(5).trim());
                 if (event.type === "message_stop") { this.stopped = true; this.terminalPending = true; }
-                if (event.type === "error") { this.failed = true; this.rejected = true; this.terminalPending = true; }
+                if (event.type === "error") { this.failed = true; this.terminalPending = true; }
                 if (event.type === "content_block_start" && event.content_block?.type === "tool_use") this.output = true;
                 if (event.type === "content_block_start" && event.content_block?.type === "text" && event.content_block.text?.trim()) this.output = true;
                 if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text?.trim()) this.output = true;
@@ -78,9 +77,5 @@ export class ChatStreamOutcome {
     }
 
     get terminal() { return this.ended; }
-    // A disconnected client or a missing terminal event does not erase useful
-    // output already returned by the provider (including a client-side tool plan).
-    get hasOutput() { return this.output; }
-    get confirmedEmpty() { return this.ended && !this.output && (this.rejected || (this.stopped && !this.failed)); }
     get successful() { return this.ended && this.stopped && this.output && !this.failed; }
 }

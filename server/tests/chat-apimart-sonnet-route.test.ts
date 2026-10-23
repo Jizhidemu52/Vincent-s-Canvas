@@ -148,7 +148,7 @@ test.each([false, true])("APIMart Sonnet failure is not replayed in another resp
         expect(body.message).not.toContain("private-provider-token");
         expect(calls).toHaveLength(1);
         expect(calls[0]!.stream).toBe(stream ? true : undefined);
-        expect(settlements).toEqual([]);
+        expect(settlements).toEqual([false]);
     });
 });
 
@@ -167,11 +167,11 @@ test.each(["apimart", "anthropic"])("%s Sonnet honors the requested SSE mode", a
 });
 
 test.each([
-    { name: "nonempty message_stop", wire: events, splitBytes: false, billable: true, complete: true },
-    { name: "byte-split CRLF message_stop", wire: events.replaceAll("\n", "\r\n"), splitBytes: true, billable: true, complete: true },
-    { name: "empty message_stop", wire: 'event: message_stop\ndata: {"type":"message_stop"}\n\n', splitBytes: false, billable: false, complete: false },
-    { name: "error after text", wire: 'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}\n\nevent: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}\n\n', splitBytes: false, billable: true, complete: false },
-])("Sonnet finishes and cancels an open upstream on $name without replay", async ({ wire, splitBytes, billable, complete }) => {
+    { name: "nonempty message_stop", wire: events, splitBytes: false, billable: true },
+    { name: "byte-split CRLF message_stop", wire: events.replaceAll("\n", "\r\n"), splitBytes: true, billable: true },
+    { name: "empty message_stop", wire: 'event: message_stop\ndata: {"type":"message_stop"}\n\n', splitBytes: false, billable: false },
+    { name: "error after text", wire: 'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}\n\nevent: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}\n\n', splitBytes: false, billable: false },
+])("Sonnet finishes and cancels an open upstream on $name without replay", async ({ wire, splitBytes, billable }) => {
     let controller: ReadableStreamDefaultController<Uint8Array>;
     let cancellations = 0;
     const bytes = new TextEncoder().encode(wire);
@@ -194,7 +194,7 @@ test.each([
             ]);
             expect(endedBeforeEOF).toBe(true);
             const received = await read;
-            if (complete) expect(received).toBe(wire);
+            if (billable) expect(received).toBe(wire);
             else {
                 expect(received).toStartWith(wire);
                 expect(received).toContain("event: error");

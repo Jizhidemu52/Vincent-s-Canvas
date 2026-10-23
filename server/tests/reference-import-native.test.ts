@@ -63,7 +63,7 @@ test("native sockets pin DNS, ignore proxies, bound wire/decoded bytes, validate
       for (const path of ['/large-length','/large-wire','/gzip-bomb']) await assert.rejects(requestPinned(target(path), fixed, opts), { code: 'BODY_TOO_LARGE' });
       await assert.rejects(requestPinned(target('/wrong-type'), fixed, opts), { code: 'UNSUPPORTED_TYPE' });
       await assert.rejects(requestPinned(target('/wrong-encoding'), fixed, opts), { code: 'UNSUPPORTED_ENCODING' });
-      await assert.rejects(requestPinned(target('/error'), fixed, opts), { code: 'REMOTE_HTTP_ERROR', httpStatus: 403 });
+      await assert.rejects(requestPinned(target('/error'), fixed, opts), { code: 'REMOTE_HTTP_ERROR' });
       const image = await requestPinned(target('/image-gzip'), fixed, { ...opts, kind: 'image' });
       assert.deepEqual(image.bytes, payload);
       await assert.rejects(requestPinned(target('/wait'), fixed, { ...opts, signal: AbortSignal.timeout(100) }));

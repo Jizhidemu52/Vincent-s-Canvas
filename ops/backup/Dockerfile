@@ -6,12 +6,11 @@ FROM build AS mc-build
 RUN sh /usr/local/bin/build-from-source.sh mc /out
 
 FROM alpine:3.21
-RUN apk add --no-cache bash python3 age postgresql17-client curl ca-certificates tzdata
+RUN apk add --no-cache bash postgresql17-client curl ca-certificates tzdata
 COPY --from=mc-build /out/mc /usr/local/bin/mc
 COPY --from=mc-build /out/licenses/ /licenses/mc/
 COPY --from=mc-build /out/source/ /usr/share/minio-source/mc/
 COPY ops/backup/backup.sh /usr/local/bin/backup.sh
 COPY ops/backup/restore.sh /usr/local/bin/restore.sh
-COPY ops/backup/archive.py /usr/local/bin/archive.py
 RUN chmod +x /usr/local/bin/backup.sh /usr/local/bin/restore.sh
 CMD ["/usr/local/bin/backup.sh"]

@@ -2,7 +2,6 @@ import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
 import { readDemoTaskProgress } from "./task-progress";
 import { logDemoRequest } from "./request-logging";
 import { taskSubmissionSchema, batchSubmissionSchema } from "../../shared/task-contracts";
-import { fetchProviderResult, fetchProviderMediaResult } from "./provider-result";
 import { hashAssetContent, requestedContentHash } from "./asset-content-hash";
 import { ZodError } from "zod";
 import { demoTaskSummary, pageDemoRecords, parseDemoTaskFilters } from "./demo-list-pagination";
@@ -2240,8 +2239,10 @@ async function callApiMartImage(
 }
 
 async function downloadApiMartImage(url: string) {
-  const result = await fetchProviderResult(url);
-  return `data:${result.mimeType};base64,${Buffer.from(result.bytes).toString("base64")}`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+  if (!response.ok) throw Object.assign(new Error(`APIMart 图片下载失败：${response.status}`), { code: "RESULT_DOWNLOAD_HTTP_ERROR", httpStatus: response.status });
+  const mimeType = response.headers.get("content-type")?.split(";")[0] || "image/png";
+  return `data:${mimeType};base64,${Buffer.from(await response.arrayBuffer()).toString("base64")}`;
 }
 
 async function runVideoTask(
@@ -2359,8 +2360,9 @@ async function callVideoProvider(
 class DemoVideoTerminalError extends Error {}
 
 async function downloadDemoVideoResult(task: DemoTask, url: string): Promise<DemoAsset> {
-  const result = await fetchProviderMediaResult(url);
-  const bytes = new Uint8Array(result.bytes);
+  const response = await fetch(url, { signal: AbortSignal.timeout(180_000) });
+  if (!response.ok) throw new Error(`视频下载失败（${response.status}），可恢复查询原任务`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
   if (!bytes.byteLength) throw new Error("视频结果为空，可恢复查询原任务");
   const id = crypto.randomUUID();
   return { id, ownerUserId: task.ownerUserId, filename: `video-${task.id}.mp4`, mimeType: "video/mp4", bytes, createdAt: now(), projectId: task.projectId, taskId: task.id, upstreamUrl: isPublicHttpsUrl(url) ? url : undefined };
@@ -2512,7 +2514,14 @@ async function callGptImage2WithBun(
     const outputUrl = status.data.result?.images?.[0]?.url?.[0];
     if (!outputUrl)
       throw new Error("GPT-Image-2 completed without an output image");
-    return downloadApiMartImage(outputUrl);
+    const image = await fetch(outputUrl, {
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!image.ok)
+      throw new Error(`GPT-Image-2 image download failed: ${image.status}`);
+    const mimeType =
+      image.headers.get("content-type")?.split(";")[0] || "image/png";
+    return `data:${mimeType};base64,${Buffer.from(await image.arrayBuffer()).toString("base64")}`;
   }
   throw new Error("GPT-Image-2 generation timed out");
 }

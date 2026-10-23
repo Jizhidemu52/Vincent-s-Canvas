@@ -7,13 +7,13 @@ description: 使用 Docker Compose 部署完整业务平台
 
 根目录 Compose 会启动 Web、API、Worker、PostgreSQL、Redis、MinIO、初始化器和备份服务。
 
-根目录模板与 Compose 默认 `AUTH_ENABLED=true`、`OA_LOGIN_ENABLED=false`，使用独立账号认证；两项均可在 `.env` 显式配置，不再硬编码覆盖 OA。生产环境禁止两种认证同时关闭。Web 默认仅监听 `127.0.0.1:3000`，用户通过前置 HTTPS 域名访问；异机网关需要显式调整 `WEB_BIND_HOST` 并限定防火墙。Windows 单机开发试用另有入口，不等于生产默认值。
+根目录模板与 Compose 默认 `OA_LOGIN_ENABLED=false`，使用者可直接打开画布；API 与 Worker 的 Compose 设置会覆盖旧 `.env` 中的开启值。免登录试用不代表员工隔离，只能放在受信网络或受控入口后。启用企业 OA 须显式调整两处 Compose 覆盖，并由 IT 联调公司服务器、正式 HTTPS、可信 OA 接口和网络限制；仅修改 `.env` 不会启用。
 
 ## 启动
 
 ```bash
-test -e .env || cp .env.example .env
-# 编辑生产密码、加密密钥、身份模式及独立外部备份配置
+cp .env.example .env
+# 编辑生产密码、加密密钥、对象存储和可信 OA 接口
 bun --env-file=.env ops/preflight/production-preflight.ts
 docker compose up -d --build
 docker compose ps
@@ -27,7 +27,7 @@ docker compose ps
 | --- | --- |
 | PostgreSQL | 员工身份、员工画布文档、部门、权限、项目、账本、任务、历史、素材元数据、审计 |
 | Redis | Session、登录限流和任务队列 |
-| S3/MinIO | 原图、生成结果、视频、音频和文本；外部独立 S3 保存备份 |
+| S3/MinIO | 原图、生成结果、视频、音频、文本和数据库备份 |
 | Worker | 从队列取任务，解密服务端 Provider 凭据并执行模型调用 |
 
 企业画布与原图确认云端同步后可由本人恢复，浏览器另保留员工缓存；独立聊天与创意草稿仍为员工分区的本地数据，不承诺全部云同步。旧账号和共用数据不自动迁移或公开。
@@ -41,4 +41,4 @@ docker compose logs --tail=200 api worker postgres redis minio backup
 
 ## 备份恢复
 
-升级前必须配置独立 `BACKUP_S3_ENDPOINT`、bucket、专用凭据和 `BACKUP_AGE_RECIPIENT`。备份使用同一 PostgreSQL 快照导出数据库与引用清单，数据库和清单通过 age 加密；复制并回读验证原图、缩略图和独立设计库原件后才发布完成标志。不宣称跨数据库/S3 原子快照，媒体须在外部 bucket 启用访问控制和静态加密。恢复前停止所有写入方，使用离线私钥和明确快照编号；完整步骤见 [外部备份说明](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/ops/backup/README.md)及 [生产部署手册](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/production-deployment.md)。
+备份容器定期把 PostgreSQL dump 写到对象存储，原图对象也必须保留和备份。恢复前停止 API 和 Worker，再使用 `restore.sh` 恢复指定对象。完整命令、OA 和并发验收见 [生产部署与验收手册](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/production-deployment.md)。

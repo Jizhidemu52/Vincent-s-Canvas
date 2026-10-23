@@ -178,11 +178,4 @@ integration("SQL task admission and atomic cancellation", () => {
     expect(await balance(userId)).toBe(84);
   });
 
-  test("department administrators cannot submit urgent single or batch tasks", async () => {
-    const userId = await user(); const value = input(userId, { priority: "urgent" });
-    expect((await request(userId, "", value, "department_admin")).status).toBe(403);
-    expect((await request(userId, "/batch", { ...value, items: [{ sourceUrls: ["/fixture.png"] }] }, "department_admin")).status).toBe(403);
-    expect((await row("SELECT count(*)::int AS count FROM tasks WHERE user_id=$1", [userId])).count).toBe(0);
-    expect(await balance(userId)).toBe(100);
-  });
 });

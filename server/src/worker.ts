@@ -29,7 +29,7 @@ import { probeMediaBytes } from "./media-probe";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
 import { ProviderSubmissionRejected, isDefinitiveSubmissionRejection, submissionWasNotSent } from "./provider-submission-policy";
 import { createGenerationTiming, type GenerationTiming, type GenerationTimingOutcome } from "./generation-timing";
-import { fetchProviderResult, fetchProviderMediaResult } from "./provider-result";
+import { fetchProviderResult } from "./provider-result";
 import { inlineProviderImageDataUrl } from "./provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-input";
 import { imageResultExtension, storeImageResult } from "./image-result-storage";
@@ -467,11 +467,12 @@ async function executeApiMartVideo(task: WorkRow, credentials: Record<string, st
     },
   });
   if (result.status === "pending") throw new VideoTaskPending();
-  const downloaded = await fetchProviderMediaResult(result.url);
-  const contentType = downloaded.mimeType;
+  const response = await fetch(result.url, { signal: AbortSignal.timeout(180_000) });
+  if (!response.ok) throw new Error(`视频下载失败（${response.status}）`);
+  const contentType = response.headers.get("content-type")?.split(";")[0] || "video/mp4";
   const mimeType = contentType === "application/octet-stream" ? "video/mp4" : contentType;
   if (!mimeType.startsWith("video/")) throw new Error("上游返回的不是视频文件");
-  const bytes = downloaded.bytes;
+  const bytes = Buffer.from(await response.arrayBuffer());
   if (!bytes.byteLength) throw new Error("视频结果为空");
   return [{ bytes, mimeType }];
 }

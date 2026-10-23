@@ -1,7 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { runOpenTokenImage } from "../src/opentoken-image";
-import { fetchProviderResult, MAX_PROVIDER_IMAGE_BYTES } from "../src/provider-result";
-import type { PublicResourceOptions } from "../src/public-resource";
+import { fetchProviderResult } from "../src/provider-result";
 import { decodeInlineImageResult } from "../src/demo-task-result-assets";
 
 // Complete tiny image files, not just format signatures. Expected MIME values
@@ -49,13 +48,11 @@ describe("provider image MIME follows actual bytes", () => {
     });
 
     test(`Worker result download corrects ${fixture.mime} while retaining original bytes`, async () => {
-      const calls: Array<{ url: string; options: PublicResourceOptions }> = [];
-      const download = async (url: string, options: PublicResourceOptions) => {
-        calls.push({ url, options });
-        return { bytes, mime: fixture.declared, finalUrl: url };
-      };
-      expect(await fetchProviderResult("https://provider.example/image.png", undefined, download)).toEqual({ mimeType: fixture.mime, bytes });
-      expect(calls).toEqual([{ url: "https://provider.example/image.png", options: { kind: "provider-image", maxBytes: MAX_PROVIDER_IMAGE_BYTES, timeoutMs: 60_000 } }]);
+      const network = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async () => new Response(bytes, { headers: { "content-type": fixture.declared } }), { preconnect() {} }));
+      try {
+        expect(await fetchProviderResult("http://result.invalid/image.png")).toEqual({ mimeType: fixture.mime, bytes });
+        expect(network).toHaveBeenCalledTimes(1);
+      } finally { network.mockRestore(); }
     });
 
     test(`Demo asset decoding corrects ${fixture.mime} while retaining original bytes`, () => {

@@ -38,9 +38,6 @@ export type AppConfig = z.infer<typeof schema>;
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
     const config = schema.parse(env);
-    if (config.NODE_ENV === "production" && config.AUTH_ENABLED !== "true" && config.OA_LOGIN_ENABLED !== "true") {
-        throw new Error("Production requires AUTH_ENABLED=true or OA_LOGIN_ENABLED=true; anonymous trials must use development mode");
-    }
     if (config.OA_LOGIN_ENABLED === "true") {
         const endpoint = new URL(config.OA_USERINFO_URL);
         if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) {

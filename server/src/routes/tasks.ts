@@ -127,10 +127,6 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
       const input = batchSchema.parse(request.body);
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      if (input.priority === "urgent" && actor.role !== "super_admin") {
-        response.status(403).json({ error: "FORBIDDEN", message: "仅超级管理员可提交紧急任务" });
-        return;
-      }
       if (input.priority !== "normal" && actor.role === "designer") {
         response.status(403).json({ error: "FORBIDDEN", message: "设计师只能提交普通任务" });
         return;

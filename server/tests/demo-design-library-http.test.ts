@@ -123,20 +123,27 @@ test("demo library persists independent publication and reader copies, authentic
     expect((await h.request(entryPath, h.b)).status).toBe(200);
     expect((await h.request(`${entryPath}/stats`, h.b)).status).toBe(403);
     expect((await h.post(`${entryPath}/moderate`, h.b, { reason: "伪造管理员" })).status).toBe(403);
-    // A valid replacement must not change the independent published snapshot;
-    // corrupt same-length input remains rejected without changing the source.
+    // Ready source bytes are immutable. A new revision gets its own asset, and
+    // removing the old source must not remove the independent published snapshot.
+    // Corrupt same-length input also remains rejected without changing the source.
     expect((await h.request(source.uploadUrl, h.a, { method: "PUT", body: new Uint8Array(original.byteLength).fill(7) })).status).toBe(415);
     expect(await h.request(`/api/assets/${source.assetId}/content`, h.a).then(r => r.bytes())).toEqual(original);
     const sourceReplacement = new Uint8Array(replacementPng);
     expect(sourceReplacement.byteLength).toBe(original.byteLength);
     expect(sourceReplacement).not.toEqual(original);
-    expect((await h.request(source.uploadUrl, h.a, { method: "PUT", body: sourceReplacement })).status).toBe(204);
-    expect(await h.request(`/api/assets/${source.assetId}/content`, h.a).then(r => r.bytes())).toEqual(sourceReplacement);
+    expect((await h.request(source.uploadUrl, h.a, { method: "PUT", body: sourceReplacement })).status).toBe(404);
+    expect(await h.request(`/api/assets/${source.assetId}/content`, h.a).then(r => r.bytes())).toEqual(original);
+    const replacement = await h.upload(h.a, sourceReplacement);
+    expect(replacement.assetId).not.toBe(source.assetId);
+    expect(await h.request(`/api/assets/${replacement.assetId}/content`, h.a).then(r => r.bytes())).toEqual(sourceReplacement);
+    expect((await h.request(`/api/assets/${source.assetId}`, h.a, { method: "DELETE" })).status).toBe(204);
+    expect((await h.request(`/api/assets/${source.assetId}/content`, h.a)).status).toBe(404);
     expect(await h.request(image.contentUrl, h.b).then(r => r.bytes())).toEqual(original);
     const reuseResponse = await h.post(`${imagePath}/reuse`, h.b, { requestId: "reuse-001" });
     expect(reuseResponse.status).toBe(200);
     const reuse = (await reuseResponse.json() as any).data;
     expect(reuse.assetId).not.toBe(source.assetId);
+    expect(reuse.assetId).not.toBe(replacement.assetId);
     expect(reuse.image.contentUrl).toBe(`/api/assets/${reuse.assetId}/content`);
     expect(await h.request(reuse.image.contentUrl, h.b).then(r => r.bytes())).toEqual(original);
     expect((await h.request(reuse.image.contentUrl, h.a)).status).toBe(404);
@@ -158,6 +165,8 @@ test("demo library persists independent publication and reader copies, authentic
     const inFlight = await h.post(`${imagePath}/download`, h.b, { requestId: "download-in-flight" });
     expect(await inFlight.bytes()).toEqual(original);
     await h.start();
+    expect((await h.request(`/api/assets/${source.assetId}/content`, h.a)).status).toBe(404);
+    expect(await h.request(`/api/assets/${replacement.assetId}/content`, h.a).then(r => r.bytes())).toEqual(sourceReplacement);
     expect(await h.request(image.contentUrl, h.b).then(r => r.bytes())).toEqual(original);
     expect(await h.request(reuse.image.contentUrl, h.b).then(r => r.bytes())).toEqual(original);
     const stats = (await h.request(`${entryPath}/stats?page=1&pageSize=1`, h.a).then(r => r.json()) as any).data;

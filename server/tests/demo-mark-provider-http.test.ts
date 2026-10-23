@@ -134,7 +134,7 @@ for (const downloadStatus of [503, 403]) test(`demo recovers the same Mark job a
     if (request.method === "GET" && path === "/v1/tasks/unchanged-mark-job") {
       polls++;
       if (polls <= 3) return Response.json({ error: { message: "temporary local failure" } }, { status: 503 });
-      return Response.json({ data: { status: "completed", result: { images: [{ url: ["https://mark-demo-result.example/original.png"] }] } } });
+      return Response.json({ data: { status: "completed", result: { images: [{ url: ["https://mark-demo-result.invalid/original.png"] }] } } });
     }
     return Response.json({ error: "Unexpected local mock request" }, { status: 400 });
   } });
@@ -191,7 +191,7 @@ for (const downloadStatus of [503, 403]) test(`demo recovers the same Mark job a
     expect(downloadPaused.status).toBe("paused");
     expect(downloadPaused.lastFailure).toEqual({ phase: "download", code: "RESULT_DOWNLOAD_HTTP_ERROR", httpStatus: downloadStatus });
     expect(downloadPaused.upstreamResultUrl).toBeUndefined();
-    expect(JSON.stringify(downloadPaused)).not.toContain("mark-demo-result.example");
+    expect(JSON.stringify(downloadPaused)).not.toContain("mark-demo-result.invalid");
     expect(generated).toBe(1); expect(uploads).toBe(1); expect(polls).toBe(4);
     const downloadRecovery = await request(`/api/tasks/${task.id}/recover`, "POST").then(response => response.json());
     expect(downloadRecovery.task.upstreamResultUrl).toBeUndefined();
