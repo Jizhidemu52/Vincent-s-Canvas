@@ -9,7 +9,7 @@ export function copyCanvasNodeGraph(nodes: readonly CanvasNodeData[], connection
     return {
         nodes: nodes.filter(node => selectedIds.has(node.id)).map(node => structuredClone(node)),
         connections: connections.filter(connection => selectedIds.has(connection.fromNodeId) && selectedIds.has(connection.toNodeId)).map(connection => ({ ...connection })),
-        groups: groups.filter(group => group.nodeIds.length && group.nodeIds.every(id => selectedIds.has(id))).map(group => ({ ...group, nodeIds: [...group.nodeIds] })),
+        groups: groups.filter(group => group.nodeIds.length && group.nodeIds.every(id => selectedIds.has(id))).map(group => structuredClone(group)),
     };
 }
 
@@ -27,6 +27,7 @@ export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position): 
         };
     });
     const connections = graph.connections.flatMap((connection, index) => {
+        if (connection.kind === "sequence-input") return [];
         const fromNodeId = idMap.get(connection.fromNodeId);
         const toNodeId = idMap.get(connection.toNodeId);
         if (!fromNodeId || !toNodeId) return [];
@@ -72,6 +73,12 @@ export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position): 
         if (node.metadata.imageReferenceOrder) node.metadata.imageReferenceOrder = node.metadata.imageReferenceOrder.map(remapReferenceKey);
         if (node.metadata.excludedConnectedImageReferenceKeys) node.metadata.excludedConnectedImageReferenceKeys = node.metadata.excludedConnectedImageReferenceKeys.map(remapReferenceKey);
     });
-    const groups = (graph.groups || []).map(group => ({ ...group, id: `group-${nanoid()}`, nodeIds: group.nodeIds.flatMap(id => idMap.has(id) ? [idMap.get(id)!] : []) }));
+    const groups = (graph.groups || []).map(group => ({ ...group, id: `group-${nanoid()}`, nodeIds: group.nodeIds.flatMap(id => idMap.has(id) ? [idMap.get(id)!] : []),
+        imageSequence: group.imageSequence ? {
+            sourceNodeId: idMap.get(group.imageSequence.sourceNodeId) || group.imageSequence.sourceNodeId,
+            status: "idle" as const,
+            steps: group.imageSequence.steps.map(step => ({ configNodeId: idMap.get(step.configNodeId)!, inputConfigId: step.inputConfigId ? idMap.get(step.inputConfigId) : undefined, status: "idle" as const })),
+        } : undefined,
+    }));
     return { nodes, connections, groups };
 }

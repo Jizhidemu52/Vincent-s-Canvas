@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Square, Video } from "lucide-react";
-import { Button, Segmented } from "antd";
+import { Button, Input, Segmented } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -36,9 +36,10 @@ type CanvasConfigNodePanelProps = {
     onGenerate: (nodeId: string) => void;
     onStop: (nodeId: string) => void;
     onComposerToggle?: () => void;
+    workflow?: { status?: string; stepStatus?: string; onRun: () => void; onStop: () => void };
 };
 
-export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, linkedTaskHasImages = false, inputSummary, inputImageTaskCount = inputSummary.imageCount, inputs = [], imageReferences, onConfigChange, onGenerate, onStop }: CanvasConfigNodePanelProps) {
+export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, linkedTaskHasImages = false, inputSummary, inputImageTaskCount = inputSummary.imageCount, inputs = [], imageReferences, onConfigChange, onGenerate, onStop, workflow }: CanvasConfigNodePanelProps) {
     const composerRef = useRef<CanvasConfigComposerHandle>(null);
     const [inputModeFeedback, setInputModeFeedback] = useState<{ error: boolean; text: string } | null>(null);
     const globalConfig = useEffectiveConfig();
@@ -51,7 +52,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
     const selectedModel = businessConfigStatus === "ready" ? mode === "text" ? globalConfig.textModel : resolveCapabilityModel(globalConfig, mode, businessModels, node.metadata?.model) : "";
     const references = imageReferences || [];
     const imageCount = imageReferences?.length ?? inputSummary.imageCount;
-    const hasImages = imageCount > 0 || linkedTaskHasImages;
+    const hasImages = imageCount > 0 || linkedTaskHasImages || Boolean(workflow);
     let toolKey = canvasToolKey(mode, hasImages, imageModelProfile(selectedModel, businessModels).kind);
     const initialToolKey = toolKey;
     let imageModelIsBound = false;
@@ -106,13 +107,13 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
     return (
         <div className="thin-scrollbar flex h-full w-full cursor-move flex-col overflow-y-auto px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
             <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="shrink-0 text-sm font-semibold">生成配置</div>
+                <div className="min-w-0 truncate text-sm font-semibold" title={node.title}>{node.title || "生成配置"}</div>
                 <div className="cursor-default" onMouseDown={(event) => event.stopPropagation()}>
                     <Segmented
                         size="small"
                         className="canvas-config-mode !rounded-md !p-0.5"
                         value={mode}
-                        disabled={isRunning}
+                        disabled={isRunning || Boolean(workflow)}
                         onChange={(value) => {
                             const nextMode = value as CanvasGenerationMode;
                             const nextModel = businessConfigStatus === "ready" ? nextMode === "text" ? globalConfig.textModel : resolveCapabilityModel(globalConfig, nextMode, businessModels, node.metadata?.model) : "";
@@ -166,15 +167,22 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                         value={separateImages ? "per-image" : "combined"}
                         onChange={value => changeInputMode(value as "per-image" | "combined")}
                         options={[{ value: "per-image", label: `逐图执行 · ${inputImageTaskCount} 个任务` }, { value: "combined", label: "合并参考 · 1 个任务" }]} />
-                </div> : <div>左侧接共用素材，右侧连接任务</div>}
+                </div> : <div>{workflow ? "工作流：左侧接原图或上一步，右侧接下一步配置" : "左侧接素材；右侧接下一步生图配置可创建工作流"}</div>}
+                {workflow ? <div role="status">{workflow.stepStatus === "success" ? "本步已完成" : workflow.stepStatus === "running" ? isRunning ? "本步正在执行" : "本步待核查" : workflow.stepStatus === "failed" ? "本步失败，下游未提交" : "上游出图后自动执行本步"} · 每步单独调用，请保持本页打开</div> : null}
                 {taskCount > 0 ? <div role="status"><span style={{ color: theme.node.text }}>待执行 {taskCount} 个任务</span> · {separateImages ? "每个任务主图均为图片1，公共参考从图片2起" : "每个任务使用自身输入与公共素材"}</div> : showInputMode ? <div role="status">多张参考图共同生成 1 张结果</div> : null}
                 {inputModeFeedback ? <div role={inputModeFeedback.error ? "alert" : "status"} className="mt-1">{inputModeFeedback.text}</div> : null}
                 {fixedTaskReference ? <div role="alert" className="mt-1">逐图提示词仍固定引用某张任务图片。请改为“图片1”（每个任务的主图）；需要固定共享的图片请添加为公共参考，或切回合并参考。</div> : null}
             </div>
 
             <div className="mb-2 shrink-0 space-y-2">
-                {!blend ? <CanvasConfigComposer ref={composerRef} compact value={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} inputs={referencePresentation.inputs} referenceLabels={referencePresentation.mentionLabels} disabled={isRunning} label={mode === "audio" ? "朗读文本" : "提示词"} onChange={composerContent => { setInputModeFeedback(null); onConfigChange(node.id, { composerContent }); }} /> : <span role="status" className="text-xs">融合 2–4 张参考图，不使用提示词。</span>}
-                {mode !== "audio" ? <CanvasConfigImageReferences node={node} references={references} labels={referencePresentation.trayLabels} disabled={isRunning} onChange={onConfigChange} /> : null}
+                {workflow ? <div className="cursor-text" onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+                    <div className="mb-2 text-xs font-semibold">提示词</div>
+                    <Input.TextArea aria-label="提示词" autoSize={{ minRows: 3, maxRows: 6 }} disabled={isRunning}
+                        value={(node.metadata?.composerContent ?? node.metadata?.prompt ?? "").replace(/@\[node:[^\]]+\]\n?/g, "")}
+                        onChange={event => onConfigChange(node.id, { composerContent: event.target.value, prompt: event.target.value })} />
+                    <div className="mt-2 text-[11px] opacity-60">输入图片由连线自动传入，无需在提示词中插入引用。</div>
+                </div> : !blend ? <CanvasConfigComposer ref={composerRef} compact value={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} inputs={referencePresentation.inputs} referenceLabels={referencePresentation.mentionLabels} disabled={isRunning} label={mode === "audio" ? "朗读文本" : "提示词"} onChange={composerContent => { setInputModeFeedback(null); onConfigChange(node.id, { composerContent }); }} /> : <span role="status" className="text-xs">融合 2–4 张参考图，不使用提示词。</span>}
+                {mode !== "audio" && !workflow ? <CanvasConfigImageReferences node={node} references={references} labels={referencePresentation.trayLabels} disabled={isRunning} onChange={onConfigChange} /> : null}
                 {mode === "video" && (inputSummary.videoCount > 0 || inputSummary.audioCount > 0) ? <div className="flex flex-wrap gap-1.5">
                     {inputSummary.videoCount > 0 ? <InputChip label="已连视频" value={`${inputSummary.videoCount} 个`} style={chipStyle} /> : null}
                     {inputSummary.audioCount > 0 ? <InputChip label="已连音频" value={`${inputSummary.audioCount} 个`} style={chipStyle} /> : null}
@@ -197,12 +205,12 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                 type="primary"
                 className="mt-auto shrink-0 !h-9 !w-full !cursor-pointer !rounded-lg"
                 danger={isRunning}
-                disabled={!isRunning && !canGenerate}
+                disabled={!workflow && !isRunning && !canGenerate}
                 onMouseDown={(event) => event.stopPropagation()}
-                onClick={() => { if (isRunning) onStop(node.id); else if (canGenerate) onGenerate(node.id); }}
+                onClick={() => { if (workflow) { if (isRunning) workflow.onStop(); else workflow.onRun(); } else if (isRunning) onStop(node.id); else if (canGenerate) onGenerate(node.id); }}
             >
                 <span className="inline-flex items-center gap-1.5">
-                    {isRunning ? (
+                    {workflow ? <>{isRunning ? <Square className="size-4" /> : <Play className="size-4" />}<span>{isRunning ? "停止工作流" : workflow.status === "success" ? "重新运行工作流" : workflow.status === "failed" || workflow.status === "stopped" ? "继续工作流" : "运行工作流"}</span></> : isRunning ? (
                         <>
                             <LoaderCircle className="size-4 animate-spin" />
                             <Square className="size-3.5 fill-current" />

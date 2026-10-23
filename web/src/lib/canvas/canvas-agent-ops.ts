@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { getNodeSpec } from "@/constant/canvas";
-import { normalizeCanvasConnection } from "@/lib/canvas/canvas-shared-connections";
+import { imageWorkflowConnectionError, normalizeCanvasConnection } from "@/lib/canvas/canvas-shared-connections";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type ViewportTransform } from "@/types/canvas";
 
 export type CanvasAgentOp =
@@ -82,10 +82,11 @@ export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasA
             if (!from || !to) return;
             const edge = normalizeCanvasConnection(from, to, "source");
             if (!edge) return;
+            if (imageWorkflowConnectionError(edge, connections)) return;
             if (edge.kind === "config-target" && connections.some(conn => conn.kind === "config-target" && conn.toNodeId === to.id && conn.fromNodeId !== from.id)) return;
             const existing = connections.find(conn => conn.fromNodeId === edge.fromNodeId && conn.toNodeId === edge.toNodeId);
             if (!existing) connections = [...connections, { id: op.id || nanoid(), ...edge }];
-            else if (edge.kind === "config-target" && existing.kind !== edge.kind) connections = connections.map(conn => conn === existing ? { ...conn, kind: edge.kind } : conn);
+            else if (edge.kind && existing.kind !== edge.kind) connections = connections.map(conn => conn === existing ? { ...conn, kind: edge.kind } : conn);
         }
         if (op.type === "set_viewport" && op.viewport) viewport = op.viewport;
         if (op.type === "select_nodes") selectedNodeIds = (op.ids || []).filter((id) => nodes.some((node) => node.id === id));

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { buildNodeMentionReferencesByNodeId, createCanvasMentionReferenceIndex, createCanvasResourceReferenceIndex, mergeCanvasResourceReferences, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { buildNodeMentionReferencesByNodeId, createCanvasMentionReferenceIndex, createCanvasResourceReferenceIndex, getGenerationResourceNodes, mergeCanvasResourceReferences, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 import { createCanvasNodeMap, refreshCanvasNodeMap } from "@/lib/canvas/canvas-node-map";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
@@ -15,6 +16,26 @@ const node = (id: string, type: CanvasNodeType, content?: string): CanvasNodeDat
 });
 
 const connection = (id: string, fromNodeId: string, toNodeId: string): CanvasConnection => ({ id, fromNodeId, toNodeId });
+
+test("workflow configs use their own current input, never the downstream config's previous run input", () => {
+    const original = node("original", CanvasNodeType.Image, "data:image/png;base64,original");
+    const current = node("current", CanvasNodeType.Image, "data:image/png;base64,current");
+    const stale = node("stale", CanvasNodeType.Image, "data:image/png;base64,stale");
+    const configs = ["one", "two", "three"].map(id => node(id, CanvasNodeType.Config));
+    const nodes = [original, current, stale, ...configs];
+    const connections: CanvasConnection[] = [connection("source", "original", "one"),
+        { ...connection("1-2", "one", "two"), kind: "config-sequence" },
+        { ...connection("2-3", "two", "three"), kind: "config-sequence" },
+        { ...connection("input2", "current", "two"), kind: "sequence-input" },
+        { ...connection("input3", "stale", "three"), kind: "sequence-input" }];
+    const mentions = createCanvasMentionReferenceIndex(nodes, connections);
+    for (const [index, expected] of ["original", "current", "stale"].entries()) {
+        const config = configs[index]!;
+        expect(getGenerationResourceNodes(config.id, nodes, connections).map(item => item.id)).toEqual([expected]);
+        expect(resolveCanvasImageReferences(config, nodes, connections).map(item => item.id)).toEqual([expected]);
+        expect(mentions.get(config.id).map(item => item.nodeId)).toEqual([expected]);
+    }
+});
 
 test("builds every node mention list from a single connection index", () => {
     const image = node("image", CanvasNodeType.Image, "data:image/png;base64,one");

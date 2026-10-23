@@ -82,7 +82,7 @@ export function createCanvasMentionReferenceIndex(nodes: CanvasNodeData[], conne
             inputIds.push(source.id);
             resourceInputIdsByTargetId.set(target.id, inputIds);
         }
-        if (target.type === CanvasNodeType.Config && !firstConfigTargetBySourceId.has(source.id)) {
+        if (source.type !== CanvasNodeType.Config && target.type === CanvasNodeType.Config && !firstConfigTargetBySourceId.has(source.id)) {
             firstConfigTargetBySourceId.set(source.id, target.id);
         }
     });
@@ -138,6 +138,7 @@ function getContextResourceNodes(nodeId: string, nodes: CanvasNodeData[], connec
 }
 
 function getConnectedConfigResourceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    if (nodes.find(node => node.id === nodeId)?.type === CanvasNodeType.Config) return [];
     const configConnection = connections.find((connection) => connection.fromNodeId === nodeId && nodes.find((node) => node.id === connection.toNodeId)?.type === CanvasNodeType.Config);
     if (!configConnection) return [];
     return getContextResourceNodes(configConnection.toNodeId, nodes, connections).filter((node) => node.id !== nodeId);

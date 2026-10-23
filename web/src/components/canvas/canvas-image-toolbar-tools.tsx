@@ -1,14 +1,15 @@
 import type { ReactNode } from "react";
-import { Brush, Camera, Columns2, Copy, FileText, Grid2x2, History, Lock, LockOpen, Maximize2, PanelsTopLeft, PencilRuler, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
+import { Brush, Camera, Columns2, Copy, FileText, Grid2x2, History, Lock, LockOpen, Maximize2, PanelsTopLeft, PencilRuler, Scissors, Sparkles, Upload, ZoomIn, Workflow } from "lucide-react";
 
 import type { CanvasNodeData } from "@/types/canvas";
 
-export type ImageNodeActionToolId = "compare" | "designTemplate" | "restoreGeneration" | "manualEdit" | "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
+export type ImageNodeActionToolId = "compare" | "designTemplate" | "imageSequence" | "restoreGeneration" | "manualEdit" | "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | "edit" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
     onCompare?: (node: CanvasNodeData) => void;
     onDesignTemplate?: (node: CanvasNodeData) => void;
+    onImageSequence?: (node: CanvasNodeData) => void;
     onRestoreGeneration?: (node: CanvasNodeData) => void;
     onManualEdit: (node: CanvasNodeData) => void;
     onUpload: (node: CanvasNodeData) => void;
@@ -45,6 +46,7 @@ export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v6";
 const allBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download", "edit"];
 
 export const imageToolDefinitions: ImageToolDefinition[] = [
+    { id: "imageSequence", defaultVisible: false, panelLabel: "图片工作流", label: "图片工作流 · 快速搭建", title: "创建并连接白底 → 改色 → 模特上身节点，也可自行拖线编排", icon: () => <Workflow className="size-[18px]" />, run: (node, handlers) => handlers.onImageSequence?.(node) },
     { id: "compare", defaultVisible: false, panelLabel: "高级对比", label: "高级对比 · 差异图与导出", title: "原位滑块位于结果图下方；此处打开差异图、并排、叠加和 PNG 导出工具", icon: () => <Columns2 className="size-[18px]" />, run: (node, handlers) => handlers.onCompare?.(node) },
     { id: "designTemplate", defaultVisible: false, panelLabel: "服装画布模板", label: "服装画布模板 · 得到整套生成流程", title: "以当前图为参考，新增线稿、改色、效果图等可编辑生成配置", icon: () => <PanelsTopLeft className="size-[18px]" />, run: (node, handlers) => handlers.onDesignTemplate?.(node) },
     { id: "restoreGeneration", defaultVisible: false, panelLabel: "恢复生成输入", label: "恢复生成输入 · 找回参考图和参数", title: "恢复当时的提示词、参考原图和参数，不自动生成", icon: () => <History className="size-[18px]" />, run: (node, handlers) => handlers.onRestoreGeneration?.(node) },
@@ -164,7 +166,7 @@ export function compactImageQuickToolIds(ids: ImageQuickToolId[]) {
 }
 
 export function buildImageToolbarTools(node: CanvasNodeData, handlers: ImageToolHandlers) {
-    return imageToolDefinitions.filter(tool => tool.id === "compare" ? Boolean(handlers.onCompare) : tool.id === "designTemplate" ? Boolean(handlers.onDesignTemplate) : tool.id === "restoreGeneration" ? Boolean(handlers.onRestoreGeneration) : true).map((tool) => ({
+    return imageToolDefinitions.filter(tool => tool.id === "imageSequence" ? Boolean(handlers.onImageSequence) : tool.id === "compare" ? Boolean(handlers.onCompare) : tool.id === "designTemplate" ? Boolean(handlers.onDesignTemplate) : tool.id === "restoreGeneration" ? Boolean(handlers.onRestoreGeneration) : true).map((tool) => ({
         id: tool.id,
         label: resolveToolText(tool.label, node),
         title: resolveToolText(tool.title, node),

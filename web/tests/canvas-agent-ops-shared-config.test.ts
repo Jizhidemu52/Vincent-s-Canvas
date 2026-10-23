@@ -13,12 +13,14 @@ test("agent shared connections follow UI direction and dedupe while refusing con
         { type: "connect_nodes", fromNodeId: "config", toNodeId: "target" },
         { type: "connect_nodes", fromNodeId: "second", toNodeId: "target" },
         { type: "connect_nodes", fromNodeId: "config", toNodeId: "second" },
+        { type: "connect_nodes", fromNodeId: "second", toNodeId: "config" },
         { type: "connect_nodes", fromNodeId: "target", toNodeId: "target" },
     ]);
-    expect(next.connections).toHaveLength(2);
+    expect(next.connections).toHaveLength(3);
     expect(next.connections[0]).toMatchObject({ fromNodeId: "source", toNodeId: "config" });
     expect(next.connections[0]!.kind).toBeUndefined();
     expect(next.connections[1]).toMatchObject({ fromNodeId: "config", toNodeId: "target", kind: "config-target" });
+    expect(next.connections[2]).toMatchObject({ fromNodeId: "config", toNodeId: "second", kind: "config-sequence" });
     expect(snapshot.connections).toEqual([]);
 });
 

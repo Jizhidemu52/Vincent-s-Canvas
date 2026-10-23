@@ -38,7 +38,26 @@ export function getSharedConfigForTarget(targetId: string, nodes: CanvasNodeData
 }
 
 export function normalizeCanvasConnection(first: CanvasNodeData, second: CanvasNodeData, firstHandleType: "source" | "target"): Omit<CanvasConnection, "id"> | null {
-    if (first.id === second.id || (first.type === CanvasNodeType.Config && second.type === CanvasNodeType.Config)) return null;
+    if (first.id === second.id) return null;
     const [source, target] = firstHandleType === "source" ? [first, second] : [second, first];
+    if (source.type === CanvasNodeType.Config && target.type === CanvasNodeType.Config) {
+        if ((source.metadata?.generationMode || "image") !== "image" || (target.metadata?.generationMode || "image") !== "image") return null;
+        return { fromNodeId: source.id, toNodeId: target.id, kind: "config-sequence" };
+    }
     return { fromNodeId: source.id, toNodeId: target.id, ...(source.type === CanvasNodeType.Config ? { kind: "config-target" as const } : {}) };
+}
+
+export function imageWorkflowConnectionError(edge: Omit<CanvasConnection, "id">, connections: CanvasConnection[]) {
+    if (edge.kind !== "config-sequence") return undefined;
+    const dependencies = connections.filter(item => item.kind === "config-sequence");
+    if (dependencies.some(item => item.toNodeId === edge.toNodeId && item.fromNodeId !== edge.fromNodeId)) return "一个改图节点只能连接一个上游步骤，请先断开原来的输入连线";
+    const pending = [edge.toNodeId], seen = new Set<string>();
+    while (pending.length) {
+        const id = pending.pop()!;
+        if (id === edge.fromNodeId) return "这条连线会形成循环，请保持从原图到结果的单向流程";
+        if (seen.has(id)) continue;
+        seen.add(id);
+        pending.push(...dependencies.filter(item => item.fromNodeId === id).map(item => item.toNodeId));
+    }
+    return undefined;
 }

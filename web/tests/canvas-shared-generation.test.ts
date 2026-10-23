@@ -49,7 +49,9 @@ describe("shared canvas generation relationships", () => {
         expect(normalizeCanvasConnection(first, settings, "source")).toEqual({ fromNodeId: "a", toNodeId: "config" });
         expect(normalizeCanvasConnection(settings, first, "target")).toEqual({ fromNodeId: "a", toNodeId: "config" });
         expect(normalizeCanvasConnection(first, first, "source")).toBeNull();
-        expect(normalizeCanvasConnection(settings, { ...settings, id: "other" }, "source")).toBeNull();
+        expect(normalizeCanvasConnection(settings, { ...settings, id: "other" }, "source")).toEqual({ fromNodeId: "config", toNodeId: "other", kind: "config-sequence" });
+        expect(normalizeCanvasConnection(settings, { ...settings, id: "other" }, "target")).toEqual({ fromNodeId: "other", toNodeId: "config", kind: "config-sequence" });
+        expect(normalizeCanvasConnection(settings, { ...config("video"), id: "video" }, "source")).toBeNull();
     });
 });
 

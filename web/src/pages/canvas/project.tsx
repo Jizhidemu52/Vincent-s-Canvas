@@ -1,12 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ChevronDown, ImageIcon, List, Music2, Settings2, Video, X } from "lucide-react";
+import { ChevronDown, ImageIcon, X } from "lucide-react";
 
 import { requestImageQuestion } from "@/services/api/image";
 import type { BatchEditFileItem } from "./canvas-batch-edit-runtime";
 import { canvasToolKey, currentToolConfig, useToolConfig } from "@/hooks/use-tool-config";
 import { useCanvasGenerationRuntime } from "./use-canvas-generation-runtime";
+import { useCanvasImageSequence } from "./use-canvas-image-sequence";
 import { QueuedTaskFailedError, QueuedTaskPausedError, type QueuedBatchAction } from "@/services/api/generation-tasks";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { recoverVideoGenerationTask, requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
@@ -82,7 +83,7 @@ import { canvasImageBaseName, canvasImageExportStem, canvasImageVersion, canvasI
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { canvasNodePromptDraftPatch } from "@/lib/canvas/canvas-node-prompt-draft";
-import { getConfigImageInputs, getSharedConfigTargets, normalizeCanvasConnection } from "@/lib/canvas/canvas-shared-connections";
+import { imageWorkflowConnectionError, normalizeCanvasConnection } from "@/lib/canvas/canvas-shared-connections";
 import type { SharedGenerationExecution } from "./canvas-shared-generation-runtime";
 import { createCanvasBatchRenderIndex } from "@/lib/canvas/canvas-batch-motion";
 import { isCanvasBatchChildHidden, isCanvasBatchConnectionEndpointHidden } from "@/lib/canvas/canvas-batch-visibility";
@@ -112,7 +113,7 @@ import { createCanvasNodeMap, refreshCanvasNodeMap } from "@/lib/canvas/canvas-n
 import { canvasNodeHasImagePreview } from "@/lib/canvas/canvas-node-rendering";
 import { CANVAS_AGENT_PANEL_MOTION_MS } from "@/lib/canvas/canvas-agent-panel-constants";
 import { loadCanvasAssistantPanel, loadCanvasLocalAgentPanel } from "@/lib/canvas/canvas-agent-panel-loaders";
-import { loadCanvasConfigNodePanel, loadCanvasNodePromptPanel, loadCanvasQuickGeneratePanel } from "@/lib/canvas/canvas-node-panel-loaders";
+import { loadCanvasNodePromptPanel, loadCanvasQuickGeneratePanel } from "@/lib/canvas/canvas-node-panel-loaders";
 import { loadCanvasNodeHoverToolbar } from "@/lib/canvas/canvas-node-hover-loaders";
 import { CanvasTopBar } from "@/components/canvas/canvas-top-bar";
 import { CanvasDialogsHost } from "@/components/canvas/canvas-dialogs-host";
@@ -153,6 +154,7 @@ const CanvasZoomControls = lazy(() => import("@/components/canvas/canvas-zoom-co
 
 
 const CanvasDesignActions = lazy(() => import("@/components/canvas/canvas-design-actions").then(module => ({ default: module.CanvasDesignActions })));
+const CanvasImageSequenceDialog = lazy(() => import("@/components/canvas/canvas-image-sequence-dialog").then(module => ({ default: module.CanvasImageSequenceDialog })));
 const CanvasInlineImageCompare = lazy(() => import("@/components/canvas/canvas-inline-image-compare").then(module => ({ default: module.CanvasInlineImageCompare })));
 const CanvasGroupLayer = lazy(() => import("@/components/canvas/canvas-group-layer").then(module => ({ default: module.CanvasGroupLayer })));
 
@@ -168,7 +170,7 @@ const CanvasLocalAgentPanel = lazy(loadCanvasLocalAgentPanel);
 
 
 
-const CanvasConfigNodePanel = lazy(loadCanvasConfigNodePanel);
+const CanvasConfigNodeContent = lazy(() => import("./canvas-config-node-content").then(module => ({ default: module.CanvasConfigNodeContent })));
 const CanvasNodePromptPanel = lazy(loadCanvasNodePromptPanel);
 const CanvasQuickGeneratePanel = lazy(loadCanvasQuickGeneratePanel);
 const loadCanvasPanelControls = () => import("@/components/canvas/canvas-panel-size-control");
@@ -206,6 +208,7 @@ const loadBatchEditRuntime = () => import("./canvas-batch-edit-runtime");
 
 const VIDEO_NODE_MAX_WIDTH = 420;
 const VIDEO_NODE_MAX_HEIGHT = 420;
+const ConnectionCreateMenu = lazy(() => import("@/components/canvas/canvas-connection-create-menu").then(module => ({ default: module.ConnectionCreateMenu })));
 const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
@@ -274,68 +277,6 @@ function CanvasRefreshShell() {
     );
 }
 
-function ConnectionCreateMenu({
-    pending,
-    onCreate,
-    onClose,
-}: {
-    pending: PendingConnectionCreate;
-    onCreate: (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio) => void;
-    onClose: () => void;
-}) {
-    const canvasThemeKey = useThemeStore((state) => state.theme);
-    const theme = canvasThemes[canvasThemeKey];
-    return (
-        <div
-            className="absolute z-[120] w-[300px] rounded-[18px] border p-3 shadow-2xl backdrop-blur"
-            data-connection-create-menu
-            style={{ left: pending.position.x, top: pending.position.y, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
-            onMouseDown={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-        >
-            <div className="mb-2 flex items-center justify-between px-1">
-                <span className="text-sm font-medium" style={{ color: theme.node.muted }}>
-                    引用该节点生成
-                </span>
-                <button type="button" className="grid size-7 place-items-center rounded-lg text-base opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label="关闭">
-                    ×
-                </button>
-            </div>
-            <div className="grid gap-1">
-                <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本生成" description="脚本、广告词、品牌文案" onClick={() => onCreate(CanvasNodeType.Text)} />
-                <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title="图片生成" onClick={() => onCreate(CanvasNodeType.Image)} />
-                <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title="视频生成" onClick={() => onCreate(CanvasNodeType.Video)} />
-                <ConnectionCreateOption theme={theme} icon={<Music2 className="size-5" />} title="音频参考" onClick={() => onCreate(CanvasNodeType.Audio)} />
-                <ConnectionCreateOption theme={theme} icon={<Settings2 className="size-5" />} title="配置节点" description="模型、尺寸、数量和输入顺序" onClick={() => onCreate(CanvasNodeType.Config)} />
-            </div>
-        </div>
-    );
-}
-
-function ConnectionCreateOption({ theme, icon, title, description, onClick }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; icon: React.ReactNode; title: string; description?: string; onClick?: () => void }) {
-    return (
-        <button
-            type="button"
-            className="flex h-16 w-full cursor-pointer items-center gap-3 rounded-2xl px-3 text-left transition"
-            style={{ color: theme.node.text }}
-            onClick={onClick}
-            onMouseEnter={(event) => (event.currentTarget.style.background = theme.node.fill)}
-            onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
-        >
-            <span className="grid size-11 shrink-0 place-items-center rounded-xl" style={{ background: theme.node.fill, color: theme.node.muted }}>
-                {icon}
-            </span>
-            <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2 text-base font-semibold leading-5">{title}</span>
-                {description ? (
-                    <span className="mt-1 block truncate text-sm" style={{ color: theme.node.muted }}>
-                        {description}
-                    </span>
-                ) : null}
-            </span>
-        </button>
-    );
-}
 
 function WirelessCanvasPage() {
     const { message, modal } = App.useApp();
@@ -1032,9 +973,12 @@ function WirelessCanvasPage() {
 
             const connection = normalizeConnection(current.nodeId, targetNodeId, nodesRef.current, current.handleType);
             if (!connection) {
-                message.warning("配置节点之间不能连接");
+                message.warning("当前支持生图配置之间的工作流连接，请把两个配置都设为生图");
                 return;
             }
+            if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info("请先停止工作流，再修改连线"); return; }
+            const workflowError = imageWorkflowConnectionError(connection, connectionsRef.current);
+            if (workflowError) { message.warning(workflowError); return; }
             const { fromNodeId, toNodeId } = connection;
             if (connection.kind === "config-target" && connectionsRef.current.some((edge) => edge.kind === "config-target" && edge.toNodeId === toNodeId && edge.fromNodeId !== fromNodeId)) {
                 message.warning("一个任务只能使用一套公共配置，请先断开原配置连线");
@@ -1043,8 +987,8 @@ function WirelessCanvasPage() {
             const exists = connectionsRef.current.some((conn) => conn.fromNodeId === fromNodeId && conn.toNodeId === toNodeId);
             if (!exists) {
                 setConnections((prev) => [...prev, { id: nanoid(), ...connection }]);
-            } else if (connection.kind === "config-target") {
-                setConnections((prev) => prev.map((edge) => edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId ? { ...edge, kind: "config-target" } : edge));
+            } else if (connection.kind) {
+                setConnections((prev) => prev.map((edge) => edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId ? { ...edge, kind: connection.kind } : edge));
             }
             setContextMenu(null);
         },
@@ -1053,11 +997,12 @@ function WirelessCanvasPage() {
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
-            const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: 1 } : undefined;
+            if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info("请先停止工作流，再修改连线"); return; }
+            const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, generationMode: "image" as const, size: effectiveConfig.size, count: 1 } : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
             if (!connection) {
-                message.warning("配置节点之间不能连接");
+                message.warning("工作流只支持生图配置，请把上一步配置设为生图");
                 return;
             }
             setNodes((prev) => [...prev, newNode]);
@@ -1612,11 +1557,12 @@ function WirelessCanvasPage() {
     }, [renameGroup]);
 
     const deleteConnection = useCallback((connectionId: string) => {
+        if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info("请先停止工作流，再修改连线"); return; }
         flushPendingHistory();
         setConnections((prev) => prev.filter((conn) => conn.id !== connectionId));
         setSelectedConnectionId((current) => (current === connectionId ? null : current));
         setContextMenu((current) => (current?.type === "connection" && current.connectionId === connectionId ? null : current));
-    }, [flushPendingHistory]);
+    }, [flushPendingHistory, message]);
 
     const deselectCanvas = useCallback(() => {
         cancelPendingConnectionCreate();
@@ -3426,13 +3372,15 @@ function WirelessCanvasPage() {
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
+                    const workflowStep = isConfigNode && connectionsRef.current.some(edge => edge.kind === "config-sequence" && (edge.fromNodeId === nodeId || edge.toNodeId === nodeId));
                     const gap = 96;
                     const rowGap = 36;
                     const outputPosition = isEmptyImageNode ? parentPosition : placeCanvasImageOutputs(
                         nodesRef.current,
-                        shared ? [shared.plan.configNode, shared.plan.targetNode] : sourceNode ? [sourceNode] : [],
+                        workflowStep ? [] : shared ? [shared.plan.configNode, shared.plan.targetNode] : sourceNode ? [sourceNode] : [],
                         imageConfig,
-                        { x: parentPosition.x + parentConfig.width + gap + imageConfig.width / 2, y: parentPosition.y + parentConfig.height / 2 },
+                        workflowStep ? { x: parentPosition.x + parentConfig.width / 2, y: parentPosition.y + parentConfig.height + gap + imageConfig.height / 2 }
+                            : { x: parentPosition.x + parentConfig.width + gap + imageConfig.width / 2, y: parentPosition.y + parentConfig.height / 2 },
                         gap,
                     );
                     const rootId = isEmptyImageNode ? nodeId : nanoid();
@@ -3547,7 +3495,7 @@ function WirelessCanvasPage() {
                                     });
                                 });
                                 // Keep the first completed result in view, including Agent-created edit flows.
-                                if (targetId === rootId || !hasSuccess) {
+                                if (!workflowStep && (targetId === rootId || !hasSuccess)) {
                                     const target = targetId === rootId ? rootNode : childNodes.find((node) => node.id === targetId) || rootNode;
                                     focusCanvasArea(target.position, imageSize.width, imageSize.height);
                                 }
@@ -3705,16 +3653,21 @@ function WirelessCanvasPage() {
         },
         [createOptions, effectiveConfig, finishGenerationRequest, handleMissingModelConfig, isAiConfigReady, message, projectId, recoverPending, startGenerationRequest],
     );
-    const handleGenerateNode = useCallback(async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void) => {
+    const handleGenerateNode = useCallback(async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, sequenceLock?: string, sequenceSignal?: AbortSignal) => {
+        if (!sequenceLock && connectionsRef.current.some(edge => edge.kind === "config-sequence" && (edge.fromNodeId === nodeId || edge.toNodeId === nodeId))) {
+            message.info("请从配置节点的“运行工作流”按钮启动相连步骤"); return;
+        }
         // Lock before the lazy import: rapid double clicks must not submit twice.
-        if (generationDispatchLocksRef.current.size) {
+        const ownsSequenceLock = sequenceLock && generationDispatchLocksRef.current.size === 1 && generationDispatchLocksRef.current.has(sequenceLock);
+        if (generationDispatchLocksRef.current.size && !ownsSequenceLock) {
             message.info("请先完成或停止当前任务");
             return;
         }
-        generationDispatchLocksRef.current.add(nodeId);
+        if (!ownsSequenceLock) generationDispatchLocksRef.current.add(nodeId);
         const snapshot = { nodes: nodesRef.current, connections: connectionsRef.current };
         try {
             const { runCanvasGeneration } = await import("./canvas-shared-generation-runtime");
+            if (sequenceSignal?.aborted) return;
             await runCanvasGeneration(nodeId, mode, prompt, onResult, {
                 snapshot, getSnapshot: () => ({ nodes: nodesRef.current, connections: connectionsRef.current }),
                 buildConfig: (node, selectedMode) => buildGenerationConfig(effectiveConfig, node, selectedMode),
@@ -3726,12 +3679,23 @@ function WirelessCanvasPage() {
             message.error(detail);
             onResult?.({ mode, outputs: [{ nodeId, status: "failed", error: detail }] });
         } finally {
-            generationDispatchLocksRef.current.delete(nodeId);
+            if (!ownsSequenceLock) generationDispatchLocksRef.current.delete(nodeId);
         }
     }, [effectiveConfig, executeGenerateNode, finishGenerationRequest, isAiConfigReady, message, recoverPending, startGenerationRequest]);
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
     }, [handleGenerateNode]);
+
+    const imageSequence = useCanvasImageSequence({
+        projectId, nodes: nodesRef, connections: connectionsRef, groups: groupsRef, locks: generationDispatchLocksRef,
+        setNodes, setConnections, setGroups, stopGeneration: stopGenerationByRunningId,
+        generate: async (nodeId, lockKey, signal) => {
+            let result: CanvasGenerationResult | undefined;
+            const node = nodesRef.current.find(item => item.id === nodeId);
+            await handleGenerateNode(nodeId, "image", node?.metadata?.composerContent || "", value => { result = value; }, lockKey, signal);
+            return result;
+        },
+    });
 
     const updateMediaWorkflow = useCallback((messageId: string, updater: (workflow: CanvasAgentMediaWorkflow) => CanvasAgentMediaWorkflow) => {
         setChatSessions((sessions) =>
@@ -4259,34 +4223,20 @@ function WirelessCanvasPage() {
         confirmStopGeneration: typeof confirmStopGeneration;
         handleGenerateNode: typeof handleGenerateNode;
         configGenerationInputIndex: typeof configGenerationInputIndex;
+        imageSequence: typeof imageSequence;
     } | null>(null);
-    configNodeActionsRef.current = { handleConfigNodeChange, confirmStopGeneration, handleGenerateNode, configGenerationInputIndex };
+    configNodeActionsRef.current = { handleConfigNodeChange, confirmStopGeneration, handleGenerateNode, configGenerationInputIndex, imageSequence };
 
     const renderConfigNodeContent = useCallback(
         (contentNode: CanvasNodeData, { inputSummary, isRunning }: { inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number }; isRunning: boolean }) => {
-            const targets = getSharedConfigTargets(contentNode.id, nodesRef.current, connectionsRef.current);
             return (
             <Suspense fallback={null}>
-            <CanvasConfigNodePanel
-                node={contentNode}
-                isRunning={isRunning}
-                inputSummary={inputSummary}
-                inputs={configNodeActionsRef.current?.configGenerationInputIndex.get(contentNode.id)}
-                imageReferences={resolveCanvasNodeImageReferences(contentNode, nodesRef.current, connectionsRef.current)}
-                inputImageTaskCount={getConfigImageInputs(contentNode.id, nodesRef.current, connectionsRef.current).length}
-                linkedTaskCount={targets.length}
-                linkedTaskHasImages={targets.some((node) => node.type === CanvasNodeType.Image && Boolean(node.metadata?.content || node.metadata?.storageKey))}
-                onConfigChange={(nodeId, patch) => configNodeActionsRef.current?.handleConfigNodeChange(nodeId, patch)}
-                onStop={(nodeId) => configNodeActionsRef.current?.confirmStopGeneration(nodeId)}
-                onGenerate={(nodeId) => {
-                    const target = nodesRef.current.find((item) => item.id === nodeId);
-                    void configNodeActionsRef.current?.handleGenerateNode(nodeId, target?.metadata?.generationMode || "image", target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
-                }}
-            />
+            <CanvasConfigNodeContent node={contentNode} nodes={nodes} connections={connections} groups={groups}
+                isRunning={isRunning} inputSummary={inputSummary} actions={configNodeActionsRef.current!} />
             </Suspense>
             );
         },
-        [connections],
+        [nodes, connections, groups, imageSequence.activeGroupId],
     );
 
     const addImageNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Image), [createNode]);
@@ -4455,7 +4405,7 @@ function WirelessCanvasPage() {
                         </>
                     }
                 >
-                    {groupIndex.groups.length ? <Suspense fallback={null}><CanvasGroupLayer ref={canvasGroupLayerRef} groups={groupIndex.groups} selectedIds={selectedNodeIds} theme={theme} resolveNode={resolveRenderNode} onMove={moveGroup} onSelect={selectGroup} onRename={startGroupRename} onToggle={toggleGroup} onUngroup={ungroup} /></Suspense> : null}
+                    {groupIndex.groups.length ? <Suspense fallback={null}><CanvasGroupLayer ref={canvasGroupLayerRef} groups={groupIndex.groups} selectedIds={selectedNodeIds} theme={theme} resolveNode={resolveRenderNode} onMove={moveGroup} onSelect={selectGroup} onRename={startGroupRename} onToggle={toggleGroup} onUngroup={ungroup} onImageSequence={groupId => imageSequence.setDialog({ groupId })} /></Suspense> : null}
                     <CanvasConnectionSvg kind={connectionSvgSurfaceKind} connections={visibleConnections} highlight={graphHighlight}
                         overview={canvasOverviewEnabled} resolveNode={resolveRenderNode} activeRef={activeConnectionPathRef}
                         onSelect={connection => { setSelectedConnectionId(connection.id); setSelectedNodeIds(new Set()); setContextMenu(null); }}
@@ -4485,7 +4435,7 @@ function WirelessCanvasPage() {
 
                     {localToolsEnabled && !isNodeDragging && !isNodeResizing && !isSelecting && !connectingParams && singleSelectedNode?.type === CanvasNodeType.Image && renderedNodes.some(node => node.id === singleSelectedNode.id) ? <Suspense fallback={null}><CanvasInlineImageCompare key={singleSelectedNode.id} node={singleSelectedNode} nodes={nodes} scale={viewport.k} showImageInfo={showImageInfo} onAdvanced={sourceId => sourceId ? setCompareImageIds([sourceId, singleSelectedNode.id]) : openImageCompare(singleSelectedNode)} /></Suspense> : null}
                     <CanvasSelectionOverlay ref={selectionOverlayRef} borderColor={theme.canvas.selectionStroke} background={theme.canvas.selectionFill} />
-                    {pendingConnectionCreate ? <ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /> : null}
+                    {pendingConnectionCreate ? <Suspense fallback={null}><ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /></Suspense> : null}
                 </WirelessCanvas>
                 {performanceModeEnabled ? <Suspense fallback={null}><CanvasPerformancePanel metrics={performanceMetrics} /></Suspense> : null}
 
@@ -4516,6 +4466,7 @@ function WirelessCanvasPage() {
                             onReversePrompt={createImageReversePromptNodes}
                             onCompare={openImageCompare}
                             onDesignTemplate={(node) => setTemplateSourceId(node.id)}
+                            onImageSequence={(node) => imageSequence.setDialog({ sourceId: node.id })}
                             onRestoreGeneration={toolbarNode.metadata?.sourceTaskId ? restoreNodeGenerationInput : undefined}
                             onRetry={(node) => void handleRetryNode(node)}
                             onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
@@ -4601,6 +4552,16 @@ function WirelessCanvasPage() {
                 <input ref={imageInputRef} type="file" accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav" className="hidden" onChange={handleImageInputChange} />
                 <input ref={quickReferenceInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleQuickReferenceInputChange} />
 
+                {imageSequence.dialog ? <Suspense fallback={null}><CanvasImageSequenceDialog
+                    key={"sourceId" in imageSequence.dialog ? imageSequence.dialog.sourceId : imageSequence.dialog.groupId}
+                    controller={imageSequence}
+                    groups={groups}
+                    nodes={nodes}
+                    model={effectiveConfig.imageModel || effectiveConfig.model}
+                    onFocus={focusCanvasArea}
+                    onEditConfig={id => { setSelectedNodeIds(new Set([id])); setDialogNodeId(id); }}
+                    onPromptChange={(id, prompt) => handleConfigNodeChange(id, { prompt, composerContent: prompt })}
+                /></Suspense> : null}
                 <CanvasDialogsHost projectId={projectId} state={canvasDialogs} actions={{
                     applyDesignTemplate, saveGroupName, saveNodeName, saveManualImageEdit, cropImageNode, maskEditImageNode,
                     splitImageNode, upscaleImageNode, generateAngleNode, clearCanvas, handleAssetInsert,

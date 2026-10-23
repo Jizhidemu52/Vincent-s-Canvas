@@ -123,7 +123,7 @@ export type CanvasNodeData = {
 
 export type CanvasConnection = {
     id: string;
-    kind?: "config-target" | "generation-output";
+    kind?: "config-target" | "generation-output" | "config-sequence" | "sequence-input";
     fromNodeId: string;
     toNodeId: string;
 };
@@ -195,6 +195,19 @@ export type CanvasNodeGroup = {
     title: string;
     nodeIds: string[];
     collapsed: boolean;
+    imageSequence?: {
+        sourceNodeId: string;
+        status: "idle" | "running" | "success" | "failed" | "stopped";
+        error?: string;
+        definitionKey?: string;
+        steps: {
+            configNodeId: string;
+            inputConfigId?: string;
+            status: "idle" | "running" | "success" | "failed";
+            outputNodeId?: string;
+            previousOutputIds?: string[];
+        }[];
+    };
 };
 
 export type CanvasAssistantAttachment = {

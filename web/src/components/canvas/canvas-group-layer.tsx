@@ -1,5 +1,5 @@
 import { forwardRef, memo, useImperativeHandle, useRef, type MouseEvent } from "react";
-import { ChevronDown, ChevronRight, FolderOpen, PencilLine, Ungroup } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderOpen, PencilLine, Ungroup, Workflow } from "lucide-react";
 import { canvasGroupBounds, type ResolvedCanvasGroup } from "@/lib/canvas/canvas-node-groups";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { CanvasNodeData } from "@/types/canvas";
@@ -15,10 +15,11 @@ type Props = {
     onRename: (groupId: string) => void;
     onToggle: (groupId: string) => void;
     onUngroup: (groupId: string) => void;
+    onImageSequence?: (groupId: string) => void;
 };
 
 /** Frames follow the existing imperative drag preview, without rendering the whole editor per pointer event. */
-export const CanvasGroupLayer = memo(forwardRef<CanvasGroupLayerHandle, Props>(function CanvasGroupLayer({ groups, selectedIds, theme, resolveNode, onMove, onSelect, onRename, onToggle, onUngroup }, ref) {
+export const CanvasGroupLayer = memo(forwardRef<CanvasGroupLayerHandle, Props>(function CanvasGroupLayer({ groups, selectedIds, theme, resolveNode, onMove, onSelect, onRename, onToggle, onUngroup, onImageSequence }, ref) {
     const elements = useRef(new Map<string, HTMLDivElement>());
     useImperativeHandle(ref, () => ({ refresh() {
         for (const item of groups) {
@@ -54,6 +55,7 @@ export const CanvasGroupLayer = memo(forwardRef<CanvasGroupLayerHandle, Props>(f
                         <span className="truncate font-medium" style={{ color: theme.node.text }}>{group.title}</span>
                         <span className="shrink-0 opacity-70">{nodeIds.size}</span>
                     </button>
+                    {group.imageSequence && onImageSequence ? <button type="button" title="查看连续改图步骤与运行进度" aria-label={`连续改图 ${group.title}`} className="flex shrink-0 items-center gap-1 rounded p-1 text-xs hover:opacity-70" onClick={() => onImageSequence(group.id)}><Workflow size={14} />{group.imageSequence.steps.filter(step => step.status === "success").length}/{group.imageSequence.steps.length}</button> : null}
                     <button type="button" title="重命名款式组" aria-label={`重命名款式组 ${group.title}`} className="shrink-0 rounded p-1 hover:opacity-70" onClick={() => onRename(group.id)}><PencilLine size={14} /></button>
                     <button type="button" title="取消分组，保留全部内容" aria-label={`取消分组 ${group.title}`} className="shrink-0 rounded p-1 hover:opacity-70" onClick={() => onUngroup(group.id)}><Ungroup size={14} /></button>
                 </div>

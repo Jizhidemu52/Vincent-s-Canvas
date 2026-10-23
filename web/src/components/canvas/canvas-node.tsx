@@ -464,8 +464,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 {showResizeControls ? <>{(["top-left", "top-right", "bottom-left", "bottom-right"] as ResizeCorner[]).map((corner) => <ResizeHandle key={corner} corner={corner} theme={theme} onMouseDown={handleResizeMouseDown} />)}</> : null}
             </div>
 
-            {showConnectionControls ? <><ConnectionHandleDot side="left" theme={theme} label={data.type === CanvasNodeType.Config ? "公共素材输入" : "输入连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
-            <ConnectionHandleDot side="right" theme={theme} label={data.type === CanvasNodeType.Config ? "共享配置输出" : "输出连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /></> : null}
+            {showConnectionControls ? <><ConnectionHandleDot side="left" theme={theme} label={data.type === CanvasNodeType.Config ? "图片 / 上一步输入" : "输入连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
+            <ConnectionHandleDot side="right" theme={theme} label={data.type === CanvasNodeType.Config ? "结果输出 / 连接下一步" : "输出连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /></> : null}
 
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
         </div>
