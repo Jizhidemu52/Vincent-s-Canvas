@@ -48,7 +48,7 @@ function deferred<T>() {
 }
 
 /** Per-instance hook state, effect cleanup, and keyed reconciliation without process-global mocks. */
-function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]>, models: Parameters<typeof imageModelProfile>[1] = [{ id: "test-model", modelId: "test-model", name: "Test model", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 }]) {
+function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]>, models: Parameters<typeof imageModelProfile>[1] = [{ id: "test-model", modelId: "test-model", name: "Test model", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 }], pendingRead?: { ready: Promise<void>; records: any[] }) {
     type Frame = { values: any[]; effects: Array<{ dependencies?: DependencyList; cleanup?: ReturnType<EffectCallback> }>; pending: Array<() => void>; cursor: number; mounted: boolean };
     const frame = (): Frame => ({ values: [], effects: [], pending: [], cursor: 0, mounted: true });
     const wrapper = frame();
@@ -100,6 +100,18 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         async getItem(key: string) { return stored.get(key) || null; },
         async removeItem(key: string) { stored.delete(key); },
     };
+    const storedPending = new Map((pendingRead?.records || []).map(value => [value.id, structuredClone(value)]));
+    const pendingStorage = {
+        ...storage,
+        async iterate(visitor: (value: unknown, key: string, index: number) => void) {
+            const records = structuredClone([...storedPending.values()]);
+            await pendingRead?.ready;
+            records.forEach((value, index) => visitor(value, value.id, index + 1));
+        },
+        async setItem(key: string, value: any) { storedPending.set(key, structuredClone(value)); return value; },
+        async getItem(key: string) { return storedPending.get(key) || null; },
+        async removeItem(key: string) { storedPending.delete(key); },
+    };
     const request = async (kind: string, args: any[]) => {
         requests.push({ kind, args });
         if (!generate) throw new Error("Unexpected image request: this regression test must not call a real API");
@@ -126,7 +138,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
             Input: { TextArea: "TextArea" }, Typography: { Text: "Typography.Text" },
         },
         "react-router-dom": { Link: "Link", useSearchParams: () => [params] },
-        "@/lib/workspace-storage": { createWorkspaceStorage: () => storage },
+        "@/lib/workspace-storage": { createWorkspaceStorage: (name: string) => name === "image_pending_tasks" ? pendingStorage : storage },
         "@/stores/use-config-store": {
             useConfigStore: Object.assign((select: Function) => select(configState), { getState: () => configState }),
             useEffectiveConfig: () => config, modelOptionName: (model: string) => model, modelOptionLabel: (_: unknown, model: string) => model,
@@ -142,7 +154,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         "@/hooks/use-image-preview": { useImagePreview: (image: { dataUrl: string }) => image.dataUrl },
         "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: false, oaLoginEnabled: false } },
         "@/lib/canvas-theme": { canvasThemes: { light: {} } },
-        "@/lib/image-model-settings": { useImageModelProfile: (model: string) => imageModelProfile(model, models, "designer"), normalizeImageModelSettings },
+        "@/lib/image-model-settings": { imageModelProfile, useImageModelProfile: (model: string) => imageModelProfile(model, models, "designer"), normalizeImageModelSettings },
         "@/lib/image-reference-policy": { ...referencePolicy, validateImageReferences: (model: string, references: Parameters<typeof referencePolicy.validateImageReferences>[1], profile?: Parameters<typeof referencePolicy.validateImageReferences>[2]) => referencePolicy.validateImageReferences(model, references, profile ?? imageModelProfile(model, models, "designer")) },
         "@/lib/submission-gate": { workbenchSubmissions: { acquire: () => () => undefined } },
         "@/services/api/image": { requestGeneration: (...args: any[]) => request("generate", args), requestEdit: (...args: any[]) => request("edit", args) },
@@ -154,7 +166,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         "@/lib/image-utils": { readImageMeta: async () => ({ width: 1024, height: 1024, mimeType: "image/png" }), getDataUrlByteSize: () => 100, formatBytes: String, formatDuration: String },
         "@/services/api/server-assets": { fetchServerAssetContent: async () => { throw new Error("Unexpected asset request"); }, recordServerAssetEvent() {} },
         "@/services/api/generation-history": { restoreGenerationDraft: async () => { throw new Error("Unexpected restore request"); } },
-        "@/services/api/generation-tasks": { getQueuedTask: async () => { throw new Error("Unexpected legacy task lookup for explicitly scoped logs"); } },
+        "@/services/api/generation-tasks": { QueuedTaskFailedError: class extends Error {}, QueuedTaskPausedError: class extends Error {}, QueuedTaskSubmissionUncertainError: class extends Error {}, getQueuedTask: async () => { throw new Error("Unexpected legacy task lookup for explicitly scoped logs"); } },
         "@/services/api/prompts": { hydratePromptReuse: async () => { throw new Error("Unexpected reuse request"); }, savePromptFromTask() {} },
         "file-saver": { saveAs() {} }, nanoid: { nanoid: () => `generated-${++sequence}` },
     };
@@ -205,14 +217,14 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         navigate(tool: string, query = "") { params = new URLSearchParams(`tool=${tool}${query ? `&${query}` : ""}`); },
         setOwner(value: string) { ownerId = value; },
         setCreative(value?: object) { creativePreset = value; },
-        restoreLegacyFailedSlot(error: string) {
+        restoreLegacyFailedSlot(error: string, snapshot: { text: string; config: Record<string, any>; references: unknown[] }) {
             // An already-open legacy workspace can contain both successful and failed slots.
             // Seed only that old in-memory UI state; never manufacture it by bypassing today's
             // one-image normalization or by issuing several requests from a new action.
             const imageIds = new Set(elements(render()).filter(item => typeof item.type === "function" && item.type.name === "ResultImageCard").map(item => item.props.image.id));
             const index = workspace.values.findIndex(value => Array.isArray(value) && value.some(item => item?.status === "success" && imageIds.has(item.image?.id)));
             if (index < 0) throw new Error("Legacy fixture requires a visible successful result");
-            workspace.values[index] = [...workspace.values[index], { id: "legacy-failed-slot", status: "failed", error }];
+            workspace.values[index] = [...workspace.values[index], { id: "legacy-failed-slot", status: "failed", error, snapshot }];
         },
         delayMedia(key: string) { const pending = deferred<string>(); delayedMedia.set(key, pending.promise); return pending; },
         async settle() { for (let turn = 0; turn < 30; turn++) { render(); await Promise.resolve(); } return render(); },
@@ -228,6 +240,43 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
 }
 
 describe("image workspace isolation", () => {
+    test("a delayed startup pending read cannot replace a newer completed generation", async () => {
+        const ready = deferred<void>();
+        const pending = { id: "old-pending", requestId: "old-request", taskId: "old-task", ownerId: "designer-a", tool: "image-generation", createdAt: 1,
+            snapshot: { text: "older request", config: { model: "test-model", imageModel: "test-model", size: "1024x1024", quality: "standard", count: "1" }, references: [] } };
+        const page = pageHarness([], async () => [{ id: "new-result", dataUrl: "data:image/png;base64,bmV3" }], undefined, { ready: ready.promise, records: [pending] });
+        await page.settle();
+        page.prompt().onChange({ target: { value: "newer request" } });
+        await page.generate().onClick();
+        await page.settle();
+        expect(page.errors).toEqual([]);
+        expect(page.requests).toHaveLength(1);
+        expect(page.images().map(image => image.id)).toEqual(["new-result"]);
+        ready.resolve();
+        await page.settle();
+        expect(page.images().map(image => image.id)).toEqual(["new-result"]);
+        expect(page.failedCards()).toHaveLength(0);
+        expect(page.requests).toHaveLength(1);
+    });
+
+    test("a delayed startup pending read leaves a new in-flight slot owned by its current request", async () => {
+        const ready = deferred<void>(), generation = deferred<Image[]>();
+        const pending = { id: "old-pending", requestId: "old-request", taskId: "old-task", ownerId: "designer-a", tool: "image-generation", createdAt: 1,
+            snapshot: { text: "older request", config: { model: "test-model", imageModel: "test-model", size: "1024x1024", quality: "standard", count: "1" }, references: [] } };
+        const page = pageHarness([], () => generation.promise, undefined, { ready: ready.promise, records: [pending] });
+        await page.settle();
+        page.prompt().onChange({ target: { value: "new in-flight request" } });
+        page.generate().onClick();
+        ready.resolve();
+        await page.settle();
+        expect(page.queueProgress().active).toBe(true);
+        expect(page.failedCards()).toHaveLength(0);
+        generation.resolve([{ id: "new-inflight-result", dataUrl: "data:image/png;base64,bmV3" }]);
+        await page.settle();
+        expect(page.images().map(image => image.id)).toEqual(["new-inflight-result"]);
+        expect(page.requests).toHaveLength(1);
+    });
+
     test("the real page keys by normalized tool and owner, not unrelated query values", () => {
         const page = pageHarness();
         const keys = tools.map(tool => { page.navigate(tool); return page.boundary().key; });
@@ -365,7 +414,7 @@ describe("image workspace isolation", () => {
         page.prompt().onChange({ target: { value: "queue progress" } });
         page.generate().onClick();
         expect(page.queueProgress()).toMatchObject({ taskId: null, active: true });
-        page.requests[0]!.args[2].onSubmitted(["task-accepted"]);
+        await page.requests[0]!.args[2].onSubmitted(["task-accepted"]);
         expect(page.queueProgress()).toMatchObject({ taskId: "task-accepted", active: true });
         expect(page.requests).toHaveLength(1);
         pending.resolve([{ id: "result", dataUrl: "data:image/png;base64,YQ==", sourceTaskId: "task-accepted" }]);
@@ -483,7 +532,7 @@ describe("image workspace isolation", () => {
         const page = pageHarness([legacy], async () => [{ id: "retried-slot", dataUrl: "data:image/png;base64,YQ==" }]);
         await page.settle();
         const successfulImage = structuredClone(page.images()[0]);
-        page.restoreLegacyFailedSlot("Legacy second-slot failure");
+        page.restoreLegacyFailedSlot("Legacy second-slot failure", { text: "original failed-slot prompt", config: { ...page.config }, references: [] });
         page.prompt().onChange({ target: { value: "retry only the failed legacy slot" } });
         expect(page.failedCards()).toHaveLength(1);
         await page.failedCards()[0]!.props.onRetry();

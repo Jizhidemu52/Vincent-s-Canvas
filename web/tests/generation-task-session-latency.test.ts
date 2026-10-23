@@ -4,6 +4,7 @@ import { deploymentFeatures } from "../src/lib/deployment-features";
 import type { ApiUser } from "../src/services/api/auth";
 import { QueuedTaskFailedError, QueuedTaskSubmissionUncertainError, recoverQueuedMedia, requestQueuedImageBatch, requestQueuedImages, type QueuedTask } from "../src/services/api/generation-tasks";
 import { useUserStore } from "../src/stores/use-user-store";
+import { TaskObservationStoppedError } from "../src/services/api/task-observation";
 
 const originalFetch = globalThis.fetch;
 const globals = globalThis as unknown as Record<string, unknown>;
@@ -106,14 +107,21 @@ describe("generation results do not wait for session refresh", () => {
         });
     }
 
-    test.each(paths)("%s preserves the original query error while session refresh is pending", async path => {
-        const originalError = new Error("original task query failed");
-        controlledNetwork("initial", { pollError: originalError });
-        const error = await promptly(run(path)).catch(error => error);
-        if (path === "recovery") {
-            expect(error).toBeInstanceOf(QueuedTaskSubmissionUncertainError);
-            expect(error).toMatchObject({ requestId: completedTask.requestId, taskId: completedTask.id, cause: originalError });
-        } else expect(error).toBe(originalError);
+    test.each(paths)("%s stops observation after bounded query retries without waiting for session refresh", async path => {
+        const network = controlledNetwork("initial", { pollError: new Error("original task query failed") });
+        // Retry timing itself is covered by task-observation.test.ts. Only speed
+        // up its two backoffs here; keep the independent 500ms session guard.
+        const nativeTimeout = globalThis.setTimeout;
+        globalThis.setTimeout = ((fn: TimerHandler, ms?: number, ...args: unknown[]) => nativeTimeout(fn, ms === 2000 || ms === 4000 ? 0 : ms, ...args)) as typeof setTimeout;
+        try {
+            const error = await promptly(run(path)).catch(error => error);
+            if (path === "recovery") {
+                expect(error).toBeInstanceOf(QueuedTaskSubmissionUncertainError);
+                expect(error).toMatchObject({ requestId: completedTask.requestId, taskId: completedTask.id });
+                expect(error.cause).toBeInstanceOf(TaskObservationStoppedError);
+            } else expect(error).toBeInstanceOf(TaskObservationStoppedError);
+            expect(network.cancellations).toEqual([]);
+        } finally { globalThis.setTimeout = nativeTimeout; }
     });
 
     test.each(paths)("%s still cancels on abort without waiting for session refresh", async path => {

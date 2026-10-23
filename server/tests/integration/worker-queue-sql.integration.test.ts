@@ -8,6 +8,7 @@ import { popReadyTask, removeQueuedTask, scheduleQueuedTask } from "../../src/ta
 import { canAutomaticallyRetryTask, queueScore, recalculateBatch, restoreWaitingTasksToQueue, TASK_LEASE_SECONDS } from "../../src/tasks";
 import { stepApiMartVideoTask, VideoProviderFailure, VideoSubmissionClaimLost, VideoTaskPending, type ApiMartVideoInput } from "../../src/media-runtime";
 import { ApiMartImageProviderFailure } from "../../src/apimart-image";
+import { ProviderSubmissionRejected, submissionWasNotSent } from "../../src/provider-submission-policy";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
 import { createIsolatedQueueCache } from "../helpers/isolated-queue-cache";
 
@@ -91,11 +92,13 @@ integration("30 mock videos release worker slots, preserve model inflight quota 
     acquireModelLease, releaseModelLease, startTaskLeaseHeartbeat, TaskExecutionLost,
     withTransaction, settleReservation, scheduleQueuedTask, queueScore, canAutomaticallyRetryTask, recalculateBatch,
     VideoTaskPending, VideoSubmissionClaimLost, VideoProviderFailure, ApiMartImageProviderFailure,
+    ProviderSubmissionRejected, submissionWasNotSent,
     createGenerationTiming: () => ({ measure: async (_stage: string, action: () => unknown) => action(), finish() {} }),
     readProviderSubmissionDiagnostics: () => undefined,
     storage: { configured: true }, loadSourceAssets: async () => { referenceLoads++; return []; },
     stepApiMartVideoTask: (input: ApiMartVideoInput) => stepApiMartVideoTask(input, { fetch: fakeFetch }),
     fetch: fakeFetch,
+    fetchProviderMediaResult: async (url: string) => ({ bytes: Buffer.from(await (await fakeFetch(url)).arrayBuffer()), mimeType: "video/mp4" }),
     storeResults: async (task: { id: string }) => [`/api/assets/${task.id}/content`],
   });
   async function drainReady() {

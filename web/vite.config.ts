@@ -19,8 +19,8 @@ export default defineConfig(({ mode }) => {
             },
         }],
         build: {
-            // A deploy is a complete immutable asset set. Keeping old hashed files
-            // here made local packages grow by hundreds of megabytes after rebuilds.
+            // build.mjs points Vite at a fresh sibling directory, then publishes
+            // only after type checking and the bundle budget succeed.
             emptyOutDir: true,
             chunkSizeWarningLimit: 800,
             rollupOptions: {

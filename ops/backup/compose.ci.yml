@@ -1,0 +1,31 @@
+# Disposable CI-only recovery target. Separate container/volume, NOT off-host durability.
+services:
+  backup-minio:
+    image: wireless-canvas-minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ci-backup
+      MINIO_ROOT_PASSWORD: ci-backup-storage-password
+    volumes:
+      - ci-backup-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  backup-minio-init:
+    image: wireless-canvas-mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      backup-minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mc alias set backup http://backup-minio:9000 ci-backup ci-backup-storage-password >/dev/null && mc mb --ignore-existing backup/ci-backups"]
+  backup:
+    depends_on:
+      backup-minio-init:
+        condition: service_completed_successfully
+    # Only CI mounts an ephemeral private key for the explicit restore exercise.
+    volumes:
+      - ${RUNNER_TEMP:?CI scratch required}/canvas-backup-keys:/run/backup-keys:ro
+volumes:
+  ci-backup-data:

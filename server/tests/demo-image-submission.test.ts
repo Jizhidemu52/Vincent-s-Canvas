@@ -4,6 +4,10 @@ import { ApiMartImageProviderFailure, apiMartImageModel, buildApiMartImageReques
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { DemoStateStore, DemoStorageError } from "../src/demo-state-store";
 import { ImageResultPersistenceError } from "../src/image-result-storage";
+import { fetchProviderResult } from "../src/provider-result";
+import { queryProviderTaskStatus } from "../src/provider-status-query";
+
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL0VQAAAABJRU5ErkJggg==", "base64");
 
 const stores: DemoStateStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
@@ -72,12 +76,19 @@ function createHarness(failurePhase?: FailurePhase) {
       }
       if (request.url === "https://images.invalid/original.png") {
         if (failurePhase === "download") throw failure;
-        return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } });
+        return new Response(png, { headers: { "content-type": "image/png" } });
       }
       throw new Error(`Unexpected mock request: ${request.url}`);
     },
   };
-  const api = new Function(...Object.keys(dependencies), `${productionCode}\nreturn { callGptImage2, runApiMartImageTaskForDemo };`)(...Object.values(dependencies)) as Harness;
+  const injected = { ...dependencies,
+    queryProviderTaskStatus: (url: string, headers: HeadersInit) => queryProviderTaskStatus(url, headers, { fetch: dependencies.fetch, sleep: async () => {} }),
+    fetchProviderResult: (url: string) => fetchProviderResult(url, undefined, async value => {
+      const response = await dependencies.fetch(value);
+      return { bytes: Buffer.from(await response.arrayBuffer()), mime: response.headers.get("content-type") || "", finalUrl: value };
+    }),
+  };
+  const api = new Function(...Object.keys(injected), `${productionCode}\nreturn { callGptImage2, runApiMartImageTaskForDemo };`)(...Object.values(injected)) as Harness;
   return { api, paid, reads, failure, completed: () => completed };
 }
 
@@ -85,7 +96,7 @@ describe("demo image paid-submission boundaries", () => {
   test("GPT Image2 submits through the helper once and keeps polling/download on ordinary GET", async () => {
     const harness = createHarness();
     const result = await harness.api.callGptImage2("reference prompt", { size: "16:9", resolution: "2k" }, [{ mimeType: "image/png", bytes: new Uint8Array([0, 255]) }]);
-    expect(result).toBe("data:image/png;base64,AQID");
+    expect(result).toBe(`data:image/png;base64,${png.toString("base64")}`);
     expect(harness.paid).toHaveLength(1);
     expect(harness.paid[0]).toMatchObject({ url: "https://apimart.invalid/v1/images/generations", method: "POST" });
     expect(new Headers(harness.paid[0]!.init?.headers).get("authorization")).toBe("Bearer mock-model-key");
@@ -117,7 +128,7 @@ describe("demo image paid-submission boundaries", () => {
       expect(harness.completed()).toBe(0);
       expect(harness.paid).toHaveLength(1);
       expect(harness.paid[0]).toMatchObject({ url: "https://apimart.invalid/v1/images/generations", method: "POST" });
-      expect(harness.reads.map((request) => request.method)).toEqual(Array(phase === "submission" ? 0 : phase === "polling" ? 1 : 2).fill("GET"));
+      expect(harness.reads.map((request) => request.method)).toEqual(Array(phase === "submission" ? 0 : phase === "polling" ? 3 : 2).fill("GET"));
     });
   }
 });

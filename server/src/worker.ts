@@ -27,8 +27,9 @@ import { ApiMartImageProviderFailure, runApiMartImageTask } from "./apimart-imag
 import { videoSourceMetadata, type ProviderVideoSource } from "./video-models";
 import { probeMediaBytes } from "./media-probe";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
+import { ProviderSubmissionRejected, isDefinitiveSubmissionRejection, submissionWasNotSent } from "./provider-submission-policy";
 import { createGenerationTiming, type GenerationTiming, type GenerationTimingOutcome } from "./generation-timing";
-import { fetchProviderResult } from "./provider-result";
+import { fetchProviderResult, fetchProviderMediaResult } from "./provider-result";
 import { inlineProviderImageDataUrl } from "./provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-input";
 import { imageResultExtension, storeImageResult } from "./image-result-storage";
@@ -53,6 +54,7 @@ type WorkRow = {
   upstream_task_id: string | null;
   upstream_submission_started_at: string | null;
   priority: TaskPriority;
+  queued_at: string;
   model_id: string | null;
   concurrency_limit: number | null;
   protocol: string | null;
@@ -74,10 +76,13 @@ type WorkRow = {
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
-const cache = await createCache(config.REDIS_URL);
+let cache: Cache;
 const storage = new ObjectStorage(config);
 let stopping = false;
-let reconcilingQueue = false;
+let queueReconciliation: Promise<void> | null = null;
+let queueReconciliationTimer: ReturnType<typeof setInterval> | undefined;
+let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
+const activeTaskIds = new Set<string>();
 
 async function nextTask() {
   return popReadyTask(cache);
@@ -95,7 +100,7 @@ async function runTask(taskId: string) {
   );
   if (!claimed.rows[0]) return;
   const details = await db.query<WorkRow>(
-    `SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.priority,m.model_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
+    `SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.priority,t.queued_at,m.model_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
         FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id AND w.enabled=true WHERE t.id=$1 AND t.execution_token=$2`,
     [taskId, executionToken],
   );
@@ -115,7 +120,7 @@ async function runTask(taskId: string) {
     throw error;
   }
   const heartbeat = startTaskLeaseHeartbeat(db, cache, modelLease, TASK_LEASE_SECONDS);
-  const timing = createGenerationTiming({ taskId, modelConfigId: task.model_config_id, attempt: task.attempts + (task.upstream_submission_started_at ? 0 : 1), runtime: "worker" });
+  const timing = createGenerationTiming({ taskId, requestId: task.request_id, modelConfigId: task.model_config_id, attempt: task.attempts + (task.upstream_submission_started_at ? 0 : 1), runtime: "worker" });
   let outcome: GenerationTimingOutcome = "failed";
   let providerProducedResult = false;
   let keepModelSlot = false;
@@ -176,7 +181,8 @@ async function runTask(taskId: string) {
         [`${reason}；上游已返回结果，不能直接恢复或重新生成，请先检查已保存素材。`, task.id, executionToken],
       );
       outcome = "paused";
-    } else if (task.upstream_submission_started_at && !(error instanceof VideoProviderFailure) && !(error instanceof ApiMartImageProviderFailure)) {
+    } else if (task.upstream_submission_started_at && !(error instanceof VideoProviderFailure) && !(error instanceof ApiMartImageProviderFailure)
+      && !(error instanceof ProviderSubmissionRejected) && !submissionWasNotSent(error)) {
       keepModelSlot = true;
       // Keep the original reservation while upstream work may still exist. Recovery only polls its persisted ID.
       await db.query(
@@ -227,12 +233,29 @@ async function deferTask(task: WorkRow, milliseconds: number, polling: boolean, 
   );
   if (!changed.rows[0]) throw new TaskExecutionLost("任务执行权已改变，不能重新排队");
   const due = new Date(changed.rows[0].available_at).getTime();
-  await scheduleQueuedTask(cache, task.id, queueScore(task.priority, due), due);
+  await scheduleQueuedTask(cache, task.id, queueScore(task.priority, new Date(task.queued_at).getTime()), due);
 }
 
 async function assertTaskExecution(task: WorkRow) {
   const current = await db.query("SELECT id FROM tasks WHERE id=$1 AND execution_token=$2 AND status='processing' AND lease_expires_at>now()", [task.id, task.execution_token]);
   if (!current.rows[0]) throw new TaskExecutionLost("任务执行租约已失效");
+}
+
+async function claimProviderSubmission(task: WorkRow) {
+  if (task.upstream_submission_started_at || task.upstream_task_id) throw new Error("原任务已提交或结果未知，不能重复提交付费请求");
+  const claimed = await db.query(
+    "UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND execution_token=$2 AND lease_expires_at>now() AND status='processing' AND upstream_submission_started_at IS NULL AND upstream_task_id IS NULL RETURNING id",
+    [task.id, task.execution_token],
+  );
+  if (!claimed.rows[0]) throw new VideoSubmissionClaimLost("任务提交权已改变，不会重新生成");
+  task.upstream_submission_started_at = new Date().toISOString();
+}
+
+async function assertProviderSubmissionResponse(response: Response, label: string) {
+  if (response.ok) return;
+  await response.body?.cancel().catch(() => undefined);
+  const message = `${label}请求失败（HTTP ${response.status}）`;
+  throw isDefinitiveSubmissionRejection(response.status) ? new ProviderSubmissionRejected(message) : new Error(message);
 }
 
 import { openAiImageParameters } from "./openai-image-parameters";
@@ -289,6 +312,7 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
       );
     }
     if (editInput.mask) form.set("mask", new Blob([Uint8Array.from(editInput.mask.bytes).buffer], { type: editInput.mask.mimeType }), editInput.mask.filename || "mask.png");
+    await claimProviderSubmission(task);
     response = await timing.measure("provider_request", () => fetchProviderSubmission(`${task.base_url!.replace(/\/$/, "")}/images/edits`, {
       method: "POST",
       headers: authorization,
@@ -317,16 +341,17 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
               Object.entries(credentials).filter(([key]) => key !== "apiKey"),
             ),
           };
+    const requestBody = JSON.stringify(payload);
+    await claimProviderSubmission(task);
     response = await timing.measure("provider_request", () => fetchProviderSubmission(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json", ...authorization },
-      body: JSON.stringify(payload),
+      body: requestBody,
       signal: AbortSignal.timeout(180_000),
     }));
   }
   const body = (await timing.measure("provider_response", async () => {
-    if (!response.ok)
-      throw new Error(`Provider ${response.status}: ${(await response.text()).slice(0, 500)}`);
+    await assertProviderSubmissionResponse(response, "图片 Provider");
     return response.json();
   })) as {
     data?: Array<{ url?: string; b64_json?: string }>;
@@ -390,19 +415,18 @@ async function executeOpenAiAudio(
     task.prompt,
     task.parameters,
   );
+  const requestBody = JSON.stringify(request.payload);
+  await claimProviderSubmission(task);
   const response = await fetch(
     `${task.base_url!.replace(/\/$/, "")}/audio/speech`,
     {
       method: "POST",
       headers: { "content-type": "application/json", ...authorization },
-      body: JSON.stringify(request.payload),
+      body: requestBody,
       signal: AbortSignal.timeout(180_000),
     },
   );
-  if (!response.ok)
-    throw new Error(
-      `音频 Provider ${response.status}: ${(await response.text()).slice(0, 500)}`,
-    );
+  await assertProviderSubmissionResponse(response, "音频 Provider");
   return [
     {
       bytes: Buffer.from(await response.arrayBuffer()),
@@ -443,12 +467,11 @@ async function executeApiMartVideo(task: WorkRow, credentials: Record<string, st
     },
   });
   if (result.status === "pending") throw new VideoTaskPending();
-  const response = await fetch(result.url, { signal: AbortSignal.timeout(180_000) });
-  if (!response.ok) throw new Error(`视频下载失败（${response.status}）`);
-  const contentType = response.headers.get("content-type")?.split(";")[0] || "video/mp4";
+  const downloaded = await fetchProviderMediaResult(result.url);
+  const contentType = downloaded.mimeType;
   const mimeType = contentType === "application/octet-stream" ? "video/mp4" : contentType;
   if (!mimeType.startsWith("video/")) throw new Error("上游返回的不是视频文件");
-  const bytes = Buffer.from(await response.arrayBuffer());
+  const bytes = downloaded.bytes;
   if (!bytes.byteLength) throw new Error("视频结果为空");
   return [{ bytes, mimeType }];
 }
@@ -516,16 +539,15 @@ async function executeWorkflow(
   }
   if (credentials.walletApiKey)
     headers["wallet-api-key"] = credentials.walletApiKey;
+  const requestBody = JSON.stringify(body);
+  await claimProviderSubmission(task);
   const submit = await fetch(joinUrl(task.base_url!, task.submit_path!), {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: requestBody,
     signal: AbortSignal.timeout(180_000),
   });
-  if (!submit.ok)
-    throw new Error(
-      `工作流提交失败 ${submit.status}: ${(await submit.text()).slice(0, 500)}`,
-    );
+  await assertProviderSubmissionResponse(submit, "工作流");
   let payload = (await submit.json()) as unknown;
   let outputs = normalizeWorkflowOutputs(readPath(payload, task.output_path!));
   if (outputs.length) return Promise.all(outputs.map(url => fetchProviderResult(url)));
@@ -797,42 +819,75 @@ function mockSvg(id: string) {
 }
 
 async function workerLoop() {
+  let claimFailures = 0;
   while (!stopping) {
-    const taskId = await nextTask();
+    let taskId: string | null;
+    try {
+      taskId = await nextTask();
+      claimFailures = 0;
+    } catch {
+      const retryMs = Math.min(30_000, 500 * 2 ** Math.min(claimFailures++, 6));
+      console.error(JSON.stringify({ event: "worker.queue_claim_failed", retryMs }));
+      if (!stopping) await Bun.sleep(retryMs);
+      continue;
+    }
+    // A signal may arrive while Redis is returning. PostgreSQL retains popped
+    // but unclaimed tasks for reconciliation on the next healthy worker.
+    if (stopping) break;
     if (!taskId) {
       await Bun.sleep(500);
       continue;
     }
-    await runTask(taskId).catch((error) =>
-      console.error("Task worker error", error),
-    );
+    activeTaskIds.add(taskId);
+    try {
+      await runTask(taskId);
+    } catch {
+      console.error(JSON.stringify({ event: "worker.task_execution_error", taskId }));
+    } finally {
+      activeTaskIds.delete(taskId);
+    }
   }
 }
 
 async function reconcileTaskQueue() {
-  if (reconcilingQueue) return;
-  reconcilingQueue = true;
-  try {
-    const recovered = await restoreWaitingTasksToQueue(db, cache);
-    if (recovered) console.log(`Reconciled ${recovered} waiting task(s) into the queue`);
-  } catch (error) {
-    console.error("Task queue reconciliation failed", error);
-  } finally {
-    reconcilingQueue = false;
-  }
+  if (stopping || queueReconciliation) return;
+  queueReconciliation = (async () => {
+    try {
+      const recovered = await restoreWaitingTasksToQueue(db, cache);
+      if (recovered) console.log(JSON.stringify({ event: "worker.queue_reconciled", recovered }));
+    } catch {
+      console.error(JSON.stringify({ event: "worker.queue_reconciliation_failed" }));
+    }
+  })();
+  try { await queueReconciliation; } finally { queueReconciliation = null; }
 }
 
-const restoredTaskCount = await restoreWaitingTasksToQueue(db, cache);
-console.log(`Restored ${restoredTaskCount} waiting task(s); starting ${config.WORKER_CONCURRENCY} task workers`);
-const queueReconciliationTimer = setInterval(() => void reconcileTaskQueue(), 60_000);
+function shutdown(signal: string) {
+  if (stopping) return;
+  stopping = true;
+  clearInterval(queueReconciliationTimer);
+  console.log(JSON.stringify({ event: "worker.draining", signal, activeTasks: activeTaskIds.size, graceSeconds: config.WORKER_SHUTDOWN_GRACE_SECONDS }));
+  // Do not clear leases, refund, or abort submitted work. Active tasks retain
+  // their heartbeat until normal completion; after the limit recovery uses the
+  // durable submission marker/ID, never a replayed paid POST.
+  shutdownTimer = setTimeout(() => {
+    console.error(JSON.stringify({ event: "worker.drain_timeout", activeTasks: activeTaskIds.size }));
+    process.exit(1);
+  }, config.WORKER_SHUTDOWN_GRACE_SECONDS * 1000);
+  shutdownTimer.unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+cache = await createCache(config.REDIS_URL);
+await reconcileTaskQueue();
+console.log(JSON.stringify({ event: "worker.started", concurrency: config.WORKER_CONCURRENCY }));
+if (!stopping) queueReconciliationTimer = setInterval(() => void reconcileTaskQueue(), 60_000);
 const workers = Array.from({ length: config.WORKER_CONCURRENCY }, () =>
   workerLoop(),
 );
-const shutdown = () => {
-  stopping = true;
-  clearInterval(queueReconciliationTimer);
-};
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
 await Promise.all(workers);
-await Promise.all([db.end(), cache.quit()]);
+await queueReconciliation;
+await Promise.allSettled([db.end(), cache.quit()]);
+clearTimeout(shutdownTimer);
+console.log(JSON.stringify({ event: "worker.stopped" }));

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { deploymentFeatures } from "../src/lib/deployment-features";
-import { getQueuedTaskByRequestId, QueuedTaskFailedError, requestQueuedImages, type QueuedTask } from "../src/services/api/generation-tasks";
+import { getQueuedTaskByRequestId, QueuedTaskFailedError, QueuedTaskSubmissionUncertainError, requestQueuedImages, type QueuedTask } from "../src/services/api/generation-tasks";
 import { requestEdit, requestGeneration } from "../src/services/api/image";
 import { defaultConfig } from "../src/stores/use-config-store";
 import { useUserStore } from "../src/stores/use-user-store";
@@ -53,6 +53,13 @@ function respondToGeneration(onPoll: (init?: RequestInit) => unknown = () => ({ 
 const writes = () => calls.filter(call => call.method === "POST").map(call => call.path);
 
 describe("image request identity before submission", () => {
+    test.each([{}, { task: {} }, { task: { id: "" } }])("a malformed acknowledgement preserves the original request identity without resubmitting", async payload => {
+        respond((path) => path === "/api/models" ? { models: [model], tools: [], prices: [] } : payload);
+        const error = await requestQueuedImages(baseInput).catch(error => error);
+        expect(error).toBeInstanceOf(QueuedTaskSubmissionUncertainError);
+        expect(error.requestId).toBe("saved-request:0");
+        expect(writes()).toEqual(["/api/tasks"]);
+    });
     test("waits for durable request identity before POST and preserves its exact per-image suffix", async () => {
         respondToGeneration();
         const saving = Promise.withResolvers<void>();
@@ -125,9 +132,10 @@ describe("image observation and cancellation", () => {
         const controller = new AbortController();
         let explicitlyStopped = false;
         respondToGeneration(init => {
-            expect(init?.signal).toBe(controller.signal);
+            expect(init?.signal?.aborted).toBe(false);
             explicitlyStopped = mode === "stop";
             controller.abort();
+            expect(init?.signal?.aborted).toBe(true);
             throw new DOMException("请求已取消", "AbortError");
         });
         const result = requestQueuedImages({ ...baseInput, signal: controller.signal, ...(mode === "default" ? {} : { cancelOnAbort: () => explicitlyStopped }) });

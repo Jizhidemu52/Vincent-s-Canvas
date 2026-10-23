@@ -7,6 +7,9 @@ import { resolveImageResultVariants } from "../src/image-result-variants";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fetchProviderResult } from "../src/provider-result";
+
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL0VQAAAABJRU5ErkJggg==", "base64");
 
 const file = new URL("../src/demo-server.ts", import.meta.url);
 const source = ts.createSourceFile(file.pathname, await Bun.file(file).text(), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -37,6 +40,10 @@ function harness(options: { path?: string; process?: Parameters<typeof storeImag
     demoAccounts: [{ user }], demoOwner: (id: string) => id === user.id ? user : undefined, DemoVideoTerminalError,
     internalAiConfig: { seamlessUrl: "http://seamless.invalid/generate", appKey: "test-only" },
     resolveDemoVideoProvider: () => ({ baseUrl: "https://video-fixture.invalid/v1", apiKey: "fixture-only" }),
+    fetchProviderResult: (url: string) => fetchProviderResult(url, undefined, async value => {
+      expect(value).toBe("https://result.invalid/temporary.png"); downloads.push(value);
+      return { bytes: png, mime: "image/png", finalUrl: value };
+    }),
     fetch: async (url: string) => {
       if (url === "http://seamless.invalid/generate") return Response.json({ data: { data: { list: ["https://result.invalid/temporary.png"] } } });
       if (url === "https://result.invalid/temporary.png") {
@@ -63,7 +70,7 @@ test("remote seamless output is downloaded and saved as original bytes, not an e
     const result = await h.api.callInternalAiSeamless(h.task, { bytes: new Uint8Array([1]) }, {});
     await h.api.completeDemoImageTask(h.task, h.user.id, result);
     expect(h.downloads).toEqual(["https://result.invalid/temporary.png"]);
-    expect(h.demoState.load().assets[0].bytes).toEqual(new Uint8Array([0, 255, 1, 2]));
+    expect(h.demoState.load().assets[0].bytes).toEqual(new Uint8Array(png));
     expect(h.demoState.load().tasks[0].resultUrls[0]).toStartWith("/api/assets/");
   } finally { h.demoState.close(); }
 });

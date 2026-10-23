@@ -11,9 +11,9 @@ const config = {
 } as AppConfig;
 
 describe("WeCom identity integration", () => {
-    test("obsolete WeCom configuration does not block an open deployment", () => {
+    test("partial WeCom settings do not block a development trial but cannot authorize anonymous production", () => {
         expect(() => loadConfig({ DATABASE_URL: "postgres://test", REDIS_URL: "redis://test", WECOM_CORP_ID: "ww-company" })).not.toThrow();
-        expect(() => loadConfig({
+        const production = {
             NODE_ENV: "production",
             DATABASE_URL: "postgres://test",
             REDIS_URL: "redis://test",
@@ -25,7 +25,9 @@ describe("WeCom identity integration", () => {
             WECOM_AGENT_ID: "1000002",
             WECOM_SECRET: "server-secret",
             WECOM_CALLBACK_URL: "http://canvas.company.test/api/auth/wecom/callback",
-        })).not.toThrow();
+        };
+        expect(() => loadConfig(production)).toThrow("Production requires AUTH_ENABLED=true or OA_LOGIN_ENABLED=true");
+        expect(() => loadConfig({ ...production, AUTH_ENABLED: "true" })).not.toThrow();
     });
 
     test("reports missing fields without exposing configured values", () => {

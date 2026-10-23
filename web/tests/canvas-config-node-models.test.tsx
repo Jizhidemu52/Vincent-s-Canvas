@@ -83,7 +83,7 @@ describe("configuration node model availability", () => {
             const markup = panel({ generationMode, model, prompt: "" }, { models: [...models, audioModel], tools }, false, 3);
             expect(markup).toContain("待执行 3 个任务");
             expect(markup).toContain("每个任务使用自身输入与公共素材");
-            expect(markup).toContain("左侧接共用素材，右侧连接任务");
+            expect(markup).toContain("左侧接素材；右侧接下一步生图配置可创建工作流");
             expect(actionButton(markup, "执行 3 个任务")).not.toContain('disabled=""');
             expect(markup).not.toContain("开始生成");
         }

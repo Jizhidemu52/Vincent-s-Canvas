@@ -21,7 +21,7 @@ describe("Mark APIMart image contracts", () => {
       },
     }).catch(error => error);
     expect(error).toBeInstanceOf(Error);
-    expect(error instanceof ApiMartImageProviderFailure).toBe(phase === "terminal");
+    expect(error instanceof ApiMartImageProviderFailure).toBe(phase !== "status-http");
     expect(error.message).toContain("quota denied");
     expect(error.message).not.toContain(apiKey);
     expect(error.message).not.toContain(encodeURIComponent(apiKey));
@@ -209,13 +209,13 @@ describe("Mark APIMart image contracts", () => {
     for (const response of [json({ data: { status: "completed", result: { images: [] } } }), json({ error: { message: "Unavailable" } }, 503)]) {
       let calls = 0;
       try {
-        await runApiMartImageTask({ ...base, upstreamTaskId: "task_saved" }, { sleep: async () => {}, fetch: async (_url, init) => { calls++; expect(init?.method).not.toBe("POST"); return response; } });
+        await runApiMartImageTask({ ...base, upstreamTaskId: "task_saved" }, { sleep: async () => {}, fetch: async (_url, init) => { calls++; expect(init?.method).not.toBe("POST"); return response.clone(); } });
         throw new Error("Expected ambiguous failure");
       } catch (error) {
         expect(error?.constructor.name).toBe("Error");
         expect(String(error)).not.toContain("Expected ambiguous failure");
       }
-      expect(calls).toBe(1);
+      expect(calls).toBe(response.status === 503 ? 3 : 1);
     }
   });
 

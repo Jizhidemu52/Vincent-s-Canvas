@@ -22,8 +22,9 @@ function EnabledModuleGate({ children, moduleKey }: { children: ReactNode; modul
     useEffect(() => { if (status === "idle") void refresh().catch(() => undefined); }, [refresh, status]);
 
     if (status === "idle" || status === "loading") {
-        return <div className="flex h-full items-center justify-center bg-[#eeeeec]"><div className="size-6 animate-spin rounded-full border-2 border-orange-200 border-t-orange-600" /></div>;
+        return <div className="flex h-full items-center justify-center bg-background" role="status">正在加载模块配置…</div>;
     }
+    if (status === "error") return <div className="flex h-full flex-col items-center justify-center gap-3 bg-background" role="alert"><p>模块配置暂时无法加载，尚未确认模块是否可用。</p><button type="button" className="underline" onClick={() => void refresh().catch(() => undefined)}>重新加载</button></div>;
     if (!enabled) return <Navigate to="/" replace state={{ moduleDisabled: resolvedKey }} />;
     return <>{children}</>;
 }

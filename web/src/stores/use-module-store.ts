@@ -7,6 +7,7 @@ import { useBusinessConfigStore } from "./use-business-config-store";
 type ModuleStore = {
     flags: Record<ModuleKey, boolean>;
     status: "idle" | "loading" | "ready" | "error";
+    error: string | null;
     refresh: () => Promise<void>;
     setFlag: (flag: ModuleFlag) => void;
 };
@@ -17,19 +18,21 @@ let refreshPromise: Promise<void> | null = null;
 export const useModuleStore = create<ModuleStore>((set) => ({
     flags: defaultFlags,
     status: "idle",
+    error: null,
     refresh: async () => {
         if (refreshPromise) return refreshPromise;
         // Module flags are refreshed in the background while a designer works.
         // Only the first load may block a gated route; otherwise changing this
         // to `loading` would unmount the current tool and discard form input.
-        set((state) => (state.status === "idle" ? { status: "loading" } : {}));
+        set((state) => (state.status !== "ready" ? { status: "loading", error: null } : state));
         refreshPromise = listModuleFlags()
-            .then(({ modules }) => set((state) => ({
-                flags: { ...state.flags, ...Object.fromEntries(modules.map((item) => [item.moduleKey, item.enabled])) },
-                status: "ready",
-            })))
+            .then(({ modules }) => set((state) => {
+                const flags = { ...state.flags, ...Object.fromEntries(modules.map((item) => [item.moduleKey, item.enabled])) };
+                return state.status === "ready" && !state.error && moduleKeys.every(key => state.flags[key] === flags[key]) ? state : { flags, status: "ready", error: null };
+            }))
             .catch((error) => {
-                set({ status: "error" });
+                const transient = !error?.status || error.status >= 500 || error.status === 408 || error.status === 429;
+                set(state => ({ status: transient && state.status === "ready" ? "ready" : "error", error: "模块配置暂时无法加载" }));
                 throw error;
             })
             .finally(() => { refreshPromise = null; });

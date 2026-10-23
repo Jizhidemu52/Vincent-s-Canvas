@@ -12,6 +12,8 @@ function database(model: string, asset: Record<string, unknown> | null) {
     query: async (statement: string, parameters: unknown[] = []) => {
       sql.push(statement);
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(statement)) return { rows: [] };
+      if (statement.includes("pg_advisory_xact_lock") || statement.startsWith("SELECT id,request_id")) return { rows: [] };
+      if (statement.startsWith("SELECT count(*)::int AS count FROM tasks")) return { rows: [{ count: 0 }] };
       if (statement.includes("INSERT INTO tasks")) return { rows: [{ id: "pending-task" }] };
       if (statement.includes("FROM module_flags")) return { rows: [{ enabled: true }] };
       if (statement.includes("FROM tool_api_configurations")) return { rows: [] };

@@ -7,7 +7,7 @@ import { Pool, type PoolClient, type QueryResult } from "pg";
 
 import { adjustCredits, BillingError, reserveCredits, setCreditBalance, settleReservation } from "../../src/billing";
 import type { Cache, Database } from "../../src/db";
-import { enqueueTask, type TaskInput } from "../../src/tasks";
+import { enqueueTask, transitionTask, type TaskInput } from "../../src/tasks";
 
 const integration = process.env.RUN_INTEGRATION_TESTS === "true" ? describe : describe.skip;
 const schema = `billing_concurrency_${randomUUID().replaceAll("-", "")}`;
@@ -104,6 +104,15 @@ integration("PostgreSQL billing concurrency", () => {
         // Both real INSERTs have completed their FK checks and still hold KEY SHARE locks.
         await wait();
       }
+    });
+  }
+
+  function holdUserAdmissions() {
+    const wait = barrier();
+    let attempts = 0;
+    // Admission intentionally serializes the same user before any INSERT.
+    return observeQueries(undefined, async sql => {
+      if (sql.includes("hashtext('user-inflight-quota')") && attempts++ < 2) await wait();
     });
   }
 
@@ -232,7 +241,7 @@ integration("PostgreSQL billing concurrency", () => {
 
   test("two submissions by one user without a department preserve the exact personal balance", async () => {
     const data = await fixture({ users: 1, department: false });
-    const observed = holdInsertedTasks();
+    const observed = holdUserAdmissions();
     const inputs = [data.input(), data.input()];
     const results = await Promise.allSettled(inputs.map((input) => enqueueTask(observed.db, cache, input)));
     expect(observed.concurrencyErrors).toEqual([]);
@@ -260,12 +269,7 @@ integration("PostgreSQL billing concurrency", () => {
   test("concurrent duplicate request IDs create one task and charge each balance only once", async () => {
     const data = await fixture({ users: 1, budget: 100 });
     const input = data.input();
-    const wait = barrier();
-    let attempts = 0;
-    // A duplicate INSERT waits on its unique index. Synchronize before it, never after both INSERTs.
-    const observed = observeQueries(undefined, async (sql) => {
-      if (/^\s*INSERT INTO tasks\(/.test(sql) && attempts++ < 2) await wait();
-    });
+    const observed = holdUserAdmissions();
     const results = await Promise.allSettled([1, 2].map(() => enqueueTask(observed.db, cache, input)));
     expect(observed.concurrencyErrors).toEqual([]);
     expect(results.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"]);
@@ -275,6 +279,42 @@ integration("PostgreSQL billing concurrency", () => {
     const department = await database.query("SELECT credit_balance FROM departments WHERE id=$1", [data.departmentId]);
     expect(department.rows[0].credit_balance).toBe(92);
     expect(await taskCounts([input.requestId])).toEqual({ tasks: 1, reservations: 1, userHolds: 1, departmentHolds: 1 });
+  }, 20_000);
+
+  test("per-user admission lock admits exactly one competing last-slot request and does not block another user", async () => {
+    const data = await fixture({ users: 2, department: false });
+    const observed = holdUserAdmissions();
+    const inputs = [data.input(), data.input()];
+    const results = await Promise.allSettled(inputs.map(value => enqueueTask(observed.db, cache, { ...value, maxInflightTasks: 1 })));
+    expect(results.map(result => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect((results.find(result => result.status === "rejected") as PromiseRejectedResult).reason).toMatchObject({ code: "USER_TASK_LIMIT_REACHED" });
+    expect(observed.concurrencyErrors).toEqual([]);
+    expect(await taskCounts(inputs.map(value => value.requestId))).toEqual({ tasks: 1, reservations: 1, userHolds: 1, departmentHolds: 0 });
+    const other = data.input(data.userIds[1]);
+    expect((await enqueueTask(database, cache, { ...other, maxInflightTasks: 1 })).status).toBe("waiting");
+    const winningIndex = results.findIndex(result => result.status === "fulfilled");
+    expect((await enqueueTask(database, cache, { ...inputs[winningIndex]!, maxInflightTasks: 1 })).id)
+      .toBe((results[winningIndex] as PromiseFulfilledResult<any>).value.id);
+    expect(await balances(data.userIds)).toEqual([92, 92]);
+  }, 20_000);
+
+  test("row-locked cancellation fences a concurrent worker claim and refunds once", async () => {
+    const data = await fixture({ users: 1, department: false });
+    const value = data.input(); const task = await enqueueTask(database, cache, value);
+    let locked!: () => void; const ready = new Promise<void>(done => { locked = done; });
+    let unlock!: () => void; const canContinue = new Promise<void>(done => { unlock = done; });
+    const observed = observeQueries(async sql => {
+      if (sql.includes("FROM tasks WHERE id=$1 AND status IN ('waiting','paused') FOR UPDATE")) { locked(); await canContinue; }
+    });
+    const cancellation = transitionTask(observed.db, cache, task.id, "cancel", false);
+    await ready;
+    const workerClaim = database.query("UPDATE tasks SET status='processing',execution_token=$2 WHERE id=$1 AND status='waiting' RETURNING id", [task.id, randomUUID()]);
+    unlock();
+    expect(await cancellation).not.toBeNull();
+    expect((await workerClaim).rows).toHaveLength(0);
+    expect(await balances(data.userIds)).toEqual([100]);
+    expect((await database.query("SELECT status FROM credit_reservations WHERE request_id=$1", [value.requestId])).rows[0].status).toBe("released");
+    expect(observed.concurrencyErrors).toEqual([]);
   }, 20_000);
 
   for (const outcome of ["capture", "release"] as const) {

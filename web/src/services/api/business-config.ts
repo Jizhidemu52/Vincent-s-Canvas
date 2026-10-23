@@ -59,7 +59,7 @@ export async function getBusinessConfig(): Promise<BusinessConfig> {
     const response = await fetch("/api/models", { credentials: "include" });
     if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(payload.message || `业务配置同步失败（${response.status}）`);
+        throw Object.assign(new Error(payload.message || `业务配置同步失败（${response.status}）`), { status: response.status });
     }
     return response.json() as Promise<BusinessConfig>;
 }

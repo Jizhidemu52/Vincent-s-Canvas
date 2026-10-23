@@ -11,7 +11,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     });
     if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message || "模块状态读取失败");
+        throw Object.assign(new Error(body.message || "模块状态读取失败"), { status: response.status });
     }
     return response.json() as Promise<T>;
 }

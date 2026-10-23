@@ -15,6 +15,8 @@ import {
   createPublicModelRouter,
 } from "./routes/model-configuration";
 import { createAdminTasksRouter, createTasksRouter } from "./routes/tasks";
+import { createTaskReconciliationRouter } from "./routes/task-reconciliation";
+import { requestLogging } from "./request-logging";
 import {
   createAdminHistoryRouter,
   createHistoryRouter,
@@ -67,6 +69,7 @@ const app = express();
 if (config.TRUST_PROXY === "true") app.set("trust proxy", 1);
 app.disable("x-powered-by");
 app.use(helmet());
+app.use(requestLogging());
 app.use(["/api/design-library", "/api/admin/design-library"], designLibraryBoundary(features.oaLoginEnabled), express.json({ limit: "128kb" }), designLibraryBodyErrors);
 app.use("/api/reference-import", express.json({ limit: "16kb" }), referenceImportBodyErrors);
 app.use(["/api/usage", "/api/admin/usage"], express.json({ limit: "128kb" }), usageErrors);
@@ -113,7 +116,7 @@ app.use(
   "/api/billing",
   requireSession,
   requireAccountReady,
-  createBillingRouter(db, readCreditsEnabled),
+  createBillingRouter(db),
 );
 app.use(
   "/api/models",
@@ -145,7 +148,7 @@ app.use(
   requireSession,
   requireAccountReady,
   protectModelIdentity,
-  createTasksRouter(db, cache, readCreditsEnabled),
+  createTasksRouter(db, cache, readCreditsEnabled, undefined, { maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS }),
 );
 app.use(
   "/api/admin/tasks",
@@ -153,6 +156,7 @@ app.use(
   requireAccountReady,
   createAdminTasksRouter(db, cache),
 );
+app.use("/api/admin/task-reconciliation", requireAdminSession, requireAccountReady, createTaskReconciliationRouter(db, cache));
 app.use(
   "/api/history",
   requireSession,
@@ -301,6 +305,16 @@ const errorHandler: ErrorRequestHandler = (
   response,
   _next,
 ) => {
+  // Only body-parser's typed failures are client input errors. A random
+  // SyntaxError from application code must still be reported as a server fault.
+  if (error?.type === "entity.parse.failed" && error.status === 400) {
+    response.status(400).json({ error: "INVALID_JSON", message: "请求必须是有效的 JSON 对象" });
+    return;
+  }
+  if (error?.type === "entity.too.large" && error.status === 413) {
+    response.status(413).json({ error: "REQUEST_TOO_LARGE", message: "请求内容超过接口大小限制" });
+    return;
+  }
   if (error instanceof ZodError) {
     response.status(400).json({
       error: "VALIDATION_ERROR",

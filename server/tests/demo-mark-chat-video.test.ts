@@ -7,11 +7,9 @@ type PublicModel = { id: string; modelId: string; capabilities: string[]; parame
 test.each([false, true])("demo Mark chat and video isolate credentials and resume without paid replay (legacy credentials: %s)", async (withLegacyCredentials) => {
   const calls: Array<{ path: string; method: string; authorization: string | null; body?: any }> = [];
   let polls = 0;
-  let providerPort = 0;
   const output = new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112, 109, 112, 52, 50]);
   const provider = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     const path = new URL(request.url).pathname;
-    if (path === "/result.mp4") return new Response(output, { headers: { "content-type": "video/mp4" } });
     const call: (typeof calls)[number] = { path, method: request.method, authorization: request.headers.get("authorization") };
     calls.push(call);
     if (call.authorization !== "Bearer isolated-mark-test-key" || !path.startsWith("/mark/v1/"))
@@ -31,15 +29,14 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
     if (path === "/mark/v1/tasks/same-mark-video-task") {
       polls++;
       if (polls === 1) return Response.json({ error: "Temporary local poll failure" }, { status: 503 });
-      return Response.json({ data: { status: "completed", result: { videos: [{ url: [`http://127.0.0.1:${providerPort}/result.mp4`] }] } } });
+      return Response.json({ data: { status: "completed", result: { videos: [{ url: ["https://mark-demo-result.example/result.mp4"] }] } } });
     }
     return Response.json({ error: "Unexpected local request" }, { status: 400 });
   } });
-  providerPort = provider.port!;
   const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
   const port = reservation.port;
   reservation.stop(true);
-  const child = Bun.spawn([process.execPath, "src/demo-server.ts"], {
+  const child = Bun.spawn([process.execPath, "--preload", "./tests/fixtures/demo-mark-result-preload.ts", "src/demo-server.ts"], {
     cwd: fileURLToPath(new URL("..", import.meta.url)), stdout: "ignore", stderr: "pipe",
     env: { ...process.env, DEMO_STATE_PATH: ":memory:", DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1",
       OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "true", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "false", ROLE_PORTALS_ENABLED: "true", STANDALONE_WEB_DIR: "", DEMO_PUBLIC_ASSET_ORIGIN: "",
@@ -90,7 +87,7 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
     if (reference.error || reference.status !== 0) throw new Error(String(reference.error || reference.stderr));
     const upload = await request("/api/assets/upload-request", "POST", { filename: "knit-reference.png", mimeType: "image/png", byteSize: reference.stdout.byteLength }).then(response => response.json());
     expect((await fetch(base + upload.uploadUrl, { method: "PUT", body: reference.stdout, headers: { "content-type": "image/png" } })).ok).toBe(true);
-    const input = { requestId: crypto.randomUUID(), operationType: "video_generation", toolKey: "video", modelConfigId: video!.id,
+    const input = { requestId: crypto.randomUUID(), projectId: "mark-video-fixture", operationType: "video_generation", toolKey: "video", modelConfigId: video!.id,
       prompt: "Keep the cable-knit cardigan intact. Slow camera movement.", sourceUrls: [`/api/assets/${upload.assetId}/content`],
       parameters: { videoMode: "first-frame", seconds: 3, resolution: "720P", size: "3:4", watermark: false } };
     const preflight = await request("/api/tasks/preflight", "POST", input);

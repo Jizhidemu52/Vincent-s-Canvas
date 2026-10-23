@@ -18,10 +18,12 @@ describe("optional chat billing", () => {
 
 });
 
-describe("billable Claude stream completion", () => {
-    test.each(["\n", "\r\n"])("does not capture before the complete terminal event boundary (%j)", newline => {
+describe("Claude stream output and completion evidence", () => {
+    test.each(["\n", "\r\n"])("keeps completion distinct from billable output until the terminal event boundary (%j)", newline => {
         const stream = new ChatStreamOutcome();
         stream.push(encode({ type: "content_block_delta", delta: { type: "text_delta", text: "您好" } }));
+        expect(stream.hasOutput).toBe(true);
+        expect(stream.confirmedEmpty).toBe(false);
         const terminal = new TextEncoder().encode(`event: message_stop${newline}data: {"type":"message_stop"}${newline}${newline}`);
         for (const byte of terminal.subarray(0, -1)) {
             stream.push(new Uint8Array([byte]));
@@ -41,14 +43,29 @@ describe("billable Claude stream completion", () => {
     test("counts a tool plan as successful, but not thinking-only, empty, errors or truncation", () => {
         const tool = new ChatStreamOutcome();
         tool.push(encode({ type: "content_block_start", content_block: { type: "tool_use", name: "canvas_get_state" } }));
+        expect(tool.hasOutput).toBe(true);
         expect(tool.successful).toBe(false);
         tool.push(encode({ type: "message_stop" }));
         expect(tool.successful).toBe(true);
         tool.push(encode({ type: "error", error: { message: "failed" } }));
         expect(tool.successful).toBe(false);
+        expect(tool.hasOutput).toBe(true);
+        expect(tool.confirmedEmpty).toBe(false);
         const empty = new ChatStreamOutcome();
         empty.push(encode({ type: "content_block_delta", delta: { type: "thinking_delta", thinking: "thought" } }));
         empty.push(encode({ type: "message_stop" }));
         expect(empty.successful).toBe(false);
+        expect(empty.hasOutput).toBe(false);
+        expect(empty.confirmedEmpty).toBe(true);
+    });
+
+    test("invalid or truncated events are not proof of a free request", () => {
+        const invalid = new ChatStreamOutcome();
+        invalid.push(new TextEncoder().encode('data: not-json\n\n'));
+        expect(invalid.hasOutput).toBe(false);
+        expect(invalid.confirmedEmpty).toBe(false);
+        const rejected = new ChatStreamOutcome();
+        rejected.push(encode({ type: "error", error: { type: "overloaded_error" } }));
+        expect(rejected.confirmedEmpty).toBe(true);
     });
 });

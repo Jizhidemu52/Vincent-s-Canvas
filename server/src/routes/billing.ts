@@ -1,12 +1,8 @@
 import { Router } from "express";
-import { z } from "zod";
-import { BillingError, reserveCredits } from "../billing";
 import type { Database } from "../db";
 import type { AuthenticatedRequest } from "../types";
 
-const reserveSchema = z.object({ requestId: z.string().min(8).max(200), operationType: z.string().min(1).max(80), modelConfigId: z.string().uuid().nullish(), quantity: z.number().int().min(1).max(100) });
-
-export function createBillingRouter(db: Database, creditPolicy: boolean | (() => Promise<boolean>) = true) {
+export function createBillingRouter(db: Database) {
     const router = Router();
     router.get("/ledger", async (request, response, next) => {
         try {
@@ -16,16 +12,7 @@ export function createBillingRouter(db: Database, creditPolicy: boolean | (() =>
             response.json({ entries: result.rows });
         } catch (error) { next(error); }
     });
-    router.post("/reservations", async (request, response, next) => {
-        try {
-            const input = reserveSchema.parse(request.body);
-            const actor = (request as unknown as AuthenticatedRequest).auth;
-            const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
-            response.status(201).json(await reserveCredits(db, { ...input, userId: actor.id, creditsEnabled }));
-        } catch (error) {
-            if (error instanceof BillingError) { response.status(400).json({ error: error.code, message: error.message }); return; }
-            next(error);
-        }
-    });
+    // Holds are created only inside authorized task/chat submission lifecycles.
+    // A public standalone reservation has no execution or settlement owner.
     return router;
 }

@@ -23,6 +23,7 @@ import type { AuthenticatedRequest, SessionUser } from "../types";
 import { allowedAssetMimeTypes, normalizeAssetMime, validateAssetUpload, AssetMediaError, streamAssetContent } from "../asset-delivery";
 import { assetBatchSchema, assetListMetadataFields, assetPage, parseAssetListQuery } from "../asset-query";
 import { scheduleAssetThumbnails } from "../asset-thumbnails";
+import { hashAssetContent, requestedContentHash } from "../asset-content-hash";
 
 const createSchema = z.object({
   filename: z.string().trim().min(1).max(255),
@@ -170,6 +171,17 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
           return;
         }
       }
+      const contentHash = requestedContentHash(input.metadata);
+      if (contentHash && input.kind === "image" && !input.projectId) {
+        const existing = await db.query<{ id: string }>(
+          "SELECT id FROM assets WHERE owner_user_id=$1 AND content_sha256=$2 AND byte_size=$3 AND kind='image' AND status='ready' AND deleted_at IS NULL ORDER BY created_at,id LIMIT 1",
+          [actor.id, contentHash, input.byteSize],
+        );
+        if (existing.rows[0]) {
+          response.status(201).json({ assetId: existing.rows[0].id, uploadUrl: null, reused: true });
+          return;
+        }
+      }
       const id = randomUUID();
       const safe = input.filename.replace(/[^A-Za-z0-9._-]/g, "_");
       const key = `users/${actor.id}/${id}/${safe}`;
@@ -184,34 +196,78 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
     }
   });
 
-  router.put("/:id/upload", express.raw({ type: "*/*", limit: "200mb" }), async (request, response, next) => {
+  router.put("/:id/upload", async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       if (request.get("X-Canvas-Owner-Id") !== undefined) assertCanvasOwner(request.get("X-Canvas-Owner-Id"), actor.id);
-      const result = await db.query<{ object_key: string; mime_type: string; byte_size: number }>(
-        "SELECT object_key,mime_type,byte_size FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='pending'",
-        [request.params.id, actor.id],
+      const id = z.string().uuid().parse(request.params.id);
+      const result = await db.query<{ object_key: string; mime_type: string; byte_size: number; metadata: Record<string, unknown> }>(
+        "SELECT object_key,mime_type,byte_size,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='pending' AND deleted_at IS NULL",
+        [id, actor.id],
       );
       const asset = result.rows[0];
       if (!asset) {
         response.status(404).json({ error: "NOT_FOUND", message: "待上传素材不存在" });
         return;
       }
+      response.locals.uploadAsset = asset;
+      next();
+    } catch (error) {
+      if (error instanceof CanvasDocumentError) response.status(error.status).json({ error: error.code, message: error.message });
+      else next(error);
+    }
+  }, express.raw({ type: "*/*", limit: "200mb" }), async (request, response, next) => {
+    let client: PoolClient | undefined;
+    try {
+      const asset = response.locals.uploadAsset as { object_key: string; mime_type: string; byte_size: number; metadata?: Record<string, unknown> };
+      const actor = (request as unknown as AuthenticatedRequest).auth;
       const body = request.body as Buffer;
       if (!Buffer.isBuffer(body) || body.length !== Number(asset.byte_size)) {
         response.status(400).json({ error: "SIZE_MISMATCH", message: "上传文件大小与申请不一致" });
         return;
       }
-      const actualMime = await validateAssetUpload(body, asset.mime_type);
+      let actualMime = await validateAssetUpload(body, asset.mime_type);
+      const contentHash = hashAssetContent(body);
+      // The initial lookup only authorizes reading the bounded request body.
+      // Serialize the object write with its ready/hash transition so a second
+      // request that passed that lookup cannot overwrite an already-ready blob.
+      // Do not use transaction retries around the external object-store write.
+      client = await db.connect();
+      await client.query("BEGIN");
+      const locked = await client.query<{ object_key: string; mime_type: string; byte_size: number; metadata: Record<string, unknown> }>(
+        "SELECT object_key,mime_type,byte_size,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='pending' AND deleted_at IS NULL FOR UPDATE",
+        [request.params.id, actor.id],
+      );
+      const currentAsset = locked.rows[0];
+      if (!currentAsset) {
+        await client.query("ROLLBACK");
+        response.status(404).json({ error: "NOT_FOUND", message: "待上传素材不存在" });
+        return;
+      }
+      if (body.length !== Number(currentAsset.byte_size)) {
+        await client.query("ROLLBACK");
+        response.status(400).json({ error: "SIZE_MISMATCH", message: "上传文件大小与申请不一致" });
+        return;
+      }
+      if (currentAsset.mime_type !== asset.mime_type) actualMime = await validateAssetUpload(body, currentAsset.mime_type);
+      const expectedHash = requestedContentHash(currentAsset.metadata);
+      if (expectedHash && expectedHash !== contentHash) {
+        await client.query("ROLLBACK");
+        response.status(400).json({ error: "HASH_MISMATCH", message: "上传文件内容与申请的 SHA256 不一致" });
+        return;
+      }
       const kind = actualMime.startsWith('image/') ? 'image' : actualMime.startsWith('video/') ? 'video' : actualMime.startsWith('text/') || actualMime === 'application/json' ? 'text' : 'other';
-      await storage.put(asset.object_key, body, actualMime);
-      await db.query("UPDATE assets SET status='ready',mime_type=$2,kind=$3,updated_at=now() WHERE id=$1", [request.params.id, actualMime, kind]);
+      await storage.put(currentAsset.object_key, body, actualMime);
+      await client.query("UPDATE assets SET status='ready',mime_type=$2,kind=$3,content_sha256=$4,updated_at=now() WHERE id=$1 AND owner_user_id=$5 AND status='pending' AND deleted_at IS NULL", [request.params.id, actualMime, kind, contentHash, actor.id]);
+      await client.query("COMMIT");
+      client.release(); client = undefined;
       if (kind === 'image') scheduleAssetThumbnails(db, storage, request.params.id);
       response.status(204).end();
     } catch (error) {
+      if (client) await client.query("ROLLBACK").catch(() => undefined);
       if (error instanceof CanvasDocumentError || error instanceof AssetMediaError) response.status(error.status).json({ error: error.code, message: error.message });
       else next(error);
-    }
+    } finally { client?.release(); }
   });
 
   router.get("/:id/variants", async (request, response, next) => {

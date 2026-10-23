@@ -1,5 +1,9 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
 import { readDemoTaskProgress } from "./task-progress";
+import { logDemoRequest } from "./request-logging";
+import { taskSubmissionSchema, batchSubmissionSchema } from "../../shared/task-contracts";
+import { fetchProviderResult, fetchProviderMediaResult } from "./provider-result";
+import { hashAssetContent, requestedContentHash } from "./asset-content-hash";
 import { ZodError } from "zod";
 import { demoTaskSummary, pageDemoRecords, parseDemoTaskFilters } from "./demo-list-pagination";
 import { singleImageTaskParameters } from "./image-task-policy";
@@ -386,6 +390,7 @@ const demoToolConfigurations: Array<{ toolKey: ToolKey; modelConfigId: string | 
   configurationVersion: 0,
 }));
 type DemoAsset = {
+  contentSha256?: string;
   deletedAt?: string;
   downloadReceipts?: DemoDownloadReceipt[];
   /** Set only from a provider result by this server, never from upload metadata. */
@@ -717,6 +722,7 @@ Bun.serve({
     return json({ error: "INTERNAL_ERROR", message: "本地服务处理请求失败" }, 500);
   },
   async fetch(request, server) {
+    return logDemoRequest(request, async () => {
     const url = new URL(request.url);
     const path = url.pathname;
     const json = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(
@@ -1069,6 +1075,11 @@ Bun.serve({
       if (existing)
         return json({ assetId: existing.id, uploadUrl: existing.bytes.byteLength ? null : `/api/assets/${existing.id}/content-upload`, reused: true }, 201);
       if (input.projectId && !assetProjects.owns(user.id, input.projectId)) return json({ error: 'PROJECT_FORBIDDEN', message: '无权将素材加入此项目' }, 403);
+      const contentHash = requestedContentHash(input.metadata);
+      if (contentHash && !input.projectId) {
+        const duplicate = [...demoAssets.values()].find(asset => asset.ownerUserId === user.id && asset.contentSha256 === contentHash && asset.bytes.byteLength === input.byteSize && asset.mimeType.startsWith("image/"));
+        if (duplicate) return json({ assetId: duplicate.id, uploadUrl: null, reused: true }, 201);
+      }
       const assetId = crypto.randomUUID();
       saveDemoAsset({
         id: assetId,
@@ -1108,8 +1119,11 @@ Bun.serve({
       try { mimeType = await validateAssetUpload(bytes, currentAsset.mimeType); }
       catch (error) { if (error instanceof AssetMediaError) return json({ error: error.code, message: error.message }, error.status); throw error; }
       const latestAsset = demoAssets.get(assetId);
-      if (!latestAsset || latestAsset.ownerUserId !== user.id) return json({ error: 'NOT_FOUND', message: '上传素材不存在' }, 404);
-      saveDemoAsset({ ...latestAsset, bytes, mimeType, ...(mimeType.startsWith("text/") || mimeType === 'application/json'
+      if (!latestAsset || latestAsset.ownerUserId !== user.id || latestAsset.bytes.byteLength) return json({ error: 'NOT_FOUND', message: '上传素材不存在' }, 404);
+      const contentSha256 = hashAssetContent(bytes);
+      const expectedHash = requestedContentHash(latestAsset.metadata);
+      if (expectedHash && expectedHash !== contentSha256) return json({ error: "HASH_MISMATCH", message: "上传文件内容与申请的 SHA256 不一致" }, 400);
+      saveDemoAsset({ ...latestAsset, bytes, mimeType, contentSha256, ...(mimeType.startsWith("text/") || mimeType === 'application/json'
         ? { metadata: { ...latestAsset.metadata, content: new TextDecoder().decode(bytes) } } : {}) });
       return empty();
     }
@@ -1155,17 +1169,7 @@ Bun.serve({
       });
     }
     if (path === "/api/tasks/batch" && request.method === "POST") {
-      const input = (await request.json().catch(() => null)) as {
-        requestId?: string;
-        projectId?: string;
-        operationType?: string;
-        toolKey?: string;
-        modelConfigId?: string;
-        prompt?: string;
-        parameters?: Record<string, unknown>;
-        priority?: string;
-        items?: Array<{ sourceUrls?: string[] }>;
-      } | null;
+      const input = batchSubmissionSchema.parse(await request.json());
       if (!input?.requestId || !input.projectId || !input.operationType || !input.modelConfigId || !Array.isArray(input.items) || !input.items.length)
         return json({ error: "INVALID_BATCH", message: "Batch task details are incomplete" }, 400);
       if (input.items.length > 100) return json({ error: "BATCH_LIMIT_EXCEEDED", message: "每批最多提交 100 个独立任务" }, 400);
@@ -1198,15 +1202,7 @@ Bun.serve({
       return json({ batchId, tasks, failures }, 201);
     }
     if (path === "/api/tasks/preflight" && request.method === "POST") {
-      const input = (await request.clone().json().catch(() => ({}))) as {
-        requestId?: string;
-        operationType?: string;
-        toolKey?: string;
-        modelConfigId?: string;
-        prompt?: string;
-        parameters?: Record<string, unknown>;
-        sourceUrls?: string[];
-      };
+      const input = taskSubmissionSchema.parse(await request.json());
       if (input.operationType !== "video_generation")
         return json({ error: "UNSUPPORTED_OPERATION", message: "Only video preflight is supported" }, 400);
       const preflightTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
@@ -1234,19 +1230,7 @@ Bun.serve({
       }
     }
     if (path === "/api/tasks" && request.method === "POST") {
-      const input = (await request
-        .clone()
-        .json()
-        .catch(() => ({}))) as {
-        requestId?: string;
-        projectId?: string;
-        operationType?: string;
-        toolKey?: string;
-        modelConfigId?: string;
-        prompt?: string;
-        parameters?: Record<string, unknown>;
-        sourceUrls?: string[];
-      };
+      const input = taskSubmissionSchema.parse(await request.json());
       const existingTask = input.requestId
         ? [...demoTasks.values()].find((task) => task.requestId === input.requestId) : undefined;
       if (existingTask)
@@ -2137,6 +2121,7 @@ Bun.serve({
       { error: "NOT_FOUND", message: "本地演示接口暂未提供此数据" },
       404,
     );
+    });
   },
 });
 
@@ -2194,7 +2179,7 @@ async function runOpenTokenImageTaskForDemo(
   sources: DemoAsset[],
   preparedInput?: ImageEditInput<DemoAsset>,
 ) {
-  const timing = createGenerationTiming({ taskId: task.id, modelConfigId: task.modelConfigId, runtime: "demo" });
+  const timing = createGenerationTiming({ taskId: task.id, requestId: task.requestId, modelConfigId: task.modelConfigId, runtime: "demo" });
   try {
     const editInput = preparedInput || await timing.measure("prepare", () => prepareImageEditInput(sources, parameters, { protocol: "openai", modelId, operationType: task.operationType }));
     updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
@@ -2255,10 +2240,8 @@ async function callApiMartImage(
 }
 
 async function downloadApiMartImage(url: string) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
-  if (!response.ok) throw Object.assign(new Error(`APIMart 图片下载失败：${response.status}`), { code: "RESULT_DOWNLOAD_HTTP_ERROR", httpStatus: response.status });
-  const mimeType = response.headers.get("content-type")?.split(";")[0] || "image/png";
-  return `data:${mimeType};base64,${Buffer.from(await response.arrayBuffer()).toString("base64")}`;
+  const result = await fetchProviderResult(url);
+  return `data:${result.mimeType};base64,${Buffer.from(result.bytes).toString("base64")}`;
 }
 
 async function runVideoTask(
@@ -2376,9 +2359,8 @@ async function callVideoProvider(
 class DemoVideoTerminalError extends Error {}
 
 async function downloadDemoVideoResult(task: DemoTask, url: string): Promise<DemoAsset> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(180_000) });
-  if (!response.ok) throw new Error(`视频下载失败（${response.status}），可恢复查询原任务`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  const result = await fetchProviderMediaResult(url);
+  const bytes = new Uint8Array(result.bytes);
   if (!bytes.byteLength) throw new Error("视频结果为空，可恢复查询原任务");
   const id = crypto.randomUUID();
   return { id, ownerUserId: task.ownerUserId, filename: `video-${task.id}.mp4`, mimeType: "video/mp4", bytes, createdAt: now(), projectId: task.projectId, taskId: task.id, upstreamUrl: isPublicHttpsUrl(url) ? url : undefined };
@@ -2530,14 +2512,7 @@ async function callGptImage2WithBun(
     const outputUrl = status.data.result?.images?.[0]?.url?.[0];
     if (!outputUrl)
       throw new Error("GPT-Image-2 completed without an output image");
-    const image = await fetch(outputUrl, {
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!image.ok)
-      throw new Error(`GPT-Image-2 image download failed: ${image.status}`);
-    const mimeType =
-      image.headers.get("content-type")?.split(";")[0] || "image/png";
-    return `data:${mimeType};base64,${Buffer.from(await image.arrayBuffer()).toString("base64")}`;
+    return downloadApiMartImage(outputUrl);
   }
   throw new Error("GPT-Image-2 generation timed out");
 }

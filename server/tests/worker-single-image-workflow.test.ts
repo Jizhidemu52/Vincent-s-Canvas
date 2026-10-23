@@ -15,6 +15,8 @@ function harness() {
   const deps = {
     loadSourceAssets: async () => [{ bytes: new Uint8Array([1]), mimeType: "image/png" }, { bytes: new Uint8Array([2]), mimeType: "image/png" }],
     renderTemplate, parsePromptVariables, readPath, normalizeWorkflowOutputs,
+    claimProviderSubmission: async () => {},
+    assertProviderSubmissionResponse: async (response: Response) => { if (!response.ok) throw new Error(`Provider ${response.status}`); },
     joinUrl: (base: string, path: string) => base + path,
     fetchProviderResult: async () => ({ bytes: new Uint8Array([1]), mimeType: "image/png" }),
     fetch: async (_url: string, init: RequestInit) => {

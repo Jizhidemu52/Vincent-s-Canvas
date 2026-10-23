@@ -37,6 +37,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             submit: syncProjectMetadata,
         });
         const refresh = async (background = false) => {
+            if (disposed || (background && document.visibilityState !== "visible")) return;
             await hydrateSession();
             const currentUser = useUserStore.getState().user;
             if (disposed || currentUser?.id !== ownerId || currentUser.role !== ownerRole) return;

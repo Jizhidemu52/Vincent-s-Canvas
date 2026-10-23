@@ -20,12 +20,16 @@ export const useBusinessConfigStore = create<BusinessConfigStore>((set, get) => 
     refresh: async ({ background = false } = {}) => {
         if (refreshPromise) return refreshPromise;
         // Same-session polling must not disable live model controls or dismiss settings.
-        // First loads, explicit reloads and error recovery still block stale configuration.
-        set(state => ({ status: background && state.status === "ready" ? "ready" : "loading", error: null }));
+        // A transport error is not an empty configuration. Keep the last verified
+        // snapshot usable; the server still authorizes every paid request.
+        if (!background || get().status !== "ready") set({ status: "loading", error: null });
         refreshPromise = getBusinessConfig()
-            .then((config) => set({ ...config, status: "ready", error: null }))
+            .then((config) => set(state => state.status === "ready" && !state.error && JSON.stringify({ models: state.models, prices: state.prices, tools: state.tools }) === JSON.stringify(config)
+                ? state : { ...config, status: "ready", error: null }))
             .catch((error: unknown) => {
-                set({ status: "error", error: error instanceof Error ? error.message : "业务配置同步失败" });
+                const status = (error as { status?: number })?.status;
+                const transient = !status || status >= 500 || status === 408 || status === 429;
+                set(state => ({ status: transient && state.status === "ready" ? "ready" : "error", error: error instanceof Error ? error.message : "业务配置同步失败" }));
                 throw error;
             })
             .finally(() => {

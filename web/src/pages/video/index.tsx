@@ -7,7 +7,6 @@ import { GenerationElapsed } from "@/components/generation-elapsed";
 import { GenerationQueueProgress } from "@/components/generation-queue-progress";
 import { upsertGenerationLog } from "@/lib/generation-log-update";
 import { workbenchSubmissions } from "@/lib/submission-gate";
-import { createDedupedAsyncResolver } from "@/lib/deduped-async-resolver";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { nanoid } from "nanoid";
@@ -30,8 +29,8 @@ import { readReferenceMediaFile } from "@/lib/video-reference-files";
 import { createLatestVideoPreview, hydrateVideoLogMedia } from "./video-log-media";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
-import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
-import { QueuedTaskPausedError, recoverQueuedTask } from "@/services/api/generation-tasks";
+import { createVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { QueuedTaskPausedError, recoverQueuedTask, waitForTasks } from "@/services/api/generation-tasks";
 import { fetchServerAssetContent } from "@/services/api/server-assets";
 import { hydratePromptReuse } from "@/services/api/prompts";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -55,7 +54,7 @@ type GeneratedVideo = {
 
 type GenerationResult = {
     id: string;
-    status: "pending" | "success" | "failed";
+    status: "pending" | "success" | "failed" | "paused";
     video?: GeneratedVideo;
     error?: string;
     recovery?: { task: VideoGenerationTask; canRecover: boolean };
@@ -77,7 +76,7 @@ type GenerationLog = {
     size: string;
     resolution: string;
     seconds: string;
-    status: "生成中" | "成功" | "失败";
+    status: "生成中" | "成功" | "失败" | "查询暂停";
     task?: VideoGenerationTask;
     video?: GeneratedVideo;
     error?: string;
@@ -91,7 +90,6 @@ type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => 
 const LOG_STORE_KEY = "wireless-canvas:video_generation_logs";
 const logStore = createWorkspaceStorage("video_generation_logs");
 
-const sharedVideoPoll = createDedupedAsyncResolver<GeneratedVideo, [() => Promise<GeneratedVideo>]>((_key, poll) => poll());
 class TerminalVideoTaskError extends Error {}
 
 export default function VideoPage() {
@@ -106,6 +104,8 @@ function VideoGenerationWorkspace() {
     const videoInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
     const activeLogIdsRef = useRef<Set<string>>(new Set());
+    const observationControllers = useRef(new Map<string, AbortController>());
+    const mountedRef = useRef(false);
     const loadedReuseTokenRef = useRef(new Set<string>());
     const generateRef = useRef<() => Promise<void>>(async () => undefined);
     const restoredInitialResultRef = useRef(false);
@@ -166,8 +166,11 @@ function VideoGenerationWorkspace() {
     }, [configuredModels, model, updateConfig]);
 
     useEffect(() => {
+        mountedRef.current = true;
         void refreshLogs();
         return () => {
+            mountedRef.current = false;
+            for (const controller of observationControllers.current.values()) controller.abort();
             logRefreshRevisionRef.current += 1;
             previewLoader.invalidate();
         };
@@ -295,7 +298,7 @@ function VideoGenerationWorkspace() {
             const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences, undefined, snapshot.happyHorseMode);
             const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, happyHorseMode: snapshot.happyHorseMode, durationMs: 0, status: "生成中", task });
             await saveLog(log);
-            await pollGenerationLog(log, snapshot.config);
+            await pollGenerationLog(log);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "生成失败";
             setResults([{ id: nanoid(), status: "failed", error: errorMessage }]);
@@ -351,7 +354,7 @@ function VideoGenerationWorkspace() {
             if (!result.recovery.canRecover) { message.warning("原任务提交状态待核查，请勿重复生成"); return; }
             const log = logs.find((item) => item.task?.id === result.recovery?.task.id);
             if (!log) { message.error("原任务记录暂未读取，请从生成记录中重新打开"); return; }
-            void pollGenerationLog(log, undefined, true);
+            void pollGenerationLog(log, true);
             return;
         }
         void generate();
@@ -444,64 +447,57 @@ function VideoGenerationWorkspace() {
 
     const resumePendingLogs = (items: GenerationLog[]) => {
         for (const log of items) {
-            if (log.status === "生成中" && log.task) void pollGenerationLog(log);
+            if ((log.status === "生成中" || log.status === "查询暂停") && log.task) void pollGenerationLog(log);
         }
     };
 
-    const pollGenerationLog = async (log: GenerationLog, configOverride?: AiConfig, recover = false) => {
+    const pollGenerationLog = async (log: GenerationLog, recover = false) => {
         if (!log.task || activeLogIdsRef.current.has(log.id)) return;
         const task = log.task;
+        const ownerId = user?.id;
+        const controller = new AbortController();
+        observationControllers.current.set(log.id, controller);
+        const isCurrent = () => mountedRef.current && useUserStore.getState().user?.id === ownerId;
+        const displayResult = (result: GenerationResult) => {
+            if (isCurrent()) setResults(current => [...current.filter(item => item.id !== log.id), { ...result, id: log.id }]);
+        };
         activeLogIdsRef.current.add(log.id);
         setRunning(true);
         setActiveTaskId(task.provider === "server" ? task.id : null);
         setStartedAt((value) => value || performance.now());
-        setResults([{ id: log.id, status: "pending" }]);
-        const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
+        displayResult({ id: log.id, status: "pending" });
         try {
-            const nextVideo = await sharedVideoPoll(`${user?.id}:${task.id}`, async () => {
-                if (recover) await recoverQueuedTask(task.id);
-                for (let attempt = 0; attempt < 120; attempt += 1) {
-                    const state = await pollVideoGenerationTask(configOverride || taskConfig, task);
-                    if (state.status === "completed") {
-                        const stored = await storeGeneratedVideo(state.result);
-                        const nextVideo: GeneratedVideo = {
-                            id: nanoid(),
-                            url: stored.url,
-                            storageKey: stored.storageKey,
-                            durationMs: Date.now() - log.createdAt,
-                            width: stored.width || 1280,
-                            height: stored.height || 720,
-                            bytes: stored.bytes,
-                            mimeType: stored.mimeType,
-                        };
-                        addAsset({
-                            kind: "video",
-                            title: "视频创作结果",
-                            coverUrl: "",
-                            tags: ["视频创作"],
-                            source: "视频创作",
-                            data: { url: nextVideo.url, storageKey: nextVideo.storageKey, width: nextVideo.width, height: nextVideo.height, bytes: nextVideo.bytes, mimeType: nextVideo.mimeType },
-                            metadata: { source: "video-page", module: "视频创作", prompt: log.prompt, model: log.model, ...(stored.serverAssetId ? { serverAssetId: stored.serverAssetId } : {}), recreatePath: `/video?prompt=${encodeURIComponent(log.prompt)}&model=${encodeURIComponent(log.model)}` },
-                        });
-                        return nextVideo;
-                    }
-                    if (state.status === "failed") throw new TerminalVideoTaskError(state.error);
-                    if (attempt < 119) await delay(2500);
-                }
-                throw new Error("本次查询超时，可恢复查询原任务，不会重新生成");
+            if (recover) await recoverQueuedTask(task.id, controller.signal);
+            const [completed] = await waitForTasks([task.id], controller.signal, undefined, true);
+            if (!completed || completed.status !== "success") throw new TerminalVideoTaskError(completed?.failureReason || "原视频任务已失败或取消");
+            if (!completed.resultUrls[0]) throw new Error("原视频任务暂时没有可读取结果，请继续查询");
+            const stored = await storeGeneratedVideo({ url: completed.resultUrls[0], mimeType: "video/mp4" });
+            if (useUserStore.getState().user?.id !== ownerId) return;
+            const nextVideo: GeneratedVideo = {
+                id: nanoid(), url: stored.url, storageKey: stored.storageKey,
+                durationMs: Date.now() - log.createdAt,
+                width: stored.width || 1280, height: stored.height || 720,
+                bytes: stored.bytes, mimeType: stored.mimeType,
+            };
+            addAsset({
+                kind: "video", title: "视频创作结果", coverUrl: "", tags: ["视频创作"], source: "视频创作",
+                data: { url: nextVideo.url, storageKey: nextVideo.storageKey, width: nextVideo.width, height: nextVideo.height, bytes: nextVideo.bytes, mimeType: nextVideo.mimeType },
+                metadata: { source: "video-page", module: "视频创作", prompt: log.prompt, model: log.model, ...(stored.serverAssetId ? { serverAssetId: stored.serverAssetId } : {}), recreatePath: `/video?prompt=${encodeURIComponent(log.prompt)}&model=${encodeURIComponent(log.model)}` },
             });
-            setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
+            displayResult({ id: log.id, status: "success", video: nextVideo });
             await saveLog({ ...log, status: "成功", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined, canRecover: undefined });
-            message.success("视频已生成");
+            if (isCurrent()) message.success("视频已生成");
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : "生成失败";
+            if (useUserStore.getState().user?.id !== ownerId) return;
+            const errorMessage = controller.signal.aborted ? "已停止本页查询；服务端任务可能继续，可查询原任务。" : error instanceof Error ? error.message : "暂时无法查询原任务";
             const canRecover = error instanceof QueuedTaskPausedError ? error.canRecover : error instanceof TerminalVideoTaskError ? undefined : true;
-            setResults([{ id: log.id, status: "failed", error: errorMessage, ...(canRecover !== undefined ? { recovery: { task: log.task, canRecover } } : {}) }]);
-            await saveLog({ ...log, status: "失败", durationMs: Date.now() - log.createdAt, error: errorMessage, canRecover });
-            message.error(errorMessage);
+            displayResult({ id: log.id, status: canRecover === undefined ? "failed" : "paused", error: errorMessage, ...(canRecover !== undefined ? { recovery: { task: log.task, canRecover } } : {}) });
+            await saveLog({ ...log, status: canRecover === undefined ? "失败" : "查询暂停", durationMs: Date.now() - log.createdAt, error: errorMessage, canRecover });
+            if (isCurrent() && !controller.signal.aborted) message.warning(errorMessage);
         } finally {
+            observationControllers.current.delete(log.id);
             activeLogIdsRef.current.delete(log.id);
-            if (!activeLogIdsRef.current.size) {
+            if (isCurrent() && !activeLogIdsRef.current.size) {
                 setRunning(false);
                 setStartedAt(0);
             }
@@ -720,6 +716,7 @@ function VideoGenerationWorkspace() {
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running || readingReferences || previewLoading} onClick={() => void generate()}>
                                 {running ? "正在生成视频" : "生成视频"}
                             </Button>
+                            {running ? <Button block onClick={() => { for (const controller of observationControllers.current.values()) controller.abort(); }}>停止本页查询（不取消服务端任务）</Button> : logs.some(log => log.status === "查询暂停") ? <Button block onClick={() => resumePendingLogs(logs)}>继续查询原任务</Button> : null}
                         </div>
                     </div>
 
@@ -736,7 +733,7 @@ function VideoGenerationWorkspace() {
                                 {results.map((result) =>
                                     result.status === "success" && result.video ? (
                                         <ResultVideoCard key={result.id} video={result.video} onSelect={selectResultPrompt} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} />
-                                    ) : result.status === "failed" ? (
+                                    ) : result.status === "failed" || result.status === "paused" ? (
                                         <FailedVideoCard key={result.id} error={result.error || "生成失败"} recovery={result.recovery} onRetry={() => retryResult(result)} />
                                     ) : (
                                         <PendingVideoCard key={result.id} />
@@ -1106,8 +1103,4 @@ function buildVideoConfig(config: AiConfig, model: string): AiConfig {
 
 function normalizeResolution(value: string) {
     return value.trim().replace(/p$/i, "");
-}
-
-function delay(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }

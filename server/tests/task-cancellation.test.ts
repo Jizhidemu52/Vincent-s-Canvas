@@ -3,11 +3,12 @@ import { transitionBatchTasks, transitionTask } from "../src/tasks";
 
 type Task = {
   id: string; request_id: string; batch_id: string | null; status: string;
-  priority: "normal"; operation_type: string; attempts: number;
+  priority: "normal"; queued_at: string; operation_type: string; attempts: number;
   upstream_task_id: string | null; upstream_submission_started_at: string | null;
 };
 const task = (patch: Partial<Task> = {}): Task => ({
   id: "image", request_id: "request", batch_id: null, status: "paused", priority: "normal",
+  queued_at: "2026-09-01T00:00:00Z",
   operation_type: "image_generation", attempts: 0, upstream_task_id: null, upstream_submission_started_at: null, ...patch,
 });
 
@@ -19,6 +20,7 @@ function harness(records: Task[], afterRead?: (record: Task) => void) {
   const query = async (sql: string, values: unknown[] = []): Promise<{ rows: any[] }> => {
     const record = records.find(item => item.id === values[0]);
     if (sql.startsWith("SELECT id,request_id")) {
+      if (sql.includes("model_slot_token")) expect(sql).toContain("FOR UPDATE");
       const selected = record && ["waiting", "paused"].includes(record.status) ? { ...record } : undefined;
       if (record) afterRead?.(record);
       return { rows: selected ? [selected] : [] };

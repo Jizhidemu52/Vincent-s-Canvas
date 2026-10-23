@@ -146,7 +146,7 @@ describe("queued image preparation cancellation", () => {
             if (path === "/api/auth/session") return Response.json({}, { status: 401 });
             throw new Error(`Unexpected request ${path}`);
         }) as typeof fetch;
-        await expect(requestQueuedImages({ ...baseInput, requestId: "saved-root", onSubmissionStarted: () => { submissionStarted = true; }, onSubmitted: async (ids) => { expect(ids).toEqual(["accepted-task"]); throw new Error("local save failed"); } })).rejects.toThrow("local save failed");
+        await expect(requestQueuedImages({ ...baseInput, requestId: "saved-root", onSubmissionStarted: () => { submissionStarted = true; }, onSubmitted: async (ids) => { expect(ids).toEqual(["accepted-task"]); throw new Error("local save failed"); } })).rejects.toMatchObject({ name: "QueuedTaskSubmissionUncertainError", taskId: "accepted-task", requestId: "saved-root:0", cause: { message: "local save failed" } });
         expect(submissionStarted).toBe(true);
         expect(requests).toEqual(["GET /api/models", "POST /api/tasks", "GET /api/auth/session"]);
     });

@@ -1,8 +1,10 @@
 import { nanoid } from "nanoid";
+import type { TaskSubmission } from "../../../../shared/task-contracts";
 
 import { dataUrlToFile } from "@/lib/image-utils";
 import { createClientId } from "@/lib/client-id";
-import { uploadServerAsset } from "@/services/api/server-assets";
+import { fetchServerAsset, uploadServerAsset } from "@/services/api/server-assets";
+import { observeTask } from "./task-observation";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { imageToDataUrl } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
@@ -47,7 +49,7 @@ export class QueuedTaskFailedError extends Error {
 /** A POST may have been accepted, or an accepted task could not be settled locally. Never generate again to recover it. */
 export class QueuedTaskSubmissionUncertainError extends Error {
     constructor(readonly requestId: string, readonly taskId?: string, readonly cause?: unknown) {
-        super(`原音视频任务状态待核查${taskId ? `（任务 ${taskId}）` : ""}，请查询原任务，勿重复生成。`);
+        super(`原任务状态待核查${taskId ? `（任务 ${taskId}）` : ""}，请查询原任务，勿重复生成。`);
         this.name = "QueuedTaskSubmissionUncertainError";
     }
 }
@@ -95,7 +97,7 @@ export function createImageTaskRequests(input: {
         parameters: { ...input.parameters, count: 1, n: 1 },
         sourceUrls: input.sourceUrls,
         priority: "normal" as const,
-    }));
+    } satisfies TaskSubmission));
 }
 
 export async function requestQueuedImages(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
@@ -120,11 +122,11 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
         input.signal?.throwIfAborted();
         const hash = await fingerprintImage(file);
         assertOwner();
-        const assetId = await uploadServerAsset(file, { title: reference.name, source: "task-reference" }, { expectedOwnerId: ownerId });
+        const assetId = await uploadImageReference(reference, file, hash, ownerId, input.signal);
         assertOwner();
         input.signal?.throwIfAborted();
         sourceUrls.push(`/api/assets/${assetId}/content`);
-        archivedReferences.push({ id: reference.id, name: reference.name, originalFileName: reference.originalFileName, type: file.type, bytes: file.size, sha256: hash, url: sourceUrls[sourceUrls.length - 1]!, sourceAssetId: reference.sourceAssetId });
+        archivedReferences.push({ id: reference.id, name: reference.name, originalFileName: reference.originalFileName, type: file.type, bytes: file.size, sha256: hash, url: sourceUrls[sourceUrls.length - 1]!, sourceAssetId: assetId });
     }
 
     const rootRequestId = input.requestId || createClientId();
@@ -153,18 +155,26 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
             await input.onSubmissionStarted?.();
             assertOwner();
             input.signal?.throwIfAborted();
-            return request<{ task: { id: string } }>("/api/tasks", {
+            try {
+                const result = await request<{ task: { id: string } }>("/api/tasks", {
                 method: "POST",
                 body: JSON.stringify(task),
                 signal: input.signal,
-            });
+                });
+                if (typeof result?.task?.id !== "string" || !result.task.id.trim()) throw new Error("服务器未返回任务编号");
+                return result;
+            } catch (error) {
+                if (error instanceof QueuedTaskHttpError && error.status >= 400 && error.status < 500 && error.status !== 408) throw error;
+                throw new QueuedTaskSubmissionUncertainError(task.requestId, undefined, error);
+            }
         }),
     );
     const rejected = submitted.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (rejected) throw rejected.reason instanceof Error ? rejected.reason : new Error("任务提交失败");
     const ids = submitted.map((result) => (result as PromiseFulfilledResult<{ task: { id: string } }>).value.task.id);
     try {
-        await input.onSubmitted?.(ids);
+        try { await input.onSubmitted?.(ids); }
+        catch (error) { if (input.signal?.aborted) throw error; throw new QueuedTaskSubmissionUncertainError(taskRequests[0]!.requestId, ids[0], error); }
         void refreshSessionBalance();
         const tasks = await waitForTasks(ids, input.signal, undefined, true);
         const failed = tasks.find((task) => task.status === "failed" || task.status === "cancelled");
@@ -422,22 +432,20 @@ async function resolvePublicModel(modelId: string, operationType: string, toolKe
     return resolveConfiguredToolModel(await getBusinessConfig(), requireToolKey(operationType, toolKey), modelId);
 }
 
-async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks: QueuedTask[]) => void, haltOnPaused = false) {
-    for (;;) {
-        if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
-        const tasks = haltOnPaused
+export async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks: QueuedTask[]) => void, haltOnPaused = false) {
+    return observeTask({ taskIds: ids, signal, read: async querySignal => haltOnPaused
             ? await Promise.all(ids.map(async (id) => {
-                const task = await getQueuedTask(id, signal);
+                const task = await getQueuedTask(id, querySignal);
                 if (!task) throw new Error(`原任务 ${id} 不存在或无权访问`);
                 return task;
             }))
-            : (await request<{ tasks: QueuedTask[] }>(`/api/tasks?${new URLSearchParams({ ids: ids.join(",") })}`, { signal })).tasks;
+            : (await request<{ tasks: QueuedTask[] }>(`/api/tasks?${new URLSearchParams({ ids: ids.join(",") })}`, { signal: querySignal })).tasks,
+        done: tasks => {
         onPoll?.(tasks);
         const paused = haltOnPaused ? tasks.find((task) => task.status === "paused") : undefined;
         if (paused) throw new QueuedTaskPausedError(paused);
-        if (tasks.length === ids.length && tasks.every((task) => ["success", "failed", "cancelled"].includes(task.status))) return tasks;
-        await delay(1_000, signal);
-    }
+        return tasks.length === ids.length && tasks.every((task) => ["success", "failed", "cancelled"].includes(task.status));
+    } });
 }
 
 async function cancelTasks(ids: string[]) {
@@ -455,20 +463,35 @@ function currentProjectId(fallback: string) {
     return window.location.pathname.match(/^\/canvas\/([^/]+)/)?.[1] || fallback;
 }
 
-function delay(ms: number, signal?: AbortSignal) {
-    return new Promise<void>((resolve, reject) => {
-        if (signal?.aborted) {
-            reject(new DOMException("请求已取消", "AbortError"));
-            return;
-        }
-        const timer = window.setTimeout(resolve, ms);
-        signal?.addEventListener(
-            "abort",
-            () => {
-                window.clearTimeout(timer);
-                reject(new DOMException("请求已取消", "AbortError"));
-            },
-            { once: true },
-        );
-    });
+const referenceUploads = new Map<string, Promise<string>>();
+let referenceUploadOwner: string | undefined;
+useUserStore.subscribe((state, previous) => {
+    if (state.user?.id !== previous.user?.id) { referenceUploads.clear(); referenceUploadOwner = undefined; }
+});
+
+export async function uploadImageReference(reference: ReferenceImage, file: File, hash: string, ownerId: string, signal?: AbortSignal) {
+    const assertOwner = () => { signal?.throwIfAborted(); if (useUserStore.getState().user?.id !== ownerId) throw new Error("员工会话已变化"); };
+    assertOwner();
+    if (referenceUploadOwner !== ownerId) { referenceUploads.clear(); referenceUploadOwner = ownerId; }
+    if (reference.sourceAssetId) {
+        const { asset } = await fetchServerAsset(reference.sourceAssetId, signal);
+        assertOwner();
+        if (asset.kind !== "image" || asset.status !== "ready") throw new Error("原参考图不可用，请重新选择素材");
+        return asset.id;
+    }
+    const key = `${ownerId}:${hash}`;
+    const existing = referenceUploads.get(key);
+    if (existing) {
+        const assetId = await existing;
+        assertOwner();
+        // Permissions/deletion may change during this browser session.
+        await fetchServerAsset(assetId, signal);
+        assertOwner();
+        return assetId;
+    }
+    const pending = uploadServerAsset(file, { title: reference.name, source: "task-reference", contentSha256: hash }, { expectedOwnerId: ownerId });
+    referenceUploads.set(key, pending);
+    try { const id = await pending; assertOwner(); return id; }
+    catch (error) { if (referenceUploads.get(key) === pending) referenceUploads.delete(key); throw error; }
+    finally { if (referenceUploads.size > 128) referenceUploads.delete(referenceUploads.keys().next().value!); }
 }

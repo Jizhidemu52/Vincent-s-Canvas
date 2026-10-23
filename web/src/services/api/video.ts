@@ -36,7 +36,7 @@ export async function recoverVideoGenerationTask(task: VideoGenerationTask, opti
 
 export async function pollVideoGenerationTask(_config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     if (options?.signal?.aborted) throw new DOMException("请求已取消", "AbortError");
-    const current = await getQueuedTask(task.id);
+    const current = await getQueuedTask(task.id, options?.signal);
     if (!current) return { status: "failed", error: "视频任务不存在或已过期" };
     if (current.status === "paused") throw new QueuedTaskPausedError(current);
     if (current.status === "failed" || current.status === "cancelled") return { status: "failed", error: current.failureReason || "视频生成失败" };

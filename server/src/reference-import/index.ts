@@ -1,7 +1,7 @@
-import { fileURLToPath } from "node:url";
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 import { parseSrcset } from "srcset";
 import { PublicFetchError, validatePublicUrl } from "./public-fetch.mjs";
+import { fetchPublicBytes, PublicResourceError } from "../public-resource";
 
 const MiB = 1024 * 1024;
 export class ReferenceImportError extends Error {
@@ -25,46 +25,12 @@ export function sanitizeSourceUrl(input: string): string {
 /** Production fetch always uses native Node. Only a small explicit environment
  * is passed; proxy credentials, NODE_OPTIONS and TLS-disable flags never enter. */
 export const fetchReferenceResource: ReferenceFetcher = async (url, kind, signal) => {
-  checkedUrl(url);
-  signal.throwIfAborted();
-  const node = Bun.which("node");
-  if (!node) throw error(503, "NATIVE_NODE_REQUIRED", "网页采集需要原生 Node.js 运行环境");
-  const env: Record<string, string> = {};
-  for (const key of ["PATH", "Path", "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "NODE_EXTRA_CA_CERTS"]) if (process.env[key]) env[key] = process.env[key]!;
-  const child = Bun.spawn([node, fileURLToPath(new URL("./fetch-worker.mjs", import.meta.url))], {
-    stdin: new Blob([JSON.stringify({ url, kind })]), stdout: "pipe", stderr: "ignore", env,
-  });
-  const reader = child.stdout.getReader();
-  const abort = () => { child.kill(); void reader.cancel().catch(() => {}); };
-  signal.addEventListener("abort", abort, { once: true });
-  if (signal.aborted) abort();
-  const deadline = setTimeout(abort, 20_000);
   try {
-    const parts: Uint8Array[] = [];
-    let size = 0;
-    const maxOutput = (kind === "html" ? 2 : 10) * MiB + 16_384;
-    while (true) {
-      signal.throwIfAborted();
-      const chunk = await reader.read();
-      signal.throwIfAborted();
-      if (chunk.done) break;
-      size += chunk.value.byteLength;
-      if (size > maxOutput) throw error(413, "BODY_TOO_LARGE", "远程内容超过大小限制");
-      parts.push(chunk.value);
-    }
-    const output = Buffer.concat(parts);
-    const newline = output.indexOf(10);
-    if (newline < 0 || newline > 16_384) throw error(502, "FETCH_FAILED", "无法获取公开网页内容，请检查网络或使用浏览器扩展");
-    const metadata = JSON.parse(output.subarray(0, newline).toString("utf8"));
-    if (metadata.error) throw error(metadata.error.status, metadata.error.code, metadata.error.message);
-    if (await child.exited !== 0 || typeof metadata.finalUrl !== "string" || typeof metadata.mime !== "string") throw error(502, "FETCH_FAILED", "获取远程内容失败");
-    return { bytes: output.subarray(newline + 1), finalUrl: checkedUrl(metadata.finalUrl).href, mime: metadata.mime };
+    return await fetchPublicBytes(url, { kind, maxBytes: (kind === "html" ? 2 : 10) * MiB, timeoutMs: 15_000, signal });
   } catch (cause) {
     if (signal.aborted) throw error(499, "CANCELLED", "采集已取消");
-    if (cause instanceof ReferenceImportError) throw cause;
+    if (cause instanceof PublicResourceError) throw error(cause.status, cause.code, cause.message);
     throw error(502, "FETCH_FAILED", "无法获取公开网页内容，请检查网络或使用浏览器扩展");
-  } finally {
-    clearTimeout(deadline); signal.removeEventListener("abort", abort); child.kill(); await reader.cancel().catch(() => {}); await child.exited;
   }
 };
 

@@ -37,8 +37,8 @@ function dependencies(fixture: Fixture = {}) {
       if (sql.includes("FROM tool_api_configurations")) return { rows: fixture.toolBinding ? [fixture.toolBinding] : [] };
       if (sql.includes("FROM model_configs")) return { rows: fixture.model === null ? [] : [{ id: modelId, name: "Wan", modelId: "wan2.7", capabilities: ["video"], enabled: true, providerEnabled: true, workflowConfigId: null, ...fixture.model }] };
       if (sql.includes("FROM assets")) return { rows: fixture.asset === null ? [] : [fixture.asset || { id: assetId, mimeType: "image/png", byteSize: 512, status: "ready" }] };
-      if (sql.startsWith("SELECT id,request_id")) return { rows: fixture.task ? [{ ...fixture.task, operation_type: fixture.task.operationType, upstream_task_id: fixture.task.upstreamTaskId, upstream_submission_started_at: fixture.task.submissionStartedAt }] : [] };
-      if (sql.includes("FROM tasks")) return { rows: fixture.task ? [fixture.task] : [] };
+      if (sql.startsWith("SELECT id,request_id")) return { rows: fixture.task ? [{ ...fixture.task, queued_at: fixture.task.queuedAt ?? "2026-09-01T00:00:00Z", operation_type: fixture.task.operationType, upstream_task_id: fixture.task.upstreamTaskId, upstream_submission_started_at: fixture.task.submissionStartedAt }] : [] };
+      if (sql.includes("FROM tasks")) return { rows: fixture.task ? [{ ...(sql.includes('t.available_at AS "availableAt"') ? { availableAt: "2026-09-01T00:00:00Z" } : {}), ...fixture.task }] : [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
   };

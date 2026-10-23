@@ -10,7 +10,7 @@ const departmentSchema = z.object({ name: z.string().trim().min(1).max(100), cod
 
 export function createDepartmentsRouter(db: Database) {
     const router = Router();
-    router.get("/", async (_request, response, next) => {
+    router.get("/", requireRole("super_admin", "department_admin"), async (_request, response, next) => {
         try { response.json({ departments: (await db.query("SELECT id,name,code,created_at AS \"createdAt\" FROM departments ORDER BY name")).rows }); }
         catch (error) { next(error); }
     });

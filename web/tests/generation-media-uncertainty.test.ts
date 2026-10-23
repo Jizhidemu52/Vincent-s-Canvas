@@ -11,6 +11,7 @@ import {
 import { useUserStore } from "@/stores/use-user-store";
 
 const originalFetch = globalThis.fetch;
+const originalTimeout = globalThis.setTimeout;
 const globals = globalThis as unknown as Record<string, unknown>;
 const originalWindow = globals.window;
 const originalUserState = useUserStore.getState();
@@ -27,6 +28,9 @@ const polls = () => requests.filter(request => request.path === "/api/tasks/medi
 const cancellations = () => requests.filter(request => request.path === "/api/tasks/media-task/cancel" && request.method === "POST");
 
 beforeEach(() => {
+    // Backoff durations are asserted separately; these cases verify identity,
+    // settlement and exact POST counts without waiting on real retry timers.
+    globalThis.setTimeout = ((fn: TimerHandler, ms?: number, ...args: unknown[]) => originalTimeout(fn, ms === 2000 || ms === 4000 ? 0 : ms, ...args)) as typeof setTimeout;
     requests = [];
     startedIds = [];
     globals.window = { location: { pathname: "/canvas/project" }, setTimeout, clearTimeout };
@@ -53,6 +57,7 @@ afterEach(() => {
         }
     } finally {
         globalThis.fetch = originalFetch;
+        globalThis.setTimeout = originalTimeout;
         globals.window = originalWindow;
         useUserStore.setState(originalUserState);
     }
@@ -231,7 +236,7 @@ describe("acknowledged media tasks retain their original taskId", () => {
                 const error = await rejected(requestQueuedMedia(input(operation, { onSubmitted: accepted => { acknowledged.push(accepted.id); } })));
                 expectUncertain(error, true);
                 expect(acknowledged).toEqual(["media-task"]);
-                expect(polls()).toHaveLength(1);
+                expect(polls()).toHaveLength(3);
                 expect(cancellations()).toEqual([]);
             });
         }
@@ -331,8 +336,9 @@ describe("media cancellation requires a confirmed original-task cancellation", (
     test.each(operations)("%s abort during a poll cancels the same accepted task without resubmission", async operation => {
         const controller = new AbortController();
         network({ poll: request => {
-            expect(request.signal).toBe(controller.signal);
+            expect(request.signal?.aborted).toBe(false);
             controller.abort();
+            expect(request.signal?.aborted).toBe(true);
             throw new DOMException("poll interrupted", "AbortError");
         } });
         const error = await rejected(requestQueuedMedia(input(operation, { signal: controller.signal })));

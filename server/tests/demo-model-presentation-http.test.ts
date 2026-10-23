@@ -52,12 +52,12 @@ test("designer sees four model-ID-named OpenToken images while UUID submission s
     expect((await request("/api/auth/login", "", "POST", { identifier: "admin", password: "Canvas2026!#", portal: "admin" })).status).toBe(404);
     expect((await request(`/api/admin/model-configuration/models/${alias.id}`, "", "PATCH", { enabled: false })).status).toBe(403);
 
-    const removed = await request("/api/tasks", designerCookie, "POST", { requestId: crypto.randomUUID(), operationType: "image_generation", modelConfigId: "40000000-0000-4000-8000-000000000099", prompt: "must not call retired channel", parameters: {} });
+    const removed = await request("/api/tasks", designerCookie, "POST", { requestId: crypto.randomUUID(), projectId: "model-presentation-fixture", operationType: "image_generation", modelConfigId: "40000000-0000-4000-8000-000000000099", prompt: "must not call retired channel", parameters: {} });
     expect(removed.status).toBe(400);
     expect((await removed.json()).error).toBe("MODEL_DISABLED");
     expect(submissions).toHaveLength(0);
 
-    const generated = await request("/api/tasks", designerCookie, "POST", { requestId: crypto.randomUUID(), operationType: "image_generation", modelConfigId: alias.modelId, prompt: "anonymous model verification", parameters: {} });
+    const generated = await request("/api/tasks", designerCookie, "POST", { requestId: crypto.randomUUID(), projectId: "model-presentation-fixture", operationType: "image_generation", modelConfigId: alias.modelId, prompt: "anonymous model verification", parameters: {} });
     expect(generated.status).toBe(201);
     const task = (await generated.json()).task;
     let completed: any;

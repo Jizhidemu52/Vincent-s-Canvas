@@ -72,6 +72,28 @@ describe("business config background refresh stability", () => {
         expect(current.tools[0]?.configurationVersion).toBe(2);
     });
 
+    test("a transient background error preserves the effective model snapshot", async () => {
+        useBusinessConfigStore.setState({ ...config, status: "ready" });
+        const failed = pendingResponse();
+        const pending = useBusinessConfigStore.getState().refresh({ background: true });
+        failed.complete(Response.json({ message: "gateway unavailable" }, { status: 502 }));
+        await expect(pending).rejects.toThrow("gateway unavailable");
+        expect(useBusinessConfigStore.getState().status).toBe("ready");
+        expect(useBusinessConfigStore.getState().models).toBe(config.models);
+        expect(useBusinessConfigStore.getState().error).toBe("gateway unavailable");
+    });
+
+    test("unchanged successful background polls do not notify subscribers", async () => {
+        useBusinessConfigStore.setState({ ...config, status: "ready", error: null });
+        let changes = 0;
+        const unsubscribe = useBusinessConfigStore.subscribe(() => changes++);
+        const request = pendingResponse();
+        const pending = useBusinessConfigStore.getState().refresh({ background: true });
+        request.complete(Response.json(config));
+        try { await pending; } finally { unsubscribe(); }
+        expect(changes).toBe(0);
+    });
+
     test("failed refreshes still report errors and retries do not treat old configuration as ready", async () => {
         useBusinessConfigStore.setState({ ...config, status: "ready" });
         const failed = pendingResponse();

@@ -22,6 +22,8 @@ const schema = z.object({
     WECOM_CALLBACK_URL: z.string().url().optional().or(z.literal("")),
     PROVIDER_ENCRYPTION_KEY: z.string().optional(),
     WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(40).default(10),
+    USER_MAX_INFLIGHT_TASKS: z.coerce.number().int().min(1).max(1000).default(100),
+    WORKER_SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().min(1).max(3600).default(1200),
     TASK_MOCK_MODE: z.enum(["true", "false"]).default("false"),
     S3_ENDPOINT: z.string().url().optional(),
     S3_PUBLIC_ENDPOINT: z.string().url().optional().or(z.literal("")),
@@ -36,6 +38,9 @@ export type AppConfig = z.infer<typeof schema>;
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
     const config = schema.parse(env);
+    if (config.NODE_ENV === "production" && config.AUTH_ENABLED !== "true" && config.OA_LOGIN_ENABLED !== "true") {
+        throw new Error("Production requires AUTH_ENABLED=true or OA_LOGIN_ENABLED=true; anonymous trials must use development mode");
+    }
     if (config.OA_LOGIN_ENABLED === "true") {
         const endpoint = new URL(config.OA_USERINFO_URL);
         if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) {

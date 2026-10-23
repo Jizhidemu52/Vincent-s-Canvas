@@ -2,6 +2,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $previousEdition = $env:VITE_STANDALONE_EDITION
+Push-Location (Join-Path $projectRoot "shared")
+try {
+    & bun install --frozen-lockfile
+    if ($LASTEXITCODE -ne 0) { throw "Shared contract dependencies could not be installed. Existing dist is unchanged." }
+} finally { Pop-Location }
 Push-Location (Join-Path $projectRoot "web")
 try {
     $env:VITE_STANDALONE_EDITION = "false"

@@ -39,6 +39,8 @@ function harness(extra: Record<string, unknown> = {}) {
     assertImageEditMaskSupport,
     prepareImageEditInput,
     OPENAI_IMAGE_TIMEOUT_MS: 1000,
+    claimProviderSubmission: async () => {},
+    assertProviderSubmissionResponse: async (response: Response) => { if (!response.ok) throw new Error(`Provider ${response.status}`); },
     loadSourceAssets: async () => sources,
     fetchProviderSubmission: async (_url: string, init: RequestInit) => { submissions.push(init); return Response.json({ data: [{ b64_json: rgba.toString("base64") }] }); },
     fetchProviderResult: async (url: string) => ({ url }),

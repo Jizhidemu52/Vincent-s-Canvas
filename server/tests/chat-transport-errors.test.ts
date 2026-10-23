@@ -96,6 +96,14 @@ function expectSafeFailureLog(result: Awaited<ReturnType<typeof failedChat>>, co
 }
 
 describe("chat route transport failure classification", () => {
+    test.each([400, 408, 409, 429, 500, 503, 504])("HTTP %s refunds only a definitive provider rejection", async status => {
+        const result = await failedChat(undefined, false, "claude-sonnet-5-5", () => Response.json({ error: privateDetail }, { status }));
+        expect(result.status).toBe(502);
+        expect(result.upstreamCalls).toBe(1);
+        expect(result.settlements).toEqual([400, 429].includes(status) ? [{ reservationId: "held-chat-fixture", success: false }] : []);
+        expect(result.text).not.toContain(privateDetail);
+        if (![400, 429].includes(status)) expect(result.text).toContain("结果待核查");
+    });
     for (const phase of ["initial_tls", "preflight", "http_started", "response"] as const) {
         test(`${phase} returns a safe upstream error without losing submission state or refunding twice`, async () => {
             const code = phase === "preflight" ? "UNSUPPORTED_NODE_RUNTIME" : "ECONNRESET";
@@ -113,12 +121,13 @@ describe("chat route transport failure classification", () => {
             expect(result.text).not.toContain("proxy-user");
             expect(result.text).not.toContain("private-provider-token");
             expectSafeFailureLog(result, code, phase);
-            expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: false }]);
+            expect(result.settlements).toEqual(phase === "initial_tls" || phase === "preflight"
+                ? [{ reservationId: "held-chat-fixture", success: false }] : []);
             expect(result.upstreamCalls).toBe(1);
         });
     }
 
-    test.each(["gpt-6-astra", "gpt-6-sol"])("%s response interruption reaches safe diagnostics and refunds once", async modelId => {
+    test.each(["gpt-6-astra", "gpt-6-sol"])("%s response interruption retains its hold pending verification", async modelId => {
         const error = Object.assign(new Error(privateDetail), { code: "PROVIDER_RESPONSE_STREAM_ERROR", phase: "response", attempts: 1 });
         const result = await failedChat(error, true, modelId);
         expect(result.status).toBe(502);
@@ -128,7 +137,7 @@ describe("chat route transport failure classification", () => {
         expect(result.text).not.toContain("proxy-user");
         expect(result.text).not.toContain("private-provider-token");
         expectSafeFailureLog(result, "PROVIDER_RESPONSE_STREAM_ERROR", "response");
-        expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: false }]);
+        expect(result.settlements).toEqual([]);
         expect(result.upstreamCalls).toBe(1);
     });
 
@@ -139,7 +148,7 @@ describe("chat route transport failure classification", () => {
         expect(JSON.parse(result.text)).toEqual({ error: "INTERNAL_ERROR", message: "服务器处理失败" });
         expect(result.forwarded).toEqual([]);
         expectSafeFailureLog(result, "ECONNRESET", "request");
-        expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: false }]);
+        expect(result.settlements).toEqual([]);
         expect(result.upstreamCalls).toBe(1);
     });
 
@@ -158,7 +167,7 @@ describe("chat route transport failure classification", () => {
         expect(result.text).not.toContain("private-provider-token");
         expect(result.forwarded).toEqual([]);
         expectSafeFailureLog(result, diagnosed ? "PROVIDER_RESPONSE_STREAM_ERROR" : "UNCLASSIFIED_ERROR", "response");
-        expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: false }]);
+        expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: true }]);
         expect(result.upstreamCalls).toBe(1);
     });
 });
@@ -177,7 +186,7 @@ describe("chat route request timeout classification", () => {
         expect(body.message).not.toContain("尚未发送");
         expect(result.forwarded).toEqual([]);
         expectSafeFailureLog(result, "CHAT_REQUEST_TIMEOUT", "request", "TimeoutError");
-        expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: false }]);
+        expect(result.settlements).toEqual([]);
         expect(result.upstreamCalls).toBe(1);
     });
 
@@ -196,7 +205,7 @@ describe("chat route request timeout classification", () => {
         expect(result.text).not.toContain("尚未发送");
         expect(result.forwarded).toEqual([]);
         expectSafeFailureLog(result, "CHAT_REQUEST_TIMEOUT", "response", "TimeoutError");
-        expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: false }]);
+        expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: true }]);
         expect(result.upstreamCalls).toBe(1);
     });
 
@@ -207,7 +216,7 @@ describe("chat route request timeout classification", () => {
         expect(result.text).toContain("180 秒");
         expect(result.text).not.toContain("尚未发送");
         expectSafeFailureLog(result, "CHAT_REQUEST_TIMEOUT", "request", "TimeoutError");
-        expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: false }]);
+        expect(result.settlements).toEqual([]);
         expect(result.upstreamCalls).toBe(1);
     });
 
@@ -235,15 +244,15 @@ describe("chat route request timeout classification", () => {
         expect(result.forwarded).toEqual([]);
         expect(result.text).not.toContain("180 秒");
         expectSafeFailureLog(result, "UNCLASSIFIED_ERROR", "request", kind === "abort" ? "AbortError" : kind === "string" ? "UnknownError" : "Error");
-        expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: false }]);
+        expect(result.settlements).toEqual([]);
         expect(result.upstreamCalls).toBe(1);
     });
 
     test.each([
-        { name: "empty terminal", wire: 'data: {"type":"message_stop"}\n\n' },
-        { name: "partial EOF", wire: 'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}\n\n' },
-        { name: "invalid event", wire: 'data: not-json\n\n' },
-    ])("$name reports incomplete output, not the 180-second timeout", async ({ wire }) => {
+        { name: "empty terminal", wire: 'data: {"type":"message_stop"}\n\n', settlement: false },
+        { name: "partial EOF", wire: 'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}\n\n', settlement: true },
+        { name: "invalid event", wire: 'data: not-json\n\n', settlement: null },
+    ])("$name reports incomplete output, not the 180-second timeout", async ({ wire, settlement }) => {
         const result = await failedChat(undefined, false, "claude-sonnet-5-5", () => new Response(wire, { headers: { "content-type": "text/event-stream" } }));
         expect(result.status).toBe(200);
         expect(result.text).toContain('"code":"CHAT_STREAM_INCOMPLETE"');
@@ -251,7 +260,7 @@ describe("chat route request timeout classification", () => {
         expect(result.text).not.toContain("180 秒");
         expect(result.text).not.toContain("结果待核查");
         expectSafeFailureLog(result, "CHAT_STREAM_INCOMPLETE", "response", "ChatProtocolError");
-        expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: false }]);
+        expect(result.settlements).toEqual(settlement === null ? [] : [{ reservationId: "held-chat-fixture", success: settlement }]);
         expect(result.upstreamCalls).toBe(1);
     });
 

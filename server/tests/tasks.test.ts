@@ -43,7 +43,7 @@ describe("task queue priority", () => {
   });
 
   test("known asynchronous image tasks can resume by original ID, without a new reservation", async () => {
-    const task = { id: "mark-image", request_id: "request-mark", batch_id: null, status: "paused", priority: "normal", operation_type: "image_generation", attempts: 1, upstream_task_id: "upstream-mark" };
+    const task = { id: "mark-image", request_id: "request-mark", batch_id: null, status: "paused", priority: "normal", queued_at: "2026-09-01T00:00:00Z", operation_type: "image_generation", attempts: 1, upstream_task_id: "upstream-mark" };
     const writes: string[] = [], queued: string[] = [];
     const database = { query: async (sql: string) => {
       if (sql.startsWith("SELECT id,request_id")) return { rows: [task] };

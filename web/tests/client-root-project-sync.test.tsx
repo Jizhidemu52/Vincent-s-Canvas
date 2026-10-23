@@ -60,7 +60,7 @@ function mountHarness(role = "designer", oaMode = true) {
     };
 }
 
-test("root refresh retains identity/model/module polling but skips unchanged and hidden project metadata", async () => {
+test("root refresh polls visible workspaces, skips hidden pages and catches up on visibility", async () => {
     const harness = mountHarness();
     try {
         await settle();
@@ -72,9 +72,10 @@ test("root refresh retains identity/model/module polling but skips unchanged and
         harness.canvas.projects = [{ id: "same-project", title: "已改名" }];
         harness.refresh(); await settle();
         expect(harness.calls.projects).toHaveLength(1);
-        expect([harness.calls.identity, harness.calls.models, harness.calls.modules]).toEqual([3, 3, 3]);
+        expect([harness.calls.identity, harness.calls.models, harness.calls.modules]).toEqual([2, 2, 2]);
         harness.document.visibilityState = "visible";
         harness.visibility(); await settle();
+        expect([harness.calls.identity, harness.calls.models, harness.calls.modules]).toEqual([3, 3, 3]);
         expect(harness.calls.projects.at(-1)).toEqual({ owner: "employee-a", id: "same-project", title: "已改名" });
         expect(harness.calls.projects).toHaveLength(2);
     } finally { harness.close(); }

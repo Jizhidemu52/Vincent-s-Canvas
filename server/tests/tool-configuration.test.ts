@@ -36,6 +36,8 @@ function fixture() {
       statements.push({ sql, values });
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
       if (sql.includes("pg_advisory_xact_lock")) return { rows: [] };
+      if (sql.startsWith("SELECT id,request_id")) return { rows: [] };
+      if (sql.startsWith("SELECT count(*)::int AS count FROM tasks")) return { rows: [{ count: tasks.size }] };
       if (sql.includes("FROM model_presentation_settings")) return { rows: [] };
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: flags.get(String(values[0])) }] };
       if (sql.startsWith("INSERT INTO tool_api_configurations")) {
@@ -52,7 +54,7 @@ function fixture() {
         return { rows: selected };
       }
       if (sql.startsWith("INSERT INTO audit_logs")) return { rows: [] };
-      if (sql.startsWith("INSERT INTO tasks")) { tasks.set(String(values[1]), { id: String(values[0]) }); return { rows: [{ id: values[0] }] }; }
+      if (sql.startsWith("INSERT INTO tasks")) { tasks.set(String(values[1]), { id: String(values[0]) }); return { rows: [{ id: values[0], queuedAt: new Date().toISOString(), availableAt: new Date().toISOString() }] }; }
       if (sql.startsWith("UPDATE tasks") || sql.startsWith("UPDATE batch_tasks")) return { rows: [] };
       if (sql.startsWith("INSERT INTO batch_tasks")) return { rows: [{ id: values[0] }] };
       if (sql.includes("COUNT(*)::int total")) return { rows: [{ total: tasks.size, waiting: tasks.size, success: 0, failed: 0, cancelled: 0, paused: 0, processing: 0 }] };

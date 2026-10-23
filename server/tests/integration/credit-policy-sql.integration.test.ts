@@ -74,7 +74,7 @@ sqlTest("credit policy is authorized, durable and read on every new task without
     app.use("/api/admin/credit-policy", createCreditPolicyRouter(db, { authenticationEnabled: true }));
     app.use("/fixture-without-login", createCreditPolicyRouter(db, { authenticationEnabled: false }));
     app.use("/api/tasks", createTasksRouter(db, cache, () => getCreditsEnabled(db)));
-    app.use("/api/billing", createBillingRouter(db, () => getCreditsEnabled(db)));
+    app.use("/api/billing", createBillingRouter(db));
     app.use(((error, _request, response, _next) => response.status(error.status ?? (error.name === "ZodError" ? 400 : 500)).json({ error: error.code, message: error.message })) as ErrorRequestHandler);
     server = app.listen(0, "127.0.0.1");
     await new Promise<void>(done => server!.once("listening", done));
@@ -139,35 +139,13 @@ sqlTest("credit policy is authorized, durable and read on every new task without
     expect(new Set(queued).size).toBe(3);
     const reservedInput = { requestId: "reservation-owner-private", operationType: "image_generation", modelConfigId: modelId, quantity: 1 };
     const reserve = (body = reservedInput, actor = designerId) => request("/api/billing/reservations", "POST", body, actor);
-    const reserved = await reserve();
-    expect(reserved.status).toBe(201);
-    expect((await reserved.json()).duplicate).toBe(false);
-    const foreign = await reserve(reservedInput, adminId);
-    expect(foreign.status).toBe(400);
-    expect(await foreign.json()).toEqual({ error: "DUPLICATE_REQUEST", message: "请求编号已被其他账号占用" });
-    for (const changed of [{ quantity: 2 }, { operationType: "inpaint" }, { modelConfigId: "82000000-0000-4000-8000-000000000099" }]) {
-      const mismatched = await reserve({ ...reservedInput, ...changed });
-      expect(mismatched.status).toBe(400);
-      expect(await mismatched.json()).toEqual({ error: "DUPLICATE_REQUEST", message: "请求编号已用于不同的积分冻结操作" });
+    // Neither employees nor administrators can create holds without an execution owner.
+    for (const actor of [designerId, departmentAdminId, adminId]) {
+      expect((await reserve(reservedInput, actor)).status).toBe(404);
     }
-    // A task cannot adopt a direct reservation, even for its owner: tool identity differs.
-    const adopted = await submit(reservedInput.requestId);
-    expect(adopted.status).toBe(400);
-    expect((await adopted.json()).error).toBe("DUPLICATE_REQUEST");
+    expect((await query("SELECT id FROM credit_reservations WHERE request_id=$1", [reservedInput.requestId])).rows).toEqual([]);
     expect((await query("SELECT id FROM tasks WHERE request_id=$1", [reservedInput.requestId])).rows).toEqual([]);
-    // A new user's task with the same reservation ID must roll back, not inherit a hold.
-    const foreignTask = await request("/api/tasks", "POST", taskBody(reservedInput.requestId), adminId);
-    expect(foreignTask.status).toBe(400);
-    expect(await foreignTask.json()).toEqual({ error: "DUPLICATE_REQUEST", message: "请求编号已被其他账号占用" });
-    expect((await query("SELECT id FROM tasks WHERE request_id=$1", [reservedInput.requestId])).rows).toEqual([]);
-    // Same owner and operation continue returning the original snapshot after price changes.
     await query("UPDATE model_configs SET credit_cost=99 WHERE id=$1", [modelId]);
-    const repeated = await reserve();
-    expect(repeated.status).toBe(201);
-    const repeatedBody = await repeated.json();
-    expect(repeatedBody).toMatchObject({ duplicate: true, credits: 0, snapshot: { modelCredits: 4 } });
-    expect(repeatedBody).not.toHaveProperty("user_id");
-    expect((await query("SELECT id FROM credit_reservations WHERE request_id=$1", [reservedInput.requestId])).rows).toHaveLength(1);
     expect(await balance()).toBe(1000);
     await database.exec("DROP TRIGGER reject_fixture_policy_audit ON audit_logs; DROP FUNCTION reject_fixture_policy_audit();");
     expect((await setPolicy(true)).status).toBe(200);

@@ -75,7 +75,13 @@ export async function renewTaskLease(db: Database, cache: Cache, lease: TaskLeas
   if (!renewed.rows[0]) throw new TaskExecutionLost("任务执行租约已失效");
   // An absent Redis member after cache loss is rebuilt during the next admission;
   // the durable reservation remains authoritative and blocks oversubscription.
-  await cache.eval(renewScript, { keys: [modelKey(lease.modelConfigId)], arguments: [member(lease), String(renewed.rows[0].expires_ms)] });
+  try {
+    await cache.eval(renewScript, { keys: [modelKey(lease.modelConfigId)], arguments: [member(lease), String(renewed.rows[0].expires_ms)] });
+  } catch {
+    // Postgres already renewed/fenced ownership. A cache outage must not turn a
+    // live paid request into an ambiguous paused task; admissions rebuild Redis.
+    console.warn(JSON.stringify({ event: "worker.lease_cache_refresh_failed", taskId: lease.taskId }));
+  }
 }
 
 export async function releaseModelLease(db: Database, cache: Cache, lease: TaskLease) {

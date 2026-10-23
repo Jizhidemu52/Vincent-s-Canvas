@@ -61,6 +61,7 @@
 ```powershell
 git clone https://github.com/Jizhidemu52/Vincent-s-Canvas.git
 cd Vincent-s-Canvas
+bun install --cwd shared --frozen-lockfile
 cd web
 bun install --frozen-lockfile
 cd ..\server
@@ -109,8 +110,11 @@ OPENTOKEN_API_KEY=在运行电脑填入自己的真实Key
 
 更新前导出重要浏览器内容，并备份 `server/.env`、`server/.data`。SQLite 备份需先停服后复制整个数据目录，不能运行中只拷贝 `.sqlite` 主文件；正式 PostgreSQL 与对象存储要联合备份。
 
+阶段一升级：生产 Compose 默认开启账号认证、Web 仅绑定回环地址；升级前补齐独立外部 `BACKUP_S3_*` 与 `BACKUP_AGE_RECIPIENT`，按[备份说明](ops/backup/README.md)演练，不能直接沿用旧同机备份配置。应用 `039_asset_content_hash.sql` 并保持前后端同版本；本机开发试用入口不受生产认证默认值替代。
+
 ```powershell
 git pull --ff-only origin main
+bun install --cwd shared --frozen-lockfile
 cd web
 bun install --frozen-lockfile
 cd ..\server

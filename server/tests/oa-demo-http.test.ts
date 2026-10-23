@@ -65,7 +65,9 @@ test("local trial preserves private employee data and completes anonymous genera
     const upload = await request("/api/assets/upload-request", "", { method: "POST", body: JSON.stringify({ filename: "open.txt", mimeType: "text/plain", byteSize: 1, ownerUserId: b.user.id }) }).then(r => r.json()) as any;
     expect((await request(upload.uploadUrl, "", { method: "PUT", body: "a" })).status).toBe(204);
     expect(await request("/api/assets").then(r => r.json())).toMatchObject({ assets: [{ ownerUserId: user.id }] });
-    const generated = await request("/api/tasks", "", { method: "POST", body: JSON.stringify({ requestId: crypto.randomUUID(), ownerUserId: "forged-owner", operationType: "image_generation", modelConfigId: "40000000-0000-4000-8000-000000000107", prompt: "open mock generation" }) }).then(r => r.json()) as any;
+    const submission = await request("/api/tasks", "", { method: "POST", body: JSON.stringify({ requestId: crypto.randomUUID(), projectId: "open-trial-canvas", ownerUserId: "forged-owner", operationType: "image_generation", modelConfigId: "40000000-0000-4000-8000-000000000107", prompt: "open mock generation" }) });
+    expect(submission.status).toBe(201);
+    const generated = await submission.json() as any;
     let completed: any;
     for (let i = 0; i < 50; i++) {
       completed = await request(`/api/tasks/${generated.task.id}`).then(r => r.json());

@@ -1,3 +1,5 @@
+import { currentCorrelationId } from "./request-logging";
+
 export type GenerationTimingStage =
   | "prepare"
   | "provider_request"
@@ -16,6 +18,7 @@ export interface GenerationTiming {
 
 type TimingContext = {
   taskId: string;
+  requestId?: string;
   modelConfigId?: string | null;
   attempt?: number;
   runtime: "worker" | "demo";
@@ -29,6 +32,8 @@ export function createGenerationTiming(context: TimingContext): GenerationTiming
   const started = performance.now();
   const identity = {
     taskId: context.taskId,
+    requestId: context.requestId ?? null,
+    correlationId: currentCorrelationId() ?? null,
     modelConfigId: context.modelConfigId ?? null,
     attempt: context.attempt ?? 1,
     runtime: context.runtime,

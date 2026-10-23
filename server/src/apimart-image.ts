@@ -1,4 +1,6 @@
 import { fetchProviderSubmission } from "./provider-submission-transport";
+import { queryProviderTaskStatus } from "./provider-status-query";
+import { isDefinitiveSubmissionRejection } from "./provider-submission-policy";
 import { isPublicHttpUrl, uploadApiMartImage, validateApiMartGenerationImage } from "./apimart-upload";
 
 type MarkImageModel = "gpt-image-2.5-flare" | "gpt-image-2.5-sunburst" | "gemini-nano-banana-2.1";
@@ -370,7 +372,10 @@ export async function runApiMartImageTask(input: ApiMartImageInput & {
     const submit = await (runtime.fetch || fetchProviderSubmission)(`${baseUrl}${request.path}`, {
       method: "POST", headers, body: JSON.stringify(request.payload), redirect: "error", signal: AbortSignal.timeout(180_000),
     });
-    if (!submit.ok) throw Object.assign(new Error(`APIMart 图片任务提交失败：${submit.status} ${await providerMessage(submit, input.apiKey)}`), { code: "PROVIDER_SUBMISSION_HTTP_ERROR", httpStatus: submit.status });
+    if (!submit.ok) {
+      const message = `APIMart 图片任务提交失败：${submit.status} ${await providerMessage(submit, input.apiKey)}`;
+      throw Object.assign(isDefinitiveSubmissionRejection(submit.status) ? new ApiMartImageProviderFailure(message) : new Error(message), { code: "PROVIDER_SUBMISSION_HTTP_ERROR", httpStatus: submit.status });
+    }
     taskId = readTaskId(await submit.json());
     if (!taskId) throw Object.assign(new Error("APIMart 图片任务未返回 task_id；请核查上游状态，不会自动重新提交"), { code: "PROVIDER_TASK_ID_MISSING" });
     // A failed persistence callback must stop before GET; the caller retains the submission intent.
@@ -380,9 +385,7 @@ export async function runApiMartImageTask(input: ApiMartImageInput & {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await wait(pollIntervalMs);
-    const statusResponse = await poll(`${baseUrl}/tasks/${encodeURIComponent(taskId)}`, {
-      headers: queryHeaders, redirect: "error", signal: AbortSignal.timeout(60_000),
-    });
+    const statusResponse = await queryProviderTaskStatus(`${baseUrl}/tasks/${encodeURIComponent(taskId)}`, queryHeaders, { fetch: poll, sleep: wait });
     if (!statusResponse.ok) throw Object.assign(new Error(`APIMart 图片任务状态查询失败：${statusResponse.status} ${await providerMessage(statusResponse, input.apiKey)}`), { code: "PROVIDER_POLL_HTTP_ERROR", httpStatus: statusResponse.status });
     const statusPayload = await statusResponse.json();
     const status = readStatus(statusPayload);

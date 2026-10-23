@@ -46,7 +46,7 @@ test("the image execution path includes the shared config as an anchor and prese
     const expression = project.match(/const outputPosition = ([\s\S]*?);\r?\n/)?.[1];
     expect(expression).toBeDefined();
     const config = { ...source, type: CanvasNodeType.Config, position: { x: 440, y: 210 }, width: 400, height: 460 };
-    const env = { placeCanvasImageOutputs, isEmptyImageNode: false, parentPosition: source.position, nodesRef: { current: [source, config] },
+    const env = { placeCanvasImageOutputs, isEmptyImageNode: false, workflowStep: false, parentPosition: source.position, nodesRef: { current: [source, config] },
         shared: { plan: { configNode: config, targetNode: source } }, sourceNode: source, imageConfig: { width: 240, height: 240 }, parentConfig: { width: 240, height: 240 }, gap: 96 };
     const calculate = new Function("env", `const { ${Object.keys(env).join(",")} } = env; return ${expression};`);
     expect(calculate(env).x).toBe(936);

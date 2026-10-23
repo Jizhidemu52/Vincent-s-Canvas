@@ -6,7 +6,7 @@ export class DemoToolConfigurationError extends Error {
 }
 
 export function resolveDemoToolConfiguration(
-  input: { operationType: string; toolKey?: string; modelConfigId?: string; parameters?: Record<string, unknown> },
+  input: { operationType: string; toolKey?: string; modelConfigId?: string | null; parameters?: Record<string, unknown> },
   bindings: Array<{ toolKey: string; modelConfigId: string | null; enabled: boolean }>,
   models: Array<Record<string, unknown>>,
   providers: Array<Record<string, unknown>>,

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
+import { taskSubmissionSchema as singleSchema, batchSubmissionSchema as batchSchema } from "../../../shared/task-contracts";
 
 import { writeAudit } from "../audit";
 import type { Cache, Database } from "../db";
@@ -21,30 +22,8 @@ import { resolveToolExecution } from "../tool-configuration";
 import { loadTaskPriceSnapshot } from "../billing";
 import { preflightStoredVideoTask } from "../stored-video-preflight";
 import { readTaskProgress } from "../task-progress";
+import { scheduleQueuedTask } from "../task-queue";
 
-const base = z.object({
-  requestId: z.string().min(8).max(200),
-  projectId: z.string().min(1).max(200),
-  operationType: z.string().min(1).max(80),
-  toolKey: z.string().min(1).max(100).optional(),
-  modelConfigId: z.string().uuid().nullish(),
-  prompt: z.string().max(20_000).default(""),
-  parameters: z.record(z.string(), z.unknown()).default({}),
-  priority: z.enum(["normal", "priority", "urgent"]).default("normal"),
-});
-const singleSchema = base.extend({
-  sourceUrls: z.array(z.string().max(2_000)).max(50).default([]),
-});
-const batchSchema = base.extend({
-  items: z
-    .array(
-      z.object({
-        sourceUrls: z.array(z.string().max(2_000)).min(1).max(20),
-      }),
-    )
-    .min(1)
-    .max(100, "每批最多提交 100 个独立任务"),
-});
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
 const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
@@ -60,7 +39,7 @@ const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COALESCE(SUM(t.rmb_cost) FILTER (WHERE t.status='success'),0)::float8 AS consumed_rmb_cost
   FROM tasks t WHERE t.batch_id=b.id) stats ON true`;
 
-export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask) {
+export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { maxInflightTasks?: number } = {}) {
   const router = Router();
 
   router.post("/preflight", async (request, response, next) => {
@@ -83,8 +62,8 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
   router.post("/:id/recover", async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const result = await db.query<{ id: string; requestId: string; status: string; operationType: string; upstreamTaskId: string | null; submissionStartedAt: string | null; attempts: number; priority: TaskPriority; queuedAt: string }>(
-        `SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.id=$1 AND t.user_id=$2`,
+      const result = await db.query<{ id: string; requestId: string; status: string; operationType: string; upstreamTaskId: string | null; submissionStartedAt: string | null; attempts: number; priority: TaskPriority; queuedAt: string; availableAt: string }>(
+        `SELECT ${taskSelect},t.available_at AS "availableAt" FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.id=$1 AND t.user_id=$2`,
         [request.params.id, actor.id],
       );
       const task = result.rows[0];
@@ -95,7 +74,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       const canPollOriginalTask = Boolean(task.upstreamTaskId);
       let recovered = false;
       if (task.status === "waiting" && ((!task.submissionStartedAt && task.attempts === 0) || canPollOriginalTask)) {
-        await cache.zAdd("tasks:queue", { score: queueScore(task.priority, new Date(task.queuedAt).getTime()), value: task.id });
+        await scheduleQueuedTask(cache, task.id, queueScore(task.priority, new Date(task.queuedAt).getTime()), new Date(task.availableAt).getTime());
         recovered = true;
       } else if (task.status === "paused" && canPollOriginalTask) {
         recovered = Boolean(await transitionTask(db, cache, task.id, "resume", false));
@@ -127,6 +106,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
         task: await enqueueTask(db, cache, {
           ...input,
           creditsEnabled,
+          maxInflightTasks: options.maxInflightTasks,
           userId: actor.id,
           departmentId: actor.departmentId,
         }),
@@ -134,7 +114,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
     } catch (error) {
       if (error instanceof BillingError) {
         response
-          .status(400)
+          .status(error.code === "USER_TASK_LIMIT_REACHED" ? 429 : 400)
           .json({ error: error.code, message: error.message });
         return;
       }
@@ -146,18 +126,20 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
     try {
       const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
       const input = batchSchema.parse(request.body);
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      if (input.priority === "urgent" && actor.role !== "super_admin") {
+        response.status(403).json({ error: "FORBIDDEN", message: "仅超级管理员可提交紧急任务" });
+        return;
+      }
+      if (input.priority !== "normal" && actor.role === "designer") {
+        response.status(403).json({ error: "FORBIDDEN", message: "设计师只能提交普通任务" });
+        return;
+      }
       const execution = await resolveToolExecution(db, input);
       input.toolKey = execution.toolKey;
       input.modelConfigId = execution.modelConfigId;
       input.parameters = { ...input.parameters, tool: execution.toolKey };
       const priceSnapshot = await loadTaskPriceSnapshot(db, { ...input, toolConfiguration: execution, quantity: 1, creditsEnabled });
-      const actor = (request as unknown as AuthenticatedRequest).auth;
-      if (input.priority !== "normal" && actor.role === "designer") {
-        response
-          .status(403)
-          .json({ error: "FORBIDDEN", message: "设计师只能提交普通任务" });
-        return;
-      }
       const requestedBatchId = randomUUID();
       const insertedBatch = await db.query<{ id: string }>(
         `INSERT INTO batch_tasks(id,request_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,priority,total_items,tool_key)
@@ -197,6 +179,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
             toolConfiguration: execution,
             priceSnapshot,
             creditsEnabled,
+            maxInflightTasks: options.maxInflightTasks,
             requestId: `${input.requestId}:${index}`,
             sourceUrls: item.sourceUrls,
             userId: actor.id,
@@ -207,6 +190,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
         } catch (error) {
           const reason =
             error instanceof Error ? error.message : "任务创建失败";
+          const code = error instanceof BillingError ? error.code : "TASK_CREATION_FAILED";
           const itemRequestId = `${input.requestId}:${index}`;
           const existing = await db.query<{ id: string; userId: string; batchId: string | null; requestId: string; status: string; credits: number; rmbCost: number }>(
             `SELECT id,user_id AS "userId",batch_id AS "batchId",request_id AS "requestId",status,credits,rmb_cost::float8 AS "rmbCost" FROM tasks WHERE request_id=$1`,
@@ -222,7 +206,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
             // again; never overwrite another task or turn its hold into a leak.
             const { userId: _owner, batchId: _batch, ...task } = committed;
             tasks.push({ ...task, itemIndex: index });
-            failures.push({ index, reason });
+            failures.push({ index, reason, code });
             continue;
           }
           const failedId = randomUUID();
@@ -265,7 +249,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
               reason,
             ],
           );
-          failures.push({ index, reason });
+          failures.push({ index, reason, code });
         }
       }
       await recalculateBatch(db, batchId);

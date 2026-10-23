@@ -122,6 +122,7 @@ describe("admin/team interaction guards", () => {
         const harness = componentHarness("../src/pages/admin/components/task-history-panels.tsx", "TaskManagementPanel", {
             "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user: { id: "admin-a" } }) },
             "@/components/infinite-load-more": { InfiniteLoadMore: "InfiniteLoadMore" },
+            "./task-reconciliation-panel": { TaskReconciliationPanel: "TaskReconciliationPanel" },
             "@tanstack/react-query": { useInfiniteQuery: (value: any) => { options.push(value); return { data: { pages: [{ tasks: [], batches: [] }] }, isPending: false, isFetching: false, dataUpdatedAt: 0, refetch() {} }; } },
             "@/services/api/task-history": { listAdminTasks: async (query: unknown) => { requested.push(query); return { tasks: [], nextCursor: null }; }, listAdminBatches: async () => ({ batches: [], nextCursor: null }) },
         });

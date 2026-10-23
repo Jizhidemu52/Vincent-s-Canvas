@@ -93,7 +93,9 @@ test("OA HTTP exchange isolates employees, denies legacy logins and invalid repl
     expect(await request("/api/assets", first.cookie).then(r => r.json())).toMatchObject({ assets: [{ ownerUserId: a.user.id, ownerName: "甲" }] });
     expect((await request(`/api/assets/${upload.assetId}/content`, second.cookie)).status).toBe(404);
     for (const employee of [{ login: first, id: a.user.id }, { login: second, id: b.user.id }]) {
-      const generated = await request("/api/tasks", employee.login.cookie, { method: "POST", body: JSON.stringify({ requestId: crypto.randomUUID(), ownerUserId: "forged-owner", operationType: "image_generation", modelConfigId: "40000000-0000-4000-8000-000000000107", prompt: "isolated mock generation" }) }).then(r => r.json()) as any;
+      const submission = await request("/api/tasks", employee.login.cookie, { method: "POST", body: JSON.stringify({ requestId: crypto.randomUUID(), projectId: "oa-employee-canvas", ownerUserId: "forged-owner", operationType: "image_generation", modelConfigId: "40000000-0000-4000-8000-000000000107", prompt: "isolated mock generation" }) });
+      expect(submission.status).toBe(201);
+      const generated = await submission.json() as any;
       expect(generated.task.ownerUserId).toBe(employee.id);
       let completed: any;
       for (let i = 0; i < 50; i++) {

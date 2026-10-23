@@ -7,6 +7,7 @@ import dayjs from "dayjs";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
 import { useUserStore } from "@/stores/use-user-store";
 import { InfiniteLoadMore } from "@/components/infinite-load-more";
+import { TaskReconciliationPanel } from "./task-reconciliation-panel";
 
 import {
     availableBatchActions,
@@ -49,6 +50,7 @@ const statusText: Record<string, string> = {
 export function TaskManagementPanel({ active = true }: { active?: boolean }) {
     const { message } = App.useApp();
     const userId = useUserStore(state => state.user?.id);
+    const isSuperAdmin = useUserStore(state => state.user?.role === "super_admin");
     const [detailId, setDetailId] = useState<string | null>(null);
     const [acting, setActing] = useState("");
     const actingRef = useRef("");
@@ -110,6 +112,7 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
 
     return (
         <div className="grid min-w-0 gap-5">
+            {isSuperAdmin ? <TaskReconciliationPanel active={active} onResolved={refresh} /> : null}
             <div className="wb-toolbar justify-between">
                 <p className="text-sm text-[var(--muted-foreground)]" role="status">{updatedAt ? `更新于 ${updatedAt} · 当前页每 10 秒自动同步` : "正在读取任务状态…"}</p>
                 <Button className="!h-10" loading={loading} icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>

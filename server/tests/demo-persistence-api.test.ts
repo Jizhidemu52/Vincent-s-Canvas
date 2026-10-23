@@ -232,7 +232,7 @@ test("restart pauses stored paid work, deduplicates before provider checks and i
     await demo.start();
     const recovered = await demo.json<{ task: ApiTask }>(`/api/tasks/${interrupted.id}`);
     expect(recovered.task).toMatchObject({ id: interrupted.id, requestId: interrupted.requestId, status: "paused", upstreamTaskId: interrupted.upstreamTaskId, errorCode: "LOCAL_PROCESS_INTERRUPTED", credits: 0 });
-    const duplicateBody = { requestId: interrupted.requestId, operationType: "video_generation", modelConfigId: "provider-is-deliberately-unconfigured", prompt: "must not create another task" };
+    const duplicateBody = { requestId: interrupted.requestId, projectId: "persistence-fixture", operationType: "video_generation", modelConfigId: "86000000-0000-4000-8000-000000000099", prompt: "must not create another task" };
     expect(await demo.json<{ task: ApiTask }>("/api/tasks", "POST", duplicateBody)).toEqual(recovered);
     expect((await demo.json<{ tasks: ApiTask[] }>("/api/tasks")).tasks).toHaveLength(1);
     expect((await demo.json<{ user: { creditBalance: number } }>("/api/auth/session")).user.creditBalance).toBe(user.creditBalance);
@@ -293,7 +293,7 @@ test("delayed metadata and upload bodies cannot overwrite each other's committed
   } finally { await demo.close(); }
 }, 60_000);
 
-test("SQLite rejected writes return 503 and leave both original asset bytes and metadata unchanged", async () => {
+test("ready asset bytes cannot be overwritten and SQLite rejected metadata writes return 503", async () => {
   const demo = await createHarness();
   const originalBytes = new TextEncoder().encode("keep original bytes");
   const replacementBytes = new Uint8Array(originalBytes.byteLength).fill(120);
@@ -306,8 +306,8 @@ test("SQLite rejected writes return 503 and leave both original asset bytes and 
     try {
       storageFault.exec("CREATE TRIGGER test_reject_asset_updates BEFORE UPDATE ON demo_assets BEGIN SELECT RAISE(ABORT, 'test storage write rejected'); END;");
       const rejectedUpload = await demo.request(upload.uploadUrl!, { method: "PUT", body: replacementBytes });
-      expect(rejectedUpload.status).toBe(503);
-      expect(await rejectedUpload.json()).toMatchObject({ error: "LOCAL_STORAGE_UNAVAILABLE" });
+      expect(rejectedUpload.status).toBe(404);
+      expect(await rejectedUpload.json()).toMatchObject({ error: "NOT_FOUND" });
       const rejectedMetadata = await demo.request(`/api/assets/${upload.assetId}/metadata`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...originalMetadata, title: "must not be saved" }) });
       expect(rejectedMetadata.status).toBe(503);
       expect(await rejectedMetadata.json()).toMatchObject({ error: "LOCAL_STORAGE_UNAVAILABLE" });

@@ -7,6 +7,7 @@ import type { Database } from "../db";
 import { resolveToolExecution } from "../tool-configuration";
 import { decryptSecret } from "../security";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "../provider-submission-transport";
+import { isDefinitiveSubmissionRejection } from "../provider-submission-policy";
 import type { AuthenticatedRequest } from "../types";
 import { beginUsageChat, finishUsageChat } from "../usage-analytics";
 import { beginChatBilling, ChatStreamOutcome, finishChatBilling } from "../chat-billing";
@@ -90,6 +91,18 @@ export function createChatRouter(db: Database, config: AppConfig) {
         let usageRequestId: string | undefined;
         let billingReservationId: string | null = null;
         let providerInFlight = false;
+        let submissionStarted = false;
+        let billableOutput = false;
+        let streamOutcome: ChatStreamOutcome | undefined;
+        let settlementAttempted = false;
+        const onSubmission = () => { submissionStarted = true; };
+        const settleBilling = async (capture: boolean) => {
+            if (!billingReservationId || settlementAttempted) return;
+            // A failed/uncertain capture must never fall through to release.
+            settlementAttempted = true;
+            await finishChatBilling(db, billingReservationId, capture);
+            billingReservationId = null;
+        };
         const socket = request.socket;
         const hadRemoteAddress = Boolean(socket?.remoteAddress);
         // Bun 1.3.x can lose its native socket without setting destroyed or
@@ -141,20 +154,23 @@ export function createChatRouter(db: Database, config: AppConfig) {
             }
             providerInFlight = true;
             if (isClaudeMessagesModel(model) && input.claude?.stream) {
-                const upstream = await requestClaudeStream(model, credentials, input);
+                const upstream = await requestClaudeStream(model, credentials, input, onSubmission);
                 response.setHeader("content-type", "text/event-stream; charset=utf-8");
                 response.setHeader("cache-control", "no-cache");
-                const streamOutcome = new ChatStreamOutcome();
+                streamOutcome = new ChatStreamOutcome();
                 const reader = upstream.body!.getReader();
                 try {
                     while (true) {
                         const { done, value } = await reader.read();
-                        if (done || disconnected()) break;
+                        if (done) break;
+                        // Account for already-received output before checking
+                        // the browser connection; it cannot make that output free.
                         streamOutcome.push(value);
+                        if (disconnected()) break;
                         response.write(value);
                         // Forward the complete terminal event before ending an
                         // upstream HTTP stream that may otherwise remain open.
-                        if (streamOutcome.terminal) break;
+                        if (streamOutcome.terminal || disconnected()) break;
                     }
                 } finally {
                     // Cleanup failure cannot invalidate a completed reply or
@@ -162,7 +178,10 @@ export function createChatRouter(db: Database, config: AppConfig) {
                     try { await reader.cancel(); } catch { /* Best-effort cleanup only. */ }
                     reader.releaseLock();
                 }
-                if (!disconnected() && !streamOutcome.successful) throw new ChatProtocolError("CHAT_STREAM_INCOMPLETE", "对话流未完整返回有效回复，本次不扣积分");
+                billableOutput = streamOutcome.hasOutput;
+                if (billableOutput) await settleBilling(true);
+                else if (streamOutcome.confirmedEmpty) await settleBilling(false);
+                if (!streamOutcome.successful) throw new ChatProtocolError("CHAT_STREAM_INCOMPLETE", "对话流未完整返回，本轮对话未完成，不会自动重新提交。");
                 providerInFlight = false;
                 if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "success");
                 if (!disconnected()) await writeAudit(db, {
@@ -174,14 +193,16 @@ export function createChatRouter(db: Database, config: AppConfig) {
                     detail: { protocol: model.protocol, streaming: true, toolKey: execution.toolKey, configurationVersion: execution.configurationVersion },
                     ip: request.ip,
                 });
-                await finishChatBilling(db, billingReservationId, !disconnected() && streamOutcome.successful);
-                billingReservationId = null;
-                response.end();
+                if (!disconnected()) response.end();
                 return;
             }
-            const resultPayload = await requestChatCompletion(model, credentials, input);
+            const resultPayload = await requestChatCompletion(model, credentials, input, onSubmission);
             providerInFlight = false;
-            if (!resultPayload.content.trim() && !resultPayload.toolCalls.length) throw new ChatProtocolError("CHAT_RESPONSE_EMPTY", "模型未返回有效回复，本次不扣积分");
+            billableOutput = Boolean(resultPayload.content.trim() || resultPayload.toolCalls.length);
+            if (!billableOutput) throw new ChatProtocolError("CHAT_RESPONSE_EMPTY", "模型未返回有效回复，本次不扣积分", true);
+            // Settle the provider result before ancillary audit/usage writes.
+            // Browser delivery and bookkeeping failures do not erase paid output.
+            await settleBilling(true);
             if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "success");
 
             if (!disconnected()) await writeAudit(db, {
@@ -193,18 +214,21 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 detail: { protocol: model.protocol, toolCallCount: resultPayload.toolCalls.length, toolKey: execution.toolKey, configurationVersion: execution.configurationVersion },
                 ip: request.ip,
             });
-            // Capture only after required bookkeeping succeeds. A failed audit or
-            // usage write must still follow the held-reservation refund path.
-            await finishChatBilling(db, billingReservationId, !disconnected());
-            billingReservationId = null;
-            response.json(resultPayload);
+            if (!disconnected()) response.json(resultPayload);
         } catch (error) {
-            if (billingReservationId) await finishChatBilling(db, billingReservationId, false).catch((releaseError) => {
-                const { code, name } = chatErrorMetadata(releaseError);
-                console.error("Chat credit release failed", { code, name, phase: "credit_release", elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)) });
-            });
-            if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "failed").catch(() => undefined);
             const diagnostics = readProviderSubmissionDiagnostics(error);
+            const hasOutput = billableOutput || streamOutcome?.hasOutput;
+            const confirmedNoOutput = !submissionStarted || diagnostics?.phase === "initial_tls" || diagnostics?.phase === "preflight"
+                || streamOutcome?.confirmedEmpty || (error instanceof ChatProtocolError && error.safeToRelease);
+            if (billingReservationId && !settlementAttempted && (hasOutput || confirmedNoOutput)) {
+                await settleBilling(Boolean(hasOutput)).catch((settlementError) => {
+                    const { code, name } = chatErrorMetadata(settlementError);
+                    console.error("Chat credit settlement failed", { code, name, phase: "credit_settlement", elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)) });
+                });
+            }
+            // Submitted requests with no definitive result retain their hold for
+            // administrator reconciliation; neither refund nor replay is safe.
+            if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "failed").catch(() => undefined);
             const metadata = chatErrorMetadata(error);
             console.error("Chat request failed", {
                 code: metadata.timeout ? metadata.code : diagnostics?.code || metadata.code,
@@ -250,17 +274,18 @@ export async function requestChatCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number }; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
+    onSubmission?: () => void,
 ): Promise<ChatCompletionResult> {
     if (!(CHAT_COMPLETION_PROTOCOLS as readonly string[]).includes(model.protocol)) throw new ChatProtocolError("PROTOCOL_NOT_SUPPORTED", "当前对话入口暂不支持该 Provider 协议");
     const usesResponses = model.protocol === "openai" || model.protocol === "custom" || (model.protocol === "apimart" && model.model_id === "gpt-6-astra");
     if (!usesResponses && input.input.some(item => "type" in item && item.type === "responses_assistant"))
         throw new ChatProtocolError("CHAT_HISTORY_PROTOCOL_MISMATCH", "该会话包含 Responses 原生工具记录，请新建对话后切换接口协议。");
     // GPT-6 Astra function tools require Responses on Mark. Choose before submission; never retry another endpoint.
-    if (model.protocol === "apimart" && model.model_id === "gpt-6-astra") return requestOpenAiCompletion(model, credentials, input);
-    if (model.protocol === "gemini") return requestGeminiCompletion(model, credentials, input);
-    if (isClaudeMessagesModel(model)) return requestClaudeCompletion(model, credentials, input);
-    if (model.protocol === "openai-chat" || model.protocol === "apimart") return requestOpenAiChatCompletion(model, credentials, input);
-    if (model.protocol === "openai" || model.protocol === "custom") return requestOpenAiCompletion(model, credentials, input);
+    if (model.protocol === "apimart" && model.model_id === "gpt-6-astra") return requestOpenAiCompletion(model, credentials, input, onSubmission);
+    if (model.protocol === "gemini") return requestGeminiCompletion(model, credentials, input, onSubmission);
+    if (isClaudeMessagesModel(model)) return requestClaudeCompletion(model, credentials, input, onSubmission);
+    if (model.protocol === "openai-chat" || model.protocol === "apimart") return requestOpenAiChatCompletion(model, credentials, input, onSubmission);
+    if (model.protocol === "openai" || model.protocol === "custom") return requestOpenAiCompletion(model, credentials, input, onSubmission);
     throw new ChatProtocolError("PROTOCOL_NOT_SUPPORTED", "当前对话入口暂不支持该 Provider 协议");
 }
 
@@ -268,14 +293,15 @@ async function requestClaudeCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
+    onSubmission?: () => void,
 ) {
-    const upstream = await fetchProviderSubmission(claudeMessagesUrl(model.base_url), {
+    const upstream = await submitChatRequest(claudeMessagesUrl(model.base_url), {
         method: "POST",
         headers: claudeHeaders(credentials, model.protocol),
         body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking }) }),
         signal: AbortSignal.timeout(180000),
-    });
-    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream, model.protocol === "apimart");
+    }, onSubmission);
+    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream);
     return readClaudeResponse(await readNativeChatPayload(upstream) as ClaudeResponse);
 }
 
@@ -304,14 +330,15 @@ export async function requestClaudeStream(
     model: ChatModel,
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; claude?: { thinking?: boolean; maxTokens?: number } },
+    onSubmission?: () => void,
 ) {
-    const upstream = await fetchProviderSubmission(claudeMessagesUrl(model.base_url), {
+    const upstream = await submitChatRequest(claudeMessagesUrl(model.base_url), {
         method: "POST",
         headers: claudeHeaders(credentials, model.protocol),
         body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking, stream: true }) }),
         signal: AbortSignal.timeout(180000),
-    });
-    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream, model.protocol === "apimart");
+    }, onSubmission);
+    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream);
     if (!upstream.body) throw new ChatProtocolError("CLAUDE_STREAM_EMPTY", "Claude 流式响应为空");
     return upstream;
 }
@@ -442,6 +469,7 @@ async function requestOpenAiCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean },
+    onSubmission?: () => void,
 ): Promise<ChatCompletionResult> {
     const responseInput = input.input.flatMap((item): Array<Record<string, unknown>> => {
         if (!("type" in item)) return [item];
@@ -451,7 +479,7 @@ async function requestOpenAiCompletion(
         if (!checked.success) throw new ChatProtocolError("CHAT_HISTORY_PROTOCOL_MISMATCH", "Responses 原生工具记录无效，请新建对话。");
         return checked.data;
     });
-    const upstream = await fetchProviderSubmission(`${model.base_url.replace(/\/$/, "")}/responses`, {
+    const upstream = await submitChatRequest(`${model.base_url.replace(/\/$/, "")}/responses`, {
         method: "POST",
         headers: requestHeaders(credentials),
         body: JSON.stringify({
@@ -463,8 +491,8 @@ async function requestOpenAiCompletion(
             ...(model.protocol === "apimart" ? { stream: false, ...(input.tools.length ? { include: ["reasoning.encrypted_content"] } : {}) } : {}),
         }),
         signal: AbortSignal.timeout(180000),
-    });
-    if (!upstream.ok) throw await upstreamError("对话 Provider", upstream, model.protocol === "apimart");
+    }, onSubmission);
+    if (!upstream.ok) throw await upstreamError("对话 Provider", upstream);
     if (model.protocol === "apimart") return readApiMartResponses(await readApiMartChatPayload(upstream));
 
     const body = await upstream.json() as {
@@ -473,11 +501,11 @@ async function requestOpenAiCompletion(
         output_text?: string;
         output?: Array<{ type?: string; status?: string; content?: Array<{ text?: string }>; id?: string; call_id?: string; name?: string; arguments?: string; thoughtSignature?: string }>;
     };
-    // HTTP 200 can contain a failed or incomplete Responses operation with
-    // partial text. It is not a completed model call and must take the refund path.
+    // An incomplete JSON response cannot be delivered as a completed tool plan.
+    // Preserve its hold for reconciliation instead of assuming it was unbilled.
     if (body.error || (body.status !== undefined && body.status !== "completed")
         || body.output?.some(item => item.status !== undefined && item.status !== "completed")) {
-        throw new ChatProtocolError("CHAT_RESPONSE_INCOMPLETE", "模型未完整返回有效回复，本次不扣积分");
+        throw new ChatProtocolError("CHAT_RESPONSE_INCOMPLETE", "模型未完整返回有效回复，结果待核查，不会自动重新提交。");
     }
     const content = body.output_text
         || body.output?.flatMap((item) => item.type === "message" ? item.content || [] : []).map((item) => item.text || "").join("")
@@ -569,6 +597,7 @@ async function requestOpenAiChatCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown },
+    onSubmission?: () => void,
 ): Promise<ChatCompletionResult> {
     type Message = { role: string; content: unknown; tool_calls?: ToolCall[]; tool_call_id?: string };
     const messages: Message[] = [];
@@ -590,7 +619,7 @@ async function requestOpenAiChatCompletion(
     }
     const toolChoice = input.toolChoice && typeof input.toolChoice === "object" && "name" in input.toolChoice
         ? { type: "function", function: { name: input.toolChoice.name } } : input.toolChoice ?? "auto";
-    const upstream = await fetchProviderSubmission(`${model.base_url.replace(/\/$/, "")}/chat/completions`, {
+    const upstream = await submitChatRequest(`${model.base_url.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",
         headers: requestHeaders(credentials),
         body: JSON.stringify({
@@ -605,8 +634,8 @@ async function requestOpenAiChatCompletion(
             } : {}),
         }),
         signal: AbortSignal.timeout(180000),
-    });
-    if (!upstream.ok) throw await upstreamError("Chat Completions Provider", upstream, model.protocol === "apimart");
+    }, onSubmission);
+    if (!upstream.ok) throw await upstreamError("Chat Completions Provider", upstream);
     if (model.protocol === "apimart") return readApiMartChatChoices(await readApiMartChatPayload(upstream));
     const body = await upstream.json() as { choices?: Array<{ message?: { content?: string | null; tool_calls?: ToolCall[] }; finish_reason?: string }> };
     const choice = body.choices?.[0];
@@ -617,13 +646,14 @@ async function requestGeminiCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
     input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number } },
+    onSubmission?: () => void,
 ) {
-    const upstream = await fetchProviderSubmission(buildGeminiGenerateUrl(model.base_url, model.model_id), {
+    const upstream = await submitChatRequest(buildGeminiGenerateUrl(model.base_url, model.model_id), {
         method: "POST",
         headers: requestHeaders(credentials),
         body: JSON.stringify(buildGeminiRequestBody(input)),
         signal: AbortSignal.timeout(180000),
-    });
+    }, onSubmission);
     if (!upstream.ok) throw await upstreamError("Gemini Provider", upstream);
 
     return readGeminiResponse(await readNativeChatPayload(upstream) as GeminiResponse);
@@ -734,19 +764,24 @@ function requestHeaders(credentials: Record<string, string>) {
     return headers;
 }
 
-async function upstreamError(label: string, upstream: Response, suppressProviderBody = false) {
-    // Mark can echo request headers in an error body. Retain its HTTP status,
-    // never expose that body to clients, and never submit a fallback request.
-    if (suppressProviderBody) {
-        await upstream.body?.cancel().catch(() => {});
-        return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", `${label} ${upstream.status}: 上游服务拒绝了请求；本次请求不会重新提交。`);
-    }
-    const detail = (await upstream.text()).slice(0, 500);
-    return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", `${label} ${upstream.status}: ${detail}`);
+function submitChatRequest(url: string, init: RequestInit, onSubmission?: () => void) {
+    // Request-body construction/validation has completed before this call.
+    onSubmission?.();
+    return fetchProviderSubmission(url, init);
+}
+
+async function upstreamError(label: string, upstream: Response) {
+    // A gateway timeout/5xx can arrive after acceptance. Only explicit rejection
+    // statuses justify releasing a hold; never read credential-bearing bodies.
+    await upstream.body?.cancel().catch(() => {});
+    const rejected = isDefinitiveSubmissionRejection(upstream.status);
+    return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", `${label} ${upstream.status}: ${rejected
+        ? "上游服务拒绝了请求；本次请求不会重新提交。"
+        : "上游返回异常状态，结果待核查，不会自动重新提交。"}`, rejected);
 }
 
 export class ChatProtocolError extends Error {
-    constructor(readonly code: string, message: string) {
+    constructor(readonly code: string, message: string, readonly safeToRelease = false) {
         super(message);
     }
 }

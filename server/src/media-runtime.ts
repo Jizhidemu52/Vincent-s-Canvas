@@ -1,5 +1,7 @@
 import { buildVideoProviderRequest, isSupportedVideoModelId, videoTaskStatusPath, type ProviderVideoSource, type VideoProviderParameters } from "./video-models";
 import { prepareVideoProviderSources } from "./video-source-preparation";
+import { queryProviderTaskStatus } from "./provider-status-query";
+import { isDefinitiveSubmissionRejection } from "./provider-submission-policy";
 
 export class VideoProviderFailure extends Error {}
 export class VideoSubmissionClaimLost extends Error {}
@@ -41,7 +43,7 @@ export async function stepApiMartVideoTask(input: ApiMartVideoInput, runtime: Vi
     const submitted = await request(`${baseUrl}/videos/generations`, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(180_000) });
     if (!submitted.ok) {
       const message = `APIMart 视频提交失败（${submitted.status}）`;
-      if (submitted.status >= 400 && submitted.status < 500 && submitted.status !== 408) throw new VideoProviderFailure(message);
+      if (isDefinitiveSubmissionRejection(submitted.status)) throw new VideoProviderFailure(message);
       throw new Error(message);
     }
     const created = await submitted.json() as { data?: Array<{ task_id?: string }> };
@@ -50,7 +52,7 @@ export async function stepApiMartVideoTask(input: ApiMartVideoInput, runtime: Vi
     await input.onSubmitted(upstreamId);
     return { status: "pending", upstreamTaskId: upstreamId };
   }
-  const response = await request(`${baseUrl}${videoTaskStatusPath(upstreamId)}`, { headers, signal: AbortSignal.timeout(60_000) });
+  const response = await queryProviderTaskStatus(`${baseUrl}${videoTaskStatusPath(upstreamId)}`, headers, runtime);
   if (!response.ok) throw new Error(`APIMart 视频状态查询失败（${response.status}）`);
   const result = await response.json() as { data?: { status?: string; error?: { message?: string }; result?: { videos?: unknown[] } } };
   if (["failed", "cancelled", "canceled"].includes(result.data?.status || "")) throw new VideoProviderFailure(result.data?.error?.message || "视频生成失败");

@@ -8,6 +8,8 @@ import { collectProductionPreflight } from "../../ops/preflight/production-prefl
 const ready = {
     POSTGRES_PASSWORD: "postgres-production-password",
     NODE_ENV: "production",
+    AUTH_ENABLED: "true",
+    OA_LOGIN_ENABLED: "false",
     SESSION_COOKIE_NAME: "wireless_canvas_session",
     SESSION_TTL_SECONDS: "28800",
     TRUST_PROXY: "true",
@@ -23,6 +25,11 @@ const ready = {
     S3_ACCESS_KEY_ID: "wireless-canvas",
     S3_SECRET_ACCESS_KEY: "object-storage-password",
     S3_FORCE_PATH_STYLE: "true",
+    BACKUP_S3_ENDPOINT: "https://independent-backup.company.test",
+    BACKUP_S3_BUCKET: "backups",
+    BACKUP_S3_ACCESS_KEY_ID: "backup-fixture",
+    BACKUP_S3_SECRET_ACCESS_KEY: "backup-fixture-secret",
+    BACKUP_AGE_RECIPIENT: `age1${"q".repeat(58)}`,
     WECOM_CORP_ID: "ww-company",
     WECOM_AGENT_ID: "1000002",
     WECOM_SECRET: "wecom-server-secret",
@@ -47,17 +54,17 @@ describe("production readiness", () => {
         expect(JSON.stringify(checks)).not.toContain(ready.WECOM_SECRET);
     });
 
-    test("rejects placeholders, mock mode and a request for retired standalone WeCom login", () => {
+    test("rejects placeholders, mock mode and incomplete standalone WeCom login", () => {
         const checks = validateProductionEnvironment({ ...ready, POSTGRES_PASSWORD: "replace-with-password", TASK_MOCK_MODE: "true", WECOM_SECRET: "" }, { requireWeCom: true });
         expect(checks.some((check) => check.level === "error" && check.key === "POSTGRES_PASSWORD")).toBe(true);
         expect(checks.some((check) => check.level === "error" && check.key === "TASK_MOCK_MODE")).toBe(true);
-        expect(checks.some((check) => check.level === "error" && check.key === "WECOM")).toBe(true);
+        expect(checks.some((check) => check.level === "error" && check.key === "WECOM_SECRET")).toBe(true);
     });
 
-    test("rejects --require-wecom even with complete credentials because the QR routes are retired", () => {
+    test("checks configured standalone WeCom login and rejects OA mode overlap", () => {
         const checks = validateProductionEnvironment(ready, { requireWeCom: true });
-        expect(checks.find((check) => check.key === "WECOM")).toEqual({ key: "WECOM", level: "error", message: "本版复用公司 OA，不提供独立扫码；请配置 OA_LOGIN_ENABLED" });
-        expect(checks.some((check) => check.key.startsWith("WECOM_"))).toBe(false);
+        expect(checks.filter(check => check.level === "error")).toEqual([]);
+        expect(validateProductionEnvironment({ ...ready, OA_LOGIN_ENABLED: "true" }, { requireWeCom: true }).some(check => check.key === "WECOM" && check.level === "error")).toBe(true);
     });
 
     test("still requires a strong initial password before the first administrator is verified", () => {
@@ -117,22 +124,33 @@ describe("production readiness", () => {
         }
     }, 15_000);
 
-    test("supports open deployment when all four retired WeCom fields are cleared", () => {
+    test("supports password deployment without optional WeCom configuration", () => {
         const env = { ...ready, WECOM_CORP_ID: "", WECOM_AGENT_ID: "", WECOM_SECRET: "", WECOM_CALLBACK_URL: "" };
         expect(validateProductionEnvironment(env).filter((check) => check.level === "error")).toEqual([]);
-        expect(validateProductionEnvironment(env, { requireWeCom: true }).some((check) => check.level === "error" && check.key === "WECOM")).toBe(true);
+        expect(validateProductionEnvironment(env, { requireWeCom: true }).some((check) => check.level === "error" && check.key === "WECOM_SECRET")).toBe(true);
         expect(() => loadConfig({ ...env, DATABASE_URL: "postgres://localhost/test", REDIS_URL: "redis://localhost" })).not.toThrow();
     });
 
-    test("ignores the retired callback configuration in an open deployment", () => {
+    test("does not require optional WeCom credentials for password deployment", () => {
         const env = { ...ready, WECOM_CORP_ID: "", WECOM_AGENT_ID: "", WECOM_SECRET: "", WECOM_CALLBACK_URL: "https://canvas.example.com/api/auth/wecom/callback" };
         expect(validateProductionEnvironment(env).filter((check) => check.level === "error")).toEqual([]);
         expect(() => loadConfig({ ...env, DATABASE_URL: "postgres://localhost/test", REDIS_URL: "redis://localhost" })).not.toThrow();
     });
 
-    test("does not validate retired WeCom configuration as an available login method", () => {
+    test("rejects placeholder WeCom configuration when that login method is required", () => {
         const checks = validateProductionEnvironment({ ...ready, WECOM_SECRET: "replace-with-wecom-secret", WECOM_CALLBACK_URL: "https://canvas.example.com/api/auth/wecom/callback" }, { requireWeCom: true });
-        expect(checks.some((check) => check.level === "error" && check.key === "WECOM")).toBe(true);
-        expect(checks.some((check) => check.key.startsWith("WECOM_"))).toBe(false);
+        expect(checks.some((check) => check.level === "error" && check.key === "WECOM_SECRET")).toBe(true);
+    });
+    test("anonymous production is rejected by preflight and runtime, development trials remain available", () => {
+        const env = { ...ready, AUTH_ENABLED: "false", OA_LOGIN_ENABLED: "false", DATABASE_URL: "postgres://localhost/test", REDIS_URL: "redis://localhost" };
+        expect(validateProductionEnvironment(env).some(check => check.key === "AUTHENTICATION" && check.level === "error")).toBe(true);
+        expect(() => loadConfig(env)).toThrow("Production requires");
+        expect(() => loadConfig({ ...env, NODE_ENV: "development" })).not.toThrow();
+        expect(() => loadConfig({ ...env, OA_LOGIN_ENABLED: "true" })).not.toThrow();
+    });
+    test("requires encrypted independent external backups rather than a bucket on the source host", () => {
+        expect(validateProductionEnvironment({ ...ready, BACKUP_S3_ENDPOINT: "https://minio:9443" }).some(check => check.key === "BACKUP_FAILURE_DOMAIN" && check.level === "error")).toBe(true);
+        expect(validateProductionEnvironment({ ...ready, BACKUP_AGE_RECIPIENT: "" }).some(check => check.key === "BACKUP_AGE_RECIPIENT" && check.level === "error")).toBe(true);
+        expect(validateProductionEnvironment({ ...ready, BACKUP_S3_ENDPOINT: "http://backup.company.test" }).some(check => check.key === "BACKUP_S3_ENDPOINT" && check.level === "error")).toBe(true);
     });
 });

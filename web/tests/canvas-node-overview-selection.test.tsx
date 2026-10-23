@@ -111,8 +111,8 @@ describe("bulk overview node output", () => {
     test("selected configuration ports and panels are not paint-contained outside the node bounds", () => {
         const html = markup({ data: { ...image, type: CanvasNodeType.Config }, renderQuality: "full", isMultiSelected: false, showPanel: true, renderPanel: () => <div>Shared settings</div> });
         expect(html).toContain("content-visibility:visible");
-        expect(html).toContain('aria-label="公共素材输入"');
-        expect(html).toContain('aria-label="共享配置输出"');
+        expect(html).toContain('aria-label="图片 / 上一步输入"');
+        expect(html).toContain('aria-label="结果输出 / 连接下一步"');
         expect(html).toContain("Shared settings");
     });
 });

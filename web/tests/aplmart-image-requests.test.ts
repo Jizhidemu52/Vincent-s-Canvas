@@ -38,6 +38,7 @@ beforeEach(() => {
             uploadedAssetCount++;
             return Response.json({ assetId: body?.metadata?.source === "canvas-batch-reference" ? `reference-${uploadedAssetCount}` : "reference", uploadUrl: null });
         }
+        if (path === "/api/assets/reference") return Response.json({ asset: { id: "reference", kind: "image", status: "ready" } });
         if (path === "/api/tasks/batch") {
             batchTasks = body!.items.map((_: unknown, itemIndex: number) => ({ id: `batch-task-${itemIndex}`, itemIndex, status: "success", resultUrls: [`/api/assets/result-${itemIndex}/content`] }));
             return Response.json({ batchId: "batch-many", tasks: batchTasks, failures: [] });

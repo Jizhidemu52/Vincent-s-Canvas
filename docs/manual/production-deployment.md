@@ -4,7 +4,7 @@
 
 ## 1. 服务器准备
 
-建议准备一台安装了 Docker Engine 与 Docker Compose 的 Linux 服务器。正式环境只让公司的 HTTPS 网关、负载均衡或反向代理访问容器的 `3000` 端口；用户只访问域名的 `443` 端口。PostgreSQL、Redis、MinIO、API 和 Worker 不应直接暴露到公网。
+建议准备一台安装了 Docker Engine 与 Docker Compose 的 Linux 服务器。Web 默认绑定 `127.0.0.1:3000`，同机 HTTPS 网关可直接反代；异机网关须显式设置 `WEB_BIND_HOST` 为受控网卡并仅放行网关来源。用户只访问域名的 `443` 端口。PostgreSQL、Redis、MinIO、API 和 Worker 不应直接暴露到公网。
 
 使用者按“企业微信 → 公司 OA → 画布”进入，画布验证 OA 员工身份，不增加扫码或密码步骤。公司网关限制公司网络访问，网页、API、媒体及后端端口都必须覆盖，不能仅限制登录时的来源：
 
@@ -45,6 +45,10 @@ test -e .env || cp .env.example .env
 - `BOOTSTRAP_ADMIN_PASSWORD`
 - `PROVIDER_ENCRYPTION_KEY`
 - `S3_SECRET_ACCESS_KEY`
+- `BACKUP_S3_ENDPOINT`、`BACKUP_S3_BUCKET`、`BACKUP_S3_ACCESS_KEY_ID`、`BACKUP_S3_SECRET_ACCESS_KEY`：独立故障域的备份位置与专用凭据
+- `BACKUP_AGE_RECIPIENT`：离线保管私钥对应的 age 公钥，不能把私钥填入环境或 Git
+
+阶段一升级会要求上述备份配置，旧 `.env` 不会被自动改写。部署前先补齐并试验备份/恢复；不要直接覆盖旧环境文件。API 与 Worker 使用相同 `CANVAS_API_IMAGE`，Worker 默认退出宽限 1200 秒、Compose 停止超时 21 分钟；停止期间不再领取新任务，但等待已领取任务安全落库。
 
 本项目复用现有 OA，而不是新增独立企业微信扫码。因此以下 `WECOM_*` 扫码字段留空，实际企业身份接口按 [公司 OA 接入](oa-workspace-integration.md) 配置：
 
@@ -55,7 +59,7 @@ WECOM_SECRET=
 WECOM_CALLBACK_URL=
 ```
 
-不使用 `--require-wecom` 作为 OA 接入的前置检查；该参数针对旧独立扫码流程，不能代替真实 OA 凭证与员工隔离验证。
+不使用 `--require-wecom` 作为 OA 接入的前置检查；该参数针对独立账号模式下的企业微信扫码，不能代替真实 OA 凭证与员工隔离验证。
 
 生成 Provider 加密密钥：
 
@@ -86,12 +90,13 @@ docker run --rm --env-file .env \
 
 ### 企业模式与本机试用
 
-根目录模板与 Compose 当前默认 `OA_LOGIN_ENABLED=false`；API 与 Worker 的 Compose 设置会覆盖 `.env`。企业 OA 须在 IT 联调身份接口、HTTPS 和网络限制后显式启用两处服务配置，仅改 `.env` 不生效。前端以 `/api/deployment` 的实际返回值为准，并使用同版本前后端；`AUTH_ENABLED` 控制独立密码账号，不代替 OA 模式选择。下表描述独立账号关闭时的 OA／试用路径。
+根目录模板与 Compose 默认 `AUTH_ENABLED=true`、`OA_LOGIN_ENABLED=false`；两项均读取 `.env`，不再硬编码覆盖。企业 OA 在联调身份接口、HTTPS 和网络限制后设置 `OA_LOGIN_ENABLED=true`，不需要修改 Compose。前端以 `/api/deployment` 的实际返回值为准，并使用同版本前后端。`NODE_ENV=production` 时禁止两种认证同时关闭；开发试用是独立模式。
 
 | 状态 | 当前行为 |
 | --- | --- |
 | `OA_LOGIN_ENABLED=true` | `oaLoginEnabled`、`authenticationEnabled` 均为 true；普通创作只接受已验证 OA 员工，缺失/失效身份不回退访客。 |
-| `OA_LOGIN_ENABLED=false` | 本机试用，两个认证标志均为 false；完整后端签发浏览器访客会话，Windows 演示使用共用身份，不代表企业隔离。 |
+| `AUTH_ENABLED=true`、`OA_LOGIN_ENABLED=false` | 默认独立账号模式，个人密码登录后创作；可另配企业微信扫码。 |
+| 两种认证均关闭 | 仅允许非生产开发试用；不代表员工隔离，不能作为生产匿名付费入口。 |
 | `CREDITS_ENABLED=false` | 新生成任务不冻结或扣除内部积分。旧任务按原计费快照结算。 |
 | `ROLE_PORTALS_ENABLED=false` | 普通创作界面隐藏账号、积分、小组与管理入口；不取消后台角色权限校验。 |
 
@@ -215,7 +220,9 @@ docker compose up -d api worker
 
 ## 7. 备份与恢复
 
-`backup` 容器每 15 分钟执行一次压缩 `pg_dump`，保存到 MinIO 的 `backups/postgres/`。MinIO Bucket 已启用版本保护。默认数据库和 MinIO 仍在同一台机器；这不是异机灾备。正式上线需按公司要求把数据库备份、素材对象与必要加密配置另存到独立受控位置，浏览器中的画布另行导出。
+`backup` 在上一轮成功完成后等待 15 分钟，再向 `BACKUP_S3_*` 指定的外部独立存储执行备份。数据库 dump 与媒体引用清单使用同一 PostgreSQL 快照并通过 age 加密；素材原件、缩略图和设计库独立原件逐项复制并回读校验 SHA-256，全部成功才发布 `COMPLETE.json`。媒体保留原字节，需在目标 bucket 配置静态加密与访问控制。不同域名仍须人工确认故障域独立；脚本拒绝与业务存储同 hostname，不自动删除旧快照，生命周期由备份服务端管理。
+
+这是数据库快照加在线对象引用验证，不是跨 PostgreSQL/S3 原子快照。严格联合恢复点需要先停止所有写入方；浏览器未同步内容、Redis、服务器环境和 Provider 加密主密钥须另行保管。完整边界与步骤见 [备份说明](../../ops/backup/README.md)。
 
 查看备份日志：
 
@@ -223,24 +230,28 @@ docker compose up -d api worker
 docker compose logs --tail=100 backup
 ```
 
-恢复会覆盖目标数据库，先确认备份对象、目标环境和维护窗口。先停止 Web、API、Worker 和 Backup，避免新请求或自动备份在恢复期间写入，再将示例备份路径替换为已经核实存在的对象：
+恢复会覆盖目标数据库和清单内同名媒体，优先使用新的空目标。先确认快照与维护窗口，停止 Web、API、Worker、Backup 及其他写入方，再只读挂载离线私钥。以下快照编号和私钥路径必须替换为已核实的值：
 
 ```bash
 docker compose stop web api worker backup
-docker compose run --rm --no-deps backup restore.sh backups/postgres/已核实的备份文件.dump
+docker compose run --rm --no-deps \
+  -e RESTORE_ALLOW_DESTRUCTIVE=true -e RESTORE_WRITES_STOPPED=true \
+  -e BACKUP_AGE_IDENTITY_FILE=/run/secrets/backup-age-identity \
+  -v /secure/backup-age-identity:/run/secrets/backup-age-identity:ro \
+  backup restore.sh 已核实的快照编号
 docker compose up -d api worker web backup
 ```
 
-每季度至少执行一次恢复演练，并记录恢复耗时。验收目标为 RPO 不超过 15 分钟、RTO 不超过 4 小时。
+恢复先完成全部文件校验、解密和 `pg_restore --list` 预检，才开始目标写入；媒体与数据库恢复仍非跨系统事务。每季度演练并实测 RPO/RTO，备份周期不等于已达成 15 分钟 RPO，长任务/故障/备份耗时须计入。
 
 ## 8. 40 人并发验收
 
 ### 历史并发基线与当前复验
 
-下述账号与积分链路是历史 `compose-recovery` 基线，不代表当前 OA 入口已完成目标服务器验收。当前以仓库实际 CI 脚本为准，并额外验证 OA 员工任务、画布/媒体隔离、管理接口保护及无内部积分扣费；免登录试用另行验证。
+当前 `compose-recovery` 在隔离 PostgreSQL/Redis、业务 MinIO 和第二套备份 MinIO 上执行恢复及负载测试，并运行受信任 HTTPS OA fixture 的真实 API 隔离用例；这仍不等于公司真实 OA、目标网络和生产数据已验收。以下历史数据不得冒充本轮结果。
 
 1. 构建并启动 Web、API、Worker、PostgreSQL、Redis、MinIO 和 Backup。
-2. 写入恢复标记，创建数据库备份，删除标记后执行恢复，再确认标记恢复成功。
+2. 写入恢复标记、原件/两张缩略图及独立设计库图片，创建加密快照，删除测试记录/对象后恢复，再确认数据库和每个对象原字节恢复。
 3. 通过管理员 API 完成首次改密，创建测试部门、模拟 Provider、模拟模型和 40 个相互隔离的设计师账号。
 4. 40 个设计师分别登录并完成首次改密，获得 40 份独立 Session。
 5. k6 使用 40 个并发用户持续提交 2 分钟；Worker 生成 QA 占位图并走真实队列、积分、对象存储、素材和历史链路。

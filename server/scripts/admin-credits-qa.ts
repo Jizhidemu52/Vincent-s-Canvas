@@ -154,7 +154,7 @@ app.use("/api/admin/workflows", createWorkflowsRouter(db));
 app.use("/api/admin/modules", createAdminModuleFlagsRouter(db));
 app.use("/api/modules", createModuleFlagsRouter(db));
 app.use("/api/models", createPublicModelRouter(db, readPolicy));
-app.use("/api/billing", createBillingRouter(db, readPolicy));
+app.use("/api/billing", createBillingRouter(db));
 app.use("/api/canvas-documents", createCanvasDocumentsRouter(db));
 app.use("/api", (_request, response) => response.status(403).json({ error: "QA_ONLY", message: "这是隔离的本地验证环境；模型生成及未纳入测试的接口均未启用" }));
 const dist = join(root, "web/dist");

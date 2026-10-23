@@ -61,13 +61,13 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     const sourceUrl = `/api/assets/${upload.assetId}/content`;
     const multiBatch = await request("/api/tasks/batch", "POST", { requestId: crypto.randomUUID(), projectId: "single-image-check", operationType: "batch_image", toolKey: "canvas-batch", modelConfigId: images[0]!.id, parameters: { count: 10 }, items: Array.from({ length: 101 }, () => ({ sourceUrls: [sourceUrl] })) });
     expect(multiBatch.status).toBe(400);
-    expect((await multiBatch.json()).error).toBe("BATCH_LIMIT_EXCEEDED");
+    expect((await multiBatch.json()).error).toBe("VALIDATION_ERROR");
     expect(submissions).toHaveLength(0);
-    const disabled = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), operationType: "image_generation", modelConfigId: "d5000000-0000-4000-8000-000000000008", prompt: "disabled Grok cannot submit", parameters: { size: "1:1", resolution: "1k" } });
+    const disabled = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: "image_generation", modelConfigId: "d5000000-0000-4000-8000-000000000008", prompt: "disabled Grok cannot submit", parameters: { size: "1:1", resolution: "1k" } });
     expect(disabled.status).toBe(400);
     expect((await disabled.json()).error).toBe("MODEL_DISABLED");
     for (const [index, maximum] of [[6, 4], [7, 15], [9, 14], [1, 16], [2, 16], [3, 16]]) {
-      const rejected = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), operationType: "image_generation", modelConfigId: `d5000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      const rejected = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: "image_generation", modelConfigId: `d5000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
         prompt: "local reference count rejection", sourceUrls: Array(maximum! + 1).fill(sourceUrl), parameters: { size: "1:1", resolution: "1k" } });
       expect(rejected.status).toBe(400);
       const body = await rejected.json();
@@ -76,7 +76,7 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     expect(submissions).toHaveLength(0);
 
     for (const [index, model] of images.entries()) {
-      const input = { requestId: crypto.randomUUID(), operationType: index === 1 ? "seamless_stitch" : "image_generation", modelConfigId: model.id, prompt: "local fake Mark verification", parameters: { resolution: "1k", ...(index < 2 ? { quality: "low" } : {}) } };
+      const input = { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: index === 1 ? "seamless_stitch" : "image_generation", modelConfigId: model.id, prompt: "local fake Mark verification", parameters: { resolution: "1k", ...(index < 2 ? { quality: "low" } : {}) } };
       const generated = await request("/api/tasks", "POST", input);
       expect(generated.status).toBe(201);
       const task = (await generated.json()).task;
@@ -133,8 +133,8 @@ for (const downloadStatus of [503, 403]) test(`demo recovers the same Mark job a
     }
     if (request.method === "GET" && path === "/v1/tasks/unchanged-mark-job") {
       polls++;
-      if (polls === 1) return Response.json({ error: { message: "temporary local failure" } }, { status: 503 });
-      return Response.json({ data: { status: "completed", result: { images: [{ url: ["https://mark-demo-result.invalid/original.png"] }] } } });
+      if (polls <= 3) return Response.json({ error: { message: "temporary local failure" } }, { status: 503 });
+      return Response.json({ data: { status: "completed", result: { images: [{ url: ["https://mark-demo-result.example/original.png"] }] } } });
     }
     return Response.json({ error: "Unexpected local mock request" }, { status: 400 });
   } });
@@ -174,7 +174,7 @@ for (const downloadStatus of [503, 403]) test(`demo recovers the same Mark job a
       expect(stored.ok).toBe(true);
       sourceUrls.push(`/api/assets/${upload.assetId}/content`);
     }
-    const input = { requestId: crypto.randomUUID(), operationType: "inpaint", modelConfigId: "d5000000-0000-4000-8000-000000000001", prompt: "recover original mask", sourceUrls,
+    const input = { requestId: crypto.randomUUID(), projectId: "mark-recovery-fixture", operationType: "inpaint", modelConfigId: "d5000000-0000-4000-8000-000000000001", prompt: "recover original mask", sourceUrls,
       parameters: { resolution: "1k", quality: "low", output_format: "png", inputArchive: { maskReferenceIndex: 1 } } };
     const submitted = await request("/api/tasks", "POST", input);
     expect(submitted.status).toBe(201);
@@ -182,7 +182,7 @@ for (const downloadStatus of [503, 403]) test(`demo recovers the same Mark job a
     const paused = await settle(task.id);
     expect(paused.status).toBe("paused"); expect(paused.upstreamTaskId).toBe("unchanged-mark-job");
     expect(paused.lastFailure).toEqual({ phase: "polling", code: "PROVIDER_POLL_HTTP_ERROR", httpStatus: 503 });
-    expect(generated).toBe(1); expect(uploads).toBe(1); expect(polls).toBe(1);
+    expect(generated).toBe(1); expect(uploads).toBe(1); expect(polls).toBe(3);
     const recovering = await request(`/api/tasks/${task.id}/recover`, "POST").then(response => response.json());
     expect(recovering.recovered).toBe(true);
     const repeated = await request(`/api/tasks/${task.id}/recover`, "POST").then(response => response.json());
@@ -191,8 +191,8 @@ for (const downloadStatus of [503, 403]) test(`demo recovers the same Mark job a
     expect(downloadPaused.status).toBe("paused");
     expect(downloadPaused.lastFailure).toEqual({ phase: "download", code: "RESULT_DOWNLOAD_HTTP_ERROR", httpStatus: downloadStatus });
     expect(downloadPaused.upstreamResultUrl).toBeUndefined();
-    expect(JSON.stringify(downloadPaused)).not.toContain("mark-demo-result.invalid");
-    expect(generated).toBe(1); expect(uploads).toBe(1); expect(polls).toBe(2);
+    expect(JSON.stringify(downloadPaused)).not.toContain("mark-demo-result.example");
+    expect(generated).toBe(1); expect(uploads).toBe(1); expect(polls).toBe(4);
     const downloadRecovery = await request(`/api/tasks/${task.id}/recover`, "POST").then(response => response.json());
     expect(downloadRecovery.task.upstreamResultUrl).toBeUndefined();
     expect(downloadRecovery.recovered).toBe(true);
@@ -200,7 +200,7 @@ for (const downloadStatus of [503, 403]) test(`demo recovers the same Mark job a
     expect(completed.status).toBe("success"); expect(completed.upstreamTaskId).toBe("unchanged-mark-job");
     expect(completed.stage).toBe("succeeded"); expect(completed.errorCode).toBeNull(); expect(completed.failureReason).toBeNull();
     expect(completed.lastFailure).toBeUndefined();
-    const expectedPolls = downloadStatus === 403 ? 3 : 2;
+    const expectedPolls = downloadStatus === 403 ? 5 : 4;
     expect(generated).toBe(1); expect(uploads).toBe(1); expect(polls).toBe(expectedPolls);
     expect(completed.resultUrls).toHaveLength(1);
     const assetId = completed.resultUrls[0].split("/")[3];
@@ -213,7 +213,7 @@ for (const downloadStatus of [503, 403]) test(`demo recovers the same Mark job a
     expect((await request(`/api/tasks/${task.id}/recover`, "POST").then(response => response.json())).recovered).toBe(false);
     expect(generated).toBe(1); expect(polls).toBe(expectedPolls);
 
-    const unknown = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), operationType: "image_generation", modelConfigId: input.modelConfigId, prompt: "unknown submission", parameters: {} }).then(response => response.json());
+    const unknown = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), projectId: "mark-recovery-fixture", operationType: "image_generation", modelConfigId: input.modelConfigId, prompt: "unknown submission", parameters: {} }).then(response => response.json());
     const unconfirmed = await settle(unknown.task.id);
     expect(unconfirmed.status).toBe("paused"); expect(unconfirmed.upstreamTaskId).toBeUndefined();
     const unchanged = await request(`/api/tasks/${unknown.task.id}/recover`, "POST").then(response => response.json());
