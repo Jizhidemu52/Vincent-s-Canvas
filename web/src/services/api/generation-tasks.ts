@@ -5,6 +5,8 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { createClientId } from "@/lib/client-id";
 import { fetchServerAsset, uploadServerAsset } from "@/services/api/server-assets";
 import { observeTask } from "./task-observation";
+import { watchTaskEvents } from "./task-events";
+import { readTaskSnapshot } from "./task-snapshot-query";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { imageToDataUrl } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
@@ -433,19 +435,30 @@ async function resolvePublicModel(modelId: string, operationType: string, toolKe
 }
 
 export async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks: QueuedTask[]) => void, haltOnPaused = false) {
-    return observeTask({ taskIds: ids, signal, read: async querySignal => haltOnPaused
-            ? await Promise.all(ids.map(async (id) => {
-                const task = await getQueuedTask(id, querySignal);
-                if (!task) throw new Error(`原任务 ${id} 不存在或无权访问`);
-                return task;
-            }))
-            : (await request<{ tasks: QueuedTask[] }>(`/api/tasks?${new URLSearchParams({ ids: ids.join(",") })}`, { signal: querySignal })).tasks,
+    if (!ids.length) return [];
+    const events = watchTaskEvents(ids);
+    let revision = events.version;
+    try { return await observeTask({ taskIds: ids, signal, ready: events.ready,
+        waitForChange: (remaining, nextSignal) => events.next(revision, remaining, nextSignal),
+        read: async querySignal => {
+            revision = events.version;
+            return readTaskSnapshot(ids, async snapshotSignal => {
+                if (ids.length === 1) {
+                    const task = await getQueuedTask(ids[0]!, snapshotSignal);
+                    if (!task) throw new Error(`原任务 ${ids[0]} 不存在或无权访问`);
+                    return [task];
+                }
+                const tasks = (await request<{ tasks: QueuedTask[] }>(`/api/tasks?${new URLSearchParams({ ids: ids.join(",") })}`, { signal: snapshotSignal })).tasks;
+                if (tasks.length !== ids.length) throw new Error("部分原任务不存在或无权访问");
+                return tasks;
+            }, querySignal);
+        },
         done: tasks => {
         onPoll?.(tasks);
         const paused = haltOnPaused ? tasks.find((task) => task.status === "paused") : undefined;
         if (paused) throw new QueuedTaskPausedError(paused);
         return tasks.length === ids.length && tasks.every((task) => ["success", "failed", "cancelled"].includes(task.status));
-    } });
+    } }); } finally { events.close(); }
 }
 
 async function cancelTasks(ids: string[]) {

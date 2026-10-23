@@ -112,7 +112,7 @@ jobs:
           mkdir -p "$fixture_dir"
           printf '{"private":true,"type":"module"}\n' > "$fixture_dir/package.json"
           bun add --cwd "$fixture_dir" --exact @electric-sql/pglite@0.5.10
-      - name: Test backend, SQL migrations and 30 mock video tasks
+      - name: Test backend, SQL migrations and 30 image plus 30 video tasks
         run: bun --no-env-file test
         env:
           PGLITE_RUNTIME_PATH: ${{ runner.temp }}/canvas-pglite
@@ -169,7 +169,7 @@ jobs:
       - run: bun test
       - name: Install browser for isolated E2E
         run: bunx playwright install --with-deps chromium
-      - name: Verify five canvas user paths
+      - name: Verify canvas interactions, recovery and live task notifications
         run: bun run test:e2e
 
   compose-recovery:

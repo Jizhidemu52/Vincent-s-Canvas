@@ -58,12 +58,15 @@ import { createAdminUsageRouter, createUsageRouter, usageErrors } from "./routes
 import { getCreditsEnabled } from "./credit-policy";
 import { createCreditPolicyRouter } from "./routes/credit-policy";
 import { BillingError } from "./billing";
+import { createTasksEventsRouter, TaskEventsService } from "./task-events";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
 const db = createDatabase(config.DATABASE_URL);
 const cache = await createCache(config.REDIS_URL);
 const storage = new ObjectStorage(config);
+const taskEvents = new TaskEventsService(db);
+void taskEvents.start();
 const app = express();
 
 if (config.TRUST_PROXY === "true") app.set("trust proxy", 1);
@@ -143,6 +146,7 @@ app.use(
   requireAccountReady,
   createModelConfigurationRouter(db, config),
 );
+app.use("/api/tasks/events", requireSession, requireAccountReady, createTasksEventsRouter(taskEvents));
 app.use(
   "/api/tasks",
   requireSession,
@@ -377,6 +381,7 @@ const server = app.listen(config.PORT, () =>
 );
 const shutdown = async () => {
   server.close();
+  await taskEvents.close();
   await Promise.all([db.end(), cache.quit()]);
   process.exit(0);
 };

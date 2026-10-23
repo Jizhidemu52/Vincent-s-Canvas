@@ -3,6 +3,7 @@ import ts from "typescript";
 import { randomUUID } from "node:crypto";
 import { imageResultExtension, storeImageResult } from "../src/image-result-storage";
 import { prepareImageEditInput } from "../src/image-edit-input";
+import { ApiMartImageTaskPending } from "../src/apimart-image";
 import { resolveImageResultVariants, type ImageResultAsset } from "../src/image-result-variants";
 
 const file = new URL("../src/worker.ts", import.meta.url);
@@ -66,7 +67,7 @@ test("Worker pauses a completed provider result on processing error without refu
   class VideoTaskPending extends Error {}
   class TaskExecutionLost extends Error {}
   const api = functions(["runTask"], {
-    randomUUID, TASK_LEASE_SECONDS: 180, config: { TASK_MOCK_MODE: "false" }, VideoSubmissionClaimLost, VideoTaskPending, TaskExecutionLost,
+    randomUUID, TASK_LEASE_SECONDS: 180, config: { TASK_MOCK_MODE: "false" }, VideoSubmissionClaimLost, VideoTaskPending, ApiMartImageTaskPending, TaskExecutionLost,
     db: { query: async (sql: string) => { queries.push(sql); return { rows: [task] }; } },
     cache: { incr: async () => 1, expire: async () => {}, decr: async () => {}, zAdd: async () => { queued++; } },
     createGenerationTiming: () => ({ measure: async (_stage: string, call: () => unknown) => call(), finish: () => {} }),

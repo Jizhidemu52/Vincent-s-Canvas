@@ -155,6 +155,9 @@ export class MockCanvasApi {
             return json({ changed: this.tasks.size });
         }
         if (path === "/api/tasks") return json({ tasks: [...this.tasks.values()], nextCursor: null });
+        // Most tests exercise the supported GET fallback. The stream test
+        // overrides this route with an isolated, real HTTP event stream.
+        if (path === "/api/tasks/events") return json({ error: "FIXTURE_STREAM_DISABLED" }, 404);
         if (/^\/api\/tasks\/[^/]+$/.test(path)) {
             this.taskReads.push(path);
             return json({ task: this.tasks.get(path.split("/").at(-1)!) });

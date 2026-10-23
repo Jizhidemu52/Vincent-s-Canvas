@@ -4,6 +4,7 @@ import { App, Button, Input, Segmented, Tooltip } from "antd";
 import copyToClipboard from "copy-to-clipboard";
 import { Copy, FolderOpen, History, KeyRound, Link2, LoaderCircle, PlugZap, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
+import { useShallow } from "zustand/react/shallow";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { createClientId } from "@/lib/client-id";
@@ -13,6 +14,7 @@ import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type Age
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
 import { agentMessageWindow, DEFAULT_AGENT_MESSAGE_WINDOW, expandAgentMessageWindow } from "@/lib/canvas/agent-message-window";
+import { selectLocalAgentPanelState } from "@/lib/canvas/canvas-local-agent-selection";
 
 const PANEL_MOTION_SECONDS = 0.5;
 const MAX_ATTACHMENTS = 6;
@@ -47,7 +49,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
     const user = useUserStore((state) => state.user);
     const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
-    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, messages, eventLogs, threads, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, activity, connectError, pendingTool, setAgentState, addMessage: pushMessage, addEventLog: pushEventLog, clearEventLogs } = useCanvasAgentStore();
+    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, messages, messageCount, eventLogs, eventLogCount, threads, threadCount, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, activity, connectError, pendingTool, setAgentState, addMessage: pushMessage, addEventLog: pushEventLog, clearEventLogs } = useCanvasAgentStore(useShallow(state => selectLocalAgentPanelState(state, headless, embedded)));
     const [resizing, setResizing] = useState(false);
     const [messageRenderLimit, setMessageRenderLimit] = useState(DEFAULT_AGENT_MESSAGE_WINDOW);
     const listRef = useRef<HTMLDivElement>(null);
@@ -59,7 +61,6 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
     const autoConnectRef = useRef(false);
     const connectedRef = useRef(false);
     const errorLoggedRef = useRef(false);
-    const attachmentUrlsRef = useRef(new Set<string>());
     const clientIdRef = useRef(createClientId());
     const endpoint = useMemo(() => url.trim().replace(/\/$/, ""), [url]);
     const urlAgentAutoConnect = searchParams.has("agentUrl") && searchParams.has("agentToken");
@@ -107,7 +108,6 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
     useEffect(() => {
         listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
     }, [messages, pendingTool, waiting]);
-    useEffect(() => () => attachmentUrlsRef.current.forEach((url) => URL.revokeObjectURL(url)), []);
 
     useEffect(() => {
         if (!enabled || !token.trim()) return;
@@ -202,10 +202,6 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
             const data = (await res.json()) as { threadId?: string };
             if (data.threadId) setAgentState({ activeThreadId: data.threadId });
             addEventLog("本地 Agent 已接收", { status: res.status });
-            files.forEach((item) => {
-                URL.revokeObjectURL(item.url);
-                attachmentUrlsRef.current.delete(item.url);
-            });
             setAgentState({ prompt: "", attachments: [] });
         } catch (error) {
             setAgentState({ activity: "发送失败", waiting: false });
@@ -223,16 +219,13 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         try {
             const next = await Promise.all(images.slice(0, Math.max(0, MAX_ATTACHMENTS - prev.length)).map(async (file) => {
                 const dataUrl = await readDataUrl(file);
-                const url = URL.createObjectURL(file);
-                attachmentUrlsRef.current.add(url);
-                return { id: createId(), name: file.name, type: file.type, size: file.size, url, dataUrl };
+                // The request already needs dataUrl. Reuse it for previews so a
+                // sent message or remounted panel never holds a revoked Blob URL.
+                return { id: createId(), name: file.name, type: file.type, size: file.size, url: dataUrl, dataUrl };
             }));
-            const merged = [...prev, ...next];
+            const current = useCanvasAgentStore.getState().attachments;
+            const merged = [...current, ...next.slice(0, Math.max(0, MAX_ATTACHMENTS - current.length))];
             if (attachmentPayloadBytes(merged) > MAX_ATTACHMENT_PAYLOAD_BYTES) {
-                next.forEach((item) => {
-                    URL.revokeObjectURL(item.url);
-                    attachmentUrlsRef.current.delete(item.url);
-                });
                 addMessage({ role: "error", title: "图片过大", text: "图片附件最多约 30MB。" });
                 return;
             }
@@ -243,12 +236,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
     };
 
     const removeAttachment = (id: string) => {
-        const removed = attachments.find((item) => item.id === id);
-        if (removed) {
-            URL.revokeObjectURL(removed.url);
-            attachmentUrlsRef.current.delete(removed.url);
-        }
-        setAgentState({ attachments: attachments.filter((item) => item.id !== id) });
+        setAgentState({ attachments: useCanvasAgentStore.getState().attachments.filter(item => item.id !== id) });
     };
 
     const handleToolCall = async (endpoint: string, token: string, payload: AgentPendingToolCall) => {
@@ -502,8 +490,8 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                 items={[
                     { value: "setup", label: "连接", icon: <PlugZap className="size-3.5" /> },
                     { value: "chat", label: "对话" },
-                    { value: "history", label: "历史", icon: <History className="size-3.5" />, count: threads.length },
-                    { value: "log", label: "日志", icon: <Terminal className="size-3.5" />, count: eventLogs.length },
+                    { value: "history", label: "历史", icon: <History className="size-3.5" />, count: threadCount },
+                    { value: "log", label: "日志", icon: <Terminal className="size-3.5" />, count: eventLogCount },
                 ]}
                 onChange={(activeTab) => {
                     setAgentState({ activeTab });
@@ -548,7 +536,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                 <AgentLogView
                     logs={eventLogs}
                     theme={theme}
-                    context={{ endpoint, connected, enabled, activity, waiting, sending, messages: messages.length, pendingTool: pendingTool?.name }}
+                    context={{ endpoint, connected, enabled, activity, waiting, sending, messages: messageCount, pendingTool: pendingTool?.name }}
                     onClear={clearEventLogs}
                     onCopied={(text) => message.success(text)}
                     onCopyBlocked={(text) => message.warning(text)}

@@ -31,7 +31,7 @@ const productionCode = ts.transpileModule([
     "updateDemoTask", "finishDemoTaskFailure", "pauseDemoTaskForStorageFailure",
   ]),
   await declarations("../src/apimart-image.ts", [
-    "runApiMartImageTask", "readTaskId", "readStatus", "readOutputUrls", "readFailureMessage", "providerMessage", "object", "string",
+    "runApiMartImageTask", "stepApiMartImageTask", "readTaskId", "readStatus", "readOutputUrls", "readFailureMessage", "providerMessage", "object", "string",
     "IMAGE_STATUSES", "IMAGE_FAILURE_STATUSES", "isMarkImageModel", "MARK_IMAGE_MODELS",
   ]),
 ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;

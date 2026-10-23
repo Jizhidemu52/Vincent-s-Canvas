@@ -23,7 +23,7 @@ import {
 } from "./media-runtime";
 import { recordAssetEvent } from "./asset-events";
 import { classifyDesignDirection } from "./design-direction";
-import { ApiMartImageProviderFailure, runApiMartImageTask } from "./apimart-image";
+import { ApiMartImageProviderFailure, ApiMartImageTaskPending, stepApiMartImageTask } from "./apimart-image";
 import { videoSourceMetadata, type ProviderVideoSource } from "./video-models";
 import { probeMediaBytes } from "./media-probe";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
@@ -160,7 +160,7 @@ async function runTask(taskId: string) {
     });
     outcome = "success";
   } catch (error) {
-    if (error instanceof VideoTaskPending) {
+    if (error instanceof VideoTaskPending || error instanceof ApiMartImageTaskPending) {
       // Keep the model's upstream-inflight reservation, release only this
       // execution slot. A later short invocation queries the persisted ID.
       keepModelSlot = true;
@@ -377,11 +377,26 @@ async function executeApiMartImage(
   task: WorkRow,
   credentials: Record<string, string>,
 ) {
+  if (task.upstream_task_id) {
+    // Backfill deadlines for image tasks submitted by the old blocking worker.
+    // Subsequent queue invocations must retain the same deadline, not restart it.
+    if (!task.poll_deadline_at) {
+      const initialized = await db.query<{ poll_deadline_at: string }>(
+        "UPDATE tasks SET poll_deadline_at=COALESCE(poll_deadline_at,now()+interval '15 minutes'),updated_at=now() WHERE id=$1 AND execution_token=$2 AND status='processing' RETURNING poll_deadline_at",
+        [task.id, task.execution_token],
+      );
+      if (!initialized.rows[0]) throw new VideoSubmissionClaimLost("任务查询权已改变");
+      task.poll_deadline_at = initialized.rows[0].poll_deadline_at;
+    }
+    if (new Date(task.poll_deadline_at).getTime() <= Date.now()) {
+      throw new Error("图片状态查询超时；可恢复查询原任务，不会重新生成");
+    }
+  }
   const sourceAssets = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id);
   const editInput = sourceAssets.length ? await prepareImageEditInput(sourceAssets, task.parameters, {
     protocol: "apimart", modelId: task.model_id!, operationType: task.operation_type,
   }) : { references: sourceAssets };
-  const outputUrls = await runApiMartImageTask({
+  const result = await stepApiMartImageTask({
     baseUrl: task.base_url!,
     apiKey: credentials.apiKey || "",
     modelId: task.model_id!,
@@ -399,11 +414,12 @@ async function executeApiMartImage(
     },
     onSubmitted: async (id) => {
       task.upstream_task_id = id;
-      const persisted = await db.query("UPDATE tasks SET upstream_task_id=$1,updated_at=now() WHERE id=$2 AND (upstream_task_id IS NULL OR upstream_task_id=$1) RETURNING id", [id, task.id]);
+      const persisted = await db.query("UPDATE tasks SET upstream_task_id=$1,poll_deadline_at=COALESCE(poll_deadline_at,now()+interval '15 minutes'),updated_at=now() WHERE id=$2 AND (upstream_task_id IS NULL OR upstream_task_id=$1) RETURNING id", [id, task.id]);
       if (!persisted.rows[0]) throw new VideoSubmissionClaimLost("原上游任务身份已改变");
     },
   });
-  return Promise.all(outputUrls.map(url => fetchProviderResult(url)));
+  if (result.status === "pending") throw new ApiMartImageTaskPending(result.nextPollMs);
+  return Promise.all(result.urls.map(url => fetchProviderResult(url)));
 }
 
 async function executeOpenAiAudio(

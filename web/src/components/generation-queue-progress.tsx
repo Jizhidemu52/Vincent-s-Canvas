@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getQueuedTaskProgress, type QueuedTaskProgress } from "@/services/api/generation-tasks";
 import { useUserStore } from "@/stores/use-user-store";
+import { watchTaskEvents } from "@/services/api/task-events";
 
 type ProgressView = { progress: QueuedTaskProgress | null; unavailable: boolean };
 
@@ -10,12 +11,11 @@ export function watchGenerationProgress(
     publish: (view: ProgressView) => void,
     visibility: Pick<Document, "hidden" | "addEventListener" | "removeEventListener"> = document,
     load = getQueuedTaskProgress,
-    intervalMs = 5_000,
+    intervalMs = 15_000,
 ) {
     let disposed = false, terminal = false, controller: AbortController | null = null;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    const events = watchTaskEvents([taskId]);
     const stopRequest = () => {
-        clearTimeout(timer);
         controller?.abort();
         controller = null;
     };
@@ -23,6 +23,7 @@ export function watchGenerationProgress(
         if (disposed || terminal || visibility.hidden || controller) return;
         const current = new AbortController();
         controller = current;
+        const revision = events.version;
         try {
             const progress = await load(taskId, current.signal);
             if (disposed || current.signal.aborted) return;
@@ -31,9 +32,13 @@ export function watchGenerationProgress(
         } catch {
             if (!disposed && !current.signal.aborted) publish({ progress: null, unavailable: true });
         } finally {
-            if (controller === current) controller = null;
-            if (!disposed && !current.signal.aborted && !terminal && !visibility.hidden)
-                timer = setTimeout(() => void poll(), intervalMs);
+            if (!disposed && !current.signal.aborted && !terminal && !visibility.hidden) {
+                try { await events.next(revision, intervalMs, current.signal, 5_000); }
+                catch { if (!current.signal.aborted) terminal = true; }
+                if (controller === current) controller = null;
+                if (!disposed && !current.signal.aborted && !terminal && !visibility.hidden) void poll();
+            } else if (controller === current) controller = null;
+            if (terminal) events.close();
         }
     };
     const onVisibility = () => {
@@ -45,6 +50,7 @@ export function watchGenerationProgress(
     return () => {
         disposed = true;
         stopRequest();
+        events.close();
         visibility.removeEventListener("visibilitychange", onVisibility);
     };
 }

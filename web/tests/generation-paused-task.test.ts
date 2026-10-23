@@ -41,7 +41,9 @@ test.each([false, true])("an image task paused after interruption stops waiting 
             };
             return Response.json(path === "/api/tasks" ? { tasks: [task] } : { task });
         }
-        if (path === "/api/auth/session") return Response.json({ message: "test session" }, { status: 401 });
+        // Balance refresh must preserve the session: a 401 intentionally stops
+        // the new owner-bound observer before a second task query can occur.
+        if (path === "/api/auth/session") return Response.json({ user: { id: "employee-a", role: "designer", status: "active" } });
         throw new Error(`Unexpected request: ${path}`);
     }) as typeof fetch;
     const failure = await requestQueuedImages({ modelId: "gpt-image-2.5-flare", prompt: "生成一朵花", count: 1, operationType: "image_generation" }).catch((error: unknown) => error);

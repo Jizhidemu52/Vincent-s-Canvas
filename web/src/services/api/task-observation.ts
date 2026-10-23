@@ -25,12 +25,15 @@ export async function observeTask<T>(options: {
     taskIds?: string[];
     now?: () => number;
     delay?: typeof observationDelay;
+    ready?: (remainingMs: number, signal?: AbortSignal) => Promise<void>;
+    waitForChange?: (remainingMs: number, signal?: AbortSignal) => Promise<void>;
 }) {
     const now = options.now || Date.now;
     const deadline = now() + (options.timeoutMs ?? 15 * 60_000);
     let failures = 0;
     for (;;) {
         options.signal?.throwIfAborted();
+        await options.ready?.(Math.max(0, deadline - now()), options.signal);
         const remaining = deadline - now();
         if (remaining <= 0) throw new TaskObservationStoppedError("timeout", options.taskIds);
         const timeoutSignal = AbortSignal.timeout(Math.max(1, Math.min(20_000, remaining)));
@@ -44,6 +47,7 @@ export async function observeTask<T>(options: {
             continue;
         }
         if (options.done(value)) return value;
-        await (options.delay || observationDelay)(Math.min(options.intervalMs ?? 2_500, Math.max(0, deadline - now())), options.signal);
+        if (options.waitForChange) await options.waitForChange(Math.max(0, deadline - now()), options.signal);
+        else await (options.delay || observationDelay)(Math.min(options.intervalMs ?? 2_500, Math.max(0, deadline - now())), options.signal);
     }
 }

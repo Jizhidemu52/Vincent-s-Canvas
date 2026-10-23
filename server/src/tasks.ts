@@ -296,7 +296,7 @@ export async function transitionTask(
     await removeQueuedTask(cache, taskId);
   } else if (action === "resume") {
     const changed = await db.query(
-      "UPDATE tasks SET status='waiting',available_at=now(),execution_token=NULL,lease_expires_at=NULL,poll_deadline_at=CASE WHEN operation_type='video_generation' AND upstream_task_id IS NOT NULL THEN now()+interval '20 minutes' ELSE poll_deadline_at END,updated_at=now() WHERE id=$1 AND status='paused' AND (upstream_task_id IS NOT NULL OR (upstream_submission_started_at IS NULL AND (operation_type='video_generation' OR attempts=0))) RETURNING id",
+      "UPDATE tasks SET status='waiting',available_at=now(),execution_token=NULL,lease_expires_at=NULL,poll_deadline_at=CASE WHEN upstream_task_id IS NOT NULL THEN now()+CASE WHEN operation_type='video_generation' THEN interval '20 minutes' ELSE interval '15 minutes' END ELSE poll_deadline_at END,updated_at=now() WHERE id=$1 AND status='paused' AND (upstream_task_id IS NOT NULL OR (upstream_submission_started_at IS NULL AND (operation_type='video_generation' OR attempts=0))) RETURNING id",
       [taskId],
     );
     if (!changed.rows[0]) return null;

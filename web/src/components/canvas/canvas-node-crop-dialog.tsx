@@ -1,33 +1,45 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Button, Modal } from "antd";
-import { Check, Lock, LockOpen, X } from "lucide-react";
+import { Button, Modal, Select } from "antd";
+import { Check, X } from "lucide-react";
 
 import { readImageMeta } from "@/lib/image-utils";
-
-export type CanvasImageCropRect = {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-};
+import { fitCropRatio, moveCrop, resizeCrop, type CanvasCropHandle as ResizeHandle, type CanvasImageCropRect } from "@/lib/canvas/canvas-crop-geometry";
+export type { CanvasImageCropRect } from "@/lib/canvas/canvas-crop-geometry";
 
 type DragMode = "move" | "resize";
-type ResizeHandle = "n" | "e" | "s" | "w" | "ne" | "nw" | "se" | "sw";
 
 const handles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
-const minSize = 0.06;
 const defaultCrop = { x: 0.12, y: 0.12, width: 0.76, height: 0.76 };
+const ratioOptions = [
+    { value: "free", label: "自由比例" }, { value: "original", label: "原图比例" },
+    ...["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"].map(value => ({ value, label: value })),
+];
+const handleNames: Record<ResizeHandle, string> = { n: "上", e: "右", s: "下", w: "左", ne: "右上", nw: "左上", se: "右下", sw: "左下" };
 
 export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (crop: CanvasImageCropRect) => void }) {
     const boxRef = useRef<HTMLDivElement>(null);
+    const dragCleanupRef = useRef<(() => void) | null>(null);
     const [crop, setCrop] = useState<CanvasImageCropRect>(defaultCrop);
-    const [locked, setLocked] = useState(false);
+    const [ratioKey, setRatioKey] = useState("free");
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
     const [imageError, setImageError] = useState("");
     const cropSize = image ? { width: Math.max(1, Math.round(crop.width * image.width)), height: Math.max(1, Math.round(crop.height * image.height)) } : null;
+    const normalizedRatio = (key: string) => {
+        if (key === "free" || !image) return null;
+        if (key === "original") return 1;
+        const [width, height] = key.split(":").map(Number);
+        return (width! / height!) / (image.width / image.height);
+    };
+    const changeRatio = (key: string) => {
+        dragCleanupRef.current?.();
+        setRatioKey(key);
+        const ratio = normalizedRatio(key);
+        if (ratio !== null) setCrop(current => fitCropRatio(current, ratio));
+    };
 
     useEffect(() => {
-        if (open) setCrop(defaultCrop);
+        if (open) { setCrop(defaultCrop); setRatioKey("free"); }
+        return () => { dragCleanupRef.current?.(); };
     }, [dataUrl, open]);
 
     useEffect(() => {
@@ -44,21 +56,26 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
 
     const startDrag = (mode: DragMode, event: ReactPointerEvent, handle?: ResizeHandle) => {
         const box = boxRef.current?.getBoundingClientRect();
-        if (!box) return;
+        if (!image || !box?.width || !box.height) return;
         event.preventDefault();
         event.stopPropagation();
+        dragCleanupRef.current?.();
         const start = { x: event.clientX, y: event.clientY, crop };
         const move = (event: PointerEvent) => {
             const dx = (event.clientX - start.x) / box.width;
             const dy = (event.clientY - start.y) / box.height;
-            setCrop(mode === "move" ? moveCrop(start.crop, dx, dy) : resizeCrop(start.crop, dx, dy, handle || "se", locked, box));
+            setCrop(mode === "move" ? moveCrop(start.crop, dx, dy) : resizeCrop(start.crop, dx, dy, handle || "se", normalizedRatio(ratioKey)));
         };
         const up = () => {
             document.removeEventListener("pointermove", move);
             document.removeEventListener("pointerup", up);
+            document.removeEventListener("pointercancel", up);
+            dragCleanupRef.current = null;
         };
         document.addEventListener("pointermove", move);
         document.addEventListener("pointerup", up);
+        document.addEventListener("pointercancel", up);
+        dragCleanupRef.current = up;
     };
 
     return (
@@ -66,16 +83,21 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
             <div className="space-y-4">
                 {imageError ? <div role="alert" className="text-sm">{imageError}</div> : null}
                 <div className="flex justify-center">
-                    <div ref={boxRef} className="relative inline-block max-w-full overflow-hidden rounded-lg bg-black select-none">
+                    <div ref={boxRef} className="relative inline-block max-w-full touch-none overflow-hidden rounded-lg bg-black select-none">
                         <img src={dataUrl} alt="" className="block max-h-[62vh] max-w-full opacity-90" draggable={false} />
                         <CropMask crop={crop} />
-                        <div className="absolute cursor-move border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,.3),0_0_28px_rgba(0,0,0,.28)]" style={cropStyle(crop)} onPointerDown={(event) => startDrag("move", event)}>
+                        <div aria-label="裁剪选区" className="absolute cursor-move border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,.3),0_0_28px_rgba(0,0,0,.28)]" style={cropStyle(crop)} onPointerDown={(event) => startDrag("move", event)}>
                             <div className="pointer-events-none absolute inset-x-0 top-1/3 border-t border-white/50" />
                             <div className="pointer-events-none absolute inset-x-0 top-2/3 border-t border-white/50" />
                             <div className="pointer-events-none absolute inset-y-0 left-1/3 border-l border-white/50" />
                             <div className="pointer-events-none absolute inset-y-0 left-2/3 border-l border-white/50" />
                             {handles.map((handle) => (
-                                <button key={handle} type="button" className="absolute size-3 rounded-full border border-black bg-white" style={handleStyle(handle)} onPointerDown={(event) => startDrag("resize", event, handle)} aria-label="调整裁剪框" />
+                                <button key={handle} type="button" disabled={!image} className="absolute size-3 rounded-full border border-black bg-white" style={handleStyle(handle)} onPointerDown={(event) => startDrag("resize", event, handle)} aria-label={`调整裁剪框${handleNames[handle]}`} onKeyDown={event => {
+                                    const delta = event.shiftKey ? 0.05 : 0.01;
+                                    const dx = event.key === "ArrowLeft" ? -delta : event.key === "ArrowRight" ? delta : 0;
+                                    const dy = event.key === "ArrowUp" ? -delta : event.key === "ArrowDown" ? delta : 0;
+                                    if (dx || dy) { event.preventDefault(); event.stopPropagation(); setCrop(current => resizeCrop(current, dx, dy, handle, normalizedRatio(ratioKey))); }
+                                }} />
                             ))}
                         </div>
                     </div>
@@ -91,13 +113,11 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
                             </span>
                         ) : null}
                     </div>
-                    <Button icon={locked ? <Lock className="size-4" /> : <LockOpen className="size-4" />} onClick={() => setLocked((value) => !value)}>
-                        {locked ? "锁定比例" : "自由比例"}
-                    </Button>
+                    <Select aria-label="裁剪比例" className="min-w-32" value={ratioKey} options={ratioOptions} disabled={!image} onChange={changeRatio} />
                 </div>
 
                 <div className="flex items-center justify-end gap-2">
-                    <Button onClick={() => setCrop(defaultCrop)}>重置</Button>
+                    <Button onClick={() => { dragCleanupRef.current?.(); setCrop(defaultCrop); setRatioKey("free"); }}>重置</Button>
                     <Button icon={<X className="size-4" />} onClick={onClose}>
                         取消
                     </Button>
@@ -121,36 +141,6 @@ function CropMask({ crop }: { crop: CanvasImageCropRect }) {
     );
 }
 
-function moveCrop(crop: CanvasImageCropRect, dx: number, dy: number): CanvasImageCropRect {
-    return { ...crop, x: clamp(crop.x + dx, 0, 1 - crop.width), y: clamp(crop.y + dy, 0, 1 - crop.height) };
-}
-
-function resizeCrop(crop: CanvasImageCropRect, dx: number, dy: number, handle: ResizeHandle, locked: boolean, box: DOMRect): CanvasImageCropRect {
-    let next = { ...crop };
-    if (handle.includes("e")) next.width = crop.width + dx;
-    if (handle.includes("s")) next.height = crop.height + dy;
-    if (handle.includes("w")) {
-        next.x = crop.x + dx;
-        next.width = crop.width - dx;
-    }
-    if (handle.includes("n")) {
-        next.y = crop.y + dy;
-        next.height = crop.height - dy;
-    }
-    if (locked) {
-        const size = Math.max(next.width * box.width, next.height * box.height);
-        next.width = size / box.width;
-        next.height = size / box.height;
-        if (handle.includes("w")) next.x = crop.x + crop.width - next.width;
-        if (handle.includes("n")) next.y = crop.y + crop.height - next.height;
-    }
-    next.width = clamp(next.width, minSize, 1);
-    next.height = clamp(next.height, minSize, 1);
-    next.x = clamp(next.x, 0, 1 - next.width);
-    next.y = clamp(next.y, 0, 1 - next.height);
-    return next;
-}
-
 function cropStyle(crop: CanvasImageCropRect) {
     return { left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.width * 100}%`, height: `${crop.height * 100}%` };
 }
@@ -159,10 +149,6 @@ function handleStyle(handle: ResizeHandle) {
     const top = handle.includes("n") ? "-6px" : handle.includes("s") ? "calc(100% - 6px)" : "calc(50% - 6px)";
     const left = handle.includes("w") ? "-6px" : handle.includes("e") ? "calc(100% - 6px)" : "calc(50% - 6px)";
     return { top, left, cursor: `${handle}-resize` };
-}
-
-function clamp(value: number, min: number, max: number) {
-    return Math.min(max, Math.max(min, value));
 }
 
 function formatRatio(width: number, height: number) {

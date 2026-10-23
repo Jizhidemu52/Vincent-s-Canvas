@@ -317,7 +317,11 @@ export class ApiMartImageProviderFailure extends Error {
   readonly code = "PROVIDER_TERMINAL_FAILURE";
 }
 
-export async function runApiMartImageTask(input: ApiMartImageInput & {
+export class ApiMartImageTaskPending extends Error {
+  constructor(public readonly nextPollMs = 2_000) { super("图片仍在生成，等待下一次状态查询"); }
+}
+
+export type ApiMartImageTaskInput = ApiMartImageInput & {
   baseUrl: string;
   apiKey: string;
   /** Stable local task UUID; Grok requires it before a new paid submission. */
@@ -326,10 +330,19 @@ export async function runApiMartImageTask(input: ApiMartImageInput & {
   submissionStarted?: boolean;
   beforeSubmit?: () => void | Promise<void>;
   onSubmitted?: (taskId: string) => void | Promise<void>;
-}, runtime: {
+};
+
+type ImageRuntime = {
   fetch?: (url: string, init?: RequestInit) => Promise<Response>;
   sleep?: (ms: number) => Promise<unknown>;
-} = {}): Promise<string[]> {
+};
+
+export type ApiMartImageTaskStep =
+  | { status: "pending"; upstreamTaskId: string; nextPollMs: number }
+  | { status: "completed"; upstreamTaskId: string; urls: string[] };
+
+/** One paid submission OR one status query; durable workers schedule the next step. */
+export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime: ImageRuntime = {}): Promise<ApiMartImageTaskStep> {
   if (!input.apiKey.trim()) throw new Error("APIMart 服务端 API Key 未配置");
   const kind = apiMartImageModel(input.modelId);
   if (!kind) throw new Error(`不支持的 APIMart 图片模型：${input.modelId}`);
@@ -344,7 +357,6 @@ export async function runApiMartImageTask(input: ApiMartImageInput & {
   const wait = runtime.sleep || sleep;
   let taskId = input.upstreamTaskId?.trim();
   let pollIntervalMs = kind === "gemini-nano-banana-2.1" ? 3_000 : 2_000;
-  let timeoutMs = 15 * 60_000;
   if (!taskId) {
     if (input.submissionStarted) throw new Error("图片提交状态未知；为避免重复收费，不会自动重新提交，请核查上游任务");
     if (kind === "grok-imagine-image-2.0") {
@@ -366,7 +378,6 @@ export async function runApiMartImageTask(input: ApiMartImageInput & {
       request.payload.image_urls = references;
     }
     pollIntervalMs = request.pollIntervalMs;
-    timeoutMs = request.timeoutMs;
     // Persist the intent immediately before the paid POST. Never retry a POST here.
     await input.beforeSubmit?.();
     const submit = await (runtime.fetch || fetchProviderSubmission)(`${baseUrl}${request.path}`, {
@@ -380,24 +391,34 @@ export async function runApiMartImageTask(input: ApiMartImageInput & {
     if (!taskId) throw Object.assign(new Error("APIMart 图片任务未返回 task_id；请核查上游状态，不会自动重新提交"), { code: "PROVIDER_TASK_ID_MISSING" });
     // A failed persistence callback must stop before GET; the caller retains the submission intent.
     await input.onSubmitted?.(taskId);
+    return { status: "pending", upstreamTaskId: taskId, nextPollMs: pollIntervalMs };
   }
 
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await wait(pollIntervalMs);
-    const statusResponse = await queryProviderTaskStatus(`${baseUrl}/tasks/${encodeURIComponent(taskId)}`, queryHeaders, { fetch: poll, sleep: wait });
-    if (!statusResponse.ok) throw Object.assign(new Error(`APIMart 图片任务状态查询失败：${statusResponse.status} ${await providerMessage(statusResponse, input.apiKey)}`), { code: "PROVIDER_POLL_HTTP_ERROR", httpStatus: statusResponse.status });
-    const statusPayload = await statusResponse.json();
-    const status = readStatus(statusPayload);
-    if (IMAGE_FAILURE_STATUSES.has(status)) throw new ApiMartImageProviderFailure(redactProviderCredential(readFailureMessage(statusPayload), input.apiKey) || "APIMart 图片任务失败");
-    if (status === "completed") {
-      const outputs = readOutputUrls(statusPayload);
-      if (!outputs.length) throw Object.assign(new Error("APIMart 图片任务完成但没有结果图片；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_RESULT_MISSING" });
-      if ((isMarkImageModel(kind) || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0") && outputs.some(url => !isPublicHttpUrl(url))) throw Object.assign(new Error("APIMart 图片任务返回了无效结果地址；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_RESULT_URL_INVALID" });
-      return outputs;
-    }
-    if (!IMAGE_STATUSES.has(status)) throw Object.assign(new Error(`APIMart 返回了未知任务状态：${status || "缺失"}`), { code: "PROVIDER_STATUS_INVALID" });
+  const statusResponse = await queryProviderTaskStatus(`${baseUrl}/tasks/${encodeURIComponent(taskId)}`, queryHeaders, { fetch: poll, sleep: wait });
+  if (!statusResponse.ok) throw Object.assign(new Error(`APIMart 图片任务状态查询失败：${statusResponse.status} ${await providerMessage(statusResponse, input.apiKey)}`), { code: "PROVIDER_POLL_HTTP_ERROR", httpStatus: statusResponse.status });
+  const statusPayload = await statusResponse.json();
+  const status = readStatus(statusPayload);
+  if (IMAGE_FAILURE_STATUSES.has(status)) throw new ApiMartImageProviderFailure(redactProviderCredential(readFailureMessage(statusPayload), input.apiKey) || "APIMart 图片任务失败");
+  if (status === "completed") {
+    const outputs = readOutputUrls(statusPayload);
+    if (!outputs.length) throw Object.assign(new Error("APIMart 图片任务完成但没有结果图片；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_RESULT_MISSING" });
+    if ((isMarkImageModel(kind) || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0") && outputs.some(url => !isPublicHttpUrl(url))) throw Object.assign(new Error("APIMart 图片任务返回了无效结果地址；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_RESULT_URL_INVALID" });
+    return { status: "completed", upstreamTaskId: taskId, urls: outputs };
   }
+  if (!IMAGE_STATUSES.has(status)) throw Object.assign(new Error(`APIMart 返回了未知任务状态：${status || "缺失"}`), { code: "PROVIDER_STATUS_INVALID" });
+  return { status: "pending", upstreamTaskId: taskId, nextPollMs: pollIntervalMs };
+}
+
+/** Demo/single-request callers retain the blocking convenience API. */
+export async function runApiMartImageTask(input: ApiMartImageTaskInput, runtime: ImageRuntime = {}): Promise<string[]> {
+  const wait = runtime.sleep || sleep;
+  let result = await stepApiMartImageTask(input, runtime);
+  const deadline = Date.now() + 15 * 60_000;
+  while (result.status === "pending" && Date.now() < deadline) {
+    await wait(result.nextPollMs);
+    result = await stepApiMartImageTask({ ...input, upstreamTaskId: result.upstreamTaskId, submissionStarted: true }, runtime);
+  }
+  if (result.status === "completed") return result.urls;
   throw Object.assign(new Error("APIMart 图片任务状态查询超时；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_POLL_TIMEOUT" });
 }
 

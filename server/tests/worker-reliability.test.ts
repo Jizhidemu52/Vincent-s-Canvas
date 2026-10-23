@@ -4,7 +4,7 @@ import { queueScore } from "../src/tasks";
 import { renewTaskLease, TaskExecutionLost } from "../src/model-concurrency";
 import { ProviderSubmissionRejected, isDefinitiveSubmissionRejection, submissionWasNotSent } from "../src/provider-submission-policy";
 import { VideoProviderFailure, VideoSubmissionClaimLost, VideoTaskPending } from "../src/media-runtime";
-import { ApiMartImageProviderFailure } from "../src/apimart-image";
+import { ApiMartImageProviderFailure, ApiMartImageTaskPending } from "../src/apimart-image";
 import { buildOpenAiAudioRequest } from "../src/media-runtime";
 import { normalizeWorkflowOutputs, readPath } from "../src/workflow-runtime";
 
@@ -182,7 +182,7 @@ test.each(["network", "http_started", "initial_tls", "rejected"])("paid submissi
     acquireModelLease: async () => ({}), releaseModelLease: async () => { releasedSlots++; },
     startTaskLeaseHeartbeat: () => ({ assertOwned() {}, stop: async () => {} }),
     createGenerationTiming: () => ({ measure: async (_name: string, run: () => unknown) => run(), finish: (outcome: string) => outcomes.push(outcome) }),
-    executeProvider: async () => { throw error; }, VideoTaskPending, VideoSubmissionClaimLost, TaskExecutionLost,
+    executeProvider: async () => { throw error; }, VideoTaskPending, ApiMartImageTaskPending, VideoSubmissionClaimLost, TaskExecutionLost,
     VideoProviderFailure, ApiMartImageProviderFailure, ProviderSubmissionRejected, submissionWasNotSent,
     readProviderSubmissionDiagnostics: () => undefined, canAutomaticallyRetryTask: () => false,
     withTransaction: async (_db: unknown, action: (client: unknown) => Promise<unknown>) => action(db),
