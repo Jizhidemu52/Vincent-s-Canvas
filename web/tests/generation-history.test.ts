@@ -93,6 +93,7 @@ test("scene and mask input restoration rejects altered bytes and unarchived old 
     const original = new Blob(["original-selection"], { type: "image/png" });
     const input = { id: "mask", name: "选区.png", type: "image/png", dataUrl: `data:image/png;base64,${Buffer.from("original-selection").toString("base64")}`, inputSha256: await fingerprintImage(original) };
     const restored = await restoreLocalInput(input);
+    expect(restored.dataUrl).toBe(input.dataUrl);
     expect(await (await originalFetch(restored.dataUrl)).text()).toBe("original-selection");
     URL.revokeObjectURL(restored.dataUrl);
     await expect(restoreLocalInput({ ...input, dataUrl: `data:image/png;base64,${Buffer.from("modified-selection").toString("base64")}` })).rejects.toThrow("字节已改变");

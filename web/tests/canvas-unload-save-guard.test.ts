@@ -21,8 +21,8 @@ function harness(editorPending: boolean, storagePending: boolean, fail = false) 
         visibilityState: "visible",
     };
     const queue = { hasPending: () => editorPending, flush: () => { calls.push("editor"); editorPending = false; } };
-    const cleanup = new Function("window", "document", "projectSaveQueueRef", "hasPendingCanvasPersistence", "flushCanvasPersistence", `${code}\nreturn install();`)(
-        target, target, { current: queue }, () => storagePending,
+    const cleanup = new Function("window", "document", "projectSaveQueueRef", "viewportSaveQueueRef", "hasPendingCanvasPersistence", "flushCanvasPersistence", `${code}\nreturn install();`)(
+        target, target, { current: queue }, { current: null }, () => storagePending,
         () => { calls.push("store"); return fail ? Promise.reject(new Error("disk unavailable")) : Promise.resolve(); },
     );
     const refresh = () => {

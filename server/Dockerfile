@@ -3,8 +3,8 @@ WORKDIR /app
 RUN apk add --no-cache ffmpeg nodejs ca-certificates \
     && node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (process.versions.bun || !((major === 22 && minor >= 21) || (major === 24 && minor >= 5) || major >= 25)) { console.error("Native Node.js 22.21+, 24.5+, or >=25 is required for explicit proxy support; found " + process.version); process.exit(1); }'
 COPY server/package.json server/bun.lock* ./
-RUN bun install --frozen-lockfile
-COPY server ./
+RUN bun install --frozen-lockfile --production
+COPY server/src ./src
 COPY shared /shared
 RUN cd /shared && bun install --frozen-lockfile --production
 EXPOSE 3100

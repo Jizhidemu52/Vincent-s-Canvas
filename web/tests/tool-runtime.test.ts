@@ -231,9 +231,11 @@ describe("formal tool model consumption", () => {
     });
 
     test("a newly created video task reports its effective bound model for recovery metadata", async () => {
-        mockServer(business(binding("canvas-video", video.id)));
+        const requests = mockServer(business(binding("canvas-video", video.id)));
         const task = await createVideoGenerationTask({ ...defaultConfig, model: "old-selected-model" }, "walk", [], [], [], { toolKey: "canvas-video" });
-        expect(task).toEqual({ id: "task-1", provider: "server", model: video.modelId });
+        const submission = requests.find(request => request.path === "/api/tasks" && request.body);
+        expect(submission?.body?.requestId).toEqual(expect.any(String));
+        expect(task).toEqual({ id: "task-1", provider: "server", model: video.modelId, requestId: submission!.body!.requestId });
     });
 
     test("canvas audio resolves its own binding exactly once and returns the result bytes", async () => {

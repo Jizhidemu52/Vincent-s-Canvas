@@ -3,7 +3,7 @@ import { singleImageTaskParameters } from "./image-task-policy";
 import { BillingError, reserveCredits, settleReservation, type PriceSnapshot } from "./billing";
 import type { Cache, Database } from "./db";
 import { withTransaction } from "./db-transaction";
-import { preflightStoredVideoTask } from "./stored-video-preflight";
+import { preflightStoredVideoTask, validateStoredVideoPreflightSnapshot } from "./stored-video-preflight";
 import { resolveToolExecution, type ToolConfiguration } from "./tool-configuration";
 import { removeQueuedTask, scheduleQueuedTask } from "./task-queue";
 
@@ -89,10 +89,12 @@ export async function enqueueTask(
   db: Database,
   cache: Cache,
   input: TaskInput,
+  videoPreflight = preflightStoredVideoTask,
 ) {
   input.parameters = singleImageTaskParameters(input.operationType, input.parameters);
   const taskId = randomUUID();
-  const task = await withTransaction(db, async (client) => {
+  let preparedVideo: { execution: ToolConfiguration & { modelConfigId: string }; checked: Awaited<ReturnType<typeof preflightStoredVideoTask>> } | undefined;
+  const admit = () => withTransaction(db, async (client) => {
     // Count and admission must share one per-user transaction lock. In particular,
     // a parallel batch cannot make every item observe the same remaining slot.
     await client.query("SELECT pg_advisory_xact_lock(hashtext('user-inflight-quota'),hashtext($1))", [input.userId]);
@@ -122,6 +124,9 @@ export async function enqueueTask(
     if (active.rows[0]!.count >= maxInflightTasks) {
       throw new BillingError("USER_TASK_LIMIT_REACHED", `在途任务已达到 ${maxInflightTasks} 个上限，请等待任务完成或取消未提交的任务`);
     }
+    // Finish the cheap duplicate/quota check before doing any external I/O.
+    // The second transaction repeats those checks before atomic insert + hold.
+    if (input.operationType === "video_generation" && !preparedVideo) return null;
     const inserted = await client.query<{ id: string; queuedAt: string; availableAt: string }>(
       `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,credits,rmb_cost)
            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,0)
@@ -153,8 +158,9 @@ export async function enqueueTask(
     input.parameters = { ...input.parameters, tool: execution.toolKey };
     await client.query("UPDATE tasks SET model_config_id=$1,tool_key=$2,parameters=$3 WHERE id=$4", [input.modelConfigId, input.toolKey, input.parameters, taskId]);
     if (input.operationType === "video_generation") {
-      const checked = await preflightStoredVideoTask(client, input);
-      input.parameters = { ...input.parameters, ...checked.normalized };
+      if (!preparedVideo || execution.modelConfigId !== preparedVideo.execution.modelConfigId) throw new BillingError("INVALID_VIDEO_INPUT", "视频模型已变化，请重新提交；尚未扣费");
+      await validateStoredVideoPreflightSnapshot(client, input, preparedVideo.checked.snapshot);
+      input.parameters = { ...input.parameters, ...preparedVideo.checked.normalized };
       await client.query("UPDATE tasks SET parameters=$1 WHERE id=$2", [input.parameters, taskId]);
     }
     const reservation = await reserveCredits(db, {
@@ -187,6 +193,14 @@ export async function enqueueTask(
       queueTimestamp: new Date(inserted.rows[0].queuedAt).getTime(),
     };
   });
+  let task = await admit();
+  if (!task) {
+    const execution = input.toolConfiguration ?? await resolveToolExecution(db, input);
+    const checked = await videoPreflight(db, { ...input, modelConfigId: execution.modelConfigId, parameters: { ...input.parameters, tool: execution.toolKey } });
+    preparedVideo = { execution, checked };
+    task = await admit();
+    if (!task) throw new Error("视频预检状态丢失");
+  }
   if (task.shouldQueue) {
     await scheduleQueuedTask(cache, task.task.id, queueScore(task.queuePriority, task.queueTimestamp), task.queueAvailableAt);
   }

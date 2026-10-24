@@ -25,6 +25,7 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { readClipboardImages } from "@/lib/clipboard-images";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { toolModeOperation, type AdminToolMode } from "@/lib/admin-domain";
 import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
@@ -430,12 +431,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
     const addReferencesFromClipboard = async () => {
         try {
-            const items = await navigator.clipboard.read();
-            const blobs = await Promise.all(items.flatMap((item) => item.types.filter((type) => type.startsWith("image/")).map((type) => item.getType(type))));
-            if (!blobs.length) {
-                message.error("剪切板里没有可读取的图片");
-                return;
-            }
+            const blobs = await readClipboardImages(navigator.clipboard);
             const nextReferences = await Promise.all(
                 blobs.map(async (blob, index) => {
                     const image = await uploadImage(blob);
@@ -444,8 +440,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             );
             appendReferences(nextReferences, "clipboard");
             message.success(`已读取 ${nextReferences.length} 张参考图`);
-        } catch {
-            message.error("剪切板里没有可读取的图片");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "剪贴板图片读取失败");
         }
     };
 

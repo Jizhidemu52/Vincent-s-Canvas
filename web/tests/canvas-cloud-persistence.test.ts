@@ -11,6 +11,7 @@ import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
 import { applyCanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
 import { serializeCanvasProject } from "@/lib/canvas/canvas-project-codec";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { isWorkspaceRole } from "../../shared/workspace-access";
 
 function moduleCode(path: string) {
     const source = readFileSync(new URL(path, import.meta.url), "utf8");
@@ -100,6 +101,7 @@ async function openStore(io: ReturnType<typeof harness>) {
     const userStore = create<any>(() => ({ user: { id: owner, role: "designer" }, status: "authenticated" }));
     let reloads = 0;
     const bindings = {
+        isWorkspaceRole,
         create, persist, nanoid: () => `local-${++io.state.nextId}`, createDeferredPersistQueue: <T>(delay: number, flush: (value: T) => void) => createDeferredPersistQueue(delay, flush, { setTimeout: () => 1, clearTimeout() {} }),
         collectProjectChanges, createProjectChangeBuffer, applyCanvasProjectPatch,
         readCanvasProjects: io.readCanvasProjects, writeCanvasProjects: io.writeCanvasProjects, removeCanvasProjects: async () => { io.state.local = []; },

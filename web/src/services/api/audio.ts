@@ -4,7 +4,7 @@ import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import { resolveToolConfig } from "./tool-runtime";
 
-type RequestOptions = Pick<QueuedMediaInput, "signal" | "onSubmissionStarted" | "onSubmitted">;
+type RequestOptions = Pick<QueuedMediaInput, "signal" | "cancelOnAbort" | "onSubmissionStarted" | "onSubmitted">;
 
 export async function requestAudioGeneration(config: AiConfig, prompt: string, options?: RequestOptions): Promise<Blob> {
     const resolved = await resolveToolConfig(config, "audio_generation", "canvas-audio");
@@ -23,6 +23,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, o
             instructions: config.audioInstructions.trim(),
         },
         signal: options?.signal,
+        cancelOnAbort: options?.cancelOnAbort,
         onSubmissionStarted: options?.onSubmissionStarted,
         onSubmitted: options?.onSubmitted,
     });

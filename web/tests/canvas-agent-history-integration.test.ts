@@ -8,6 +8,7 @@ import * as undoAction from "@/lib/canvas/canvas-agent-undo-action";
 import { parseCanvasProject, serializeCanvasProject } from "@/lib/canvas/canvas-project-codec";
 import type { CanvasHistorySnapshot, CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasNodeType } from "@/types/canvas";
+import { canvasGenerationRunsForNodes } from "@/lib/canvas/canvas-project-async-lifecycle";
 
 // Run the actual editor callbacks, restore layout effect, and autosave effect.
 // The harness replaces only React setters/timers and unrelated generation/UI services.
@@ -59,9 +60,11 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
     const timers = new Map<number, () => void>();
     let timerId = 0;
     const warnings: unknown[] = [], successes: string[] = [], errors: string[] = [];
+    const stopped: unknown[][] = [];
     let queuedSave: { patch: CanvasHistorySnapshot & { history: CanvasProject["history"] } } | null = null;
     const scope = {
-        React, useCallback: (callback: unknown) => callback, applyCanvasAgentOps,
+        React, useCallback: (callback: unknown) => callback, applyCanvasAgentOps, canvasGenerationRunsForNodes,
+        stopGenerationByRunningId: (...args: unknown[]) => stopped.push(args),
         require: (path: string) => {
             if (path !== "@/lib/canvas/canvas-agent-undo-action") throw new Error(`Unexpected dynamic import: ${path}`);
             return loadUndoAction();
@@ -104,7 +107,7 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
         return new Function("scope", `const { ${Object.keys(current).join(", ")} } = scope;\n${effectCode.get(name)}`)(current);
     };
     return {
-        ...actions, historyRef, applyingHistoryRef, generationRequestsRef, warnings, successes, errors, timers,
+        ...actions, historyRef, applyingHistoryRef, generationRequestsRef, warnings, successes, errors, timers, stopped,
         live: () => live, canUndoAgent: () => canUndoAgent, undoRecord: () => agentUndoRecordRef.current,
         edit: (patch: Partial<CanvasProject>) => { live = { ...live, ...patch }; },
         clearAgentPatch: () => { agentUndoRecordRef.current = null; canUndoAgent = false; },
@@ -121,6 +124,16 @@ function chat(text: string): CanvasProject["chatSessions"] {
 }
 
 describe("agent inverse and ordinary history integration", () => {
+    test("agent deletion stops dependent observations and its inverse can restore the graph", async () => {
+        const app = editor();
+        app.generationRequestsRef.current.set("run", { targetNodeId: "one", originNodeId: "one", runningNodeId: "run" });
+        app.applyAgentOps([{ type: "delete_node", id: "one" }]);
+        expect(app.stopped).toEqual([["run", true]]);
+        expect(app.live().nodes.map(node => node.id)).toEqual(["two"]);
+        app.generationRequestsRef.current.clear();
+        await app.undoAgentOps();
+        expect(app.live().nodes.map(node => node.id)).toContain("one");
+    });
     test("pending manual edit, agent batch, later edit, inverse, Ctrl+Z and redo stay separate", async () => {
         const base = project();
         const manual = { ...base, nodes: [{ ...base.nodes[0], width: 150 }, base.nodes[1]] };

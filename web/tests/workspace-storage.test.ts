@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { createStorageAccess } from "@/lib/storage-access";
+import { isWorkspaceRole } from "../../shared/workspace-access";
 
 const code = ts.transpileModule(readFileSync(new URL("../src/lib/workspace-storage.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
 
@@ -12,6 +13,7 @@ function workspace(browser = true) {
     const opened: string[] = [];
     let delay: Promise<void> | undefined;
     const dependencies: Record<string, unknown> = {
+        "../../../shared/workspace-access": { isWorkspaceRole },
         "@/lib/deployment-features": { deploymentFeatures: features },
         "@/stores/use-user-store": { useUserStore: { getState: () => state } },
         "./storage-access": { createStorageAccess },
@@ -59,8 +61,8 @@ test("employee photo, history, chat and creative caches never hydrate anonymous 
     }
 });
 
-test("unverified and administrator entry never opens a shared employee cache", async () => {
-    for (const role of [null, "super_admin", "department_admin"]) {
+test("unverified and department-administrator entry never opens a personal cache", async () => {
+    for (const role of [null, "department_admin"]) {
         const w = workspace(); w.features.authenticationEnabled = true;
         if (role) w.state.user = { id: "operator", role };
         const storage = w.create("image_files");
@@ -69,6 +71,21 @@ test("unverified and administrator entry never opens a shared employee cache", a
         await expect(storage.getItem("image:secret")).rejects.toThrow();
         await expect(storage.setItem("image:secret", "wrong")).rejects.toThrow();
     }
+});
+
+test("super admins persist their own partition and cannot read or overwrite employee drafts", async () => {
+    const w = workspace(); w.features.authenticationEnabled = true;
+    w.state.user = { id: "employee", role: "designer" };
+    const employee = w.create("app_state"); await employee.setItem("draft", "employee draft");
+    w.state.user = { id: "administrator", role: "super_admin" };
+    const admin = w.create("app_state");
+    expect(admin.available).toBe(true); expect(await admin.getItem("draft")).toBeNull();
+    await admin.setItem("draft", "admin draft");
+    expect(await w.create("app_state").getItem("draft")).toBe("admin draft");
+    await expect(employee.setItem("draft", "wrong owner")).rejects.toThrow();
+    w.state.user = { id: "employee", role: "designer" };
+    expect(await w.create("app_state").getItem("draft")).toBe("employee draft");
+    await expect(admin.setItem("draft", "late admin write")).rejects.toThrow();
 });
 
 test("server rendering and module-only tests do not initialize browser persistence", () => {

@@ -182,3 +182,11 @@
     .cs-submit-panel { position: static; }
     .cs-empty { min-height: 250px; }
 }
+.cs-result-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 14px; }
+.cs-results-heading { flex-wrap: wrap; }
+.cs-results-heading h2, .cs-results-heading > span { flex-shrink: 0; }
+.cs-results-heading > .cs-tool-entry { width: auto; margin-left: auto; }
+.cs-result-actions button { border: 1px solid var(--border); border-radius: 7px; padding: 7px 9px; font-size: 12px; background: var(--card); color: var(--foreground); }
+.cs-result-actions button:hover:not(:disabled) { background: var(--muted); }
+.cs-result-actions button:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 2px; }
+.cs-result-actions button:disabled { opacity: .45; cursor: not-allowed; }

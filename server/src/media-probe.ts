@@ -1,7 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, writeFile, unlink, rmdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { withTemporaryMediaFile, type MediaStream } from "./media-file";
 
 export type MediaMetadata = { width?: number; height?: number; durationMs?: number; fps?: number };
 type ProbeOutput = { format?: { format_name?: string; duration?: string }; streams?: Array<{ codec_type?: string; codec_name?: string; width?: number; height?: number; duration?: string; avg_frame_rate?: string; r_frame_rate?: string; disposition?: { attached_pic?: number } }> };
@@ -14,18 +12,19 @@ const formats: Record<string, readonly string[]> = {
 
 /** Read the bytes, never a client URL or client-supplied dimensions/duration. */
 export async function probeMediaBytes(bytes: Uint8Array, mimeType: string): Promise<MediaMetadata> {
-  if (!formats[mimeType]) throw new Error("视频参考素材仅支持 JPEG/PNG/WebP/GIF、MP4/MOV、WAV/MP3");
   if (!bytes.byteLength || bytes.byteLength > 200 * 1024 * 1024) throw new Error("参考素材必须非空且不超过 200MB");
-  const directory = await mkdtemp(join(tmpdir(), "canvas-media-probe-"));
-  const file = join(directory, "source");
-  try {
-    await writeFile(file, bytes);
+  return probeMediaStream((async function* () { yield bytes; })(), mimeType, bytes.byteLength);
+}
+
+export async function probeMediaStream(source: MediaStream, mimeType: string, expectedBytes?: number): Promise<MediaMetadata> {
+  if (!formats[mimeType]) throw new Error("视频参考素材仅支持 JPEG/PNG/WebP/GIF、MP4/MOV、WAV/MP3");
+  return withTemporaryMediaFile(source, { maxBytes: 200 * 1024 * 1024, expectedBytes }, async (file) => {
     const output = await new Promise<string>((resolve, reject) => {
       execFile(process.env.FFPROBE_PATH || "ffprobe", [
         "-v", "error", "-protocol_whitelist", "file,pipe",
         "-format_whitelist", "png_pipe,jpeg_pipe,webp_pipe,gif,mov,mp3,wav",
         "-show_entries", "format=format_name,duration:stream=codec_type,codec_name,width,height,duration,avg_frame_rate,r_frame_rate:stream_disposition=attached_pic",
-        "-of", "json", file,
+        "-of", "json", file.path,
       ], { timeout: 20_000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => {
         if (error) reject(new Error((error as NodeJS.ErrnoException).code === "ENOENT"
           ? "服务端缺少 ffprobe，请安装 FFmpeg 或配置 FFPROBE_PATH 后重试；尚未提交生成"
@@ -34,10 +33,7 @@ export async function probeMediaBytes(bytes: Uint8Array, mimeType: string): Prom
       });
     });
     return parseMediaProbe(JSON.parse(output), mimeType);
-  } finally {
-    await unlink(file).catch((error) => { if (error.code !== "ENOENT") throw error; });
-    await rmdir(directory);
-  }
+  });
 }
 
 export function parseMediaProbe(output: ProbeOutput, mimeType: string): MediaMetadata {

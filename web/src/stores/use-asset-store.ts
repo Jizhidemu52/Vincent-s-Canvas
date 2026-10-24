@@ -6,6 +6,7 @@ import { createCoalescedAsyncTask } from "@/lib/coalesced-async-task";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { cleanupUnusedImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
+import { chatImageCleanupGuard, collectChatImageReferences } from "@/services/chat-history-references";
 import { uploadServerAsset } from "@/services/api/server-assets";
 import { ensureCloudMedia } from "@/services/canvas-cloud-media";
 import { serverMediaId } from "@/services/canvas-media-links";
@@ -86,7 +87,12 @@ export const useAssetStore = create<AssetStore>()(
                     // An active owner's project list cannot prove a blob is unused.
                     if (deploymentFeatures.authenticationEnabled) return;
                     const shared = { assets: get().assets, projects: useCanvasStore.getState().projects, extra: extras };
-                    await cleanupUnusedImages(shared);
+                    // Chat originals share image_files but are not canvas/asset nodes.
+                    // A failed history read must stop both cleanup passes.
+                    const assertChatImagesUnchanged = chatImageCleanupGuard();
+                    assertChatImagesUnchanged();
+                    const chatImageKeys = await collectChatImageReferences();
+                    await cleanupUnusedImages(shared, chatImageKeys, assertChatImagesUnchanged);
                     await cleanupUnusedMedia(shared);
                 },
                 (callback) => window.setTimeout(callback, 0),

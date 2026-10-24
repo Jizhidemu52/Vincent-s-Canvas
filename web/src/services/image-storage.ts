@@ -106,12 +106,15 @@ export async function deleteStoredImages(keys: Iterable<string>) {
     );
 }
 
-export async function cleanupUnusedImages(usedData: unknown) {
+export async function cleanupUnusedImages(usedData: unknown, protectedKeys: Iterable<string> = [], assertCleanup?: () => void) {
+    assertCleanup?.();
     const usedKeys = collectImageStorageKeys(usedData);
+    for (const key of protectedKeys) usedKeys.add(key);
     const unused: string[] = [];
     await store.iterate((_value, key) => {
         if (!usedKeys.has(key)) unused.push(key);
     });
+    assertCleanup?.();
     await deleteStoredImages(unused);
 }
 

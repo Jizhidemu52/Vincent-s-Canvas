@@ -48,6 +48,8 @@ function uploadHarness(legacyMode: Mode) {
             mode: legacyMode,
             sessionsReady: true,
             readingAttachments: reading,
+            editing: null, activeSessionId: "session-a", activeSessionIdRef: { current: "session-a" }, attachmentReadRef: { current: null }, isCurrentScope: () => true,
+            chatMedia: { async persist(image: Attachment, assertCurrent: () => void) { assertCurrent(); return { ...image, storageKey: `image:${image.id}` }; } },
             attachments,
             sendingRef: { current: false },
             placingImageRef: { current: false },

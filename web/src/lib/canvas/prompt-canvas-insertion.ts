@@ -6,6 +6,7 @@ import { canvasHistoryForSave } from "@/pages/canvas/use-canvas-history";
 import { flushCanvasPersistence, loadCanvasProject, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { isWorkspaceRole } from "../../../../shared/workspace-access";
 
 export class PromptCanvasPersistenceError extends Error {
     constructor(public readonly projectId: string, cause: unknown) {
@@ -18,7 +19,8 @@ export class PromptCanvasPersistenceError extends Error {
 export async function insertPromptIntoCanvas(templateId: string, targetProjectId: string | undefined, assertCurrent: () => void) {
     const assertWorkspace = () => {
         assertCurrent();
-        if (deploymentFeatures.authenticationEnabled && useUserStore.getState().user?.role !== "designer") throw new Error("请使用设计师身份进入个人画布");
+        const session = useUserStore.getState();
+        if (deploymentFeatures.authenticationEnabled && (session.status !== "authenticated" || !isWorkspaceRole(session.user?.role))) throw new Error("请登录具备个人创作权限的账号后进入画布");
         if (!useCanvasStore.getState().hydrated) throw new Error("个人画布仍在加载，请稍后重试");
     };
     assertWorkspace();

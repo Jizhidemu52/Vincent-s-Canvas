@@ -15,12 +15,24 @@ export async function prepareVideoProviderSources(input: { model: SupportedVideo
   // Validate the complete request before the very first upload (including all source bytes).
   preflightVideoSources(input.model, input.prompt, input.parameters, input.sources);
   input.sources.filter((source) => source.mimeType.startsWith("image/")).forEach(validateApiMartVideoImage);
-  const prepared: ProviderVideoSource[] = [];
-  for (const source of input.sources) {
-    const publicUrl = source.mimeType.startsWith("image/")
-      ? await uploadApiMartImage({ ...source, baseUrl: input.baseUrl, apiKey: input.apiKey }, runtime)
-      : source.publicUrl;
-    prepared.push({ ...source, publicUrl });
-  }
+  const prepared = new Array<ProviderVideoSource>(input.sources.length);
+  let nextIndex = 0, failed = false;
+  let firstFailure: unknown;
+  const uploadNext = async () => {
+    while (!failed && nextIndex < input.sources.length) {
+      const index = nextIndex++, source = input.sources[index]!;
+      try {
+        const publicUrl = source.mimeType.startsWith("image/")
+          ? await uploadApiMartImage({ ...source, baseUrl: input.baseUrl, apiKey: input.apiKey }, runtime)
+          : source.publicUrl;
+        prepared[index] = { ...source, publicUrl };
+      } catch (error) {
+        if (!failed) { failed = true; firstFailure = error; }
+      }
+    }
+  };
+  // Preserve input order; stop starting work on failure and drain active uploads.
+  await Promise.all(Array.from({ length: Math.min(3, input.sources.length) }, uploadNext));
+  if (failed) throw firstFailure;
   return prepared;
 }

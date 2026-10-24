@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { getImageBlob, setImageBlob } from "./image-storage";
+import { getImageBlob, resolveImageUrl, setImageBlob } from "./image-storage";
 import { fingerprintImage } from "./api/generation-history";
 import type { ReferenceImage } from "@/types/image";
 
@@ -27,5 +27,5 @@ export async function restoreLocalInput<T extends ReferenceImage & { inputSha256
     if (!image.inputSha256) throw new Error("旧记录没有原始字节校验归档，无法完整恢复");
     const blob = await originalBlob(image);
     if (await fingerprintImage(blob) !== image.inputSha256) throw new Error(`历史原图“${image.name}”字节已改变，拒绝静默替换`);
-    return { ...image, dataUrl: URL.createObjectURL(blob) };
+    return { ...image, dataUrl: image.storageKey ? await resolveImageUrl(image.storageKey) : image.dataUrl };
 }

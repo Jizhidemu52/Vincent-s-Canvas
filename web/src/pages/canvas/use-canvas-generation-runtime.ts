@@ -3,6 +3,7 @@ import { useCanvasGraphSetter } from "@/stores/canvas/canvas-graph-store";
 import { createCanvasTextStreamBuffer } from "@/lib/canvas/canvas-text-stream-buffer";
 import { applyCanvasStreamedTextUpdates, clearCanvasStreamedText } from "@/lib/canvas/canvas-streamed-text-state";
 import { useCanvasImageTasks } from "./use-canvas-image-tasks";
+import { stopCanvasObservation } from "@/lib/canvas/canvas-project-async-lifecycle";
 import type { CanvasNodeData } from "@/types/canvas";
 
 type CanvasGenerationRequest = {
@@ -52,11 +53,12 @@ export function useCanvasGenerationRuntime({ projectId, nodesRef, setNodes, proj
         }
     }, [clearStreamedText]);
 
-    const stopGenerationByRunningId = useCallback((runningId: string) => {
+    const stopGenerationByRunningId = useCallback((runningId: string, observationOnly = false) => {
         const affectedNodeIds = new Set<string>();
         generationRequestsRef.current.forEach((request) => {
             if (request.runningNodeId !== runningId) return;
-            request.controller.abort();
+            if (observationOnly) stopCanvasObservation(request.controller);
+            else request.controller.abort();
             generationRequestsRef.current.delete(request.targetNodeId);
             affectedNodeIds.add(request.targetNodeId);
             affectedNodeIds.add(request.originNodeId);

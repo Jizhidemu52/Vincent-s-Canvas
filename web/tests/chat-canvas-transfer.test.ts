@@ -108,6 +108,8 @@ function pageCanvasHarness(options: {
         placingImageRef: { current: false },
         loadedStorageKeyRef: { current: "user-a" },
         storageKey: "user-a",
+        isCurrentScope: () => bindings.loadedStorageKeyRef.current === bindings.storageKey,
+        chatMedia: { hydrate: async (image: GeneratedImage, assertCurrent: () => void) => { assertCurrent(); return image; } },
         useCanvasStore: { getState: () => state },
         CanvasNodeType,
         sessionsRef,

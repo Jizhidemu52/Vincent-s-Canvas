@@ -8,6 +8,7 @@ import { useModuleStore } from "@/stores/use-module-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { createCanvasProjectMetadataSync } from "@/lib/canvas/canvas-project-metadata-sync";
 import { syncProjectMetadata } from "@/services/api/projects";
+import { isWorkspaceRole } from "../../../../shared/workspace-access";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const authStatus = useUserStore((state) => state.status);
@@ -23,7 +24,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (authStatus !== "authenticated" || !ownerId) return;
-        if (deploymentFeatures.authenticationEnabled && useUserStore.getState().user?.role !== "designer") return;
+        if (deploymentFeatures.authenticationEnabled && !isWorkspaceRole(useUserStore.getState().user?.role)) return;
         let disposed = false;
         const projectSync = createCanvasProjectMetadataSync({
             ownerId,
@@ -31,7 +32,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             isCurrentOwner: () => {
                 const session = useUserStore.getState();
                 return session.status === "authenticated" && session.user?.id === ownerId && useCanvasStore.getState().hydrated
-                    && (!deploymentFeatures.authenticationEnabled || session.user.role === "designer");
+                    && (!deploymentFeatures.authenticationEnabled || isWorkspaceRole(session.user.role));
             },
             isVisible: () => document.visibilityState === "visible",
             submit: syncProjectMetadata,

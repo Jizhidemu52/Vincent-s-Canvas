@@ -253,9 +253,12 @@ export const CanvasNode = React.memo(function CanvasNode({
         return () => window.removeEventListener("pointerdown", handleOutsidePointerDown, true);
     }, [finishTextEditing, isEditingContent]);
 
+    const resizeCallbacksRef = useRef({ id: data.id, getCanvasScale, onResize, onResizeEnd });
+    resizeCallbacksRef.current = { id: data.id, getCanvasScale, onResize, onResizeEnd };
     const handleResizeMove = useCallback(
         (event: MouseEvent) => {
             if (!resizeRef.current.isResizing) return;
+            const { id, getCanvasScale, onResize } = resizeCallbacksRef.current;
 
             const { x: dx, y: dy } = canvasNodeResizePointerDelta({
                 startX: resizeRef.current.startX,
@@ -307,15 +310,16 @@ export const CanvasNode = React.memo(function CanvasNode({
                     if (preview) setLocalResizePreview(preview);
                 });
             }
-            onResize(data.id, width, height, position);
+            onResize(id, width, height, position);
         },
-        [data.id, getCanvasScale, onResize],
+        [],
     );
 
     const handleResizeUp = useCallback(() => {
         const resize = resizeRef.current;
         if (resize.isResizing && (resize.currentWidth !== resize.startWidth || resize.currentHeight !== resize.startHeight || resize.currentPosition.x !== resize.startLeft || resize.currentPosition.y !== resize.startTop)) {
-            onResizeEnd(data.id, resize.currentWidth, resize.currentHeight, resize.currentPosition);
+            const { id, onResizeEnd } = resizeCallbacksRef.current;
+            onResizeEnd(id, resize.currentWidth, resize.currentHeight, resize.currentPosition);
         }
         resizeRef.current.isResizing = false;
         if (resizePreviewFrameRef.current !== null) {
@@ -326,7 +330,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         setLocalResizePreview(null);
         window.removeEventListener("mousemove", handleResizeMove);
         window.removeEventListener("mouseup", handleResizeUp);
-    }, [data.id, handleResizeMove, onResizeEnd]);
+    }, [handleResizeMove]);
 
     const handleResizeMouseDown = (event: React.MouseEvent, corner: ResizeCorner) => {
         event.stopPropagation();
@@ -356,6 +360,9 @@ export const CanvasNode = React.memo(function CanvasNode({
             window.removeEventListener("mousemove", handleResizeMove);
             window.removeEventListener("mouseup", handleResizeUp);
             if (resizePreviewFrameRef.current !== null) cancelAnimationFrame(resizePreviewFrameRef.current);
+            resizePreviewFrameRef.current = null;
+            pendingResizePreviewRef.current = null;
+            resizeRef.current.isResizing = false;
         };
     }, [handleResizeMove, handleResizeUp]);
 

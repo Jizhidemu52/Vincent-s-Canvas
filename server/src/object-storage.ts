@@ -1,5 +1,7 @@
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { Upload } from "@aws-sdk/lib-storage";
+import { createReadStream } from "node:fs";
 import type { AppConfig } from "./config";
 import { isPublicHttpsUrl } from "./apimart-upload";
 
@@ -18,6 +20,14 @@ export class ObjectStorage {
     }
     get configured() { return Boolean(this.config.S3_ENDPOINT && this.config.S3_ACCESS_KEY_ID && this.config.S3_SECRET_ACCESS_KEY); }
     async put(key: string, body: Uint8Array, contentType: string) { if (!this.configured) throw new Error("公司对象存储尚未配置"); await this.client.send(new PutObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key, Body: body, ContentType: contentType })); }
+    /** Bound upload memory independently of the generated video's total size. */
+    async putFile(key: string, path: string, byteSize: number, contentType: string) {
+        if (!this.configured) throw new Error("公司对象存储尚未配置");
+        const body = createReadStream(path);
+        try {
+            await new Upload({ client: this.client, params: { Bucket: this.config.S3_BUCKET, Key: key, Body: body, ContentType: contentType, ContentLength: byteSize }, queueSize: 2, partSize: 5 * 1024 * 1024, leavePartsOnError: false }).done();
+        } finally { body.destroy(); }
+    }
     async head(key: string, options: Pick<ObjectReadOptions, "abortSignal"> = {}) {
         return this.client.send(new HeadObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key }), { abortSignal: options.abortSignal });
     }

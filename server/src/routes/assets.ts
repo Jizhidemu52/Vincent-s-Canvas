@@ -90,22 +90,32 @@ async function withProjections(db: Database, rows: Array<Record<string, unknown>
   }));
 }
 
-async function listAssets(db: Database, actor: SessionUser, query: Record<string, unknown>, admin = false) {
+function manageClause(actor: SessionUser) {
+  return { sql: "(a.owner_user_id=$1 OR $2='super_admin' OR ($2='department_admin' AND a.department_id=$3 AND $3::uuid IS NOT NULL))", values: [actor.id, actor.role, actor.departmentId] };
+}
+
+async function listAssets(db: Database, actor: SessionUser, query: Record<string, unknown>, admin = false, trash = false) {
   const input = parseAssetListQuery(query);
-  const access = admin ? { sql: actor.role === 'department_admin' ? 'a.department_id=$1' : 'TRUE', values: actor.role === 'department_admin' ? [actor.departmentId] : [] } : accessClause(actor);
+  const access = trash ? manageClause(actor) : admin ? { sql: actor.role === 'department_admin' ? 'a.department_id=$1' : 'TRUE', values: actor.role === 'department_admin' ? [actor.departmentId] : [] } : accessClause(actor);
   const values: unknown[] = [...access.values];
-  const where = ['a.deleted_at IS NULL', primaryImageAssetClause, access.sql];
+  const where = [trash ? "a.deleted_at>now()-interval '30 days' AND a.purge_after>now() AND a.status='ready'" : 'a.deleted_at IS NULL', primaryImageAssetClause, access.sql];
+  const orderColumn = trash ? 'a.deleted_at' : 'a.created_at';
+  const direction = input.sort === 'oldest' ? 'ASC' : 'DESC';
   const parameter = (value: unknown) => { values.push(value); return `$${values.length}`; };
-  if (input.cursor) where.push(`(a.created_at,a.id)<(${parameter(input.cursor.time)}::timestamptz,${parameter(input.cursor.id)}::uuid)`);
+  if (input.cursor) where.push(`(${orderColumn},a.id)${input.sort === 'oldest' ? '>' : '<'}(${parameter(input.cursor.time)}::timestamptz,${parameter(input.cursor.id)}::uuid)`);
   if (input.kind) where.push(`a.kind=${parameter(input.kind)}`);
   if (input.projectId) where.push(`a.project_id=${parameter(input.projectId)}::uuid`);
   if (input.ownerUserId) where.push(`a.owner_user_id=${parameter(input.ownerUserId)}::uuid`);
+  if (input.tag) where.push(`a.metadata->'tags' @> ${parameter(JSON.stringify([input.tag]))}::jsonb`);
+  if (input.createdFrom) where.push(`a.created_at>=${parameter(input.createdFrom)}::timestamptz`);
+  if (input.createdBefore) where.push(`a.created_at<${parameter(input.createdBefore)}::timestamptz`);
   if (input.q) {
     const term = parameter(`%${input.q.replace(/[\\%_]/g, '\\$&')}%`);
     where.push(`(a.filename ILIKE ${term} OR a.metadata->>'title' ILIKE ${term} OR a.metadata->>'tags' ILIKE ${term} OR a.metadata->>'source' ILIKE ${term} OR a.metadata->>'content' ILIKE ${term} OR a.prompt ILIKE ${term})`);
   }
-  const result = await db.query<{ id: string; createdAt: string }>(`SELECT ${lightAssetSelect},${assetUrls} ${assetJoins} WHERE ${where.join(' AND ')} ORDER BY a.created_at DESC,a.id DESC LIMIT ${parameter(input.limit + 1)}`, values);
-  const page = assetPage(result.rows, input.limit);
+  const selection = trash ? lightAssetSelect.replace('a.deleted_at AS "deletedAt"', `to_char(a.deleted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "deletedAt"`) : lightAssetSelect;
+  const result = await db.query<{ id: string; createdAt: string; deletedAt: string }>(`SELECT ${selection},a.purge_after AS "purgeAfter",${trash ? 'NULL::text AS "contentUrl",NULL::text AS "thumbnailUrl",NULL::text AS "previewUrl"' : assetUrls} ${assetJoins} WHERE ${where.join(' AND ')} ORDER BY ${orderColumn} ${direction},a.id ${direction} LIMIT ${parameter(input.limit + 1)}`, values);
+  const page = assetPage(result.rows, input.limit, row => trash ? row.deletedAt : row.createdAt);
   return { ...page, assets: await withProjections(db, page.assets, true) };
 }
 
@@ -138,6 +148,45 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       ]);
       response.json({ ...page, total: count.rows[0]?.total || 0 });
     } catch (error) { next(error); }
+  });
+
+  router.get('/trash', async (request, response, next) => {
+    try { response.json(await listAssets(db, (request as unknown as AuthenticatedRequest).auth, request.query, false, true)); }
+    catch (error) { next(error); }
+  });
+
+  router.post('/:id/restore', async (request, response, next) => {
+    let client: PoolClient | undefined;
+    try {
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const id = z.string().uuid().parse(request.params.id);
+      const access = manageClause(actor);
+      const values = [...access.values, id];
+      const result = await db.query<{ objectKey: string; deletedAt: string; restorable: boolean }>(
+        `SELECT a.object_key AS "objectKey",a.deleted_at::text AS "deletedAt",(a.deleted_at>now()-interval '30 days' AND a.purge_after>now()) AS restorable FROM assets a WHERE ${access.sql} AND a.id=$4 AND a.deleted_at IS NOT NULL AND a.status='ready'`, values);
+      const asset = result.rows[0];
+      if (!asset) { response.status(404).json({ error: 'NOT_FOUND', message: '已删除素材不存在或无权恢复' }); return; }
+      if (!asset.restorable) { response.status(410).json({ error: 'RESTORE_EXPIRED', message: '素材已超过 30 天恢复期限' }); return; }
+      // Check object existence without retaining a database transaction across S3 I/O.
+      try { await storage.head(asset.objectKey, { abortSignal: AbortSignal.timeout(5_000) }); }
+      catch (error) {
+        const storageError = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+        const missing = storageError.$metadata?.httpStatusCode === 404 || ['NotFound', 'NoSuchKey'].includes(storageError.name || '');
+        response.status(missing ? 410 : 503).json({ error: missing ? 'ORIGINAL_MISSING' : 'STORAGE_UNAVAILABLE', message: missing ? '原始文件已清理，无法恢复' : '暂时无法验证原始文件，请稍后重试' }); return;
+      }
+      client = await db.connect();
+      await client.query('BEGIN');
+      const restored = await client.query<{ department_id: string | null }>(
+        `UPDATE assets a SET deleted_at=NULL,purge_after=NULL WHERE ${access.sql} AND a.id=$4 AND a.deleted_at=$5::timestamptz AND a.object_key=$6 AND a.status='ready' AND a.deleted_at>now()-interval '30 days' AND a.purge_after>now() RETURNING a.department_id`, [...values, asset.deletedAt, asset.objectKey]);
+      if (!restored.rows[0]) { await client.query('ROLLBACK'); response.status(409).json({ error: 'RESTORE_CHANGED', message: '素材状态已变化，请刷新后重试' }); return; }
+      await writeAudit(client, { actor, action: 'asset.restored', targetType: 'asset', targetId: id, departmentId: restored.rows[0].department_id, result: 'success', ip: request.ip });
+      await client.query('COMMIT');
+      response.status(204).end();
+    } catch (error) {
+      if (client) await client.query('ROLLBACK').catch(() => undefined);
+      if ((error as { code?: string }).code === '23505') response.status(409).json({ error: 'RESTORE_CONFLICT', message: '已有同一来源的有效素材，无法重复恢复' });
+      else next(error);
+    } finally { client?.release(); }
   });
 
   router.post("/upload-request", async (request, response, next) => {

@@ -15,6 +15,25 @@
     color: var(--text);
     background: var(--bg);
 }
+.workbench-project-bar,
+.workbench-leave-warning {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.workbench-project-bar [data-project-status] {
+    color: var(--muted);
+}
+.workbench-project-bar select {
+    max-width: 260px;
+}
+.workbench-leave-warning {
+    padding: 12px;
+    color: var(--danger);
+    background: var(--surface);
+}
 .local-design-workbench * {
     box-sizing: border-box;
 }

@@ -30,16 +30,16 @@ export default function AdminLoginPage() {
     };
 
     return (
-        <div className="flex h-full items-center justify-center bg-[#eeeeec] px-6 py-10 text-stone-900">
-            <main className="w-full max-w-md rounded-md border border-orange-200 bg-white p-6 shadow-sm">
+        <div className="flex h-full items-center justify-center bg-background px-6 py-10 text-foreground">
+            <main className="w-full max-w-md rounded-md border border-border bg-card p-6 shadow-sm">
                 <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-md bg-black text-white">
+                    <div className="flex size-10 items-center justify-center rounded-md bg-foreground text-background">
                         <ShieldCheck className="size-5" />
                     </div>
                     <div>
                         <div className="text-xs font-medium text-orange-600">管理员维护</div>
                         <h1 className="text-xl font-semibold">进入后台管理</h1>
-                        <p className="mt-1 text-xs text-stone-500">此入口仅用于受保护的系统配置；{deploymentFeatures.oaLoginEnabled ? "员工请从公司 OA 进入创作工作台。" : "设计师请使用个人账号登录工作台。"}</p>
+                        <p className="mt-1 text-xs text-stone-500">管理员在此登录管理中心；超级管理员也可进入自己的个人工作台。{deploymentFeatures.oaLoginEnabled ? "员工请从公司 OA 进入。" : "设计师请使用个人账号登录。"}</p>
                     </div>
                 </div>
 

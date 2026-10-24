@@ -5,6 +5,7 @@ import { CanvasPersistedMediaPreview } from "@/components/canvas/canvas-persiste
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { nextProjectTitle } from "@/lib/project-title";
 import "./home.css";
 
 const entries = [
@@ -21,14 +22,19 @@ export default function IndexPage() {
     const createProject = useCanvasStore(state => state.createProject);
     const flags = useModuleStore(state => state.flags);
     const tools = useBusinessConfigStore(state => state.tools);
+    const canvasAvailable = isModuleAvailable(flags, tools, "canvas");
     const recent = useMemo(() => [...projects].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, 8), [projects]);
-    const createAndEnter = () => navigate("/canvas/" + createProject("无线画布 " + (projects.length + 1)));
+    const createAndEnter = () => {
+        const current = useCanvasStore.getState();
+        if (!current.hydrated || !isModuleAvailable(flags, tools, "canvas")) return;
+        navigate("/canvas/" + createProject(nextProjectTitle(current.projects)));
+    };
     return (
         <main className="wb-page home-page h-full overflow-y-auto">
             <div className="home-content">
                 <header className="wb-header">
                     <div><p className="wb-eyebrow">VINCENT'S CANVAS / 创作工作台</p><h1 className="wb-title">让想法，开始成形。</h1><p className="wb-description">选一个工具开始，或回到上次的画布继续创作。</p></div>
-                    {flags.canvas ? <button type="button" className="wb-primary-link" disabled={!hydrated} onClick={createAndEnter}><Plus size={18} />新建画布</button> : null}
+                    {canvasAvailable ? <button type="button" className="wb-primary-link" disabled={!hydrated} onClick={createAndEnter}><Plus size={18} />新建画布</button> : null}
                 </header>
                 <section className="home-tools" aria-label="选择创作工具">
                     {entries.filter(entry => isModuleAvailable(flags, tools, entry.flag)).map(({ path, icon: Icon, title, description, action }, index) => <Link to={path} className="wb-surface home-tool" key={path}>
@@ -36,7 +42,7 @@ export default function IndexPage() {
                         <h2>{title}</h2><p>{description}</p><span className="home-tool-action">{action}<ArrowRight size={16} /></span>
                     </Link>)}
                 </section>
-                {flags.canvas ? <section className="home-projects">
+                {canvasAvailable ? <section className="home-projects">
                     <div className="wb-header"><div><p className="wb-eyebrow">继续创作</p><h2 className="wb-title">最近的画布</h2></div><Link to="/canvas" className="home-all-link">查看全部 {projects.length ? "(" + projects.length + ")" : ""}<ArrowRight size={16} /></Link></div>
                     {!hydrated ? <div className="wb-grid" role="status" aria-label="正在读取画布">{Array.from({ length: 4 }, (_, index) => <div className="home-skeleton animate-pulse" key={index} />)}</div> : recent.length ? <div className="home-project-grid">
                         {recent.map(project => {

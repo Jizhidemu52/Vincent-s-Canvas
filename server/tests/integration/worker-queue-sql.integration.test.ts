@@ -11,6 +11,7 @@ import { ApiMartImageProviderFailure, ApiMartImageTaskPending, stepApiMartImageT
 import { ProviderSubmissionRejected, submissionWasNotSent } from "../../src/provider-submission-policy";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
 import { createIsolatedQueueCache } from "../helpers/isolated-queue-cache";
+import { disposeProviderResults, downloadVideoResult } from "../../src/media-result-file";
 
 const integration = process.env.PGLITE_RUNTIME_PATH && process.env.QUEUE_TEST_REDIS_URL ? test : test.skip;
 const redisTest = process.env.QUEUE_TEST_REDIS_URL ? test : test.skip;
@@ -48,6 +49,7 @@ async function databaseFixture(kind: "image" | "video" = "video") {
 }
 
 async function productionWorker(dependencies: Record<string, unknown>) {
+  dependencies = { disposeProviderResults, ...dependencies };
   // Exercise the real orchestration/provider functions without importing the
   // worker entrypoint (which intentionally starts configured production services).
   const file = await Bun.file(new URL("../../src/worker.ts", import.meta.url)).text();
@@ -98,7 +100,8 @@ for (const kind of ["video", "image"] as const) integration(`30 mock ${kind}s re
     ProviderSubmissionRejected, submissionWasNotSent,
     createGenerationTiming: () => ({ measure: async (_stage: string, action: () => unknown) => action(), finish() {} }),
     readProviderSubmissionDiagnostics: () => undefined,
-    storage: { configured: true }, loadSourceAssets: async () => { referenceLoads++; return []; },
+    storage: { configured: true }, loadSourceAssets: async () => { referenceLoads++; return []; }, loadVideoSourceAssets: async () => { referenceLoads++; return []; },
+    downloadVideoResult: (url: string) => downloadVideoResult(url, fakeFetch),
     stepApiMartVideoTask: (input: ApiMartVideoInput) => stepApiMartVideoTask(input, { fetch: fakeFetch }),
     stepApiMartImageTask: (input: ApiMartImageTaskInput) => stepApiMartImageTask(input, { fetch: fakeFetch }),
     fetchProviderResult: async (url: string) => {
@@ -175,7 +178,7 @@ for (const [kind, minutes] of [["image", 15], ["video", 20]] as const) integrati
     ProviderSubmissionRejected, submissionWasNotSent,
     createGenerationTiming: () => ({ measure: async (_stage: string, action: () => unknown) => action(), finish() {} }),
     readProviderSubmissionDiagnostics: () => undefined,
-    storage: { configured: true }, loadSourceAssets: async () => { throw new Error("Recovery cannot reload references"); },
+    storage: { configured: true }, loadSourceAssets: async () => { throw new Error("Recovery cannot reload references"); }, loadVideoSourceAssets: async () => { throw new Error("Recovery cannot reload references"); },
     stepApiMartVideoTask: (input: ApiMartVideoInput) => stepApiMartVideoTask(input, { fetch: fakeFetch }),
     stepApiMartImageTask: (input: ApiMartImageTaskInput) => stepApiMartImageTask(input, { fetch: fakeFetch }),
   });

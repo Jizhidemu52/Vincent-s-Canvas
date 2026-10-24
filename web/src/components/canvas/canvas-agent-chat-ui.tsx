@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Tooltip } from "antd";
-import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, UserRound, WandSparkles, Wrench, X, XCircle } from "lucide-react";
+import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, Square, UserRound, WandSparkles, Wrench, X, XCircle } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { displayModelMetadata, maskImageModelText } from "@/lib/model-display";
@@ -156,6 +156,7 @@ export function AgentChatComposer({
     theme,
     onPromptChange,
     onSubmit,
+    onStop,
     onAddFiles,
     onRemoveAttachment,
     left,
@@ -170,6 +171,7 @@ export function AgentChatComposer({
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     onPromptChange: (value: string) => void;
     onSubmit: () => void;
+    onStop?: () => void;
     onAddFiles?: (files: FileList | File[] | null) => void | Promise<void>;
     onRemoveAttachment?: (id: string) => void;
     left?: ReactNode;
@@ -198,16 +200,16 @@ export function AgentChatComposer({
                     value={prompt}
                     onChange={(event) => onPromptChange(event.target.value)}
                     onPaste={(event) => {
-                        if (!onAddFiles) return;
+                        if (!onAddFiles || sending || disabled) return;
                         const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
                         if (!images.length) return;
                         event.preventDefault();
                         void onAddFiles(images);
                     }}
                     onKeyDown={(event) => {
-                        if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey) return;
+                        if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
                         event.preventDefault();
-                        void onSubmit();
+                        if (canSubmit && !event.repeat) void onSubmit();
                     }}
                     className="thin-scrollbar max-h-32 min-h-20 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:opacity-45"
                     style={{ color: theme.node.text }}
@@ -224,11 +226,12 @@ export function AgentChatComposer({
                                     event.target.value = "";
                                 }} />
                                 <Tooltip title="上传图片">
-                                    <Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" aria-label="添加参考图" disabled={sending} style={{ color: theme.node.muted }} icon={<ImagePlus className="size-5" />} onClick={() => fileInputRef.current?.click()} />
+                                    <Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" aria-label="添加参考图" disabled={sending || disabled} style={{ color: theme.node.muted }} icon={<ImagePlus className="size-5" />} onClick={() => fileInputRef.current?.click()} />
                                 </Tooltip>
                             </>
                         ) : null}
-                    <Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" style={{ background: canSubmit ? theme.node.text : theme.node.fill, color: canSubmit ? theme.node.panel : theme.node.faint }} disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={() => void onSubmit()} aria-label="发送" />
+                    {sending && onStop ? <Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" style={{ background: theme.node.text, color: theme.node.panel }} icon={<Square className="size-4" />} onClick={onStop} aria-label="停止本地回复和查询" title="停止本地回复和查询；已提交的服务端任务可能继续" />
+                        : <Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" style={{ background: canSubmit ? theme.node.text : theme.node.fill, color: canSubmit ? theme.node.panel : theme.node.faint }} disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={() => void onSubmit()} aria-label="发送" />}
                     </div>
                     {generationControls && left ? <div className="col-span-2 min-w-0">{left}</div> : null}
                 </div>

@@ -140,3 +140,38 @@ test("malformed API responses and missing identity do not produce scan data", as
     await expect(scanReferencePage(scan.pageUrl, "employee-1", new AbortController().signal)).rejects.toThrow("请求失败");
     await expect(scanReferencePage(scan.pageUrl, "", new AbortController().signal)).rejects.toThrow("登录");
 });
+
+test("selected candidates after number twenty are fetched without rescanning or downloading unselected images", async () => {
+    const largeScan = { ...scan, candidates: Array.from({ length: 25 }, (_, index) => ({ id: `item-${index}`, name: `${index}.png`, sourceImage: `https://example.com/${index}.png` })) };
+    const requested: string[] = [];
+    globalThis.fetch = (async (_path, init) => {
+        const id = JSON.parse(String(init!.body)).imageId;
+        requested.push(id);
+        return success(image(id));
+    }) as typeof fetch;
+    const ctx = context();
+    await collectReferencePage({ ...ctx.options, scan: largeScan, candidateIds: ["item-24", "item-1"] });
+    expect(requested).toEqual(["item-1", "item-24"]);
+    expect(ctx.images).toEqual(["item-1", "item-24"]);
+    await expect(collectReferencePage({ ...ctx.options, scan: largeScan, candidateIds: ["foreign"] })).rejects.toThrow("候选列表");
+    await expect(collectReferencePage({ ...ctx.options, scan: largeScan, candidateIds: largeScan.candidates.map(item => item.id) })).rejects.toThrow("最多 20");
+});
+
+test("two images load concurrently but output and progress retain the selected order", async () => {
+    let active = 0, maximum = 0;
+    let releaseFirst!: () => void;
+    const first = new Promise<void>(resolve => { releaseFirst = resolve; });
+    globalThis.fetch = (async (_path, init) => {
+        const id = JSON.parse(String(init!.body)).imageId;
+        active++; maximum = Math.max(maximum, active);
+        if (id === "one") await first;
+        if (id === "two") releaseFirst();
+        active--;
+        return success(image(id));
+    }) as typeof fetch;
+    const ctx = context();
+    await collectReferencePage({ ...ctx.options, scan });
+    expect(maximum).toBe(2);
+    expect(ctx.images).toEqual(["one", "two", "three"]);
+    expect(ctx.progress).toEqual([1, 2, 3]);
+});

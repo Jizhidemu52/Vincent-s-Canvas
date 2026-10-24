@@ -4,10 +4,19 @@ import { getQueuedTask, listQueuedTasks } from "@/services/api/generation-tasks"
 import { requestImageQuestion } from "@/services/api/image";
 import { defaultConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 
 const originalFetch = globalThis.fetch;
 const originalFeatures = { ...deploymentFeatures };
 const originalSession = { user: useUserStore.getState().user, status: useUserStore.getState().status };
+
+test("personal super-admin requests carry only their own owner while department admins remain blocked", () => {
+    deploymentFeatures.authenticationEnabled = true;
+    useUserStore.setState({ user: { id: "admin-owner", role: "super_admin" } as never, status: "authenticated" });
+    expect(workspaceOwnerHeaders()).toEqual({ "X-Canvas-Owner-Id": "admin-owner" });
+    useUserStore.setState({ user: { id: "department-owner", role: "department_admin" } as never, status: "authenticated" });
+    expect(() => workspaceOwnerHeaders()).toThrow();
+});
 afterEach(() => {
     globalThis.fetch = originalFetch;
     Object.assign(deploymentFeatures, originalFeatures);

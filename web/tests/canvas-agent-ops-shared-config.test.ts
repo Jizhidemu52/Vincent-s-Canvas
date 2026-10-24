@@ -29,3 +29,23 @@ test("an explicit agent connection upgrades an existing untyped edge without dup
     const next = applyCanvasAgentOps(current, [{ type: "connect_nodes", fromNodeId: "config", toNodeId: "target" }]);
     expect(next.connections).toEqual([{ id: "old", fromNodeId: "config", toNodeId: "target", kind: "config-target" }]);
 });
+
+test.each([{ width: 200 }, { height: 100 }, { width: 500, height: 100 }])("agent image resize preserves natural aspect ratio with %j", patch => {
+    const before = { ...snapshot, nodes: [{ ...snapshot.nodes[2]!, width: 300, height: 300, metadata: { naturalWidth: 1600, naturalHeight: 900 } }] };
+    const after = applyCanvasAgentOps(before, [{ type: "update_node", id: "source", patch }]);
+    expect(after.nodes[0]!.width / after.nodes[0]!.height).toBeCloseTo(16 / 9);
+    if (patch.width) expect(after.nodes[0]!.width).toBeLessThanOrEqual(patch.width);
+    if (patch.height) expect(after.nodes[0]!.height).toBeLessThanOrEqual(patch.height);
+    expect(before.nodes[0]!.width).toBe(300);
+});
+
+test("explicit free-resize images and text keep independent requested dimensions", () => {
+    for (const node of [{ ...snapshot.nodes[2]!, metadata: { freeResize: true } }, { ...snapshot.nodes[2]!, type: CanvasNodeType.Text }]) {
+        const after = applyCanvasAgentOps({ ...snapshot, nodes: [node] }, [{ type: "update_node", id: node.id, patch: { width: 200, height: 100 } }]);
+        expect(after.nodes[0]).toMatchObject({ width: 200, height: 100 });
+    }
+});
+
+test.each([0, -1, NaN, Infinity])("invalid protected image width %s cannot create distorted nodes", width => {
+    expect(() => applyCanvasAgentOps(snapshot, [{ type: "update_node", id: "source", patch: { width } }])).toThrow("尺寸必须大于 0");
+});

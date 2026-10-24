@@ -51,7 +51,7 @@ try {
   assert.ok(Math.abs(moved.x - .2) < .01); assert.ok(moved.y < .01 || moved.y > .99); assert.equal(moved.angle, 37); assert.equal(moved.size, .4);
   test('cross-edge drag + transforms', `last element x=${moved.x.toFixed(3)}, y=${moved.y.toFixed(3)}; half-drop y shifted 0.5, rotation 37°, size 40%`);
   await page.locator('[data-testid="repeat-save"]').click(); await page.locator('[data-role="status"]').filter({ hasText: '已保存' }).waitFor();
-  await page.reload(); await page.locator('[data-testid="repeat-restore"]').click(); await page.locator('[data-role="status"]').filter({ hasText: '已打开本地存档' }).waitFor();
+  await page.reload(); await page.locator('[data-project-status]').filter({ hasText: '已自动保存到本机' }).waitFor();
   assert.match(await page.locator('[data-role="item-count"]').innerText(), /^8/);
   test('IndexedDB save and reopen', '8 elements restored after page reload');
   await page.locator('[data-testid="repeat-width"]').fill('2.54'); await page.locator('[data-testid="repeat-width"]').press('Tab');
@@ -75,7 +75,7 @@ try {
   await page.locator('[data-testid="repeat-dpi"]').selectOption('300');
   assert.equal(await page.locator('[data-testid="repeat-export-unit"]').isDisabled(), true);
   test('large export safety', 'oversized mirror period disables full-size export and displays limit');
-  await page.locator('[data-testid="repeat-restore"]').click(); await page.locator('[data-role="status"]').filter({ hasText: '已打开本地存档' }).waitFor();
+  await page.locator('[data-testid="repeat-restore"]').click(); await page.locator('[data-role="status"]').filter({ hasText: '使用顶部工程列表' }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: path.join(qa, 'repeat-mobile.png'), fullPage: true });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
   assert.equal(overflow, false); test('mobile layout', '390px viewport has no horizontal overflow');

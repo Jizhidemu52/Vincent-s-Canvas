@@ -1,9 +1,10 @@
 import { canvasImageDownloadFileName, canvasImageExportStem } from "@/lib/canvas/canvas-image-filename";
+import { prepareCanvasImageFormat, validateImageBlob } from "@/lib/canvas/canvas-image-encoding";
 import { createZip } from "@/lib/zip";
 import { resolveImageUrl } from "@/services/image-storage";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
-export type CanvasImagePdfMode = "merged" | "separate" | "images";
+export type CanvasImagePdfMode = "merged" | "separate" | "images" | "png" | "jpg";
 export type CanvasImagePdfProgress = { completed: number; total: number; label: string };
 export type CanvasImagePdfOptions = {
     nodes: readonly CanvasNodeData[];
@@ -17,6 +18,7 @@ type PdfDependencies = {
     loadImage?: (node: CanvasNodeData) => Promise<Blob>;
     measureImage?: (blob: Blob) => Promise<ImageSize>;
     convertImage?: (blob: Blob) => Promise<Blob>;
+    encodeImage?: (blob: Blob, mimeType: string) => Promise<Blob>;
 };
 
 // Bound both encoded data and decoded pixel memory. Images are loaded and flushed sequentially.
@@ -52,13 +54,13 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
     if (nodes.length > CANVAS_IMAGE_PDF_LIMITS.images) throw new Error(`单次最多导出 ${CANVAS_IMAGE_PDF_LIMITS.images} 张图片，请分批导出`);
     if (nodes.some((node) => !isCanvasPdfImage(node))) throw new Error("选择中存在不可导出的图片，请重新选择");
     if (new Set(nodes.map((node) => node.id)).size !== nodes.length) throw new Error("选择中存在重复图片，请重新选择");
-    if (mode !== "merged" && mode !== "separate" && mode !== "images") throw new Error("请选择有效的导出方式");
+    if (!["merged", "separate", "images", "png", "jpg"].includes(mode)) throw new Error("请选择有效的导出方式");
     const setName = options.setName.trim().replace(/\.(pdf|zip)$/i, "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").slice(0, 100);
     if (!setName) throw new Error("请填写有效的图片集名称");
 
     onProgress?.({ completed: 0, total: nodes.length, label: "正在准备图片集导出" });
     // This heavyweight dependency must remain outside the initial canvas bundle.
-    const PDFDocument = mode === "images" ? null : (await import("pdf-lib")).PDFDocument;
+    const PDFDocument = mode === "merged" || mode === "separate" ? (await import("pdf-lib")).PDFDocument : null;
     const loadImage = dependencies.loadImage || loadCanvasPdfImage;
     const measureImage = dependencies.measureImage || measureImageBlob;
     const convertImage = dependencies.convertImage || convertImageToPng;
@@ -86,6 +88,15 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
             const pixels = dimensions.width * dimensions.height;
             if (!Number.isFinite(pixels) || dimensions.width <= 0 || dimensions.height <= 0) throw new Error("无法读取原图尺寸");
             if (pixels > CANVAS_IMAGE_PDF_LIMITS.imagePixels) throw new Error("单张图片超过 2000 万像素，请先缩小图片");
+
+            if (mode === "png" || mode === "jpg") {
+                const converted = await prepareCanvasImageFormat(blob, mode, dependencies.encodeImage);
+                if (converted.blob.size > CANVAS_IMAGE_PDF_LIMITS.sourceBytes) throw new Error("转换后的图片过大，请先缩小图片");
+                files.push({ name: `${String(index + 1).padStart(3, "0")}_${imageName}.${mode}`, data: converted.blob });
+                onProgress?.({ completed: index + 1, total: nodes.length, label: `已转换 ${index + 1}/${nodes.length} 张 ${mode.toUpperCase()} 图片` });
+                await new Promise((resolve) => setTimeout(resolve, 0));
+                continue;
+            }
 
             const signature = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
             const isJpeg = signature[0] === 0xff && signature[1] === 0xd8;
@@ -130,28 +141,6 @@ async function loadCanvasPdfImage(node: CanvasNodeData) {
     const length = Number(response.headers.get("content-length"));
     if (Number.isFinite(length) && length > CANVAS_IMAGE_PDF_LIMITS.sourceBytes) throw new Error("原图超过 256 MB");
     return response.blob();
-}
-
-async function validateImageBlob(blob: Blob) {
-    const type = blob.type.split(";")[0].toLowerCase();
-    const bytes = new Uint8Array(await blob.slice(0, 512).arrayBuffer());
-    const text = new TextDecoder().decode(bytes).trimStart();
-    if (/^(?:<!doctype\s+html|<html\b|<head\b|<body\b|[\[{])/i.test(text)) throw new Error("原图地址返回了网页或错误数据，不是图片");
-    const brand = String.fromCharCode(...bytes.slice(8, 12));
-    const signatures: [boolean, string][] = [
-        [bytes[0] === 0xff && bytes[1] === 0xd8, "image/jpeg"],
-        [bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47, "image/png"],
-        [/^GIF8[79]a/.test(text), "image/gif"],
-        [/^RIFF[\s\S]{4}WEBP/.test(text), "image/webp"],
-        [text.startsWith("BM"), "image/bmp"],
-        [text.startsWith("II*\0") || text.startsWith("MM\0*"), "image/tiff"],
-        [/^(?:<\?xml[^>]*>\s*)?<svg\b/i.test(text), "image/svg+xml"],
-        [String.fromCharCode(...bytes.slice(4, 8)) === "ftyp" && /^(?:avif|avis|heic|heix|heif|mif1|msf1)$/.test(brand), brand.startsWith("avi") ? "image/avif" : "image/heif"],
-    ];
-    const detectedType = signatures.find(([matches]) => matches)?.[1];
-    if (type.startsWith("image/")) return detectedType || type;
-    if ((type && type !== "application/octet-stream") || !detectedType) throw new Error("原图内容或文件类型无效");
-    return detectedType;
 }
 
 async function withBrowserImage<T>(blob: Blob, read: (image: HTMLImageElement) => T | Promise<T>): Promise<T> {

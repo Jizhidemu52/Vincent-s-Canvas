@@ -5,6 +5,7 @@ import { imageResultExtension, storeImageResult } from "../src/image-result-stor
 import { prepareImageEditInput } from "../src/image-edit-input";
 import { ApiMartImageTaskPending } from "../src/apimart-image";
 import { resolveImageResultVariants, type ImageResultAsset } from "../src/image-result-variants";
+import { disposeProviderResults } from "../src/media-result-file";
 
 const file = new URL("../src/worker.ts", import.meta.url);
 const source = ts.createSourceFile(file.pathname, await Bun.file(file).text(), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -67,6 +68,7 @@ test("Worker pauses a completed provider result on processing error without refu
   class VideoTaskPending extends Error {}
   class TaskExecutionLost extends Error {}
   const api = functions(["runTask"], {
+    disposeProviderResults,
     randomUUID, TASK_LEASE_SECONDS: 180, config: { TASK_MOCK_MODE: "false" }, VideoSubmissionClaimLost, VideoTaskPending, ApiMartImageTaskPending, TaskExecutionLost,
     db: { query: async (sql: string) => { queries.push(sql); return { rows: [task] }; } },
     cache: { incr: async () => 1, expire: async () => {}, decr: async () => {}, zAdd: async () => { queued++; } },

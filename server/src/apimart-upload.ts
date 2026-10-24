@@ -43,7 +43,9 @@ export async function uploadApiMartImage(input: {
   if (!input.apiKey.trim()) throw new Error(`APIMart ${purposeName}服务端凭据未配置`);
   if (input.purpose === "image") validateApiMartGenerationImage(input);
   else validateApiMartVideoImage(input);
-  const file = new Blob([new Uint8Array(input.bytes)], { type: input.mimeType });
+  // Blob already snapshots a view. Do not create a second full-size typed-array
+  // copy first, and keep byteOffset/byteLength when the input is a subarray.
+  const file = new Blob([input.bytes as Uint8Array<ArrayBuffer>], { type: input.mimeType });
   const filename = input.filename?.split(/[\\/]/).pop()?.replace(/[\u0000-\u001f\u007f]/g, "") || `reference.${extensions[input.mimeType]}`;
   const form = new FormData();
   form.append("file", file, filename);

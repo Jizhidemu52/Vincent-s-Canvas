@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import { Button, Input, Modal, Progress } from "antd";
+import { Button, Input, Modal, Tag, theme as antdTheme } from "antd";
 import { Pause, Play, X } from "lucide-react";
 import { ModelPicker } from "@/components/model-picker";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
@@ -33,6 +33,7 @@ export default function CanvasBatchEditDialog({
     onClose, onPromptChange, onImageSettingsChange, onSelectFiles, onClearItems, onRun, onControlBatch,
 }: CanvasBatchEditDialogProps) {
     const theme = canvasThemes[useThemeStore(state => state.theme)];
+    const { token } = antdTheme.useToken();
     const effectiveConfig = useEffectiveConfig();
     const config = useToolConfig({ ...effectiveConfig, ...imageSettings, model: imageSettings.model || effectiveConfig.imageModel || effectiveConfig.model, count: "1" }, "canvas-batch");
     return (
@@ -61,8 +62,8 @@ export default function CanvasBatchEditDialog({
                     <Button disabled={running || !items.length} onClick={onClearItems}>清空列表</Button>
                 </div>
                 {serverId && running ? (
-                    <div className="flex flex-wrap items-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-3 py-2">
-                        <span className="mr-auto text-xs text-stone-500">服务端批次 {serverId.slice(0, 8)}</span>
+                    <div className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
+                        <span className="mr-auto text-xs" style={{ color: theme.node.muted }}>服务端批次 {serverId.slice(0, 8)}</span>
                         <Button size="small" icon={<Pause className="size-4" />} loading={action === "pause"}
                             disabled={Boolean(action) || !items.some(item => item.status === "waiting")}
                             onClick={() => void onControlBatch("pause")}>暂停等待项</Button>
@@ -75,20 +76,19 @@ export default function CanvasBatchEditDialog({
                     </div>
                 ) : null}
                 <Input.TextArea value={prompt} onChange={event => onPromptChange(event.target.value)} rows={4} placeholder="例如：白底图产品摄影，保留产品结构，提升质感和光影，适合电商详情页" />
-                <div className="rounded-lg border border-stone-200">
-                    <div className="flex items-center justify-between border-b border-stone-200 px-3 py-2 text-xs font-semibold text-stone-500">
+                <div className="rounded-lg border" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
+                    <div className="flex items-center justify-between border-b px-3 py-2 text-xs font-semibold" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
                         <span>待处理图片 {items.length} 张</span><span>按文件名顺序处理</span>
                     </div>
                     <div className="max-h-64 overflow-y-auto">
                         {items.length ? items.map((item, index) => (
-                            <div key={item.id} className="grid grid-cols-[32px_minmax(0,1fr)_90px] items-center gap-2 border-b border-stone-100 px-3 py-2 text-sm last:border-b-0">
-                                <span className="text-xs text-stone-400">{index + 1}</span>
+                            <div key={item.id} className="grid grid-cols-[32px_minmax(0,1fr)_90px] items-center gap-2 border-b px-3 py-2 text-sm last:border-b-0" style={{ borderColor: theme.node.stroke }}>
+                                <span className="text-xs" style={{ color: theme.node.muted }}>{index + 1}</span>
                                 <span className="truncate">{item.relativePath}</span>
-                                <span className={batchStatusClass(item.status)}>{batchStatusLabel(item.status)}</span>
-                                {item.status === "processing" ? <Progress className="col-span-3 !mb-0" percent={60} size="small" showInfo={false} status="active" /> : null}
-                                {item.failureReason ? <span className="col-span-3 text-xs text-red-500">{item.failureReason}</span> : null}
+                                <Tag className="justify-self-end" color={item.status === "processing" ? "processing" : item.status === "paused" ? "warning" : item.status === "success" ? "success" : item.status === "failed" ? "error" : "default"}>{batchStatusLabel(item.status)}</Tag>
+                                {item.failureReason ? <span className="col-span-3 text-xs" style={{ color: token.colorError }}>{item.failureReason}</span> : null}
                             </div>
-                        )) : <div className="px-3 py-10 text-center text-sm text-stone-400">还没有选择图片</div>}
+                        )) : <div className="px-3 py-10 text-center text-sm" style={{ color: theme.node.muted }}>还没有选择图片</div>}
                     </div>
                 </div>
             </div>
@@ -103,14 +103,4 @@ function batchStatusLabel(status: BatchEditFileItem["status"]) {
     if (status === "failed") return "失败";
     if (status === "cancelled") return "已取消";
     return "等待中";
-}
-
-function batchStatusClass(status: BatchEditFileItem["status"]) {
-    const base = "justify-self-end rounded-full px-2 py-0.5 text-xs font-semibold";
-    if (status === "processing") return `${base} bg-orange-50 text-orange-600`;
-    if (status === "paused") return `${base} bg-amber-50 text-amber-700`;
-    if (status === "success") return `${base} bg-emerald-50 text-emerald-600`;
-    if (status === "failed") return `${base} bg-red-50 text-red-600`;
-    if (status === "cancelled") return `${base} bg-stone-200 text-stone-600`;
-    return `${base} bg-stone-100 text-stone-500`;
 }

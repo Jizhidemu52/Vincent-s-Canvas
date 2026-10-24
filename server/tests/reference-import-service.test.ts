@@ -33,10 +33,11 @@ describe("HTML extraction", () => {
     expect(result.candidates[1]!.sourceImage).toBe("https://example.com/assets/a.png");
     expect(new Set(result.candidates.map((item) => item.id)).size).toBe(8);
   });
-  test("caps at 20; invalid base cannot point into private network", () => {
-    const result = extractReferenceCandidates('<base href="http://127.0.0.1/">' + Array.from({ length: 25 }, (_, i) => `<img src="${i}.png">`).join(""), "https://example.com/path/");
-    expect(result.candidates).toHaveLength(20);
+  test("keeps candidates beyond the first twenty for user selection, capped at one hundred", () => {
+    const result = extractReferenceCandidates('<base href="http://127.0.0.1/">' + Array.from({ length: 105 }, (_, i) => `<img src="${i}.png">`).join(""), "https://example.com/path/");
+    expect(result.candidates).toHaveLength(100);
     expect(result.candidates[0]!.url).toBe("https://example.com/path/0.png");
+    expect(result.candidates[99]!.url).toBe("https://example.com/path/99.png");
     expect(result.warnings).toHaveLength(1);
   });
   test("does not execute scripts; no-candidate guidance; sanitized URL removes credentials/query/hash", () => {

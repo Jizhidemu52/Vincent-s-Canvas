@@ -62,10 +62,10 @@ describe("APIMart video runtime safety", () => {
     const callbacks = { beforeSubmit: async () => true, onSubmitted: async () => undefined };
     await runApiMartVideoTask({ ...baseInput, ...callbacks, sources }, { sleep: async () => undefined, fetch: async (url, init) => {
       if (url.endsWith("/uploads/images")) {
-        uploads++;
+        const index = ++uploads;
         const file = (init?.body as FormData).get("file") as File;
-        expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array([uploads]));
-        return json({ url: `https://cdn.example/frame-${uploads}.png` });
+        expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array([index]));
+        return json({ url: `https://cdn.example/frame-${index}.png` });
       }
       if (init?.method === "POST") {
         expect(JSON.parse(String(init.body)).image_urls).toEqual(["https://cdn.example/frame-1.png", "https://cdn.example/frame-2.png"]);
@@ -146,6 +146,46 @@ describe("APIMart video runtime safety", () => {
         fetch: (async () => { requests++; return json({}); }),
       })).rejects.toThrow();
       expect(requests).toBe(0);
+    }
+  });
+
+  test("retains the actual 400 rejection reason without replaying the paid POST", async () => {
+    let submissions = 0;
+    const input = { ...baseInput, beforeSubmit: async () => true, onSubmitted: async () => { throw new Error("must not store an ID"); } };
+    try {
+      await runApiMartVideoTask(input, { fetch: async () => {
+        submissions++;
+        return json({ error: { message: "First frame image validation failed" } }, 400);
+      } });
+      throw new Error("Expected rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(VideoProviderFailure);
+      expect(String(error)).toContain("400）：First frame image validation failed");
+    }
+    expect(submissions).toBe(1);
+  });
+
+  test("keeps definite failure classification if the error body is absent, invalid or oversized", async () => {
+    for (const body of ["", "<html>gateway error</html>", JSON.stringify({ error: { message: "x".repeat(20_000) } })]) {
+      await expect(runApiMartVideoTask({ ...baseInput, beforeSubmit: async () => true, onSubmitted: async () => undefined }, {
+        fetch: async () => new Response(body, { status: 400 }),
+      })).rejects.toBeInstanceOf(VideoProviderFailure);
+    }
+  });
+
+  test("bounded error text never repeats credentials or source URLs", async () => {
+    const input = { ...baseInput, upstreamTaskId: "original", beforeSubmit: async () => true, onSubmitted: async () => undefined };
+    try {
+      await runApiMartVideoTask(input, { sleep: async () => undefined, fetch: async () => json({ message: `Bad ${baseInput.apiKey} Bearer secret-token https://cdn.example/private.png?signature=secret ${"x".repeat(600)}` }, 400) });
+      throw new Error("Expected query failure");
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(VideoProviderFailure);
+      const message = String(error);
+      expect(message).toContain("状态查询失败（400）");
+      expect(message).not.toContain(baseInput.apiKey);
+      expect(message).not.toContain("secret-token");
+      expect(message).not.toContain("signature=");
+      expect(message.length).toBeLessThan(550);
     }
   });
 });

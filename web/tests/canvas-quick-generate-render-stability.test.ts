@@ -5,12 +5,14 @@ import { canvasQuickGeneratePanelPropsEqual, type CanvasQuickGeneratePanelRender
 const noop = () => undefined;
 const references: unknown[] = [];
 const config = { id: "canvas-config" };
+const promptRef = { current: "红色针织连衣裙" };
 
 function state(overrides: Partial<CanvasQuickGeneratePanelRenderState> = {}): CanvasQuickGeneratePanelRenderState {
     return {
         embedded: true,
         open: true,
-        prompt: "红色针织连衣裙",
+        promptRef,
+        promptRevision: 0,
         model: "open-gpt2",
         size: "1:1",
         quality: "auto",
@@ -23,7 +25,6 @@ function state(overrides: Partial<CanvasQuickGeneratePanelRenderState> = {}): Ca
         remainingCredits: 96,
         config,
         onClose: noop,
-        onPromptChange: noop,
         onModelChange: noop,
         onSizeChange: noop,
         onQualityChange: noop,
@@ -45,6 +46,7 @@ describe("canvas quick-generate panel render stability", () => {
     });
 
     test("refreshes the panel when a generation setting changes", () => {
+        expect(canvasQuickGeneratePanelPropsEqual(state(), state({ promptRevision: 1 }))).toBe(false);
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ count: 3 }))).toBe(false);
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ quality: "high" }))).toBe(false);
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ imageOptions: '{"output_format":"webp"}' }))).toBe(false);

@@ -30,7 +30,7 @@ const toolConfigCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use
     compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true },
 }).outputText;
 
-function panelHarness(options: { replies: ToolResponseResult[]; stream?: string; translate?: () => Promise<string>; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; models?: BusinessConfig["models"]; imageCapabilities?: BusinessConfig["models"]; standalone?: boolean; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile }) {
+function panelHarness(options: { replies: ToolResponseResult[]; stream?: string; translate?: () => Promise<string>; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; models?: BusinessConfig["models"]; imageCapabilities?: BusinessConfig["models"]; standalone?: boolean; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile; taskLifecycle?: boolean; storeImage?: () => Promise<UploadedImage> }) {
     const states: unknown[] = [];
     const refs: unknown[] = [];
     const memos: Array<{ dependencies?: DependencyList; value: unknown }> = [];
@@ -80,6 +80,11 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     const snapshotRef: { current: CanvasAgentSnapshot } = { current: { projectId: "project", title: "Canvas", nodes: options.nodes || options.selected || [], connections: [], selectedNodeIds: (options.selected || []).map((node) => node.id), viewport: { x: 0, y: 0, k: 1 }, viewportSize: { width: 800, height: 600 } } };
     const imageRequest = async (type: string, args: any[]) => {
         requests.push({ type, args });
+        if (options.taskLifecycle) {
+            const settings = args[type === "image" ? 2 : 4];
+            await settings.onSubmissionStarted();
+            await settings.onSubmitted(["accepted-image"]);
+        }
         return options.generate ? options.generate() : [{ id: "generated-image", dataUrl: "/api/assets/result/content" }];
     };
     const dependencies: Record<string, unknown> = {
@@ -147,7 +152,16 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
             requestVideoGeneration: async (...args: any[]) => { requests.push({ type: "video", args }); args[5]?.onSubmitted?.({ id: "video-task", provider: "server", model: args[0].model }); return options.video ? options.video() : { url: "/api/assets/video/content", mimeType: "video/mp4" }; },
             storeGeneratedVideo: async (result: any) => { videoStores.push(result); return options.storedVideo || { url: result.url, storageKey: "video:cached", bytes: 123, mimeType: result.mimeType, width: 768, height: 768 }; },
         },
-        "@/services/image-storage": { uploadImage: async (url: string) => { imageUploads.push(url); return options.storedImage || { url, storageKey: "", width: 1024, height: 1024, bytes: 100, mimeType: "image/png" }; }, imageToDataUrl: async (reference: any) => reference.dataUrl || reference.url },
+        "@/services/api/audio": {
+            requestAudioGeneration: async (...args: any[]) => {
+                requests.push({ type: "audio", args });
+                await args[2]?.onSubmissionStarted?.("audio-request");
+                await args[2]?.onSubmitted?.({ id: "accepted-audio" });
+                return new Blob(["audio"], { type: "audio/mpeg" });
+            },
+            storeGeneratedAudio: async () => ({ url: "/api/assets/audio/content", storageKey: "", mimeType: "audio/mpeg" }),
+        },
+        "@/services/image-storage": { uploadImage: async (url: string) => { imageUploads.push(url); return options.storeImage ? options.storeImage() : options.storedImage || { url, storageKey: "", width: 1024, height: 1024, bytes: 100, mimeType: "image/png" }; }, imageToDataUrl: async (reference: any) => reference.dataUrl || reference.url },
     };
     // Execute the real hook against this harness's React dispatcher and scoped stores.
     // No global Zustand state or network configuration leaks into manual renders.
@@ -156,6 +170,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     dependencies["@/hooks/use-tool-config"] = toolConfigModule.exports;
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
+    const panelState = { closing: false, agentMode: "online" };
     const render = () => {
         stateIndex = refIndex = memoIndex = effectIndex = 0;
         const element = module.exports.CanvasAssistantPanel({
@@ -163,7 +178,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
             sessions, activeSessionId, onSelectNodeIds: () => undefined, onSessionsChange,
             onApplyOps: (ops: any[]) => snapshotRef.current = applyCanvasAgentOps(snapshotRef.current, ops),
             canUndoOps: false, onUndoOps: () => null, onPasteImage: () => undefined,
-            agentMode: "online", onAgentModeChange: () => undefined, closing: false, onCollapse: () => undefined,
+            ...panelState, onAgentModeChange: () => undefined, onCollapse: () => undefined,
         }) as ReactElement<any>;
         for (const effect of pendingEffects.splice(0)) effect();
         return element;
@@ -172,6 +187,9 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     const messages = (): CanvasAssistantMessage[] => states.flatMap((value) => Array.isArray(value) ? value.flatMap((item) => item?.messages || []) : []);
     return {
         requests, config, snapshotRef, composer, messages, assets, imageUploads, videoStores, capabilityRequests, sessionCommits, sessionUpdates,
+        stop() { composer().props.onStop(); },
+        close() { panelState.closing = true; render(); },
+        unmount() { effects.forEach(effect => effect.cleanup?.()); },
         pauseCommit(gate: Promise<void>) { commitGate = gate; },
         pauseReply(gate: Promise<void>) { replyGate = gate; },
         newChat() { findElements(render()).find(element => element.props.title === "新对话")!.props.children.props.onClick(); },
@@ -233,6 +251,129 @@ async function waitFor(predicate: () => boolean) {
     }
     throw new Error("Panel did not reach the expected state");
 }
+
+describe("online Agent cancellation", () => {
+    test("image output IDs use each original task index, matching recovery across split tasks", async () => {
+        const harness = panelHarness({ replies: [tool("canvas_generate_image", { editIntent: "new", prompt: "A red vase" }), { content: "done", toolCalls: [] }],
+            generate: async () => [
+                { id: "a", dataUrl: "/api/assets/a/content", sourceTaskId: "task-a" },
+                { id: "b", dataUrl: "/api/assets/b/content", sourceTaskId: "task-b" },
+                { id: "c", dataUrl: "/api/assets/c/content", sourceTaskId: "task-b" },
+            ],
+        });
+        await harness.submit("生成图片");
+        expect(harness.snapshotRef.current.nodes.map(node => node.id)).toEqual(["agent-task-a-0", "agent-task-b-0", "agent-task-b-1"]);
+    });
+
+    test("audio output keeps the original task identity used by later recovery", async () => {
+        const source: CanvasNodeData = { id: "source", type: CanvasNodeType.Audio, title: "音频", position: { x: 0, y: 0 }, width: 300, height: 120, metadata: { model: "audio-model", generationMode: "audio" } };
+        const harness = panelHarness({ config: { audioModel: "audio-model" }, nodes: [source],
+            models: [
+                { id: "text-model", name: "Text", modelId: "text-model", capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
+                { id: "audio-model", name: "Audio", modelId: "audio-model", capabilities: ["audio"], creditCost: 0, rmbCost: 0 },
+            ],
+            replies: [tool("canvas_run_generation", { nodeId: "source", mode: "audio", prompt: "Read this" }), { content: "done", toolCalls: [] }],
+        });
+        await harness.submit("生成音频");
+        expect(harness.requests.filter(request => request.type === "audio")).toHaveLength(1);
+        expect(harness.snapshotRef.current.nodes.find(node => node.id === "agent-accepted-audio-0")?.metadata).toMatchObject({ sourceTaskId: "accepted-audio", status: "success" });
+        expect(harness.snapshotRef.current.connections).toContainEqual(expect.objectContaining({ fromNodeId: "source", toNodeId: "agent-accepted-audio-0" }));
+    });
+
+    test("stopping during the pre-submit save clears the unsubmitted identity and permits a later message", async () => {
+        const saved = Promise.withResolvers<void>();
+        const harness = panelHarness({ taskLifecycle: true, replies: [tool("canvas_generate_image", { editIntent: "new", prompt: "A red vase" }), { content: "ready", toolCalls: [] }] });
+        harness.pauseCommit(saved.promise);
+        const submitted = harness.submit("生成花瓶");
+        await waitFor(() => harness.messages().some(message => Boolean(message.detail?.pendingTask)));
+        harness.stop();
+        saved.resolve();
+        await submitted;
+        expect(harness.messages().some(message => Boolean(message.detail?.pendingTask))).toBe(false);
+        expect(harness.messages().some(message => message.text.includes("本次请求未提交"))).toBe(true);
+        expect(harness.imageUploads).toEqual([]);
+        await harness.submit("继续对话");
+        expect(harness.requests.filter(request => request.type === "agent")).toHaveLength(2);
+    });
+
+    test("project switches abort the prior turn before a late planner can modify the next canvas", async () => {
+        const gate = Promise.withResolvers<void>();
+        const harness = panelHarness({ replies: [tool("canvas_create_text_node", { text: "old project" })] });
+        harness.pauseReply(gate.promise);
+        const submitted = harness.submit("创建文字节点");
+        await waitFor(() => harness.requests.some(request => request.type === "agent"));
+        harness.snapshotRef.current = { ...harness.snapshotRef.current, projectId: "next-project" };
+        harness.composer();
+        gate.resolve();
+        await submitted;
+        expect(harness.snapshotRef.current.nodes).toEqual([]);
+        expect(harness.requests[0]!.args[5].signal.aborted).toBe(true);
+    });
+    test.each(["stop", "close", "unmount"] as const)("%s prevents a late planner reply from submitting tools", async action => {
+        const gate = Promise.withResolvers<void>();
+        const harness = panelHarness({ replies: [tool("canvas_create_text_node", { text: "must not appear" })] });
+        harness.pauseReply(gate.promise);
+        const submitted = harness.submit("创建文字节点");
+        await waitFor(() => harness.requests.some(request => request.type === "agent"));
+        const request = harness.requests.find(request => request.type === "agent")!;
+        harness[action]();
+        expect(request.args[5].signal.aborted).toBe(true);
+        gate.resolve();
+        await submitted;
+        expect(harness.snapshotRef.current.nodes).toEqual([]);
+        expect(harness.requests).toHaveLength(1);
+        expect(harness.messages().some(message => message.text.includes("must not appear"))).toBe(false);
+    });
+
+    test("closing expires pending approval and stale approval handlers cannot mutate the canvas", async () => {
+        const harness = panelHarness({ confirmTools: true, replies: [tool("canvas_create_text_node", { text: "blocked" })] });
+        await harness.submit("创建文字节点");
+        const pending = harness.messages().find(message => message.detail?.status === "pending")!;
+        const approve = harness.approvalHandler();
+        harness.close();
+        approve(pending.id);
+        await Promise.resolve();
+        expect(harness.snapshotRef.current.nodes).toEqual([]);
+        expect(harness.requests).toHaveLength(1);
+        expect(harness.messages().find(message => message.id === pending.id)?.detail?.status).not.toBe("pending");
+    });
+
+    test("stopping after acceptance preserves original task identity and prevents later tool cycles", async () => {
+        const gate = Promise.withResolvers<Array<{ id: string; dataUrl: string }>>();
+        const harness = panelHarness({ taskLifecycle: true, generate: () => gate.promise,
+            replies: [tool("canvas_generate_image", { editIntent: "new", prompt: "A red vase" }), tool("canvas_create_text_node", { text: "later tool" })] });
+        const submitted = harness.submit("生成花瓶");
+        await waitFor(() => harness.messages().some(message => (message.detail?.pendingTask as { taskIds?: string[] })?.taskIds?.includes("accepted-image")));
+        const saved = harness.sessionCommits.find(commit => JSON.stringify(commit).includes("accepted-image"));
+        expect(saved).toBeDefined();
+        const image = harness.requests.find(request => request.type === "image")!;
+        expect(image.args[2].cancelOnAbort()).toBe(false);
+        harness.stop();
+        gate.resolve([{ id: "late-image", dataUrl: "/api/assets/late/content" }]);
+        await submitted;
+        expect(harness.snapshotRef.current.nodes).toEqual([]);
+        expect(harness.imageUploads).toEqual([]);
+        expect(harness.requests.filter(request => request.type === "agent")).toHaveLength(1);
+        const paused = harness.messages().find(message => message.detail?.pendingTask)!;
+        expect(paused.detail?.status).toBe("paused");
+        expect(paused.text).toContain("服务端任务可能继续");
+        await harness.submit("重复生成");
+        expect(harness.requests.filter(request => request.type === "image")).toHaveLength(1);
+    });
+
+    test("a download finishing after stop cannot write nodes, assets or completion messages", async () => {
+        const download = Promise.withResolvers<UploadedImage>();
+        const harness = panelHarness({ replies: [tool("canvas_generate_image", { editIntent: "new", prompt: "A red vase" })], storeImage: () => download.promise });
+        const submitted = harness.submit("生成花瓶");
+        await waitFor(() => harness.imageUploads.length === 1);
+        harness.stop();
+        download.resolve({ url: "/api/assets/late/content", storageKey: "cached", width: 100, height: 100, bytes: 5, mimeType: "image/png" });
+        await submitted;
+        expect(harness.snapshotRef.current.nodes).toEqual([]);
+        expect(harness.assets).toEqual([]);
+        expect(harness.messages().flatMap(message => message.attachments || [])).toEqual([]);
+    });
+});
 
 function findElements(value: unknown): ReactElement<any>[] {
     if (Array.isArray(value)) return value.flatMap(findElements);
@@ -730,6 +871,16 @@ describe("canvas assistant submission", () => {
         await waitFor(() => harness.assets.length === 1);
         await waitFor(() => !harness.composer().props.sending);
         expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent", "edit"]);
+    });
+
+    test("running video directly from an unconnected image sends that source as the first frame", async () => {
+        const source: CanvasNodeData = { id: "source", type: CanvasNodeType.Image, title: "首帧", position: { x: 0, y: 0 }, width: 512, height: 512, metadata: { content: "data:image/png;base64,c291cmNl", storageKey: "source-key" } };
+        const harness = panelHarness({ nodes: [source], replies: [tool("canvas_run_generation", { nodeId: "source", mode: "video", prompt: "Animate this image" }), { content: "done", toolCalls: [] }] });
+        await harness.submit("让画布里的首帧轻微移动");
+        const video = harness.requests.find(request => request.type === "video");
+        expect(video).toBeDefined();
+        expect(video!.args[2]).toEqual([expect.objectContaining({ id: "source", storageKey: "source-key", dataUrl: "data:image/png;base64,c291cmNl" })]);
+        expect(harness.snapshotRef.current.nodes.find(node => node.id === "source")?.metadata?.content).toBe(source.metadata?.content);
     });
 
     test("uses the explicit video tool and preserves duration, aspect ratio, quality, audio, and reference data", async () => {

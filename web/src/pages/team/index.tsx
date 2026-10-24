@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 
 import { createClientId } from "@/lib/client-id";
+import { deploymentFeatures } from "@/lib/deployment-features";
 
 import {
   contributeGroupCredits,
@@ -52,7 +53,7 @@ export default function TeamPage() {
   const performanceEnabled = useModuleStore((state) => state.flags.performance);
 
   const refresh = async (background = false) => {
-    if (!user?.groupId) return;
+    if (!deploymentFeatures.creditsEnabled || !user?.groupId) return;
     const sequence = ++requestSequence.current;
     if (!background) setLoading(true);
     try {
@@ -82,7 +83,7 @@ export default function TeamPage() {
     finally { pendingActionRef.current = ""; setPendingAction(""); }
   };
 
-  if (!user || !user.groupId) return <Navigate to="/" replace />;
+  if (!deploymentFeatures.creditsEnabled || !user || !user.groupId) return <Navigate to="/" replace />;
 
   const applyCredits = (values: { amount: number; reason: string }) => runAction("request", async () => {
     try {
@@ -149,7 +150,7 @@ export default function TeamPage() {
             <Table loading={loading} rowKey="id" size="small" scroll={{ x: 720 }} pagination={{ pageSize: 10 }} dataSource={managedCredits?.requests ?? []} columns={[
               { title: "成员", dataIndex: "userName" }, { title: "积分", dataIndex: "amount" }, { title: "用途", dataIndex: "reason" },
               { title: "状态", dataIndex: "status", render: (value: string) => <Tag color={requestStatus[value]?.color}>{requestStatus[value]?.label || value}</Tag> },
-              { title: "操作", render: (_, row) => row.status === "pending" ? <div className="flex gap-2"><Button size="small" type="primary" loading={pendingAction === `decision:${row.id}`} disabled={Boolean(pendingAction)} onClick={() => void decide(row.id, "approved")}>通过</Button><Button size="small" danger disabled={Boolean(pendingAction)} onClick={() => modal.confirm({ title: "拒绝该额度申请？", okText: "拒绝", okButtonProps: { danger: true }, onOk: () => decide(row.id, "rejected") })}>拒绝</Button></div> : "-" },
+              { title: "操作", render: (_, row) => row.status === "pending" ? <div className="flex gap-2"><Button size="small" type="primary" loading={pendingAction === `decision:${row.id}`} disabled={Boolean(pendingAction)} onClick={() => modal.confirm({ title: "通过该额度申请？", content: `确认后将发放 ${row.amount} 积分。`, okText: "确认通过", cancelText: "取消", onOk: () => decide(row.id, "approved") })}>通过</Button><Button size="small" danger disabled={Boolean(pendingAction)} onClick={() => modal.confirm({ title: "拒绝该额度申请？", okText: "拒绝", cancelText: "取消", okButtonProps: { danger: true }, onOk: () => decide(row.id, "rejected") })}>拒绝</Button></div> : "-" },
             ]} />
           </section>
 

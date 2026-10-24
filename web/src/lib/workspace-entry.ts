@@ -1,5 +1,6 @@
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
+import { isWorkspaceRole } from "../../../shared/workspace-access";
 
 export function isMaintenancePath(pathname: string) {
     return /^\/admin(?:\/|$)/.test(pathname) || pathname === "/change-password";
@@ -22,7 +23,7 @@ export async function prepareWorkspaceEntry(token: string | null, pathname: stri
     if (!explicitOaToken && isMaintenancePath(pathname)) {
         return authenticated && isAdminRole(user?.role) ? "maintenance" : "maintenance-login";
     }
-    if (authenticated && user?.role === "designer") return "workspace";
+    if (authenticated && isWorkspaceRole(user?.role)) return "workspace";
     if (!deploymentFeatures.oaLoginEnabled && authenticated && isAdminRole(user?.role)) return "maintenance";
     return deploymentFeatures.oaLoginEnabled ? "oa-required" : "password-login";
 }

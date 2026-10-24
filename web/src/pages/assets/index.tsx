@@ -1,8 +1,9 @@
 import { BookmarkPlus, Check, Copy, Download, LoaderCircle, PencilLine, Plus, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Select, Space, Tag, Typography } from "antd";
+import { App, Button, Card, DatePicker, Drawer, Empty, Form, Image, Input, Modal, Segmented, Select, Space, Tag, Typography } from "antd";
+import dayjs from "dayjs";
 import { saveAs } from "file-saver";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { InfiniteLoadMore } from "@/components/infinite-load-more";
@@ -27,6 +28,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
 import { buildAssetSearchIndex, searchAssetIndex } from "./asset-search";
 import { assetCanvasNodes, assetCanvasViewport, selectAssetRange } from "./asset-batch";
+import { compareAssetCreatedAt, filterLocalAssets, patchAssetProjection, uploadAssetBatch, type AssetUploadJob } from "./asset-library-state";
 import {
     deleteServerAsset,
     updateServerAssetMetadata,
@@ -34,6 +36,8 @@ import {
     fetchServerAsset,
     batchServerAssets,
     listServerAssets,
+    listDeletedServerAssets,
+    restoreServerAsset,
     listServerProjects,
     recordServerAssetDownload,
     recordServerAssetEvent,
@@ -44,6 +48,8 @@ import {
     type AssetEventType,
     type ServerAsset,
     type UserProject,
+    type AssetListQuery,
+    type ServerAssetPage,
 } from "@/services/api/server-assets";
 import { savePromptFromAsset } from "@/services/api/prompts";
 
@@ -70,6 +76,7 @@ const kindOptions = [
 
 export default function AssetsPage() {
     const { message, modal } = App.useApp();
+    const queryClient = useQueryClient();
     const navigate = useNavigate();
     const referenceImportEnabled = useModuleEnabled("reference-import");
     const copyText = useCopyText();
@@ -95,11 +102,23 @@ export default function AssetsPage() {
     const [keyword, setKeyword] = useWorkbenchField("assets:keyword", "");
     const deferredKeyword = useDeferredValue(keyword);
     const [kindFilter, setKindFilter] = useWorkbenchField<AssetKind | "all">("assets:kind", "all");
+    const [libraryView, setLibraryView] = useState<"active" | "trash">("active");
+    const [tagFilter, setTagFilter] = useState("");
+    const deferredTag = useDeferredValue(tagFilter.trim());
+    const [projectFilter, setProjectFilter] = useState<string>();
+    const [dateRange, setDateRange] = useState<[string, string] | null>(null);
+    const [sort, setSort] = useState<"newest" | "oldest">("newest");
+    const [failedUploads, setFailedUploads] = useState<AssetUploadJob[]>([]);
+    const uploadAbort = useRef<AbortController | null>(null);
+    const assetQuery: AssetListQuery = { q: deferredKeyword || undefined, kind: kindFilter === "all" ? undefined : kindFilter,
+        tag: deferredTag || undefined, projectId: projectFilter, createdFrom: dateRange?.[0], createdBefore: dateRange?.[1], sort };
+    const assetQueryKey = ["asset-library", user?.id, libraryView, assetQuery] as const;
+    const hasFilters = Boolean(keyword || kindFilter !== "all" || tagFilter || projectFilter || dateRange);
+    const clearFilters = () => { setKeyword(""); setKindFilter("all"); setTagFilter(""); setProjectFilter(undefined); setDateRange(null); };
     const assetPages = useInfiniteQuery({
-        queryKey: ["asset-library", user?.id, deferredKeyword, kindFilter],
+        queryKey: assetQueryKey,
         initialPageParam: undefined as string | undefined,
-        queryFn: ({ pageParam, signal }) => listServerAssets({ limit: 60, cursor: pageParam,
-            q: deferredKeyword || undefined, kind: kindFilter === "all" ? undefined : kindFilter }, signal),
+        queryFn: ({ pageParam, signal }) => (libraryView === "trash" ? listDeletedServerAssets : listServerAssets)({ ...assetQuery, limit: 60, cursor: pageParam }, signal),
         getNextPageParam: last => last.hasMore ? last.nextCursor || undefined : undefined,
         enabled: Boolean(user?.id),
         staleTime: 10_000,
@@ -165,7 +184,11 @@ export default function AssetsPage() {
         setIsAssetOpen(false);
         setSelectedIds(new Set()); selectionAnchor.current = null;
         setBatchTarget(null);
-    }, [user?.id, deferredKeyword, kindFilter]);
+    }, [user?.id, deferredKeyword, kindFilter, libraryView, deferredTag, projectFilter, dateRange, sort]);
+    useEffect(() => {
+        setFailedUploads([]);
+        return () => uploadAbort.current?.abort();
+    }, [user?.id]);
     useEffect(() => {
         const controller = new AbortController();
         setServerProjects([]);
@@ -174,11 +197,14 @@ export default function AssetsPage() {
         }).catch(() => undefined);
         return () => controller.abort();
     }, [user?.id]);
-    const assets = useMemo(() => [...serverAssets.map(serverAssetToLocal), ...localAssets.filter((asset) => !serverAssetIds.has(asset.id) && !serverAssetIds.has(metadataString(asset, "serverAssetId")))], [localAssets, serverAssetIds, serverAssets]);
+    const assets = useMemo(() => libraryView === "trash" ? [] : [...serverAssets.map(serverAssetToLocal), ...localAssets.filter((asset) => !serverAssetIds.has(asset.id) && !serverAssetIds.has(metadataString(asset, "serverAssetId")))], [localAssets, serverAssetIds, serverAssets, libraryView]);
     const validAssets = useMemo(() => assets.filter((asset) => canUserAccessAsset(asset, user, serverAssetIds.has(asset.id)) && (asset.kind === "text" || asset.kind === "image" || asset.kind === "video")), [assets, user, serverAssetIds]);
 
     const searchIndex = useMemo(() => buildAssetSearchIndex(validAssets.filter(asset => !serverAssetIds.has(asset.id))), [validAssets, serverAssetIds]);
-    const filteredAssets = useMemo(() => [...validAssets.filter(asset => serverAssetIds.has(asset.id)), ...searchAssetIndex(searchIndex, deferredKeyword, kindFilter)], [validAssets, serverAssetIds, searchIndex, deferredKeyword, kindFilter]);
+    const filteredAssets = useMemo(() => [...validAssets.filter(asset => serverAssetIds.has(asset.id)), ...filterLocalAssets(searchAssetIndex(searchIndex, deferredKeyword, kindFilter), {
+        tag: deferredTag || undefined, projectId: projectFilter, createdFrom: dateRange?.[0], createdBefore: dateRange?.[1],
+    })].sort((a, b) => (sort === "oldest" ? 1 : -1) * (compareAssetCreatedAt(a.createdAt, b.createdAt) || a.id.localeCompare(b.id))),
+    [validAssets, serverAssetIds, searchIndex, deferredKeyword, kindFilter, deferredTag, projectFilter, dateRange, sort]);
 
     const visibleAssets = filteredAssets;
 
@@ -347,12 +373,20 @@ export default function AssetsPage() {
             return;
         }
         try {
+            const ownerId = user?.id;
             const receiptKey = `asset.downloaded:${asset.id}:${createClientId()}`;
             const blob = await fetchServerAssetContent(asset.id);
+            if (useUserStore.getState().user?.id !== ownerId) throw new Error("账号已切换，下载已停止");
             saveAs(blob, filename);
-            await recordServerAssetDownload(asset.id, filename, receiptKey);
-            await refreshServerAssets();
-            message.success("下载已开始并记录为首次有效下载");
+            try {
+                const { projection } = await recordServerAssetDownload(asset.id, filename, receiptKey);
+                if (useUserStore.getState().user?.id !== ownerId) return;
+                queryClient.setQueriesData<InfiniteData<ServerAssetPage>>({ queryKey: ["asset-library", ownerId] }, data => patchAssetProjection(data, asset.id, projection));
+                setPreviewAsset(current => current?.id === asset.id ? { ...current, metadata: { ...current.metadata, ...projection } } : current);
+                message.success("下载已开始，下载记录已更新");
+            } catch {
+                if (useUserStore.getState().user?.id === ownerId) message.warning("下载已开始，但下载记录暂未更新；无需重复下载");
+            }
         } catch (error) {
             message.error(error instanceof Error ? error.message : "素材下载失败");
         }
@@ -399,19 +433,24 @@ export default function AssetsPage() {
         }
     };
 
-    const importImageFiles = async (files?: FileList | null) => {
-        const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
+    const importImageFiles = async (files: File[] | AssetUploadJob[]) => {
+        const imageFiles = files.map(file => file instanceof File ? { file, clientReferenceId: `asset-upload:${createClientId()}` } : file).filter(job => job.file.type.startsWith("image/"));
         if (!imageFiles.length) {
             message.warning("请选择图片文件");
             return;
         }
-        for (const [index, file] of imageFiles.entries()) {
-            setAssetAction(`正在上传 ${index + 1} / ${imageFiles.length}：${file.name}`);
-            await uploadServerAsset(file, { title: file.name, tags: ["手动上传"], source: "manual-upload", module: "素材库", originalFileName: file.name });
-        }
-        await refreshServerAssets();
-        message.success(`已上传 ${imageFiles.length} 张图片`);
-        if (batchImageInputRef.current) batchImageInputRef.current.value = "";
+        const ownerId = user?.id;
+        const controller = new AbortController(); uploadAbort.current = controller;
+        const result = await uploadAssetBatch(imageFiles, async job => {
+            if (controller.signal.aborted || useUserStore.getState().user?.id !== ownerId) throw new Error("账号已切换，上传已停止");
+            return uploadServerAsset(job.file, { title: job.file.name, tags: ["手动上传"], source: "manual-upload", module: "素材库", originalFileName: job.file.name },
+                { clientReferenceId: job.clientReferenceId, expectedOwnerId: ownerId, signal: controller.signal });
+        }, (completed, total) => { if (!controller.signal.aborted) setAssetAction(`已处理 ${completed} / ${total} 张图片…`); });
+        if (controller.signal.aborted || useUserStore.getState().user?.id !== ownerId) return;
+        setFailedUploads(previous => [...previous.filter(job => !imageFiles.some(attempt => attempt.clientReferenceId === job.clientReferenceId)), ...result.failed]);
+        if (result.succeeded) await refreshServerAssets();
+        if (result.failed.length) message.warning(`已上传 ${result.succeeded} 张，${result.failed.length} 张失败；可重试失败项`);
+        else message.success(`已上传 ${result.succeeded} 张图片`);
     };
 
     const replicateAsset = async (asset: Asset) => {
@@ -444,6 +483,9 @@ export default function AssetsPage() {
         if (!user?.departmentId) { message.warning("账号尚未归属部门"); return; }
         try {
             await (remove ? unshareServerAssetWithDepartment(asset.id, user.departmentId) : shareServerAssetWithDepartment(asset.id, user.departmentId));
+            await refreshServerAssets();
+            const refreshed = await readAssetDetail(asset);
+            setPreviewAsset(current => current?.id === asset.id ? refreshed : current);
             message.success(remove ? "已取消部门共享" : "已共享到部门素材库");
         } catch (error) { message.error(error instanceof Error ? error.message : "共享设置失败"); }
     };
@@ -488,12 +530,15 @@ export default function AssetsPage() {
                     <header className="wb-header">
                         <div>
                             <p className="wb-eyebrow">素材工作台</p>
-                            <h1 className="wb-title">我的素材</h1>
-                            <p className="wb-description">把文本、图片和视频整理在一起。收藏、下载，或带着原提示词继续创作。</p>
+                            <h1 className="wb-title">{libraryView === "trash" ? "最近删除" : "我的素材"}</h1>
+                            <p className="wb-description">{libraryView === "trash" ? "仅展示你有权管理、删除未满 30 天的公司素材。原始文件仍保留时可恢复，归属、项目与共享设置保持不变。" : "把文本、图片和视频整理在一起。收藏、下载，或带着原提示词继续创作。"}</p>
                         </div>
                         <div className="wb-toolbar">
+                            <Segmented aria-label="素材库视图" value={libraryView} onChange={value => setLibraryView(value as "active" | "trash")} options={[{ label: "我的素材", value: "active" }, { label: "最近删除", value: "trash" }]} />
+                            {libraryView === "active" ? <>
                             <Button size="large" icon={<Plus className="size-4" />} onClick={openCreate}>新增素材</Button>
                             <Button size="large" type="primary" icon={<Upload className="size-4" />} disabled={Boolean(assetAction)} onClick={() => batchImageInputRef.current?.click()}>上传图片</Button>
+                            </> : null}
                         </div>
                     </header>
 
@@ -515,6 +560,13 @@ export default function AssetsPage() {
                     </div>
 
                     <div className="mt-5 grid gap-3 text-left">
+                        <div className="flex flex-wrap items-center gap-2" aria-label="素材筛选">
+                            <Input aria-label="按标签筛选" placeholder="标签（精确匹配）" allowClear value={tagFilter} onChange={event => setTagFilter(event.target.value)} style={{ width: 180 }} />
+                            <Select aria-label="按项目筛选" placeholder="全部项目" allowClear showSearch optionFilterProp="label" value={projectFilter} onChange={setProjectFilter} options={serverProjects.map(project => ({ value: project.id, label: project.name }))} style={{ minWidth: 180 }} />
+                            <DatePicker.RangePicker aria-label="按创建日期筛选" placeholder={["创建开始日期", "创建结束日期"]} value={dateRange ? [dayjs(dateRange[0]), dayjs(dateRange[1]).subtract(1, 'day')] : null} onChange={range => setDateRange(range?.[0] && range?.[1] ? [range[0].startOf('day').toISOString(), range[1].add(1, 'day').startOf('day').toISOString()] : null)} />
+                            <Select aria-label="素材排序" value={sort} onChange={setSort} options={[{ value: "newest", label: libraryView === "trash" ? "最近删除优先" : "最新创建优先" }, { value: "oldest", label: libraryView === "trash" ? "最早删除优先" : "最早创建优先" }]} style={{ width: 154 }} />
+                            {hasFilters ? <Button onClick={clearFilters}>清除筛选</Button> : null}
+                        </div>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-center">
                                 <div className="text-xs font-medium text-stone-500 dark:text-stone-400">类型</div>
@@ -534,19 +586,36 @@ export default function AssetsPage() {
                                 </div>
                             </div>
                             <div className="wb-toolbar">
-                                <span className="text-sm text-muted-foreground">已加载 {filteredAssets.length} 个素材{serverAssetResponse?.hasMore ? " · 还有更多" : ""}</span>
+                                <span className="text-sm text-muted-foreground">已加载 {libraryView === "trash" ? serverAssets.length : filteredAssets.length} 个素材{serverAssetResponse?.hasMore ? " · 还有更多" : ""}</span>
+                                {libraryView === "active" ? <>
                                 {referenceImportEnabled ? <Button onClick={() => navigate("/reference-import")}>网页采集</Button> : null}
                                 <Button icon={<Download className="size-4" />} disabled={Boolean(assetAction) || !validAssets.length} onClick={() => void runAssetAction("正在整理导出文件…", exportAllAssets)}>导出已加载素材</Button>
                                 <Button icon={<Upload className="size-4" />} disabled={Boolean(assetAction)} onClick={() => assetInputRef.current?.click()}>导入素材包</Button>
+                                </> : null}
                             </div>
                         </div>
                     </div>
                     {assetAction || serverLoading ? <div role="status" className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{assetAction || "正在同步素材列表…"}</div> : null}
+                    {failedUploads.length ? <div role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm dark:border-amber-900 dark:bg-amber-950/30">
+                        <div className="flex flex-wrap items-center justify-between gap-2"><strong>{failedUploads.length} 张图片上传失败</strong><Space><Button disabled={Boolean(assetAction)} onClick={() => void runAssetAction("正在重试失败图片…", () => importImageFiles(failedUploads))}>重试失败项</Button><Button disabled={Boolean(assetAction)} onClick={() => setFailedUploads([])}>清除失败记录</Button></Space></div>
+                        <ul className="mt-2 max-h-36 overflow-y-auto">{failedUploads.map(job => <li key={job.clientReferenceId}>{job.file.name}：{job.error}</li>)}</ul>
+                    </div> : null}
                     {serverError ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{serverError}；已保留当前本地素材。</span><Button onClick={() => void refreshServerAssets()}>重试加载</Button></div> : null}
                 </div>
 
                 <div className="mx-auto flex max-w-7xl flex-col gap-5">
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                        {libraryView === "trash" ? serverAssets.map(asset => <Card key={asset.id} className="h-full" title={typeof asset.metadata.title === "string" ? asset.metadata.title : asset.filename}>
+                            <div className="flex flex-col gap-3"><div className="flex items-center gap-2 text-muted-foreground"><Trash2 className="size-5" /><span>{asset.kind} · {formatBytes(asset.byteSize)}</span></div>
+                                <p className="text-sm">删除于 {asset.deletedAt ? new Date(asset.deletedAt).toLocaleString() : "—"}<br />可恢复至 {asset.purgeAfter ? new Date(asset.purgeAfter).toLocaleDateString() : "—"}</p>
+                                <p className="truncate text-xs text-muted-foreground">{asset.ownerName}{asset.projectName ? ` · ${asset.projectName}` : ""}</p>
+                                <Button icon={<RotateCcw className="size-4" />} disabled={Boolean(assetAction)} onClick={() => void runAssetAction("正在恢复素材…", async () => {
+                                    const ownerId = user?.id; await restoreServerAsset(asset.id);
+                                    if (useUserStore.getState().user?.id !== ownerId) return;
+                                    await queryClient.invalidateQueries({ queryKey: ["asset-library", ownerId] }); message.success("素材已恢复到我的素材");
+                                })}>恢复素材</Button>
+                            </div>
+                        </Card>) : null}
                         {visibleAssets.map((asset) => (
                             <AssetCard
                                 key={asset.id}
@@ -563,9 +632,9 @@ export default function AssetsPage() {
                         ))}
                     </div>
 
-                    {!visibleAssets.length && !serverLoading ? <div className="wb-surface wb-empty"><Upload className="size-8" /><strong>{keyword || kindFilter !== "all" ? "没有找到匹配素材" : "先收好你的第一份素材"}</strong><p>{keyword || kindFilter !== "all" ? "试试更短的关键词，或清除筛选查看全部内容。" : "上传常用参考图，或新增文本素材。生成的作品也会出现在这里。"}</p>{keyword || kindFilter !== "all" ? <Button onClick={() => { setKeyword(""); setKindFilter("all"); }}>清除筛选</Button> : <Button type="primary" disabled={Boolean(assetAction)} onClick={() => batchImageInputRef.current?.click()}>上传图片</Button>}</div> : null}
+                    {!(libraryView === "trash" ? serverAssets.length : visibleAssets.length) && !serverLoading ? <div className="wb-surface wb-empty"><Upload className="size-8" /><strong>{hasFilters ? "没有找到匹配素材" : libraryView === "trash" ? "暂无可恢复素材" : "先收好你的第一份素材"}</strong><p>{hasFilters ? "试试更短的关键词，或清除筛选查看全部内容。" : libraryView === "trash" ? "删除未满 30 天且你有权管理的公司素材会显示在这里。本地素材不进入最近删除。" : "上传常用参考图，或新增文本素材。生成的作品也会出现在这里。"}</p>{hasFilters ? <Button onClick={clearFilters}>清除筛选</Button> : libraryView === "active" ? <Button type="primary" disabled={Boolean(assetAction)} onClick={() => batchImageInputRef.current?.click()}>上传图片</Button> : null}</div> : null}
                     <InfiniteLoadMore hasMore={Boolean(assetPages.hasNextPage)} loading={serverLoading} error={assetPages.error}
-                        disabled={Boolean(assetAction)} resetKey={JSON.stringify([user?.id, deferredKeyword, kindFilter])}
+                        disabled={Boolean(assetAction)} resetKey={JSON.stringify(assetQueryKey)}
                         pageKey={serverAssetResponse?.nextCursor} label="加载更多素材" endLabel="已显示全部已加载素材"
                         onLoadMore={() => assetPages.fetchNextPage({ cancelRefetch: false })} />
                 </div>
@@ -576,7 +645,7 @@ export default function AssetsPage() {
                 <Button disabled={Boolean(assetAction)} icon={<Download className="size-4" />} onClick={() => void runAssetAction("正在准备批量下载…", () => executeBatch("download"))}>批量下载</Button>
                 <Button disabled={Boolean(assetAction)} onClick={() => { setBatchTarget("canvas"); setTargetId("new"); }}>加入画布</Button>
                 <Button disabled={Boolean(assetAction) || selectedAssets.some(asset => !serverAssetIds.has(asset.id))} onClick={() => { setBatchTarget("project"); setTargetId(undefined); }}>移动到项目</Button>
-                <Button danger disabled={Boolean(assetAction)} icon={<Trash2 className="size-4" />} onClick={() => modal.confirm({ title: `删除选中的 ${selectedIds.size} 个素材？`, content: "公司素材将移入30天可恢复的删除状态；本地素材会从素材库移除。任一公司素材无权限时整批不执行。", okText: "删除", cancelText: "取消", okButtonProps: { danger: true }, onOk: () => runAssetAction("正在批量删除…", () => executeBatch("delete")) })}>批量删除</Button>
+                <Button danger disabled={Boolean(assetAction)} icon={<Trash2 className="size-4" />} onClick={() => modal.confirm({ title: `删除选中的 ${selectedIds.size} 个素材？`, content: "公司素材将移入最近删除，30 天内原始文件仍保留时可恢复；本地素材会从素材库永久移除。任一公司素材无权限时整批不执行。", okText: "删除", cancelText: "取消", okButtonProps: { danger: true }, onOk: () => runAssetAction("正在批量删除…", () => executeBatch("delete")) })}>批量删除</Button>
             </div> : null}
             <Modal title={batchTarget === "canvas" ? "批量加入画布" : "批量移动到项目"} open={Boolean(batchTarget)} confirmLoading={Boolean(assetAction)} okButtonProps={{ disabled: !targetId }} onCancel={() => { if (!assetAction) setBatchTarget(null); }} onOk={() => void runAssetAction("正在批量处理…", () => executeBatch(batchTarget === "canvas" ? "add-to-canvas" : "move-project"))} okText="确认" cancelText="取消">
                 <Select className="w-full" aria-label="批量操作目标" value={targetId} onChange={setTargetId} options={batchTarget === "canvas" ? [{ value: "new", label: "创建新画布" }, ...[...canvasProjects, ...unloadedCanvasProjects].map(project => ({ value: project.id, label: project.title }))] : serverProjects.map(project => ({ value: project.id, label: project.name }))} placeholder="请选择目标项目" />
@@ -714,10 +783,11 @@ export default function AssetsPage() {
             </Suspense> : null}
 
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" disabled={Boolean(assetAction)} onChange={(event) => { const file = event.target.files?.[0]; void runAssetAction("正在导入素材包…", () => importAssetZip(file)); }} />
-            <input ref={batchImageInputRef} type="file" accept="image/*" multiple className="hidden" disabled={Boolean(assetAction)} onChange={(event) => { const files = event.target.files; void runAssetAction("正在准备上传…", () => importImageFiles(files)); }} />
+            <input ref={batchImageInputRef} type="file" accept="image/*" multiple className="hidden" disabled={Boolean(assetAction)} onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ""; void runAssetAction("正在准备上传…", () => importImageFiles(files)); }} />
 
             <Modal title="删除素材" open={Boolean(deletingAsset)} onCancel={() => { if (!deleting) setDeletingAsset(null); }} onOk={() => void runDelete(confirmDelete)} confirmLoading={deleting} cancelButtonProps={{ disabled: deleting }} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除「{deletingAsset?.title}」吗？删除后会从我的素材中移除。
+                {deletingAsset && serverAssetIds.has(deletingAsset.id) ? "公司素材可在最近删除中恢复，期限为 30 天且原始文件须仍保留。" : "本地素材不会进入最近删除，删除后无法从此处恢复。"}
             </Modal>
             <Modal title="加入正式项目" open={Boolean(projectAsset)} onCancel={() => setProjectAsset(null)} onOk={() => void addToProject()} okText="确认加入" cancelText="取消">
                 <Select

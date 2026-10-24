@@ -102,6 +102,32 @@ test("original image ZIP preserves bytes and does not measure or convert images"
     expect(new Uint8Array(await files.get("002_same_v1.jpg")!.arrayBuffer())).toEqual(new Uint8Array(await tinyJpeg.arrayBuffer()));
 });
 
+test("PNG and JPG image ZIPs preserve order and safe versioned names and truly convert each differing format", async () => {
+    for (const mode of ["png", "jpg"] as const) {
+        const nodes = [node("one", "first.png"), node("two", "second.jpg", { imageVersion: 3 })];
+        const before = JSON.stringify(nodes);
+        const conversions: string[] = [];
+        const result = await createCanvasImagePdfExport({ nodes, setName: "格式导出", mode }, {
+            loadImage: async item => item.id === "one" ? redWide : tinyJpeg, measureImage,
+            encodeImage: async (_blob, mime) => { conversions.push(mime); return mode === "png" ? blueTall : tinyJpeg; },
+        });
+        const files = await readZip(result.blob);
+        expect([...files.keys()]).toEqual([`001_first_v1.${mode}`, `002_second_v3.${mode}`]);
+        expect(conversions).toEqual([mode === "png" ? "image/png" : "image/jpeg"]);
+        for (const file of files.values()) {
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            expect([...bytes.slice(0, 2)]).toEqual(mode === "png" ? [0x89, 0x50] : [0xff, 0xd8]);
+        }
+        expect(JSON.stringify(nodes)).toBe(before);
+    }
+});
+
+test("PNG/JPG export rejects a failed conversion without downloading a partial archive", async () => {
+    await expect(createCanvasImagePdfExport({ nodes: [node("first"), node("second")], setName: "失败", mode: "jpg" }, {
+        loadImage: async () => redWide, measureImage, encodeImage: async () => redWide,
+    })).rejects.toThrow("第 1 张「方案_v1」导出失败：浏览器未生成所选图片格式，未下载文件。未下载任何文件。");
+});
+
 test("failed image rejects the entire export at the named page without loading later images", async () => {
     const loaded: string[] = [];
     await expect(createCanvasImagePdfExport({ nodes: [node("one"), node("broken", "无法读取.png"), node("three")], setName: "失败", mode: "separate" }, {

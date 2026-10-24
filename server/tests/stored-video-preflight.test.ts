@@ -36,7 +36,7 @@ describe("stored video task preflight", () => {
   test("uses owned stored MIME, actual byte count and metadata; edit exposes the upstream deposit duration", async () => {
     const { db, sql } = database("doubao-seedance-2.5", video);
     const checked = await preflightStoredVideoTask(db as never, { ...input, parameters: { videoMode: "edit", size: "16:9", seconds: 5 } }, "https://media.company.example", {
-      readSource: async (key) => { expect(key).toBe(video.objectKey); return new Uint8Array(video.byteSize); },
+      readSource: async (key) => { expect(key).toBe(video.objectKey); return (async function* () { yield new Uint8Array(video.byteSize); })(); },
       probe: async () => ({ durationMs: 6000, width: 1280, height: 720, fps: 24 }),
     });
     expect(checked.normalized).toMatchObject({ videoMode: "edit", seconds: -1, size: "adaptive", upstreamBillingSeconds: 36 });
@@ -69,7 +69,8 @@ describe("stored video task preflight", () => {
     const cache = { zAdd: async () => { queues++; return 1; } };
     const badInput = { ...input, parameters: { videoMode: "first-frame" } };
     await expect(enqueueTask(db as never, cache as never, badInput)).rejects.toThrow("10MB");
-    expect(sql.at(-1)).toBe("ROLLBACK");
+    expect(sql).toContain("COMMIT");
+    expect(sql.some((statement) => statement.includes("INSERT INTO tasks"))).toBe(false);
     expect(sql.some((statement) => /credit_reservations|pricing_rule_versions|credit_ledger/.test(statement))).toBe(false);
     expect(queues).toBe(0);
   });
@@ -79,7 +80,7 @@ describe("stored video task preflight", () => {
       for (const actual of [{ durationMs: 16000, width: 1280, height: 720, fps: 24 }, { durationMs: 5000, width: 1280, height: 720, fps: 12 }]) {
         const { db } = database("MiniMax-H3", { ...video, metadata });
         await expect(preflightStoredVideoTask(db as never, { ...input, parameters: { videoMode: "reference" } }, "https://media.company.example", {
-          readSource: async () => new Uint8Array(video.byteSize), probe: async () => actual,
+          readSource: async () => (async function* () { yield new Uint8Array(video.byteSize); })(), probe: async () => actual,
         })).rejects.toThrow();
       }
     }

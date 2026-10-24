@@ -1,4 +1,4 @@
-import { memo, useEffect } from "react";
+import { memo, useEffect, useState } from "react";
 import { ImageIcon, Info, LoaderCircle, Plus, X } from "lucide-react";
 import { Popover } from "radix-ui";
 import { CanvasQuickReferenceTray } from "@/components/canvas/canvas-quick-reference-tray";
@@ -24,11 +24,13 @@ type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "
 };
 
 export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
-    embedded = false, open, prompt, model, size, quality, count, imageOptions, references, running,
-    estimateCredits, estimateRmb, remainingCredits, config, onClose, onPromptChange,
+    embedded = false, open, promptRef, promptRevision, model, size, quality, count, imageOptions, references, running,
+    estimateCredits, estimateRmb, remainingCredits, config, onClose,
     onModelChange, onSizeChange, onQualityChange, onCountChange, onImageOptionsChange, onPickReferences, onRemoveReference,
     onClearReferences, onMoveReference, onMissingConfig, onGenerate, positioned, onClearPosition,
 }: CanvasQuickGeneratePanelProps) {
+    const [prompt, setPrompt] = useState(promptRef.current);
+    useEffect(() => setPrompt(promptRef.current), [promptRef, promptRevision]);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const models = useBusinessConfigStore((state) => state.models);
     const modelStatus = useBusinessConfigStore((state) => state.status);
@@ -70,7 +72,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 </div>
                 {profile.requiresPrompt ? <textarea className="cw-prompt" data-canvas-image-paste aria-label="描述图像" placeholder={references.length ? "描述想如何修改，可用「图1」「图2」指定参考图…" : "描述你想创作的图像…"}
                     value={prompt} maxLength={profile.kind === "grok-image" ? 8000 : 2000} disabled={running} title="Enter 生成，Shift+Enter 换行"
-                    onChange={(event) => onPromptChange(event.target.value)}
+                    onChange={(event) => { promptRef.current = event.target.value; setPrompt(event.target.value); }}
                     onKeyDown={(event) => {
                         if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
                         event.preventDefault();

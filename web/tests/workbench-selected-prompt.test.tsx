@@ -40,6 +40,13 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     const currentConfig = { ...config };
     const reads: string[] = [], writes: unknown[] = [], submissions: unknown[] = [];
     const draft = { form: { ...createSceneForm("style-to-sketch"), description: "当前草稿" }, images: { primary: image }, config: currentConfig };
+    // Exercise the real summary/detail history adapter, including its migration
+    // writes. A record read must return one record, never the legacy array.
+    const stored = new Map<string, unknown>([
+        ["draft:owner:style-to-sketch", structuredClone(draft)],
+        ["history:owner:style-to-sketch", structuredClone([sceneLog])],
+    ]);
+    const storageReads: string[] = [];
     const useState = (initial: any) => {
         const index = stateIndex++;
         if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial;
@@ -53,8 +60,8 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
                 pendingEffects.push(() => { prior?.cleanup?.(); effects[index] = { deps, cleanup: effect() }; });
             } },
         "@/lib/workspace-storage": { createWorkspaceStorage: () => ({
-            async getItem(key: string) { return key.startsWith("draft:") ? draft : [sceneLog]; },
-            async setItem(_key: string, value: unknown) { writes.push(value); },
+            async getItem(key: string) { storageReads.push(key); return structuredClone(stored.get(key) ?? null); },
+            async setItem(key: string, value: unknown) { writes.push(value); stored.set(key, structuredClone(value)); },
             async iterate(callback: (log: unknown) => void) { callback(videoLog); },
         }) },
         "@/hooks/use-workbench-field": { useWorkbenchField: () => [prompt, (next: string) => { prompt = next; }] },
@@ -95,7 +102,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
         pendingEffects.splice(0).forEach(effect => effect());
         return output;
     };
-    return { render, reads, writes, submissions, currentConfig, get prompt() { return prompt; }, setPrompt: (value: string) => { prompt = value; }, setToolEnabled: (value: boolean) => { toolEnabled = value; }, unmount: () => effects.forEach(effect => effect.cleanup?.()) };
+    return { render, reads, storageReads, stored, writes, submissions, currentConfig, get prompt() { return prompt; }, setPrompt: (value: string) => { prompt = value; }, setToolEnabled: (value: boolean) => { toolEnabled = value; }, unmount: () => effects.forEach(effect => effect.cleanup?.()) };
 }
 
 function elements(node: unknown): ReactElement<any>[] {
@@ -152,6 +159,7 @@ test("creative record preview exposes the exact archived prompt but preserves th
     const before = app.render();
     expect(typeof before.previewLog).toBe("function");
     app.reads.length = 0;
+    app.storageReads.length = 0;
     await before.previewLog(sceneLog);
     const selected = app.render();
     expect(selected.selectedPrompt).toBe("原任务完整提示词：保留领口结构。");
@@ -160,13 +168,15 @@ test("creative record preview exposes the exact archived prompt but preserves th
     expect(selected.images).toEqual(before.images);
     expect(selected.results[0].image.dataUrl).toBe("blob:image:generated");
     expect(app.reads).toEqual(["image:generated"]);
+    expect(app.storageReads).toEqual(["history-record:owner:style-to-sketch:scene-log"]);
     expect(app.submissions).toHaveLength(0);
     app.unmount();
 });
 
 test("creative previews cannot accept another account or scene and a late older preview cannot replace a newer selection", async () => {
     let slow = false, finish!: (url: string) => void;
-    const app = harness("creative", async key => slow && key === "image:generated" ? new Promise<string>(resolve => { finish = resolve; }) : `blob:${key}`);
+    const started = Promise.withResolvers<void>();
+    const app = harness("creative", async key => slow && key === "image:generated" ? new Promise<string>(resolve => { finish = resolve; started.resolve(); }) : `blob:${key}`);
     app.render(); await settle();
     const workspace = app.render();
     await workspace.previewLog({ ...sceneLog, ownerId: "other-owner" });
@@ -174,7 +184,9 @@ test("creative previews cannot accept another account or scene and a late older 
     expect(app.render().selectedPrompt).toBeNull();
     slow = true;
     const old = app.render().previewLog(sceneLog);
+    await started.promise;
     const newer = { ...sceneLog, id: "newer-log", prompt: "新选中的原提示词", results: [{ ...sceneLog.results[0], id: "newer-slot", image: { ...image, id: "newer-image", storageKey: "image:newer" } }] };
+    app.stored.set("history-record:owner:style-to-sketch:newer-log", structuredClone(newer));
     await app.render().previewLog(newer);
     finish("blob:older"); await old;
     expect(app.render().selectedPrompt).toBe("新选中的原提示词");
@@ -185,10 +197,12 @@ test("creative previews cannot accept another account or scene and a late older 
 
 test("editing creative parameters while a preview loads cancels the spinner and late result without altering the new inputs", async () => {
     let slow = false, finish!: (url: string) => void;
-    const app = harness("creative", async key => slow && key === "image:generated" ? new Promise<string>(resolve => { finish = resolve; }) : `blob:${key}`);
+    const started = Promise.withResolvers<void>();
+    const app = harness("creative", async key => slow && key === "image:generated" ? new Promise<string>(resolve => { finish = resolve; started.resolve(); }) : `blob:${key}`);
     app.render(); await settle(); app.render();
     slow = true;
     const pending = app.render().previewLog(sceneLog);
+    await started.promise;
     app.render().updateConfig("size", "1536x1024");
     expect(app.render().previewing).toBe(false);
     finish("blob:older"); await pending;
@@ -204,6 +218,9 @@ test("creative result selection only accepts an explicit result of this owner an
     const workspace = app.render();
     expect(typeof workspace.selectResultPrompt).toBe("function");
     workspace.selectResultPrompt(sceneLog.results[0]);
+    expect(app.render().selectedPrompt).toBeNull();
+    await workspace.previewLog(sceneLog);
+    app.render().selectResultPrompt(sceneLog.results[0]);
     expect(app.render().selectedPrompt).toBe("原任务完整提示词：保留领口结构。");
     app.render().setForm({ ...workspace.form, description: "新草稿" });
     app.render().selectResultPrompt({ ...sceneLog.results[0], id: "unrelated", image: { ...image, id: "unrelated" } });

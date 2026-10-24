@@ -1,7 +1,8 @@
 export type CanvasQuickGeneratePanelRenderState = {
     embedded: boolean;
     open: boolean;
-    prompt: string;
+    promptRef: { current: string };
+    promptRevision: number;
     model: string;
     size: string;
     quality: string;
@@ -16,7 +17,6 @@ export type CanvasQuickGeneratePanelRenderState = {
     remainingCredits?: number;
     config: object;
     onClose: () => void;
-    onPromptChange: (value: string) => void;
     onModelChange: (value: string) => void;
     onSizeChange: (value: string) => void;
     onQualityChange: (value: string) => void;
@@ -39,7 +39,8 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
     return (
         previous.embedded === next.embedded &&
         previous.open === next.open &&
-        previous.prompt === next.prompt &&
+        previous.promptRef === next.promptRef &&
+        previous.promptRevision === next.promptRevision &&
         previous.model === next.model &&
         previous.size === next.size &&
         previous.quality === next.quality &&
@@ -54,7 +55,6 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
         previous.remainingCredits === next.remainingCredits &&
         previous.config === next.config &&
         previous.onClose === next.onClose &&
-        previous.onPromptChange === next.onPromptChange &&
         previous.onModelChange === next.onModelChange &&
         previous.onSizeChange === next.onSizeChange &&
         previous.onQualityChange === next.onQualityChange &&

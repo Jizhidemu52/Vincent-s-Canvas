@@ -84,6 +84,19 @@ test('isolated demo serves light cursor pages, original bytes, authorized cache 
     expect(restored.projects[0].id).toBe(project.project.id);
     expect((await request(`/api/assets/${ids[0]}`)).status).toBe(404);
     expect(await request(`/api/assets/${picture}/content`).then(response => response.bytes())).toEqual(new Uint8Array(png));
+    const trash = await request('/api/assets/trash').then(response => response.json()) as any;
+    expect(trash.assets.map((asset: any) => asset.id).sort()).toEqual(ids.slice(0, 2).sort());
+    expect(trash.assets[0].contentUrl).toBeNull();
+    expect(await request('/api/assets/trash', b).then(response => response.json())).toMatchObject({ assets: [] });
+    expect((await post(`/api/assets/${ids[0]}/restore`, {}, b)).status).toBe(404);
+    expect((await post(`/api/assets/${ids[0]}/restore`, {})).status).toBe(204);
+    expect(await request(`/api/assets/${ids[0]}/content`).then(response => response.bytes())).toEqual(text);
+    expect(await request(`/api/assets/${ids[0]}`).then(response => response.json())).toMatchObject({ asset: { projectId: project.project.id, metadata: { title: 'text-0.txt' } } });
+    handle.kill(); await handle.exited; handle = start(); await ready();
+    expect((await request(`/api/assets/${ids[0]}`)).status).toBe(200);
+    expect(await request('/api/assets/trash').then(response => response.json())).toMatchObject({ assets: [{ id: ids[1] }] });
+    const oldest = await request('/api/assets?sort=oldest&limit=1').then(response => response.json()) as any;
+    expect(oldest.assets[0].id).toBe(ids[0]);
   } finally {
     handle.kill(); await handle.exited;
     const resolved = realpathSync(directory);

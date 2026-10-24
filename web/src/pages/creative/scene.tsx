@@ -9,7 +9,8 @@ import { ModelPicker } from "@/components/model-picker";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { creativePresets, getCreativePreset, type CreativePreset } from "@/lib/creative-presets";
-import { useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
+import { isModuleAvailable, useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { SceneFields, SceneUploads } from "./scene-form";
@@ -19,8 +20,9 @@ import { RegionSelectionDialog } from "./region-selection-dialog";
 import { RecolorDialog } from "./recolor-dialog";
 import { VectorTraceDialog } from "./vector-trace-dialog";
 import { selectionPrompt } from "./image-processing";
+import { canRetrySceneResult } from "./scene-retry";
 import "./scene.css";
-import { moduleIsEnabled, type ModuleKey } from "@/services/api/modules";
+import type { ModuleKey } from "@/services/api/modules";
 import type { ToolKey } from "../../../../shared/feature-catalog";
 
 export default function CreativeScenePage() {
@@ -42,8 +44,11 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
     const selectionEnabled = useModuleEnabled("creative-selection");
     const recolorEnabled = useModuleEnabled("pattern-recolor");
     const traceEnabled = useModuleEnabled("svg-trace");
+    const canvasEnabled = useModuleEnabled("canvas");
+    const imageEditEnabled = useModuleEnabled("image-edit");
     const navigate = useNavigate();
     const flags = useModuleStore(state => state.flags);
+    const tools = useBusinessConfigStore(state => state.tools);
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const [view, setView] = useState<"example" | "results" | "history">("example");
     const [tool, setTool] = useState<"selection" | "recolor" | null>(null);
@@ -51,7 +56,7 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
     const [promptOpen, setPromptOpen] = useState(false);
     const summary = sceneSummaries[preset.id]!;
     const slots = getSceneSlots(preset.id, ws.form);
-    const available = creativePresets.filter(item => moduleIsEnabled(flags, `creative-${item.id}` as ModuleKey));
+    const available = creativePresets.filter(item => isModuleAvailable(flags, tools, `creative-${item.id}` as ModuleKey));
     const submit = () => { setView("results"); void ws.generate(); };
 
     return <main className="wb-page cs-page">
@@ -85,6 +90,7 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                 </fieldset>}
                 <div className="cs-submit-panel">
                     {ws.error && <p className="cs-error" role="alert">{ws.error}</p>}
+                    {ws.notice && <p className="cs-help" role="status">{ws.notice}</p>}
                     {!ws.error && ws.validation && <p className="cs-validation">{ws.validation}</p>}
                     <button type="button" className="cs-generate" disabled={ws.loading || ws.running || Boolean(ws.validation) || ws.quotaBlocked} onClick={submit}>{ws.running ? <><LoaderCircle size={16} className="animate-spin" />正在生成<GenerationElapsed startedAt={ws.startedAt} /></> : <><Sparkles size={16} />生成{preset.title === "以文生款" ? "款式" : preset.title === "款生线稿" ? "线稿" : preset.title === "花型提取" ? "图案" : "设计"}<span>{ws.count} 张</span></>}</button>
                     <p className="cs-submit-note">{deploymentFeatures.creditsEnabled ? `预计 ${ws.estimatedCredits} 积分 · ` : ""}点击后提交模型任务</p>
@@ -94,23 +100,33 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                 <nav className="cs-stage-tabs" aria-label="预览内容">
                     <button type="button" aria-pressed={view === "example"} onClick={() => setView("example")}><ImageIcon size={15} />功能示例</button>
                     <button type="button" aria-pressed={view === "results"} onClick={() => setView("results")}>当前结果{ws.results.length ? <span>{ws.results.length}</span> : null}</button>
-                    <button type="button" className="cs-history-tab" aria-pressed={view === "history"} onClick={() => setView("history")}><History size={15} />最近任务{ws.logs.length ? <span>{ws.logs.length}</span> : null}</button>
+                    <button type="button" className="cs-history-tab" aria-pressed={view === "history"} onClick={() => setView("history")}><History size={15} />最近任务{ws.historyTotal ? <span>{ws.historyTotal}</span> : null}</button>
                 </nav>
                 {view === "example" ? <div className="cs-example">
                     <div className="cs-example-heading"><span className="cs-eyebrow">WHAT YOU CAN CREATE</span><h2>{summary.input}<ArrowRight size={21} />{summary.output}</h2><p>{summary.example}</p></div>
-                    <figure className="cs-example-image"><img src={`/creative-scenes/v2/${preset.id}.webp`} alt={`${preset.title}：${summary.input}转为${summary.output}的概念示意`} loading="lazy" decoding="async" /><figcaption><span>{summary.input}</span><ArrowRight size={17} /><span>{summary.output}</span></figcaption></figure>
+                    <figure className="cs-example-image"><img src={`/creative-scenes/v2/${preset.id}.preview.webp`} alt={`${preset.title}：${summary.input}转为${summary.output}的概念示意`} loading="lazy" decoding="async" /><figcaption><span>{summary.input}</span><ArrowRight size={17} /><span>{summary.output}</span></figcaption></figure>
                     <div className="cs-example-foot"><span>AI 功能示意 · 非模型实测</span><p>{summary.limit}</p></div>
                 </div> : view === "history" ? <div className="cs-history">
                     <h2>最近任务</h2><p className="cs-help">仅显示当前账号在「{preset.title}」中已结束的任务，保存在本机浏览器。</p>
                     {ws.logs.length ? ws.logs.map(log => <button key={log.id} type="button" className="cs-history-item" disabled={ws.running} onClick={() => { void ws.previewLog(log); setPromptOpen(true); setView("results"); }}>
-                        <span className="cs-history-icon"><History size={18} /></span><span><strong>{new Date(log.createdAt).toLocaleString("zh-CN", {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</strong><small>{log.operation === "recolor" ? "本地精确换色 · " : log.selection ? "选区合成 · " : ""}{log.successCount} 张成功{log.failCount ? ` · ${log.failCount} 张失败` : ""} · 查看结果与提示词</small></span><ArrowRight size={15} />
+                        <span className="cs-history-icon"><History size={18} /></span><span><strong>{new Date(log.createdAt).toLocaleString("zh-CN", {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</strong><small>{log.operation === "recolor" ? "本地精确换色 · " : log.hasSelection ? "选区合成 · " : ""}{log.successCount} 张成功{log.failCount ? ` · ${log.failCount} 张失败` : ""} · 查看结果与提示词</small></span><ArrowRight size={15} />
                     </button>) : <div className="cs-empty"><History size={26} /><h3>还没有生成记录</h3><p>完成一次设计后，会在这里保存参数和结果。</p></div>}
+                    {ws.historyHasMore && <button type="button" className="cs-tool-entry" disabled={ws.historyLoading} onClick={() => void ws.loadMoreHistory()}>{ws.historyLoading ? "正在加载…" : `加载更多（已显示 ${ws.logs.length} / ${ws.historyTotal}）`}</button>}
                 </div> : <div className="cs-results">
                     <div className="cs-results-heading"><h2>{ws.running ? "正在创作" : "设计结果"}</h2>{ws.activeLog && <><span>{new Date(ws.activeLog.createdAt).toLocaleString("zh-CN")}</span><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || ws.previewing} onClick={() => { void ws.restoreLog(ws.activeLog!); setPromptOpen(true); }}>恢复为草稿继续改</button></>}</div>
                     {ws.previewing && <p className="cs-help" role="status">正在读取所选结果…</p>}
                     {ws.activeLog?.operation === "recolor" && <p className="cs-help cs-operation-note">{ws.activeLog.prompt}</p>}
                     {!ws.results.length ? <div className="cs-empty"><Sparkles size={28} /><h3>让设计从这里开始</h3><p>在左侧完成{slots.length ? "素材和" : ""}设计要求，点击生成。</p><button type="button" onClick={() => setView("example")}><RotateCcw size={14} />看看功能示例</button></div> : <div className="cs-result-grid">{ws.results.map((result, index) => <article key={result.id} className="cs-result-card">
-                        {result.status === "success" && result.image ? <><Image src={result.image.dataUrl} alt={`${preset.title}结果 ${index + 1}`} onClick={() => { ws.selectResultPrompt(result); setPromptOpen(true); }} /><div className="cs-result-meta"><span>方案 {String(index + 1).padStart(2, "0")}</span><button type="button" onClick={() => { void ws.download(result.image!, index); }}><Download size={14} />下载原图</button>{traceEnabled && preset.id === "style-to-sketch" && <button type="button" onClick={() => setTraceImage(result.image!)}>导出 SVG</button>}</div></> : result.status === "failed" ? <div className="cs-result-message"><span>方案 {index + 1} {result.uncompositedImage ? "合成未完成" : "生成失败"}</span><p>{result.error}</p>{result.uncompositedImage && <button type="button" className="cs-tool-entry" onClick={() => void ws.download(result.uncompositedImage!, index)}><Download size={14} />下载未合成图</button>}</div> : <div className="cs-result-message"><LoaderCircle className="animate-spin" size={25} /><span>正在生成方案 {index + 1}</span><small>请保留此页面，避免中断结果保存</small></div>}
+                        {result.status === "success" && result.image ? <><Image src={result.image.dataUrl} alt={`${preset.title}结果 ${index + 1}`} onClick={() => { ws.selectResultPrompt(result); setPromptOpen(true); }} /><div className="cs-result-meta"><span>方案 {String(index + 1).padStart(2, "0")}</span><button type="button" onClick={() => { void ws.download(result.image!, index); }}><Download size={14} />下载原图</button>{traceEnabled && preset.id === "style-to-sketch" && <button type="button" onClick={() => setTraceImage(result.image!)}>导出 SVG</button>}</div>
+                            <div className="cs-result-actions">
+                                <button type="button" disabled={ws.running || ws.resultActionBusy || !ws.activeLog} onClick={() => void ws.resultAction("saveAsset", result.image!)}>保存到素材库</button>
+                                {canvasEnabled && <button type="button" disabled={ws.running || ws.resultActionBusy || !ws.activeLog} onClick={() => void ws.resultAction("canvas", result.image!).then(url => { if (url) navigate(url); })}>加入新画布</button>}
+                                {imageEditEnabled && <button type="button" disabled={ws.running || ws.resultActionBusy || !ws.activeLog} onClick={() => void ws.resultAction("reference", result.image!).then(url => { if (url) navigate(url); })}>作为参考继续改</button>}
+                            </div></> : result.status === "failed" ? <div className="cs-result-message"><span>方案 {index + 1} {result.uncompositedImage ? "合成未完成" : "生成失败"}</span><p>{result.error}</p>{result.uncompositedImage && <button type="button" className="cs-tool-entry" onClick={() => void ws.download(result.uncompositedImage!, index)}><Download size={14} />下载未合成图</button>}
+                            {canRetrySceneResult(result) && <><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || !ws.activeLog} onClick={() => void ws.retryResult(result)}>按原输入仅重试此张</button><small>会提交 1 个新任务，按当前计费规则收费。</small></>}
+                            {result.retryLogId && <small>此失败项已发起过重试，请查看对应的新记录。</small>}
+                            {result.failureKind === "uncertain" && <small>请在任务中心查询或恢复原任务，不要重新生成。</small>}
+                        </div> : <div className="cs-result-message"><LoaderCircle className="animate-spin" size={25} /><span>正在生成方案 {index + 1}</span><small>请保留此页面，避免中断结果保存</small></div>}
                     </article>)}</div>}
                     {!!ws.results.length && <p className="cs-result-limit">{summary.limit}</p>}
                 </div>}

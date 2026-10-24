@@ -44,8 +44,14 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
             open.onsuccess = () => {
                 const db = open.result;
                 if (!db.objectStoreNames.contains("app_state")) { db.close(); resolve(undefined); return; }
-                const query = db.transaction("app_state", "readonly").objectStore("app_state").get(key);
-                query.onsuccess = () => { db.close(); resolve(query.result?.[0]); };
+                const store = db.transaction("app_state", "readonly").objectStore("app_state");
+                const query = store.get(`${key}:index:v2`);
+                query.onsuccess = () => {
+                    const entry = query.result?.sessions?.[0];
+                    const record = store.get(entry?.recordKey || key);
+                    record.onsuccess = () => { db.close(); resolve(entry?.recordKey ? record.result : record.result?.[0]); };
+                    record.onerror = () => { db.close(); reject(record.error); };
+                };
                 query.onerror = () => { db.close(); reject(query.error); };
             };
         });
@@ -141,7 +147,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         const draft = tab.getByRole("textbox", { name: "对话内容", exact: true });
         const send = tab.getByRole("button", { name: "发送", exact: true });
         await draft.waitFor({ state: "visible", timeout: 60_000 });
-        await waitFor(() => tab.getByRole("combobox", { name: "出图模型", exact: true }).inputValue().then(value => value === "gpt-image-2"), "Shared business configuration did not become ready");
+        await waitFor(() => tab.locator('[data-usage-control="model"]').innerText().then(value => value.includes("隔离图片模型")), "Shared business configuration did not become ready");
         await assertNaturalChatControls();
         await tab.locator('input[type="file"]').setInputFiles([
             { name: "原款.png", mimeType: "image/png", buffer: Buffer.from(fixtureImages.original.split(",")[1], "base64") },
@@ -159,7 +165,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
         const firstUser = firstState.messages[0];
         const firstImage = firstState.messages.at(-1).generatedImages[0];
         check(firstUser.content === firstInstruction && firstUser.attachments.length === 2, "The first user turn lost its original text or uploads");
-        check(originalAttachment.dataUrl === fixtureImages.original, "Uploaded original bytes were replaced by a planning preview");
+        check(originalAttachment.storageKey?.startsWith("image:") && !originalAttachment.dataUrl, "Uploaded original was not serialized as a durable media reference");
         check(firstUser.attachments.find(item => item.name === "需求.txt")?.textContent === requirements, "Uploaded TXT requirements were not retained");
         const firstPayload = JSON.stringify(plannerRequests[0]);
         check(firstPayload.includes(requirements) && firstPayload.includes(firstInstruction) && firstPayload.includes(originalAttachment.id) && firstPayload.includes("input_image"), "The first planner request omitted original image, document, or current instruction");
@@ -194,7 +200,7 @@ export async function verifyChatCreativeContinuity(page, origin = "http://127.0.
             check(submitted.prompt.includes(prompt) && submitted.parameters.inputArchive.prompt.includes(prompt), `Edit ${index + 1} did not receive the full planner prompt`);
         });
         check(uploads.length === 2 && uploadedBytes.size === 2, "Two edits did not upload exactly their respective target images");
-        check(uploadedBytes.get(uploads[0].assetId) === originalAttachment.dataUrl.split(",")[1], "First edit did not upload the stored original bytes");
+        check(uploadedBytes.get(uploads[0].assetId) === fixtureImages.original.split(",")[1], "First edit did not upload the stored original bytes");
         check(uploadedBytes.get(uploads[1].assetId) === fixtureImages.first.split(",")[1], "Second edit did not upload the prior result's original bytes");
         await assertNaturalChatControls();
 

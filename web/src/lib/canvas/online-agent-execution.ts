@@ -40,10 +40,12 @@ export async function executeOnlineAgentOperations<Result>(
     ops: CanvasAgentOp[],
     apply: (mutations: CanvasAgentOp[]) => unknown,
     generate: (operation: Extract<CanvasAgentOp, { type: "run_generation" }>) => Promise<Result>,
+    signal?: AbortSignal,
 ) {
     const generated: Result[] = [];
     let mutations: CanvasAgentOp[] = [];
     for (const op of ops) {
+        signal?.throwIfAborted();
         if (op.type !== "run_generation") {
             mutations.push(op);
             continue;
@@ -52,6 +54,7 @@ export async function executeOnlineAgentOperations<Result>(
         mutations = [];
         generated.push(await generate(op));
     }
+    signal?.throwIfAborted();
     if (mutations.length) apply(mutations);
     return generated;
 }

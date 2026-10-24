@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseMediaProbe, probeMediaBytes } from "../src/media-probe";
+import { parseMediaProbe, probeMediaBytes, probeMediaStream } from "../src/media-probe";
 
 describe("server-owned media metadata", () => {
   test("reads real PNG dimensions and WAV duration without client metadata", async () => {
@@ -11,6 +11,7 @@ describe("server-owned media metadata", () => {
     wav.writeUInt32LE(16000, 24); wav.writeUInt32LE(32000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
     wav.write("data", 36); wav.writeUInt32LE(wav.length - 44, 40);
     expect(await probeMediaBytes(wav, "audio/wav")).toEqual({ durationMs: 4000 });
+    expect(await probeMediaStream((async function* () { for (let offset = 0; offset < wav.length; offset += 1024) yield wav.subarray(offset, offset + 1024); })(), "audio/wav", wav.byteLength)).toEqual({ durationMs: 4000 });
     await expect(probeMediaBytes(wav, "video/mp4")).rejects.toThrow("真实格式");
   });
 

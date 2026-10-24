@@ -11,6 +11,7 @@ import { consumeOaLoginToken } from "@/lib/oa-login";
 import { prepareWorkspaceEntry } from "@/lib/workspace-entry";
 import { subscribeWorkspaceIdentity } from "@/lib/workspace-session-events";
 import { useUserStore } from "@/stores/use-user-store";
+import { isWorkspaceRole } from "../../shared/workspace-access";
 
 // Remove credentials before any network request, dynamic import or navigation.
 let oaToken = consumeOaLoginToken(window.location, window.history);
@@ -44,8 +45,8 @@ void loadDeploymentFeatures().then(async (loaded) => {
         root.render(<PasswordChangeEntry />);
         return;
     }
-    const owner = deploymentFeatures.authenticationEnabled && entry === "workspace" ? useUserStore.getState().user?.id : null;
     const sessionUser = deploymentFeatures.authenticationEnabled ? useUserStore.getState().user : null;
+    const owner = sessionUser && isWorkspaceRole(sessionUser.role) ? sessionUser.id : null;
     const renderIdentityChanged = () => root.render(deploymentFeatures.oaLoginEnabled ? <CompanyOaEntry />
         : <main role="status" className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background text-sm text-muted-foreground"><p>登录账号已变化，正在重新准备工作区…</p><button type="button" onClick={() => window.location.reload()}>重新加载</button></main>);
     let workspaceLoaded = false;

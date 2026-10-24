@@ -59,6 +59,8 @@ import { CANVAS_ASSISTANT_OUTPUT_POLICY, CANVAS_ENGLISH_IMAGE_PROMPT_SYSTEM, IMA
 import { createCanvasSelectionPromptSync } from "@/lib/canvas/canvas-selection-prompt";
 import { canvasImageEditContext, imageEditContextDescription, IMAGE_EDIT_TOOL_PROPERTIES, resolveCanvasImageEdit, type CanvasImageEditContext, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
 import { CanvasEditContractError } from "@/lib/canvas/canvas-image-edit-contract";
+import { pendingOnlineAgentTask, recoverOnlineAgentTask, type PendingOnlineAgentTask } from "@/lib/canvas/canvas-online-task-recovery";
+import { CANVAS_AGENT_ATTACHMENT_LIMIT, readCanvasAgentAttachments } from "@/lib/canvas/canvas-agent-attachments";
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
 
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -226,7 +228,7 @@ type OnlineAgentTab = "setup" | "chat" | "history" | "log";
 type OnlineAgentLog = { id: string; time: string; title: string; data?: unknown };
 type OnlineAgentLogContext = { model: string; running: boolean; confirmTools: boolean; messages: number; nodes: number; connections: number };
 type OnlineLoopContext = { step: number };
-type OnlineTurnContext = { userPrompt: string; references: CanvasAssistantReference[]; historyReferences?: CanvasAssistantReference[]; hiddenPrompts?: string[]; imageEditContext?: CanvasImageEditContext; settings: AgentGenerationSettings; videoSize: string; config: AiConfig; canvasSnapshot: CanvasAgentSnapshot; autoContext: boolean; writeOperationAttempted?: boolean; imageContractRepairUsed?: boolean; finishAfterImageRepair?: boolean; imageRepairReferences?: CanvasAssistantReference[] };
+type OnlineTurnContext = { signal?: AbortSignal; userPrompt: string; references: CanvasAssistantReference[]; historyReferences?: CanvasAssistantReference[]; hiddenPrompts?: string[]; imageEditContext?: CanvasImageEditContext; settings: AgentGenerationSettings; videoSize: string; config: AiConfig; canvasSnapshot: CanvasAgentSnapshot; autoContext: boolean; writeOperationAttempted?: boolean; imageContractRepairUsed?: boolean; finishAfterImageRepair?: boolean; imageRepairReferences?: CanvasAssistantReference[] };
 type OnlineToolResult = { ok: true; message: string; data?: unknown; mediaWorkflow?: CanvasAgentMediaWorkflow } | { ok: false; message: string; data?: unknown };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
 type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: ToolResponseResult["responsesOutputItems"]; assistantId: string; step: number; turn: OnlineTurnContext };
@@ -295,6 +297,9 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const [autoContext, setAutoContext] = useState(true);
     const [isRunning, setIsRunning] = useState(false);
     const [uploadedReferences, setUploadedReferences] = useState<CanvasAssistantReference[]>([]);
+    const [attachmentErrors, setAttachmentErrors] = useState<string[]>([]);
+    const [attachmentsLoading, setAttachmentsLoading] = useState(false);
+    const attachmentReadRef = useRef<{ token: object; busy: boolean }>({ token: {}, busy: false });
     const [referenceOrder, setReferenceOrder] = useState<string[]>([]);
     const [imageCapabilities, setImageCapabilities] = useState<ImageGenerationModel[]>([]);
     const [videoCapabilities, setVideoCapabilities] = useState<GenerationCapabilityModel[]>([]);
@@ -340,6 +345,19 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const [chatMessageLimit, setChatMessageLimit] = useState(DEFAULT_AGENT_MESSAGE_WINDOW);
     const pendingToolContextRef = useRef(new Map<string, PendingOnlineToolContext>());
     const executingToolIdsRef = useRef(new Set<string>());
+    const onlineRequestRef = useRef<AbortController | null>(null);
+    const onlineMountedRef = useRef(true);
+    const onlineProjectId = snapshotRef.current.projectId;
+    useEffect(() => {
+        onlineMountedRef.current = true;
+        setIsRunning(false);
+        return () => {
+            onlineMountedRef.current = false;
+            attachmentReadRef.current = { token: {}, busy: false };
+            onlineRequestRef.current?.abort();
+            pendingToolContextRef.current.clear();
+        };
+    }, [onlineProjectId, user?.id]);
     const onlineActionHandlersRef = useRef<{
         approve: (messageId: string) => unknown;
         reject: (messageId: string) => void;
@@ -501,7 +519,30 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         });
     };
 
-    const finishConversationTurn = async (sessionId: string) => {
+    const stopOnlineAgent = useCallback(() => {
+        attachmentReadRef.current = { token: {}, busy: false };
+        setAttachmentsLoading(false);
+        onlineRequestRef.current?.abort();
+        onlineRequestRef.current = null;
+        pendingToolContextRef.current.clear();
+        setLocalSessions(previous => previous.map(session => ({ ...session, messages: session.messages.map(item => {
+            if (item.role === "tool" && ["pending", "running"].includes(String(item.detail?.status))) return { ...item, title: "已停止后续执行", text: "已停止本地回复和后续工具提交；已提交的服务端任务可能继续，请查询原任务。", detail: { ...item.detail, status: "rejected" } };
+            if (item.detail?.kind === "agent_generation" && item.detail.status === "running") return { ...item, text: item.detail.pendingTask ? "已停止本地查询；服务端任务可能继续，请查询原任务，勿重复生成。" : "已停止本地回复和后续工具提交。", detail: { ...item.detail, status: "paused" } };
+            return item;
+        }) })));
+        setIsRunning(false);
+    }, []);
+    useEffect(() => { if (closing || agentMode !== "online") stopOnlineAgent(); }, [agentMode, closing, stopOnlineAgent]);
+    const beginOnlineRequest = () => {
+        stopOnlineAgent();
+        const controller = new AbortController();
+        onlineRequestRef.current = controller;
+        setIsRunning(true);
+        return controller.signal;
+    };
+
+    const finishConversationTurn = async (sessionId: string, signal?: AbortSignal) => {
+        if (!onlineMountedRef.current || signal?.aborted) return;
         try {
             // A complete reply must not remain behind the panel and editor debounce queues.
             const snapshot = { sessions: localSessionsRef.current, activeSessionId: localActiveSessionIdRef.current || sessionId };
@@ -509,10 +550,11 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             publishedSessionsRef.current = snapshot;
             await onSessionsChange(snapshot.sessions, snapshot.activeSessionId, { flush: true });
         } catch (error) {
+            if (!onlineMountedRef.current || signal?.aborted) return;
             addOnlineLog("对话保存失败", error instanceof Error ? error.message : error);
             appendMessage(sessionId, { id: nanoid(), role: "error", title: "对话尚未保存", text: "回复已返回，但本机保存失败；请保留此页面并复制重要内容。" });
         } finally {
-            setIsRunning(false);
+            if (onlineMountedRef.current && !signal?.aborted) setIsRunning(false);
         }
     };
 
@@ -548,6 +590,10 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 
     const sendMessage = async (text: string, history: CanvasAssistantMessage[], savedReferences?: CanvasAssistantReference[]) => {
         if (!onlineEnabled) return;
+        if (history.some(item => pendingOnlineAgentTask(item.detail?.pendingTask))) {
+            appendMessage(activeSession!.id, { id: nanoid(), role: "system", text: "本会话有生成任务尚未核实，请先查询原任务，勿重复生成。" });
+            return;
+        }
         const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
         if (!isAiConfigReady(requestConfig, requestConfig.model)) {
             if (canManageConfig) {
@@ -569,7 +615,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 
         const refs = savedReferences || draftReferences;
         const settings = { ...generationSettings };
-        const turn: OnlineTurnContext = { userPrompt: text, references: refs, settings, videoSize: videoSizeRef.current, config: onlineAgentConfig(effectiveConfig, settings), canvasSnapshot: captureCanvasContextSnapshot(snapshotRef.current), autoContext };
+        const turn: OnlineTurnContext = { signal: beginOnlineRequest(), userPrompt: text, references: refs, settings, videoSize: videoSizeRef.current, config: onlineAgentConfig(effectiveConfig, settings), canvasSnapshot: captureCanvasContextSnapshot(snapshotRef.current), autoContext };
         const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references: refs, detail: { generationSettings: settings } };
         const assistantId = nanoid();
         appendMessage(session.id, userMessage);
@@ -585,10 +631,12 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         try {
             setIsRunning(true);
             const context = turn.autoContext ? await buildCanvasAssistantContext(turn.canvasSnapshot, new Set(turn.references.map((ref) => ref.id)), { image: readCanvasContextImage, video: readCanvasContextVideo }) : undefined;
+            turn.signal?.throwIfAborted();
             turn.imageEditContext = canvasImageEditContext(history);
             // Keep original and latest-result evidence available even beyond the chat window.
             const editEvidence = [...turn.imageEditContext.originals, ...turn.imageEditContext.results];
             const conversation = await buildCanvasConversationHistory(history, { ...userMessage, contextReferences: editEvidence }, readCanvasConversationImage, context?.content);
+            turn.signal?.throwIfAborted();
             turn.historyReferences = conversation.references;
             const contextReferences = context?.summary.items.filter(item => item.type === CanvasNodeType.Image && item.reading === "已提供图片").flatMap(item => {
                 const node = turn.canvasSnapshot.nodes.find(node => node.id === item.id);
@@ -607,8 +655,9 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 (text) => {
                     streamed = text;
                 },
-                { webSearch: true, tool: "canvas-chat" },
+                { webSearch: true, tool: "canvas-chat", signal: turn.signal },
             );
+            turn.signal?.throwIfAborted();
             addOnlineLog("模型工具回复", { content: result.content, toolCalls: result.toolCalls, stopReason: result.stopReason });
             if (result.toolCalls.length) {
                 const writableCalls = result.toolCalls.filter(isWritableToolCall);
@@ -627,15 +676,17 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 addOnlineLog(`Agent Tool Loop ${loop.step} 结束`, { reply: result.content });
             }
         } catch (error) {
+            if (turn.signal?.aborted) return;
             addOnlineLog("请求失败", error instanceof Error ? error.message : error);
             appendMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
         } finally {
-            await finishConversationTurn(sessionId);
+            await finishConversationTurn(sessionId, turn.signal);
         }
     };
 
     const continueOnlineToolLoop = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], result: ToolResponseResult, step: number, turn: OnlineTurnContext) => {
         const toolResults = await executeOnlineToolCalls(sessionId, result.toolCalls, turn);
+        turn.signal?.throwIfAborted();
         addOnlineLog("工具执行结果", toolResults);
         const mediaWorkflow = mediaWorkflowFromResults(toolResults);
         appendMessage(sessionId, {
@@ -649,6 +700,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     };
 
     const continueOnlineToolLoopAfterResults = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], toolCalls: ResponseToolCall[], toolResults: OnlineExecutedToolCall[], step: number, turn: OnlineTurnContext, claudeAssistantContent?: ClaudeAssistantContent, responsesOutputItems?: ToolResponseResult["responsesOutputItems"]) => {
+        turn.signal?.throwIfAborted();
         const prompts = toolResults.map(item => objectDetail(item.result.data).prompt);
         for (const call of toolCalls) {
             try { prompts.push(parseToolArguments(call.function.arguments).prompt); } catch { /* Invalid arguments are reported by tool execution. */ }
@@ -681,10 +733,12 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                     repaired = await requestToolResponse(
                         { ...turn.config, model: turn.config.textModel || turn.config.model, systemPrompt: "" },
                         repairMessages, ONLINE_AGENT_TOOLS.filter(tool => tool.function.name === "canvas_generate_image"),
-                        { type: "function", name: "canvas_generate_image" }, undefined, { tool: "canvas-chat" },
+                        { type: "function", name: "canvas_generate_image" }, undefined, { tool: "canvas-chat", signal: turn.signal },
                     );
+                    turn.signal?.throwIfAborted();
                     call = checkedImageContractRepairCall(original, repaired.toolCalls, turn);
                 } catch (error) {
+                    if (turn.signal?.aborted) throw error;
                     addOnlineLog("图片参数纠正未完成", error instanceof Error ? error.message : error);
                     upsertMessage(sessionId, { id: assistantId, role: "assistant", text: IMAGE_TARGETS_INCOMPLETE_MESSAGE });
                     return;
@@ -724,8 +778,9 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             (text) => {
                 streamed = text;
             },
-            { webSearch: true, tool: "canvas-chat" },
+            { webSearch: true, tool: "canvas-chat", signal: turn.signal },
         );
+        turn.signal?.throwIfAborted();
         addOnlineLog(`Agent Tool Loop ${step + 1} 回复`, { content: next.content, toolCalls: next.toolCalls, stopReason: next.stopReason });
         if (next.toolCalls.length) {
             const writableCalls = next.toolCalls.filter(isWritableToolCall);
@@ -742,7 +797,9 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || toolResults.map((item) => toolResultText(item.result)).join("\n") || "画布操作已完成。", detail: { hiddenPrompts: turn.hiddenPrompts } });
     };
 
-    const executeOps = (ops: CanvasAgentOp[]) => {
+    const executeOps = (ops: CanvasAgentOp[], signal?: AbortSignal) => {
+        signal?.throwIfAborted();
+        if (!onlineMountedRef.current || (signal && onlineRequestRef.current?.signal !== signal)) throw new DOMException("本轮已停止", "AbortError");
         const beforeSnapshot = snapshotRef.current;
         const before = snapshotSignature(beforeSnapshot);
         const next = onApplyOps(ops);
@@ -790,33 +847,48 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             audioVoice: metadata.audioVoice || turn.config.audioVoice, audioFormat: metadata.audioFormat || turn.config.audioFormat,
             audioSpeed: metadata.audioSpeed || turn.config.audioSpeed, audioInstructions: metadata.audioInstructions || turn.config.audioInstructions,
         };
-        const context = buildNodeGenerationContext(node.id, current.nodes, current.connections, op.prompt || metadata.composerContent || metadata.prompt || turn.userPrompt);
-        executeOps([{ type: "update_node", id: node.id, metadata: { status: "loading", errorDetails: undefined } }]);
+        const context = buildNodeGenerationContext(node.id, current.nodes, current.connections, op.prompt || metadata.composerContent || metadata.prompt || turn.userPrompt, mode);
+        executeOps([{ type: "update_node", id: node.id, metadata: { status: "loading", errorDetails: undefined } }], turn.signal);
         try {
             if (mode === "image" || mode === "video") {
                 const settings = onlineAgentMediaSettings(turn.settings, mode, { model: config.model, size: config.size, quality: config.quality, imageOptions: config.imageOptions, count: Number(config.count), seconds: config.videoSeconds, vquality: config.vquality, generateAudio: config.videoGenerateAudio });
-                const result = await runDirectGeneration(sessionId, context.prompt, settings, context.referenceImages, config);
-                executeOps([{ type: "update_node", id: node.id, metadata: { status: "success" } }, ...result.data.nodeIds.map((id): CanvasAgentOp => ({ type: "connect_nodes", fromNodeId: node.id, toNodeId: id }))]);
+                const result = await runDirectGeneration(sessionId, context.prompt, settings, context.referenceImages, config, undefined, turn.signal, node.id);
+                executeOps([{ type: "update_node", id: node.id, metadata: { status: "success" } }, ...result.data.nodeIds.map((id): CanvasAgentOp => ({ type: "connect_nodes", fromNodeId: node.id, toNodeId: id }))], turn.signal);
                 return result;
             }
             const id = nanoid();
             const position = { x: node.position.x + node.width + 80, y: node.position.y };
             if (mode === "text") {
-                const content = await requestImageQuestion(config, buildNodeResponseMessages(await hydrateNodeGenerationContext(context)), () => undefined, { tool: "canvas-chat" });
-                executeOps([{ type: "add_node", id, nodeType: CanvasNodeType.Text, title: "生成文本", position, metadata: { content, prompt: context.prompt, model: config.model, status: "success" } }, { type: "connect_nodes", fromNodeId: node.id, toNodeId: id }, { type: "update_node", id: node.id, metadata: { status: "success" } }]);
+                const content = await requestImageQuestion(config, buildNodeResponseMessages(await hydrateNodeGenerationContext(context)), () => undefined, { tool: "canvas-chat", signal: turn.signal });
+                if (!snapshotRef.current.nodes.some(item => item.id === node.id)) throw new DOMException("生成源节点已删除，结果未回写画布", "AbortError");
+                executeOps([{ type: "add_node", id, nodeType: CanvasNodeType.Text, title: "生成文本", position, metadata: { content, prompt: context.prompt, model: config.model, status: "success" } }, { type: "connect_nodes", fromNodeId: node.id, toNodeId: id }, { type: "update_node", id: node.id, metadata: { status: "success" } }], turn.signal);
                 appendMessage(sessionId, { id: nanoid(), role: "assistant", title: "生成文本", text: content });
                 return { ok: true as const, message: "文本已生成并放入画布。", data: { nodeIds: [id] } };
             }
-            const audio = await storeGeneratedAudio(await requestAudioGeneration(config, context.prompt), config.audioFormat);
-            executeOps([{ type: "add_node", id, nodeType: CanvasNodeType.Audio, title: "生成音频", position, metadata: { content: audio.url, storageKey: audio.storageKey, mimeType: audio.mimeType, prompt: context.prompt, model: config.model, status: "success" } }, { type: "connect_nodes", fromNodeId: node.id, toNodeId: id }, { type: "update_node", id: node.id, metadata: { status: "success" } }]);
-            return { ok: true as const, message: "音频已生成，可在画布节点播放。", data: { nodeIds: [id], url: audio.url } };
+            let pending: PendingOnlineAgentTask | undefined;
+            const audio = await storeGeneratedAudio(await requestAudioGeneration(config, context.prompt, {
+                signal: turn.signal, cancelOnAbort: () => false,
+                onSubmissionStarted: async requestId => {
+                    pending = { requestId, ownerId: user?.id || "", projectId: snapshotRef.current.projectId, mode: "audio", model: config.model, prompt: context.prompt, nodeId: node.id };
+                    await savePendingOnlineTask(sessionId, id, pending, turn.signal, true);
+                },
+                onSubmitted: async task => { if (pending) { pending = { ...pending, taskIds: [task.id] }; await savePendingOnlineTask(sessionId, id, pending, turn.signal); } },
+            }), config.audioFormat);
+            if (!snapshotRef.current.nodes.some(item => item.id === node.id)) throw new DOMException("生成源节点已删除，可查询原任务", "AbortError");
+            const sourceTaskId = pending?.taskIds?.[0];
+            const outputId = sourceTaskId ? `agent-${sourceTaskId}-0` : id;
+            executeOps([{ type: "add_node", id: outputId, nodeType: CanvasNodeType.Audio, title: "生成音频", position, metadata: { content: audio.url, storageKey: audio.storageKey, mimeType: audio.mimeType, prompt: context.prompt, model: config.model, status: "success", sourceTaskId } }, { type: "connect_nodes", fromNodeId: node.id, toNodeId: outputId }, { type: "update_node", id: node.id, metadata: { status: "success" } }], turn.signal);
+            upsertMessage(sessionId, { id, role: "assistant", text: "音频已生成并放入画布。", detail: { kind: "agent_generation", status: "completed" } });
+            return { ok: true as const, message: "音频已生成，可在画布节点播放。", data: { nodeIds: [outputId], url: audio.url } };
         } catch (error) {
-            executeOps([{ type: "update_node", id: node.id, metadata: { status: "error", errorDetails: error instanceof Error ? error.message : "生成失败" } }]);
+            if (turn.signal?.aborted) throw error;
+            executeOps([{ type: "update_node", id: node.id, metadata: { status: "error", errorDetails: error instanceof Error ? error.message : "生成失败" } }], turn.signal);
             throw error;
         }
     };
 
     const executeOnlineTool = async (sessionId: string, name: string, args: Record<string, unknown>, turn: OnlineTurnContext): Promise<OnlineToolResult> => {
+        turn.signal?.throwIfAborted();
         const current = snapshotRef.current;
         try {
             if (name === "canvas_get_state") return { ok: true, message: describeCanvasSnapshot(current), data: compactSnapshot(current) };
@@ -843,17 +915,17 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                     }
                     turn.writeOperationAttempted = true;
                     addOnlineLog("改图底图选择", { intent: edit.lineage.intent, references: edit.references.map(({ id, title, storageKey }) => ({ id, title, storageKey })) });
-                    return await runDirectGeneration(sessionId, edit.prompt, settings, edit.references.map(referenceToImage), turn.config, edit.lineage);
+                    return await runDirectGeneration(sessionId, edit.prompt, settings, edit.references.map(referenceToImage), turn.config, edit.lineage, turn.signal);
                 }
                 const references = mediaReferencesForTool(args, turn).map(referenceToImage);
-                return await runDirectGeneration(sessionId, generationPrompt, settings, references, turn.config);
+                return await runDirectGeneration(sessionId, generationPrompt, settings, references, turn.config, undefined, turn.signal);
             }
             const referenceTools = ["canvas_create_generation_flow", "canvas_create_image_prompt_flow", "canvas_create_config_node", "canvas_generate_text", "canvas_generate_audio"];
             let references: Array<CanvasAssistantReference & { dataUrl: string }> = [];
             if (referenceTools.includes(name)) {
                 references = mediaReferencesForTool(args, turn);
                 const missing = references.filter((reference) => !snapshotRef.current.nodes.some((node) => node.id === reference.id));
-                if (missing.length) executeOps(missing.map((reference, index) => ({ type: "add_node", id: reference.id, nodeType: CanvasNodeType.Image, title: reference.title, position: { x: nextCanvasX(snapshotRef.current) + index * 380, y: 0 }, metadata: { content: reference.dataUrl, storageKey: reference.storageKey, status: "success" } })));
+                if (missing.length) executeOps(missing.map((reference, index) => ({ type: "add_node", id: reference.id, nodeType: CanvasNodeType.Image, title: reference.title, position: { x: nextCanvasX(snapshotRef.current) + index * 380, y: 0 }, metadata: { content: reference.dataUrl, storageKey: reference.storageKey, status: "success" } })), turn.signal);
                 args = { ...args, referenceNodeIds: references.map((reference) => reference.id) };
                 if (name === "canvas_create_generation_flow" && args.mode === undefined) args.mode = turn.settings.mode;
                 if (name === "canvas_create_config_node" && references.length) args.prompt = `${stringOptional(args.prompt)}\n${references.map((reference) => `@[node:${reference.id}]`).join("\n")}`;
@@ -864,7 +936,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 if (configNode?.type === "add_node" && configNode.id) ops.splice(1, 0, ...references.map((reference): CanvasAgentOp => ({ type: "connect_nodes", fromNodeId: reference.id, toNodeId: configNode.id! })));
             }
             const before = snapshotSignature(snapshotRef.current);
-            const generated = await executeOnlineAgentOperations(ops, executeOps, (op) => generateOnlineNode(sessionId, op, turn));
+            const generated = await executeOnlineAgentOperations(ops, mutations => executeOps(mutations, turn.signal), (op) => generateOnlineNode(sessionId, op, turn), turn.signal);
             const changed = before !== snapshotSignature(snapshotRef.current) || generated.length > 0;
             return { ok: changed, message: generated.length ? generated.map((item) => item.message).join("\n") : changed ? summarizeCanvasAgentOps(ops) || "画布操作已执行。" : explainNoop(ops, current), data: { generated, snapshot: compactSnapshot(snapshotRef.current) } };
         } catch (error) {
@@ -888,11 +960,13 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const results: OnlineExecutedToolCall[] = [];
         let stopped = false;
         for (const toolCall of toolCalls) {
+            turn.signal?.throwIfAborted();
             if (stopped) {
                 results.push({ toolCallId: toolCall.id, name: toolCall.function.name, result: { ok: false, message: "前一个工具调用失败，未继续执行。" } });
                 continue;
             }
             const result = await executeOnlineToolCall(sessionId, toolCall, turn);
+            turn.signal?.throwIfAborted();
             results.push(result);
             if (!result.result.ok) stopped = true;
         }
@@ -915,11 +989,13 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             return;
         }
         try {
+            pendingContext.turn.signal?.throwIfAborted();
             executingToolIdsRef.current.add(messageId);
             setIsRunning(true);
             pendingToolContextRef.current.delete(messageId);
             upsertMessage(session.id, { id: messageId, role: "tool", title: "工具执行中", text: message?.text || summarizeToolCalls(toolCalls), detail: { ...detail, status: "running" } });
             const results = await executeOnlineToolCalls(session.id, toolCalls, pendingContext.turn);
+            pendingContext.turn.signal?.throwIfAborted();
             addOnlineLog("工具执行结果", results);
             const mediaWorkflow = mediaWorkflowFromResults(results);
             upsertMessage(session.id, {
@@ -932,11 +1008,12 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             pendingToolContextRef.current.delete(messageId);
             await continueOnlineToolLoopAfterResults(session.id, assistantId, previousMessages, toolCalls, results, pendingContext.step, pendingContext.turn, pendingContext.claudeAssistantContent, pendingContext.responsesOutputItems);
         } catch (error) {
+            if (pendingContext.turn.signal?.aborted) return;
             addOnlineLog("工具续跑失败", error instanceof Error ? error.message : error);
             appendMessage(session.id, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
         } finally {
             executingToolIdsRef.current.delete(messageId);
-            await finishConversationTurn(session.id);
+            await finishConversationTurn(session.id, pendingContext.turn.signal);
         }
     };
 
@@ -967,11 +1044,54 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         if (patch.imageCount) updateConfig("canvasImageCount", patch.imageCount);
     };
 
-    const runDirectGeneration = async (sessionId: string, text: string, settings: AgentGenerationSettings, references: ReferenceImage[], baseConfig: AiConfig, imageEdit?: CanvasImageEditLineage) => {
+    const savePendingOnlineTask = async (sessionId: string, messageId: string, pendingTask: PendingOnlineAgentTask, signal?: AbortSignal, beforeSubmission = false) => {
+        signal?.throwIfAborted();
+        const previous = localSessionsRef.current.find(session => session.id === sessionId)?.messages.find(item => item.id === messageId);
+        upsertMessage(sessionId, { id: messageId, role: "assistant", text: "正在查询原任务；停止本地查询不会撤销服务端任务。", ...previous,
+            detail: { ...previous?.detail, kind: "agent_generation", status: "running", pendingTask, resubmitAllowed: false } });
+        try {
+            await onSessionsChange(localSessionsRef.current, localActiveSessionIdRef.current || sessionId, { flush: true });
+            signal?.throwIfAborted();
+        } catch (error) {
+            // This callback is awaited before POST: its rejection proves no job was submitted.
+            if (beforeSubmission && onlineMountedRef.current && snapshotRef.current.projectId === pendingTask.projectId) {
+                upsertMessage(sessionId, { id: messageId, role: "error", text: "本次请求未提交，可重新发送。", detail: { kind: "agent_generation", status: "failed" } });
+                await Promise.resolve(onSessionsChange(localSessionsRef.current, localActiveSessionIdRef.current || sessionId, { flush: true })).catch(() => undefined);
+            }
+            throw error;
+        }
+    };
+
+    const queryOriginalAgentTask = async (sessionId: string, item: CanvasAssistantMessage) => {
+        const pending = pendingOnlineAgentTask(item.detail?.pendingTask);
+        if (!pending || isRunning) return;
+        if (pending.ownerId !== user?.id || pending.projectId !== snapshotRef.current.projectId) return;
+        const signal = beginOnlineRequest();
+        try {
+            const result = await recoverOnlineAgentTask(pending, resolveAgentGeneratedMediaPosition(snapshotRef.current), signal);
+            signal.throwIfAborted();
+            const existing = new Set(snapshotRef.current.nodes.map(node => node.id));
+            executeOps(result.ops.filter(op => op.type !== "add_node" || !op.id || !existing.has(op.id)), signal);
+            upsertMessage(sessionId, { ...item, role: "assistant", text: "已取回原任务结果并放入画布，没有重新生成。", attachments: result.attachments,
+                detail: { ...item.detail, pendingTask: undefined, status: "completed", imageEdit: pending.imageEdit } });
+        } catch (error) {
+            if (signal.aborted) return;
+            upsertMessage(sessionId, { ...item, role: "error", text: error instanceof Error ? error.message : "原任务查询失败",
+                detail: { ...item.detail, ...(error instanceof QueuedTaskFailedError ? { pendingTask: undefined, status: "failed" } : { status: "paused" }) } });
+        } finally { await finishConversationTurn(sessionId, signal); }
+    };
+
+    const runDirectGeneration = async (sessionId: string, text: string, settings: AgentGenerationSettings, references: ReferenceImage[], baseConfig: AiConfig, imageEdit?: CanvasImageEditLineage, signal?: AbortSignal, nodeId?: string) => {
+        const assertTarget = () => {
+            signal?.throwIfAborted();
+            if (nodeId && !snapshotRef.current.nodes.some(node => node.id === nodeId)) throw new DOMException("生成源节点已删除，可查询原任务", "AbortError");
+        };
+        assertTarget();
         const blend = settings.mode === "image" && imageModelProfile(settings.imageModel).kind === "midjourney-blend";
         const operation = settings.mode === "video" ? "video_generation" : references.length && !blend ? "inpaint" : "image_generation";
         const tool = canvasToolKey(settings.mode, references.length > 0, imageModelProfile(settings.imageModel).kind);
         const resolved = await resolveToolConfig({ ...baseConfig, model: settings.mode === "video" ? settings.videoModel : settings.imageModel }, operation, tool);
+        assertTarget();
         baseConfig = resolved.config;
         settings = { ...settings, ...(settings.mode === "video" ? { videoModel: baseConfig.model } : { imageModel: baseConfig.model }) };
         const plan = buildAgentGenerationPlan(settings, text, references, imageModelProfile(resolved.model.modelId, [resolved.model]));
@@ -981,21 +1101,39 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const strategy = plan.kind === "image" ? `${!plan.requiresPrompt ? "合成参考图并输出" : references.length ? "以参考图为依据编辑" : "按文字描述生成"} ${plan.count} 张图片` : `${activeReferences.length ? "以所选图片为参考生成" : "按文字描述生成"} ${plan.seconds === "-1" ? "智能时长" : `${plan.seconds} 秒`}视频`;
         appendMessage(sessionId, { id: progressId, role: "assistant", text: `${strategy}，正在执行…`, meta: imageModelDisplayName(modelOptionName(plan.model)), detail: { kind: "agent_generation", status: "running", prompt, settings } });
         let submittedVideoTask: VideoGenerationTask | undefined;
+        let pending: PendingOnlineAgentTask | undefined;
         try {
             if (plan.kind === "image") {
                 prompt = await ensureEnglishImagePrompt(prompt, source => requestImageQuestion(
                     { ...baseConfig, model: baseConfig.textModel || baseConfig.model, systemPrompt: "" },
                     [{ role: "system", content: CANVAS_ENGLISH_IMAGE_PROMPT_SYSTEM }, { role: "user", content: source }],
-                    () => {}, { tool: "canvas-chat" },
+                    () => {}, { tool: "canvas-chat", signal },
                 ), { requiresPrompt: plan.requiresPrompt });
+                signal?.throwIfAborted();
                 const config = { ...baseConfig, model: plan.model, imageModel: plan.model, size: plan.size, quality: plan.quality, imageOptions: plan.imageOptions ?? baseConfig.imageOptions, count: String(plan.count), canvasImageCount: String(plan.count), systemPrompt: "" };
-                const generated = references.length && plan.requiresPrompt ? await requestEdit(config, prompt, references, undefined, { tool: "canvas-edit", referencePromptLanguage: "en" }) : await requestGeneration(config, prompt, { tool: "canvas-image" }, references);
+                const requestId = nanoid();
+                const requestOptions = { requestId, signal, cancelOnAbort: () => false,
+                    onSubmissionStarted: async () => {
+                        pending = { requestId: `${requestId}:0`, ownerId: user?.id || "", projectId: snapshotRef.current.projectId, mode: "image", model: plan.model, prompt, imageEdit, nodeId };
+                        try { await savePendingOnlineTask(sessionId, progressId, pending, signal, true); }
+                        catch (error) { pending = undefined; throw error; }
+                    },
+                    onSubmitted: async (taskIds: string[]) => { if (pending) { pending = { ...pending, taskIds }; await savePendingOnlineTask(sessionId, progressId, pending, signal); } },
+                };
+                const generated = references.length && plan.requiresPrompt ? await requestEdit(config, prompt, references, undefined, { ...requestOptions, tool: "canvas-edit", referencePromptLanguage: "en" }) : await requestGeneration(config, prompt, { ...requestOptions, tool: "canvas-image" }, references);
+                assertTarget();
                 if (!generated.length) throw new Error("图片任务没有返回结果，尚未生成可见图片。");
                 const storedImages = await Promise.all(generated.map(async (item) => ({ item, image: await uploadImage(item.dataUrl) })));
-                const attachments: CanvasAssistantAttachment[] = storedImages.map(({ item, image }, index) => ({
-                    id: item.id, name: `生成图片 ${index + 1}`, url: image.url, storageKey: image.storageKey, width: image.width, height: image.height, mediaType: "image",
-                    serverAssetId: serverAssetIdFromAsset({ kind: "image", data: { ...image, dataUrl: item.dataUrl } }),
-                }));
+                assertTarget();
+                const taskOutputCounts = new Map<string, number>();
+                const attachments: CanvasAssistantAttachment[] = storedImages.map(({ item, image }, index) => {
+                    const outputIndex = item.sourceTaskId ? taskOutputCounts.get(item.sourceTaskId) || 0 : index;
+                    if (item.sourceTaskId) taskOutputCounts.set(item.sourceTaskId, outputIndex + 1);
+                    return {
+                        id: item.sourceTaskId ? `agent-${item.sourceTaskId}-${outputIndex}` : item.id, name: `生成图片 ${index + 1}`, url: image.url, storageKey: image.storageKey, width: image.width, height: image.height, mediaType: "image",
+                        serverAssetId: serverAssetIdFromAsset({ kind: "image", data: { ...image, dataUrl: item.dataUrl } }),
+                    };
+                });
                 executeOps(buildAgentGeneratedMediaOps(attachments, {
                     prompt, model: plan.model, ...resolveAgentGeneratedMediaPosition(snapshotRef.current),
                     imageMetadata: {
@@ -1004,7 +1142,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         references: references.map((reference) => reference.storageKey || reference.url || reference.dataUrl).filter(Boolean),
                         compareSources: references.map(canvasCompareSource),
                     },
-                }));
+                }), signal);
                 addAssets(storedImages.map(({ image }, index) => ({
                     kind: "image" as const,
                     title: prompt.slice(0, 24) || attachments[index].name,
@@ -1023,13 +1161,20 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             }
             const config = { ...baseConfig, model: plan.model, videoModel: plan.model, size: plan.size, videoSeconds: plan.seconds, vquality: plan.quality, videoGenerateAudio: settings.videoGenerateAudio ?? baseConfig.videoGenerateAudio };
             const videoPrompt = buildAgentVideoPrompt(prompt, plan.requiresReference);
-            const result = await requestVideoGeneration(config, videoPrompt, activeReferences, [], [], { toolKey: "canvas-video", onSubmitted: (task) => {
+            const result = await requestVideoGeneration(config, videoPrompt, activeReferences, [], [], { toolKey: "canvas-video", signal, cancelOnAbort: () => false,
+                onSubmissionStarted: async requestId => {
+                    pending = { requestId, ownerId: user?.id || "", projectId: snapshotRef.current.projectId, mode: "video", model: plan.model, prompt: videoPrompt, nodeId };
+                    try { await savePendingOnlineTask(sessionId, progressId, pending, signal, true); }
+                    catch (error) { pending = undefined; throw error; }
+                }, onSubmitted: async (task) => {
                 submittedVideoTask = task;
-                upsertMessage(sessionId, { id: progressId, role: "assistant", text: `${strategy}，正在等待原任务结果…`, meta: modelOptionName(plan.model), detail: { kind: "agent_generation", status: "running", prompt: videoPrompt, settings, videoTask: task } });
+                if (pending) { pending = { ...pending, taskIds: [task.id] }; await savePendingOnlineTask(sessionId, progressId, pending, signal); }
             } });
+            signal?.throwIfAborted();
             const video = await storeGeneratedVideo(result);
-            const attachments: CanvasAssistantAttachment[] = [{ id: nanoid(), name: "生成视频", mediaType: "video", ...video }];
-            executeOps(buildAgentGeneratedMediaOps(attachments, { prompt: videoPrompt, model: plan.model, ...resolveAgentGeneratedMediaPosition(snapshotRef.current) }));
+            assertTarget();
+            const attachments: CanvasAssistantAttachment[] = [{ id: submittedVideoTask ? `agent-${submittedVideoTask.id}-0` : nanoid(), name: "生成视频", mediaType: "video", ...video }];
+            executeOps(buildAgentGeneratedMediaOps(attachments, { prompt: videoPrompt, model: plan.model, ...resolveAgentGeneratedMediaPosition(snapshotRef.current) }), signal);
             addAssets([{
                 kind: "video", title: prompt.slice(0, 24) || "Agent 视频", coverUrl: "", tags: ["无线画布", "Agent"], source: "无线画布-Agent",
                 data: { url: video.url, storageKey: video.storageKey, width: video.width || 0, height: video.height || 0, bytes: video.bytes, mimeType: video.mimeType },
@@ -1039,38 +1184,53 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             upsertMessage(sessionId, { id: progressId, role: "assistant", text: message, attachments, meta: `${plan.seconds} 秒 · ${modelOptionName(plan.model)}`, detail: { kind: "agent_generation", status: "completed", prompt: videoPrompt, settings } });
             return { ok: true as const, message, data: { nodeIds: attachments.map((item) => item.id), mediaType: "video", prompt: videoPrompt } };
         } catch (error) {
+            if (signal?.aborted) throw error;
             const paused = error instanceof QueuedTaskPausedError;
+            if (paused && !pending) pending = { requestId: error.task.requestId, taskIds: [error.taskId], ownerId: user?.id || "", projectId: snapshotRef.current.projectId, mode: settings.mode, model: plan.model, prompt, nodeId, imageEdit };
             const videoTask = paused ? { id: error.taskId, provider: "server" as const, model: plan.model } : error instanceof QueuedTaskFailedError ? undefined : submittedVideoTask;
             const canRecover = paused ? error.canRecover : Boolean(videoTask);
             const reason = error instanceof Error ? error.message : "生成失败";
-            upsertMessage(sessionId, { id: progressId, role: "error", title: videoTask ? "视频任务尚未完成" : "生成失败", text: reason, detail: { kind: "agent_generation", status: videoTask ? "paused" : "failed", prompt, settings, ...(videoTask ? { videoTask, taskId: videoTask.id, canRecover, resubmitAllowed: false } : {}) } });
+            upsertMessage(sessionId, { id: progressId, role: "error", title: pending ? "原任务尚未完成" : "生成失败", text: reason, detail: { kind: "agent_generation", status: pending ? "paused" : "failed", prompt, settings,
+                ...(pending && !(error instanceof QueuedTaskFailedError) ? { pendingTask: pending, resubmitAllowed: false } : {}), ...(videoTask ? { videoTask, taskId: videoTask.id, canRecover, resubmitAllowed: false } : {}) } });
             if (videoTask && error instanceof Error) Object.assign(error, { taskId: videoTask.id, canRecover });
             throw error;
         }
     };
 
     const runVideoFromImage = async (sessionId: string, image: CanvasAssistantAttachment, text: string) => {
-        setIsRunning(true);
+        const signal = beginOnlineRequest();
         try {
             const reference: ReferenceImage = { id: image.id, name: image.name, type: "image/png", dataUrl: await imageToDataUrl(image), storageKey: image.storageKey };
-            await runDirectGeneration(sessionId, text, { ...generationSettings, mode: "video" }, [reference], onlineAgentConfig(effectiveConfig, generationSettings));
+            await runDirectGeneration(sessionId, text, { ...generationSettings, mode: "video" }, [reference], onlineAgentConfig(effectiveConfig, generationSettings), undefined, signal);
         } catch (error) {
+            if (signal.aborted) return;
             addOnlineLog("视频生成未完成", error instanceof Error ? error.message : error);
         } finally {
-            await finishConversationTurn(sessionId);
+            await finishConversationTurn(sessionId, signal);
         }
     };
 
     const submit = async () => {
         const text = prompt.trim();
-        if (!onlineEnabled || !text || isRunning) return;
+        if (!onlineEnabled || !text || isRunning || attachmentReadRef.current.busy) return;
         await sendMessage(text, messages, draftReferences);
     };
 
     const addImagesToAgent = async (files: FileList | File[] | null) => {
-        const images = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
-        const references = await Promise.all(images.map(async (file) => ({ id: nanoid(), type: CanvasNodeType.Image, title: file.name || "上传图片", dataUrl: await fileToDataUrl(file) })));
-        setUploadedReferences((current) => [...current, ...references]);
+        if (isRunning || attachmentReadRef.current.busy) return;
+        const token = {};
+        attachmentReadRef.current = { token, busy: true };
+        setAttachmentsLoading(true);
+        const current = () => onlineMountedRef.current && attachmentReadRef.current.token === token;
+        try {
+            const available = CANVAS_AGENT_ATTACHMENT_LIMIT - uploadedReferences.reduce((bytes, item) => bytes + (item.dataUrl?.length || 0), 0);
+            const result = await readCanvasAgentAttachments(Array.from(files || []), available, fileToDataUrl, current);
+            if (!current()) return;
+            setUploadedReferences(previous => [...previous, ...result.images.map(image => ({ id: nanoid(), type: CanvasNodeType.Image, title: image.name, dataUrl: image.dataUrl }))]);
+            setAttachmentErrors(result.errors);
+        } finally {
+            if (current()) { attachmentReadRef.current.busy = false; setAttachmentsLoading(false); }
+        }
     };
 
     const useImageForVideo = (attachment: CanvasAgentChatAttachment) => {
@@ -1139,6 +1299,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     };
 
     const collapse = () => {
+        stopOnlineAgent();
         onCollapse();
     };
 
@@ -1229,6 +1390,10 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                             {renderedMessages.map((message) => (
                                 <div key={message.id} className="space-y-2">
                                     <AgentChatMessage item={message} theme={theme} user={user} onRejectTool={handleRejectOnlineTool} onApproveTool={handleApproveOnlineTool} onUseImageForVideo={handleUseImageForVideo} />
+                                    {pendingOnlineAgentTask(message.detail?.pendingTask) ? <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
+                                        <span className="break-all">原任务：{pendingOnlineAgentTask(message.detail?.pendingTask)?.taskIds?.join("、") || pendingOnlineAgentTask(message.detail?.pendingTask)?.requestId}</span>
+                                        <Button size="small" disabled={isRunning} onClick={() => void queryOriginalAgentTask(activeSession!.id, message)}>查询原任务</Button>
+                                    </div> : null}
                                     {message.references?.length ? <MessageReferences message={message} nodes={snapshotRef.current.nodes} /> : null}
                                     {message.detail?.mediaWorkflow ? (
                                         <CanvasAgentMediaWorkflowCard
@@ -1315,7 +1480,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         <button type="button" className="shrink-0 hover:underline" aria-pressed={autoContext} onClick={() => setAutoContext((current) => !current)}>{autoContext ? "关闭" : "开启"}</button>
                     </div>
                     <AgentChatComposer
-                        disabled={!onlineEnabled || !effectiveConfig.textModel}
+                        disabled={!onlineEnabled || !effectiveConfig.textModel || attachmentsLoading}
                         prompt={prompt}
                         attachments={uploadedReferences.map((item) => ({ id: item.id, name: item.title, url: item.dataUrl || "", storageKey: item.storageKey, mediaType: "image" as const }))}
                         attachmentPreview={<div className="min-w-0 [&_.cw-reference-preview]:!object-contain">
@@ -1331,6 +1496,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                             setVideoConfirmation((current) => current ? { ...current, prompt: value } : null);
                         }}
                         onSubmit={submit}
+                        onStop={stopOnlineAgent}
                         onAddFiles={addImagesToAgent}
                         onRemoveAttachment={(id) => setUploadedReferences((current) => current.filter((item) => item.id !== id))}
                         generationControls={<AgentGenerationControls editing={generationReferences.length > 0} settings={generationSettings} config={effectiveConfig} imageCapabilities={imageCapabilities} videoCapabilities={videoCapabilities} theme={theme} onChange={updateGenerationSettings}
@@ -1341,6 +1507,8 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                                 <CanvasPromptLibrary onSelect={setPrompt} />
                             </div>} />}
                     />
+                    {attachmentsLoading ? <p role="status" className="mx-4 mb-2 text-xs" style={{ color: theme.node.muted }}>正在读取图片…</p> : null}
+                    {attachmentErrors.length ? <p role="alert" className="mx-4 mb-2 whitespace-pre-wrap text-xs" style={{ color: theme.node.text }}>{attachmentErrors.join("\n")}</p> : null}
                 </>
             ) : null}
 
@@ -2191,6 +2359,7 @@ function fileToDataUrl(file: File) {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ""));
         reader.onerror = () => reject(new Error("读取图片失败"));
+        reader.onabort = () => reject(new Error("读取图片已中止"));
         reader.readAsDataURL(file);
     });
 }

@@ -135,4 +135,21 @@ describe("queued media preparation cancellation", () => {
         expect(submitted).toEqual(["accepted-task"]);
         expect(requests.filter(request => request.startsWith("POST /api/tasks"))).toEqual(["POST /api/tasks", "POST /api/tasks/accepted-task/cancel"]);
     });
+
+    test.each(["video_generation", "audio_generation"])("stopping %s observation explicitly leaves the accepted task running", async operation => {
+        const controller = new AbortController();
+        const requests: string[] = [];
+        globalThis.fetch = (async (url, init) => {
+            const path = String(url);
+            requests.push(`${init?.method || "GET"} ${path}`);
+            if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [model] });
+            if (path === "/api/tasks/preflight") return Response.json({ ok: true, normalized: {} });
+            if (path === "/api/tasks") return Response.json({ task: { id: "accepted-task" } });
+            if (path === "/api/auth/session") return Response.json({}, { status: 401 });
+            throw new Error(`unexpected request ${path}`);
+        }) as typeof fetch;
+        await expect(requestQueuedMedia({ ...input(operation), signal: controller.signal, cancelOnAbort: () => false, onSubmitted: () => controller.abort() })).rejects.toMatchObject({ name: "AbortError" });
+        expect(requests.filter(request => request.includes("/cancel"))).toEqual([]);
+        expect(requests.filter(request => request === "POST /api/tasks")).toHaveLength(1);
+    });
 });

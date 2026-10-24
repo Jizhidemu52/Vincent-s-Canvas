@@ -13,6 +13,7 @@ import type { AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import type { CanvasGenerationOutput } from "./canvas-shared-generation-runtime";
+import { shouldCancelCanvasGeneration } from "@/lib/canvas/canvas-project-async-lifecycle";
 
 type MediaBinding = NonNullable<CanvasNodeMetadata["mediaTask"]>;
 type MediaCanvas = {
@@ -75,12 +76,12 @@ export function createCanvasMediaSubmission(nodeId: string, context: MediaCanvas
         async complete(metadata: Partial<CanvasNodeMetadata>) {
             await patch({ ...metadata, mediaTask: undefined, generationSubmissionUncertain: undefined, videoTaskCanRecover: undefined, errorDetails: undefined });
         },
-        async fail(error: unknown) {
+        async fail(error: unknown, observationOnly = false) {
             const uncertain = error instanceof QueuedTaskSubmissionUncertainError;
             const paused = error instanceof QueuedTaskPausedError;
             if (uncertain) binding = { requestId: error.requestId, taskId: error.taskId || binding?.taskId, ownerId, projectId: context.projectId };
             if (paused) binding = { requestId: error.task.requestId || binding?.requestId || "", taskId: error.taskId, ownerId, projectId: context.projectId };
-            const pending = Boolean(binding && (uncertain || paused || (!canceled(error) && !(error instanceof QueuedTaskFailedError) && binding.taskId)));
+            const pending = Boolean(binding && (uncertain || paused || ((observationOnly || (!canceled(error) && binding.taskId)) && !(error instanceof QueuedTaskFailedError))));
             const detail = pending ? `${error instanceof Error ? error.message : "原任务结果尚未保存"}（已保留原任务，重试只查询，不重新生成）` : canceled(error) ? "生成已取消" : error instanceof Error ? error.message : "生成失败";
             await patch({ status: canceled(error) && !pending ? "idle" : "error", errorDetails: detail, mediaTask: pending ? binding : undefined, generationSubmissionUncertain: pending || undefined,
                 ...(findNode(context, nodeId)?.type === CanvasNodeType.Video ? { videoTaskId: pending ? binding?.taskId : undefined, videoTaskCanRecover: pending ? Boolean(binding?.taskId) : undefined } : {}) }).catch(() => undefined);
@@ -117,10 +118,11 @@ export async function runCanvasMediaGeneration(input: Generation): Promise<Canva
     input.start(outputId, nodeId, input.runningId, controller);
     const submission = createCanvasMediaSubmission(outputId, input);
     try {
-        const options = { signal: controller.signal, onSubmissionStarted: submission.onSubmissionStarted, onSubmitted: submission.onSubmitted };
+        const options = { signal: controller.signal, cancelOnAbort: () => shouldCancelCanvasGeneration(controller.signal), onSubmissionStarted: submission.onSubmissionStarted, onSubmitted: submission.onSubmitted };
         const file = mode === "video"
             ? await storeGeneratedVideo(await requestVideoGeneration(config, context.prompt, context.referenceImages, context.referenceVideos, context.referenceAudios, { ...options, toolKey: "canvas-video" }))
             : await storeGeneratedAudio(await requestAudioGeneration(config, context.prompt, options), config.audioFormat);
+        controller.signal.throwIfAborted();
         if (mode === "video") {
             const size = fitNodeSize(file.width || spec.width, file.height || spec.height, 420, 420);
             flushSync(() => input.setNodes(previous => previous.map(node => node.id === outputId ? { ...node, ...size, position: { x: node.position.x + node.width / 2 - size.width / 2, y: node.position.y + node.height / 2 - size.height / 2 } } : node)));
@@ -128,7 +130,7 @@ export async function runCanvasMediaGeneration(input: Generation): Promise<Canva
         await submission.complete(outputMetadata(file, mode));
         return { nodeId: outputId, status: "success", url: file.url, storageKey: file.storageKey };
     } catch (error) {
-        const detail = await submission.fail(error);
+        const detail = await submission.fail(error, !shouldCancelCanvasGeneration(controller.signal));
         if (!input.shared && nodeId !== outputId) input.setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: canceled(error) ? "idle" : "error", errorDetails: detail } } : node));
         return { nodeId: outputId, status: "failed", error: detail };
     } finally { input.finish(outputId, controller); }

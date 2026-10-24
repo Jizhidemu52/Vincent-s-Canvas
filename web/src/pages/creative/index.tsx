@@ -31,7 +31,7 @@ export default function CreativePage() {
                     <div className="creative-grid">
                         {items.map((preset) => <Link key={preset.id} to={buildCreativePresetHref(preset)} className="creative-card">
                             <div className="creative-cover">
-                                <img src={`/creative-scenes/v2/${preset.id}.webp`} alt={`${sceneSummaries[preset.id]?.input} → ${sceneSummaries[preset.id]?.output}的功能示意`} loading="lazy" decoding="async" />
+                                <img src={`/creative-scenes/v2/${preset.id}.preview.webp`} alt={`${sceneSummaries[preset.id]?.input} → ${sceneSummaries[preset.id]?.output}的功能示意`} loading="lazy" decoding="async" />
                                 <div className="creative-cover-flow" aria-hidden="true"><span>{sceneSummaries[preset.id]?.input}</span><ArrowRight size={15} /><span>{sceneSummaries[preset.id]?.output}</span></div>
                             </div>
                             <div className="creative-card-copy"><h3>{preset.title}<ArrowRight size={16} strokeWidth={1.5} /></h3><p>{preset.description}</p></div>

@@ -42,7 +42,7 @@ export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultNa
         [next[from], next[to]] = [next[to], next[from]];
         return next;
     });
-    const exportPdf = async () => {
+    const exportImages = async () => {
         if (exporting.current) return;
         exporting.current = true;
         setBusy(true);
@@ -68,14 +68,14 @@ export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultNa
     return (
         <Modal title="导出图片集" open onCancel={onClose} closable={!busy} keyboard={!busy} mask={{ closable: !busy }} width={720} centered destroyOnHidden footer={
             <div className="flex flex-wrap items-center justify-between gap-3">
-                <span style={{ color: token.colorTextSecondary }} className="text-sm">{chosenIds.length} 张图片 · {mode === "merged" ? "1 个多页 PDF" : mode === "separate" ? `${chosenIds.length} 个单页 PDF（ZIP）` : "原图 ZIP"}</span>
-                <div className="flex gap-2"><Button onClick={onClose} disabled={busy}>取消</Button><Button type="primary" icon={<FileDown size={16} />} loading={busy} disabled={!chosenIds.length || !setName.trim() || overLimit} onClick={() => void exportPdf()}>导出并下载</Button></div>
+                <span style={{ color: token.colorTextSecondary }} className="text-sm">{chosenIds.length} 张图片 · {mode === "merged" ? "1 个多页 PDF" : mode === "separate" ? `${chosenIds.length} 个单页 PDF（ZIP）` : mode === "images" ? "原图 ZIP" : `${mode.toUpperCase()} 图片 ZIP`}</span>
+                <div className="flex gap-2"><Button onClick={onClose} disabled={busy}>取消</Button><Button type="primary" icon={<FileDown size={16} />} loading={busy} disabled={!chosenIds.length || !setName.trim() || overLimit} onClick={() => void exportImages()}>导出并下载</Button></div>
             </div>
         }>
             <div className="space-y-4 py-2">
                 <label className="block space-y-2"><span className="text-sm font-medium">图片集名称</span><Input aria-label="图片集名称" value={setName} maxLength={100} disabled={busy} onChange={(event) => setSetName(event.target.value)} placeholder="例如：秋冬印花方案" /></label>
-                <Radio.Group aria-label="图片集导出方式" value={mode} disabled={busy} onChange={(event) => setMode(event.target.value)} className="flex flex-wrap gap-2" options={[{ value: "merged", label: "合并多页 PDF" }, { value: "separate", label: "每张一个 PDF（ZIP）" }, { value: "images", label: "原图（ZIP）" }]} />
-                <p className="text-xs leading-5" style={{ color: token.colorTextSecondary }}>按下方编号导出，勾选后可上移或下移。{mode === "images" ? "保留原始图片格式与文件内容，按图片名称和版本命名，不压缩画质。" : "每张图独占一页，保持原图比例、不裁切；按 96 px = 72 pt 设置页面（超长图等比缩放）。PNG/JPEG 直接嵌入，其他格式转为静态 PNG。"}</p>
+                <Radio.Group aria-label="图片集导出方式" value={mode} disabled={busy} onChange={(event) => setMode(event.target.value)} className="flex flex-wrap gap-2" options={[{ value: "png", label: "PNG 图片（ZIP）" }, { value: "jpg", label: "JPG 图片（ZIP）" }, { value: "images", label: "原图（ZIP）" }, { value: "merged", label: "合并多页 PDF" }, { value: "separate", label: "每张一个 PDF（ZIP）" }]} />
+                <p className="text-xs leading-5" style={{ color: token.colorTextSecondary }}>逐张导出所选图片，不会把整个画布合成一张图。按下方编号导出，勾选后可上移或下移。{mode === "images" ? "保留原始图片格式与文件内容，按图片名称和版本命名，不压缩画质。" : mode === "png" || mode === "jpg" ? `保持原图像素尺寸，不裁切。${mode === "png" ? "PNG 保留已有透明区域。" : "JPG 为高质量有损格式，透明区域填充白色，不保证逐像素一致。"}格式转换时，动态图仅导出静态画面。` : "每张图独占一页，保持原图比例、不裁切；按 96 px = 72 pt 设置页面（超长图等比缩放）。PNG/JPEG 直接嵌入，其他格式转为静态 PNG。"}</p>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-sm font-medium">图片与导出顺序</span>
                     <div className="flex flex-wrap gap-1"><Button size="small" type="text" disabled={busy || !available.length} onClick={() => setSelectedIds([...chosenIds, ...available.filter((node) => !chosen.has(node.id)).map((node) => node.id)])}>全选</Button><Button size="small" type="text" disabled={busy || !initialIds.length} onClick={() => setSelectedIds(initialIds)}>仅画布已选</Button><Button size="small" type="text" disabled={busy || !chosenIds.length} onClick={() => setSelectedIds([])}>清空</Button></div>

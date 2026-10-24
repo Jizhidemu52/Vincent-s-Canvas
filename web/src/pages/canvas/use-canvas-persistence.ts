@@ -26,16 +26,22 @@ export function useCanvasPersistence(options: {
     projectSaveQueueRef: RefObject<CanvasProjectSaveQueue<CanvasProjectSaveSnapshot> | null>;
     history: ReturnType<typeof useCanvasHistoryState>; current: CanvasHistoryEntry;
     updateProject: UpdateProject; batchEditRunning: boolean; runningNodeId: string | null;
-    viewport: ViewportTransform; viewportRef: RefObject<ViewportTransform>;
+    viewport: ViewportTransform;
 }) {
-    const { projectId, projectLoaded, usePerformanceScenario, projectSaveQueueRef, updateProject, batchEditRunning, runningNodeId, viewport, viewportRef } = options;
+    const { projectId, projectLoaded, usePerformanceScenario, projectSaveQueueRef, updateProject, batchEditRunning, runningNodeId, viewport } = options;
     const { historyRef, lastHistoryRef, historyPausedRef, applyingHistoryRef, historyState } = options.history;
     const { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo } = options.current;
     const savedProjectIdRef = useRef(projectId);
-    const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const viewportSaveQueueRef = useRef<CanvasProjectSaveQueue<{ projectId: string; viewport: ViewportTransform }> | null>(null);
+    const viewportSaveHandlerRef = useRef(updateProject);
+    viewportSaveHandlerRef.current = updateProject;
+    if (!viewportSaveQueueRef.current) {
+        viewportSaveQueueRef.current = createCanvasProjectSaveQueue(500, ({ projectId: id, viewport: savedViewport }) => viewportSaveHandlerRef.current(id, { viewport: savedViewport }));
+    }
     useEffect(() => {
         if (savedProjectIdRef.current === projectId) return;
         projectSaveQueueRef.current?.flush();
+        viewportSaveQueueRef.current?.flush();
         savedProjectIdRef.current = projectId;
     }, [projectId]);
 
@@ -53,23 +59,17 @@ export function useCanvasPersistence(options: {
         );
     }, [activeChatId, backgroundMode, batchEditRunning, chatSessions, connections, groups, historyState, nodes, projectId, projectLoaded, runningNodeId, showImageInfo, usePerformanceScenario]);
 
-    useEffect(
-        () => () => {
-            projectSaveQueueRef.current?.flush();
-        },
-        [],
-    );
-
     useEffect(() => {
         const flushProjectSave = () => {
             projectSaveQueueRef.current?.flush();
+            viewportSaveQueueRef.current?.flush();
             // The editor queue feeds the store queue. Flush both in this order so
             // the final edit does not wait for a debounce after the page closes.
             void flushCanvasPersistence().catch(() => undefined);
         };
         const onVisibility = () => { if (document.visibilityState === "hidden") flushProjectSave(); };
         const onBeforeUnload = (event: BeforeUnloadEvent) => {
-            const pending = projectSaveQueueRef.current?.hasPending() || hasPendingCanvasPersistence();
+            const pending = projectSaveQueueRef.current?.hasPending() || viewportSaveQueueRef.current?.hasPending() || hasPendingCanvasPersistence();
             flushProjectSave();
             // IndexedDB writes cannot be awaited during unload. Give the user a
             // chance to stay until the pending write finishes instead of losing it silently.
@@ -91,14 +91,9 @@ export function useCanvasPersistence(options: {
 
     useEffect(() => {
         if (!projectLoaded || usePerformanceScenario) return;
-        if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
-        viewportSaveTimerRef.current = setTimeout(() => {
-            updateProject(projectId, { viewport: viewportRef.current });
-            viewportSaveTimerRef.current = null;
-        }, 500);
-        return () => {
-            if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
-        };
-    }, [projectId, projectLoaded, updateProject, usePerformanceScenario, viewport]);
+        // Capture the owner and value together: a project switch must never save
+        // the next project's live viewport into the previous project.
+        viewportSaveQueueRef.current?.schedule({ projectId, viewport });
+    }, [projectId, projectLoaded, usePerformanceScenario, viewport]);
     return savedProjectIdRef;
 }

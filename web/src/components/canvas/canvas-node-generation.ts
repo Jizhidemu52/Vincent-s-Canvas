@@ -3,7 +3,7 @@ import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import { getGenerationResourceNodes } from "@/lib/canvas/canvas-resource-references";
 import { canvasImageBaseName, canvasImageVersion } from "@/lib/canvas/canvas-image-filename";
 
@@ -28,9 +28,19 @@ export type NodeGenerationInput = {
     audio?: ReferenceAudio;
 };
 
-export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string): NodeGenerationContext {
+export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string, mode?: CanvasGenerationMode): NodeGenerationContext {
     const inputs = buildNodeGenerationInputs(nodeId, nodes, connections);
     const sourceNode = nodes.find((node) => node.id === nodeId);
+    // Running video from an image means that image is the first frame, even
+    // without incoming edges. Other connected images remain later references.
+    if (mode === "video" && sourceNode?.type === CanvasNodeType.Image) {
+        const source = generationInputForNode(sourceNode);
+        if (source?.image) {
+            const existing = inputs.findIndex(input => input.nodeId === nodeId);
+            if (existing !== -1) inputs.splice(existing, 1);
+            inputs.unshift(source);
+        }
+    }
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
         return buildComposerGenerationContext(inputs, prompt);
     }

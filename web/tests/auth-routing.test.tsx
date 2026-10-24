@@ -6,6 +6,7 @@ import ts from "typescript";
 
 import { shouldBypassStandaloneAuthGate } from "@/lib/standalone-access";
 import { isAdminRole, type LocalUser } from "@/stores/use-user-store";
+import { isWorkspaceRole } from "../../shared/workspace-access";
 
 const requireModule = createRequire(import.meta.url);
 const compiled = new Map<string, string>();
@@ -45,6 +46,7 @@ function registeredRoutes(features: Features, standalone = false): Route[] {
 function gateResult(features: Features, user: LocalUser | null, admin: boolean, passwordChange = false) {
     const state = { user, status: user ? "authenticated" : "guest", hydrateSession: async () => undefined };
     const { AuthGate } = evaluateModule("../src/components/auth/auth-gate.tsx", {
+        "../../../../shared/workspace-access": { isWorkspaceRole },
         react: { ...React, useEffect: () => undefined },
         "react-router-dom": { Navigate, useLocation: () => ({ pathname: admin ? "/admin" : "/canvas/test", search: "" }) },
         "@/stores/use-user-store": { isAdminRole, useUserStore: (selector: (value: typeof state) => unknown) => selector(state) },
@@ -138,14 +140,23 @@ describe("optional authentication route wiring", () => {
         }
     });
 
-    test("password accounts require login, keep admin roles out of designer workspaces and permit both roles to change passwords", () => {
+    test("password accounts require login, allow a personal super-admin workspace and preserve department boundaries", () => {
         const features = { authenticationEnabled: true, oaLoginEnabled: false, creditsEnabled: false, rolePortalsEnabled: false };
         expect(gateResult(features, null, false).props.to).toBe("/login");
         expect(gateResult(features, { ...visitor, mustChangePassword: true }, false).props.to).toBe("/change-password");
         expect(gateResult(features, visitor, false, true).props.children).toBe("protected content");
         const administrator = { ...visitor, role: "super_admin" as const };
-        expect(gateResult(features, administrator, false).props.to).toBe("/admin");
+        expect(gateResult(features, administrator, false).props.children).toBe("protected content");
+        expect(gateResult(features, { ...visitor, role: "department_admin" }, false).props.to).toBe("/admin");
         expect(gateResult(features, administrator, false, true).props.children).toBe("protected content");
         expect(gateResult(features, visitor, true).props.to).toBe("/admin/login");
+    });
+
+    test("OA deployment permits local super-admin workspaces but requires the existing password change", () => {
+        const features = { authenticationEnabled: true, oaLoginEnabled: true, creditsEnabled: false, rolePortalsEnabled: false };
+        const administrator = { ...visitor, role: "super_admin" as const };
+        expect(gateResult(features, administrator, false).props.children).toBe("protected content");
+        expect(gateResult(features, { ...administrator, mustChangePassword: true }, false).props.to).toBe("/change-password");
+        expect(gateResult(features, { ...visitor, role: "department_admin" }, false).props.children).not.toBe("protected content");
     });
 });

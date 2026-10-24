@@ -152,6 +152,15 @@ describe("canvas media identity is persisted before submission continues", () =>
 });
 
 describe("canvas media completion and failure keep only unsettled task bindings", () => {
+    test.each(modes)("%s observation-only abort preserves a request whose POST acknowledgement may be late", async mode => {
+        const h = harness(mode);
+        const submission = h.submission();
+        await submission.onSubmissionStarted(binding.requestId);
+        await submission.fail(new DOMException("stopped local observation", "AbortError"), true);
+        expect(h.metadata.mediaTask).toEqual(binding);
+        expect(h.metadata.generationSubmissionUncertain).toBe(true);
+        expect(h.metadata.errorDetails).toContain("重试只查询");
+    });
     test.each(modes)("%s completed result clears recovery identity in persisted state", async mode => {
         const h = harness(mode, { errorDetails: "old failure", videoTaskCanRecover: true });
         const submission = h.submission();

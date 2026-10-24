@@ -4,15 +4,23 @@ import { assetResponseHeaders, matchesAssetEtag } from "./asset-delivery";
 import { assetPage, lightAssetMetadata, parseAssetListQuery } from "./asset-query";
 import { createAssetThumbnailBytes } from "./asset-thumbnails";
 
-type ListedAsset = { id: string; createdAt: string; kind: string; filename: string; projectId?: string | null; prompt?: string | null; metadata: Record<string, unknown> };
-export function demoAssetPage<T extends ListedAsset>(assets: T[], query: Record<string, unknown>) {
+export const demoAssetPurgeAfter = (deletedAt: string) => new Date(Date.parse(deletedAt) + 30 * 86_400_000).toISOString();
+export const canRestoreDemoAsset = (asset: { deletedAt?: string; bytes: Uint8Array }, now = Date.now()) => Boolean(asset.deletedAt && asset.bytes.length && Date.parse(asset.deletedAt) + 30 * 86_400_000 > now);
+type ListedAsset = { id: string; createdAt: string; deletedAt?: string | null; kind: string; filename: string; projectId?: string | null; prompt?: string | null; metadata: Record<string, unknown> };
+export function demoAssetPage<T extends ListedAsset>(assets: T[], query: Record<string, unknown>, trash = false) {
   const input = parseAssetListQuery(query);
   const search = input.q?.toLocaleLowerCase();
+  const time = (asset: T) => trash ? asset.deletedAt! : asset.createdAt;
+  const compare = (a: { time: string; id: string }, b: { time: string; id: string }) => a.time.localeCompare(b.time) || a.id.localeCompare(b.id);
+  const direction = input.sort === 'oldest' ? 1 : -1;
   const rows = assets.filter(asset => (!input.kind || asset.kind === input.kind) && (!input.projectId || asset.projectId === input.projectId)
+    && (!input.tag || Array.isArray(asset.metadata.tags) && asset.metadata.tags.includes(input.tag))
+    && (!input.createdFrom || Date.parse(asset.createdAt) >= Date.parse(input.createdFrom))
+    && (!input.createdBefore || Date.parse(asset.createdAt) < Date.parse(input.createdBefore))
     && (!search || [asset.filename, asset.prompt || "", asset.metadata.title, asset.metadata.tags, asset.metadata.source, asset.metadata.content].join(" ").toLocaleLowerCase().includes(search))
-    && (!input.cursor || asset.createdAt < input.cursor.time || asset.createdAt === input.cursor.time && asset.id < input.cursor.id))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
-  const page = assetPage(rows.slice(0, input.limit + 1), input.limit);
+    && (!input.cursor || direction * compare({ time: time(asset), id: asset.id }, input.cursor) > 0))
+    .sort((a, b) => direction * compare({ time: time(a), id: a.id }, { time: time(b), id: b.id }));
+  const page = assetPage(rows.slice(0, input.limit + 1), input.limit, time);
   return { ...page, assets: page.assets.map(asset => ({ ...asset,
     canRecreate: [asset.prompt, asset.metadata.prompt, asset.metadata.recreatePath, asset.metadata.content].some(value => typeof value === 'string' && Boolean(value.trim())),
     prompt: null, metadata: lightAssetMetadata(asset.metadata) })) };

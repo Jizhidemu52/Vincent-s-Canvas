@@ -17,11 +17,11 @@ const models = ["gpt-image-2", "vcen-gpt2", "nano-banana-2", "midjourney-v7", "g
     id: modelId, name: modelId, modelId, capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0,
 }));
 const initialProps: Props = {
-    embedded: true, open: true, prompt: "将花瓶改成绿色", model: "gpt-image-2", size: "1536x1024", quality: "high", count: 1,
+    embedded: true, open: true, promptRef: { current: "将花瓶改成绿色" }, promptRevision: 0, model: "gpt-image-2", size: "1536x1024", quality: "high", count: 1,
     imageOptions: "", onImageOptionsChange: noop,
     references: [{ id: "ref-1", name: "花瓶", type: "image/png", dataUrl: "data:image/png;base64,example" }],
     running: false, config: defaultConfig, estimateCredits: 0, estimateRmb: 0,
-    onClose: noop, onPromptChange: noop, onModelChange: noop, onSizeChange: noop, onQualityChange: noop, onCountChange: noop,
+    onClose: noop, onModelChange: noop, onSizeChange: noop, onQualityChange: noop, onCountChange: noop,
     onPickReferences: noop, onRemoveReference: noop, onClearReferences: noop, onMoveReference: noop, onMissingConfig: noop, onGenerate: noop,
 };
 
@@ -147,7 +147,7 @@ test("editing popover settings retains latest values without clearing inputs or 
     const changes: unknown[] = [];
     const render = controls({
         onSizeChange: value => changes.push(["size", value]), onQualityChange: value => changes.push(["quality", value]), onCountChange: value => changes.push(["count", value]),
-        onPromptChange: value => changes.push(["prompt", value]), onClearReferences: () => changes.push("clear"), onGenerate: () => changes.push("generate"),
+        onClearReferences: () => changes.push("clear"), onGenerate: () => changes.push("generate"),
     });
     const opened = render();
     expect(opened.settings.props.config).toMatchObject({ size: "1536x1024", quality: "high", count: "1" });
@@ -156,7 +156,7 @@ test("editing popover settings retains latest values without clearing inputs or 
     expect(changes).toEqual([["quality", "medium"]]);
     const reclosed = render({ quality: "medium" });
     expect(reclosed.settings.props.config).toMatchObject({ size: "1536x1024", quality: "medium", count: "1" });
-    expect(reclosed.tree.find(element => element.type === "textarea")!.props.value).toBe(initialProps.prompt);
+    expect(reclosed.tree.find(element => element.type === "textarea")!.props.value).toBe(initialProps.promptRef.current);
     expect(reclosed.tree.find(element => element.props.references)?.props.references).toBe(initialProps.references);
     expect(changes).toEqual([["quality", "medium"]]);
     reclosed.tree.find(element => element.props.className === "cw-generate-button")!.props.onClick();
@@ -215,11 +215,29 @@ test("Shift+Enter and composing Enter remain with the text editor", () => {
 
 test("Enter never bypasses the generate button's running, empty-prompt or invalid-reference locks", () => {
     const tooMany = Array.from({ length: 30 }, (_, index) => ({ ...initialProps.references[0]!, id: `reference-${index}` }));
-    for (const props of [{ running: true }, { prompt: " " }, { references: tooMany }]) {
+    for (const props of [{ running: true }, { promptRef: { current: " " } }, { references: tooMany }]) {
         const result = pressPrompt(props);
         expect(result.buttonDisabled).toBe(true);
         expect(result.submissions).toBe(0);
     }
+});
+
+test("prompt edits stay local, survive remount, and external resets refresh even the same saved text", () => {
+    const promptRef = { current: "模板提示词" };
+    const submitted: string[] = [];
+    const props = { promptRef, onGenerate: () => submitted.push(promptRef.current) };
+    const render = controls(props);
+    let tree = render().tree;
+    tree.find(element => element.type === "textarea")!.props.onChange({ target: { value: "本地正在编辑" } });
+    expect(promptRef.current).toBe("本地正在编辑");
+    tree = render({ quality: "medium" }).tree;
+    expect(tree.find(element => element.type === "textarea")!.props.value).toBe("本地正在编辑");
+    tree.find(element => element.props.className === "cw-generate-button")!.props.onClick();
+    expect(submitted).toEqual(["本地正在编辑"]);
+    expect(controls(props)().tree.find(element => element.type === "textarea")!.props.value).toBe("本地正在编辑");
+    promptRef.current = "模板提示词";
+    render({ promptRevision: 1 });
+    expect(render({ promptRevision: 1 }).tree.find(element => element.type === "textarea")!.props.value).toBe("模板提示词");
 });
 
 test("Enter cannot submit a disabled canvas tool even when its prompt, model and references are valid", () => {

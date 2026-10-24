@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { disposeProviderResults } from "../src/media-result-file";
 import ts from "typescript";
 import { queueScore } from "../src/tasks";
 import { renewTaskLease, TaskExecutionLost } from "../src/model-concurrency";
@@ -178,6 +179,7 @@ test.each(["network", "http_started", "initial_tls", "rejected"])("paid submissi
     : Object.assign(new Error("transport failure"), { code: "PROVIDER_CONNECTION_ERROR", phase });
   const db = { query: async (sql: string) => { statements.push(sql); return { rows: [task] }; } };
   const worker = productionFunctions(["runTask"], {
+    disposeProviderResults,
     db, cache: {}, randomUUID: () => "token", TASK_LEASE_SECONDS: 180, config: { TASK_MOCK_MODE: "false" },
     acquireModelLease: async () => ({}), releaseModelLease: async () => { releasedSlots++; },
     startTaskLeaseHeartbeat: () => ({ assertOwned() {}, stop: async () => {} }),

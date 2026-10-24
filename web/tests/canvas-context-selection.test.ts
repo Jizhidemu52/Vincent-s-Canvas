@@ -5,6 +5,7 @@ import ts from "typescript";
 
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 import { removeCanvasGroupMembers } from "@/lib/canvas/canvas-node-groups";
+import { canvasGenerationRunsForNodes } from "@/lib/canvas/canvas-project-async-lifecycle";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeGroup, type ContextMenuState } from "@/types/canvas";
 
 // Execute the page's real callback bodies and context-menu JSX; only React state
@@ -51,6 +52,8 @@ function pageHarness(initialNodes = [node("a"), node("b", 100), node("c", 300)],
         selectedConnectionId: null as string | null, dialogNodeId: null as string | null, contextMenu: null as ContextMenuState | null };
     const writes: Record<string, number> = {};
     const cleanup: unknown[] = [];
+    const confirmations: Array<{ onOk: () => void }> = [];
+    const stopped: unknown[][] = [];
     const targets = { duplicate: [] as ReadonlySet<string>[], delete: [] as ReadonlySet<string>[], connection: [] as string[] };
     const clipboard = { token: "unchanged-clipboard", nodes: [node("clipboard")], connections: [] };
     const clipboardRef = { current: clipboard };
@@ -60,7 +63,9 @@ function pageHarness(initialNodes = [node("a"), node("b", 100), node("c", 300)],
     };
     const scope: Record<string, unknown> = {
         CanvasNodeType, copyCanvasNodeGraph, cloneCanvasNodeGraph, removeCanvasGroupMembers, clipboardRef,
-        flushPendingHistory: () => true, generationRequestsRef: { current: new Map() }, generationDispatchLocksRef: { current: new Set() }, stopGenerationByRunningId: () => {},
+        flushPendingHistory: () => true, generationRequestsRef: { current: new Map() }, generationDispatchLocksRef: { current: new Set() }, stopGenerationByRunningId: (...args: unknown[]) => stopped.push(args),
+        canvasGenerationRunsForNodes, NODE_STATUS_LOADING: "loading", modal: { confirm: (value: { onOk: () => void }) => confirmations.push(value) },
+        deleteNodes: (...args: unknown[]) => remove(...args),
         nodesRef: { get current() { return state.nodes; } }, connectionsRef: { get current() { return state.connections; } },
         groupsRef: { get current() { return state.groups; } }, selectedNodeIdsRef: { get current() { return state.selectedNodeIds; } },
         setNodes: update("nodes"), setConnections: update("connections"), setGroups: update("groups"),
@@ -84,7 +89,7 @@ function pageHarness(initialNodes = [node("a"), node("b", 100), node("c", 300)],
         });
         return { props: element.props, ids: contextMenuNodeIds };
     };
-    return { state, scope, writes, cleanup, targets, clipboard, clipboardRef, duplicate, open, menu };
+    return { state, scope, writes, cleanup, targets, clipboard, clipboardRef, duplicate, remove, open, menu, confirmations, stopped };
 }
 
 describe("page context-menu input and selection", () => {
@@ -155,6 +160,17 @@ describe("page context-menu input and selection", () => {
 });
 
 describe("actual page menu actions share their displayed selection", () => {
+    test("deleting a running node requires confirmation and only stops local observation", () => {
+        const page = pageHarness();
+        (page.scope.generationRequestsRef as any).current.set("run", { targetNodeId: "a", originNodeId: "a", runningNodeId: "run" });
+        page.remove(new Set(["a"]));
+        expect(page.state.nodes).toHaveLength(3);
+        expect(page.stopped).toEqual([]);
+        expect(page.confirmations).toHaveLength(1);
+        page.confirmations[0]!.onOk();
+        expect(page.state.nodes.map(node => node.id)).toEqual(["b", "c"]);
+        expect(page.stopped).toEqual([["run", true]]);
+    });
     test.each([
         ["duplicate", "a", ["a", "b"]], ["delete", "a", ["a", "b"]],
         ["duplicate", "c", ["c"]], ["delete", "c", ["c"]],

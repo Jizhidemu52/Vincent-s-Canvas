@@ -102,7 +102,7 @@ app.get("/api/health", async (_request, response, next) => {
   }
 });
 app.use("/api/auth", createAuthRouter(db, cache, config));
-const requireSession = sessionMiddleware(db, cache, config);
+const requireSession = sessionMiddleware(db, cache, config, { allowPersonalWorkspace: true });
 const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
 const requireUsageSession = sessionMiddleware(db, cache, config, { allowGuest: false, allowAdminSession: true, unauthenticatedStatus: 403 });
 app.use("/api/usage", requireUsageSession, requireAccountReady, createUsageRouter(db, { enabled: features.authenticationEnabled }));

@@ -9,6 +9,7 @@ import { applyCanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
 import { createCanvasProjectSaveQueue } from "@/lib/canvas/canvas-project-save-queue";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasNodeType } from "@/types/canvas";
+import { isWorkspaceRole } from "../../shared/workspace-access";
 
 const source = readFileSync(new URL("../src/stores/canvas/use-canvas-store.ts", import.meta.url), "utf8");
 const ast = ts.createSourceFile("store.ts", source, ts.ScriptTarget.Latest, true);
@@ -60,12 +61,13 @@ function database() {
     };
 }
 
-async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | null, browser = true, oaMode = true) {
+async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | null, browser = true, oaMode = true, role = "designer") {
     let ids = 0;
     let reloads = 0;
-    const userStore = create<{ user: { id: string; role?: string } | null; status: string }>(() => ({ user: oaOwnerId ? { id: oaOwnerId, role: "designer" } : null, status: oaOwnerId ? "authenticated" : "guest" }));
+    const userStore = create<{ user: { id: string; role?: string } | null; status: string }>(() => ({ user: oaOwnerId ? { id: oaOwnerId, role } : null, status: oaOwnerId ? "authenticated" : "guest" }));
     const errors: unknown[][] = [];
     const bindings = {
+        isWorkspaceRole,
         create, persist, nanoid: () => `new-${++ids}`, collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, applyCanvasProjectPatch,
         deploymentFeatures: { authenticationEnabled: oaOwnerId !== undefined, oaLoginEnabled: oaMode && oaOwnerId !== undefined },
         useUserStore: userStore,
@@ -93,6 +95,16 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
     if (!store.persist.hasHydrated() && oaOwnerId !== null) await new Promise<void>(resolve => { const unsubscribe = store.persist.onFinishHydration(() => { unsubscribe(); resolve(); }); });
     return { store, flush: exports.flushCanvasPersistence, retry: exports.flushCanvasCloudPersistence, hasPending: exports.hasPendingCanvasPersistence, errors, userStore, reloads: () => reloads };
 }
+
+test("super-admin canvas mutations persist only in their own partition and reload intact", async () => {
+    const io = database(), tab = await openTab(io, "admin-owner", true, true, "super_admin");
+    const id = tab.store.getState().createProject("管理员个人画布");
+    await tab.flush();
+    expect(io.read("wireless-canvas:canvas_store:oa:user:admin-owner")[0].id).toBe(id);
+    expect(io.read()[0].title).toBe("原画布");
+    const restored = await openTab(io, "admin-owner", true, true, "super_admin");
+    expect(restored.store.getState().openProject(id)?.title).toBe("管理员个人画布");
+});
 
 test("pending persistence stays true from debounce through the actual database write", async () => {
     const io = database(), tab = await openTab(io);

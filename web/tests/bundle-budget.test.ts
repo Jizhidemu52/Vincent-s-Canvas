@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test";
 
-import { bundleBudgetViolations, CANVAS_PROJECT_BUDGET } from "../scripts/bundle-budget.mjs";
+import { bundleBudgetViolations, CANVAS_PROJECT_BUDGET, isCanvasProjectBundle } from "../scripts/bundle-budget.mjs";
+
+test("selects the hashed canvas route without counting workbench project-session chunks", () => {
+    expect(isCanvasProjectBundle("project-tA8VYIap.js")).toBe(true);
+    expect(isCanvasProjectBundle("project-a_-A1234.js")).toBe(true);
+    expect(isCanvasProjectBundle("project-session-DnTFljQ6.js")).toBe(false);
+    expect(isCanvasProjectBundle("project-DCWsHngD.css")).toBe(false);
+});
 
 test("keeps the canvas project entry within its initial-load budget", () => {
     expect(bundleBudgetViolations([{ name: "project-demo.js", bytes: CANVAS_PROJECT_BUDGET.rawBytes, gzipBytes: CANVAS_PROJECT_BUDGET.gzipBytes }])).toEqual([]);

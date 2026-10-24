@@ -98,7 +98,7 @@ export function extractReferenceCandidates(html: string, pageUrl: string) {
     try { url = checkedUrl(new URL(value.trim(), base).href); } catch { return; }
     if (seen.has(url.href)) return;
     seen.add(url.href);
-    if (candidates.length >= 20) { truncated = true; return; }
+    if (candidates.length >= 100) { truncated = true; return; }
     const basename = url.pathname.split("/").pop() || "参考图";
     let decoded = basename;
     try { decoded = decodeURIComponent(basename); } catch { /* Keep encoded filename. */ }
@@ -113,7 +113,7 @@ export function extractReferenceCandidates(html: string, pageUrl: string) {
       for (const item of parseSrcset(attr.srcset)) add(item.url, undefined);
     } else if (element.tagName === "meta" && ["og:image", "og:image:url", "og:image:secure_url", "twitter:image"].includes((attr.property || attr.name || "").toLowerCase())) add(attr.content, undefined);
   }
-  return { pageTitle, candidates, warnings: [...(truncated ? ["网页候选图片超过 20 张，本次仅展示前 20 张。"] : []), ...(candidates.length ? [] : ["未发现可采集的公开图片。登录页、反爬或 JavaScript 动态图片请使用浏览器扩展。"]) ] };
+  return { pageTitle, candidates, warnings: [...(truncated ? ["网页候选图片超过 100 张，本次仅展示前 100 张，可从中选择最多 20 张读取。"] : []), ...(candidates.length ? [] : ["未发现可采集的公开图片。登录页、反爬或 JavaScript 动态图片请使用浏览器扩展。"]) ] };
 }
 
 export function detectReferenceImage(bytes: Buffer): string | undefined {

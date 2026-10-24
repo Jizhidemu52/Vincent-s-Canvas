@@ -25,7 +25,8 @@ import { recordAssetEvent } from "./asset-events";
 import { classifyDesignDirection } from "./design-direction";
 import { ApiMartImageProviderFailure, ApiMartImageTaskPending, stepApiMartImageTask } from "./apimart-image";
 import { videoSourceMetadata, type ProviderVideoSource } from "./video-models";
-import { probeMediaBytes } from "./media-probe";
+import { probeMediaBytes, probeMediaStream } from "./media-probe";
+import { disposeProviderResults, downloadVideoResult, type ProviderResult } from "./media-result-file";
 import { fetchProviderSubmission, readProviderSubmissionDiagnostics } from "./provider-submission-transport";
 import { ProviderSubmissionRejected, isDefinitiveSubmissionRejection, submissionWasNotSent } from "./provider-submission-policy";
 import { createGenerationTiming, type GenerationTiming, type GenerationTimingOutcome } from "./generation-timing";
@@ -124,6 +125,7 @@ async function runTask(taskId: string) {
   let outcome: GenerationTimingOutcome = "failed";
   let providerProducedResult = false;
   let keepModelSlot = false;
+  let providerResults: ProviderResult[] = [];
   try {
     const attempted = await db.query<{ attempts: number }>(
       `UPDATE tasks SET attempts=attempts+CASE WHEN upstream_task_id IS NULL AND upstream_submission_started_at IS NULL THEN 1 ELSE 0 END
@@ -134,7 +136,7 @@ async function runTask(taskId: string) {
     if (config.TASK_MOCK_MODE === "true" && (task.operation_type === "video_generation" || task.operation_type === "audio_generation"))
       throw new Error("模拟模式不提供真实视频或音频，请配置真实服务后生成");
     heartbeat.assertOwned();
-    const providerResults =
+    providerResults =
       config.TASK_MOCK_MODE === "true"
         ? [{ bytes: Buffer.from(mockSvg(task.id)), mimeType: "image/svg+xml" }]
         : await timing.measure("provider_execution", () => executeProvider(task, timing));
@@ -216,6 +218,8 @@ async function runTask(taskId: string) {
       });
     }
   } finally {
+    const cleanup = await disposeProviderResults(providerResults);
+    if (cleanup.some(result => result.status === "rejected")) console.error(JSON.stringify({ event: "worker.result_cleanup_failed", taskId: task.id }));
     timing.finish(outcome);
     await heartbeat.stop();
     if (!keepModelSlot) await releaseModelLease(db, cache, modelLease);
@@ -403,8 +407,8 @@ async function executeApiMartImage(
     submissionKey: task.id,
     prompt: task.prompt,
     parameters: task.parameters,
-    sourceDataUrls: editInput.references.map((asset) => `data:${asset.mimeType};base64,${Buffer.from(asset.bytes).toString("base64")}`),
-    ...(editInput.mask ? { maskDataUrl: `data:image/png;base64,${Buffer.from(editInput.mask.bytes).toString("base64")}` } : {}),
+    sourceImages: editInput.references,
+    ...(editInput.mask ? { maskImage: editInput.mask } : {}),
     upstreamTaskId: task.upstream_task_id,
     submissionStarted: Boolean(task.upstream_submission_started_at),
     submissionStartedAt: task.upstream_submission_started_at || task.started_at,
@@ -458,11 +462,7 @@ async function executeApiMartVideo(task: WorkRow, credentials: Record<string, st
   if (task.upstream_task_id && task.poll_deadline_at && new Date(task.poll_deadline_at).getTime() <= Date.now()) {
     throw new Error("视频状态查询超时；可恢复查询原任务，不会重新生成");
   }
-  const sources = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id);
-  const providerSources: ProviderVideoSource[] = [];
-  for (const source of sources) {
-    providerSources.push({ ...source, ...await probeMediaBytes(source.bytes, source.mimeType), publicUrl: source.mimeType.startsWith("image/") ? undefined : await storage.signedDownloadUrl(source.objectKey, 1800) });
-  }
+  const providerSources = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadVideoSourceAssets(task.source_urls, task.user_id);
   const result = await stepApiMartVideoTask({
     baseUrl: task.base_url!, apiKey: credentials.apiKey || "", modelId: task.model_id!, prompt: task.prompt,
     parameters: task.parameters, sources: providerSources, upstreamTaskId: task.upstream_task_id,
@@ -485,14 +485,7 @@ async function executeApiMartVideo(task: WorkRow, credentials: Record<string, st
     },
   });
   if (result.status === "pending") throw new VideoTaskPending(result.nextPollMs);
-  const response = await fetch(result.url, { signal: AbortSignal.timeout(180_000) });
-  if (!response.ok) throw new Error(`视频下载失败（${response.status}）`);
-  const contentType = response.headers.get("content-type")?.split(";")[0] || "video/mp4";
-  const mimeType = contentType === "application/octet-stream" ? "video/mp4" : contentType;
-  if (!mimeType.startsWith("video/")) throw new Error("上游返回的不是视频文件");
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (!bytes.byteLength) throw new Error("视频结果为空");
-  return [{ bytes, mimeType }];
+  return [await downloadVideoResult(result.url)];
 }
 
 async function executeWorkflow(
@@ -721,15 +714,41 @@ async function loadSourceAsset(url: string, userId: string): Promise<SourceAsset
   };
 }
 
+async function loadVideoSourceAssets(urls: string[], userId: string): Promise<ProviderVideoSource[]> {
+  const sources: ProviderVideoSource[] = [];
+  for (const url of urls) {
+    const id = url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i)?.[1];
+    if (!id) throw new Error("参考素材不是公司素材地址");
+    const stored = await db.query<{ object_key: string; mime_type: string; filename: string; byte_size: number }>(
+      "SELECT object_key,mime_type,filename,byte_size FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL", [id, userId],
+    );
+    const asset = stored.rows[0];
+    if (!asset) throw new Error("参考素材不存在或无权访问");
+    const byteSize = Number(asset.byte_size);
+    const isImage = asset.mime_type.startsWith("image/");
+    if (isImage && byteSize > 10 * 1024 * 1024) throw new Error("视频参考图片不能超过 10MB");
+    const object = await storage.get(asset.object_key);
+    if (!object.Body) throw new Error("参考素材内容为空或无法读取");
+    // Only images need resident bytes for APIMart upload; video/audio are signed URLs.
+    const bytes = isImage ? await object.Body.transformToByteArray() : new Uint8Array();
+    if (isImage && bytes.byteLength !== byteSize) throw new Error("参考素材实际大小与存储记录不一致，请重新上传");
+    const metadata = isImage ? await probeMediaBytes(bytes, asset.mime_type)
+      : await probeMediaStream(object.Body.transformToWebStream(), asset.mime_type, byteSize);
+    sources.push({ bytes, byteSize, mimeType: asset.mime_type, ...metadata,
+      publicUrl: isImage ? undefined : await storage.signedDownloadUrl(asset.object_key, 1800) });
+  }
+  return sources;
+}
+
 async function storeResults(
   task: WorkRow,
-  results: Array<{ bytes: Uint8Array; mimeType: string }>,
+  results: ProviderResult[],
 ) {
   if (!storage.configured)
     throw new Error("公司对象存储尚未配置，不能保存生成结果");
   const urls: string[] = [];
   for (const [index, result] of results.entries()) {
-    if (["image/png", "image/jpeg", "image/webp"].includes(result.mimeType)) {
+    if ("bytes" in result && ["image/png", "image/jpeg", "image/webp"].includes(result.mimeType)) {
       const primary = await storeImageResult({
         result, parameters: task.parameters, resultIndex: index,
         prepareEditInput: async () => {
@@ -764,7 +783,7 @@ async function storeResults(
   return urls;
 }
 
-async function saveResultAsset(task: WorkRow, index: number, result: { bytes: Uint8Array; mimeType: string }, role: string, metadata: Record<string, unknown>) {
+async function saveResultAsset(task: WorkRow, index: number, result: ProviderResult, role: string, metadata: Record<string, unknown>) {
       await assertTaskExecution(task);
     const id = randomUUID();
     const extension =
@@ -785,7 +804,8 @@ async function saveResultAsset(task: WorkRow, index: number, result: { bytes: Ui
                       : "png";
     const filename = `task-${task.id}-${index + 1}${role === "primary" ? "" : `-${role}`}.${extension}`;
     const key = `users/${task.user_id}/generated/${task.id}/${filename}`;
-    await storage.put(key, result.bytes, result.mimeType);
+    if ("filePath" in result) await storage.putFile(key, result.filePath, result.byteSize, result.mimeType);
+    else await storage.put(key, result.bytes, result.mimeType);
     const kind = result.mimeType.startsWith("video/")
       ? "video"
       : result.mimeType.startsWith("audio/")
@@ -812,7 +832,7 @@ async function saveResultAsset(task: WorkRow, index: number, result: { bytes: Ui
         key,
         filename,
         result.mimeType,
-        result.bytes.byteLength,
+        "filePath" in result ? result.byteSize : result.bytes.byteLength,
         kind,
         task.operation_type === "image_generation" ||
         task.operation_type === "video_generation" ||

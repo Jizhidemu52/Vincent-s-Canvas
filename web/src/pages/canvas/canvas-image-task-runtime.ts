@@ -10,6 +10,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import type { ToolKey } from "../../../../shared/feature-catalog";
 import { imageModelProfile } from "@/lib/image-model-settings";
+import { shouldCancelCanvasGeneration } from "@/lib/canvas/canvas-project-async-lifecycle";
 
 export type CanvasImageTaskScope = { projectId: string; mounted: boolean; recoveries: Map<string, AbortController> };
 type RecoveryOutput = { nodeId: string; status: "success" | "failed"; url?: string; storageKey?: string; error?: string };
@@ -87,7 +88,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
             const options = {
                 requestId,
                 signal: controller.signal,
-                cancelOnAbort: () => current(nodeId, binding, prepared),
+                cancelOnAbort: () => shouldCancelCanvasGeneration(controller.signal) && current(nodeId, binding, prepared),
                 assertCurrent,
                 async generate(config: Parameters<typeof requestGeneration>[0], prompt: string, references?: Parameters<typeof requestEdit>[2], mask?: Parameters<typeof requestEdit>[3], edit = Boolean(references?.length || mask)) {
                     assertCurrent();

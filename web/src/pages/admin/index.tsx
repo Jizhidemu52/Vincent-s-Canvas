@@ -250,6 +250,7 @@ export default function AdminPage() {
                         <p className="wb-description">统一管理成员、生成服务与使用记录。只显示当前账号可管理的范围。</p>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        {signedInUser.role === "super_admin" && <Link to="/"><Button className="!h-10">进入个人工作台</Button></Link>}
                         {deploymentFeatures.oaLoginEnabled && <Link to="/admin/design-library"><Button className="!h-10">设计灵感库管理</Button></Link>}
                         <div className="text-sm text-[var(--muted-foreground)]">
                             当前管理员：<span className="font-medium">{currentOperator?.displayName}</span>

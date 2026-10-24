@@ -60,7 +60,7 @@ class QueuedTaskHttpError extends Error {
 }
 export type GenerationVideoCapability = { seconds: readonly [number, number]; resolutions: readonly string[]; sizes: readonly string[]; minImages: number; maxImages: number; firstFrameRequired: boolean; supportsAudio: boolean };
 export type GenerationCapabilityModel = { id: string; name: string; modelId: string; capability: GenerationVideoCapability };
-export type QueuedMediaInput = { modelId: string; resolvedModel?: PublicModel; prompt: string; operationType: string; toolKey?: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; sourceMetadata?: Record<string, unknown>[]; sourceOrder?: Array<{ kind: "file" | "url"; index: number }>; signal?: AbortSignal; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: QueuedTask) => void | Promise<void> };
+export type QueuedMediaInput = { modelId: string; resolvedModel?: PublicModel; prompt: string; operationType: string; toolKey?: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; sourceMetadata?: Record<string, unknown>[]; sourceOrder?: Array<{ kind: "file" | "url"; index: number }>; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: QueuedTask) => void | Promise<void> };
 export type QueuedBatchItem = QueuedTask & { itemIndex: number };
 export type QueuedBatchFailure = { index: number; reason: string };
 export type QueuedBatchAction = "pause" | "resume" | "cancel";
@@ -401,16 +401,16 @@ export async function requestQueuedMedia(input: QueuedMediaInput) {
     const submitted = await submitQueuedMediaTask(input);
     try { await input.onSubmitted?.(submitted); }
     catch (error) { throw new QueuedTaskSubmissionUncertainError(submitted.requestId, submitted.id, error); }
-    return waitForQueuedMedia(submitted, input.signal);
+    return waitForQueuedMedia(submitted, input.signal, input.cancelOnAbort);
 }
 
 export async function recoverQueuedMedia(id: string, signal?: AbortSignal) {
     if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
-    const original = await recoverQueuedTask(id);
-    return waitForQueuedMedia(original, signal);
+    const original = await recoverQueuedTask(id, signal);
+    return waitForQueuedMedia(original, signal, () => false);
 }
 
-async function waitForQueuedMedia(submitted: QueuedTask, signal?: AbortSignal) {
+async function waitForQueuedMedia(submitted: QueuedTask, signal?: AbortSignal, cancelOnAbort?: () => boolean) {
     const ids = [submitted.id];
     try {
         const [completed] = await waitForTasks(ids, signal, undefined, true);
@@ -419,6 +419,7 @@ async function waitForQueuedMedia(submitted: QueuedTask, signal?: AbortSignal) {
         return completed.resultUrls;
     } catch (error) {
         if (signal?.aborted) {
+            if (cancelOnAbort?.() === false) throw error;
             try { await request<void>(`/api/tasks/${submitted.id}/cancel`, { method: "POST" }); }
             catch (cancelError) { throw new QueuedTaskSubmissionUncertainError(submitted.requestId, submitted.id, cancelError); }
             throw error;

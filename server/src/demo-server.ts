@@ -33,7 +33,7 @@ import { decodeInlineImageResult } from "./demo-task-result-assets";
 import { ImageResultPersistenceError, imageResultExtension, storeImageResult } from "./image-result-storage";
 import { ImageResultVariantsError, imageResultVariantIds, isAuxiliaryImageResult, resolveImageResultVariants, type ImageResultAsset } from "./image-result-variants";
 import { DemoAssetProjectStore } from "./demo-asset-projects";
-import { demoAssetContentResponse, demoAssetPage, demoAssetThumbnail, scheduleDemoAssetThumbnails } from "./demo-asset-library";
+import { canRestoreDemoAsset, demoAssetPurgeAfter, demoAssetContentResponse, demoAssetPage, demoAssetThumbnail, scheduleDemoAssetThumbnails } from "./demo-asset-library";
 import { allowedAssetMimeTypes, normalizeAssetMime, validateAssetUpload, AssetMediaError } from "./asset-delivery";
 import { assetBatchSchema } from "./asset-query";
 import { createDemoBatchTaskInputs } from "./demo-batch-tasks";
@@ -461,7 +461,8 @@ if (!demoState.isInitialized()) {
 }
 demoState.recoverInterruptedTasks();
 const recoveredState = demoState.load();
-for (const asset of recoveredState.assets) if (!asset.deletedAt) demoAssets.set(asset.id, asset);
+const demoDeletedAssets = new Map<string, DemoAsset>();
+for (const asset of recoveredState.assets) (asset.deletedAt ? demoDeletedAssets : demoAssets).set(asset.id, asset);
 for (const task of recoveredState.tasks) demoTasks.set(task.id, task);
 console.info(`Loaded ${demoAssets.size} local assets and ${demoTasks.size} tasks from durable storage.`);
 const internalAiConfig: DemoInternalAiConfig = {
@@ -644,8 +645,9 @@ function describeDemoAsset(asset: DemoAsset) {
     source: task ? 'generation' : 'upload', operationType: task?.operationType || null, prompt: task?.prompt || null,
     modelName: demoModels.find(model => model.id === task?.modelConfigId)?.name || null, status: 'ready', visibilityScope: 'private',
     metadata: asset.metadata || {}, createdAt: asset.createdAt, ...demoDownloadProjection(asset),
-    contentUrl: `/api/assets/${asset.id}/content`, thumbnailUrl: kind === 'image' ? `/api/assets/${asset.id}/thumb?w=256` : null,
-    previewUrl: kind === 'image' ? `/api/assets/${asset.id}/thumb?w=1024` : null };
+    deletedAt: asset.deletedAt || null, purgeAfter: asset.deletedAt ? demoAssetPurgeAfter(asset.deletedAt) : null,
+    contentUrl: asset.deletedAt ? null : `/api/assets/${asset.id}/content`, thumbnailUrl: !asset.deletedAt && kind === 'image' ? `/api/assets/${asset.id}/thumb?w=256` : null,
+    previewUrl: !asset.deletedAt && kind === 'image' ? `/api/assets/${asset.id}/thumb?w=1024` : null };
 }
 
 /** Keep running-task aliases, but expose changes only after the whole transaction commits. */
@@ -1697,7 +1699,7 @@ Bun.serve({
       if (input.action === 'delete' || input.action === 'move-project') {
         const updated = permitted.map(asset => input.action === 'delete' ? { ...asset, deletedAt: now() } : { ...asset, projectId: input.projectId });
         demoState.save({ assets: updated });
-        for (const asset of updated) { if (asset.deletedAt) demoAssets.delete(asset.id); else demoAssets.set(asset.id, asset); }
+        for (const asset of updated) { if (asset.deletedAt) { demoAssets.delete(asset.id); demoDeletedAssets.set(asset.id, asset); } else demoAssets.set(asset.id, asset); }
       }
       return json({ action: input.action, assetIds: input.assetIds, count: permitted.length,
         assets: input.action === 'download' || input.action === 'add-to-canvas' ? permitted.map(describeDemoAsset) : [] });
@@ -1706,10 +1708,24 @@ Bun.serve({
       const assets = [...demoAssets.values()].filter(asset => asset.ownerUserId === user.id && asset.bytes.length && !isAuxiliaryImageResult(asset.metadata));
       return json({ ...demoAssetPage(assets.map(describeDemoAsset), { limit: 12 }), total: assets.length });
     }
+    if (path === '/api/assets/trash' && request.method === 'GET') {
+      try { return json(demoAssetPage([...demoDeletedAssets.values()].filter(asset => (asset.ownerUserId === user.id || canManageDemoOwner(user, asset.ownerUserId)) && canRestoreDemoAsset(asset) && !isAuxiliaryImageResult(asset.metadata)).map(describeDemoAsset), Object.fromEntries(url.searchParams), true)); }
+      catch { return json({ error: 'INVALID_PAGINATION', message: '素材分页或筛选参数无效' }, 400); }
+    }
+    if (/^\/api\/assets\/[^/]+\/restore$/.test(path) && request.method === 'POST') {
+      const asset = demoDeletedAssets.get(path.split('/')[3]!);
+      if (!asset || asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) return json({ error: 'NOT_FOUND', message: '已删除素材不存在或无权恢复' }, 404);
+      if (!canRestoreDemoAsset(asset)) return json({ error: 'RESTORE_UNAVAILABLE', message: '已超过 30 天恢复期限或原始文件已清理' }, 410);
+      if (asset.clientReferenceId && [...demoAssets.values()].some(active => active.ownerUserId === asset.ownerUserId && active.clientReferenceId === asset.clientReferenceId)) return json({ error: 'RESTORE_CONFLICT', message: '已有同一来源的有效素材，无法重复恢复' }, 409);
+      const restored = { ...asset, deletedAt: undefined };
+      demoState.save({ assets: [restored] });
+      demoAssets.set(asset.id, restored); demoDeletedAssets.delete(asset.id);
+      return empty();
+    }
     if (/^\/api\/assets\/[^/]+$/.test(path) && (request.method === 'GET' || request.method === 'DELETE')) {
       const asset = demoAssets.get(path.split('/')[3]!);
       if (!asset || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId))) return json({ error: 'NOT_FOUND', message: '素材不存在或无权访问' }, 404);
-      if (request.method === 'DELETE') { demoState.save({ assets: [{ ...asset, deletedAt: now() }] }); demoAssets.delete(asset.id); return empty(); }
+      if (request.method === 'DELETE') { const deleted = { ...asset, deletedAt: now() }; demoState.save({ assets: [deleted] }); demoDeletedAssets.set(asset.id, deleted); demoAssets.delete(asset.id); return empty(); }
       return json({ asset: describeDemoAsset(asset) });
     }
     if (path === '/api/projects' && request.method === 'GET') return json({ projects: assetProjects.list(user.id) });

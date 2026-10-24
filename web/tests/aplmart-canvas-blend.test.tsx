@@ -31,7 +31,7 @@ function actionButton(html: string, label: string) {
 }
 
 test.each([0, 1, 2, 4, 5])("Blend quick canvas with %i references hides old prompt and obeys its exact input range", count => configured(() => {
-    const html = renderToStaticMarkup(<CanvasQuickGeneratePanel embedded open prompt="OLD_DRAFT_MUST_NOT_SHOW" model={model.id} size="3:2" quality="turbo" count={9} imageOptions="" running={false} config={defaultConfig} estimateCredits={0} estimateRmb={0} references={references(count)} onClose={noop} onPromptChange={noop} onModelChange={noop} onSizeChange={noop} onQualityChange={noop} onCountChange={noop} onImageOptionsChange={noop} onPickReferences={noop} onRemoveReference={noop} onClearReferences={noop} onMoveReference={noop} onMissingConfig={noop} onGenerate={noop} />);
+    const html = renderToStaticMarkup(<CanvasQuickGeneratePanel embedded open promptRef={{ current: "OLD_DRAFT_MUST_NOT_SHOW" }} promptRevision={0} model={model.id} size="3:2" quality="turbo" count={9} imageOptions="" running={false} config={defaultConfig} estimateCredits={0} estimateRmb={0} references={references(count)} onClose={noop} onModelChange={noop} onSizeChange={noop} onQualityChange={noop} onCountChange={noop} onImageOptionsChange={noop} onPickReferences={noop} onRemoveReference={noop} onClearReferences={noop} onMoveReference={noop} onMissingConfig={noop} onGenerate={noop} />);
     expect(html).not.toContain("<textarea");
     expect(html).not.toContain("OLD_DRAFT_MUST_NOT_SHOW");
     expect(html).not.toContain('aria-label="生成张数"');

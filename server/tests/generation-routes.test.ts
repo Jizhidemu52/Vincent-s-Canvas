@@ -203,7 +203,7 @@ describe("production generation routes", () => {
   test("preflight accepts a local owned image without a public URL or upstream work", async () => {
     const deps = dependencies({ asset: { id: assetId, objectKey: "owned/image.png", mimeType: "image/png", byteSize: 512 } });
     const url = await serve(createTasksRouter(deps.database as never, deps.cache as never, true, (db, input) => preflightStoredVideoTask(db, input, "", {
-      readSource: async () => new Uint8Array(512), probe: async () => ({ width: 768, height: 768 }),
+      readSource: async () => (async function* () { yield new Uint8Array(512); })(), probe: async () => ({ width: 768, height: 768 }),
     })));
     const response = await post(`${url}/preflight`, videoInput({ sourceUrls: [`/api/assets/${assetId}/content`] }));
     expect(response.status).toBe(200);

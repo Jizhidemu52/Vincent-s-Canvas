@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { canvasPoint, pointInLayer, validateProject, resizeBase, checkDimensions, clone } from './model.js';
 
-const fixture = () => ({ type: 'garment-placement-demo', version: 1, base: { src: '/assets/garment.png', width: 1024, height: 1024, name: '示例' }, layers: [{ id: 'flower-1', name: '花', src: '/assets/flower.svg', x: 500, y: 420, width: 200, aspect: 2, rotation: 90, opacity: .9, blend: 'multiply', visible: true }] });
+const fixture = () => ({ type: 'garment-pattern-placement', version: 1, base: { src: '/design-workbench/assets/garment.png', width: 1024, height: 1024, name: '示例' }, layers: [{ id: 'flower-1', name: '花', src: '/design-workbench/assets/flower.svg', x: 500, y: 420, width: 200, aspect: 2, rotation: 90, opacity: .9, blend: 'multiply', visible: true }] });
 
 test('CSS-scaled canvas pointer maps into base-image coordinates', () => {
   assert.deepEqual(canvasPoint(260, 170, { left: 10, top: 20, width: 500, height: 500 }, 1000, 1000), { x: 500, y: 300 });
@@ -33,7 +33,7 @@ test('import bounds, IDs, layer limit, number validation and blend validation', 
   }
 });
 test('base replacement rescales location and width but preserves original object', () => {
-  const project = fixture(); const result = resizeBase(project, { src: '/assets/garment.png', name: '新底图', width: 512, height: 2048 });
+  const project = fixture(); const result = resizeBase(project, { src: '/design-workbench/assets/garment.png', name: '新底图', width: 512, height: 2048 });
   assert.equal(result.layers[0].x, 250); assert.equal(result.layers[0].y, 840); assert.equal(result.layers[0].width, 100);
   assert.equal(result.layers[0].aspect, 2); assert.equal(project.layers[0].x, 500);
 });
@@ -47,6 +47,6 @@ test('history snapshots isolate mutable objects and retain image strings', () =>
   assert.equal(project.layers[0].x, 500); assert.equal(snapshot.layers[0].src, project.layers[0].src);
 });
 test('tiny replacement base keeps width inside the editable/importable range', () => {
-  const result = resizeBase(fixture(), { src: '/assets/garment.png', name: 'tiny', width: 1, height: 1 });
+  const result = resizeBase(fixture(), { src: '/design-workbench/assets/garment.png', name: 'tiny', width: 1, height: 1 });
   assert.equal(result.layers[0].width, 1); assert.doesNotThrow(() => validateProject(result));
 });

@@ -17,6 +17,7 @@ type Options = {
     createAudio: (file: File, position: Position) => Promise<unknown>;
     warning: (message: string) => unknown;
     error: (message: string) => unknown;
+    onImportProgress?: (progress: { id: string; completed: number; total: number; failed: number }) => void;
 };
 export function useCanvasClipboardDrop(options: Options) {
     const latest = useRef(options);
@@ -48,12 +49,18 @@ export function useCanvasClipboardDrop(options: Options) {
         const io = latest.current;
         if (files.length !== dropped.length) io.warning("仅支持图片、视频和音频，其他文件已跳过");
         const point = io.screenToCanvas(event.clientX, event.clientY);
+        const id = `canvas-import-${crypto.randomUUID()}`;
+        let failed = 0;
+        if (files.length) io.onImportProgress?.({ id, completed: 0, total: files.length, failed });
         for (const [index, file] of files.entries()) {
             const position = { x: point.x + index * 36, y: point.y + index * 36 };
             try {
                 await (isCanvasAudioFile(file) ? io.createAudio(file, position) : file.type.startsWith("video/") ? io.createVideo(file, position) : io.createImage(file, position));
             } catch (error) {
+                failed++;
                 io.error(`${file.name}：${error instanceof Error ? error.message : "素材导入失败"}`);
+            } finally {
+                io.onImportProgress?.({ id, completed: index + 1, total: files.length, failed });
             }
         }
     }, []);

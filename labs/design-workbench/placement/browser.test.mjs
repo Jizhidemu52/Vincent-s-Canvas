@@ -33,7 +33,7 @@ try {
   await page.goto(origin + '/demo/placement');
   await page.getByRole('button', { name: '胸前花朵', exact: true }).waitFor();
   assert.equal(await layerCount(), 1);
-  assert.match(await page.locator('.placement-status').textContent(), /人工智能褶皱融合未连接/);
+  assert.match(await page.locator('.placement-status').textContent(), /不包含人工智能褶皱融合/);
   await page.screenshot({ path: path.join(qa, '01-desktop-default.png'), fullPage: true });
   completed.push('default composition and boundary notice');
 
@@ -74,11 +74,12 @@ try {
   await setNumber('旋转角度', 24); await setNumber('不透明度', 63);
   await page.getByLabel('混合模式', { exact: true }).selectOption('multiply');
   await button('本地保存').click();
-  await page.getByText(/本地已保存 ·/).waitFor();
+  await page.locator('[data-project-status]').filter({ hasText: '已自动保存到本机' }).waitFor();
   await setNumber('图案宽度', 400);
-  await button('打开本地工程').click();
-  await page.getByText('已打开当前浏览器保存的工程。', { exact: true }).waitFor();
-  assert.equal(Number(await number('图案宽度').inputValue()), 225.3);
+  await page.locator('[data-project-status]').filter({ hasText: '已自动保存到本机' }).waitFor();
+  await page.reload();
+  await page.getByRole('button', { name: '枝叶图案', exact: true }).click();
+  assert.equal(Number(await number('图案宽度').inputValue()), 400);
   assert.equal(Number(await number('旋转角度').inputValue()), 24);
   assert.equal(Number(await number('不透明度').inputValue()), 63);
   completed.push('IndexedDB save and reopen preserves layer transforms');

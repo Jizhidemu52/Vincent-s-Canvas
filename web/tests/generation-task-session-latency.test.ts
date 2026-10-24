@@ -124,11 +124,11 @@ describe("generation results do not wait for session refresh", () => {
         } finally { globalThis.setTimeout = nativeTimeout; }
     });
 
-    test.each(paths)("%s still cancels on abort without waiting for session refresh", async path => {
+    test.each(paths)("%s stops on abort without waiting for session refresh and preserves recovery tasks", async path => {
         const controller = new AbortController();
         const network = controlledNetwork("initial", { abort: controller });
         await expect(promptly(run(path, controller.signal))).rejects.toMatchObject({ name: "AbortError" });
-        expect(network.cancellations).toEqual([path === "batch" ? "/api/tasks/batches/batch-1/cancel" : "/api/tasks/task-1/cancel"]);
+        expect(network.cancellations).toEqual(path === "recovery" ? [] : [path === "batch" ? "/api/tasks/batches/batch-1/cancel" : "/api/tasks/task-1/cancel"]);
     });
 
     test.each(["image", "recovery"] as const)("%s preserves a failed task and its reason while session refresh is pending", async path => {

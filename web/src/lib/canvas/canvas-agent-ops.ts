@@ -66,7 +66,18 @@ export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasA
         }
         if (op.type === "update_node") {
             if (!op.id) return;
-            nodes = nodes.map((node) => (node.id === op.id ? { ...node, ...op.patch, metadata: { ...node.metadata, ...op.patch?.metadata, ...op.metadata } } : node));
+            nodes = nodes.map((node) => {
+                if (node.id !== op.id) return node;
+                const metadata = { ...node.metadata, ...op.patch?.metadata, ...op.metadata };
+                let patch = op.patch;
+                if (node.type === CanvasNodeType.Image && !metadata.freeResize && (patch?.width !== undefined || patch?.height !== undefined)) {
+                    const width = metadata.naturalWidth || node.width, height = metadata.naturalHeight || node.height;
+                    const scale = Math.min(patch.width === undefined ? Infinity : patch.width / width, patch.height === undefined ? Infinity : patch.height / height);
+                    if (!Number.isFinite(scale) || scale <= 0) throw new Error("图片节点尺寸必须大于 0");
+                    patch = { ...patch, width: width * scale, height: height * scale };
+                }
+                return { ...node, ...patch, metadata };
+            });
         }
         if (op.type === "delete_node") {
             const ids = new Set(op.ids || (op.id ? [op.id] : op.nodeType ? nodes.filter((node) => node.type === op.nodeType).map((node) => node.id) : []));

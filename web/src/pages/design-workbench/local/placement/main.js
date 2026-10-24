@@ -1,13 +1,14 @@
 import { PROJECT_VERSION, MAX_LAYERS, clone, clamp, canvasPoint, pointInLayer, checkDimensions, validateProject, resizeBase } from "./model.js";
+import { createProjectSession, mountProjectBar, sameProject } from "../project-session.js";
 
 const STORAGE_KEY = "garment-pattern-placement-v1";
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 const id = () => `layer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const same = sameProject;
 const format = (value) => Math.round(value * 10) / 10;
 
 export async function mountPlacement(root, services) {
-    const { loadImage, readImageFile, downloadBlob, saveProject, loadProject, notify, signal } = services;
+    const { loadImage, readImageFile, downloadBlob, notify, signal } = services;
     root.innerHTML = '<div class="placement-demo"><div class="empty">正在准备服装定位工作台…</div></div>';
     const images = new Map();
     let live = true;
@@ -18,9 +19,7 @@ export async function mountPlacement(root, services) {
     let redo = [];
     let drag = null;
     let editSnapshot = null;
-    let saveText = "工程保存在当前账号的浏览器分区，不会上传服务器。";
-    let currentOperation = "";
-    let savedFingerprint = "";
+    let projects;
     let exporting = false;
     const signalController = new AbortController();
     let observer;
@@ -31,6 +30,7 @@ export async function mountPlacement(root, services) {
         live = false;
         sequence++;
         signalController.abort();
+        projects?.dispose();
         observer?.disconnect();
         images.clear();
         undo = [];
@@ -113,6 +113,7 @@ export async function mountPlacement(root, services) {
         <div class="panel-body">
           <p class="placement-intro">先选服装，再放图案。拖动胸前花朵，试试新的位置与比例。</p>
           <button class="btn placement-upload" data-action="upload-base">替换服装底图</button>
+          ${services.pickImage ? '<button class="btn ghost placement-upload" data-action="asset-base">从素材库选择底图</button>' : ""}
           <p class="hint">PNG / JPG / WebP，单张 ≤ 15 MB<br>原图保持不变，仅在工作台中合成。</p>
           <div class="placement-divider"></div>
           <div class="section-title">添加图案</div>
@@ -148,10 +149,11 @@ export async function mountPlacement(root, services) {
           <div class="placement-divider"></div>
           <div class="placement-delivery"><div class="section-title">保存与交付</div>
             <button class="btn primary placement-export" data-action="export-png">导出合成 PNG</button>
+            ${services.saveAsset ? '<button class="btn placement-export" data-action="save-asset">保存合成图到素材库</button>' : ""}
             <div class="placement-save-actions"><button class="btn" data-action="save">本地保存</button><button class="btn" data-action="open">打开本地工程</button><button class="btn ghost" data-action="export-json">导出工程 JSON</button><button class="btn ghost" data-action="import-json">导入工程 JSON</button></div>
             <p class="placement-save-state" aria-live="polite"></p>
             <button class="btn ghost placement-upload" data-action="reset">恢复示例构图</button>
-            <p class="hint">PNG 为平面合成图；JSON 保留可编辑图层和上传图片。恢复示例可撤销，不会删除本地保存。</p>
+            <p class="hint">PNG 为平面合成图；JSON 保留可编辑图层和上传图片。恢复示例可撤销并自动保存；要保留当前构图，请先新建工程。</p>
           </div>
         </div>
       </aside>
@@ -165,6 +167,30 @@ export async function mountPlacement(root, services) {
     const selected = () => state.layers.find((layer) => layer.id === selectedId);
     const query = (selector) => root.querySelector(selector);
     const eventOptions = { signal: signalController.signal };
+    let updateProjects = () => {};
+    projects = createProjectSession({
+        services,
+        key: STORAGE_KEY,
+        snapshot: () => clone(state),
+        fresh: demoProject,
+        apply: async (data) => {
+            const project = await preparedProject(data);
+            await materializeImages();
+            if (!live) return;
+            sequence++;
+            state = project;
+            selectedId = state.layers.at(-1)?.id;
+            undo = [];
+            redo = [];
+            editSnapshot = null;
+            render();
+        },
+        onChange: (view) => {
+            updateProjects(view);
+            updateToolbar();
+        },
+    });
+    updateProjects = mountProjectBar(root, projects);
 
     async function materializeImages() {
         const entries = [...images.entries()];
@@ -176,6 +202,7 @@ export async function mountPlacement(root, services) {
         undo.push(before);
         if (undo.length > 60) undo.shift();
         redo = [];
+        projects.changed();
     }
 
     function flushEdit() {
@@ -249,8 +276,8 @@ export async function mountPlacement(root, services) {
         query("[data-action=up]").disabled = !layer || index >= state.layers.length - 1;
         query("[data-action=down]").disabled = !layer || index <= 0;
         query("[data-action=export-png]").disabled = exporting;
-        const modified = savedFingerprint && savedFingerprint !== JSON.stringify(state);
-        query(".placement-save-state").textContent = currentOperation || (modified ? `${saveText} · 有未保存更改` : saveText);
+        if (query("[data-action=save-asset]")) query("[data-action=save-asset]").disabled = exporting;
+        query(".placement-save-state").textContent = "工程自动保存在当前账号的本机浏览器；可导出 JSON 备份。";
         query("[data-selection-status]").textContent = layer ? `选中：${layer.name}${layer.visible ? "" : "（已隐藏）"}` : "未选中图案";
     }
 
@@ -326,15 +353,12 @@ export async function mountPlacement(root, services) {
         notify("图案已添加，可直接拖动定位。");
     }
 
-    async function importProject(input, operation) {
+    async function importProject(input, operation, name = "导入工程") {
         const project = await preparedProject(input);
         await materializeImages();
         if (!live || operation !== sequence) return;
-        mutate(() => {
-            state = project;
-            selectedId = state.layers.at(-1)?.id;
-        });
-        notify("工程已打开，图层可以继续编辑。");
+        await projects.create(name, project);
+        notify("已导入为新工程，原有工程保留。");
     }
 
     async function action(name) {
@@ -342,6 +366,19 @@ export async function mountPlacement(root, services) {
         const layer = selected();
         if (name === "upload-base") return query("[data-input=base]").click();
         if (name === "upload-art") return query("[data-input=art]").click();
+        if (name === "asset-base") {
+            const operation = ++sequence;
+            const asset = await services.pickImage();
+            if (!asset || !live || sequence !== operation) return;
+            const image = await getImage(asset.src);
+            await materializeImages();
+            if (!live || sequence !== operation) return;
+            mutate(() => {
+                state = resizeBase(state, { src: asset.src, name: asset.name, width: image.naturalWidth, height: image.naturalHeight });
+            });
+            notify("素材库底图已加入；工程保留图片副本，原素材不变。");
+            return;
+        }
         if (name === "import-json") return query("[data-input=project]").click();
         if (name === "undo" || name === "redo") {
             const source = name === "undo" ? undo : redo;
@@ -350,6 +387,7 @@ export async function mountPlacement(root, services) {
             sequence++;
             destination.push(clone(state));
             state = source.pop();
+            projects.changed();
             if (!selected()) selectedId = state.layers.at(-1)?.id;
             render();
             return;
@@ -380,37 +418,17 @@ export async function mountPlacement(root, services) {
                 state = project;
                 selectedId = state.layers[0].id;
             });
-            notify("已恢复示例构图；可撤销。已保存的本地工程不受影响。");
+            notify("已恢复示例构图；可撤销，当前工程将自动保存。");
             return;
         }
         if (name === "save") {
-            if (currentOperation) return;
-            const snapshot = clone(state);
-            currentOperation = "正在保存到当前浏览器…";
-            updateToolbar();
-            try {
-                await saveProject(STORAGE_KEY, snapshot);
-                if (!live) return;
-                savedFingerprint = JSON.stringify(snapshot);
-                saveText = `本地已保存 · ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
-                notify("可编辑工程已保存到当前账号的浏览器分区。");
-            } finally {
-                currentOperation = "";
-                if (live) updateToolbar();
-            }
+            await projects.save();
+            notify("可编辑工程已保存到当前账号的浏览器分区。");
             return;
         }
         if (name === "open") {
-            const operation = ++sequence;
-            const project = await loadProject(STORAGE_KEY);
-            if (!live || operation !== sequence) return;
-            if (!project) throw new Error("还没有本地工程。请先点击“本地保存”，或导入工程 JSON。");
-            await importProject(project, operation);
-            if (live && operation === sequence) {
-                savedFingerprint = JSON.stringify(state);
-                saveText = "已打开当前账号在此浏览器保存的工程。";
-                updateToolbar();
-            }
+            root.querySelector("[aria-label='本地工程']").focus();
+            notify("使用顶部工程列表切换；当前更改会先保存。");
             return;
         }
         if (name === "export-json") {
@@ -420,7 +438,7 @@ export async function mountPlacement(root, services) {
             notify("工程 JSON 已导出，包含上传的图片数据。");
             return;
         }
-        if (name === "export-png") {
+        if (name === "export-png" || name === "save-asset") {
             if (exporting) return;
             exporting = true;
             updateToolbar();
@@ -429,10 +447,16 @@ export async function mountPlacement(root, services) {
                 const output = document.createElement("canvas");
                 draw(output.getContext("2d"), false, snapshot);
                 const blob = await new Promise((resolve) => output.toBlob(resolve, "image/png"));
+                output.width = 1;
+                output.height = 1;
                 if (!blob) throw new Error("图片导出失败，请尝试使用较小的底图。");
                 if (!live) return;
-                downloadBlob(blob, `服装定位-${snapshot.base.width}x${snapshot.base.height}.png`);
-                notify("PNG 已导出，不包含选择框，原始图片未修改。");
+                const filename = `服装定位-${snapshot.base.width}x${snapshot.base.height}.png`;
+                if (name === "save-asset") await services.saveAsset(blob, filename);
+                else {
+                    downloadBlob(blob, filename);
+                    notify("PNG 已导出，不包含选择框，原始图片未修改。");
+                }
             } finally {
                 exporting = false;
                 if (live) updateToolbar();
@@ -482,6 +506,7 @@ export async function mountPlacement(root, services) {
             if (!Number.isFinite(value)) return;
             const clamped = clamp(value, Number(control.min), Number(control.max));
             selected()[control.dataset.prop] = control.dataset.prop === "opacity" ? clamped / 100 : clamped;
+            projects.changed();
             draw();
             syncControls();
         },
@@ -520,7 +545,7 @@ export async function mountPlacement(root, services) {
                     } catch {
                         throw new Error("无法读取该 JSON，请使用从服装定位工作台导出的工程文件。");
                     }
-                    await importProject(project, operation);
+                    await importProject(project, operation, file.name.replace(/\.json$/i, "").slice(0, 80));
                 } else {
                     const src = await readImageFile(file);
                     if (!live || sequence !== operation) return;
@@ -574,6 +599,7 @@ export async function mountPlacement(root, services) {
             if (!layer) return;
             layer.x = clamp(point.x - drag.offsetX, -state.base.width, state.base.width * 2);
             layer.y = clamp(point.y - drag.offsetY, -state.base.height, state.base.height * 2);
+            projects.changed();
             draw();
             syncControls();
         },
@@ -628,5 +654,13 @@ export async function mountPlacement(root, services) {
     });
     observer.observe(canvas);
     render();
+    root.querySelector(".placement-demo").inert = true;
+    try {
+        await projects.initialize();
+    } catch (error) {
+        errorMessage(error);
+    } finally {
+        if (live) root.querySelector(".placement-demo").inert = !projects.view().ready;
+    }
     return cleanup;
 }

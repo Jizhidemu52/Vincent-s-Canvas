@@ -1,5 +1,8 @@
 import localforage from "localforage";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
+import { createChatIndexedHistory } from "./chat-indexed-history";
+import { chatMedia } from "./chat-media";
+import type { ChatSession } from "./chat-types";
 
 type ChatSessionStore = {
     getItem<T>(key: string): Promise<T | null>;
@@ -37,6 +40,6 @@ export function createChatSessionStorage(store: ChatSessionStore) {
     };
 }
 
-export const chatSessionStorage = createChatSessionStorage(createWorkspaceStorage("app_state", {
+export const chatSessionStorage = createChatIndexedHistory<ChatSession>(createWorkspaceStorage("app_state", {
     driver: localforage.INDEXEDDB,
-}));
+}), chatMedia.serializeSession);

@@ -38,13 +38,13 @@ test.each(["blend", "midjourney-blend"])("chat rejects promptless %s profiles an
 const source = readFileSync(new URL("../src/pages/chat/index.tsx", import.meta.url), "utf8");
 const ast = ts.createSourceFile("chat.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let sendExpression: ts.Expression | undefined;
-let selectExpression: ts.JsxElement | undefined;
-let resolutionExpression: ts.JsxElement | undefined;
-let modelExpression: ts.JsxElement | undefined;
+let selectExpression: ts.JsxSelfClosingElement | undefined;
+let resolutionExpression: ts.JsxSelfClosingElement | undefined;
+let modelExpression: ts.JsxSelfClosingElement | undefined;
 function visit(node: ts.Node) {
     if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "send") sendExpression = node.initializer;
-    if (ts.isJsxElement(node) && node.openingElement.tagName.getText(ast) === "select") {
-        for (const attr of node.openingElement.attributes.properties) {
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === "Select") {
+        for (const attr of node.attributes.properties) {
             if (!ts.isJsxAttribute(attr) || !attr.initializer || !ts.isStringLiteral(attr.initializer)) continue;
             if (attr.name.getText(ast) === "data-testid" && attr.initializer.text === "chat-image-quality") selectExpression = node;
             if (attr.name.getText(ast) === "data-testid" && attr.initializer.text === "chat-image-resolution") resolutionExpression = node;
@@ -76,6 +76,8 @@ function sendHarness({ action = "generate", quality = "high", resolution = undef
     const config = { model: "chat-model", imageModel: models[0].modelId, quality: "4k", imageOptions: '{"resolution":"2k","output_format":"webp"}' };
     const bindings = {
         sessionsReady: true, draft: "只改花瓣", attachments: [], readingAttachments: false, sendingRef: { current: false }, placingImageRef: { current: false }, activeSession: initial,
+        hydratingMedia: false, isCurrentScope: () => true,
+        chatMedia: { async hydrateSession<T>(session: T) { return session; }, async persist<T>(image: T, assertCurrent: () => void) { assertCurrent(); return image; } },
         selectedModel: "chat-model", selected: { modelId: "chat-model" }, creativeModelId: "chat-model", config, imageModels, preferredChatImageModel, resolveChatImageQuality, chatImageRequestOptions,
         activeSendRef: { current: null }, preparingMessageRef: { current: false }, loadedStorageKeyRef: { current: "user-a" }, storageKey: "user-a", sessionsRef,
         createClientId: (() => { let count = 0; return () => `message-${++count}`; })(),
@@ -153,7 +155,7 @@ function qualitySelect({ ready = true, sending = false, modelsLoading = false, m
     if (!expression) throw new Error("Actual image select not found");
     const sessions: any[] = [{ id: "a", imageQuality: quality, ...(resolution ? { imageResolution: resolution } : {}) }, { id: "b", imageQuality: "low" }];
     const bindings = {
-        React, imageQualitySettings: chatImageQualitySettings(imageModelProfile(model?.modelId || "", models), sessions[0]!.imageQuality, sessions[0]!.imageResolution),
+        React, Select: "select", imageQualitySettings: chatImageQualitySettings(imageModelProfile(model?.modelId || "", models), sessions[0]!.imageQuality, sessions[0]!.imageResolution),
         imageModels: models, imageBinding: bound ? { modelConfigId: model?.id } : undefined, resolveChatImageQuality, modelLabelWithUsage,
         sessionsReady: ready, modelsLoading, isSending: sending, pendingImageMessage: pending, preferredImageModel: model,
         activeSession: sessions[0], updateSession: (id: string, update: (value: any) => any) => { const index = sessions.findIndex(value => value.id === id); sessions[index] = update(sessions[index]); },
@@ -167,7 +169,7 @@ function qualitySelect({ ready = true, sending = false, modelsLoading = false, m
 test("the actual quality selector changes only the active session and persists distinct choices across reloads", async () => {
     const page = qualitySelect();
     expect(page.select.props.value).toBe("high");
-    page.select.props.onChange({ target: { value: "medium" } });
+    page.select.props.onChange("medium");
     expect(page.sessions).toEqual([{ id: "a", imageModelId: models[0].modelId, imageQuality: "medium" }, { id: "b", imageQuality: "low" }]);
     const database = new Map<string, any>();
     const storage = createChatSessionStorage({ getItem: async <T,>(key: string) => structuredClone(database.get(key)) as T | null, setItem: async <T,>(key: string, value: T) => { database.set(key, structuredClone(value)); return value; } });
@@ -237,7 +239,7 @@ test("resolution uses the send snapshot, not a later session mutation during pla
 test("the actual Mark resolution selector changes only this session and survives storage reload", async () => {
     const page = qualitySelect({ model: models[4], control: "resolution", resolution: "2k" });
     expect(page.select.props.value).toBe("2k");
-    page.select.props.onChange({ target: { value: "4k" } });
+    page.select.props.onChange("4k");
     expect(page.sessions[0]).toMatchObject({ imageModelId: models[4].modelId, imageQuality: "high", imageResolution: "4k" });
     expect(page.sessions[1]).toEqual({ id: "b", imageQuality: "low" });
     const data = new Map<string, any>();
@@ -249,7 +251,7 @@ test("the actual Mark resolution selector changes only this session and survives
 test("the actual image-model picker resets incompatible settings and respects backend binding", () => {
     useBusinessConfigStore.setState({ models });
     const page = qualitySelect({ model: models[4], control: "model", resolution: "4k" });
-    page.select.props.onChange({ target: { value: models[6].modelId } });
+    page.select.props.onChange(models[6].modelId);
     expect(page.sessions[0]).toMatchObject({ imageModelId: models[6].modelId, imageQuality: "1k", imageResolution: undefined });
     expect(page.sessions[1]).toEqual({ id: "b", imageQuality: "low" });
     expect(qualitySelect({ control: "model", bound: true }).select.props.disabled).toBe(true);

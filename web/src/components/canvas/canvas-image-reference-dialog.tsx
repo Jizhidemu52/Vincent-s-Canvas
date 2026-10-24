@@ -2,6 +2,7 @@ import { Button, Checkbox, Empty, Modal, theme } from "antd";
 import { useEffect, useMemo, useState } from "react";
 
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { useCanvasImageThumbnail } from "./use-canvas-image-thumbnail";
 
 type Props = { open: boolean; nodes: CanvasNodeData[]; selectedReferenceKeys: string[]; onConfirm: (nodeIds: string[]) => void; onClose: () => void };
 
@@ -32,7 +33,7 @@ export function CanvasImageReferenceDialog({ open, nodes, selectedReferenceKeys,
                 const added = existingIds.has(node.id);
                 return <div key={node.id} className="relative overflow-hidden rounded-lg border" style={{ borderColor: selected.has(node.id) ? token.colorPrimary : token.colorBorder, background: token.colorBgContainer, boxShadow: selected.has(node.id) ? `0 0 0 2px ${token.colorPrimaryBorder}` : undefined }}>
                     <button type="button" className="block w-full text-left disabled:cursor-default" disabled={added} aria-label={`${added ? "已添加" : "选择参考图"} ${title}`} aria-pressed={selected.has(node.id)} onClick={() => toggle(node.id)}>
-                        <img src={node.metadata!.content} alt={title} className="aspect-square w-full object-cover" />
+                        <CanvasReferenceThumbnail node={node} title={title} />
                         <span className="block truncate p-2 text-xs">{title}{added ? " · 已添加" : ""}</span>
                     </button>
                     <Checkbox aria-label={`选择参考图 ${title}`} checked={selected.has(node.id)} disabled={added} className="absolute right-2 top-2" onChange={() => toggle(node.id)} />
@@ -40,4 +41,11 @@ export function CanvasImageReferenceDialog({ open, nodes, selectedReferenceKeys,
             })}
         </div> : <Empty description="画布中暂无可用图片节点" className="py-10" />}
     </Modal>;
+}
+
+function CanvasReferenceThumbnail({ node, title }: { node: CanvasNodeData; title: string }) {
+    const preview = useCanvasImageThumbnail(node, 256);
+    return preview.failed ? <span className="flex aspect-square items-center justify-center text-xs">图片加载失败</span>
+        : preview.url ? <img key={preview.key} src={preview.url} alt={title} loading="lazy" decoding="async" onError={preview.onError} className="aspect-square w-full object-cover" />
+            : <span className="block aspect-square animate-pulse" aria-label="正在加载缩略图" />;
 }

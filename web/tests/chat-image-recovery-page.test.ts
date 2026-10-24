@@ -35,12 +35,12 @@ const task = { id: "original-task", requestId: "original-request:0", status: "su
 type ResumeRequest = { storageKey: string; sessionId: string; messageId: string; requestId: string; taskId?: string };
 const matchingResumeRequest: ResumeRequest = { storageKey: "user-a", sessionId: "original-session", messageId: "original-assistant", requestId: pending.requestId, taskId: task.id };
 
-async function recoveryPageHarness(options: { pending?: PendingChatImageTask; sourceGate?: Promise<void>; resumeRequest?: ResumeRequest; click?: boolean } = {}) {
+async function recoveryPageHarness(options: { pending?: PendingChatImageTask; sourceGate?: Promise<void>; resumeRequest?: ResumeRequest; click?: boolean; stopped?: boolean } = {}) {
     const initial = [
         { id: "unrelated", messages: [{ id: "other", role: "user", content: "保留这段对话" }] },
         { id: "original-session", editTargetImageId: "old-task:0", messages: [
             { id: "user-turn", role: "user", content: "把刚才那版花瓣改细", attachments: [{ dataUrl: "data:image/png;base64,c291cmNl" }] },
-            { id: "original-assistant", role: "assistant", content: "图片任务已提交", pendingImageTask: options.pending || pending },
+            { id: "original-assistant", role: "assistant", content: "图片任务已提交", pendingImageTask: options.pending || pending, ...(options.stopped ? { stopped: true } : {}) },
         ] },
     ];
     const database = new Map<string, unknown>([["user-a", structuredClone(initial)], ["user-b", [{ id: "account-b", messages: [] }]]]);
@@ -64,6 +64,8 @@ async function recoveryPageHarness(options: { pending?: PendingChatImageTask; so
         pendingImageMessage: activeSession.messages[1],
         imageRecoveryRequestRef: { current: options.resumeRequest || null },
         loadedStorageKeyRef: { current: "user-a" }, storageKey: "user-a", sessionsRef,
+        isCurrentScope: () => bindings.loadedStorageKeyRef.current === bindings.storageKey,
+        chatMedia: { async persist(image: { dataUrl: string }, assertCurrent: () => void) { assertCurrent(); expect(image.dataUrl).toBe("/api/assets/original/content"); sourceStarted.resolve(); await options.sourceGate; assertCurrent(); return { ...image, dataUrl: originalImage }; } },
         updateSession(id: string, update: (session: any) => any) {
             if (bindings.loadedStorageKeyRef.current !== bindings.storageKey) return;
             sessionsRef.current = sessionsRef.current.map((session) => session.id === id ? update(session) : session);
@@ -86,6 +88,18 @@ async function recoveryPageHarness(options: { pending?: PendingChatImageTask; so
     const cleanup = exports.run();
     return { completed: completed.promise, sourceStarted: sourceStarted.promise, cleanup, run: exports.run, database, writes, initial, sessionsRef, bindings, recovering, recoveryPromises, signals };
 }
+
+test("a user-stopped image task stays locally paused across reloads until the original-task button is clicked", async () => {
+    const requests: string[] = [];
+    globalThis.fetch = (async url => { requests.push(String(url)); return Response.json({ task }); }) as typeof fetch;
+    const paused = await recoveryPageHarness({ stopped: true, pending: { ...pending, taskId: task.id } });
+    await paused.completed;
+    expect(requests).toEqual([]); expect(paused.writes).toEqual([]); expect(paused.cleanup).toBeUndefined();
+    const resumed = await recoveryPageHarness({ stopped: true, pending: { ...pending, taskId: task.id }, click: true });
+    await resumed.completed; expect(requests).toEqual(["/api/tasks/original-task"]);
+    expect((resumed.database.get("user-a") as any[])[1].messages[1].generatedImages[0].id).toBe("original-task:0");
+    resumed.cleanup();
+});
 
 test.each([false, true])("the restored page writes the original task result into the original assistant message (saved taskId: %s)", async (hasTaskId) => {
     const requests: Array<{ url: string; method: string }> = [];

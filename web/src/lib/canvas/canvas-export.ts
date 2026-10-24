@@ -8,7 +8,8 @@ import { fetchServerAssetContent, fetchServerAssetVariants, type ServerAssetVari
 import type { CanvasExportAsset, CanvasExportFile } from "@/types/canvas-export";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasNodeData } from "@/types/canvas";
-import { canvasImageDownloadFileName, imageMimeFromFileName } from "@/lib/canvas/canvas-image-filename";
+import { canvasImageDownloadFileName, canvasImageExportStem, imageMimeFromFileName } from "@/lib/canvas/canvas-image-filename";
+import { encodeImageBlob, prepareCanvasImageFormat, type CanvasImageDownloadFormat } from "@/lib/canvas/canvas-image-encoding";
 import { collectCanvasExportMedia } from "@/lib/canvas/canvas-export-media";
 import { exportModelMetadata } from "@/lib/model-display";
 import { encodeCanvasProject } from "./canvas-project-codec";
@@ -47,16 +48,18 @@ export function downloadCanvasContent(content: string, fileName: string) {
     saveAs(content, fileName);
 }
 
-export async function downloadCanvasImage(node: CanvasNodeData) {
+export async function downloadCanvasImage(node: CanvasNodeData, format: CanvasImageDownloadFormat = "original") {
     let blob = node.metadata?.storageKey ? await getImageBlob(node.metadata.storageKey) : null;
     if (!blob) {
-        const response = await fetch(node.metadata?.content || "");
+        const response = await fetch(node.metadata?.content || "", { signal: AbortSignal.timeout(30_000) });
         if (!response.ok) throw new Error("无法读取图片，请重新打开画布后再试");
         blob = await response.blob();
     }
-    const fileName = canvasImageDownloadFileName(node);
-    const result = await prepareCanvasImageDownload(blob, fileName);
-    saveAs(result, fileName);
+    const result = await prepareCanvasImageFormat(blob, format);
+    const fileName = format === "original"
+        ? canvasImageDownloadFileName({ ...node, metadata: { ...node.metadata, mimeType: result.mimeType } })
+        : `${canvasImageExportStem(node)}.${format}`;
+    saveAs(result.blob, fileName);
 }
 
 /** Resolve only the current media, never a task ID left over after a local edit. */
@@ -98,23 +101,6 @@ export async function prepareCanvasImageDownload(blob: Blob, fileName: string, e
     const result = await encode(blob, targetType);
     if (result.type !== targetType) throw new Error("浏览器不支持所需图片格式，未修改原文件名");
     return result;
-}
-
-async function encodeImageBlob(blob: Blob, mimeType: string) {
-    const url = URL.createObjectURL(blob);
-    try {
-        const image = new Image();
-        image.src = url;
-        await image.decode();
-        const canvas = document.createElement("canvas");
-        canvas.width = image.naturalWidth;
-        canvas.height = image.naturalHeight;
-        const context = canvas.getContext("2d");
-        if (!context) throw new Error("无法转换图片格式");
-        if (mimeType === "image/jpeg") { context.fillStyle = "#fff"; context.fillRect(0, 0, canvas.width, canvas.height); }
-        context.drawImage(image, 0, 0);
-        return await new Promise<Blob>((resolve, reject) => canvas.toBlob((result) => result ? resolve(result) : reject(new Error("图片格式转换失败")), mimeType, 0.95));
-    } finally { URL.revokeObjectURL(url); }
 }
 
 function collectStorageKeys(value: unknown, keys = new Set<string>(), field = "") {

@@ -6,6 +6,7 @@ import { buildChatRequestMessages, type ChatHistoryMessage } from "@/lib/chat-co
 import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
 import { chatImageRequestOptions, preferredChatImageModel, resolveChatImageQuality } from "@/pages/chat/image-quality";
 import { resolveToolModel, type BusinessConfig } from "@/services/api/business-config";
+import { createChatBranch } from "@/pages/chat/chat-message-actions";
 
 function memoryStore() {
     const values = new Map<string, unknown>();
@@ -95,8 +96,10 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
     const source = readFileSync(new URL("../src/pages/chat/index.tsx", import.meta.url), "utf8");
     const ast = ts.createSourceFile("chat.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     let initializer: ts.Expression | undefined;
+    let stopHandler: ts.Expression | undefined;
     const visit = (node: ts.Node) => {
         if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "send") initializer = node.initializer;
+        if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "stopSending") stopHandler = node.initializer;
         ts.forEachChild(node, visit);
     };
     visit(ast);
@@ -126,11 +129,14 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
         return taskResult;
     };
     const bindings = {
-        sessionsReady: ready, draft: memory.draft, attachments: memory.attachments, isSending: false, readingAttachments: false,
+        sessionsReady: ready, draft: memory.draft, attachments: memory.attachments, isSending: false, readingAttachments: false, hydratingMedia: false,
         activeSession: session, selectedModel: selected?.modelId || "", selected, imageModels, preferredChatImageModel, resolveChatImageQuality, chatImageRequestOptions, config: {} as Record<string, string>,
         creativeChat, creativeModelId: selected?.modelId || "", sendingRef: { current: false }, placingImageRef: { current: false }, activeSendRef: { current: null as { controller: AbortController; submitted: boolean } | null },
-        createClientId: () => `message-${++ids}`, buildChatRequestMessages, sessionsRef,
+        createClientId: () => `message-${++ids}`, createChatBranch, buildChatRequestMessages, sessionsRef,
         preparingMessageRef: { current: false }, loadedStorageKeyRef: { current: "user-a" }, storageKey: "user-a",
+        isCurrentScope: () => bindings.loadedStorageKeyRef.current === bindings.storageKey,
+        setSessions: (value: any[]) => { sessionsRef.current = value; }, activeSessionIdRef: { current: session.id },
+        setActiveSessionId: (_value: string) => {}, setEditing: (_value: unknown) => {},
         persistence: { clear: () => events.push("clear-pending") },
         setIsSending: (value: boolean) => events.push(`sending:${value}`),
         setSendPhase: (_value: string) => {},
@@ -139,26 +145,29 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
         setDraft: (update: (value: string) => string) => { memory.draft = update(memory.draft); },
         setAttachments: (update: (value: typeof memory.attachments) => typeof memory.attachments) => { memory.attachments = update(memory.attachments); },
         followBottomRef: { current: false }, activeStreamRef: { current: null },
-        createChatStreamBuffer: () => ({ push() {}, cancel() {}, flush() {} }),
+        createChatStreamBuffer: (onFlush: (value: string) => void) => ({ push: onFlush, cancel() {}, flush() {} }),
+        chatMedia: { hydrateSession: async (value: any, assertCurrent: () => void) => { assertCurrent(); return value; }, persist: async (value: any, assertCurrent: () => void) => { assertCurrent(); return value; } },
         requestImageQuestion: async () => { events.push("model-request"); return "已读取图片"; },
-        requestCreativeChatPlan: async (config: any, history: any[], current: any, options: any) => { events.push("planner-request"); plannerCalls.push(structuredClone({ config, history, current, options: { selectedImageId: options.selectedImageId } })); return plan; },
+        requestCreativeChatPlan: async (config: any, history: any[], current: any, options: any) => { events.push("planner-request"); plannerCalls.push({ config: structuredClone(config), history: structuredClone(history), current: structuredClone(current), options }); return plan; },
         requestGeneration: async (_config: unknown, _prompt: string, options: typeof taskOptions[number]) => imageTask("generate", options),
         requestEdit: async (_config: unknown, _prompt: string, _references: unknown, _mask: unknown, options: typeof taskOptions[number]) => imageTask("edit", options),
         imageToDataUrl: async (image: { dataUrl: string }) => image.dataUrl,
         message: { warning: (value: string) => events.push(value), error: (value: string) => events.push(value) },
     };
-    const code = ts.transpileModule(`const send = ${initializer.getText(ast)}; exports.send = send;`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
-    const send = () => {
+    const code = ts.transpileModule(`exports.send = ${initializer.getText(ast)}; exports.stop = ${stopHandler!.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+    let stop = () => {};
+    const send = (resend?: { messageId: string; content?: string }) => {
         // Each user send runs with the current render snapshot, including the
         // previous generated answer and the newly typed (possibly text-only) turn.
         bindings.activeSession = sessionsRef.current[0]!;
         bindings.draft = memory.draft;
         bindings.attachments = memory.attachments;
-        const module = { exports: {} as { send: () => Promise<void> } };
+        const module = { exports: {} as { send: (resend?: { messageId: string; content?: string }) => Promise<void>; stop: () => void } };
         new Function(...Object.keys(bindings), "module", "exports", code)(...Object.values(bindings), module, module.exports);
-        return module.exports.send();
+        stop = module.exports.stop;
+        return module.exports.send(resend);
     };
-    return { send, events, snapshots, memory, bindings, sessionsRef, taskOptions, plannerCalls };
+    return { send, stop: () => stop(), events, snapshots, memory, bindings, sessionsRef, taskOptions, plannerCalls };
 }
 
 test("the actual chat send handler cannot write or submit before hydration finishes", async () => {
@@ -374,7 +383,7 @@ test.each(["account-change", "unmount"])("an unfinished creative plan cannot sub
     const decision = Promise.withResolvers<any>();
     const page = pageSendHarness({ mode: "create", plan: decision.promise });
     const pending = page.send();
-    await Promise.resolve();
+    for (let turn = 0; turn < 20 && !page.events.includes("planner-request"); turn++) await Promise.resolve();
     expect(page.events).toContain("planner-request");
     if (reason === "account-change") page.bindings.loadedStorageKeyRef.current = "user-b";
     else page.bindings.activeSendRef.current!.controller.abort();
@@ -387,9 +396,66 @@ test("a failed creative plan does not silently generate or retry", async () => {
     const decision = Promise.withResolvers<any>();
     const page = pageSendHarness({ mode: "create", plan: decision.promise });
     const pending = page.send();
-    await Promise.resolve();
+    for (let turn = 0; turn < 20 && !page.events.includes("planner-request"); turn++) await Promise.resolve();
     decision.reject(new Error("upstream unavailable"));
     await pending;
     expect(page.events.filter((event) => event === "planner-request")).toHaveLength(1);
     expect(page.events.filter((event) => event.endsWith("-task"))).toEqual([]);
+});
+
+test("stopping a streamed reply preserves partial text and prevents a late image decision from submitting", async () => {
+    const decision = Promise.withResolvers<any>();
+    const page = pageSendHarness({ plan: decision.promise });
+    const pending = page.send();
+    for (let turn = 0; turn < 20 && !page.plannerCalls.length; turn++) await Promise.resolve();
+    page.plannerCalls[0]!.options.onDelta("**保留已收到的文字**");
+    page.stop(); page.stop();
+    expect(page.plannerCalls[0]!.options.signal.aborted).toBe(true);
+    decision.resolve({ kind: "image", action: "generate", prompt: "must not submit", content: "", references: [] });
+    await pending;
+    expect(page.sessionsRef.current[0]!.messages.at(-1)).toMatchObject({ content: "**保留已收到的文字**", stopped: true, role: "assistant" });
+    expect(page.taskOptions).toEqual([]);
+    expect(page.events.at(-1)).toBe("sending:false");
+});
+
+test("stopping after image submission keeps the original task marker instead of cancelling or resubmitting", async () => {
+    const result = Promise.withResolvers<any[]>();
+    const page = pageSendHarness({ plan: Promise.resolve({ kind: "image", action: "generate", prompt: "original", content: "", references: [] }), taskResult: result.promise });
+    const pending = page.send();
+    for (let turn = 0; turn < 30 && !page.bindings.activeSendRef.current?.submitted; turn++) await Promise.resolve();
+    expect(page.bindings.activeSendRef.current?.submitted).toBe(true);
+    page.stop(); result.resolve([{ id: "late-result", sourceTaskId: "task-result", dataUrl: "data:image/png;base64,AQID" }]); await pending;
+    const reply = page.sessionsRef.current[0]!.messages.at(-1);
+    expect(reply.pendingImageTask).toMatchObject({ taskId: "task-result", requestId: page.taskOptions[0]!.requestId });
+    expect(reply.content).toContain("计费不会因此取消");
+    expect(reply.stopped).toBe(true);
+    expect(reply.generatedImages).toBeUndefined(); expect(page.taskOptions).toHaveLength(1);
+    await page.send(); expect(page.taskOptions).toHaveLength(1);
+});
+
+test("stopping while the user turn is being saved creates no model call and keeps the saved message visible", async () => {
+    const gate = Promise.withResolvers<void>(), page = pageSendHarness();
+    const save = page.bindings.persistSessions; let first = true;
+    page.bindings.persistSessions = async value => { if (first) { first = false; await gate.promise; } await save(value); };
+    const pending = page.send(); page.stop(); gate.resolve(); await pending;
+    expect(page.plannerCalls).toEqual([]);
+    expect(page.sessionsRef.current[0]!.messages.map(item => item.role)).toEqual(["user", "assistant"]);
+    expect(page.sessionsRef.current[0]!.messages.at(-1).stopped).toBe(true);
+});
+
+test.each([undefined, "edited original"])("explicit replay branches from the original turn and retains the original full conversation (edit=%s)", async (content) => {
+    const page = pageSendHarness();
+    page.sessionsRef.current[0]!.messages.push(
+        { id: "old-user", role: "user", content: "original prompt", attachments: [], createdAt: "old" },
+        { id: "old-answer", role: "assistant", parentMessageId: "old-user", content: "original answer", createdAt: "old" },
+        { id: "future", role: "user", content: "future must not enter replay", createdAt: "old" },
+    );
+    const original = structuredClone(page.sessionsRef.current[0]);
+    await Promise.all([page.send({ messageId: "old-answer", content }), page.send({ messageId: "old-answer", content })]);
+    expect(page.plannerCalls).toHaveLength(1);
+    expect(page.plannerCalls[0]!.history).toEqual([]);
+    expect(page.plannerCalls[0]!.current.content).toBe(content || "original prompt");
+    expect(page.sessionsRef.current).toHaveLength(2);
+    expect(page.sessionsRef.current[1]).toEqual(original);
+    expect(page.sessionsRef.current[0]).toMatchObject({ branchOf: { sessionId: original!.id, messageId: "old-user" } });
 });

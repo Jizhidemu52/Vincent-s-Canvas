@@ -30,10 +30,16 @@ export function bundleBudgetViolations(entries) {
     });
 }
 
+// Vite's default content hash is eight characters. A separate workbench module
+// named project-session is not the canvas route and must not match this gate.
+export function isCanvasProjectBundle(name) {
+    return /^project-[A-Za-z0-9_-]{8}\.js$/.test(name);
+}
+
 function projectEntries(distDirectory) {
     const assetsDir = resolve(distDirectory, "assets");
     return readdirSync(assetsDir)
-        .filter((name) => /^project-.*\.js$/.test(name))
+        .filter(isCanvasProjectBundle)
         .map((name) => {
             const path = resolve(assetsDir, name);
             const content = readFileSync(path);

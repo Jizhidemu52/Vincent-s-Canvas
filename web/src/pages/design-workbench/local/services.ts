@@ -2,9 +2,12 @@ import localforage from "localforage";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { useUserStore } from "@/stores/use-user-store";
 import { createWorkbenchProjectStorage } from "./project-storage";
+import { imageToDataUrl } from "@/services/image-storage";
+import { uploadServerAsset } from "@/services/api/server-assets";
+import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 
 /** Page-owned resources: never share image data, pending imports, or toasts across owners. */
-export function createLocalWorkbenchServices(root: HTMLElement, ownerId: string | null, signal: AbortSignal) {
+export function createLocalWorkbenchServices(root: HTMLElement, ownerId: string | null, signal: AbortSignal, setDirty: (dirty: boolean) => void = () => {}, chooseAsset?: () => Promise<InsertAssetPayload | null>) {
     const persistence = createWorkbenchProjectStorage(
         createWorkspaceStorage("design_workbench_projects", { driver: localforage.INDEXEDDB }),
         ownerId,
@@ -137,7 +140,29 @@ export function createLocalWorkbenchServices(root: HTMLElement, ownerId: string 
         },
         { once: true },
     );
-    return { ...persistence, signal, loadImage, readImageFile, downloadBlob, notify };
+    async function pickImage() {
+        persistence.assertCurrent();
+        const asset = await chooseAsset?.();
+        persistence.assertCurrent();
+        if (!asset || asset.kind !== "image") return null;
+        const src = await imageToDataUrl(asset);
+        persistence.assertCurrent();
+        if (!/^data:image\/(png|jpeg|webp);base64,/i.test(src) || src.length > 21_000_000) throw new Error("请选择 15 MB 以内的 PNG、JPG 或 WebP 素材");
+        await loadImage(src);
+        return { src, name: asset.title.slice(0, 80) || "素材库图片" };
+    }
+    async function saveAsset(blob: Blob, name: string) {
+        persistence.assertCurrent();
+        const assetId = await uploadServerAsset(
+            new File([blob], name, { type: blob.type }),
+            { title: name, source: "design-workbench", module: "设计工作台", tags: ["工作台导出"] },
+            { expectedOwnerId: ownerId || undefined, signal, clientReferenceId: crypto.randomUUID() },
+        );
+        persistence.assertCurrent();
+        notify("已保存到素材库，可继续用于画布或生成参考图。");
+        return assetId;
+    }
+    return { ...persistence, signal, loadImage, readImageFile, downloadBlob, notify, setDirty, pickImage, saveAsset };
 }
 
 export type LocalWorkbenchServices = ReturnType<typeof createLocalWorkbenchServices>;

@@ -9,6 +9,7 @@ import { CanvasNodeType } from "@/types/canvas";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type * as Reuse from "@/lib/prompt-template-reuse";
 import type * as Insertion from "@/lib/canvas/prompt-canvas-insertion";
+import { isWorkspaceRole } from "../../shared/workspace-access";
 
 function load<T>(path: string, dependencies: Record<string, unknown>): T {
     const code = ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), { compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS } }).outputText;
@@ -54,6 +55,7 @@ function harness(options: { failResolve?: boolean; failHydrate?: boolean; failFl
         updateProject: (id: string, patch: unknown) => { steps.push("append"); patches.push(patch); state.projects = state.projects.map(project => project.id === id ? { ...project, ...patch as object } : project); },
     };
     const dependencies: Record<string, unknown> = {
+        "../../../../shared/workspace-access": { isWorkspaceRole },
         "@/lib/deployment-features": { deploymentFeatures: { authenticationEnabled: true } },
         "@/stores/use-user-store": { useUserStore: { getState: () => user, subscribe: (listener: (state: typeof user) => void) => { subscribers.add(listener); return () => subscribers.delete(listener); } } },
         "@/lib/workspace-session-events": { subscribeWorkspaceIdentity: (listener: (owner: string | null) => void) => { workspaceSubscribers.add(listener); return () => workspaceSubscribers.delete(listener); } },
@@ -156,13 +158,14 @@ test("latest graph is read after lazy loading and concurrent edits, including a 
     expect(h.state.projects[0].history?.future).toHaveLength(0);
 });
 
-test("missing/deleted targets, empty prompts, unavailable stores and administrators never create a replacement canvas", async () => {
+test("missing/deleted targets, empty prompts, unavailable stores and department admins never create a replacement canvas", async () => {
     const missing = harness(); await expect(missing.start("missing")).rejects.toThrow("不存在");
     const deleted = harness({ onHydrate: () => { deleted.state.projects = []; } }); await expect(deleted.start()).rejects.toThrow("已被删除");
     const unready = harness(); unready.state.hydrated = false; await expect(unready.start()).rejects.toThrow("仍在加载");
     const empty = harness(); empty.payload.template.prompt = " "; await expect(empty.start()).rejects.toThrow("为空");
-    const admin = harness(); admin.setOwner("admin", "super_admin"); await expect(admin.start()).rejects.toThrow("设计师");
-    for (const h of [missing, deleted, unready, empty, admin]) { expect(h.patches).toHaveLength(0); expect(h.steps).not.toContain("create"); }
+    const admin = harness(); admin.setOwner("admin", "super_admin"); expect(await admin.start()).toMatchObject({ projectId: "canvas" });
+    const department = harness(); department.setOwner("manager", "department_admin"); await expect(department.start()).rejects.toThrow("个人创作权限");
+    for (const h of [missing, deleted, unready, empty, department]) { expect(h.patches).toHaveLength(0); expect(h.steps).not.toContain("create"); }
 });
 
 test("identity changes, including A-B-A and cross-tab changes, cannot insert stale content", async () => {

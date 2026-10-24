@@ -2,12 +2,13 @@ import localforage from "localforage";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { useUserStore } from "@/stores/use-user-store";
 import { createStorageAccess } from "./storage-access";
+import { isWorkspaceRole } from "../../../shared/workspace-access";
 
 /** A page owns one immutable partition. Identity changes require a fresh bootstrap. */
 export function createWorkspaceStorage(storeName: string, options: Pick<LocalForageOptions, "driver"> = {}) {
     const enterprise = deploymentFeatures.authenticationEnabled;
     const { user, status } = useUserStore.getState();
-    const owner = enterprise && status === "authenticated" && user?.role === "designer" ? user.id : null;
+    const owner = enterprise && status === "authenticated" && user && isWorkspaceRole(user.role) ? user.id : null;
     const available = typeof window !== "undefined" && (!enterprise || Boolean(owner));
     const name = enterprise ? `wireless-canvas:oa:user:${encodeURIComponent(owner!)}` : "wireless-canvas";
     const storage = available ? localforage.createInstance({
@@ -16,7 +17,7 @@ export function createWorkspaceStorage(storeName: string, options: Pick<LocalFor
         ...options,
     }) : null;
     const access = storage ? createStorageAccess(name, () => storage.ready()) : null;
-    const hasIdentity = () => !enterprise || Boolean(owner && useUserStore.getState().status === "authenticated" && useUserStore.getState().user?.id === owner && useUserStore.getState().user?.role === "designer");
+    const hasIdentity = () => !enterprise || Boolean(owner && useUserStore.getState().status === "authenticated" && useUserStore.getState().user?.id === owner && isWorkspaceRole(useUserStore.getState().user?.role));
     const isCurrent = () => available && hasIdentity();
     const assertIdentity = () => {
         if (!hasIdentity()) throw new Error("员工会话已变化，请重新登录后进入工作区");

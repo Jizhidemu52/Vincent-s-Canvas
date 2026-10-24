@@ -11,11 +11,12 @@ import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
 import { standaloneEdition } from "@/lib/standalone-edition";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { nextProjectTitle } from "@/lib/project-title";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
-import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
+import { isModuleAvailable, useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
 import type { ModuleKey } from "@/services/api/modules";
 
 const groupLabels: Record<NavigationGroup, string> = {
@@ -26,7 +27,7 @@ const groupLabels: Record<NavigationGroup, string> = {
 
 function BrandMark() {
     return (
-        <Link to="/" className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-black text-white shadow-sm" aria-label="无线画布首页">
+        <Link to="/" className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm" aria-label="无线画布首页">
             <span
                 className="size-5 bg-current"
                 style={{
@@ -87,7 +88,7 @@ function SidebarFooter({ adminVisible }: { adminVisible: boolean }) {
     const buttonClass = "wb-nav-link flex h-10 w-full items-center gap-2 rounded-lg px-3";
 
     return (
-        <div className="space-y-1 border-t border-stone-200 pt-3">
+        <div className="space-y-1 border-t border-border pt-3">
             {adminVisible && deploymentFeatures.rolePortalsEnabled ? (
                 <button type="button" className={buttonClass} onClick={() => navigate("/admin?tab=api")}>
                     <Link2 className="size-4 text-stone-400" />
@@ -128,7 +129,8 @@ export function AppTopNav() {
     const hideShell = /^\/canvas\/[^/]+/.test(pathname) || pathname === "/login" || pathname === "/admin/login";
     const activeToolSlug = getActiveToolSlug(pathname, search);
     const createProject = useCanvasStore((state) => state.createProject);
-    const projectsLength = useCanvasStore((state) => state.projects.length);
+    const hydrated = useCanvasStore((state) => state.hydrated);
+    const canvasEnabled = useModuleEnabled("canvas");
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const businessConfigStatus = useBusinessConfigStore((state) => state.status);
     const configVisible = useCanManageConfig();
@@ -151,7 +153,9 @@ export function AppTopNav() {
     };
 
     const createAndEnter = () => {
-        const id = createProject(`无线画布 ${projectsLength + 1}`);
+        const current = useCanvasStore.getState();
+        if (!current.hydrated || !canvasEnabled) return;
+        const id = createProject(nextProjectTitle(current.projects));
         navigate(`/canvas/${id}`);
     };
 
@@ -162,10 +166,10 @@ export function AppTopNav() {
                     <aside className="wb-sidebar hidden h-dvh w-[216px] shrink-0 flex-col px-4 py-5 md:flex">
                         <div className="flex items-center gap-2">
                             <BrandMark />
-                            <button type="button" onClick={createAndEnter} className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md !bg-black px-3 text-[12px] font-bold !text-white shadow-sm transition hover:!bg-stone-800">
-                                <Plus className="size-3.5 !text-white" />
+                            {canvasEnabled && <button type="button" disabled={!hydrated} onClick={createAndEnter} className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md bg-foreground px-3 text-[12px] font-bold text-background shadow-sm transition hover:opacity-85 disabled:cursor-wait disabled:opacity-50">
+                                <Plus className="size-3.5" />
                                 新建项目
-                            </button>
+                            </button>}
                         </div>
                         <nav className="hide-scrollbar mt-6 min-h-0 flex-1 space-y-5 overflow-y-auto pb-6">
                             <FrequentNavigation />
@@ -197,11 +201,11 @@ export function AppTopNav() {
                             无线画布
                         </Link>
                         <div className="flex items-center gap-2">
-                            <button type="button" className="inline-flex h-9 items-center gap-1.5 rounded-md bg-black px-3 text-xs font-bold text-white" onClick={createAndEnter}>
+                            {canvasEnabled && <button type="button" disabled={!hydrated} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-bold text-background disabled:cursor-wait disabled:opacity-50" onClick={createAndEnter}>
                                 <Plus className="size-4" />
                                 新建
-                            </button>
-                            <button type="button" className="inline-flex size-9 items-center justify-center rounded-md border border-stone-200 bg-white text-stone-950" onClick={() => setMobileNavOpen(true)} aria-label="打开导航菜单" title="导航菜单">
+                            </button>}
+                            <button type="button" className="inline-flex size-9 items-center justify-center rounded-md border border-border bg-card text-foreground" onClick={() => setMobileNavOpen(true)} aria-label="打开导航菜单" title="导航菜单">
                                 <Menu className="size-5" />
                             </button>
                         </div>

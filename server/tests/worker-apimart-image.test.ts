@@ -45,8 +45,10 @@ test("Worker isolates PNG mask, persists Mark upstream ID and deadline, then yie
   const h = harness(), task = newTask();
   await expect(h.execute(task, { apiKey: "fixture-only" })).rejects.toMatchObject({ nextPollMs: 3_000 });
   expect(h.loaded()).toBe(1);
-  expect(h.calls[0]!.sourceDataUrls).toHaveLength(2);
-  expect(h.calls[0]!.maskDataUrl).toBe(`data:image/png;base64,${bytes.toString("base64")}`);
+  expect(h.calls[0]!.sourceImages).toHaveLength(2);
+  expect(h.calls[0]!.sourceImages[0].bytes).toBe(bytes);
+  expect(h.calls[0]!.maskImage.bytes).toBe(bytes);
+  expect(h.calls[0]!.sourceDataUrls).toBeUndefined();
   expect(h.calls[0]!.parameters).toMatchObject({ quality: "xhigh", resolution: "4k" });
   expect(task.upstream_task_id).toBe("provider-image-task");
   expect(task.upstream_submission_started_at).not.toBeNull();
@@ -64,7 +66,7 @@ test("Worker resumes original upstream image without loading or uploading refere
   expect(h.loaded()).toBe(0);
   expect(h.statements).toHaveLength(0);
   expect(h.calls[0]!.upstreamTaskId).toBe("existing-task");
-  expect(h.calls[0]!.sourceDataUrls).toHaveLength(0);
+  expect(h.calls[0]!.sourceImages).toHaveLength(0);
   expect(h.downloaded()).toBe(2);
 });
 

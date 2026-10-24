@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { create } from "zustand";
 import ts from "typescript";
+import { isWorkspaceRole } from "../../shared/workspace-access";
 
 function transpile(path: string) {
     return ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext } }).outputText;
@@ -22,10 +23,20 @@ function session() {
         return pending.promise;
     });
     const exports: any = {};
-    new Function("exports", "require", storeCode)(exports, (name: string) => name === "zustand" ? { create } : name === "@/lib/workspace-session-events" ? { broadcastWorkspaceIdentity(owner: string | null) { broadcasts.push(owner); } } : api);
+    new Function("exports", "require", storeCode)(exports, (name: string) => name === "zustand" ? { create } : name === "../../../shared/workspace-access" ? { isWorkspaceRole } : name === "@/lib/workspace-session-events" ? { broadcastWorkspaceIdentity(owner: string | null) { broadcasts.push(owner); } } : api);
     const store = exports.useUserStore;
     return { requests, broadcasts, store, api, state: () => store.getState() };
 }
+
+test("super-admin password login broadcasts its own personal owner without making a department workspace", async () => {
+    for (const role of ["super_admin", "department_admin"]) {
+        const s = session();
+        const login = s.state().loginWithPassword("admin", "FixtureOnly2026", "admin");
+        s.requests[0].resolve(Response.json({ user: { ...employee("admin"), role } }));
+        await login;
+        expect(s.broadcasts).toEqual([role === "super_admin" ? "admin" : null]);
+    }
+});
 
 test("known identity survives network and 5xx outages without losing its working session", async () => {
     for (const status of [null, 500, 503]) {

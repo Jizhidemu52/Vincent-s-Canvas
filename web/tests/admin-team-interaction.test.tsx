@@ -79,6 +79,7 @@ describe("admin/team interaction guards", () => {
         const pending = [deferred<any>(), deferred<any>()];
         let calls = 0;
         const harness = componentHarness("../src/pages/team/index.tsx", "default", {
+            "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: true } },
             "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user, hydrateSession: async () => undefined }) },
             "@/stores/use-module-store": { useModuleStore: (selector: any) => selector({ flags: { performance: false } }) },
             "./team-overview": { loadTeamOverview: () => pending[calls++].promise },
@@ -99,6 +100,7 @@ describe("admin/team interaction guards", () => {
         const pending = deferred<any>();
         let submitted = 0;
         const harness = componentHarness("../src/pages/team/index.tsx", "default", {
+            "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: true } },
             "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user: { id: "user", groupId: "group", groupRole: "member", creditBalance: 100 }, hydrateSession: async () => undefined }) },
             "@/stores/use-module-store": { useModuleStore: (selector: any) => selector({ flags: { performance: false } }) },
             "./team-overview": { loadTeamOverview: async () => ({ myCredits: { policy: {}, wallet: {}, requests: [] }, errors: [] }) },
@@ -112,6 +114,20 @@ describe("admin/team interaction guards", () => {
         expect(harness.render().find((element) => typeof element.props.onFinish === "function")!.props.disabled).toBe(true);
         pending.resolve({}); await first;
         expect(harness.render().find((element) => typeof element.props.onFinish === "function")!.props.disabled).toBe(false);
+        harness.unmount();
+    });
+
+    test("disabled credits hide the direct team URL without loading credit endpoints", async () => {
+        let loaded = 0;
+        const harness = componentHarness("../src/pages/team/index.tsx", "default", {
+            "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: false } },
+            "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user: { id: "user", groupId: "group", groupRole: "leader" } }) },
+            "@/stores/use-module-store": { useModuleStore: (selector: any) => selector({ flags: {} }) },
+            "./team-overview": { loadTeamOverview: async () => { loaded++; return {}; } },
+        });
+        expect(harness.render().some(element => element.props.to === "/" && element.props.replace)).toBe(true);
+        await settle();
+        expect(loaded).toBe(0);
         harness.unmount();
     });
 

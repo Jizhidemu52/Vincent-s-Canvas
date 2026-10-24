@@ -9,7 +9,7 @@ import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { resolveToolConfig } from "./tool-runtime";
 
-type RequestOptions = { signal?: AbortSignal; toolKey?: "video" | "canvas-video"; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: VideoGenerationTask) => void | Promise<void> };
+type RequestOptions = { signal?: AbortSignal; cancelOnAbort?: () => boolean; toolKey?: "video" | "canvas-video"; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: VideoGenerationTask) => void | Promise<void> };
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; requestId?: string; provider: "server"; model: string };
@@ -25,7 +25,7 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions, happyHorseMode?: HappyHorseMode): Promise<VideoGenerationTask> {
     const input = await queuedVideoInput(config, prompt, references, videoReferences, audioReferences, options, happyHorseMode);
     const task = await submitQueuedMediaTask(input);
-    return { id: task.id, provider: "server", model: input.modelId };
+    return { id: task.id, requestId: task.requestId, provider: "server", model: input.modelId };
 }
 
 export async function recoverVideoGenerationTask(task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
@@ -113,6 +113,7 @@ async function queuedVideoInput(config: AiConfig, prompt: string, references: Re
         sourceMetadata,
         sourceOrder,
         signal: options?.signal,
+        cancelOnAbort: options?.cancelOnAbort,
         onSubmissionStarted: options?.onSubmissionStarted,
     };
 }

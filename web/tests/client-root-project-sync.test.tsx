@@ -81,11 +81,20 @@ test("root refresh polls visible workspaces, skips hidden pages and catches up o
     } finally { harness.close(); }
 });
 
-test("password administrator pages never start employee project or workspace polling", async () => {
-    const harness = mountHarness("super_admin", false);
+test("department administrator pages never start personal project or workspace polling", async () => {
+    const harness = mountHarness("department_admin", false);
     try {
         await settle(); harness.refresh(); await settle();
         expect(harness.calls).toEqual({ identity: 0, models: 0, modules: 0, projects: [] });
+    } finally { harness.close(); }
+});
+
+test("super-admin pages refresh workspace configuration and sync only their own project metadata", async () => {
+    const harness = mountHarness("super_admin");
+    try {
+        await settle();
+        expect(harness.calls.projects).toEqual([{ owner: "employee-a", id: "same-project", title: "初稿" }]);
+        expect([harness.calls.identity, harness.calls.models, harness.calls.modules]).toEqual([1, 1, 1]);
     } finally { harness.close(); }
 });
 

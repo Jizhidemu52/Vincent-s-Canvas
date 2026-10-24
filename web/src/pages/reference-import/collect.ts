@@ -22,6 +22,8 @@ export async function collectReferencePage(options: {
     onImage: (image: ReturnType<typeof decodeReference>) => void;
     onFailure: (name: string, reason: string) => void;
     onProgress: (completed: number, total: number) => void;
+    scan?: ReferenceScan;
+    candidateIds?: readonly string[];
 }) {
     const { ownerId, signal } = options;
     const check = () => {
@@ -29,25 +31,35 @@ export async function collectReferencePage(options: {
         if (options.getOwner() !== ownerId) throw new ReferenceRequestError("员工身份已变化，本批采集已停止", 403);
     };
     check();
-    const scan = await scanReferencePage(normalizePageUrl(options.url), ownerId, signal);
+    const scan = options.scan ?? await scanReferencePage(normalizePageUrl(options.url), ownerId, signal);
     check();
     options.onScan(scan);
     let totalBytes = 0;
-    const candidates = scan.candidates.slice(0, MAX_IMAGES);
-    for (const [index, candidate] of candidates.entries()) {
-        check();
-        try {
-            const raw = await fetchReferenceImage(scan.scanId, candidate.id, ownerId, signal);
+    const selected = options.candidateIds && new Set(options.candidateIds);
+    if (selected && (selected.size > MAX_IMAGES || [...selected].some(id => !scan.candidates.some(candidate => candidate.id === id)))) throw new Error("请选择当前候选列表内的最多 20 张图片");
+    const candidates = selected ? scan.candidates.filter(candidate => selected.has(candidate.id)) : scan.candidates.slice(0, MAX_IMAGES);
+    for (let index = 0; index < candidates.length; index += 2) {
+        // The service allows two concurrent reads per employee. Keep ordered
+        // delivery and byte accounting even when the later request finishes first.
+        const batch = candidates.slice(index, index + 2);
+        const responses = await Promise.allSettled(batch.map(async candidate => {
             check();
-            const image = decodeReference(raw);
-            if (totalBytes + image.file.size > MAX_TOTAL_BYTES) throw new Error("本批图片总大小超过 30 MiB，请减少图片后重试");
-            totalBytes += image.file.size;
-            options.onImage(image);
-        } catch (error) {
+            return fetchReferenceImage(scan.scanId, candidate.id, ownerId, signal);
+        }));
+        for (const [offset, response] of responses.entries()) {
             check();
-            if (error instanceof ReferenceRequestError && [401, 403].includes(error.status)) throw error;
-            options.onFailure(candidate.name, error instanceof Error ? error.message : "图片读取失败");
+            try {
+                if (response.status === "rejected") throw response.reason;
+                const image = decodeReference(response.value);
+                if (totalBytes + image.file.size > MAX_TOTAL_BYTES) throw new Error("本批图片总大小超过 30 MiB，请减少图片后重试");
+                totalBytes += image.file.size;
+                options.onImage(image);
+            } catch (error) {
+                check();
+                if (error instanceof ReferenceRequestError && [401, 403].includes(error.status)) throw error;
+                options.onFailure(batch[offset]!.name, error instanceof Error ? error.message : "图片读取失败");
+            }
+            options.onProgress(index + offset + 1, candidates.length);
         }
-        options.onProgress(index + 1, candidates.length);
     }
 }

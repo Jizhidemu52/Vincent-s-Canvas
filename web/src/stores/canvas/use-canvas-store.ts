@@ -12,6 +12,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, CanvasNodeGroup, ViewportTransform } from "@/types/canvas";
 import type { CanvasProjectSummary } from "@/lib/canvas/canvas-project-summary";
+import { isWorkspaceRole } from "../../../../shared/workspace-access";
 
 export type CanvasProject = {
     id: string;
@@ -48,12 +49,12 @@ type CanvasStore = {
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
 const initialSession = useUserStore.getState();
-const canvasOwnerId = deploymentFeatures.authenticationEnabled && initialSession.status === "authenticated" && initialSession.user?.role === "designer" ? initialSession.user.id : null;
+const canvasOwnerId = deploymentFeatures.authenticationEnabled && initialSession.status === "authenticated" && initialSession.user && isWorkspaceRole(initialSession.user.role) ? initialSession.user.id : null;
 const CANVAS_STORE_KEY = deploymentFeatures.authenticationEnabled
     ? `wireless-canvas:canvas_store:oa:user:${encodeURIComponent(canvasOwnerId || "")}`
     : "wireless-canvas:canvas_store";
 let canvasOwnerValid = !deploymentFeatures.authenticationEnabled || Boolean(canvasOwnerId);
-const isCanvasOwnerValid = () => canvasOwnerValid && (!canvasOwnerId || (useUserStore.getState().status === "authenticated" && useUserStore.getState().user?.id === canvasOwnerId && useUserStore.getState().user?.role === "designer"));
+const isCanvasOwnerValid = () => canvasOwnerValid && (!canvasOwnerId || (useUserStore.getState().status === "authenticated" && useUserStore.getState().user?.id === canvasOwnerId && isWorkspaceRole(useUserStore.getState().user?.role)));
 const cloudPersistence = canvasOwnerId ? createCloudCanvasPersistence(canvasOwnerId, CANVAS_STORE_KEY, {
     valid: isCanvasOwnerValid,
     status: (cloudStatus, cloudError = "") => { if (isCanvasOwnerValid() && !lastPersistError) useCanvasStore.setState({ cloudStatus, cloudError }); },
@@ -277,7 +278,7 @@ export const useCanvasStore = create<CanvasStore>()(
 if (deploymentFeatures.authenticationEnabled && canvasOwnerId) {
     let restartingForOwner = false;
     useUserStore.subscribe((state) => {
-        if (restartingForOwner || (state.status === "authenticated" && state.user?.id === canvasOwnerId && state.user.role === "designer")) return;
+        if (restartingForOwner || (state.status === "authenticated" && state.user?.id === canvasOwnerId && isWorkspaceRole(state.user.role))) return;
         // A cookie may change in another tab. Never reuse a live editor or its
         // debounce/retry buffers for a different employee. Drain the old owner's
         // immutable storage key, hide the workspace, then bootstrap a fresh one.

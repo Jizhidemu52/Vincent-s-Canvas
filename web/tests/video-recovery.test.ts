@@ -83,3 +83,20 @@ test("refused recovery remains actionable and never falls through to generation"
   await expect(recoverQueuedMedia(task.id)).rejects.toMatchObject({ taskId: task.id, canRecover: false });
   expect(calls).toEqual(["POST:/api/tasks/original-task/recover"]);
 });
+
+test("stopping a recovered observation never sends cancellation for the original paid task", async () => {
+  const controller = new AbortController();
+  const calls: string[] = [];
+  respond((url, method) => {
+    calls.push(`${method}:${url}`);
+    if (url.endsWith("/recover")) return { recovered: true, task: { ...task, status: "waiting" } };
+    if (url === "/api/tasks/original-task") {
+      controller.abort();
+      throw new DOMException("stopped", "AbortError");
+    }
+    if (url === "/api/auth/session") return { user: null };
+    throw new Error(`Unexpected ${method} ${url}`);
+  });
+  await expect(recoverQueuedMedia(task.id, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+  expect(calls.filter(call => call.startsWith("POST:"))).toEqual(["POST:/api/tasks/original-task/recover"]);
+});

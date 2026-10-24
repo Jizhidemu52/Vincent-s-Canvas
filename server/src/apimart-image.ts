@@ -7,14 +7,19 @@ import { isPublicHttpUrl, uploadApiMartImage, validateApiMartGenerationImage } f
 type MarkImageModel = "gpt-image-2.5-flare" | "gpt-image-2.5-sunburst" | "gemini-nano-banana-2.1";
 type GrokImageModel = "grok-imagine-image-2.0";
 export type ApiMartImageModel = "gpt-image-2" | "gemini-3.1-flash-image-preview" | "midjourney" | "midjourney-blend" | MarkImageModel | GrokImageModel;
+export type ApiMartImageBytes = { bytes: Uint8Array; mimeType: string; filename?: string };
+type ImageReference = string | ApiMartImageBytes;
 
 export type ApiMartImageInput = {
   modelId: string;
   prompt: string;
   parameters: Record<string, unknown>;
   sourceDataUrls?: string[];
+  /** Owned source bytes stay binary until an upload or inline-JSON boundary. */
+  sourceImages?: ImageReference[];
   /** Already-authorized PNG mask; the caller verifies alpha and source dimensions. */
   maskDataUrl?: string;
+  maskImage?: ApiMartImageBytes;
 };
 
 export type ApiMartImageRequest = {
@@ -54,20 +59,23 @@ export function apiMartImageModel(modelId: string): ApiMartImageModel | null {
 }
 
 export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImageRequest {
+  return buildImageRequest(input, true);
+}
+
+function buildImageRequest(input: ApiMartImageInput, encodeReferences: boolean): ApiMartImageRequest {
   const kind = apiMartImageModel(input.modelId);
   if (!kind) throw new Error(`不支持的 APIMart 图片模型：${input.modelId}`);
-  if (isMarkImageModel(kind)) return buildMarkImageRequest(input, kind);
+  if (isMarkImageModel(kind)) return buildMarkImageRequest(input, kind, false, encodeReferences);
   if (kind === "grok-imagine-image-2.0") return buildGrokImageRequest(input);
 
-  const references = input.sourceDataUrls || [];
+  const references = imageReferences(input);
   if (kind === "midjourney-blend") {
     if (references.length < 2 || references.length > 4)
       throw new Error("Midjourney Blend requires 2 to 4 reference images");
-    if (input.maskDataUrl !== undefined) throw new Error("Midjourney Blend 不支持独立蒙版");
+    if (input.maskDataUrl !== undefined || input.maskImage !== undefined) throw new Error("Midjourney Blend 不支持独立蒙版");
     if (input.parameters.n !== undefined && input.parameters.n !== 1) throw new Error("每个 Midjourney Blend 任务只能提交一次融合");
     for (const reference of references) {
-      if (typeof reference !== "string") throw new Error("Blend 参考图必须为公开 HTTP(S) URL 或有效图片 Data URL");
-      if (reference.startsWith("data:")) {
+      if (typeof reference !== "string" || reference.startsWith("data:")) {
         if (decodeGenerationReference(reference).bytes.byteLength > 12 * 1024 * 1024) throw new Error("Midjourney Blend 单张参考图不能超过 12 MiB");
       } else if (!isPublicHttpUrl(reference)) throw new Error("Blend 参考图必须为公开 HTTP(S) URL；本地图片请先上传");
     }
@@ -80,7 +88,7 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
     return {
       path: "/midjourney/generations/blend",
       payload: {
-        image_urls: references,
+        image_urls: referencePayload(references, encodeReferences),
         ...(size !== undefined ? { size } : {}),
         speed: enumParameter(input.parameters.speed !== undefined ? input.parameters.speed : input.parameters.midjourneySpeed, ["relax", "fast", "turbo"], "speed", "relax"),
         ...options,
@@ -98,7 +106,7 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
         prompt: input.prompt,
         size: normalizeAspect(input.parameters.size, kind),
         ...(input.parameters.midjourneyVersion ? { version: String(input.parameters.midjourneyVersion) } : {}),
-        ...(references.length ? { image_urls: references } : {}),
+        ...(references.length ? { image_urls: referencePayload(references, encodeReferences) } : {}),
         speed: normalizeMidjourneySpeed(input.parameters.midjourneySpeed),
         ...apiMartImageOptions(input.parameters, kind),
       },
@@ -120,7 +128,7 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
     resolution: kind === "gpt-image-2" ? normalizeGptResolution(input.parameters.resolution) : normalizeGeminiResolution(input.parameters.resolution),
     ...apiMartImageOptions(input.parameters, kind),
   };
-  if (references.length) payload.image_urls = references;
+  if (references.length) payload.image_urls = referencePayload(references, encodeReferences);
   if (kind === "gemini-3.1-flash-image-preview") {
     if (String(payload.model).endsWith("-official")) delete payload.official_fallback;
     if (input.parameters.officialFallback === true && !String(payload.model).endsWith("-official")) payload.official_fallback = true;
@@ -139,22 +147,21 @@ function isMarkImageModel(kind: ApiMartImageModel): kind is MarkImageModel {
 }
 
 /** Official Grok 2.0 is distinct from the text-only Ext endpoint contract. */
-function buildGrokImageRequest(input: ApiMartImageInput, allowInlineReferences = false): ApiMartImageRequest {
+function buildGrokImageRequest(input: ApiMartImageInput, allowInlineReferences = false, encodeReferences = true): ApiMartImageRequest {
   const prompt = input.prompt.trim();
   if (!prompt || prompt.length > 8000) throw new Error("Grok 2.0 图片描述不能为空，且不能超过 8000 个字符");
   const parameters = input.parameters;
   if (parameters.n !== undefined && parameters.n !== 1) throw new Error("画布已拆分批量任务，每个 Grok 图片任务的 n 必须为 1");
-  if (input.maskDataUrl !== undefined) throw new Error("Grok 2.0 不支持独立蒙版参数");
-  const references = input.sourceDataUrls || [];
+  if (input.maskDataUrl !== undefined || input.maskImage !== undefined) throw new Error("Grok 2.0 不支持独立蒙版参数");
+  const references = imageReferences(input);
   if (references.length > 3) throw new Error("Grok 2.0 最多支持 3 张参考图");
   for (const reference of references) {
-    if (typeof reference !== "string") throw new Error("Grok 参考图必须为公开 HTTP(S) URL");
-    if (allowInlineReferences && reference.startsWith("data:")) {
+    if (allowInlineReferences && (typeof reference !== "string" || reference.startsWith("data:"))) {
       const source = decodeGenerationReference(reference);
       if (!["image/jpeg", "image/png", "image/webp"].includes(source.mimeType) || source.bytes.byteLength > 10 * 1024 * 1024) {
         throw new Error("Grok 参考图仅支持不超过 10 MiB 的 JPEG、PNG 或 WebP");
       }
-    } else if (!isPublicHttpUrl(reference)) throw new Error("Grok 参考图必须为公开 HTTP(S) URL；本地图片请先上传");
+    } else if (typeof reference !== "string" || !isPublicHttpUrl(reference)) throw new Error("Grok 参考图必须为公开 HTTP(S) URL；本地图片请先上传");
   }
   const payload: Record<string, unknown> = {
     model: "grok-imagine-image-2.0", prompt, n: 1,
@@ -162,7 +169,7 @@ function buildGrokImageRequest(input: ApiMartImageInput, allowInlineReferences =
     resolution: enumParameter(parameters.resolution, ["1k", "2k"], "resolution", "1k"),
   };
   // Quality is text-to-image only. A previous UI value must never leak into an edit request.
-  if (references.length) payload.image_urls = references;
+  if (references.length) payload.image_urls = referencePayload(references, encodeReferences);
   else payload.quality = enumParameter(parameters.quality, ["low", "medium"], "quality", "medium");
   if (parameters.nsfw_check !== undefined) {
     if (typeof parameters.nsfw_check !== "boolean") throw new Error("nsfw_check 必须为布尔值");
@@ -172,7 +179,7 @@ function buildGrokImageRequest(input: ApiMartImageInput, allowInlineReferences =
 }
 
 /** These exact models have a different contract from the legacy GPT2/Nano2 aliases. */
-function buildMarkImageRequest(input: ApiMartImageInput, model: MarkImageModel, allowInlineGptReferences = false): ApiMartImageRequest {
+function buildMarkImageRequest(input: ApiMartImageInput, model: MarkImageModel, allowInlineGptReferences = false, encodeReferences = true): ApiMartImageRequest {
   if (!input.prompt.trim()) throw new Error("请填写图像生成或编辑描述");
   const gpt = model !== "gemini-nano-banana-2.1";
   const parameters = input.parameters;
@@ -182,12 +189,11 @@ function buildMarkImageRequest(input: ApiMartImageInput, model: MarkImageModel, 
   for (const key of unsupported) if (parameters[key] !== undefined) throw new Error(`${model} 不支持参数 ${key}`);
   if (parameters.n !== undefined && parameters.n !== 1) throw new Error("画布已拆分批量任务，每个 APIMart 图片任务的 n 必须为 1");
 
-  const references = input.sourceDataUrls || [];
+  const references = imageReferences(input);
   if (gpt && references.length > 16) throw new Error("GPT-Image-2.5 最多支持 16 张参考图");
   for (const reference of references) {
-    if (typeof reference !== "string") throw new Error("参考图必须为公开 HTTP(S) URL 或有效图片 Data URL");
-    if (reference.startsWith("data:") && (!gpt || allowInlineGptReferences)) decodeGenerationReference(reference);
-    else if (!isPublicHttpUrl(reference)) throw new Error("参考图必须为公开 HTTP(S) URL；本地图片请先上传");
+    if ((typeof reference !== "string" || reference.startsWith("data:")) && (!gpt || allowInlineGptReferences)) decodeGenerationReference(reference);
+    else if (typeof reference !== "string" || !isPublicHttpUrl(reference)) throw new Error("参考图必须为公开 HTTP(S) URL；本地图片请先上传");
   }
 
   const payload: Record<string, unknown> = {
@@ -195,7 +201,7 @@ function buildMarkImageRequest(input: ApiMartImageInput, model: MarkImageModel, 
     resolution: normalizeMarkResolution(parameters.resolution, gpt),
   };
   if (parameters.size !== undefined) payload.size = normalizeMarkSize(parameters.size, gpt);
-  if (references.length) payload.image_urls = references;
+  if (references.length) payload.image_urls = referencePayload(references, encodeReferences);
   if (gpt) {
     payload.quality = enumParameter(parameters.quality, ["auto", "low", "medium", "high", "xhigh", "max"], "quality", "auto");
     for (const [key, allowed] of Object.entries({ output_format: ["png", "jpeg", "webp"], background: ["auto", "opaque", "transparent"], moderation: ["auto", "low"] })) {
@@ -210,12 +216,13 @@ function buildMarkImageRequest(input: ApiMartImageInput, model: MarkImageModel, 
       payload.output_compression = compression;
     }
   }
-  if (input.maskDataUrl !== undefined) {
+  const maskInput = input.maskImage ?? input.maskDataUrl;
+  if (maskInput !== undefined) {
     if (!gpt) throw new Error("Nano 2.1 不支持独立蒙版参数");
     if (!references.length) throw new Error("蒙版编辑必须提供第一张原图");
-    const mask = decodeGenerationReference(input.maskDataUrl);
+    const mask = decodeGenerationReference(maskInput);
     if (mask.mimeType !== "image/png" || mask.bytes.byteLength >= 4 * 1024 * 1024) throw new Error("蒙版必须为小于 4MB 的 PNG Data URL");
-    payload.mask_url = input.maskDataUrl;
+    payload.mask_url = typeof maskInput === 'string' ? maskInput : imageDataUrl(maskInput);
   }
   return { path: "/images/generations", payload, pollIntervalMs: gpt ? 2_000 : 3_000, timeoutMs: 15 * 60_000 };
 }
@@ -246,7 +253,20 @@ function normalizeMarkSize(value: unknown, gpt: boolean) {
   throw new Error(`${gpt ? "GPT2.5" : "Nano 2.1"} 不支持尺寸或比例 ${size}`);
 }
 
-function decodeGenerationReference(value: string) {
+function imageReferences(input: ApiMartImageInput): ImageReference[] { return input.sourceImages ?? input.sourceDataUrls ?? []; }
+
+function imageDataUrl(source: ApiMartImageBytes) {
+  return `data:${source.mimeType};base64,${Buffer.from(source.bytes.buffer, source.bytes.byteOffset, source.bytes.byteLength).toString('base64')}`;
+}
+
+function referencePayload(references: ImageReference[], encode: boolean) {
+  // Upload-only request builders retain the original views until every upload
+  // succeeds; stepApiMartImageTask replaces this field before serialization.
+  return references.map(reference => typeof reference === 'string' || !encode ? reference : imageDataUrl(reference));
+}
+
+function decodeGenerationReference(value: ImageReference): ApiMartImageBytes {
+  if (typeof value !== 'string') { validateApiMartGenerationImage(value); return value; }
   const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]*={0,2})$/.exec(value);
   if (!match || match[2]!.length % 4 !== 0) throw new Error("参考图必须为有效的 JPEG/PNG/WebP/GIF Base64 Data URL");
   const bytes = Buffer.from(match[2]!, "base64");
@@ -370,10 +390,13 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
       headers["idempotency-key"] = input.submissionKey;
     }
     // Validate ALL parameters and local reference bytes before the first upload.
-    const request = isMarkImageModel(kind) ? buildMarkImageRequest(input, kind, true)
-      : kind === "grok-imagine-image-2.0" ? buildGrokImageRequest(input, true) : buildApiMartImageRequest(input);
-    if ((isMarkImageModel(kind) || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0") && input.sourceDataUrls?.length) {
-      request.payload.image_urls = await uploadApiMartImageReferences(input.sourceDataUrls, baseUrl, input.apiKey, runtime);
+    const uploadsReferences = isMarkImageModel(kind) || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0";
+    const sources = imageReferences(input).map(reference => uploadsReferences && typeof reference === 'string' && reference.startsWith('data:') ? decodeGenerationReference(reference) : reference);
+    const preparedInput = { ...input, sourceImages: sources };
+    const request = isMarkImageModel(kind) ? buildMarkImageRequest(preparedInput, kind, true, false)
+      : kind === "grok-imagine-image-2.0" ? buildGrokImageRequest(preparedInput, true, false) : buildImageRequest(preparedInput, !uploadsReferences);
+    if (uploadsReferences && sources.length) {
+      request.payload.image_urls = await uploadApiMartImageReferences(sources, baseUrl, input.apiKey, runtime);
     }
     pollIntervalMs = request.pollIntervalMs;
     // Persist the intent immediately before the paid POST. Never retry a POST here.
@@ -408,7 +431,7 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
 }
 
 /** Stop claiming new references after failure, but drain every upload already started. */
-async function uploadApiMartImageReferences(sources: string[], baseUrl: string, apiKey: string, runtime: ImageRuntime) {
+async function uploadApiMartImageReferences(sources: ImageReference[], baseUrl: string, apiKey: string, runtime: ImageRuntime) {
   const references = new Array<string>(sources.length);
   let nextIndex = 0, failed = false;
   let firstFailure: unknown;
@@ -416,7 +439,7 @@ async function uploadApiMartImageReferences(sources: string[], baseUrl: string, 
     while (!failed && nextIndex < sources.length) {
       const index = nextIndex++, source = sources[index]!;
       try {
-        references[index] = source.startsWith("data:")
+        references[index] = typeof source !== 'string' || source.startsWith("data:")
           ? await uploadApiMartImage({ baseUrl, apiKey, ...decodeGenerationReference(source), purpose: "image" }, { fetch: runtime.fetch })
           : source;
       } catch (error) {
@@ -456,10 +479,16 @@ function normalizeAspect(value: unknown, kind: ApiMartImageModel) {
   throw new Error(`${kind} 不支持尺寸或比例 ${raw}，请按当前模型的参数面板重新选择`);
 }
 
-function validateInlineReferences(references: string[], kind: ApiMartImageModel) {
+function validateInlineReferences(references: ImageReference[], kind: ApiMartImageModel) {
   const perImage = kind === "gpt-image-2" ? 20 * 1024 * 1024 : kind === "gemini-3.1-flash-image-preview" ? 10 * 1024 * 1024 : 12 * 1024 * 1024;
   let totalBytes = 0;
   for (const reference of references) {
+    if (typeof reference !== 'string') {
+      if (kind === "gemini-3.1-flash-image-preview" && !["image/jpeg", "image/png", "image/webp"].includes(reference.mimeType)) throw new Error("Gemini 参考图仅支持 JPEG、PNG 或 WebP");
+      totalBytes += reference.bytes.byteLength;
+      if (reference.bytes.byteLength > perImage) throw new Error(`单张参考图超过 ${perImage / 1024 / 1024} MB，请压缩后重试`);
+      continue;
+    }
     if (!reference.startsWith("data:")) continue;
     const match = reference.match(/^data:([^;,]+);base64,(.*)$/s);
     if (!match) throw new Error("参考图必须为完整的 base64 Data URI");

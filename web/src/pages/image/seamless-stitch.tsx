@@ -11,6 +11,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { useToolConfig } from "@/hooks/use-tool-config";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { readClipboardImages } from "@/lib/clipboard-images";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { resolveCapabilityModel } from "@/lib/model-picker-options";
 import { resolveToolModel } from "@/services/api/business-config";
@@ -19,7 +20,8 @@ import { listQueuedTasks, type QueuedTask } from "@/services/api/generation-task
 import { fetchServerAssetContent } from "@/services/api/server-assets";
 import { hydratePromptReuse } from "@/services/api/prompts";
 import { promptImageSettings } from "@/lib/prompt-editor-parameters";
-import { uploadImage, type UploadedImage } from "@/services/image-storage";
+import { uploadImage } from "@/services/image-storage";
+import { loadSeamlessPreview, type StitchPreviewImage } from "./seamless-preview";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -34,7 +36,7 @@ const SEAMLESS_PRESETS = {
 
 type StitchPreset = keyof typeof SEAMLESS_PRESETS | "custom";
 
-type StitchResult = { status: "idle" } | { status: "pending" } | { status: "failed"; error: string } | { status: "success"; image: UploadedImage; durationMs: number };
+type StitchResult = { status: "idle" } | { status: "pending" } | { status: "failed"; error: string } | { status: "success"; image: StitchPreviewImage; durationMs: number };
 
 export function SeamlessStitchPage() {
     const { message, modal } = App.useApp();
@@ -70,6 +72,7 @@ export function SeamlessStitchPage() {
     const [historyLoading, setHistoryLoading] = useState(true);
     const [historyError, setHistoryError] = useState("");
     const [previewLoading, setPreviewLoading] = useState(false);
+    const [previewMode, setPreviewMode] = useState<"single" | "repeat">("single");
     const seamlessModel = resolveToolModel({ models, tools, prices: [] }, "seamless-stitch", config.model);
     const modelProfile = imageModelProfile(config.model, models);
     const usesImageSettings = typeof seamlessModel?.imageSupportsMask === "boolean" || modelProfile.kind === "quality-resolution" || modelProfile.kind === "resolution-1k";
@@ -98,7 +101,7 @@ export function SeamlessStitchPage() {
         const sequence = ++previewSequenceRef.current;
         setPreviewLoading(true);
         try {
-            const image = await uploadImage(imageUrl);
+            const image = await loadSeamlessPreview(imageUrl);
             if (!mountedRef.current || sequence !== previewSequenceRef.current) return;
             restoredHistoryTaskIdRef.current = task.id;
             setResult({ status: "success", image, durationMs: 0 });
@@ -154,17 +157,11 @@ export function SeamlessStitchPage() {
 
     const pasteSource = async () => {
         try {
-            const items = await navigator.clipboard.read();
-            for (const item of items) {
-                const imageType = item.types.find((type) => type.startsWith("image/"));
-                if (!imageType) continue;
-                await setSourceFromBlob(await item.getType(imageType), "clipboard-image.png");
-                message.success("已读取剪切板图片");
-                return;
-            }
-            message.error("剪切板里没有可读取的图片");
-        } catch {
-            message.error("无法读取剪切板图片");
+            const [image] = await readClipboardImages(navigator.clipboard);
+            await setSourceFromBlob(image, "clipboard-image.png");
+            message.success("已读取剪贴板图片");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "剪贴板图片读取失败");
         }
     };
 
@@ -173,8 +170,14 @@ export function SeamlessStitchPage() {
             message.warning("无缝拼接只能使用图片素材");
             return;
         }
-        await setSourceFromBlob(await (await fetch(payload.dataUrl)).blob(), payload.title);
-        setAssetPickerOpen(false);
+        try {
+            const response = await fetch(payload.dataUrl);
+            if (!response.ok) throw new Error(`素材读取失败（${response.status}）`);
+            await setSourceFromBlob(await response.blob(), payload.title);
+            setAssetPickerOpen(false);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "素材读取失败，请重试");
+        }
     };
 
     const runStitch = async () => {
@@ -401,8 +404,12 @@ export function SeamlessStitchPage() {
                         </div>
                     ) : result.status === "success" ? (
                         <div>
+                            <div className="mb-3 flex flex-wrap items-center gap-3">
+                                <Segmented name="seamless-preview" aria-label="结果预览方式" value={previewMode} onChange={value => setPreviewMode(value as "single" | "repeat")} options={[{ label: "单图", value: "single" }, { label: "2×2 平铺", value: "repeat" }]} />
+                                <span className="text-xs" style={{ color: theme.node.muted }}>平铺检查接缝，不改变原图或下载文件。</span>
+                            </div>
                             <div className="overflow-hidden rounded-lg border border-stone-200 bg-stone-100 dark:border-stone-800 dark:bg-stone-950">
-                                <Image src={result.image.url} alt="无缝拼接结果" className="max-h-[620px] w-full object-contain" />
+                                {previewMode === "repeat" ? <div role="img" aria-label="无缝拼接结果 2×2 平铺预览" className="w-full" style={{ aspectRatio: `${result.image.width} / ${result.image.height}`, backgroundImage: `url(${JSON.stringify(result.image.url)})`, backgroundSize: "50% 50%", backgroundRepeat: "repeat" }} /> : <Image src={result.image.url} alt="无缝拼接结果" className="max-h-[620px] w-full object-contain" />}
                             </div>
                             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                                 <div className="text-xs text-stone-500">

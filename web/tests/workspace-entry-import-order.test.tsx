@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import React, { type ReactElement } from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import ts from "typescript";
+import { isWorkspaceRole } from "../../shared/workspace-access";
 
 // Keep the entry module intact, replacing import() with a controllable asynchronous
 // module boundary. This observes execution order instead of matching source text.
@@ -36,7 +37,7 @@ const adminPath = "@/pages/admin/login-entry";
 const loginPath = "@/pages/login/login-entry";
 const passwordPath = "@/pages/change-password/entry";
 
-function harness(owner: string | null = "employee-a", oaMode = true) {
+function harness(owner: string | null = "employee-a", oaMode = true, role = "designer") {
     const events: string[] = [];
     const renders: ReactElement[] = [];
     const features = deferred<boolean>();
@@ -45,6 +46,7 @@ function harness(owner: string | null = "employee-a", oaMode = true) {
     const modules = new Map<string, ReturnType<typeof deferred<unknown>>>();
     let startup!: Promise<void>;
     let userChanged: ((state: { user: { id: string; role: string } | null }) => void) | undefined;
+    let identityChanged: ((owner: string | null) => void) | undefined;
     const CompanyOaEntry = () => null;
     const ServiceUnavailable = () => null;
     const AdminLoginEntry = () => null;
@@ -53,10 +55,11 @@ function harness(owner: string | null = "employee-a", oaMode = true) {
     const AppProviders = () => null;
     const RouterProvider = () => null;
     const state = {
-        user: owner ? { id: owner, role: "designer" } : null,
+        user: owner ? { id: owner, role } : null,
         invalidateSession: () => { events.push("invalidate"); state.user = null; },
     };
     const dependencies: Record<string, unknown> = {
+        "../../shared/workspace-access": { isWorkspaceRole },
         react: React,
         "react/jsx-runtime": jsxRuntime,
         "react-dom/client": { createRoot: () => ({ render: (element: ReactElement) => { renders.push(element); } }) },
@@ -77,7 +80,7 @@ function harness(owner: string | null = "employee-a", oaMode = true) {
             events.push(`prepare:${token}:${pathname}`);
             return entry.promise;
         } },
-        "@/lib/workspace-session-events": { subscribeWorkspaceIdentity: () => undefined },
+        "@/lib/workspace-session-events": { subscribeWorkspaceIdentity: (listener: typeof identityChanged) => { identityChanged = listener; } },
         "@/stores/use-user-store": { useUserStore: {
             getState: () => state,
             subscribe: (listener: typeof userChanged) => { userChanged = listener; },
@@ -110,10 +113,18 @@ function harness(owner: string | null = "employee-a", oaMode = true) {
                 : { default: name === loginPath ? PasswordLoginEntry : name === passwordPath ? PasswordChangeEntry : AdminLoginEntry });
         },
         changeUser: (id: string) => { state.user = { id, role: "designer" }; userChanged?.(state); },
+        broadcast: (id: string | null) => identityChanged?.(id),
     };
 }
 
 describe("workspace entry dynamic import boundary", () => {
+    test("super-admin maintenance bootstrap retains its personal owner across same-owner broadcasts", async () => {
+        const h = harness("admin-owner", true, "super_admin");
+        h.features.resolve(true); h.entry.resolve("maintenance");
+        await flushMicrotasks(); h.resolveImport(providersPath); h.resolveImport(routerPath); await h.done();
+        h.broadcast("admin-owner"); expect(h.events).not.toContain("invalidate");
+        h.broadcast("employee-b"); expect(h.events).toContain("invalidate");
+    });
     test("credentials are consumed first and parallel workspace imports wait for completed authentication", async () => {
         const h = harness();
         expect(h.events).toEqual(["consume-token", "features"]);

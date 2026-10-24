@@ -11,7 +11,7 @@ export function useCanvasDialogs() {
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [manualEditNode, setManualEditNode] = useState<CanvasNodeData | null>(null);
     const [imageExport, setImageExport] = useState<{ nodes: CanvasNodeData[]; ids: string[] } | null>(null);
-    const [imageDownload, setImageDownload] = useState<{ projectId: string; node: CanvasNodeData; variants: ServerAssetVariants } | null>(null);
+    const [imageDownload, setImageDownload] = useState<{ projectId: string; node: CanvasNodeData; variants: ServerAssetVariants | null } | null>(null);
     const [renameNode, setRenameNode] = useState<{ id: string; name: string } | null>(null);
     const [renameGroup, setRenameGroup] = useState<{ id: string; name: string } | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);

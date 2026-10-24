@@ -18,7 +18,8 @@ function bubbleHarness(actionsDisabled = false) {
     const bindings = {
         React, memo: <T,>(component: T) => component,
         cn: (...values: unknown[]) => values.filter(Boolean).join(" "),
-        Bot: () => null, FileText: () => null,
+        Bot: () => null, FileText: () => null, Copy: () => null, Pencil: () => null, RotateCcw: () => null,
+        useCopyText: () => () => undefined, ChatMarkdown: "div", ChatImage: "chat-image", Tooltip: "div",
     };
     const code = ts.transpileModule(`exports.Bubble = ${initializer.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React } }).outputText;
     const exports = {} as { Bubble: (props: any) => ReactElement<any> };
@@ -58,19 +59,19 @@ test("the page has one natural conversation entry and no LLM model, mode, or man
 
 test("real chat image bubbles display originals and results without an edit-selection button", () => {
     const page = bubbleHarness();
-    expect(page.nodes.filter((node) => node.type === "img").map((node) => node.props.src)).toEqual(["data:image/png;base64,cmVzdWx0", "data:image/png;base64,b3JpZ2luYWw="]);
+    const images = page.nodes.filter((node) => node.type === "chat-image");
+    expect(images.map((node) => node.props.image.dataUrl)).toEqual(["data:image/png;base64,cmVzdWx0", "data:image/png;base64,b3JpZ2luYWw="]);
     const buttons = page.nodes.filter((node) => node.type === "button");
-    expect(buttons.map((button) => page.text(button))).toEqual(["放入画布"]);
+    expect(buttons.map((button) => page.text(button))).toEqual([]);
     expect(page.text(page.tree)).not.toMatch(/继续编辑|编辑起点|从这版继续|当前起点/);
     expect(page.text(page.tree)).toContain("规格.pdf");
-    expect(page.nodes.find((node) => node.type === "a" && node.props.download)?.props.href).toBe(page.generated.dataUrl);
     expect(page.calls).toEqual([]);
-    buttons[0]!.props.onClick();
+    images[0]!.props.onPlace();
     expect(page.calls).toEqual([page.generated]);
 });
 
 test("the remaining canvas action is disabled while a task is busy", () => {
     const page = bubbleHarness(true);
-    expect(page.nodes.filter((node) => node.type === "button").map((node) => node.props.disabled)).toEqual([true]);
+    expect(page.nodes.find((node) => node.type === "chat-image" && node.props.onPlace)?.props.disabled).toBe(true);
     expect(page.calls).toEqual([]);
 });

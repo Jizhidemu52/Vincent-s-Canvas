@@ -4,6 +4,7 @@ import ts from "typescript";
 
 import { observeCanvasImageTask, type CanvasImageTaskBinding } from "@/lib/canvas/canvas-image-task-recovery";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import { shouldCancelCanvasGeneration, stopCanvasObservation } from "@/lib/canvas/canvas-project-async-lifecycle";
 import { QueuedTaskFailedError, QueuedTaskPausedError, type QueuedTask } from "@/services/api/generation-tasks";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { imageModelProfile } from "@/lib/image-model-settings";
@@ -91,6 +92,7 @@ function harness(options: {
         "@/types/canvas": { CanvasNodeType },
         "@/lib/canvas/canvas-image-task-recovery": { observeCanvasImageTask },
         "@/lib/canvas/canvas-node-size": { fitNodeSize },
+        "@/lib/canvas/canvas-project-async-lifecycle": { shouldCancelCanvasGeneration },
         "@/lib/image-model-settings": { imageModelProfile },
         "@/services/api/generation-tasks": {
             QueuedTaskFailedError, QueuedTaskPausedError,
@@ -153,6 +155,7 @@ function harness(options: {
         effectIndex = 0;
         memoIndex = 0;
         queuedEffects = [];
+        // biome-ignore lint/correctness/useHookAtTopLevel: This harness supplies its own isolated React hook dispatcher above.
         value = module.exports.useCanvasImageTasks({ projectId, nodes, setNodes, saveQueue, generating });
         for (const run of queuedEffects) run();
         return value;
@@ -198,6 +201,22 @@ describe("lazy canvas image task runtime", () => {
         expect(() => options.assertCurrent()).not.toThrow();
         expect(h.runtimeLoadAttempts()).toBe(1);
         expect(h.saves).toEqual([]);
+        expect(h.queries).toEqual([]);
+        h.unmount();
+    });
+
+    test("stopping local observation never cancels the accepted task even while the node remains current", async () => {
+        const h = harness();
+        const controller = new AbortController();
+        const options = await h.action().createOptions("result-node", controller);
+        await options.onSubmissionStarted();
+        await options.onSubmitted(["accepted-task"]);
+        stopCanvasObservation(controller);
+        expect(controller.signal.aborted).toBe(true);
+        expect(options.cancelOnAbort()).toBe(false);
+        expect(() => options.assertCurrent()).toThrow();
+        expect(h.result()!.metadata?.imageTask?.taskId).toBe("accepted-task");
+        expect(h.uploads).toEqual([]);
         expect(h.queries).toEqual([]);
         h.unmount();
     });

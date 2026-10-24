@@ -45,7 +45,8 @@ export async function stepApiMartVideoTask(input: ApiMartVideoInput, runtime: Vi
     if (!await input.beforeSubmit()) throw new VideoSubmissionClaimLost("视频提交已被其他执行器接管；不会重复生成");
     const submitted = await request(`${baseUrl}/videos/generations`, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(180_000) });
     if (!submitted.ok) {
-      const message = `APIMart 视频提交失败（${submitted.status}）`;
+      const detail = await readVideoProviderError(submitted, input.apiKey);
+      const message = `APIMart 视频提交失败（${submitted.status}）${detail ? `：${detail}` : ""}`;
       if (isDefinitiveSubmissionRejection(submitted.status)) throw new VideoProviderFailure(message);
       throw new Error(message);
     }
@@ -56,7 +57,10 @@ export async function stepApiMartVideoTask(input: ApiMartVideoInput, runtime: Vi
     return { status: "pending", upstreamTaskId: upstreamId, nextPollMs: 2_000 };
   }
   const response = await queryProviderTaskStatus(`${baseUrl}${videoTaskStatusPath(upstreamId)}`, headers, runtime);
-  if (!response.ok) throw new Error(`APIMart 视频状态查询失败（${response.status}）`);
+  if (!response.ok) {
+    const detail = await readVideoProviderError(response, input.apiKey);
+    throw new Error(`APIMart 视频状态查询失败（${response.status}）${detail ? `：${detail}` : ""}`);
+  }
   const result = await response.json() as { data?: { status?: string; error?: { message?: string }; result?: { videos?: unknown[] } } };
   if (["failed", "cancelled", "canceled"].includes(result.data?.status || "")) throw new VideoProviderFailure(result.data?.error?.message || "视频生成失败");
   if (result.data?.status !== "completed") return { status: "pending", upstreamTaskId: upstreamId, nextPollMs: apiMartPollIntervalMs(input.submissionStartedAt, 2_000, runtime.now?.()) };
@@ -66,6 +70,39 @@ export async function stepApiMartVideoTask(input: ApiMartVideoInput, runtime: Vi
     if (typeof url === "string" && /^https?:\/\//i.test(url)) return { status: "completed", upstreamTaskId: upstreamId, url };
   }
   throw new Error("视频任务完成但没有可下载结果；可稍后重新查询原任务");
+}
+
+/** Retain the upstream rejection reason, not its whole response or request data. */
+async function readVideoProviderError(response: Response, apiKey: string) {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder();
+  let body = "", bytes = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > 16 * 1024) return "";
+      body += decoder.decode(value, { stream: true });
+    }
+    body += decoder.decode();
+    const payload = JSON.parse(body);
+    const detail = [payload?.error?.message, payload?.data?.error?.message, payload?.message, payload?.msg, payload?.error]
+      .find((value) => typeof value === "string" && value.trim());
+    if (typeof detail !== "string") return "";
+    return detail.split(apiKey).join("[redacted]")
+      .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+      .replace(/https?:\/\/[^\s"<>]+/gi, "[URL]")
+      .replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 500);
+  } catch {
+    // A broken/non-JSON body must not turn a definite HTTP rejection into an
+    // uncertain submission, or erase the original status code.
+    return "";
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
 }
 
 /** Demo/single-request callers retain the blocking convenience API. */

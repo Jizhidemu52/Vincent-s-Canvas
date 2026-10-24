@@ -44,6 +44,7 @@ function dialogHarness(kind: string, name: string, extraProps: Record<string, un
         antd: { Button: "Button", Modal: "Modal", InputNumber: "InputNumber", Segmented: "Segmented", Select: "Select", Checkbox: "Checkbox", Empty: "Empty", theme: { useToken: () => ({ token: {} }) } },
         "lucide-react": new Proxy({}, { get: (_target, key) => String(key) }),
         "@/lib/image-utils": { readImageMeta() { const reading = Promise.withResolvers<{ width: number; height: number }>(); reads.push(reading); return reading.promise; } },
+        "./use-canvas-image-thumbnail": { useCanvasImageThumbnail: (node: { id: string }, edge: number) => ({ url: `/thumb/${node.id}?w=${edge}`, key: node.id, failed: false, onError() {} }) },
     };
     const module = { exports: {} as Record<string, Function> };
     new Function("require", "module", "exports", code)((key: string) => dependencies[key] || requireModule(key), module, module.exports);
@@ -90,6 +91,16 @@ test("reference picker recognizes canvas and connection keys and drops nodes rem
     expect(referenceConfirm(h.render(undefined, true, { nodes: [referenceNodes[0]] })).props.disabled).toBe(true);
     h.render(undefined, true, { selectedReferenceKeys: ["connection:second"] });
     expect(h.render(undefined, true, { selectedReferenceKeys: ["connection:second"] }).some(element => element.type === "button" && element.props["aria-label"] === "已添加 second" && element.props.disabled)).toBe(true);
+});
+
+test("reference grid uses bounded display-only thumbnails while retaining original node sources", () => {
+    const h = dialogHarness("reference", "CanvasImageReferenceDialog", { nodes: referenceNodes, selectedReferenceKeys: [] });
+    const component = h.render().find(element => typeof element.type === "function" && element.props.node?.id === "first")!;
+    const image = (component.type as Function)(component.props) as ReactElement<any>;
+    expect(image.type).toBe("img");
+    expect(image.props.src).toBe("/thumb/first?w=256");
+    expect(image.props.loading).toBe("lazy");
+    expect(referenceNodes[0]!.metadata.content).toBe("data:image/png;base64,first");
 });
 
 const confirmation = (tree: ReactElement<any>[]) => tree.find(element => element.type === "Button" && element.props.type === "primary")!;

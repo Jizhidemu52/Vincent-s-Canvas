@@ -12,9 +12,9 @@ function render(count: number, running = false, enabled = true) {
     const savedBusiness = { ...business }, savedFlags = modules.flags;
     Object.assign(business, { models: [{ id: "gpt-image-2", name: "gpt-image-2", modelId: "gpt-image-2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 }], tools: [], status: "ready" });
     modules.flags = { ...savedFlags, canvas: true, "canvas-image": enabled, "canvas-edit": enabled };
-    try { return renderToStaticMarkup(<CanvasQuickGeneratePanel embedded open prompt="修改花瓶颜色" model="gpt-image-2" size="1:1" quality="auto" onQualityChange={noop} count={1} imageOptions="" onImageOptionsChange={noop} running={running} config={defaultConfig} estimateCredits={0} estimateRmb={0}
+    try { return renderToStaticMarkup(<CanvasQuickGeneratePanel embedded open promptRef={{ current: "修改花瓶颜色" }} promptRevision={0} model="gpt-image-2" size="1:1" quality="auto" onQualityChange={noop} count={1} imageOptions="" onImageOptionsChange={noop} running={running} config={defaultConfig} estimateCredits={0} estimateRmb={0}
         references={Array.from({ length: count }, (_, index) => ({ id: String(index), name: `reference-${index}`, type: "image/png", dataUrl: `data:image/png;base64,${index}` }))}
-        onClose={noop} onPromptChange={noop} onModelChange={noop} onSizeChange={noop} onCountChange={noop} onPickReferences={noop} onRemoveReference={noop} onClearReferences={noop} onMoveReference={noop} onMissingConfig={noop} onGenerate={noop} />); }
+        onClose={noop} onModelChange={noop} onSizeChange={noop} onCountChange={noop} onPickReferences={noop} onRemoveReference={noop} onClearReferences={noop} onMoveReference={noop} onMissingConfig={noop} onGenerate={noop} />); }
     finally { Object.assign(business, savedBusiness); modules.flags = savedFlags; }
 }
 test("the same composer switches between creation and editing with numbered references", () => {

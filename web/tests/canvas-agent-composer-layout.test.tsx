@@ -163,9 +163,9 @@ test("prompt and submit callbacks remain intact with disabled and sending states
     expect(panel.changes).toEqual(["新的提示词"]);
     control(tree, "发送").props.onClick();
     let prevented = 0;
-    const key = (patch: Record<string, unknown> = {}) => ({ key: "Enter", shiftKey: false, ctrlKey: false, metaKey: false, preventDefault() { prevented++; }, ...patch });
+    const key = (patch: Record<string, unknown> = {}) => ({ key: "Enter", shiftKey: false, ctrlKey: false, metaKey: false, nativeEvent: { isComposing: false }, preventDefault() { prevented++; }, ...patch });
     textarea.props.onKeyDown(key());
-    for (const patch of [{ shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { key: "a" }]) textarea.props.onKeyDown(key(patch));
+    for (const patch of [{ shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { key: "a" }, { nativeEvent: { isComposing: true } }, { keyCode: 229 }]) textarea.props.onKeyDown(key(patch));
     expect(panel.submissions()).toBe(2);
     expect(prevented).toBe(1);
 
@@ -179,4 +179,15 @@ test("prompt and submit callbacks remain intact with disabled and sending states
     expect(control(sending, "添加参考图").props.disabled).toBe(true);
     expect(control(tree, "发送").props.disabled).toBe(false);
     expect(control(tree, "添加参考图").props.disabled).not.toBe(true);
+});
+
+test("an active online request exposes a working stop control without enabling duplicate send", () => {
+    let stopped = 0;
+    const panel = composer();
+    const tree = panel.render({ sending: true, onStop: () => stopped++ });
+    control(tree, "停止本地回复和查询").props.onClick();
+    expect(stopped).toBe(1);
+    const textarea = tree.find(element => element.type === "textarea")!;
+    textarea.props.onKeyDown({ key: "Enter", nativeEvent: { isComposing: false }, preventDefault() {} });
+    expect(panel.submissions()).toBe(0);
 });

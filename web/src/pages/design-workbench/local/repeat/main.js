@@ -1,4 +1,5 @@
 import { MODES, cmToPx, periodSize, validateExport, wrapPosition, latticeCopies, mirrorCellTransform, hitElement, previewSize } from "./geometry.mjs";
+import { createProjectSession, mountProjectBar } from "../project-session.js";
 
 const STORE_KEY = "design-workbench.repeat.v1";
 const BUILTINS = { flower: "/design-workbench/assets/flower.svg", leaf: "/design-workbench/assets/leaf.svg" };
@@ -62,8 +63,8 @@ export function sanitizeProject(input) {
     };
 }
 
-export function mountRepeat(root, services) {
-    const { loadImage, readImageFile, downloadBlob, saveProject, loadProject, notify, signal } = services;
+export async function mountRepeat(root, services) {
+    const { loadImage, readImageFile, downloadBlob, notify, signal } = services;
     let state = defaultState();
     let selectedId = null;
     let guides = true;
@@ -72,6 +73,7 @@ export function mountRepeat(root, services) {
     let drag = null;
     let renderRequest = 0;
     let operationSequence = 0;
+    let exporting = false;
     const images = new Map();
     root.innerHTML = `
     <div class="workspace repeat-workspace" data-testid="repeat-workspace">
@@ -89,6 +91,7 @@ export function mountRepeat(root, services) {
         </section>
         <section><div class="section-title">添加图案元素</div><div class="repeat-assets"><button class="repeat-asset" data-add="flower" data-testid="repeat-add-flower"><img src="/design-workbench/assets/flower.svg" alt="">花朵 +</button><button class="repeat-asset" data-add="leaf"><img src="/design-workbench/assets/leaf.svg" alt="">叶枝 +</button></div>
           <button class="btn ghost repeat-upload" data-action="upload" data-testid="repeat-upload">＋ 上传自己的元素</button><input class="repeat-file" data-role="image-file" type="file" accept="image/png,image/jpeg,image/webp">
+          ${services.pickImage ? '<button class="btn ghost repeat-upload" data-action="asset-element">从素材库添加元素</button>' : ""}
           <p class="hint">PNG / JPG / WebP，≤ 15MB。<br>建议使用透明 PNG；不会自动抠图。</p>
           <div class="repeat-item-count" data-role="item-count"></div><div class="repeat-layer-list" data-role="layers" aria-label="图案元素"></div>
         </section>
@@ -106,6 +109,7 @@ export function mountRepeat(root, services) {
         <section class="repeat-preview-group"><div class="repeat-kicker">实时铺排</div><h2>连续效果</h2><div class="hint">3 × 3 设计单元 · 实时预览</div><div class="repeat-preview-box"><canvas class="repeat-preview-canvas" data-testid="repeat-preview" aria-label="3乘3花型重复预览"></canvas></div><p class="repeat-period-note" data-role="period-note"></p></section>
         <section class="repeat-export-group"><div class="section-title">导出可用文件</div><div class="repeat-export-summary"><span>真实无缝周期 / PNG</span><strong class="mono" data-role="export-pixels"></strong><span data-role="export-cm"></span></div>
           <button class="btn primary" data-action="export-unit" data-testid="repeat-export-unit">↓ 导出无缝周期 PNG</button><button class="btn ghost" data-action="export-preview" data-testid="repeat-export-preview">↓ 导出 3 × 3 预览 PNG</button>
+          ${services.saveAsset ? '<button class="btn" data-action="save-asset">保存无缝周期到素材库</button>' : ""}
           <div class="repeat-warning" data-role="limit-warning"></div><div class="hint" data-role="preview-size"></div><p class="hint">PNG 不嵌入 DPI 元数据。物理尺寸、DPI 与重复方式记录在项目 JSON 中。</p>
         </section>
         <section class="repeat-save-group"><hr class="repeat-separator"><div class="section-title">保留这次灵感</div><button class="btn ghost" data-action="save" data-testid="repeat-save">保存到当前账号</button><button class="btn ghost" data-action="restore" data-testid="repeat-restore">打开本地存档</button><div class="repeat-grid2"><button class="btn ghost" data-action="export-json" data-testid="repeat-export-json">导出 JSON</button><button class="btn ghost" data-action="import-json">打开 JSON</button></div><input class="repeat-file" data-role="json-file" type="file" accept="application/json,.json"><div class="repeat-status" data-role="status" role="status" aria-live="polite">当前账号的浏览器分区保存，不上传服务器。</div></section>
@@ -118,6 +122,24 @@ export function mountRepeat(root, services) {
     const previewCanvas = $(".repeat-preview-canvas");
     const editorWrap = $(".repeat-editor-wrap");
     const currentItem = () => state.elements.find((item) => item.id === selectedId);
+    let updateProjects = () => {};
+    const projects = createProjectSession({
+        services,
+        key: STORE_KEY,
+        snapshot: () => structuredClone(state),
+        fresh: defaultState,
+        apply: async (data) => {
+            const project = sanitizeProject(data);
+            await prepareImages(project);
+            if (disposed) return;
+            operationSequence++;
+            state = project;
+            selectedId = null;
+            syncSettings();
+        },
+        onChange: (view) => updateProjects(view),
+    });
+    updateProjects = mountProjectBar(root, projects);
     function status(message, error = false) {
         if (disposed) return;
         $('[data-role="status"]').textContent = message;
@@ -264,7 +286,9 @@ export function mountRepeat(root, services) {
         $('[data-role="period-note"]').textContent =
             state.mode === "half" ? "半落：相邻列下移 ½ 高度。矩形无缝周期 = 2 宽 × 1 高。" : state.mode === "mirror" ? "镜像：相邻行列交替翻转。无缝周期 = 2 宽 × 2 高。" : "直排：左右、上下同位衔接。无缝周期 = 1 个设计单元。";
         $('[data-role="limit-warning"]').textContent = period.valid ? "" : "周期尺寸超过限制：每边 ≤ 4096 像素，面积 ≤ 1600 万像素。请减小厘米尺寸或 DPI 后导出。";
-        $('[data-action="export-unit"]').disabled = !period.valid;
+        $('[data-action="export-unit"]').disabled = !period.valid || exporting;
+        $('[data-action="export-preview"]').disabled = exporting;
+        if ($('[data-action="save-asset"]')) $('[data-action="save-asset"]').disabled = !period.valid || exporting;
         $('[data-role="preview-size"]').textContent = `3 × 3 预览导出 ${preview.width} × ${preview.height} 像素${preview.scale < 1 ? "（已缩小，最长边 1600 像素）" : "（原像素）"}；不是新增的无缝周期。`;
         $$("[data-mode]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.mode === state.mode)));
         $('[data-setting="background"]').disabled = state.transparent;
@@ -311,12 +335,14 @@ export function mountRepeat(root, services) {
         if (disposed || operation !== operationSequence) return;
         if (state.elements.length >= 32) throw new Error("最多添加 32 个元素");
         state.elements.push(item);
+        projects.changed();
         selectedId = item.id;
         syncDetails();
     }
     function deleteSelected() {
         if (!selectedId) return;
         state.elements = state.elements.filter((item) => item.id !== selectedId);
+        projects.changed();
         selectedId = null;
         syncDetails();
     }
@@ -335,20 +361,34 @@ export function mountRepeat(root, services) {
             },
         };
     }
-    async function pngDownload(kind) {
-        const { width, height, period, preview } = dimensions();
-        if (kind === "unit" && !period.valid) throw new Error("无缝周期超出 4096 像素 / 1600 万像素限制");
-        const canvas = document.createElement("canvas");
-        if (kind === "unit") paintField(canvas, width, height, state.mode === "straight" ? 1 : 2, state.mode === "mirror" ? 2 : 1, state.mode, period.width, period.height);
-        else paintField(canvas, preview.width / 3, preview.height / 3, 3, 3, state.mode, preview.width, preview.height);
-        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-        const sizeLabel = `${canvas.width}x${canvas.height}`;
-        canvas.width = 1;
-        canvas.height = 1;
-        if (disposed) return;
-        if (!blob) throw new Error("PNG 导出失败，请降低输出尺寸");
-        downloadBlob(blob, `花型-${MODES[state.mode]}-${kind === "unit" ? "无缝周期" : "3×3预览"}-${sizeLabel}.png`);
-        status(`已导出 ${sizeLabel.replace("x", " × ")} 像素 ${kind === "unit" ? "无缝周期" : "3 × 3 预览"} PNG；不含 DPI 元数据。`);
+    async function pngDownload(kind, toAssets = false) {
+        if (exporting) return;
+        exporting = true;
+        syncDetails();
+        try {
+            const { width, height, period, preview } = dimensions();
+            if (kind === "unit" && !period.valid) throw new Error("无缝周期超出 4096 像素 / 1600 万像素限制");
+            const canvas = document.createElement("canvas");
+            if (kind === "unit") paintField(canvas, width, height, state.mode === "straight" ? 1 : 2, state.mode === "mirror" ? 2 : 1, state.mode, period.width, period.height);
+            else paintField(canvas, preview.width / 3, preview.height / 3, 3, 3, state.mode, preview.width, preview.height);
+            const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+            const sizeLabel = `${canvas.width}x${canvas.height}`;
+            canvas.width = 1;
+            canvas.height = 1;
+            if (disposed) return;
+            if (!blob) throw new Error("PNG 导出失败，请降低输出尺寸");
+            const filename = `花型-${MODES[state.mode]}-${kind === "unit" ? "无缝周期" : "3×3预览"}-${sizeLabel}.png`;
+            if (toAssets) {
+                await services.saveAsset(blob, filename);
+                status("无缝周期已保存到素材库。");
+            } else {
+                downloadBlob(blob, filename);
+                status(`已导出 ${sizeLabel.replace("x", " × ")} 像素 ${kind === "unit" ? "无缝周期" : "3 × 3 预览"} PNG；不含 DPI 元数据。`);
+            }
+        } finally {
+            exporting = false;
+            if (!disposed) syncDetails();
+        }
     }
     const clickHandler = async (event) => {
         const button = event.target.closest("button");
@@ -356,6 +396,7 @@ export function mountRepeat(root, services) {
         try {
             if (button.dataset.mode) {
                 state.mode = button.dataset.mode;
+                projects.changed();
                 syncDetails();
                 return;
             }
@@ -372,6 +413,20 @@ export function mountRepeat(root, services) {
                 case "upload":
                     $('[data-role="image-file"]').click();
                     break;
+                case "asset-element": {
+                    const operation = operationSequence;
+                    const asset = await services.pickImage();
+                    if (asset && !disposed && operation === operationSequence) await addElement(asset.src, asset.name);
+                    break;
+                }
+                case "save-asset":
+                    button.disabled = true;
+                    try {
+                        await pngDownload("unit", true);
+                    } finally {
+                        if (!disposed) syncDetails();
+                    }
+                    break;
                 case "delete":
                     deleteSelected();
                     break;
@@ -380,6 +435,7 @@ export function mountRepeat(root, services) {
                     if (!item || state.elements.length >= 32) return;
                     const copy = { ...item, id: makeId(), ...wrapPosition(item.x + 0.08, item.y + 0.08, state.mode) };
                     state.elements.push(copy);
+                    projects.changed();
                     selectedId = copy.id;
                     syncDetails();
                     break;
@@ -391,21 +447,13 @@ export function mountRepeat(root, services) {
                     await pngDownload("preview");
                     break;
                 case "save":
-                    await saveProject(STORE_KEY, projectFile());
+                    await projects.save();
                     status("已保存到当前账号。切换工具或刷新后可重新打开。");
                     notify("花型已保存到当前账号");
                     break;
                 case "restore": {
-                    const operation = ++operationSequence;
-                    const saved = await loadProject(STORE_KEY);
-                    if (!saved) throw new Error("尚无存档，请先保存项目");
-                    const project = sanitizeProject(saved);
-                    await prepareImages(project);
-                    if (disposed || operation !== operationSequence) return;
-                    state = project;
-                    selectedId = null;
-                    syncSettings();
-                    status("已打开本地存档，元素、重复方式与输出参数均已恢复。");
+                    root.querySelector("[aria-label='本地工程']").focus();
+                    status("使用顶部工程列表切换；当前更改会先保存。");
                     break;
                 }
                 case "export-json": {
@@ -429,10 +477,12 @@ export function mountRepeat(root, services) {
             const item = currentItem();
             if (!item) return;
             item[input.dataset.role] = Number(input.value);
+            projects.changed();
             syncDetails();
         }
         if (input.dataset.setting === "background") {
             state.background = input.value;
+            projects.changed();
             syncDetails();
         }
     };
@@ -453,6 +503,7 @@ export function mountRepeat(root, services) {
                     }
                     state[key] = value;
                 }
+                projects.changed();
                 syncDetails();
             }
             if (input.dataset.role === "guides") {
@@ -472,10 +523,8 @@ export function mountRepeat(root, services) {
                 const project = sanitizeProject(JSON.parse(await input.files[0].text()));
                 await prepareImages(project);
                 if (disposed || operation !== operationSequence) return;
-                state = project;
-                selectedId = null;
-                syncSettings();
-                status("已打开 JSON 项目。");
+                await projects.create(input.files[0].name.replace(/\.json$/i, "").slice(0, 80), project);
+                status("已导入为新工程，原有工程保留。");
                 input.value = "";
             }
         } catch (error) {
@@ -509,6 +558,7 @@ export function mountRepeat(root, services) {
         const item = state.elements.find((item) => item.id === drag.id);
         if (!item) return;
         Object.assign(item, wrapPosition(drag.x + (event.clientX - drag.clientX) / drag.rect.width, drag.y + (event.clientY - drag.clientY) / drag.rect.height, state.mode === "half" ? "half" : "straight"));
+        projects.changed();
         requestRender();
     }
     function pointerUp(event) {
@@ -535,6 +585,7 @@ export function mountRepeat(root, services) {
             event.preventDefault();
             const [dx, dy] = moves[event.key];
             Object.assign(item, wrapPosition(item.x + dx, item.y + dy, state.mode === "half" ? "half" : "straight"));
+            projects.changed();
             requestRender();
         }
     }
@@ -549,14 +600,10 @@ export function mountRepeat(root, services) {
     const observer = new ResizeObserver(requestRender);
     observer.observe(editorWrap);
     observer.observe(previewCanvas.parentElement);
-    void prepareImages(state)
-        .then(() => {
-            if (!disposed) syncSettings();
-        })
-        .catch(fail);
     const cleanup = () => {
         if (disposed) return;
         disposed = true;
+        projects.dispose();
         cancelAnimationFrame(renderRequest);
         observer.disconnect();
         if (drag && editorCanvas.hasPointerCapture(drag.pointerId)) editorCanvas.releasePointerCapture(drag.pointerId);
@@ -577,5 +624,17 @@ export function mountRepeat(root, services) {
         previewCanvas.height = 1;
     };
     signal.addEventListener("abort", cleanup, { once: true });
+    root.querySelector(".repeat-workspace").inert = true;
+    try {
+        await prepareImages(state);
+        if (!disposed) {
+            syncSettings();
+            await projects.initialize();
+        }
+    } catch (error) {
+        fail(error);
+    } finally {
+        if (!disposed) root.querySelector(".repeat-workspace").inert = !projects.view().ready;
+    }
     return cleanup;
 }
