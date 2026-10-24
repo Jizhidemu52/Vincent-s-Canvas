@@ -135,13 +135,54 @@ export class PostgresDesignLibraryRepository implements DesignLibraryRepository 
 }
 
 export function designLibraryObjectStorage(storage: ObjectStorage): DesignLibraryMediaStore {
+    const maxBytes = 20 * 1024 * 1024;
+    const requireStorage = () => {
+        if (!storage.configured) throw new DesignLibraryError("STORAGE_NOT_CONFIGURED", "公司对象存储尚未配置，无法读取分享图片", 503);
+    };
+    const unavailable = () => new DesignLibraryError("SNAPSHOT_UNAVAILABLE", "图片内容与保存记录不一致或超出大小限制", 503);
+    const checkedSize = (value: number) => {
+        if (!Number.isSafeInteger(value) || value < 1 || value > maxBytes) throw unavailable();
+        return value;
+    };
+    const readObject = async (key: string, expectedBytes?: number) => {
+        requireStorage();
+        if (expectedBytes !== undefined) checkedSize(expectedBytes);
+        const object = await storage.get(key);
+        const body = object.Body;
+        try {
+            if (!body || !(Symbol.asyncIterator in body)) throw unavailable();
+            const size = expectedBytes ?? (object.ContentLength === undefined ? maxBytes : checkedSize(object.ContentLength));
+            if (object.ContentLength !== undefined && (checkedSize(object.ContentLength) > size || (expectedBytes !== undefined && object.ContentLength !== expectedBytes))) throw unavailable();
+            const bytes = Buffer.allocUnsafe(size);
+            let length = 0;
+            for await (const chunk of body as AsyncIterable<Uint8Array>) {
+                if (!(chunk instanceof Uint8Array) || chunk.byteLength > size - length) throw unavailable();
+                bytes.set(chunk, length);
+                length += chunk.byteLength;
+            }
+            if (!length || (expectedBytes !== undefined && length !== expectedBytes) || (object.ContentLength !== undefined && length !== object.ContentLength)) throw unavailable();
+            return { bytes: bytes.subarray(0, length), etag: object.ETag };
+        } finally {
+            if (body && "destroy" in body && typeof body.destroy === "function") body.destroy();
+        }
+    };
     return {
-        read: async key => {
-            if (!storage.configured) throw new DesignLibraryError("STORAGE_NOT_CONFIGURED", "公司对象存储尚未配置，无法读取分享图片", 503);
-            const object = await storage.get(key);
-            const bytes = await object.Body?.transformToByteArray();
-            if (!bytes) throw new Error("Image object is empty");
-            return bytes;
+        read: async (key, expectedBytes) => (await readObject(key, expectedBytes)).bytes,
+        copy: async (sourceKey, destinationKey, { byteSize, validate }) => {
+            requireStorage();
+            checkedSize(byteSize);
+            let etag: string | undefined;
+            if (validate) {
+                const object = await readObject(sourceKey, byteSize);
+                validate(object.bytes);
+                etag = object.etag;
+            } else {
+                const object = await storage.head(sourceKey);
+                if (object.ContentLength !== byteSize) throw unavailable();
+                etag = object.ETag;
+            }
+            if (!etag) throw unavailable();
+            await storage.copy(sourceKey, destinationKey, etag);
         },
         write: async (key, bytes, mimeType) => {
             if (!storage.configured) throw new DesignLibraryError("STORAGE_NOT_CONFIGURED", "公司对象存储尚未配置，无法保存分享图片", 503);

@@ -3,6 +3,7 @@ import ts from "typescript";
 import { singleImageTaskParameters } from "../src/image-task-policy";
 import { internalAiRequestTemplate, internalAiSeamlessDefaults } from "../src/routes/internal-ai-configuration";
 import { normalizeWorkflowOutputs, parsePromptVariables, readPath, renderTemplate } from "../src/workflow-runtime";
+import { assertWorkflowTaskContext, workflowTaskContext } from "../src/workflow-task-context";
 
 const file = new URL("../src/worker.ts", import.meta.url);
 const source = ts.createSourceFile(file.pathname, await Bun.file(file).text(), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -13,6 +14,7 @@ const code = ts.transpileModule(source.statements.filter(node => ts.isFunctionDe
 function harness() {
   const posts: Record<string, unknown>[] = [];
   const deps = {
+    assertWorkflowTaskContext, workflowTaskContext,
     loadSourceAssets: async () => [{ bytes: new Uint8Array([1]), mimeType: "image/png" }, { bytes: new Uint8Array([2]), mimeType: "image/png" }],
     renderTemplate, parsePromptVariables, readPath, normalizeWorkflowOutputs,
     claimProviderSubmission: async () => {},
@@ -26,7 +28,7 @@ function harness() {
   };
   const execute = new Function(...Object.keys(deps), `${code};return executeWorkflow;`)(...Object.values(deps));
   const task = (overrides: Record<string, unknown> = {}) => ({
-    id: "offline-task", operation_type: "image_generation", model_id: "gpt-image-2", protocol: "custom", source_urls: [], user_id: "owner",
+    id: "offline-task", workflow_config_id: "workflow", model_config_id: "model", provider_id: "provider", operation_type: "image_generation", model_id: "gpt-image-2", protocol: "custom", source_urls: [], user_id: "owner",
     prompt: "cloth", parameters: singleImageTaskParameters("image_generation"), request_template: { n: "$n", prompt: "$prompt" },
     base_url: "https://fixture.invalid", submit_path: "/images/generations", output_path: "outputs", ...overrides,
   });

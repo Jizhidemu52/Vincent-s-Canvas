@@ -12,6 +12,7 @@ import { ProviderSubmissionRejected, submissionWasNotSent } from "../../src/prov
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
 import { createIsolatedQueueCache } from "../helpers/isolated-queue-cache";
 import { disposeProviderResults, downloadVideoResult } from "../../src/media-result-file";
+import { WorkflowTaskPending } from "../../src/workflow-task-context";
 
 const integration = process.env.PGLITE_RUNTIME_PATH && process.env.QUEUE_TEST_REDIS_URL ? test : test.skip;
 const redisTest = process.env.QUEUE_TEST_REDIS_URL ? test : test.skip;
@@ -49,7 +50,7 @@ async function databaseFixture(kind: "image" | "video" = "video") {
 }
 
 async function productionWorker(dependencies: Record<string, unknown>) {
-  dependencies = { disposeProviderResults, ...dependencies };
+  dependencies = { disposeProviderResults, WorkflowTaskPending, ...dependencies };
   // Exercise the real orchestration/provider functions without importing the
   // worker entrypoint (which intentionally starts configured production services).
   const file = await Bun.file(new URL("../../src/worker.ts", import.meta.url)).text();

@@ -25,6 +25,7 @@ export class TaskEventsService {
   private connecting?: Promise<void>;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
+  private draining = false;
   private retryDelay: number;
   private readonly retryBaseMs: number;
   private readonly retryMaxMs: number;
@@ -46,7 +47,7 @@ export class TaskEventsService {
   }
 
   subscribe(ownerId: string, ids: readonly string[], changed: (ids: string[]) => void, close: () => void) {
-    if (this.stopped) { close(); return () => {}; }
+    if (this.stopped || this.draining) { close(); return () => {}; }
     const owner = ownerId.toLowerCase();
     const subscription = { ids: new Set(ids.map(id => id.toLowerCase())), changed, close };
     const bucket = this.subscriptions.get(owner) ?? new Set<Subscription>();
@@ -61,17 +62,22 @@ export class TaskEventsService {
     };
   }
 
+  drain() {
+    this.draining = true;
+    const subscriptions = [...this.subscriptions.values()].flatMap(bucket => [...bucket]);
+    this.subscriptions.clear();
+    for (const subscription of subscriptions) {
+      try { subscription.close(); } catch { /* One closed browser cannot prevent shutdown. */ }
+    }
+  }
+
   async close() {
     if (this.stopped) return;
     this.stopped = true;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
     if (this.connection) this.release(this.connection);
-    const subscriptions = [...this.subscriptions.values()].flatMap(bucket => [...bucket]);
-    this.subscriptions.clear();
-    for (const subscription of subscriptions) {
-      try { subscription.close(); } catch { /* One closed browser cannot prevent shutdown. */ }
-    }
+    this.drain();
     // A pool checkout already in progress releases itself when it resolves.
     // Do not leave shutdown waiting on a pool connection that is unavailable.
   }

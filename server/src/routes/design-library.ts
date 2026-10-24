@@ -51,7 +51,7 @@ function sendImage(response: Response, result: { bytes: Uint8Array; image: Libra
     response.set("Content-Length", String(result.bytes.byteLength));
     response.set("Content-Disposition", `${download ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(result.image.filename)}`);
     response.set("Content-Security-Policy", "default-src 'none'; sandbox");
-    response.send(Buffer.from(result.bytes));
+    response.send(Buffer.from(result.bytes.buffer, result.bytes.byteOffset, result.bytes.byteLength));
 }
 
 /** Requires the real OA session middleware (or strict admin session middleware) at mount. */

@@ -13,6 +13,7 @@ services:
     restart: unless-stopped
   api:
     image: ${CANVAS_API_IMAGE:-wireless-canvas-api:local}
+    stop_grace_period: 35s
     build:
       context: .
       dockerfile: server/Dockerfile

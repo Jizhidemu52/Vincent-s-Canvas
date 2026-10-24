@@ -59,6 +59,8 @@ import { getCreditsEnabled } from "./credit-policy";
 import { createCreditPolicyRouter } from "./routes/credit-policy";
 import { BillingError } from "./billing";
 import { createTasksEventsRouter, TaskEventsService } from "./task-events";
+import { createApiShutdown } from "./api-shutdown";
+import { startAssetThumbnailMaintenance } from "./asset-thumbnails";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
@@ -376,14 +378,17 @@ const errorHandler: ErrorRequestHandler = (
 };
 app.use(errorHandler);
 
+const thumbnailMaintenance = startAssetThumbnailMaintenance(db, storage);
 const server = app.listen(config.PORT, () =>
   console.log(`Wireless Canvas API listening on ${config.PORT}`),
 );
-const shutdown = async () => {
-  server.close();
-  await taskEvents.close();
-  await Promise.all([db.end(), cache.quit()]);
-  process.exit(0);
-};
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+const shutdown = createApiShutdown({
+  server,
+  drainSubscriptions: () => taskEvents.drain(),
+  closeBackground: () => thumbnailMaintenance.stop(),
+  closeEvents: () => taskEvents.close(),
+  closeDatabase: () => db.end(),
+  closeCache: () => cache.quit(),
+});
+process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
+process.on("SIGINT", () => { void shutdown("SIGINT"); });

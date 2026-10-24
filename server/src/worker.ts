@@ -35,6 +35,7 @@ import { inlineProviderImageDataUrl } from "./provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-input";
 import { imageResultExtension, storeImageResult } from "./image-result-storage";
 import { scheduleAssetThumbnails } from "./asset-thumbnails";
+import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending, type WorkflowTaskContext } from "./workflow-task-context";
 
 type WorkRow = {
   id: string;
@@ -54,9 +55,11 @@ type WorkRow = {
   poll_deadline_at: string | null;
   upstream_task_id: string | null;
   upstream_submission_started_at: string | null;
+  upstream_workflow_context: WorkflowTaskContext | null;
   priority: TaskPriority;
   queued_at: string;
   model_id: string | null;
+  provider_id: string | null;
   concurrency_limit: number | null;
   protocol: string | null;
   base_url: string | null;
@@ -101,7 +104,7 @@ async function runTask(taskId: string) {
   );
   if (!claimed.rows[0]) return;
   const details = await db.query<WorkRow>(
-    `SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.priority,t.queued_at,m.model_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
+    `SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.upstream_workflow_context,t.priority,t.queued_at,m.model_id,m.provider_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
         FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id AND w.enabled=true WHERE t.id=$1 AND t.execution_token=$2`,
     [taskId, executionToken],
   );
@@ -162,7 +165,7 @@ async function runTask(taskId: string) {
     });
     outcome = "success";
   } catch (error) {
-    if (error instanceof VideoTaskPending || error instanceof ApiMartImageTaskPending) {
+    if (error instanceof VideoTaskPending || error instanceof ApiMartImageTaskPending || error instanceof WorkflowTaskPending) {
       // Keep the model's upstream-inflight reservation, release only this
       // execution slot. A later short invocation queries the persisted ID.
       keepModelSlot = true;
@@ -245,14 +248,15 @@ async function assertTaskExecution(task: WorkRow) {
   if (!current.rows[0]) throw new TaskExecutionLost("任务执行租约已失效");
 }
 
-async function claimProviderSubmission(task: WorkRow) {
+async function claimProviderSubmission(task: WorkRow, workflowContext: WorkflowTaskContext | null = null) {
   if (task.upstream_submission_started_at || task.upstream_task_id) throw new Error("原任务已提交或结果未知，不能重复提交付费请求");
   const claimed = await db.query(
-    "UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND execution_token=$2 AND lease_expires_at>now() AND status='processing' AND upstream_submission_started_at IS NULL AND upstream_task_id IS NULL RETURNING id",
-    [task.id, task.execution_token],
+    "UPDATE tasks SET upstream_submission_started_at=now(),upstream_workflow_context=$3::jsonb,updated_at=now() WHERE id=$1 AND execution_token=$2 AND lease_expires_at>now() AND status='processing' AND upstream_submission_started_at IS NULL AND upstream_task_id IS NULL RETURNING id",
+    [task.id, task.execution_token, workflowContext ? JSON.stringify(workflowContext) : null],
   );
   if (!claimed.rows[0]) throw new VideoSubmissionClaimLost("任务提交权已改变，不会重新生成");
   task.upstream_submission_started_at = new Date().toISOString();
+  task.upstream_workflow_context = workflowContext;
 }
 
 async function assertProviderSubmissionResponse(response: Response, label: string) {
@@ -268,7 +272,9 @@ import { OPENAI_IMAGE_TIMEOUT_MS } from "./opentoken-image";
 async function executeProvider(task: WorkRow, timing: GenerationTiming) {
   // Existing async image submissions must never fall through to a newly edited
   // synchronous provider/workflow configuration and create another paid job.
-  if (task.operation_type !== "video_generation" && (task.upstream_task_id || task.upstream_submission_started_at)
+  if (task.upstream_workflow_context) {
+    assertWorkflowTaskContext(task, task.upstream_workflow_context);
+  } else if (task.operation_type !== "video_generation" && (task.upstream_task_id || task.upstream_submission_started_at)
     && (task.protocol !== "apimart" || task.workflow_config_id)) {
     throw new Error("原图片任务已提交，但模型渠道配置已变更；请恢复原 APIMart 渠道后查询，不能重新提交生成");
   }
@@ -492,6 +498,42 @@ async function executeWorkflow(
   task: WorkRow,
   credentials: Record<string, string>,
 ) {
+  const context = task.upstream_workflow_context
+    ? assertWorkflowTaskContext(task, task.upstream_workflow_context) : workflowTaskContext(task);
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (credentials.apiKey) {
+    headers.authorization = `Bearer ${credentials.apiKey}`;
+    headers["x-api-key"] = credentials.apiKey;
+  }
+  if (credentials.walletApiKey) headers["wallet-api-key"] = credentials.walletApiKey;
+  if (task.upstream_task_id) {
+    if (!task.upstream_workflow_context || !task.status_path)
+      throw new Error("原工作流协议记录或状态地址缺失，不能重新提交生成");
+    if (!task.poll_deadline_at) {
+      const deadline = await db.query<{ poll_deadline_at: string }>(
+        "UPDATE tasks SET poll_deadline_at=COALESCE(poll_deadline_at,now()+($3::int * interval '1 second')),updated_at=now() WHERE id=$1 AND execution_token=$2 AND status='processing' RETURNING poll_deadline_at",
+        [task.id, task.execution_token, context.timeoutSeconds],
+      );
+      if (!deadline.rows[0]) throw new TaskExecutionLost("工作流查询执行权已改变");
+      task.poll_deadline_at = deadline.rows[0].poll_deadline_at;
+    }
+    if (new Date(task.poll_deadline_at).getTime() <= Date.now()) throw new Error("工作流查询已超时");
+    const response = await fetch(joinUrl(task.base_url!, task.status_path.replace("{taskId}", encodeURIComponent(task.upstream_task_id))), {
+      headers, signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(`工作流状态查询失败 ${response.status}`);
+    }
+    const payload = await response.json();
+    const outputs = normalizeWorkflowOutputs(readPath(payload, task.output_path!));
+    if (outputs.length) return Promise.all(outputs.map(url => fetchProviderResult(url)));
+    const state = String(task.status_value_path ? readPath(payload, task.status_value_path) : "").toLowerCase();
+    if ((task.failure_values ?? []).some(value => value.toLowerCase() === state)) throw new Error(`工作流执行失败：${state}`);
+    if ((task.success_values ?? []).some(value => value.toLowerCase() === state)) throw new Error("工作流已完成但没有返回结果地址");
+    throw new WorkflowTaskPending(context.pollIntervalMs);
+  }
+  if (task.upstream_submission_started_at) throw new Error("原工作流提交状态待核实，不会重新生成");
   const sourceAssets = await loadSourceAssets(task.source_urls, task.user_id);
   if (
     (task.model_id === "gpt-image-2" || task.model_id === "gpt-image-2-ext") &&
@@ -542,17 +584,8 @@ async function executeWorkflow(
     ...(isImageWorkflowTask(task) ? { n: 1, count: 1, quantity: 1 } : {}),
   };
   const body = singleImageWorkflowRequestBody(task, renderTemplate(task.request_template ?? {}, variables));
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-  };
-  if (credentials.apiKey) {
-    headers.authorization = `Bearer ${credentials.apiKey}`;
-    headers["x-api-key"] = credentials.apiKey;
-  }
-  if (credentials.walletApiKey)
-    headers["wallet-api-key"] = credentials.walletApiKey;
   const requestBody = JSON.stringify(body);
-  await claimProviderSubmission(task);
+  await claimProviderSubmission(task, context);
   const submit = await fetch(joinUrl(task.base_url!, task.submit_path!), {
     method: "POST",
     headers,
@@ -560,49 +593,24 @@ async function executeWorkflow(
     signal: AbortSignal.timeout(180_000),
   });
   await assertProviderSubmissionResponse(submit, "工作流");
-  let payload = (await submit.json()) as unknown;
-  let outputs = normalizeWorkflowOutputs(readPath(payload, task.output_path!));
+  const payload = (await submit.json()) as unknown;
+  const outputs = normalizeWorkflowOutputs(readPath(payload, task.output_path!));
   if (outputs.length) return Promise.all(outputs.map(url => fetchProviderResult(url)));
   const externalId = task.external_task_path
     ? readPath(payload, task.external_task_path)
     : null;
-  if (!externalId || !task.status_path)
+  if ((typeof externalId !== "string" && typeof externalId !== "number") || !String(externalId).trim() || !task.status_path)
     throw new Error("工作流响应中没有任务 ID 或直接结果");
-  const deadline = Date.now() + (task.timeout_seconds ?? 600) * 1000;
-  while (Date.now() < deadline) {
-    await Bun.sleep(task.poll_interval_ms ?? 2000);
-    const statusResponse = await fetch(
-      joinUrl(
-        task.base_url!,
-        task.status_path.replace(
-          "{taskId}",
-          encodeURIComponent(String(externalId)),
-        ),
-      ),
-      { headers, signal: AbortSignal.timeout(60_000) },
-    );
-    if (!statusResponse.ok)
-      throw new Error(`工作流状态查询失败 ${statusResponse.status}`);
-    payload = await statusResponse.json();
-    outputs = normalizeWorkflowOutputs(readPath(payload, task.output_path!));
-    if (outputs.length) return Promise.all(outputs.map(url => fetchProviderResult(url)));
-    const state = String(
-      task.status_value_path ? readPath(payload, task.status_value_path) : "",
-    ).toLowerCase();
-    if (
-      (task.failure_values ?? [])
-        .map((value) => value.toLowerCase())
-        .includes(state)
-    )
-      throw new Error(`工作流执行失败：${state}`);
-    if (
-      (task.success_values ?? [])
-        .map((value) => value.toLowerCase())
-        .includes(state)
-    )
-      throw new Error("工作流已完成但没有返回结果地址");
-  }
-  throw new Error("工作流执行超时");
+  task.upstream_task_id = String(externalId);
+  // Even after losing a lease, recording the ID from our single accepted POST
+  // is safe and essential. Never replace another ID or protocol snapshot.
+  const persisted = await db.query<{ poll_deadline_at: string }>(
+    "UPDATE tasks SET upstream_task_id=$1,poll_deadline_at=COALESCE(poll_deadline_at,now()+($3::int * interval '1 second')),updated_at=now() WHERE id=$2 AND upstream_workflow_context=$4::jsonb AND (upstream_task_id IS NULL OR upstream_task_id=$1) RETURNING poll_deadline_at",
+    [task.upstream_task_id, task.id, context.timeoutSeconds, JSON.stringify(context)],
+  );
+  if (!persisted.rows[0]) throw new VideoSubmissionClaimLost("原工作流任务身份已改变");
+  task.poll_deadline_at = persisted.rows[0].poll_deadline_at;
+  throw new WorkflowTaskPending(context.pollIntervalMs);
 }
 
 function isImageWorkflowTask(task: Pick<WorkRow, "operation_type">) {

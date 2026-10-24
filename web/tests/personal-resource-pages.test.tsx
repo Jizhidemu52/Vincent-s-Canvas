@@ -38,17 +38,22 @@ function page(path: string, exportName: string, dependencies: Record<string, unk
         antd: new Proxy({ App: { useApp: () => ({ message: { success() {}, error() {}, warning() {} }, modal: { confirm() {} } }) }, Input: mockInput, DatePicker: { RangePicker: "RangePicker" } }, { get(target, key) { return key in target ? target[key as keyof typeof target] : String(key); } }),
         ...dependencies,
     };
-    // The extracted action hook uses this page instance's React/runtime too.
-    // Keep its real implementation; never invoke a second React dispatcher.
+    // Extracted prompt hooks use this page instance's React/runtime too.
+    // Keep their real implementations; never invoke a second React dispatcher.
     if (path.endsWith("/prompts/index.tsx")) {
-        const hookUrl = new URL("../src/components/prompts/use-prompt-template-actions.tsx", import.meta.url);
-        const requireHook = createRequire(hookUrl);
-        const hookCode = ts.transpileModule(readFileSync(hookUrl, "utf8"), {
-            compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
-        }).outputText;
-        const hookModule = { exports: {} };
-        new Function("require", "module", "exports", hookCode)((name: string) => Object.hasOwn(mocks, name) ? mocks[name] : requireHook(name), hookModule, hookModule.exports);
-        mocks["@/components/prompts/use-prompt-template-actions"] = hookModule.exports;
+        for (const [name, file] of [
+            ["use-prompt-template-actions", "use-prompt-template-actions.tsx"],
+            ["use-prompt-favorite-list", "use-prompt-favorite-list.ts"],
+        ]) {
+            const hookUrl = new URL(`../src/components/prompts/${file}`, import.meta.url);
+            const requireHook = createRequire(hookUrl);
+            const hookCode = ts.transpileModule(readFileSync(hookUrl, "utf8"), {
+                compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
+            }).outputText;
+            const hookModule = { exports: {} };
+            new Function("require", "module", "exports", hookCode)((dependency: string) => Object.hasOwn(mocks, dependency) ? mocks[dependency] : requireHook(dependency), hookModule, hookModule.exports);
+            mocks[`@/components/prompts/${name}`] = hookModule.exports;
+        }
     }
     const module = { exports: {} as any };
     new Function("require", "module", "exports", "window", code)((name: string) => Object.hasOwn(mocks, name) ? mocks[name] : requireModule(name), module, module.exports, {
@@ -108,14 +113,16 @@ test("leaving a group falls back from the remembered team scope to the accessibl
         "@/hooks/use-workbench-field": { useWorkbenchField(key: string, initial: unknown) { if (!fields.has(key)) fields.set(key, [initial, (next: any) => { const current = fields.get(key)!; current[0] = typeof next === "function" ? next(current[0]) : next; }]); return fields.get(key); } },
         "@/components/prompts/prompt-template-card": { PromptTemplateCard: "PromptTemplateCard" },
         "@/components/prompts/prompt-template-editor": { PromptTemplateEditor: "PromptTemplateEditor" },
-        "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user }), isAdminRole: () => false },
-        "@/services/api/prompts": { listPromptTemplates: async ({ scope }: { scope: string }) => { reads.push(scope); return { templates: [], total: 0 }; } },
+        "@/stores/use-user-store": { useUserStore: Object.assign((selector: any) => selector({ user }), { getState: () => ({ user }) }), isAdminRole: () => false },
+        "@/services/api/prompts": { listPromptTemplates: async ({ scope }: { scope: string }) => { reads.push(scope); return { templates: [{ id: scope, title: scope, scope }], total: 1 }; } },
     });
     h.render(); h.runTimers(); await settle(); expect(reads).toEqual(["team"]);
+    expect(h.render().elements.filter(element => element.type === "PromptTemplateCard").map(element => element.props.item.id)).toEqual(["team"]);
     user = { ...user, groupId: "" };
     let rendered = h.render(); h.runTimers(); await settle(); rendered = h.render();
     expect(rendered.elements.find(element => element.type === "Segmented")!.props.value).toBe("public");
     expect(reads.at(-1)).toBe("public");
+    expect(rendered.elements.filter(element => element.type === "PromptTemplateCard").map(element => element.props.item.id)).toEqual(["public"]);
     h.unmount();
 });
 

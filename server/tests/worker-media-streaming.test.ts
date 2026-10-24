@@ -3,6 +3,7 @@ import ts from "typescript";
 import { disposeProviderResults } from "../src/media-result-file";
 import { VideoTaskPending, VideoSubmissionClaimLost } from "../src/media-runtime";
 import { ApiMartImageTaskPending } from "../src/apimart-image";
+import { WorkflowTaskPending } from "../src/workflow-task-context";
 
 const source = ts.createSourceFile("worker.ts", await Bun.file(new URL("../src/worker.ts", import.meta.url)).text(), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 function functions(names: string[], dependencies: Record<string, unknown>) {
@@ -58,7 +59,7 @@ test.each(["stored", "store-failed", "lease-lost"])("worker disposes generated v
     executeProvider: async () => { paid++; return [{ filePath: "fixture-only", byteSize: 5, mimeType: "video/mp4", dispose: async () => { disposed++; } }]; },
     assertTaskExecution: async () => {}, storeResults: async () => { stored++; if (outcome === "store-failed") throw new Error("fixture storage failure"); return ["owned/result"]; },
     withTransaction: async (_db: unknown, action: (client: unknown) => unknown) => action(db), settleReservation: async (_db: unknown, _request: string, action: string) => { expect(action).toBe("capture"); captures++; },
-    VideoTaskPending, ApiMartImageTaskPending, VideoSubmissionClaimLost, TaskExecutionLost, readProviderSubmissionDiagnostics: () => undefined,
+    VideoTaskPending, ApiMartImageTaskPending, WorkflowTaskPending, VideoSubmissionClaimLost, TaskExecutionLost, readProviderSubmissionDiagnostics: () => undefined,
   });
   await api.runTask(task.id);
   expect(paid).toBe(1); expect(disposed).toBe(1); expect(captures).toBe(outcome === "stored" ? 1 : 0); expect(stored).toBe(outcome === "lease-lost" ? 0 : 1);

@@ -28,6 +28,20 @@ function clientFixture(failListen = false) {
 }
 
 describe("shared PostgreSQL task invalidation listener", () => {
+  test("drain closes current and late SSE subscriptions without releasing LISTEN until HTTP has drained", async () => {
+    const fixture = clientFixture();
+    const service = new TaskEventsService({ connect: async () => fixture.client } as unknown as Database);
+    await service.start();
+    let closed = 0;
+    service.subscribe(ownerA, [taskA], () => {}, () => { closed++; });
+    service.drain(); service.drain();
+    service.subscribe(ownerB, [taskB], () => {}, () => { closed++; });
+    expect(closed).toBe(2); expect(fixture.releases).toEqual([]);
+    expect(fixture.emitter.listenerCount("notification")).toBe(1);
+    await service.close();
+    expect(fixture.releases).toEqual([true]); expect(closed).toBe(2);
+  });
+
   test("many subscriptions share one LISTEN connection, intersect owner and task IDs, and release it on close", async () => {
     const fixture = clientFixture();
     let checkouts = 0;

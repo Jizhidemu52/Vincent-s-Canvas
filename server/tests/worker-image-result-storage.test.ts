@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { imageResultExtension, storeImageResult } from "../src/image-result-storage";
 import { prepareImageEditInput } from "../src/image-edit-input";
 import { ApiMartImageTaskPending } from "../src/apimart-image";
+import { WorkflowTaskPending } from "../src/workflow-task-context";
 import { resolveImageResultVariants, type ImageResultAsset } from "../src/image-result-variants";
 import { disposeProviderResults } from "../src/media-result-file";
 
@@ -69,7 +70,7 @@ test("Worker pauses a completed provider result on processing error without refu
   class TaskExecutionLost extends Error {}
   const api = functions(["runTask"], {
     disposeProviderResults,
-    randomUUID, TASK_LEASE_SECONDS: 180, config: { TASK_MOCK_MODE: "false" }, VideoSubmissionClaimLost, VideoTaskPending, ApiMartImageTaskPending, TaskExecutionLost,
+    randomUUID, TASK_LEASE_SECONDS: 180, config: { TASK_MOCK_MODE: "false" }, VideoSubmissionClaimLost, VideoTaskPending, ApiMartImageTaskPending, WorkflowTaskPending, TaskExecutionLost,
     db: { query: async (sql: string) => { queries.push(sql); return { rows: [task] }; } },
     cache: { incr: async () => 1, expire: async () => {}, decr: async () => {}, zAdd: async () => { queued++; } },
     createGenerationTiming: () => ({ measure: async (_stage: string, call: () => unknown) => call(), finish: () => {} }),

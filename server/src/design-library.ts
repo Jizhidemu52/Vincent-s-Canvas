@@ -62,7 +62,7 @@ export type LibraryListFilter = {
     query: string; tag: string; page: number; pageSize: number;
 };
 
-/** Adapters persist state only. Transactions include source reads, media writes and private-asset insertion.
+/** Adapters persist state only. External media preparation happens before short commit transactions.
  * lock() is transaction-scoped (PG advisory lock / serialized SQLite transaction).
  * getPublication(id,true) locks status while issuing a delivery or changing publication state.
  * getSourceAsset must return only the requested owner; service rechecks ready/deleted/kind.
@@ -87,9 +87,12 @@ export interface DesignLibraryRepository {
     listActivity(entryId: string, page: number, pageSize: number): Promise<{ items: LibraryReceipt[]; total: number }>;
 }
 export interface DesignLibraryMediaStore {
-    read(key: string): Promise<Uint8Array>;
+    read(key: string, expectedBytes?: number): Promise<Uint8Array>;
     write(key: string, bytes: Uint8Array, mimeType: string): Promise<void>;
     remove(key: string): Promise<void>;
+    /** External stores copy outside SQL transactions, conditionally against the validated source version.
+     * Embedded stores may omit this: their BLOB writes remain atomic with their SQL records. */
+    copy?(sourceKey: string, destinationKey: string, options: { byteSize: number; validate?: (bytes: Uint8Array) => void }): Promise<void>;
 }
 
 export class DesignLibraryError extends Error {
@@ -251,6 +254,19 @@ function safeFilename(filename: string, mimeType: string) {
     return `${clean || "设计灵感"}.${mimeExtensions[mimeType]}`;
 }
 
+function unchangedSource(before: LibrarySourceAsset, after: LibrarySourceAsset) {
+    if (before.id !== after.id || before.ownerId !== after.ownerId || before.objectKey !== after.objectKey
+        || before.filename !== after.filename || before.mimeType !== after.mimeType || before.byteSize !== after.byteSize) {
+        throw new DesignLibraryError("SOURCE_ASSET_CHANGED", "原图保存记录已改变，请重新发布", 409);
+    }
+}
+function unchangedImage(before: LibraryImageRecord, after: LibraryImageRecord) {
+    if (before.id !== after.id || before.objectKey !== after.objectKey || before.mimeType !== after.mimeType
+        || before.byteSize !== after.byteSize || before.filename !== after.filename || before.width !== after.width || before.height !== after.height) {
+        throw new DesignLibraryError("SNAPSHOT_UNAVAILABLE", "分享原图记录已改变，请重试", 409);
+    }
+}
+
 export class DesignLibraryService {
     constructor(private repository: DesignLibraryRepository, private media: DesignLibraryMediaStore) {}
 
@@ -281,52 +297,82 @@ export class DesignLibraryService {
         const input = designLibraryPublishSchema.parse(body);
         const payloadHash = digest(input);
         const copied: string[] = [];
+        let commitMayHaveRun = false;
+        const existingEntry = (publication: LibraryPublication) => {
+            if (publication.payloadHash !== payloadHash) throw new DesignLibraryError("IDEMPOTENCY_CONFLICT", "同一发布请求不能更换内容，请重新发布", 409);
+            return entryDto(publication, actor);
+        };
         try {
-            return await this.repository.transaction(async repository => {
+            const previous = await this.repository.findPublication(actor.id, input.requestId);
+            if (previous) return existingEntry(previous);
+            const sources: LibrarySourceAsset[] = [];
+            let total = 0;
+            for (const id of input.assetIds) {
+                const source = checkedSource(await this.repository.getSourceAsset(id, actor.id), actor);
+                total += source.byteSize;
+                if (total > MAX_PUBLICATION_BYTES) throw new DesignLibraryError("PUBLICATION_TOO_LARGE", "一次分享的图片总量不能超过 100 MiB", 413);
+                sources.push(source);
+            }
+            const id = randomUUID();
+            const images: LibraryImageRecord[] = [];
+            const embeddedBytes: Uint8Array[] = [];
+            for (const source of sources) {
+                let inspected: ReturnType<typeof inspectDesignLibraryImage> | undefined;
+                const validate = (bytes: Uint8Array) => {
+                    if (bytes.byteLength !== source.byteSize) throw new DesignLibraryError("SOURCE_SIZE_MISMATCH", "原图内容与保存记录不一致，请重新保存后发布", 409);
+                    inspected = inspectDesignLibraryImage(bytes, source.mimeType);
+                };
+                const imageId = randomUUID();
+                const objectKey = `design-library/${id}/${imageId}.${mimeExtensions[source.mimeType.toLowerCase().split(";")[0]!.trim()] ?? "image"}`;
+                if (this.media.copy) {
+                    copied.push(objectKey);
+                    await this.media.copy(source.objectKey, objectKey, { byteSize: source.byteSize, validate });
+                } else {
+                    const bytes = await this.media.read(source.objectKey, source.byteSize);
+                    validate(bytes);
+                    embeddedBytes.push(bytes);
+                }
+                if (!inspected) throw new Error("Image copy did not validate its source");
+                images.push({ id: imageId, filename: safeFilename(source.filename, inspected.mimeType), objectKey, byteSize: source.byteSize, ...inspected });
+            }
+            const now = new Date().toISOString();
+            const publication: LibraryPublication = {
+                id, title: input.title, thought: input.thought, prompt: input.prompt, tags: input.tags,
+                author: { id: actor.id, name: actor.name, departmentId: actor.departmentId, departmentName: actor.departmentName },
+                images, status: "published", createdAt: now, updatedAt: now, requestId: input.requestId, payloadHash,
+                moderationReason: null, moderatedBy: null,
+            };
+            const result = await this.repository.transaction(async repository => {
                 await repository.lock(`publish:${actor.id}:${input.requestId}`);
                 const existing = await repository.findPublication(actor.id, input.requestId);
-                if (existing) {
-                    if (existing.payloadHash !== payloadHash) throw new DesignLibraryError("IDEMPOTENCY_CONFLICT", "同一发布请求不能更换内容，请重新发布", 409);
-                    return entryDto(existing, actor);
-                }
-                const sources: LibrarySourceAsset[] = [];
-                let total = 0;
-                for (const id of input.assetIds) {
-                    const source = checkedSource(await repository.getSourceAsset(id, actor.id), actor);
-                    total += source.byteSize;
-                    if (total > MAX_PUBLICATION_BYTES) throw new DesignLibraryError("PUBLICATION_TOO_LARGE", "一次分享的图片总量不能超过 100 MiB", 413);
-                    sources.push(source);
-                }
-                const id = randomUUID();
-                const images: LibraryImageRecord[] = [];
+                if (existing) return existingEntry(existing);
                 for (const source of sources) {
-                    const bytes = await this.media.read(source.objectKey);
-                    if (bytes.byteLength !== source.byteSize) throw new DesignLibraryError("SOURCE_SIZE_MISMATCH", "原图内容与保存记录不一致，请重新保存后发布", 409);
-                    const inspected = inspectDesignLibraryImage(bytes, source.mimeType);
-                    const imageId = randomUUID();
-                    const objectKey = `design-library/${id}/${imageId}.${mimeExtensions[inspected.mimeType]}`;
-                    copied.push(objectKey);
-                    await this.media.write(objectKey, bytes, inspected.mimeType);
-                    images.push({ id: imageId, filename: safeFilename(source.filename, inspected.mimeType), objectKey, byteSize: bytes.byteLength, ...inspected });
+                    unchangedSource(source, checkedSource(await repository.getSourceAsset(source.id, actor.id), actor));
                 }
-                const now = new Date().toISOString();
-                const publication: LibraryPublication = {
-                    id, title: input.title, thought: input.thought, prompt: input.prompt, tags: input.tags,
-                    author: { id: actor.id, name: actor.name, departmentId: actor.departmentId, departmentName: actor.departmentName },
-                    images, status: "published", createdAt: now, updatedAt: now, requestId: input.requestId, payloadHash,
-                    moderationReason: null, moderatedBy: null,
-                };
+                for (const [index, bytes] of embeddedBytes.entries()) {
+                    const image = images[index]!;
+                    copied.push(image.objectKey);
+                    await this.media.write(image.objectKey, bytes, image.mimeType);
+                }
                 await repository.insertPublication(publication);
+                commitMayHaveRun = true;
                 return entryDto(publication, actor);
             });
+            if (result.id !== id) await this.removeCopies(copied);
+            return result;
         } catch (error) {
             // A lost COMMIT acknowledgement must never delete an already-published snapshot.
-            let checked = false;
-            const committed = await this.repository.findPublication(actor.id, input.requestId).then(value => { checked = true; return value; }).catch(() => null);
-            if (committed?.payloadHash === payloadHash) return entryDto(committed, actor);
-            if (checked && !committed) await Promise.all(copied.map(key => this.media.remove(key).catch(() => undefined)));
+            const committed = await this.repository.findPublication(actor.id, input.requestId).catch(() => null);
+            if (committed) {
+                await this.removeCopies(copied.filter(key => !committed.images.some(image => image.objectKey === key)));
+                if (committed.payloadHash === payloadHash) return entryDto(committed, actor);
+            } else if (!commitMayHaveRun) await this.removeCopies(copied);
             throw error;
         }
+    }
+
+    private async removeCopies(keys: string[]) {
+        await Promise.all(keys.map(key => this.media.remove(key).catch(() => undefined)));
     }
 
     async withdraw(actor: DesignLibraryActor, id: string): Promise<DesignLibraryEntry> {
@@ -362,18 +408,20 @@ export class DesignLibraryService {
         requireActor(actor);
         const publication = readable(await this.repository.getPublication(recordId.parse(id)), actor);
         const image = selectedImage(publication, imageId);
-        return { bytes: await this.media.read(image.objectKey), image };
+        return { bytes: await this.media.read(image.objectKey, image.byteSize), image };
     }
 
     async download(actor: DesignLibraryActor, id: string, imageId: string, body: unknown) {
         requireActor(actor, true);
         const input = designLibraryOperationSchema.parse(body);
         const key = operationKey(actor.id, recordId.parse(id), "download", recordId.parse(imageId), input.requestId);
+        const snapshot = selectedImage(published(await this.repository.getPublication(id)), imageId);
+        const bytes = await this.media.read(snapshot.objectKey, snapshot.byteSize);
+        if (bytes.byteLength !== snapshot.byteSize) throw new DesignLibraryError("SNAPSHOT_UNAVAILABLE", "分享原图暂时不可用，未记录下载", 503);
         return this.repository.transaction(async repository => {
             const publication = published(await repository.getPublication(id, true));
             const image = selectedImage(publication, imageId);
-            const bytes = await this.media.read(image.objectKey);
-            if (bytes.byteLength !== image.byteSize) throw new DesignLibraryError("SNAPSHOT_UNAVAILABLE", "分享原图暂时不可用，未记录下载", 503);
+            unchangedImage(snapshot, image);
             if (!await repository.getDelivery(key)) await repository.insertDelivery({ key, actorId: actor.id, entryId: id, imageId, action: "download", requestId: input.requestId, assetId: null, createdAt: new Date().toISOString() });
             return { bytes, image };
         });
@@ -384,22 +432,36 @@ export class DesignLibraryService {
         const input = designLibraryOperationSchema.parse(body);
         const key = operationKey(actor.id, recordId.parse(id), "reuse", recordId.parse(imageId), input.requestId);
         const copied: string[] = [];
+        const assetId = randomUUID();
+        let commitMayHaveRun = false;
         try {
-            return await this.repository.transaction(async repository => {
+            const snapshot = selectedImage(published(await this.repository.getPublication(id)), imageId);
+            const objectKey = `users/${actor.id}/${assetId}/library-image.${mimeExtensions[snapshot.mimeType]}`;
+            let bytes: Uint8Array | undefined;
+            if (!(await this.repository.getDelivery(key))?.assetId) {
+                if (this.media.copy) {
+                    copied.push(objectKey);
+                    await this.media.copy(snapshot.objectKey, objectKey, { byteSize: snapshot.byteSize });
+                } else {
+                    bytes = await this.media.read(snapshot.objectKey, snapshot.byteSize);
+                    if (bytes.byteLength !== snapshot.byteSize) throw new DesignLibraryError("SNAPSHOT_UNAVAILABLE", "分享原图暂时不可用，未创建复用素材", 503);
+                }
+            }
+            const result = await this.repository.transaction(async repository => {
                 await repository.lock(`reuse:${key}`);
                 const publication = published(await repository.getPublication(id, true));
                 const image = selectedImage(publication, imageId);
+                unchangedImage(snapshot, image);
                 const existing = await repository.getDelivery(key);
                 if (existing?.assetId) {
                     checkedSource(await repository.getSourceAsset(existing.assetId, actor.id), actor);
+                    commitMayHaveRun = true;
                     return this.reuseDto(publication, image, existing.assetId);
                 }
-                const bytes = await this.media.read(image.objectKey);
-                if (bytes.byteLength !== image.byteSize) throw new DesignLibraryError("SNAPSHOT_UNAVAILABLE", "分享原图暂时不可用，未创建复用素材", 503);
-                const assetId = randomUUID();
-                const objectKey = `users/${actor.id}/${assetId}/library-image.${mimeExtensions[image.mimeType]}`;
-                copied.push(objectKey);
-                await this.media.write(objectKey, bytes, image.mimeType);
+                if (bytes) {
+                    copied.push(objectKey);
+                    await this.media.write(objectKey, bytes, image.mimeType);
+                } else if (!copied.length) throw new DesignLibraryError("SNAPSHOT_UNAVAILABLE", "复用记录已改变，请重试", 409);
                 const now = new Date().toISOString();
                 const result = this.reuseDto(publication, image, assetId);
                 await repository.insertPrivateAsset({
@@ -408,17 +470,20 @@ export class DesignLibraryService {
                     createdAt: now, metadata: { designLibrarySource: result.source, width: image.width, height: image.height },
                 });
                 await repository.insertDelivery({ key, actorId: actor.id, entryId: id, imageId, action: "reuse", requestId: input.requestId, assetId, createdAt: now });
+                commitMayHaveRun = true;
                 return result;
             });
+            if (result.assetId !== assetId) await this.removeCopies(copied);
+            return result;
         } catch (error) {
             if (!copied.length) throw error;
-            let checked = false;
-            const committed = await this.repository.getDelivery(key).then(value => { checked = true; return value; }).catch(() => null);
-            if (committed?.assetId) {
+            const committed = await this.repository.getDelivery(key).catch(() => null);
+            if (committed?.assetId && commitMayHaveRun) {
+                if (committed.assetId !== assetId) await this.removeCopies(copied);
                 const publication = await this.repository.getPublication(id);
                 if (publication) return this.reuseDto(publication, selectedImage(publication, imageId), committed.assetId);
             }
-            if (checked && !committed) await Promise.all(copied.map(objectKey => this.media.remove(objectKey).catch(() => undefined)));
+            if (!commitMayHaveRun) await this.removeCopies(copied);
             throw error;
         }
     }

@@ -8,9 +8,10 @@ import { createPromptListLoader } from "@/lib/prompt-list-loader";
 import { PromptTemplateCard } from "@/components/prompts/prompt-template-card";
 import { PromptTemplateEditor } from "@/components/prompts/prompt-template-editor";
 import { usePromptTemplateActions } from "@/components/prompts/use-prompt-template-actions";
+import { usePromptFavoriteList } from "@/components/prompts/use-prompt-favorite-list";
 import {
     copyPromptTemplate, createPromptTemplate, deletePromptTemplate, listPromptTemplates,
-    setPromptFavorite, submitPromptToTeam, updatePromptTemplate,
+    submitPromptToTeam, updatePromptTemplate,
     type PromptSnapshotInput, type PromptTemplate,
 } from "@/services/api/prompts";
 import { useUserStore } from "@/stores/use-user-store";
@@ -18,8 +19,8 @@ import { useUserStore } from "@/stores/use-user-store";
 export default function MyPromptsPage() {
     const { message, modal } = App.useApp();
     const { reuse, insertToCanvas, canvasDialog } = usePromptTemplateActions();
-    const groupId = useUserStore((state) => state.user?.groupId);
-    const [items, setItems] = useState<PromptTemplate[]>([]);
+    const user = useUserStore((state) => state.user);
+    const groupId = user?.groupId;
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState("");
     const [query, setQuery] = useWorkbenchField("my-prompts:query", "");
@@ -27,17 +28,21 @@ export default function MyPromptsPage() {
     const [favorite, setFavorite] = useWorkbenchField("my-prompts:favorite", false);
     const [page, setPage] = useWorkbenchField("my-prompts:page", 1);
     const [pageSize, setPageSize] = useWorkbenchField("my-prompts:pageSize", 24);
-    const [total, setTotal] = useState(0);
     const [editing, setEditing] = useState<PromptTemplate | null>(null);
     const [editorOpen, setEditorOpen] = useState(false);
     const [loader] = useState(createPromptListLoader);
+    const { items, total, accept, waitForPending, onFavorite } = usePromptFavoriteList({
+        ownerId: user?.id, viewKey: JSON.stringify([query, sort, favorite, page, pageSize]), page, pageSize, favoriteOnly: favorite, loading, setPage,
+        readPage: (nextPage, size) => listPromptTemplates({ scope: "personal", query, sort, favorite: favorite ? true : undefined, page: nextPage, pageSize: size }),
+        onRefreshError: setLoadError,
+    });
 
     const load = useCallback(() => loader.load(
-        () => listPromptTemplates({ scope: "personal", query, sort, favorite: favorite ? true : undefined, page, pageSize }),
-        (result) => { setItems(result.templates); setTotal(result.total); setPage((value) => Math.min(value, Math.max(1, Math.ceil(result.total / pageSize)))); },
+        async () => { await waitForPending(); return listPromptTemplates({ scope: "personal", query, sort, favorite: favorite ? true : undefined, page, pageSize }); },
+        (result) => { accept(result); setPage((value) => Math.min(value, Math.max(1, Math.ceil(result.total / pageSize)))); },
         (error) => setLoadError(error instanceof Error ? error.message : "加载个人提示词失败"),
         (value) => { setLoading(value); if (value) setLoadError(""); },
-    ), [favorite, loader, page, pageSize, query, setPage, sort]);
+    ), [accept, favorite, loader, page, pageSize, query, setPage, sort, waitForPending]);
 
     useEffect(() => {
         const timer = window.setTimeout(() => void load(), 250);
@@ -69,7 +74,7 @@ export default function MyPromptsPage() {
                         <PromptTemplateCard key={item.id} item={item} editable canSubmit={Boolean(groupId)} onReuse={(mode) => reuse(item, mode)} onInsertToCanvas={() => insertToCanvas(item)}
                             onEdit={() => { setEditing(item); setEditorOpen(true); }}
                             onCopy={async () => { await copyPromptTemplate(item.id); message.success("已复制为新模板"); await load(); }}
-                            onFavorite={async () => { await setPromptFavorite(item.id, !item.favorite); await load(); }}
+                            onFavorite={() => onFavorite(item)}
                             onSubmit={async () => { const result = await submitPromptToTeam(item.id); message.success(result.submission.duplicate ? "该请求已提交过" : "已提交组长或管理员审核"); }}
                             onDelete={() => modal.confirm({ title: "删除这个个人模板？", content: "已发布的团队版本不会受影响。", okText: "删除", okButtonProps: { danger: true }, onOk: async () => { await deletePromptTemplate(item.id); message.success("模板已删除"); await load(); } })}
                         />

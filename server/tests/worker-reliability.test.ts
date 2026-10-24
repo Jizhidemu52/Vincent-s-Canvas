@@ -8,6 +8,7 @@ import { VideoProviderFailure, VideoSubmissionClaimLost, VideoTaskPending } from
 import { ApiMartImageProviderFailure, ApiMartImageTaskPending } from "../src/apimart-image";
 import { buildOpenAiAudioRequest } from "../src/media-runtime";
 import { normalizeWorkflowOutputs, readPath } from "../src/workflow-runtime";
+import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending } from "../src/workflow-task-context";
 
 const text = await Bun.file(new URL("../src/worker.ts", import.meta.url)).text();
 const source = ts.createSourceFile("worker.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -149,6 +150,7 @@ test.each(["image", "audio", "workflow"])("%s POST waits for the durable submiss
         : Response.json({ data: [{ url: "https://result.invalid/image.png" }], outputs: ["https://result.invalid/image.png"] });
     };
     const worker = productionFunctions(["executeProvider", "executeOpenAiAudio", "executeWorkflow", "claimProviderSubmission", "assertProviderSubmissionResponse"], {
+      assertWorkflowTaskContext, workflowTaskContext,
       db: { query: async () => { events.push("claim"); return { rows: owned ? [{ id: "task" }] : [] }; } },
       config: { PROVIDER_ENCRYPTION_KEY: "test-only" }, decryptSecret: () => '{"apiKey":"test-only"}',
       assertImageEditMaskSupport: () => {}, openAiImageParameters: () => ({}), VideoSubmissionClaimLost,
@@ -159,7 +161,7 @@ test.each(["image", "audio", "workflow"])("%s POST waits for the durable submiss
       isImageWorkflowTask: () => true, normalizeWorkflowOutputs, readPath,
       joinUrl: (base: string, path: string) => base + path,
     });
-    const task = { id: "task", execution_token: "owner", protocol: "openai", base_url: "https://provider.invalid/v1", model_id: "gpt-image-2",
+    const task = { id: "task", model_config_id: "model", provider_id: "provider", execution_token: "owner", protocol: "openai", base_url: "https://provider.invalid/v1", model_id: "gpt-image-2",
       operation_type: kind === "audio" ? "audio_generation" : "image_generation", prompt: "test", parameters: {}, source_urls: [], encrypted_credentials: "test-only",
       ...(kind === "workflow" ? { workflow_config_id: "workflow", submit_path: "/workflow", output_path: "outputs" } : {}),
     };
@@ -184,7 +186,7 @@ test.each(["network", "http_started", "initial_tls", "rejected"])("paid submissi
     acquireModelLease: async () => ({}), releaseModelLease: async () => { releasedSlots++; },
     startTaskLeaseHeartbeat: () => ({ assertOwned() {}, stop: async () => {} }),
     createGenerationTiming: () => ({ measure: async (_name: string, run: () => unknown) => run(), finish: (outcome: string) => outcomes.push(outcome) }),
-    executeProvider: async () => { throw error; }, VideoTaskPending, ApiMartImageTaskPending, VideoSubmissionClaimLost, TaskExecutionLost,
+    executeProvider: async () => { throw error; }, VideoTaskPending, ApiMartImageTaskPending, WorkflowTaskPending, VideoSubmissionClaimLost, TaskExecutionLost,
     VideoProviderFailure, ApiMartImageProviderFailure, ProviderSubmissionRejected, submissionWasNotSent,
     readProviderSubmissionDiagnostics: () => undefined, canAutomaticallyRetryTask: () => false,
     withTransaction: async (_db: unknown, action: (client: unknown) => Promise<unknown>) => action(db),
