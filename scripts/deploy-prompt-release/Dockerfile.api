@@ -1,4 +1,4 @@
-FROM canvas-api:canvas-ef575ee-20261024-prompt
+FROM canvas-api:canvas-be2d2a2-20261024-prompt
 WORKDIR /app
 # This is an image layer, not a host directory. Remove previous application sources/dependencies.
 RUN find /app -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && rm -rf /shared

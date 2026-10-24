@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 release="$(cd -- "$(dirname -- "$0")/.." && pwd)"
-previous=/home/vcan/releases/canvas-ef575ee-20261024-prompt
+previous=/home/vcan/releases/canvas-be2d2a2-20261024-prompt
 optimizer="${PROMPT_OPTIMIZER_MODEL_ID:-652b3d3c-93bf-419e-851f-31c5e101daf6}"
 action="${1:-deploy}"
 test "$release" = /home/vcan/releases/__RELEASE__

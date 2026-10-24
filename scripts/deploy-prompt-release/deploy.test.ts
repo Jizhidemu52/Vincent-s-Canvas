@@ -58,10 +58,13 @@ test("UTF-8 Chinese archive paths and exact bytes survive extraction and repacka
   execFileSync("tar", [...tarOptions, "-czf", packed, "-C", first, "."], { cwd: repo, windowsHide: true });
   const compressed = await readFile(packed);
   expect(compressed.subarray(0, 2).toString("hex")).toBe("1f8b");
-  // Verify gzip independently of Windows bsdtar's intermittent compressed-extract exit 5 under Bun tests.
+  // Windows bsdtar 3.5.2 crashes (0xC0000005, confirmed under Node too) when
+  // reading its own UTF-8 archive. Verify with Git's independent GNU tar reader.
   const unpacked = join(fixture, "repacked.tar");
   await writeFile(unpacked, gunzipSync(compressed));
-  execFileSync("tar", [...tarOptions, "-xf", unpacked, "-C", second], { cwd: repo, windowsHide: true });
+  const verifier = process.platform === "win32" ? "C:/Program Files/Git/usr/bin/tar.exe" : "tar";
+  const verifierOptions = process.platform === "win32" ? ["--force-local"] : [];
+  execFileSync(verifier, [...verifierOptions, "-xf", unpacked, "-C", second], { cwd: repo, windowsHide: true });
   expect(await readFile(join(second, originals[0]))).toEqual(expected);
   expect(await files(first)).toEqual(await files(second));
 });

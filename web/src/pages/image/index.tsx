@@ -660,7 +660,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         try {
             const draft = await restoreGenerationDraft(taskId);
             if (draft.maskReferenceIndex !== undefined) throw new Error("历史包含蒙版，请在支持蒙版的原编辑入口恢复；未套用任何输入");
-            if (draft.tool && draft.tool !== historyTool) throw new Error(`请先切换到历史原工具“${imageToolModes[draft.tool as GenerationToolMode]?.title || draft.tool}”再恢复，当前草稿未改变`);
+            if (draft.tool && requireToolKey(draft.operationType, draft.tool) !== toolKey) throw new Error(`请先切换到历史原工具“${imageToolModes[draft.tool as GenerationToolMode]?.title || draft.tool}”再恢复，当前草稿未改变`);
             if (revision !== inputRevision.current || preview !== previewRevision.current || settingsBeforeRestore !== useConfigStore.getState().config) throw new Error("草稿或所选记录已改变，已取消恢复");
             replacePrompt(draft.prompt);
             setOptimizedDraft(draft.userInput ? { prompt: draft.prompt, input: { ...draft.userInput, compilationId: undefined }, references: draft.references } : undefined);

@@ -4,7 +4,7 @@
 
 ## 固定目标与边界
 
-- 上一发布：`/home/vcan/releases/canvas-ef575ee-20261024-prompt`；预期 `/home/vcan/current` 指向它。
+- 上一发布：`/home/vcan/releases/canvas-be2d2a2-20261024-prompt`；预期 `/home/vcan/current` 指向它。
 - 仅替换 `vincent-s-canvas-api-1`、`vincent-s-canvas-worker-1`、`wireless-canvas-web`；数据库、Redis、MinIO、备份容器及另一套 `newvcan-*` 不动。
 - 默认独立优化模型为 `652b3d3c-93bf-419e-851f-31c5e101daf6`。它只用于首次创建的配方设置，不修改任何 `gpt-chat` 或其他板块绑定。执行前仍验证此 UUID 的模型、Provider、工作流启用状态及 chat 能力。
 - `PROMPT_OPTIMIZER_MODEL_ID` 可在**首次切换前**选择另一模型。已有配方的模型和管理员设置不被重复导入覆盖；上线后的模型变更通过超管配方页单独保存。
@@ -83,6 +83,6 @@ bun --no-env-file test ./scripts/deploy-prompt-release/deploy.test.ts
 
 合同测试只在临时 Git 仓库、文件夹及隔离 PGlite 数据库运行，不调用 Docker、SSH、curl 或模型。完整远端构建、真实容器环境、OA 登录、真实模型输出与视觉验收均留给根任务负责，不由离线测试代替。
 
-当前离线结果：7 项合同测试通过、0 失败、58 条断言；两份 shell 脚本 `bash -n` 通过。新增真实 Git 归档中文文件名、gzip 编码和字节一致性往返检查，以及 Docker 保留 `.env.example` 的规则检查；Windows 调用显式指定工作目录与 UTF-8 header charset。Windows bsdtar 在 Bun 测试内直接解压 gzip 曾间歇退出 5，测试现由标准 zlib 解压 gzip，再用 tar 核验文件名和原字节；真实 Linux 上传包另完整解压并核对全部 SHA-256。
+当前离线结果：7 项合同测试通过、0 失败、58 条断言；两份 shell 脚本 `bash -n` 通过。新增真实 Git 归档中文文件名、gzip 编码和字节一致性往返检查，以及 Docker 保留 `.env.example` 的规则检查；Windows 调用显式指定工作目录与 UTF-8 header charset。Windows 系统 bsdtar 3.5.2 在重读自己生成的 UTF-8 包时曾间歇退出 5；Node 隔离诊断进一步确认是原生 `0xC0000005` 崩溃，并非 Bun 专属问题，标准 zlib 先解压也不足以修复。当前独立回读验证使用已安装 Git 的 GNU tar 1.35（Windows 加 `--force-local`），验证中文文件名和原字节；真实 Linux 上传包另完整解压并核对全部 SHA-256。原失败未算作通过，不因此重做付费调用。
 
 隔离 PostgreSQL 测试实际导入 18 配方，随后修改管理员设置与版本，再重复导入，确认原管理员选择、员工余额和原 chat 绑定均保留。批次指纹只排除本次新增的 5 个 admission 元数据列：同时改动这 5 列不会误报；故意修改原有批次 prompt 或员工余额时保护校验均正确拒绝。最初测试夹具将同一 SQL 参数同时用于 UUID/text 曾失败，已拆分参数后通过，未因此修改产品代码。

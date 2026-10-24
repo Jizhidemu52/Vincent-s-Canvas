@@ -64,4 +64,6 @@
 
 上线实操发现正式 `POST /api/tasks` 的受理摘要不含 `resultUrls`，而 SQLite 演示响应带空数组，导致管理员试生图面板报错；原任务仍成功。v0.5.3 在 API 边界补齐待产出字段，新增真实响应形状与原请求 GET 恢复回归。补丁针对性检查 9 项、57 断言通过，Web 类型检查通过；原全套结果为补丁前的有效基线，不将其伪称为补丁后重新执行的全套。发布包另从补丁提交重新构建，线上复验结果保存在对应 GitHub release。
 
+随后正式图像页恢复原草稿时，后端的规范工具 key `image` 与页面别名 `image-generation` 被误判不相同。原用户输入、最终提示词和原图均已正确保存；v0.5.4 复用工具目录规范化后比较，不放松跨工具限制。新增两个别名成功恢复和一个跨工具拒绝的真实页面回归；合并管理员、历史与隔离检查共 50 项、304 断言通过，Web 类型检查通过。线上复验使用已存在原任务，不为恢复再次付费生成。
+
 原图、输入、最终提示词、错误与逐图审阅分别位于 `testing/quality-matrix/`、`testing/visual-review-*.{json,md}`、`testing/chat-live-ui/`、`testing/workflow-live-ui/` 和 `testing/supplement-v1/`。运行数据库不在仓库。发布流程见 [部署脚本](../../../scripts/deploy-prompt-release/README.md)，付费重现入口见 [QA 脚本说明](../../../server/scripts/README.prompt-quality.md)；CI 不会自动运行付费脚本。

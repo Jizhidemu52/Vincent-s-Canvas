@@ -64,6 +64,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     const requests: Array<{ kind: string; args: any[] }> = [];
     const errors: string[] = [];
     const warnings: string[] = [];
+    let restoredDraft: Record<string, any> | undefined;
     const delayedMedia = new Map<string, Promise<string>>();
     const stored = new Map(initial.map(log => [log.id, structuredClone(log)]));
     const config: Record<string, any> = { model: "test-model", imageModel: "test-model", quality: "standard", size: "1024x1024", count: "1" };
@@ -166,7 +167,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         },
         "@/lib/image-utils": { readImageMeta: async () => ({ width: 1024, height: 1024, mimeType: "image/png" }), getDataUrlByteSize: () => 100, formatBytes: String, formatDuration: String },
         "@/services/api/server-assets": { fetchServerAssetContent: async () => { throw new Error("Unexpected asset request"); }, recordServerAssetEvent() {} },
-        "@/services/api/generation-history": { restoreGenerationDraft: async () => { throw new Error("Unexpected restore request"); } },
+        "@/services/api/generation-history": { restoreGenerationDraft: async () => { if (!restoredDraft) throw new Error("Unexpected restore request"); return restoredDraft; } },
         "@/services/api/generation-tasks": { QueuedTaskFailedError: class extends Error {}, QueuedTaskPausedError: class extends Error {}, QueuedTaskSubmissionUncertainError: class extends Error {}, getQueuedTask: async () => { throw new Error("Unexpected legacy task lookup for explicitly scoped logs"); } },
         "@/services/api/prompts": { hydratePromptReuse: async () => { throw new Error("Unexpected reuse request"); }, savePromptFromTask() {} },
         "file-saver": { saveAs() {} }, nanoid: { nanoid: () => `generated-${++sequence}` },
@@ -215,6 +216,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     disposers.push(unmount);
     return {
         boundary, render, stored, requests, errors, warnings, config,
+        setRestoredDraft(value: Record<string, any>) { restoredDraft = value; },
         navigate(tool: string, query = "") { params = new URLSearchParams(`tool=${tool}${query ? `&${query}` : ""}`); },
         setOwner(value: string) { ownerId = value; },
         setCreative(value?: object) { creativePreset = value; },
@@ -241,6 +243,38 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
 }
 
 describe("image workspace isolation", () => {
+    test.each(["image", "image-generation"])("history restoration accepts %s as the image entry and restores user input without generating", async archivedTool => {
+        const log = storedLog("image-generation", "optimized", 10);
+        Object.assign(log.images[0]!, { sourceTaskId: "original-task" });
+        const page = pageHarness([log]);
+        page.setRestoredDraft({ prompt: "original user input", finalPrompt: "optimized final prompt", userInput: { scene: "free-optimize", userText: "original user input", fields: {}, referenceRoles: [], mode: "generate" }, config: { ...page.config, systemPrompt: "", imageOptions: "" }, references: [], operationType: "image_generation", tool: archivedTool, parameters: {} });
+        await page.settle();
+        page.panels()[0].onPreviewLog(page.panels()[0].logs[0]);
+        await page.settle();
+        elements(page.render()).find(element => element.props.children === "恢复为草稿继续改")!.props.onClick();
+        await page.settle();
+        expect(page.errors).toEqual([]);
+        expect(page.prompt().value).toBe("original user input");
+        expect(page.prompt().value).not.toBe("optimized final prompt");
+        expect(page.requests).toHaveLength(0);
+    });
+
+    test("history restoration still rejects a genuinely different image tool without changing the draft", async () => {
+        const log = storedLog("image-generation", "other-tool", 10);
+        Object.assign(log.images[0]!, { sourceTaskId: "original-task" });
+        const page = pageHarness([log]);
+        page.setRestoredDraft({ prompt: "must not apply", config: { ...page.config }, references: [], operationType: "inpaint", tool: "image-edit", parameters: {} });
+        await page.settle();
+        page.panels()[0].onPreviewLog(page.panels()[0].logs[0]);
+        await page.settle();
+        const before = page.prompt().value;
+        elements(page.render()).find(element => element.props.children === "恢复为草稿继续改")!.props.onClick();
+        await page.settle();
+        expect(page.errors[0]).toContain("请先切换到历史原工具");
+        expect(page.prompt().value).toBe(before);
+        expect(page.requests).toHaveLength(0);
+    });
+
     test("a delayed startup pending read cannot replace a newer completed generation", async () => {
         const ready = deferred<void>();
         const pending = { id: "old-pending", requestId: "old-request", taskId: "old-task", ownerId: "designer-a", tool: "image-generation", createdAt: 1,
