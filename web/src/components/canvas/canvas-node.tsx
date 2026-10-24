@@ -536,24 +536,27 @@ function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
     );
 }
 
-function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
+function ErrorContent({ node, theme, onRetry, onReload }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry"> & { onReload?: () => void }) {
     const videoRecovery = node.type === CanvasNodeType.Video && Boolean(node.metadata?.videoTaskId);
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
-            <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
+            <div className="text-xs leading-5 text-red-300" style={onReload ? { color: theme.node.muted } : undefined}>{onReload ? "图片读取失败" : node.metadata?.errorDetails || "生成失败"}</div>
             <button
                 type="button"
+                aria-label={onReload ? "重新加载图片" : undefined}
                 disabled={videoRecovery && node.metadata?.videoTaskCanRecover === false}
                 className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02]"
                 style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                 onClick={(event) => {
                     event.stopPropagation();
-                    onRetry?.(node);
+                    if (onReload) onReload();
+                    else onRetry?.(node);
                 }}
+                onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 <RefreshCw className="size-3.5" />
-                {videoRecovery ? node.metadata?.videoTaskCanRecover === false ? "提交状态待核查" : "恢复查询" : node.metadata?.imageTask ? "恢复查询" : "重试"}
+                {onReload ? "重新加载" : videoRecovery ? node.metadata?.videoTaskCanRecover === false ? "提交状态待核查" : "恢复查询" : node.metadata?.imageTask ? "恢复查询" : "重试"}
             </button>
         </div>
     );
@@ -757,11 +760,8 @@ function ImageContent({
         <BatchFrame theme={theme} batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
             <div className="h-full w-full overflow-hidden">
                 {preview.failed ? (
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center text-xs" style={{ color: theme.node.muted }} role="status">
-                        <span>图片读取失败</span>
-                        <button type="button" className="rounded px-3 py-1.5 transition hover:opacity-80" style={{ color: theme.node.text, background: theme.toolbar.activeBg }}
-                            aria-label={`重新加载图片 ${node.title}`} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()}
-                            onClick={event => { event.stopPropagation(); preview.retry(); }}>重新加载</button>
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-3" role="status">
+                        <ErrorContent node={node} theme={theme} onReload={preview.retry} />
                     </div>
                 ) : previewUrl ? (
                     <img

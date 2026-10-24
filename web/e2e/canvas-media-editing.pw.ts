@@ -120,7 +120,7 @@ test("图片缩略图失败回退原图，原图失败显示重试且不改动�
     });
     await remotePage.goto(page.url());
     const node = remotePage.locator(`[data-node-id="${original.id}"]`);
-    const retry = node.getByRole("button", { name: /^重新加载图片 / });
+    const retry = node.getByRole("button", { name: "重新加载图片", exact: true });
     await expect(retry).toBeVisible();
     expect(thumbnailReads).toBeGreaterThan(0);
     expect(originalReads).toBe(1);
