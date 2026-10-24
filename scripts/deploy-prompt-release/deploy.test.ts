@@ -98,6 +98,7 @@ test("deployment contract uses frozen archives, explicit migrate/import order, p
   expect(cutover).toContain("652b3d3c-93bf-419e-851f-31c5e101daf6");
   expect(cutover).not.toMatch(/DROP\s+TABLE|TRUNCATE|down\s+-v|pg_restore\s+--clean|UPDATE\s+tool_api_configurations/i);
   expect(dockerfile).toContain("COPY server/ /app/");
+  expect(dockerfile).toMatch(/^FROM canvas-api:canvas-4ed9d8d-20261024\r?$/m);
   expect(dockerfile).toContain('CMD ["bun", "src/index.ts"]');
   expect(dockerfile).toContain("COPY docs/manual/prompt-optimization/");
   expect(dockerIgnore.lastIndexOf("!**/.env.example")).toBeGreaterThan(dockerIgnore.lastIndexOf("**/.env.*"));

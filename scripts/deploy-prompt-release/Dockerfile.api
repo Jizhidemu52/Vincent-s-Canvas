@@ -1,4 +1,6 @@
-FROM canvas-api:canvas-be2d2a2-20261024-prompt
+# Fixed, verified runtime base; do not chain each patch onto the previous patch.
+# The previous patch already has 118 layers and another rebuild exceeds Docker's limit.
+FROM canvas-api:canvas-4ed9d8d-20261024
 WORKDIR /app
 # This is an image layer, not a host directory. Remove previous application sources/dependencies.
 RUN find /app -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && rm -rf /shared
