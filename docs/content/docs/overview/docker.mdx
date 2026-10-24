@@ -39,6 +39,8 @@ curl http://localhost:3000/api/health
 docker compose logs --tail=200 api worker postgres redis minio backup
 ```
 
+Worker 有独立健康检查：消费进程每 15 秒在 PostgreSQL 和 Redis 探测均成功后更新心跳，超过 75 秒未更新、进程不存在或正在退出时检查失败。用 `docker compose ps` 区分 API 健康与 Worker 健康；健康只证明进程和依赖响应，不证明付费模型调用成功。Compose 日志按单文件 20 MiB、最多 5 个轮转，配置在对应容器重新创建后生效。
+
 ## 备份恢复
 
 备份容器定期把 PostgreSQL dump 写到对象存储，原图对象也必须保留和备份。恢复前停止 API 和 Worker，再使用 `restore.sh` 恢复指定对象。完整命令、OA 和并发验收见 [生产部署与验收手册](https://github.com/Jizhidemu52/Vincent-s-Canvas/blob/main/docs/manual/production-deployment.md)。

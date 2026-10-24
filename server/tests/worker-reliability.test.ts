@@ -78,14 +78,17 @@ test("stop arriving during a queue pop does not start the popped task", async ()
 test("graceful shutdown is idempotent, stops reconciliation and enforces a bounded drain", () => {
   const scheduled: Array<{ callback: () => void; milliseconds: number }> = [];
   const cleared: unknown[] = [], exits: number[] = [];
+  let healthStops = 0;
   const worker = productionFunctions(["shutdown"], {
     stopping: false, queueReconciliationTimer: "reconcile-timer", shutdownTimer: undefined,
+    workerHealth: { stop: async () => { healthStops++; } },
     activeTaskIds: new Set(["active"]), config: { WORKER_SHUTDOWN_GRACE_SECONDS: 1200 },
     console: { log() {}, error() {} }, process: { exit: (code: number) => exits.push(code) },
     clearInterval: (timer: unknown) => cleared.push(timer),
     setTimeout: (callback: () => void, milliseconds: number) => { scheduled.push({ callback, milliseconds }); return { unref() {} }; },
   });
   worker.shutdown("SIGTERM"); worker.shutdown("SIGINT");
+  expect(healthStops).toBe(1);
   expect(cleared).toEqual(["reconcile-timer"]);
   expect(scheduled).toHaveLength(1);
   expect(scheduled[0]!.milliseconds).toBe(1_200_000);

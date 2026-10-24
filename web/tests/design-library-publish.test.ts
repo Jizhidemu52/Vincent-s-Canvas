@@ -47,6 +47,7 @@ function harness(options: {
         "lucide-react": { ImagePlus: "ImagePlus", X: "X" },
         "@/lib/client-id": { createClientId: () => `request-${++nextId}` },
         "@/lib/image-utils": { formatBytes: String },
+        "./library-image": { LibraryImage: "LibraryImage" },
         "@/stores/use-user-store": { useUserStore: Object.assign((selector: (value: typeof store) => unknown) => selector(store), { getState: () => store }) },
         "@/services/api/design-library": { publishDesignLibrary: async (input: DesignLibraryPublishInput, request: DesignLibraryRequestOptions) => {
             calls.push({ actor: store.user.id, input, options: request });

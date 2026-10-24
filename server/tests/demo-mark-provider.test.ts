@@ -4,7 +4,7 @@ import { MARK_IMAGE_BASE_URL, MARK_PLATFORM_MODELS, MARK_IMAGE_PROVIDER_ID } fro
 import { ApiMartImageProviderFailure } from "../src/apimart-image";
 import { createDemoMarkProvider } from "../src/demo-mark-provider";
 import { listAvailableDemoModels } from "../src/demo-provider-configuration";
-import { DemoStateStore, DemoStorageError } from "../src/demo-state-store";
+import { DemoStateStore, DemoStorageError, materializeDemoAsset } from "../src/demo-state-store";
 import { ImageResultPersistenceError } from "../src/image-result-storage";
 import { imageTaskApiReplacer, imageTaskFailureDetail, imageTaskPauseReason, type ImageTaskFailureDetail } from "../src/image-task-diagnostics";
 import { isPublicHttpUrl } from "../src/apimart-upload";
@@ -29,7 +29,7 @@ function harness(failure?: "prepare" | "preflight" | "submission" | "polling" | 
   let paid = 0;
   let downloads = 0;
   const dependencies = {
-    demoState, DemoStorageError, ImageResultPersistenceError, ApiMartImageProviderFailure, MARK_IMAGE_PROVIDER_ID,
+    demoState, DemoStorageError, materializeDemoAsset, ImageResultPersistenceError, ApiMartImageProviderFailure, MARK_IMAGE_PROVIDER_ID,
     imageTaskFailureDetail, imageTaskPauseReason, isPublicHttpUrl,
     demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
     gptImage2ProviderId: "legacy-apimart", apiMartBaseUrl: "https://legacy.invalid/v1", apiMartApiKey: "legacy-key-must-not-be-used",

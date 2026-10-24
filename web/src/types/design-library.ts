@@ -8,6 +8,7 @@ export type DesignLibraryImage = {
     width: number | null;
     height: number | null;
     contentUrl: string;
+    thumbnailUrl?: string;
 };
 export type DesignLibraryEntry = {
     id: string;

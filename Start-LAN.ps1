@@ -4,6 +4,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $root 'tools/lan-process.ps1')
 $serverRoot = Join-Path $root "server"
 $webRoot = Join-Path $root "web\\dist"
 $ruleName = "Wireless Canvas LAN Pilot TCP 5188 LocalSubnet"
@@ -57,9 +58,18 @@ else {
 
 $listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
 if ($null -ne $listener) {
-    Write-Output "Wireless Canvas is already listening on port $port."
+    $listenerIds = @($listener | Select-Object -ExpandProperty OwningProcess -Unique)
+    $owners = @($listenerIds | ForEach-Object {
+        $ownerProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$_)"
+        "$($_) ($($ownerProcess.Name))"
+    }) -join ', '
+    Write-Output "Port $port is occupied by PID $owners. Verifying that it is the expected Canvas service and access mode."
 }
 else {
+    $recordedProcess = Get-RecordedLanProcess $root
+    if ($null -ne $recordedProcess) {
+        throw "This project's LAN process ($($recordedProcess.ProcessId)) is already starting or uses another port. Inspect its logs or use Stop-LAN.bat before restarting."
+    }
     $env:LOCAL_STANDALONE = "false"
     # The default remains a local trial. CompanyOa requires an existing trusted OA entry.
     $env:OA_LOGIN_ENABLED = if ($CompanyOa) { "true" } else { "false" }
@@ -69,9 +79,8 @@ else {
     $env:STANDALONE_WEB_DIR = $webRoot
     $env:DEMO_PORT = "$port"
     $env:DEMO_HOST = "0.0.0.0"
-    $logRoot = Join-Path $serverRoot ".data"
-    New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
-    Start-Process -FilePath $bun.Source -ArgumentList "src/demo-server.ts" -WorkingDirectory $serverRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logRoot "lan-server.out.log") -RedirectStandardError (Join-Path $logRoot "lan-server.err.log")
+    $started = Start-RecordedLanProcess $root $bun.Source
+    Write-Output "Started LAN process $($started.ProcessId). Logs: $($started.OutputLog) and $($started.ErrorLog)"
 }
 
 $ready = $false
@@ -90,7 +99,7 @@ for ($attempt = 0; $attempt -lt 15; $attempt++) {
     } catch { }
     Start-Sleep -Seconds 1
 }
-if (!$ready) { throw "LAN service health check failed. Check server/.data/lan-server.err.log and the process on port $port." }
+if (!$ready) { throw "LAN service health check failed; port $port is not a healthy Canvas local-demo service. Check its owning PID and server/.data/lan-server-*.err.log. No existing process was stopped." }
 $deploymentRequest = [System.Net.WebRequest]::Create("http://${address}:$port/api/deployment")
 $deploymentRequest.Proxy = $null
 $deploymentRequest.Timeout = 5000

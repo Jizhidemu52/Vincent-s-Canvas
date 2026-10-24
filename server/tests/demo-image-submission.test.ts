@@ -3,7 +3,7 @@ import ts from "typescript";
 import { ApiMartImageProviderFailure, apiMartImageModel, apiMartImageOptions, buildApiMartImageRequest } from "../src/apimart-image";
 import { apiMartPollIntervalMs } from "../src/apimart-poll-interval";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
-import { DemoStateStore, DemoStorageError } from "../src/demo-state-store";
+import { DemoStateStore, DemoStorageError, materializeDemoAsset } from "../src/demo-state-store";
 import { ImageResultPersistenceError } from "../src/image-result-storage";
 import { queryProviderTaskStatus } from "../src/provider-status-query";
 
@@ -55,7 +55,7 @@ function createHarness(failurePhase?: FailurePhase) {
   let completed = 0;
   const failure = Object.assign(new Error("unknown certificate verification error"), { code: "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR" });
   const dependencies = {
-    demoState, DemoStorageError, ImageResultPersistenceError, demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
+    demoState, DemoStorageError, materializeDemoAsset, ImageResultPersistenceError, demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
     apiMartBaseUrl: "https://apimart.invalid/v1",
     apiMartApiKey: "mock-model-key",
     gptImage2ProviderId: "legacy-apimart", MARK_IMAGE_PROVIDER_ID,

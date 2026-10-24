@@ -71,7 +71,9 @@ integration("design library external I/O with real PostgreSQL and production S3 
         const { author, original, entry, image } = await publication();
         const reader = await actor();
         const snapshot = (await repository.getPublication(entry.id))!.images[0]!;
-        expect(s3.requests.map(request => request.method)).toEqual(["GET", "PUT"]);
+        expect(s3.requests.map(request => request.method)).toEqual(["GET", "PUT", "PUT"]);
+        expect(s3.requests.filter(request => request.method === "PUT" && request.source)).toHaveLength(1);
+        expect(s3.objects.has(`${snapshot.objectKey}.library-thumb-256-v1.webp`)).toBe(true);
         expect(s3.objects.get(snapshot.objectKey)!.bytes).toEqual(png);
         await db.query("DELETE FROM assets WHERE id=$1", [original.id]); s3.objects.delete(original.key);
         s3.requests.length = 0;
@@ -93,9 +95,11 @@ integration("design library external I/O with real PostgreSQL and production S3 
         const entries = await Promise.all([service.publish(author, input), service.publish(author, input)]);
         expect(entries[0]!.id).toBe(entries[1]!.id);
         const entry = entries[0]!, snapshot = (await repository.getPublication(entry.id))!.images[0]!;
-        expect(s3.requests.filter(request => request.method === "PUT")).toHaveLength(2);
-        expect(s3.requests.filter(request => request.method === "DELETE")).toHaveLength(1);
+        expect(s3.requests.filter(request => request.method === "PUT" && request.source)).toHaveLength(2);
+        expect(s3.requests.filter(request => request.method === "PUT" && !request.source)).toHaveLength(2);
+        expect(s3.requests.filter(request => request.method === "DELETE")).toHaveLength(2);
         expect(s3.objects.has(snapshot.objectKey)).toBe(true);
+        expect(s3.objects.has(`${snapshot.objectKey}.library-thumb-256-v1.webp`)).toBe(true);
         expect((await row("SELECT count(*)::int AS count FROM design_library_publications WHERE author_id=$1", [author.id])).count).toBe(1);
         const reader = await actor(); s3.requests.length = 0; ioHook = twoCopies();
         const operation = { requestId: randomUUID() };
@@ -169,7 +173,8 @@ integration("design library external I/O with real PostgreSQL and production S3 
             repository.transaction = transaction; repository.getDelivery = delivery;
             const reused = await service.reuse(reader, entry.id, entry.images[0]!.id, operation);
             expect(s3.objects.get((await repository.getSourceAsset(reused.assetId, reader.id))!.objectKey)!.bytes).toEqual(png);
-            expect(s3.requests.filter(request => request.method === "PUT")).toHaveLength(2);
+            expect(s3.requests.filter(request => request.method === "PUT" && request.source)).toHaveLength(2);
+            expect(s3.requests.filter(request => request.method === "PUT" && !request.source)).toHaveLength(1);
         } finally { repository.transaction = transaction; repository.findPublication = find; repository.getDelivery = delivery; }
     });
 

@@ -17,7 +17,27 @@ export type DemoStateUpdate<A extends DemoStoredAsset, T extends DemoStoredTask>
 };
 
 type AssetRow = { id: string; fields_json: string; bytes: Uint8Array };
+type AssetIndexRow = { id: string; fields_json: string; byte_length: number };
 type TaskRow = { id: string; request_id: string; fields_json: string };
+const storedAssetLengths = new WeakMap<object, number>();
+
+/** The actual stored length, not an upload reservation's declared byteSize. */
+export function demoAssetByteLength(asset: DemoStoredAsset): number {
+  return storedAssetLengths.get(asset) ?? asset.bytes.byteLength;
+}
+
+/** Do not destructure/spread a stored asset just to change its metadata: that
+ * would evaluate the compatibility bytes getter and read its entire BLOB. */
+export function demoAssetFields<A extends DemoStoredAsset>(asset: A): Omit<A, "bytes"> {
+  const fields: Record<string, unknown> = {};
+  for (const key of Object.keys(asset)) if (key !== "bytes") fields[key] = Reflect.get(asset, key);
+  return fields as Omit<A, "bytes">;
+}
+
+/** Explicit request-scoped materialization. No copy and no process-wide cache. */
+export function materializeDemoAsset<A extends DemoStoredAsset>(asset: A): A {
+  return { ...demoAssetFields(asset), bytes: asset.bytes } as A;
+}
 
 export class DemoStorageError extends Error {
   readonly code = "DEMO_STORAGE_ERROR";
@@ -67,16 +87,41 @@ export class DemoStateStore<A extends DemoStoredAsset = DemoStoredAsset, T exten
     }
   }
 
-  /** Returns detached values. Call recoverInterruptedTasks separately, once at startup. */
+  /** Load metadata only. The compatible bytes getter reads one original BLOB on
+   * demand; a WeakRef may reuse it but never keeps media resident in the index. */
   load(): { assets: A[]; tasks: T[] } {
     return this.access("读取状态", () => this.db.transaction(() => ({
-      assets: this.db.query<AssetRow, []>("SELECT id, fields_json, bytes FROM demo_assets ORDER BY rowid").all().map((row) => {
-        const fields = readFields(row.fields_json);
-        if (fields.id !== row.id || !(row.bytes instanceof Uint8Array)) throw new Error("数据库中的素材记录无效");
-        return { ...fields, bytes: Uint8Array.from(row.bytes) } as A;
-      }),
+      assets: this.db.query<AssetIndexRow, []>("SELECT id, fields_json, length(bytes) AS byte_length FROM demo_assets ORDER BY rowid").all().map(row => this.assetReference(row)),
       tasks: this.readTasks(),
     }))());
+  }
+
+  getAsset(id: string): A | null {
+    return this.access("读取素材信息", () => {
+      const row = this.db.query<AssetIndexRow, [string]>("SELECT id, fields_json, length(bytes) AS byte_length FROM demo_assets WHERE id=?").get(id);
+      return row ? this.assetReference(row) : null;
+    });
+  }
+
+  readAssetBytes(id: string): Uint8Array {
+    return this.access("读取素材原件", () => {
+      const row = this.db.query<Pick<AssetRow, "bytes">, [string]>("SELECT bytes FROM demo_assets WHERE id=?").get(id);
+      if (!row || !(row.bytes instanceof Uint8Array)) throw new Error("素材原件不存在或数据无效");
+      // SQLite already returns an independent Uint8Array; another full-size
+      // Uint8Array.from() would only double peak memory for each read.
+      return row.bytes;
+    });
+  }
+
+  /** Update metadata atomically without reading or rewriting any original BLOB. */
+  saveAssetMetadata(assets: readonly Omit<A, "bytes">[]): void {
+    this.access("保存素材信息", () => this.db.transaction(() => {
+      for (const asset of assets) {
+        if (!asset.id || Object.prototype.hasOwnProperty.call(asset, "bytes")) throw new Error("素材信息更新不能包含原件内容");
+        const changed = this.db.query("UPDATE demo_assets SET fields_json=? WHERE id=?").run(JSON.stringify(asset), asset.id);
+        if (changed.changes !== 1) throw new Error("待更新的素材不存在");
+      }
+    }).immediate());
   }
 
   /** Upserts all supplied assets and tasks in one transaction; unrelated records are retained. */
@@ -122,6 +167,23 @@ export class DemoStateStore<A extends DemoStoredAsset = DemoStoredAsset, T exten
     return this.db.query<{ value: string }, []>("SELECT value FROM demo_state_metadata WHERE key = 'initialized'").get()?.value === "1";
   }
 
+  private assetReference(row: AssetIndexRow): A {
+    const fields = readFields(row.fields_json);
+    if (fields.id !== row.id || !Number.isSafeInteger(row.byte_length) || row.byte_length < 0)
+      throw new Error("数据库中的素材记录无效");
+    let cached: WeakRef<Uint8Array> | undefined;
+    const asset = fields as A;
+    Object.defineProperty(asset, "bytes", { enumerable: true, configurable: true,
+      get: () => {
+        let bytes = cached?.deref();
+        if (!bytes) { bytes = this.readAssetBytes(row.id); cached = new WeakRef(bytes); }
+        return bytes;
+      },
+    });
+    storedAssetLengths.set(asset, row.byte_length);
+    return asset;
+  }
+
   private readTasks(): T[] {
     return this.db.query<TaskRow, []>("SELECT id, request_id, fields_json FROM demo_tasks ORDER BY rowid").all().map((row) => {
       const fields = readFields(row.fields_json);
@@ -132,8 +194,9 @@ export class DemoStateStore<A extends DemoStoredAsset = DemoStoredAsset, T exten
 
   private writeRows(update: DemoStateUpdate<A, T>): void {
     for (const asset of update.assets || []) {
-      if (!asset.id || !(asset.bytes instanceof Uint8Array)) throw new Error("待保存的素材记录无效");
-      const { bytes, ...fields } = asset;
+      const bytes = asset.bytes;
+      if (!asset.id || !(bytes instanceof Uint8Array)) throw new Error("待保存的素材记录无效");
+      const fields = demoAssetFields(asset);
       this.db.query(`INSERT INTO demo_assets (id, fields_json, bytes) VALUES (?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET fields_json = excluded.fields_json, bytes = excluded.bytes`)
         .run(asset.id, JSON.stringify(fields), bytes);

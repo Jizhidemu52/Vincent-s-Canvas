@@ -4,12 +4,13 @@ import { ObjectStorage } from "../../src/object-storage";
 
 type StoredObject = { bytes: Uint8Array; contentType: string; etag: string; metadata: Record<string, string> };
 export type StorageRequest = { method: string; key: string; source?: string; ifMatch?: string; metadataDirective?: string };
+export type StorageRequestFailure = { status: number; code: string };
 
 /** Loopback-only S3 wire fixture: production AWS SDK, no cloud or paid provider. */
 export async function createDesignLibraryObjectStorageFixture() {
     const objects = new Map<string, StoredObject>();
     const requests: StorageRequest[] = [];
-    let beforeRequest: ((request: StorageRequest) => Promise<void>) | undefined;
+    let beforeRequest: ((request: StorageRequest) => Promise<void | StorageRequestFailure>) | undefined;
     const seed = (key: string, bytes: Uint8Array, contentType = "image/png", metadata = { fixture: "preserved" }) => {
         objects.set(key, { bytes: new Uint8Array(bytes), contentType, etag: `"${createHash("sha256").update(bytes).digest("hex")}"`, metadata });
     };
@@ -20,17 +21,19 @@ export async function createDesignLibraryObjectStorageFixture() {
             const copySource = request.headers["x-amz-copy-source"] as string | undefined;
             const item: StorageRequest = { method: request.method!, key,
                 ...(copySource ? { source: decodeURIComponent(copySource.replace(/^\/?fixture\//, "")), ifMatch: request.headers["x-amz-copy-source-if-match"] as string,
-                    metadataDirective: request.headers["x-amz-metadata-directive"] as string } : {}) };
+                    metadataDirective: request.headers["x-amz-metadata-directive"] as string } : request.headers["if-match"] ? { ifMatch: request.headers["if-match"] as string } : {}) };
             requests.push(item);
-            await beforeRequest?.(item);
             const failure = (status: number, code: string) => {
                 request.resume(); response.statusCode = status; response.setHeader("content-type", "application/xml");
                 response.end(`<Error><Code>${code}</Code><Message>${code}</Message></Error>`);
             };
+            const rejected = await beforeRequest?.(item);
+            if (rejected) return failure(rejected.status, rejected.code);
             if (item.method === "GET" || item.method === "HEAD") {
                 request.resume();
                 const object = objects.get(key);
                 if (!object) return failure(404, "NoSuchKey");
+                if (item.ifMatch && item.ifMatch !== object.etag) return failure(412, "PreconditionFailed");
                 response.setHeader("content-length", object.bytes.byteLength);
                 response.setHeader("content-type", object.contentType);
                 response.setHeader("etag", object.etag);

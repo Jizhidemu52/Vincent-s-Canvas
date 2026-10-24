@@ -108,7 +108,7 @@ test("formal HTTP serves independent original bytes and admin-prefixed previews 
             expect((await request(`${base}/stats`, "viewer-oa")).status).toBe(403);
             const preview = await request(image.contentUrl, "viewer-oa");
             expect(preview.status).toBe(200); expect(preview.headers.get("x-content-type-options")).toBe("nosniff");
-            expect(preview.headers.get("cache-control")).toBe("private, no-store"); expect(await preview.bytes()).toEqual(png);
+            expect(preview.headers.get("cache-control")).toBe("private, no-cache, must-revalidate"); expect(await preview.bytes()).toEqual(png);
             const downloadPath = `${base}/images/${image.id}/download`;
             expect((await request(downloadPath, "viewer-oa", { requestId: "download-http" })).status).toBe(403);
             const download = await request(downloadPath, "viewer-oa", { requestId: "download-http" }, h.viewer.id);

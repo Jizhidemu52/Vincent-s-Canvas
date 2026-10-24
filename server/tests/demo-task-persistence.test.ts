@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import ts from "typescript";
-import { DemoStateStore, DemoStorageError } from "../src/demo-state-store";
+import { DemoStateStore, DemoStorageError, demoAssetFields, materializeDemoAsset } from "../src/demo-state-store";
 import { decodeInlineImageResult } from "../src/demo-task-result-assets";
 import { imageResultExtension, ImageResultPersistenceError, storeImageResult } from "../src/image-result-storage";
 import { resolveImageResultVariants } from "../src/image-result-variants";
@@ -10,7 +10,7 @@ import { join, resolve } from "node:path";
 
 const file = new URL("../src/demo-server.ts", import.meta.url);
 const source = ts.createSourceFile(file.pathname, await Bun.file(file).text(), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-const names = ["saveDemoAsset", "updateDemoTask", "pauseDemoTaskForStorageFailure", "finishDemoTaskFailure", "completeDemoImageTask", "runVideoTask", "recoverVideoTask", "classifyVideoTaskError", "callInternalAiSeamless", "downloadApiMartImage"];
+const names = ["saveDemoAsset", "cacheStoredDemoAsset", "saveDemoAssetMetadata", "updateDemoTask", "pauseDemoTaskForStorageFailure", "finishDemoTaskFailure", "completeDemoImageTask", "runVideoTask", "recoverVideoTask", "classifyVideoTaskError", "callInternalAiSeamless", "downloadApiMartImage"];
 const code = ts.transpileModule(names.map((name) => {
   const node = source.statements.find((item) => ts.isFunctionDeclaration(item) && item.name?.text === name);
   if (!node) throw new Error(`Missing production declaration: ${name}`);
@@ -26,7 +26,7 @@ function harness(options: { path?: string; process?: Parameters<typeof storeImag
   let submissions = 0;
   const downloads: string[] = [];
   const deps = {
-    demoState, demoAssets, demoTasks, DemoStorageError, decodeInlineImageResult,
+    demoState, demoAssets, demoDeletedAssets: new Map(), demoTasks, DemoStorageError, demoAssetFields, decodeInlineImageResult,
     scheduleDemoAssetThumbnails: (asset: { id: string }) => {
       // Derived previews must never be scheduled before their original is durable.
       expect(demoState.load().assets.some((saved) => saved.id === asset.id)).toBe(true);
@@ -138,6 +138,7 @@ test("completed result keeps original and export relations plus unchanged bytes 
     const saved = h.demoState.load();
     expect(saved.tasks[0].resultUrls).toHaveLength(1);
     expect(saved.assets).toHaveLength(3);
+    saved.assets = saved.assets.map(materializeDemoAsset);
     h.demoState.close();
     const reopened = new DemoStateStore<any, any>(path);
     try {

@@ -23,7 +23,8 @@ import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { cn } from "@/lib/utils";
 import { isSupportedServerAsset, serverAssetToLocal } from "@/lib/server-asset-local";
-import { canUserAccessAsset, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
+import { canUserAccessAsset, serverAssetIdFromAsset, useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
+import { useDesignLibraryShare } from "@/pages/design-library/use-design-library-share";
 import { useUserStore } from "@/stores/use-user-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
 import { buildAssetSearchIndex, searchAssetIndex } from "./asset-search";
@@ -76,6 +77,7 @@ const kindOptions = [
 
 export default function AssetsPage() {
     const { message, modal } = App.useApp();
+    const libraryShare = useDesignLibraryShare();
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     const referenceImportEnabled = useModuleEnabled("reference-import");
@@ -774,6 +776,13 @@ export default function AssetsPage() {
                 onAddProject={(asset) => { setProjectAsset(asset); setSelectedProjectId(metadataString(asset, "projectId") || undefined); }}
                 onShareDepartment={shareWithDepartment}
                 onSetCompanyVisibility={setCompanyVisibility}
+                onShareDesign={libraryShare.canShare ? async asset => {
+                    if (asset.kind !== "image") return;
+                    await libraryShare.share({ ownerId: asset.ownerId, assetId: serverAssetIdFromAsset(asset), title: asset.title,
+                        prompt: metadataString(asset, "prompt"), thought: asset.note || "", tags: asset.tags, model: metadataString(asset, "model"),
+                        dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey });
+                } : undefined}
+                sharingDesign={libraryShare.busy}
             />
             {imageEditor.node ? <Suspense fallback={<Modal title="编辑原图" open footer={null} onCancel={imageEditor.close}><p role="status">正在读取图片编辑器…</p></Modal>}>
                 <CanvasImageEditorDialog node={imageEditor.node} onClose={imageEditor.close} onConfirm={imageEditor.confirm}
@@ -967,6 +976,8 @@ function AssetDrawer({
     onAddProject,
     onShareDepartment,
     onSetCompanyVisibility,
+    onShareDesign,
+    sharingDesign,
 }: {
     asset: Asset | null;
     currentUserId: string;
@@ -982,6 +993,8 @@ function AssetDrawer({
     onAddProject: (asset: Asset) => void;
     onShareDepartment: (asset: Asset, remove?: boolean) => void | Promise<void>;
     onSetCompanyVisibility: (asset: Asset, visibility: "private" | "company") => void | Promise<void>;
+    onShareDesign?: (asset: Asset) => void | Promise<void>;
+    sharingDesign?: boolean;
 }) {
     const isOwner = asset?.ownerId === currentUserId;
     const isAdmin = currentUserRole === "super_admin" || currentUserRole === "department_admin";
@@ -1054,6 +1067,7 @@ function AssetDrawer({
                                 保存到我的提示词
                             </Button>
                         ) : null}
+                        {isOwner && asset.kind === "image" && onShareDesign ? <Button icon={<Share2 className="size-4" />} loading={sharingDesign} onClick={() => void onShareDesign(asset)}>分享到灵感库</Button> : null}
                     </Space>
                     {isServerAsset ? (
                         <div className="rounded-lg border border-orange-200 bg-orange-50/60 p-4 dark:border-orange-900 dark:bg-orange-950/20">

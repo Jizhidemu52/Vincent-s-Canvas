@@ -8,13 +8,17 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { DesignLibraryEntry, DesignLibraryList } from "@/types/design-library";
 import { EntryDetail, statusLabels } from "./entry-detail";
 import { PublishDialog } from "./publish-dialog";
+import { LibraryImage } from "./library-image";
+import { readDesignLibraryShareDraft } from "./share-draft";
 
 export default function DesignLibraryPage() {
     const { message, modal } = App.useApp();
-    const admin = useLocation().pathname.startsWith("/admin/");
+    const location = useLocation();
+    const admin = location.pathname.startsWith("/admin/");
     const [searchParams, setSearchParams] = useSearchParams();
     const user = useUserStore(state => state.user);
     const owner = user?.id || "";
+    const [shareDraft, setShareDraft] = useState(() => readDesignLibraryShareDraft(location.state, owner));
     const [scope, setScope] = useState<"company" | "mine">("company");
     const [query, setQuery] = useState("");
     const [keyword, setKeyword] = useState("");
@@ -37,6 +41,10 @@ export default function DesignLibraryPage() {
     const detail = opened?.owner === owner ? opened : null;
 
     useEffect(() => {
+        if (shareDraft && location.state) setSearchParams(new URLSearchParams(searchParams), { replace: true, state: null });
+    }, [shareDraft, location.state, searchParams, setSearchParams]);
+
+    useEffect(() => {
         const controller = new AbortController();
         if (!enabled) { setLoading(false); return; }
         setLoading(true); setError("");
@@ -52,6 +60,7 @@ export default function DesignLibraryPage() {
     }, [owner, admin]);
     const closePublish = () => {
         setPublishOwner("");
+        setShareDraft(undefined);
         if (searchParams.has("publish")) { const next = new URLSearchParams(searchParams); next.delete("publish"); setSearchParams(next, { replace: true }); }
     };
     const openEntry = async (id: string) => {
@@ -104,7 +113,7 @@ export default function DesignLibraryPage() {
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-busy={loading}>
                         {data.items.map(entry => <article key={entry.id} className="wb-surface group flex min-w-0 flex-col overflow-hidden">
                             <button type="button" aria-label={`查看作品：${entry.title}`} disabled={opening === entry.id} className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-muted/30 text-left focus-visible:outline-2 focus-visible:outline-primary" onClick={() => void openEntry(entry.id)}>
-                                {entry.images[0] ? <img src={entry.images[0].contentUrl} alt={entry.title} loading="lazy" className="size-full object-contain transition-transform duration-300 motion-reduce:transition-none group-hover:scale-[1.025]" /> : <div className="p-6"><BookOpen className="mb-3 text-muted-foreground" /><p className="line-clamp-4 whitespace-pre-wrap text-sm leading-6">{entry.thought || entry.prompt || "打开阅读这份设计灵感"}</p></div>}
+                                {entry.images[0] ? <LibraryImage {...entry.images[0]} alt={entry.title} className="size-full object-contain transition-transform duration-300 motion-reduce:transition-none group-hover:scale-[1.025]" /> : <div className="p-6"><BookOpen className="mb-3 text-muted-foreground" /><p className="line-clamp-4 whitespace-pre-wrap text-sm leading-6">{entry.thought || entry.prompt || "打开阅读这份设计灵感"}</p></div>}
                                 {entry.images.length > 1 && <span className="absolute bottom-2 right-2 rounded bg-background/90 px-2 py-1 text-xs">{entry.images.length} 张图片</span>}
                                 {entry.status !== "published" && <span className="absolute left-2 top-2 rounded bg-background/95 px-2 py-1 text-xs">{statusLabels[entry.status]}</span>}
                             </button>
@@ -115,7 +124,7 @@ export default function DesignLibraryPage() {
                 </> : !error && <section className="wb-surface py-16"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={keyword || tag ? "没有找到匹配作品，试试其他关键词" : scope === "mine" ? "你还没有公开的设计分享" : "灵感库等待第一份分享"}>{!admin && !keyword && !tag && <Button type="primary" onClick={() => setPublishOwner(owner)}>分享我的设计</Button>}</Empty></section>}
             </>}
         </main>
-        {enabled && !admin && publishOwner === owner && Boolean(owner) && <PublishDialog key={owner} onClose={closePublish} onPublished={entry => { closePublish(); setScope("mine"); setPage(1); setKeyword(""); setQuery(""); setTag(""); setRevision(value => value + 1); setOpened({ owner, entry, key: `${entry.id}:${Date.now()}` }); }} />}
+        {enabled && !admin && publishOwner === owner && Boolean(owner) && <PublishDialog key={owner} initialDraft={shareDraft?.ownerId === owner ? shareDraft : undefined} onClose={closePublish} onPublished={entry => { closePublish(); setScope("mine"); setPage(1); setKeyword(""); setQuery(""); setTag(""); setRevision(value => value + 1); setOpened({ owner, entry, key: `${entry.id}:${Date.now()}` }); }} />}
         {detail && <EntryDetail key={detail.key} entry={detail.entry} admin={admin} onClose={() => setOpened(null)} onWithdraw={withdraw} onModerate={() => { setModerationReason(""); setModerationOpen(true); }} />}
         <Modal open={moderationOpen && Boolean(detail)} title="下架共享作品" okText="确认下架" cancelText="取消" okButtonProps={{ danger: true }} confirmLoading={moderating} onOk={() => void moderate()} onCancel={() => { if (!moderationBusy.current) setModerationOpen(false); }}>
             <p className="mb-4 text-sm text-muted-foreground">停止后续访问、下载和复用；已有副本无法收回。下架原因会记录在管理员审计中。</p><Input.TextArea aria-label="下架原因" value={moderationReason} maxLength={1000} rows={4} showCount onChange={event => setModerationReason(event.target.value)} placeholder="请填写具体下架原因" />

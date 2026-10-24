@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -39,9 +39,10 @@ async function unusedLocalPort() {
   }
 }
 
-async function createHarness() {
+async function createHarness(options: { auditMediaReads?: boolean } = {}) {
   const directory = validateTemporaryDirectory(await mkdtemp(join(tmpdir(), temporaryPrefix)));
   const databasePath = join(directory, "database", "demo.sqlite");
+  const mediaAuditPath = join(directory, "media-reads.log");
   const providerRequests: string[] = [];
   const provider = Bun.serve({
     hostname: "127.0.0.1", port: 0,
@@ -66,7 +67,9 @@ async function createHarness() {
     for (const name of ["PATH", "SystemRoot", "WINDIR", "PATHEXT", "COMSPEC", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA"]) {
       if (process.env[name]) environment[name] = process.env[name]!;
     }
-    const child = Bun.spawn([process.execPath, "--no-env-file", serverEntry], {
+    if (options.auditMediaReads) await writeFile(mediaAuditPath, "");
+    const preload = options.auditMediaReads ? ["--preload", fileURLToPath(new URL("./helpers/demo-media-read-audit.ts", import.meta.url))] : [];
+    const child = Bun.spawn([process.execPath, "--no-env-file", ...preload, serverEntry], {
       cwd: serverDirectory,
       stdin: "ignore", stdout: "pipe", stderr: "pipe",
       env: {
@@ -74,6 +77,7 @@ async function createHarness() {
         NODE_ENV: "test", DEMO_HOST: "127.0.0.1", DEMO_PORT: String(port),
         LOCAL_STANDALONE: "true", OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "false", CREDITS_ENABLED: "false", ROLE_PORTALS_ENABLED: "false",
         DEMO_STATE_PATH: databasePath, DEMO_RECOVERY_FILE: recoveryFile,
+        ...(options.auditMediaReads ? { DEMO_MEDIA_READ_AUDIT: mediaAuditPath } : {}),
         APIMART_API_KEY: "", OPENTOKEN_API_KEY: "", GPT_IMAGE_2_API_KEY: "",
         APIMART_BASE_URL: `${provider.url.origin}/v1`, OPENTOKEN_BASE_URL: `${provider.url.origin}/v1`, GPT_IMAGE_2_BASE_URL: `${provider.url.origin}/v1`,
         DEMO_PUBLIC_ASSET_ORIGIN: "", STANDALONE_WEB_DIR: "",
@@ -147,6 +151,7 @@ async function createHarness() {
   };
   return {
     directory, databasePath, providerRequests, start, stop, request, json, deferredRequest,
+    async originalReads() { return (await readFile(mediaAuditPath, "utf8")).split("\n").filter(Boolean).length; },
     async close() {
       try { await stop(); }
       finally {
@@ -383,6 +388,57 @@ test("real demo variants HTTP preserves downloads and relations across restart, 
       const failure = await rejectedRelation.text();
       expect(failure).not.toContain(foreign.id);
       expect(failure).not.toContain(foreign.filename);
+      expect(demo.providerRequests).toEqual([]);
+    }
+  } finally { await demo.close(); }
+}, 60_000);
+
+test("real demo startup, lists, metadata and trash never load originals; authorized downloads read only the requested BLOB", async () => {
+  const demo = await createHarness({ auditMediaReads: true });
+  try {
+    await demo.start();
+    const { user } = await demo.json<{ user: { id: string } }>("/api/auth/session");
+    await demo.stop();
+    const createdAt = new Date().toISOString();
+    const assets = Array.from({ length: 12 }, (_, index) => ({
+      id: crypto.randomUUID(), ownerUserId: user.id, filename: `large-${index}.bin`, mimeType: "application/octet-stream",
+      bytes: new Uint8Array(1024 * 1024 + index).fill(index + 1), createdAt, metadata: { title: `large-${index}` },
+    }));
+    const selected = assets[0]!;
+    const foreign = { ...assets[1]!, id: crypto.randomUUID(), ownerUserId: crypto.randomUUID(), filename: "foreign.bin" };
+    const pending = { ...assets[2]!, id: crypto.randomUUID(), filename: "pending.bin", bytes: new Uint8Array(), byteSize: 9_000_000 };
+    const store = new DemoStateStore<typeof selected>(demo.databasePath);
+    try { store.save({ assets: [...assets, foreign, pending] }); }
+    finally { store.close(); }
+
+    for (let restart = 0; restart < 2; restart++) {
+      await demo.start();
+      expect(await demo.originalReads()).toBe(0);
+      const listed = (await demo.json<{ assets: ListedAsset[] }>("/api/assets?limit=50")).assets;
+      expect(listed).toHaveLength(12);
+      expect(listed.find(item => item.id === selected.id)?.byteSize).toBe(selected.bytes.byteLength);
+      expect((await demo.json<{ total: number }>("/api/assets/summary")).total).toBe(12);
+      expect((await demo.request("/api/admin/assets")).status).toBe(403);
+      expect((await demo.request(`/api/assets/${foreign.id}/content`)).status).toBe(404);
+      expect((await demo.request(`/api/assets/${pending.id}/content`)).status).toBe(404);
+      expect((await demo.request(`/api/assets/${foreign.id}/metadata`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "forbidden" }) })).status).toBe(404);
+      expect((await demo.request(`/api/assets/${selected.id}/metadata`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "metadata-only", tags: ["lazy"], source: "test", note: "preserve original" }) })).status).toBe(204);
+      expect((await demo.json<{ asset: ListedAsset }>(`/api/assets/${selected.id}`)).asset.metadata.title).toBe("metadata-only");
+      await demo.json("/api/assets/batch", "POST", { action: "delete", assetIds: [selected.id] });
+      expect((await demo.json<{ assets: ListedAsset[] }>("/api/assets/trash")).assets.map(item => item.id)).toEqual([selected.id]);
+      expect((await demo.request(`/api/assets/${selected.id}/content`)).status).toBe(404);
+      expect((await demo.request(`/api/assets/${selected.id}/restore`, { method: "POST" })).status).toBe(204);
+      expect(await demo.originalReads()).toBe(0);
+
+      const original = await demo.request(`/api/assets/${selected.id}/content?download=1`);
+      expect(original.status).toBe(200);
+      expect(new Uint8Array(await original.arrayBuffer())).toEqual(selected.bytes);
+      expect(await demo.originalReads()).toBe(1);
+      const etag = original.headers.get("etag")!;
+      const unchanged = await demo.request(`/api/assets/${selected.id}/content`, { headers: { "if-none-match": etag } });
+      expect(unchanged.status).toBe(304);
+      expect(await unchanged.text()).toBe("");
+      expect(await demo.originalReads()).toBe(1);
       expect(demo.providerRequests).toEqual([]);
     }
   } finally { await demo.close(); }

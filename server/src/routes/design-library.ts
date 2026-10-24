@@ -1,7 +1,7 @@
 import { Router, type ErrorRequestHandler, type RequestHandler, type Response } from "express";
 import type { AuthenticatedRequest } from "../types";
 import {
-    DesignLibraryError, DesignLibraryService, designLibraryFailure,
+    DesignLibraryError, DesignLibraryService, designLibraryFailure, designLibraryMediaCacheControl, designLibraryMediaVary,
     type DesignLibraryActor, type LibraryImageRecord,
 } from "../design-library";
 
@@ -83,8 +83,19 @@ export function createDesignLibraryRouter(service: DesignLibraryService, options
     router.get("/", action((request, _response, actor) => service.list(actor, request.query)));
     router.get("/:id", action(async (request, _response, actor) => ({ entry: await service.detail(actor, String(request.params.id)) })));
     router.get("/:id/stats", action((request, _response, actor) => service.stats(actor, String(request.params.id), request.query)));
-    router.get("/:id/images/:imageId/content", action(async (request, response, actor) => {
-        sendImage(response, await service.image(actor, String(request.params.id), String(request.params.imageId)), false);
+    for (const kind of ["content", "thumbnail"] as const) router.get(`/:id/images/:imageId/${kind}`, action(async (request, response, actor) => {
+        const result = await service.imageResponse(actor, String(request.params.id), String(request.params.imageId), {
+            thumbnail: kind === "thumbnail", ifNoneMatch: request.get("If-None-Match"), head: request.method === "HEAD",
+        });
+        response.set("Cache-Control", designLibraryMediaCacheControl);
+        response.vary(designLibraryMediaVary);
+        response.set("ETag", result.etag);
+        if (result.status === 304) { response.status(304).end(); return; }
+        if (result.bytes) { sendImage(response, { bytes: result.bytes, image: result.image }, false); return; }
+        response.set("Content-Type", result.image.mimeType);
+        response.set("Content-Length", String(result.image.byteSize));
+        response.set("Content-Security-Policy", "default-src 'none'; sandbox");
+        response.end();
     }));
     if (admin) {
         router.post("/:id/moderate", action(async (request, _response, actor) => ({ entry: await service.moderate(actor, String(request.params.id), request.body) })));

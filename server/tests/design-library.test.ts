@@ -20,7 +20,8 @@ test("PG adapter executes publication, filters, ownership, source-independent sn
         const input = publishInput([sourceId]);
         const [entry, repeated] = await Promise.all([h.service.publish(author, input), h.service.publish(author, input)]);
         expect(repeated.id).toBe(entry.id);
-        expect(h.writes).toHaveLength(1);
+        expect(h.writes.filter(key => !key.endsWith(".library-thumb-256-v1.webp"))).toHaveLength(1);
+        expect(h.writes.filter(key => key.endsWith(".library-thumb-256-v1.webp"))).toHaveLength(1);
         expect(entry.images[0]?.filename).toBe("原始设计.png");
         expect(entry.images[0]?.width).toBe(1);
         expect(entry.canViewStats).toBe(true);
@@ -161,8 +162,10 @@ test("failed private-asset persistence removes only the attempted copy and never
         await expect(h.service.reuse(viewer, entry.id, entry.images[0]!.id, { requestId: "failed-copy-persistence" })).rejects.toThrow("test persistence failure");
         expect(h.objects.has(privateKey)).toBe(true);
         expect(h.objects.has(h.writes[0]!)).toBe(true);
-        expect(h.removed).toEqual([h.writes[1]!]);
-        expect(h.objects.has(h.writes[1]!)).toBe(false);
+        const attemptedCopy = h.writes.find(key => key.startsWith(`users/${viewer.id}/`))!;
+        expect(h.removed).toEqual([attemptedCopy]);
+        expect(h.objects.has(attemptedCopy)).toBe(false);
+        expect(h.objects.has(h.writes.find(key => key.endsWith(".library-thumb-256-v1.webp"))!)).toBe(true);
         expect(h.sqlite.query("SELECT count(*) AS count FROM design_library_deliveries").get()).toEqual({ count: 0 });
         expect((await h.service.stats(author, entry.id, {})).totals.reuse).toEqual({ count: 0, people: 0 });
         h.sqlite.exec("DROP TRIGGER reject_library_copy");
@@ -182,8 +185,9 @@ test("a lost commit acknowledgement recovers durable publication/reuse without d
         expect(h.removed).toEqual([]);
         const copy = await h.service.reuse(viewer, entry.id, entry.images[0]!.id, { requestId: "committed-copy" });
         expect(h.removed).toEqual([]);
-        expect(h.writes).toHaveLength(2);
-        for (const key of h.writes) expect(h.objects.get(key)).toEqual(png);
+        expect(h.writes).toHaveLength(3);
+        for (const key of h.writes.filter(key => !key.endsWith(".library-thumb-256-v1.webp"))) expect(h.objects.get(key)).toEqual(png);
+        expect(inspectDesignLibraryImage(h.objects.get(h.writes.find(key => key.endsWith(".library-thumb-256-v1.webp"))!)!, "image/webp").width).toBe(1);
         expect((await h.repository.getSourceAsset(copy.assetId, viewer.id))?.ownerId).toBe(viewer.id);
         expect((await h.service.stats(author, entry.id, {})).totals.reuse).toEqual({ count: 0, people: 0 });
     } finally { h.close(); }

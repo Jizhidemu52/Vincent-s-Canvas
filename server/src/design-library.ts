@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z, ZodError } from "zod";
 import { detectReferenceImage } from "./reference-import";
+import { createAssetThumbnailBytes } from "./asset-thumbnails";
 
 export type DesignLibraryStatus = "published" | "withdrawn" | "taken_down";
 export type DesignLibraryAction = "view" | "download" | "reuse" | "prompt_copy";
@@ -12,7 +13,7 @@ export type DesignLibraryActor = {
 };
 export type DesignLibraryImage = {
     id: string; filename: string; mimeType: string; byteSize: number;
-    width: number | null; height: number | null; contentUrl: string;
+    width: number | null; height: number | null; contentUrl: string; thumbnailUrl?: string;
 };
 export type DesignLibraryEntry = {
     id: string; title: string; thought: string; prompt: string; tags: string[];
@@ -33,7 +34,9 @@ export type DesignLibraryList = { items: DesignLibraryEntry[]; total: number; pa
 export type DesignLibraryReuse = { assetId: string; image: DesignLibraryImage;
     source: { entryId: string; imageId: string; title: string; authorName: string } };
 
-export type LibraryImageRecord = Omit<DesignLibraryImage, "contentUrl"> & { objectKey: string };
+export type LibraryImageRecord = Omit<DesignLibraryImage, "contentUrl" | "thumbnailUrl"> & { objectKey: string };
+export type LibraryMediaStat = { byteSize: number; mimeType: string | null; etag: string };
+export type DesignLibraryMediaResponse = { status: 200 | 304; bytes: Uint8Array | null; image: LibraryImageRecord; etag: string };
 export type LibraryPublication = Omit<DesignLibraryEntry, "images" | "canWithdraw" | "canModerate" | "canViewStats"> & {
     images: LibraryImageRecord[]; requestId: string; payloadHash: string;
     moderationReason: string | null; moderatedBy: string | null;
@@ -87,12 +90,14 @@ export interface DesignLibraryRepository {
     listActivity(entryId: string, page: number, pageSize: number): Promise<{ items: LibraryReceipt[]; total: number }>;
 }
 export interface DesignLibraryMediaStore {
-    read(key: string, expectedBytes?: number): Promise<Uint8Array>;
+    read(key: string, expectedBytes?: number, options?: { ifMatch?: string }): Promise<Uint8Array>;
+    /** Metadata only. Null means a missing object, not a failed read or missing permission. */
+    stat?(key: string): Promise<LibraryMediaStat | null>;
     write(key: string, bytes: Uint8Array, mimeType: string): Promise<void>;
     remove(key: string): Promise<void>;
     /** External stores copy outside SQL transactions, conditionally against the validated source version.
      * Embedded stores may omit this: their BLOB writes remain atomic with their SQL records. */
-    copy?(sourceKey: string, destinationKey: string, options: { byteSize: number; validate?: (bytes: Uint8Array) => void }): Promise<void>;
+    copy?(sourceKey: string, destinationKey: string, options: { byteSize: number; validate?: (bytes: Uint8Array) => void | Promise<void> }): Promise<void>;
 }
 
 export class DesignLibraryError extends Error {
@@ -132,6 +137,11 @@ export function designLibraryFailure(error: unknown) {
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_PUBLICATION_BYTES = 100 * 1024 * 1024;
+const MAX_THUMBNAIL_BYTES = 1024 * 1024;
+const thumbnailKey = (image: Pick<LibraryImageRecord, "objectKey">) => `${image.objectKey}.library-thumb-256-v1.webp`;
+export const designLibraryMediaCacheControl = "private, no-cache, must-revalidate";
+export const designLibraryMediaVary = "Cookie, Authorization, X-Canvas-Owner-Id";
+let activeThumbnailJobs = 0;
 const mimeExtensions: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const operationKey = (actorId: string, entryId: string, action: DesignLibraryAction, imageId: string | null, operationId: string) => digest([actorId, entryId, action, imageId, operationId]);
@@ -152,7 +162,10 @@ function entryDto(publication: LibraryPublication, actor: DesignLibraryActor): D
     return {
         id: publication.id, title: publication.title, thought: publication.thought, prompt: publication.prompt, tags: publication.tags,
         author: publication.author, status: publication.status, createdAt: publication.createdAt, updatedAt: publication.updatedAt,
-        images: publication.images.map(({ objectKey: _key, ...image }) => ({ ...image, contentUrl: `/api/${actor.kind === "admin" ? "admin/" : ""}design-library/${publication.id}/images/${image.id}/content` })),
+        images: publication.images.map(({ objectKey: _key, ...image }) => {
+            const base = `/api/${actor.kind === "admin" ? "admin/" : ""}design-library/${publication.id}/images/${image.id}`;
+            return { ...image, contentUrl: `${base}/content`, thumbnailUrl: `${base}/thumbnail` };
+        }),
         canWithdraw: owns && publication.status === "published", canModerate: manages && publication.status !== "taken_down", canViewStats: owns || manages,
     };
 }
@@ -268,7 +281,27 @@ function unchangedImage(before: LibraryImageRecord, after: LibraryImageRecord) {
 }
 
 export class DesignLibraryService {
-    constructor(private repository: DesignLibraryRepository, private media: DesignLibraryMediaStore) {}
+    private readonly thumbnailJobs = new Map<string, Promise<unknown>>();
+    constructor(private repository: DesignLibraryRepository, private media: DesignLibraryMediaStore,
+        private options: { createThumbnail?: (bytes: Uint8Array) => Promise<Uint8Array> } = {}) {}
+
+    private async createThumbnail(bytes: Uint8Array) {
+        const thumbnail = this.options.createThumbnail ? await this.options.createThumbnail(bytes) : (await createAssetThumbnailBytes(bytes, [256]))[256];
+        const inspected = inspectDesignLibraryImage(thumbnail, "image/webp");
+        if (thumbnail.byteLength > MAX_THUMBNAIL_BYTES || inspected.width > 256 || inspected.height > 256) throw new Error("Invalid library thumbnail size");
+        return thumbnail;
+    }
+
+    private thumbnailJob<T>(key: string, work: () => Promise<T>): Promise<T> {
+        const existing = this.thumbnailJobs.get(key) as Promise<T> | undefined;
+        if (existing) return existing;
+        // No waiting queue: a busy preview falls back to the original at the client.
+        if (activeThumbnailJobs >= 2) return Promise.reject(new DesignLibraryError("THUMBNAIL_UNAVAILABLE", "预览图处理中，请查看原图", 503));
+        activeThumbnailJobs++;
+        const promise = Promise.resolve().then(work).finally(() => { activeThumbnailJobs--; this.thumbnailJobs.delete(key); });
+        this.thumbnailJobs.set(key, promise);
+        return promise;
+    }
 
     async list(actor: DesignLibraryActor, query: unknown): Promise<DesignLibraryList> {
         requireActor(actor);
@@ -316,11 +349,15 @@ export class DesignLibraryService {
             const id = randomUUID();
             const images: LibraryImageRecord[] = [];
             const embeddedBytes: Uint8Array[] = [];
+            const embeddedThumbnails = new Map<string, Uint8Array>();
             for (const source of sources) {
                 let inspected: ReturnType<typeof inspectDesignLibraryImage> | undefined;
-                const validate = (bytes: Uint8Array) => {
+                let thumbnail: Uint8Array | undefined;
+                const validate = async (bytes: Uint8Array) => {
                     if (bytes.byteLength !== source.byteSize) throw new DesignLibraryError("SOURCE_SIZE_MISMATCH", "原图内容与保存记录不一致，请重新保存后发布", 409);
                     inspected = inspectDesignLibraryImage(bytes, source.mimeType);
+                    // A preview is optional. Encoder failure must not block a valid original.
+                    thumbnail = await this.thumbnailJob(`publish:${objectKey}`, () => this.createThumbnail(bytes)).catch(() => undefined);
                 };
                 const imageId = randomUUID();
                 const objectKey = `design-library/${id}/${imageId}.${mimeExtensions[source.mimeType.toLowerCase().split(";")[0]!.trim()] ?? "image"}`;
@@ -329,11 +366,18 @@ export class DesignLibraryService {
                     await this.media.copy(source.objectKey, objectKey, { byteSize: source.byteSize, validate });
                 } else {
                     const bytes = await this.media.read(source.objectKey, source.byteSize);
-                    validate(bytes);
+                    await validate(bytes);
                     embeddedBytes.push(bytes);
                 }
                 if (!inspected) throw new Error("Image copy did not validate its source");
                 images.push({ id: imageId, filename: safeFilename(source.filename, inspected.mimeType), objectKey, byteSize: source.byteSize, ...inspected });
+                if (thumbnail) {
+                    const key = thumbnailKey({ objectKey });
+                    if (this.media.copy) {
+                        copied.push(key);
+                        await this.media.write(key, thumbnail, "image/webp").catch(() => this.media.remove(key).catch(() => undefined));
+                    } else embeddedThumbnails.set(key, thumbnail);
+                }
             }
             const now = new Date().toISOString();
             const publication: LibraryPublication = {
@@ -354,6 +398,10 @@ export class DesignLibraryService {
                     copied.push(image.objectKey);
                     await this.media.write(image.objectKey, bytes, image.mimeType);
                 }
+                for (const [key, bytes] of embeddedThumbnails) {
+                    copied.push(key);
+                    await this.media.write(key, bytes, "image/webp").catch(() => this.media.remove(key).catch(() => undefined));
+                }
                 await repository.insertPublication(publication);
                 commitMayHaveRun = true;
                 return entryDto(publication, actor);
@@ -364,7 +412,7 @@ export class DesignLibraryService {
             // A lost COMMIT acknowledgement must never delete an already-published snapshot.
             const committed = await this.repository.findPublication(actor.id, input.requestId).catch(() => null);
             if (committed) {
-                await this.removeCopies(copied.filter(key => !committed.images.some(image => image.objectKey === key)));
+                await this.removeCopies(copied.filter(key => !committed.images.some(image => image.objectKey === key || thumbnailKey(image) === key)));
                 if (committed.payloadHash === payloadHash) return entryDto(committed, actor);
             } else if (!commitMayHaveRun) await this.removeCopies(copied);
             throw error;
@@ -409,6 +457,64 @@ export class DesignLibraryService {
         const publication = readable(await this.repository.getPublication(recordId.parse(id)), actor);
         const image = selectedImage(publication, imageId);
         return { bytes: await this.media.read(image.objectKey, image.byteSize), image };
+    }
+
+    /** Every representation, including conditional hits, rechecks current visibility. */
+    async imageResponse(actor: DesignLibraryActor, id: string, imageId: string,
+        options: { thumbnail?: boolean; ifNoneMatch?: string; head?: boolean } = {}): Promise<DesignLibraryMediaResponse> {
+        requireActor(actor);
+        const current = () => this.repository.getPublication(recordId.parse(id)).then(value => selectedImage(readable(value, actor), imageId));
+        const source = await current();
+        let image = source;
+        let stat: LibraryMediaStat | null = null;
+        if (options.thumbnail) {
+            const key = thumbnailKey(source);
+            stat = await this.media.stat?.(key) ?? null;
+            if (!stat) {
+                try {
+                    stat = await this.thumbnailJob(`read:${key}`, async () => {
+                        const original = await this.media.read(source.objectKey, source.byteSize);
+                        if (original.byteLength !== source.byteSize) throw new DesignLibraryError("SNAPSHOT_UNAVAILABLE", "分享原图内容与记录不一致", 503);
+                        inspectDesignLibraryImage(original, source.mimeType);
+                        const thumbnail = await this.createThumbnail(original);
+                        if (this.media.copy) {
+                            // Immutable snapshot + versioned derived key; parallel writers derive the same preview.
+                            // No database lock is held across either encoder or object storage I/O.
+                            await this.media.write(key, thumbnail, "image/webp");
+                        } else {
+                            await this.repository.transaction(async repository => {
+                                const latest = selectedImage(readable(await repository.getPublication(id, true), actor), imageId);
+                                unchangedImage(source, latest);
+                                if (!await this.media.stat?.(key)) await this.media.write(key, thumbnail, "image/webp");
+                            });
+                        }
+                        return await this.media.stat?.(key) ?? { byteSize: thumbnail.byteLength, mimeType: "image/webp", etag: `"${createHash("sha256").update(thumbnail).digest("hex")}"` };
+                    });
+                } catch (error) {
+                    if (error instanceof DesignLibraryError && error.code === "NOT_FOUND") throw error;
+                    throw new DesignLibraryError("THUMBNAIL_UNAVAILABLE", "预览图暂时不可用，请查看原图", 503);
+                }
+            }
+            if (stat.mimeType?.split(";")[0]?.trim().toLowerCase() !== "image/webp" || !Number.isSafeInteger(stat.byteSize) || stat.byteSize < 1 || stat.byteSize > MAX_THUMBNAIL_BYTES) {
+                throw new DesignLibraryError("THUMBNAIL_UNAVAILABLE", "预览图暂时不可用，请查看原图", 503);
+            }
+            image = { ...source, objectKey: key, filename: safeFilename(source.filename, "image/webp"), mimeType: "image/webp", byteSize: stat.byteSize, width: null, height: null };
+        } else {
+            stat = await this.media.stat?.(source.objectKey) ?? null;
+            if (this.media.stat && !stat) throw new DesignLibraryError("SNAPSHOT_UNAVAILABLE", "分享原图暂时不可用", 503);
+        }
+        if (stat && stat.byteSize !== image.byteSize) throw new DesignLibraryError("SNAPSHOT_UNAVAILABLE", "分享原图内容与记录不一致", 503);
+        // A withdrawal may have happened while HEAD or lazy thumbnail generation was in flight.
+        unchangedImage(source, await current());
+        const matches = (etag: string) => options.ifNoneMatch?.split(",").some(value => value.trim() === "*" || value.trim().replace(/^W\//, "") === etag.replace(/^W\//, ""));
+        if (stat && matches(stat.etag)) return { status: 304, bytes: null, image, etag: stat.etag };
+        if (stat && options.head) return { status: 200, bytes: null, image, etag: stat.etag };
+        const bytes = await this.media.read(image.objectKey, image.byteSize, { ifMatch: stat?.etag });
+        if (bytes.byteLength !== image.byteSize) throw new DesignLibraryError("SNAPSHOT_UNAVAILABLE", "图片内容与记录不一致", 503);
+        if (options.thumbnail) inspectDesignLibraryImage(bytes, "image/webp");
+        unchangedImage(source, await current());
+        const etag = stat?.etag ?? `"${createHash("sha256").update(bytes).digest("hex")}"`;
+        return { status: matches(etag) ? 304 : 200, bytes: matches(etag) || options.head ? null : bytes, image, etag };
     }
 
     async download(actor: DesignLibraryActor, id: string, imageId: string, body: unknown) {

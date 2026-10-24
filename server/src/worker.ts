@@ -36,6 +36,7 @@ import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-
 import { imageResultExtension, storeImageResult } from "./image-result-storage";
 import { scheduleAssetThumbnails } from "./asset-thumbnails";
 import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending, type WorkflowTaskContext } from "./workflow-task-context";
+import { resetWorkerHealth, startWorkerHealth } from "./worker-health";
 
 type WorkRow = {
   id: string;
@@ -913,6 +914,7 @@ function shutdown(signal: string) {
   if (stopping) return;
   stopping = true;
   clearInterval(queueReconciliationTimer);
+  void workerHealth?.stop();
   console.log(JSON.stringify({ event: "worker.draining", signal, activeTasks: activeTaskIds.size, graceSeconds: config.WORKER_SHUTDOWN_GRACE_SECONDS }));
   // Do not clear leases, refund, or abort submitted work. Active tasks retain
   // their heartbeat until normal completion; after the limit recovery uses the
@@ -926,15 +928,24 @@ function shutdown(signal: string) {
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+let workerHealth: ReturnType<typeof startWorkerHealth> | undefined;
+// Container restarts can reuse PID 1 and /tmp. A previous process heartbeat
+// must not make this instance healthy before dependency initialization.
+await resetWorkerHealth();
 cache = await createCache(config.REDIS_URL);
 await reconcileTaskQueue();
 console.log(JSON.stringify({ event: "worker.started", concurrency: config.WORKER_CONCURRENCY }));
+if (!stopping) workerHealth = startWorkerHealth({
+  probe: () => Promise.all([db.query("SELECT 1"), cache.ping()]),
+  isRunning: () => !stopping,
+});
 if (!stopping) queueReconciliationTimer = setInterval(() => void reconcileTaskQueue(), 60_000);
 const workers = Array.from({ length: config.WORKER_CONCURRENCY }, () =>
   workerLoop(),
 );
 await Promise.all(workers);
 await queueReconciliation;
+await workerHealth?.stop();
 await Promise.allSettled([db.end(), cache.quit()]);
 clearTimeout(shutdownTimer);
 console.log(JSON.stringify({ event: "worker.stopped" }));

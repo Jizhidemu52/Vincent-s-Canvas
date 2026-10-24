@@ -1,5 +1,12 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   web:
+    logging: *default-logging
     build:
       context: .
       dockerfile: Dockerfile
@@ -12,6 +19,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   api:
+    logging: *default-logging
     image: ${CANVAS_API_IMAGE:-wireless-canvas-api:local}
     stop_grace_period: 35s
     build:
@@ -39,11 +47,18 @@ services:
       retries: 10
     restart: unless-stopped
   worker:
+    logging: *default-logging
     image: ${CANVAS_API_IMAGE:-wireless-canvas-api:local}
     build:
       context: .
       dockerfile: server/Dockerfile
     command: ["bun", "src/worker.ts"]
+    healthcheck:
+      test: ["CMD", "bun", "src/worker-healthcheck.ts"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
     stop_grace_period: 21m
     env_file: .env
     environment:
@@ -58,6 +73,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   postgres:
+    logging: *default-logging
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: wireless_canvas
@@ -72,6 +88,7 @@ services:
       retries: 20
     restart: unless-stopped
   redis:
+    logging: *default-logging
     image: redis:7.4-alpine
     command: redis-server --appendonly yes
     volumes:
@@ -83,6 +100,7 @@ services:
       retries: 20
     restart: unless-stopped
   minio:
+    logging: *default-logging
     build:
       context: .
       dockerfile: ops/minio/Dockerfile
@@ -102,6 +120,7 @@ services:
       retries: 20
     restart: unless-stopped
   minio-init:
+    logging: *default-logging
     build:
       context: .
       dockerfile: ops/minio/Dockerfile
@@ -118,6 +137,7 @@ services:
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
       S3_BUCKET: ${S3_BUCKET:-wireless-canvas}
   backup:
+    logging: *default-logging
     build:
       context: .
       dockerfile: ops/backup/Dockerfile

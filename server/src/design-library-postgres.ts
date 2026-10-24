@@ -144,10 +144,10 @@ export function designLibraryObjectStorage(storage: ObjectStorage): DesignLibrar
         if (!Number.isSafeInteger(value) || value < 1 || value > maxBytes) throw unavailable();
         return value;
     };
-    const readObject = async (key: string, expectedBytes?: number) => {
+    const readObject = async (key: string, expectedBytes?: number, options: { ifMatch?: string } = {}) => {
         requireStorage();
         if (expectedBytes !== undefined) checkedSize(expectedBytes);
-        const object = await storage.get(key);
+        const object = await storage.get(key, { ifMatch: options.ifMatch });
         const body = object.Body;
         try {
             if (!body || !(Symbol.asyncIterator in body)) throw unavailable();
@@ -167,14 +167,26 @@ export function designLibraryObjectStorage(storage: ObjectStorage): DesignLibrar
         }
     };
     return {
-        read: async (key, expectedBytes) => (await readObject(key, expectedBytes)).bytes,
+        read: async (key, expectedBytes, options) => (await readObject(key, expectedBytes, options)).bytes,
+        stat: async key => {
+            requireStorage();
+            try {
+                const object = await storage.head(key);
+                if (!object.ETag || object.ContentLength === undefined) throw unavailable();
+                return { byteSize: checkedSize(object.ContentLength), mimeType: object.ContentType ?? null, etag: object.ETag };
+            } catch (error) {
+                const missing = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+                if (missing.$metadata?.httpStatusCode === 404 || ["NoSuchKey", "NotFound"].includes(missing.name ?? "")) return null;
+                throw error;
+            }
+        },
         copy: async (sourceKey, destinationKey, { byteSize, validate }) => {
             requireStorage();
             checkedSize(byteSize);
             let etag: string | undefined;
             if (validate) {
                 const object = await readObject(sourceKey, byteSize);
-                validate(object.bytes);
+                await validate(object.bytes);
                 etag = object.etag;
             } else {
                 const object = await storage.head(sourceKey);

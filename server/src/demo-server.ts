@@ -42,7 +42,7 @@ import { isPublicHttpUrl, isPublicHttpsUrl } from "./apimart-upload";
 import { preflightVideoSources, prepareVideoProviderSources } from "./video-source-preparation";
 import { probeMediaBytes, type MediaMetadata } from "./media-probe";
 import { readDemoRecovery } from "./demo-state-recovery";
-import { DemoStateStore, DemoStorageError } from "./demo-state-store";
+import { DemoStateStore, DemoStorageError, demoAssetByteLength, demoAssetFields, materializeDemoAsset } from "./demo-state-store";
 import { DemoDesignLibraryStore, handleDemoDesignLibrary } from "./demo-design-library";
 import { DesignLibraryService } from "./design-library";
 import { DemoCanvasDocumentStore } from "./demo-canvas-documents";
@@ -438,6 +438,7 @@ type DemoInternalAiConfig = {
   updatedAt: string | null;
 };
 const demoAssets = new Map<string, DemoAsset>();
+const demoDeletedAssets = new Map<string, DemoAsset>();
 const features = deploymentFeatures({ OA_LOGIN_ENABLED: process.env.OA_LOGIN_ENABLED === "true" ? "true" : "false" });
 const standaloneDemoUser = resolveStandaloneDemoUser(!features.authenticationEnabled);
 const standaloneMode = Boolean(standaloneDemoUser);
@@ -450,7 +451,7 @@ const assetProjects = new DemoAssetProjectStore(demoStatePath);
 const canvasDocuments = new DemoCanvasDocumentStore(demoStatePath);
 const promptTemplates = new DemoPromptTemplateStore(demoStatePath);
 const oaStore = features.oaLoginEnabled ? new DemoOaStore(demoStatePath) : null;
-const demoDesignLibrary = oaStore ? new DemoDesignLibraryStore(demoStatePath, (asset) => demoAssets.set(asset.id, asset)) : null;
+const demoDesignLibrary = oaStore ? new DemoDesignLibraryStore(demoStatePath, (asset) => { cacheStoredDemoAsset(asset.id); }) : null;
 const designLibraryService = demoDesignLibrary ? new DesignLibraryService(demoDesignLibrary, demoDesignLibrary) : null;
 const oaLoginRates = new Map<string, { count: number; expiresAt: number }>();
 if (!demoState.isInitialized()) {
@@ -461,7 +462,6 @@ if (!demoState.isInitialized()) {
 }
 demoState.recoverInterruptedTasks();
 const recoveredState = demoState.load();
-const demoDeletedAssets = new Map<string, DemoAsset>();
 for (const asset of recoveredState.assets) (asset.deletedAt ? demoDeletedAssets : demoAssets).set(asset.id, asset);
 for (const task of recoveredState.tasks) demoTasks.set(task.id, task);
 console.info(`Loaded ${demoAssets.size} local assets and ${demoTasks.size} tasks from durable storage.`);
@@ -560,9 +560,10 @@ const demoSourceProbes = new WeakMap<Uint8Array, MediaMetadata>();
 async function createProviderVideoSources(_model: SupportedVideoModelId, sources: DemoAsset[]) {
   const verified: DemoAsset[] = [];
   for (const source of sources) {
-    const metadata = demoSourceProbes.get(source.bytes) || await probeMediaBytes(source.bytes, source.mimeType);
-    demoSourceProbes.set(source.bytes, metadata);
-    verified.push({ ...source, metadata });
+    const material = materializeDemoAsset(source);
+    const metadata = demoSourceProbes.get(material.bytes) || await probeMediaBytes(material.bytes, material.mimeType);
+    demoSourceProbes.set(material.bytes, metadata);
+    verified.push({ ...material, metadata });
   }
   return createDemoProviderVideoSources(verified, demoPublicAssetOrigin, demoPublicVideoAssetAccess);
 }
@@ -630,8 +631,20 @@ function publicDemoAssetResponse(asset: DemoAsset, request?: Request) {
 
 function saveDemoAsset(asset: DemoAsset) {
   demoState.save({ assets: [asset] });
-  demoAssets.set(asset.id, asset);
-  scheduleDemoAssetThumbnails(asset);
+  scheduleDemoAssetThumbnails(cacheStoredDemoAsset(asset.id));
+}
+
+function cacheStoredDemoAsset(id: string) {
+  const asset = demoState.getAsset(id);
+  if (!asset) throw new DemoStorageError("读取已保存素材", new Error("素材记录不存在"));
+  (asset.deletedAt ? demoDeletedAssets : demoAssets).set(id, asset);
+  (asset.deletedAt ? demoAssets : demoDeletedAssets).delete(id);
+  return asset;
+}
+
+function saveDemoAssetMetadata(assets: readonly Omit<DemoAsset, "bytes">[]) {
+  demoState.saveAssetMetadata(assets);
+  for (const asset of assets) cacheStoredDemoAsset(asset.id);
 }
 
 function describeDemoAsset(asset: DemoAsset) {
@@ -641,7 +654,7 @@ function describeDemoAsset(asset: DemoAsset) {
   return { id: asset.id, ownerUserId: asset.ownerUserId, ownerName: owner?.displayName || asset.ownerUserId,
     departmentId: owner?.departmentId || null, departmentName: owner?.departmentName || null,
     projectId: asset.projectId || null, projectName: null,
-    taskId: asset.taskId || null, filename: asset.filename, mimeType: asset.mimeType, byteSize: asset.bytes.byteLength, kind,
+    taskId: asset.taskId || null, filename: asset.filename, mimeType: asset.mimeType, byteSize: demoAssetByteLength(asset), kind,
     source: task ? 'generation' : 'upload', operationType: task?.operationType || null, prompt: task?.prompt || null,
     modelName: demoModels.find(model => model.id === task?.modelConfigId)?.name || null, status: 'ready', visibilityScope: 'private',
     metadata: asset.metadata || {}, createdAt: asset.createdAt, ...demoDownloadProjection(asset),
@@ -654,7 +667,7 @@ function describeDemoAsset(asset: DemoAsset) {
 function updateDemoTask(task: DemoTask, patch: Partial<DemoTask>, assets: DemoAsset[] = []) {
   const next = { ...task, ...patch };
   demoState.save({ tasks: [next], assets });
-  for (const asset of assets) demoAssets.set(asset.id, asset);
+  for (const asset of assets) cacheStoredDemoAsset(asset.id);
   Object.assign(task, next);
   demoTasks.set(task.id, task);
 }
@@ -700,7 +713,7 @@ async function completeDemoImageTask(task: DemoTask, ownerUserId: string, result
     },
     updateMetadata: async (asset, metadata) => {
       const current = demoAssets.get(asset.assetId)!;
-      saveDemoAsset({ ...current, metadata: { ...current.metadata, ...metadata } });
+      saveDemoAssetMetadata([{ ...demoAssetFields(current), metadata: { ...current.metadata, ...metadata } }]);
     },
   });
   resultUrl = `/api/assets/${primary.assetId}/content`;
@@ -841,7 +854,7 @@ Bun.serve({
         return json({ error: "NOT_FOUND", message: "素材不存在或访问已过期" }, 404);
       }
       const asset = demoAssets.get(assetId);
-      if (!asset?.bytes.byteLength)
+      if (!asset || !demoAssetByteLength(asset))
         return json({ error: "NOT_FOUND", message: "素材不存在或访问已过期" }, 404);
       return publicDemoAssetResponse(asset);
     }
@@ -868,9 +881,9 @@ Bun.serve({
     if (/^\/api\/assets\/[^/]+\/variants$/.test(path) && request.method === "GET") {
       const variantHeaders = { "cache-control": "private, no-store" };
       const asset = demoAssets.get(path.split("/")[3]!);
-      if (!asset || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) || !asset.bytes.byteLength)
+      if (!asset || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) || !demoAssetByteLength(asset))
         return json({ error: "NOT_FOUND", message: "素材不存在或无权访问" }, 404, variantHeaders);
-      const asResultAsset = (item: DemoAsset): ImageResultAsset => ({ ...item, taskId: item.taskId || null, status: item.bytes.byteLength ? "ready" : "pending" });
+      const asResultAsset = (item: DemoAsset): ImageResultAsset => ({ ...demoAssetFields(item), taskId: item.taskId || null, status: demoAssetByteLength(item) ? "ready" : "pending" });
       try {
         const primary = asResultAsset(asset);
         const related = imageResultVariantIds(primary).flatMap(id => {
@@ -904,7 +917,7 @@ Bun.serve({
           catch { throw new CanvasDocumentError("INVALID_CANVAS_DOCUMENT", "画布请求格式无效"); }
           const result = canvasDocuments.put(user.id, id, input, (assetId) => {
             const asset = demoAssets.get(assetId);
-            return Boolean(asset?.bytes.byteLength && (asset.ownerUserId === user.id || canManageDemoOwner(user, asset.ownerUserId)));
+            return Boolean(asset && (asset.ownerUserId === user.id || canManageDemoOwner(user, asset.ownerUserId)) && demoAssetByteLength(asset));
           });
           return result.ok
             ? json({ document: { id: result.document.id, revision: result.document.revision, deleted: result.document.deleted, updatedAt: result.document.updatedAt } }, 200, responseHeaders)
@@ -1074,11 +1087,11 @@ Bun.serve({
         ? [...demoAssets.values()].find((asset) => asset.ownerUserId === user.id && asset.clientReferenceId === input.clientReferenceId)
         : undefined;
       if (existing)
-        return json({ assetId: existing.id, uploadUrl: existing.bytes.byteLength ? null : `/api/assets/${existing.id}/content-upload`, reused: true }, 201);
+        return json({ assetId: existing.id, uploadUrl: demoAssetByteLength(existing) ? null : `/api/assets/${existing.id}/content-upload`, reused: true }, 201);
       if (input.projectId && !assetProjects.owns(user.id, input.projectId)) return json({ error: 'PROJECT_FORBIDDEN', message: '无权将素材加入此项目' }, 403);
       const contentHash = requestedContentHash(input.metadata);
       if (contentHash && !input.projectId) {
-        const duplicate = [...demoAssets.values()].find(asset => asset.ownerUserId === user.id && asset.contentSha256 === contentHash && asset.bytes.byteLength === input.byteSize && asset.mimeType.startsWith("image/"));
+        const duplicate = [...demoAssets.values()].find(asset => asset.ownerUserId === user.id && asset.contentSha256 === contentHash && demoAssetByteLength(asset) === input.byteSize && asset.mimeType.startsWith("image/"));
         if (duplicate) return json({ assetId: duplicate.id, uploadUrl: null, reused: true }, 201);
       }
       const assetId = crypto.randomUUID();
@@ -1120,11 +1133,11 @@ Bun.serve({
       try { mimeType = await validateAssetUpload(bytes, currentAsset.mimeType); }
       catch (error) { if (error instanceof AssetMediaError) return json({ error: error.code, message: error.message }, error.status); throw error; }
       const latestAsset = demoAssets.get(assetId);
-      if (!latestAsset || latestAsset.ownerUserId !== user.id || latestAsset.bytes.byteLength) return json({ error: 'NOT_FOUND', message: '上传素材不存在' }, 404);
+      if (!latestAsset || latestAsset.ownerUserId !== user.id || demoAssetByteLength(latestAsset)) return json({ error: 'NOT_FOUND', message: '上传素材不存在' }, 404);
       const contentSha256 = hashAssetContent(bytes);
       const expectedHash = requestedContentHash(latestAsset.metadata);
       if (expectedHash && expectedHash !== contentSha256) return json({ error: "HASH_MISMATCH", message: "上传文件内容与申请的 SHA256 不一致" }, 400);
-      saveDemoAsset({ ...latestAsset, bytes, mimeType, contentSha256, ...(mimeType.startsWith("text/") || mimeType === 'application/json'
+      saveDemoAsset({ ...demoAssetFields(latestAsset), bytes, mimeType, contentSha256, ...(mimeType.startsWith("text/") || mimeType === 'application/json'
         ? { metadata: { ...latestAsset.metadata, content: new TextDecoder().decode(bytes) } } : {}) });
       return empty();
     }
@@ -1133,7 +1146,7 @@ Bun.serve({
       request.method === "GET"
     ) {
       const asset = demoAssets.get(path.split("/")[3]!);
-      if (!asset || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) || !asset.bytes.byteLength)
+      if (!asset || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) || !demoAssetByteLength(asset))
         return json(
           { error: "NOT_FOUND", message: "素材不存在或无权访问" },
           404,
@@ -1144,7 +1157,7 @@ Bun.serve({
       const width = url.searchParams.get('w') || '256';
       if (width !== '256' && width !== '1024') return json({ error: 'INVALID_WIDTH', message: '缩略图仅支持256或1024' }, 400);
       const asset = demoAssets.get(path.split('/')[3]!);
-      if (!asset || !asset.mimeType.startsWith('image/') || !asset.bytes.length || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId))) return json({ error: 'NOT_FOUND', message: '素材不存在或无权访问' }, 404);
+      if (!asset || !asset.mimeType.startsWith('image/') || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) || !demoAssetByteLength(asset)) return json({ error: 'NOT_FOUND', message: '素材不存在或无权访问' }, 404);
       return demoAssetContentResponse(demoAssetThumbnail(asset, Number(width) as 256 | 1024), request);
     }
     if (path === "/api/generation-capabilities" && request.method === "GET") {
@@ -1400,7 +1413,7 @@ Bun.serve({
           if (
             !source ||
             source.ownerUserId !== user.id ||
-            !source.bytes.byteLength
+            !demoAssetByteLength(source)
           )
             return json(
               {
@@ -1409,7 +1422,7 @@ Bun.serve({
               },
               400,
             );
-          sources.push(source);
+          sources.push(materializeDemoAsset(source));
         }
         const imageModelId = String(model.modelId);
         let editInput: ImageEditInput<DemoAsset>;
@@ -1535,7 +1548,7 @@ Bun.serve({
         /^\/api\/assets\/([0-9a-f-]+)\/content$/i,
       );
       const source = sourceMatch ? demoAssets.get(sourceMatch[1]!) : undefined;
-      if (!source || source.ownerUserId !== user.id || !source.bytes.byteLength)
+      if (!source || source.ownerUserId !== user.id || !demoAssetByteLength(source))
         return json(
           { error: "INVALID_SOURCE", message: "请先上传一张有效的源图片" },
           400,
@@ -1646,7 +1659,7 @@ Bun.serve({
           const assetId = sourceUrl.match(/^\/api\/assets\/([0-9a-f-]+)\/content$/i)?.[1];
           return assetId ? demoAssets.get(assetId) : undefined;
         });
-        if (sources.some(source => !source || source.ownerUserId !== task.ownerUserId || !source.bytes.byteLength)) {
+        if (sources.some(source => !source || source.ownerUserId !== task.ownerUserId || !demoAssetByteLength(source))) {
           updateDemoTask(task, { status: "paused", errorCode: "MARK_IMAGE_INPUT_UNAVAILABLE", failureReason: "原任务的参考图或蒙版已不可用，无法安全恢复结果保存；保留原上游任务，不会重新生成。", updatedAt: now() });
           return json({ task, recovered: false, message: task.failureReason });
         }
@@ -1666,13 +1679,13 @@ Bun.serve({
 
     if (/^\/api\/assets\/[^/]+\/download-receipts$/.test(path) && request.method === "POST") {
       const asset = demoAssets.get(path.split("/")[3]!);
-      if (!asset || asset.ownerUserId !== user.id || !asset.bytes.byteLength) return json({ error: "NOT_FOUND", message: "素材不存在或无权访问" }, 404);
+      if (!asset || asset.ownerUserId !== user.id || !demoAssetByteLength(asset)) return json({ error: "NOT_FOUND", message: "素材不存在或无权访问" }, 404);
       const parsed = demoDownloadReceiptSchema.safeParse(await request.json().catch(() => null));
       if (!parsed.success) return json({ error: "INVALID_INPUT", message: "下载记录格式不正确" }, 400);
       const current = demoAssets.get(asset.id);
       if (!current || current.ownerUserId !== user.id) return json({ error: "NOT_FOUND", message: "素材不存在或无权访问" }, 404);
-      const receipt = appendDemoDownloadReceipt(current, parsed.data);
-      if (!receipt.duplicate) saveDemoAsset(receipt.asset);
+      const receipt = appendDemoDownloadReceipt(demoAssetFields(current), parsed.data);
+      if (!receipt.duplicate) saveDemoAssetMetadata([receipt.asset]);
       return json({ eventId: receipt.eventId, projection: receipt.projection }, 201);
     }
 
@@ -1684,7 +1697,7 @@ Bun.serve({
       const currentAsset = demoAssets.get(asset.id);
       if (!currentAsset || currentAsset.ownerUserId !== user.id)
         return json({ error: "NOT_FOUND", message: "素材不存在或无权编辑" }, 404);
-      saveDemoAsset({ ...currentAsset, metadata: { ...currentAsset.metadata, ...parsed.data } });
+      saveDemoAssetMetadata([{ ...demoAssetFields(currentAsset), metadata: { ...currentAsset.metadata, ...parsed.data } }]);
       return new Response(null, { status: 204 });
     }
 
@@ -1693,19 +1706,18 @@ Bun.serve({
       if (!parsed.success) return json({ error: 'INVALID_INPUT', message: '批量操作需选择1至50个不重复素材；移动时需指定项目' }, 400);
       const input = parsed.data;
       const assets = input.assetIds.map(id => demoAssets.get(id));
-      if (assets.some(asset => !asset || !asset.bytes.length || asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId))) return json({ error: 'BATCH_FORBIDDEN', message: '部分素材不存在或无权操作，整批未修改' }, 403);
+      if (assets.some(asset => !asset || asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId) || !demoAssetByteLength(asset))) return json({ error: 'BATCH_FORBIDDEN', message: '部分素材不存在或无权操作，整批未修改' }, 403);
       const permitted = assets as DemoAsset[];
       if (input.action === 'move-project' && !assetProjects.owns(user.id, input.projectId!)) return json({ error: 'PROJECT_FORBIDDEN', message: '无权将素材移入此项目，整批未修改' }, 403);
       if (input.action === 'delete' || input.action === 'move-project') {
-        const updated = permitted.map(asset => input.action === 'delete' ? { ...asset, deletedAt: now() } : { ...asset, projectId: input.projectId });
-        demoState.save({ assets: updated });
-        for (const asset of updated) { if (asset.deletedAt) { demoAssets.delete(asset.id); demoDeletedAssets.set(asset.id, asset); } else demoAssets.set(asset.id, asset); }
+        const updated = permitted.map(asset => input.action === 'delete' ? { ...demoAssetFields(asset), deletedAt: now() } : { ...demoAssetFields(asset), projectId: input.projectId });
+        saveDemoAssetMetadata(updated);
       }
       return json({ action: input.action, assetIds: input.assetIds, count: permitted.length,
         assets: input.action === 'download' || input.action === 'add-to-canvas' ? permitted.map(describeDemoAsset) : [] });
     }
     if (path === '/api/assets/summary' && request.method === 'GET') {
-      const assets = [...demoAssets.values()].filter(asset => asset.ownerUserId === user.id && asset.bytes.length && !isAuxiliaryImageResult(asset.metadata));
+      const assets = [...demoAssets.values()].filter(asset => asset.ownerUserId === user.id && demoAssetByteLength(asset) && !isAuxiliaryImageResult(asset.metadata));
       return json({ ...demoAssetPage(assets.map(describeDemoAsset), { limit: 12 }), total: assets.length });
     }
     if (path === '/api/assets/trash' && request.method === 'GET') {
@@ -1717,15 +1729,13 @@ Bun.serve({
       if (!asset || asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) return json({ error: 'NOT_FOUND', message: '已删除素材不存在或无权恢复' }, 404);
       if (!canRestoreDemoAsset(asset)) return json({ error: 'RESTORE_UNAVAILABLE', message: '已超过 30 天恢复期限或原始文件已清理' }, 410);
       if (asset.clientReferenceId && [...demoAssets.values()].some(active => active.ownerUserId === asset.ownerUserId && active.clientReferenceId === asset.clientReferenceId)) return json({ error: 'RESTORE_CONFLICT', message: '已有同一来源的有效素材，无法重复恢复' }, 409);
-      const restored = { ...asset, deletedAt: undefined };
-      demoState.save({ assets: [restored] });
-      demoAssets.set(asset.id, restored); demoDeletedAssets.delete(asset.id);
+      saveDemoAssetMetadata([{ ...demoAssetFields(asset), deletedAt: undefined }]);
       return empty();
     }
     if (/^\/api\/assets\/[^/]+$/.test(path) && (request.method === 'GET' || request.method === 'DELETE')) {
       const asset = demoAssets.get(path.split('/')[3]!);
       if (!asset || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId))) return json({ error: 'NOT_FOUND', message: '素材不存在或无权访问' }, 404);
-      if (request.method === 'DELETE') { const deleted = { ...asset, deletedAt: now() }; demoState.save({ assets: [deleted] }); demoDeletedAssets.set(asset.id, deleted); demoAssets.delete(asset.id); return empty(); }
+      if (request.method === 'DELETE') { saveDemoAssetMetadata([{ ...demoAssetFields(asset), deletedAt: now() }]); return empty(); }
       return json({ asset: describeDemoAsset(asset) });
     }
     if (path === '/api/projects' && request.method === 'GET') return json({ projects: assetProjects.list(user.id) });
@@ -1733,7 +1743,7 @@ Bun.serve({
       const adminView = path === "/api/admin/assets";
       if (adminView && !user.role.includes("admin")) return json({ message: "无权访问管理素材" }, 403);
       try {
-        return json(demoAssetPage([...demoAssets.values()].filter(asset => (adminView ? canManageDemoOwner(user, asset.ownerUserId) : asset.ownerUserId === user.id) && asset.bytes.byteLength && !isAuxiliaryImageResult(asset.metadata)).map(describeDemoAsset), Object.fromEntries(url.searchParams)));
+        return json(demoAssetPage([...demoAssets.values()].filter(asset => (adminView ? canManageDemoOwner(user, asset.ownerUserId) : asset.ownerUserId === user.id) && demoAssetByteLength(asset) && !isAuxiliaryImageResult(asset.metadata)).map(describeDemoAsset), Object.fromEntries(url.searchParams)));
       } catch { return json({ error: 'INVALID_PAGINATION', message: '素材分页或筛选参数无效' }, 400); }
     }
     if (path === "/api/history" && request.method === "GET") {
@@ -2112,7 +2122,7 @@ Bun.serve({
       });
     }
     if (path === "/api/admin/projects" && request.method === "GET") {
-      const assets = [...demoAssets.values()].filter((asset) => asset.bytes.byteLength && canManageDemoOwner(user, asset.ownerUserId));
+      const assets = [...demoAssets.values()].filter((asset) => canManageDemoOwner(user, asset.ownerUserId) && demoAssetByteLength(asset));
       const tasks = [...demoTasks.values()].filter((task) => canManageDemoOwner(user, task.ownerUserId));
       const identities = new Map([...assets, ...tasks].filter((item) => item.projectId).map((item) => [`${item.ownerUserId}:${item.projectId}`, item]));
       return json({ projects: [...identities.values()].map((item) => {
@@ -2155,6 +2165,7 @@ async function runApiMartImageTaskForDemo(
   const isMarkImage = providerId === MARK_IMAGE_PROVIDER_ID;
   let phase: ImageTaskFailurePhase = "preflight";
   try {
+    sources = sources.map(materializeDemoAsset);
     const editInput = isMarkImage ? preparedInput || await prepareImageEditInput(sources, parameters, { protocol: "apimart", modelId, operationType: task.operationType }) : undefined;
     phase = "submission";
     if (!isMarkImage) updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
@@ -2309,7 +2320,7 @@ async function recoverVideoTask(
 }
 
 function resolveOwnedVideoSources(sourceUrls: string[], user: { id: string }): DemoAsset[] | Response {
-  try { return resolveOwnedDemoVideoSources(sourceUrls, user.id, demoAssets); }
+  try { return resolveOwnedDemoVideoSources(sourceUrls, user.id, demoAssets).map(materializeDemoAsset); }
   catch (error) { return json({ error: "INVALID_SOURCE", message: error instanceof Error ? error.message : "参考素材不可用" }, 400); }
 }
 

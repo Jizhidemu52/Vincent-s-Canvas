@@ -2,8 +2,9 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash } from "node:crypto";
 import {
-  DesignLibraryError, DesignLibraryService, designLibraryFailure,
+  DesignLibraryError, DesignLibraryService, designLibraryFailure, designLibraryMediaCacheControl, designLibraryMediaVary,
   type DesignLibraryActor, type DesignLibraryMediaStore, type DesignLibraryRepository, type DesignLibraryStatus,
   type LibraryDelivery, type LibraryListFilter, type LibraryMetricRow, type LibraryPrivateAsset,
   type LibraryPublication, type LibraryReceipt, type LibrarySourceAsset,
@@ -213,6 +214,15 @@ export class DemoDesignLibraryStore implements DesignLibraryRepository, DesignLi
     return Uint8Array.from(row.bytes);
     });
   }
+  async stat(key: string) {
+    return this.committedRead(() => {
+      const row = key.startsWith(sourceKeyPrefix)
+        ? this.db.query<{ byteSize: number; mimeType: string }, [string]>("SELECT length(bytes) AS byteSize,json_extract(fields_json,'$.mimeType') AS mimeType FROM demo_assets WHERE id=?").get(key.slice(sourceKeyPrefix.length))
+        : this.db.query<{ byteSize: number; mimeType: string }, [string]>("SELECT length(bytes) AS byteSize,mime_type AS mimeType FROM demo_library_media WHERE object_key=?").get(key);
+      // Library snapshot and versioned derivative keys are immutable INSERT-only BLOBs.
+      return row ? { ...row, etag: `"${createHash("sha256").update(`${key}:${row.byteSize}`).digest("hex")}"` } : null;
+    });
+  }
   async write(key: string, bytes: Uint8Array, mimeType: string): Promise<void> {
     this.requireTransaction();
     this.db.query("INSERT INTO demo_library_media(object_key,mime_type,bytes) VALUES(?,?,?)").run(key, mimeType, bytes);
@@ -267,11 +277,21 @@ export async function handleDemoDesignLibrary(request: Request, service: DesignL
     }
     if (parts.length === 4 && action === "images") {
       if (operation === "reuse" && request.method === "POST") return libraryJson(await service.reuse(actor, id!, imageId!, await readJson(request)));
-      if ((operation === "content" && request.method === "GET") || (operation === "download" && request.method === "POST")) {
-        const result = operation === "content" ? await service.image(actor, id!, imageId!) : await service.download(actor, id!, imageId!, await readJson(request));
+      if ((operation === "content" || operation === "thumbnail") && ["GET", "HEAD"].includes(request.method)) {
+        const result = await service.imageResponse(actor, id!, imageId!, { thumbnail: operation === "thumbnail", ifNoneMatch: request.headers.get("if-none-match") ?? undefined, head: request.method === "HEAD" });
+        const headers = { ...responseHeaders, "cache-control": designLibraryMediaCacheControl, vary: designLibraryMediaVary, etag: result.etag };
+        if (result.status === 304) return new Response(null, { status: 304, headers });
+        return new Response(result.bytes ? new Uint8Array(result.bytes) : null, { headers: {
+          ...headers, "content-type": result.image.mimeType, "content-length": String(result.image.byteSize),
+          "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(result.image.filename)}`,
+          "content-security-policy": "default-src 'none'; sandbox",
+        } });
+      }
+      if (operation === "download" && request.method === "POST") {
+        const result = await service.download(actor, id!, imageId!, await readJson(request));
         return new Response(new Uint8Array(result.bytes), { headers: {
           ...responseHeaders, "content-type": result.image.mimeType, "content-length": String(result.bytes.byteLength),
-          "content-disposition": `${operation === "download" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(result.image.filename)}`,
+          "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(result.image.filename)}`,
         } });
       }
     }

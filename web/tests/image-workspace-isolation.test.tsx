@@ -149,6 +149,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         "@/stores/use-asset-store": { useAssetStore: (select: Function) => select({ addAsset() {} }) },
         "@/hooks/use-workbench-field": { useWorkbenchField: (_key: string, initialValue: unknown) => useState(initialValue) },
         "@/hooks/use-image-copy-editor": { useImageCopyEditor: () => ({ node: null }) },
+        "@/pages/design-library/use-design-library-share": { useDesignLibraryShare: () => ({ canShare: false, busy: false }) },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },
         "@/hooks/use-tool-config": { useToolConfig: (value: typeof config) => value },
         "@/hooks/use-image-preview": { useImagePreview: (image: { dataUrl: string }) => image.dataUrl },

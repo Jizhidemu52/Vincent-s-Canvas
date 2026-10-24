@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, Share2, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
@@ -55,6 +55,7 @@ const SeamlessStitchPage = lazy(() => import("@/pages/image/seamless-stitch").th
 const CanvasImageEditorDialog = lazy(() => import("@/components/canvas/canvas-image-editor-dialog").then(module => ({ default: module.CanvasImageEditorDialog })));
 import { hydratePromptReuse, savePromptFromTask } from "@/services/api/prompts";
 import { promptImageSettings } from "@/lib/prompt-editor-parameters";
+import { useDesignLibraryShare } from "@/pages/design-library/use-design-library-share";
 
 type GeneratedImage = {
     id: string;
@@ -181,6 +182,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
 
 function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePreset?: CreativePreset; historyTool: string }) {
     const { message, modal } = App.useApp();
+    const libraryShare = useDesignLibraryShare();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const loadedRecreateAssetsRef = useRef(new Set<string>());
@@ -509,6 +511,13 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const downloadImage = async (image: GeneratedImage, index: number) => {
         try { saveAs(await resolveImageUrl(image.storageKey, image.dataUrl), canvasImageDownloadFileName(resultEditorNode(image, index))); }
         catch (error) { message.error(error instanceof Error ? error.message : "原图读取失败"); }
+    };
+
+    const shareResultDesign = (image: GeneratedImage, index: number) => {
+        const sourceLog = [...logs, ...unclassifiedLogs].find(log => log.images.some(item => item.id === image.id));
+        return libraryShare.share({ ownerId: user?.id || "", title: image.imageName ? `${image.imageName}_v${image.imageVersion || 1}` : `生成结果 ${index + 1}`,
+            dataUrl: image.dataUrl, storageKey: image.storageKey, filename: canvasImageDownloadFileName(resultEditorNode(image, index)),
+            prompt: image.prompt ?? sourceLog?.prompt ?? "", model: sourceLog?.model || "", tags: [] });
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
@@ -899,7 +908,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} onSelect={selectResultPrompt} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} />
+                                        <ResultImageCard key={result.id} image={result.image} index={index} onSelect={selectResultPrompt} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} onShareDesign={libraryShare.canShare ? shareResultDesign : undefined} sharingDesign={libraryShare.busy} />
                                     ) : result.status === "failed" || result.status === "paused" ? (
                                         <FailedImageCard key={result.id} error={result.error || "生成失败"} recovery={Boolean(result.recovery)} disabled={running || (!result.recovery && !result.snapshot)} onRetry={() => retryResult(index)} />
                                     ) : (
@@ -999,6 +1008,8 @@ function ResultImageCard({
     onDownload,
     onSaveAsset,
     onSavePrompt,
+    onShareDesign,
+    sharingDesign,
 }: {
     image: GeneratedImage;
     index: number;
@@ -1008,6 +1019,8 @@ function ResultImageCard({
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
     onSavePrompt: (image: GeneratedImage) => void;
+    onShareDesign?: (image: GeneratedImage, index: number) => Promise<void>;
+    sharingDesign?: boolean;
 }) {
     const previewUrl = useImagePreview(image);
     return (
@@ -1048,6 +1061,9 @@ function ResultImageCard({
                             存为提示词
                         </Button>
                     </Tooltip>
+                    {onShareDesign && <Tooltip title="复用或保存本人私有原图，再核对公开内容；不会自动发布">
+                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<Share2 className="size-3.5" />} loading={sharingDesign} onClick={() => void onShareDesign(image, index)}>分享到灵感库</Button>
+                    </Tooltip>}
                 </div>
             </div>
         </div>

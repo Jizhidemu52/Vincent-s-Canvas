@@ -20,14 +20,14 @@ function run(tool: "ffmpeg" | "ffprobe", args: string[], maxBuffer = 8 * 1024 * 
   });
 }
 const limits = ["-v", "error", "-max_alloc", "134217728", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", formats];
-async function thumbnailsFromFile(file: string, signal?: AbortSignal) {
+async function thumbnailsFromFile(file: string, signal?: AbortSignal, sizes: readonly (256 | 1024)[] = [256, 1024]) {
   const info = JSON.parse((await run("ffprobe", [...limits, "-show_entries", "stream=width,height", "-of", "json", file], 64 * 1024, signal)).toString());
   const { width, height } = info.streams?.[0] || {};
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 16384 || height > 16384 || width * height > 67_108_864) {
     throw new Error("缩略图原图尺寸无效或超出安全限制");
   }
   const result = {} as Record<256 | 1024, Buffer>;
-  for (const size of [256, 1024] as const) {
+  for (const size of sizes) {
     result[size] = await run("ffmpeg", ["-nostdin", ...limits, "-i", file, "-map", "0:v:0", "-frames:v", "1",
       "-vf", `scale=w='min(${size},iw)':h='min(${size},ih)':force_original_aspect_ratio=decrease`,
       "-threads", "1", "-c:v", "libwebp", "-quality", "82", "-f", "image2pipe", "pipe:1"], undefined, signal);
@@ -35,17 +35,19 @@ async function thumbnailsFromFile(file: string, signal?: AbortSignal) {
   }
   return result;
 }
-async function withInput(write: (path: string) => Promise<void>, signal?: AbortSignal) {
+async function withInput(write: (path: string) => Promise<void>, signal?: AbortSignal, sizes?: readonly (256 | 1024)[]) {
   const directory = await mkdtemp(join(tmpdir(), "canvas-asset-thumb-"));
   const input = join(directory, "original");
-  try { signal?.throwIfAborted(); await write(input); return await thumbnailsFromFile(input, signal); }
+  try { signal?.throwIfAborted(); await write(input); return await thumbnailsFromFile(input, signal, sizes); }
   finally { await unlink(input).catch(() => undefined); await rmdir(directory).catch(() => undefined); }
 }
 
 /** Also used by the local demo. Does not alter the input bytes. */
-export async function createAssetThumbnailBytes(bytes: Uint8Array) {
+export function createAssetThumbnailBytes(bytes: Uint8Array): Promise<Record<256 | 1024, Buffer>>;
+export function createAssetThumbnailBytes<S extends 256 | 1024>(bytes: Uint8Array, sizes: readonly S[]): Promise<Record<S, Buffer>>;
+export async function createAssetThumbnailBytes(bytes: Uint8Array, sizes: readonly (256 | 1024)[] = [256, 1024]) {
   if (!bytes.length || bytes.length > maxBytes) throw new Error("缩略图原文件超过限制");
-  return withInput(path => writeFile(path, bytes));
+  return withInput(path => writeFile(path, bytes), undefined, sizes);
 }
 
 export async function generateAssetThumbnails(db: Database, storage: ObjectStorage, assetId: string, options: { signal?: AbortSignal; leaseToken?: string } = {}) {
