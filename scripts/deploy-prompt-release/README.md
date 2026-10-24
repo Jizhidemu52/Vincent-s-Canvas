@@ -83,4 +83,6 @@ bun --no-env-file test scripts/deploy-prompt-release/deploy.test.ts
 
 合同测试只在临时 Git 仓库、文件夹及隔离 PGlite 数据库运行，不调用 Docker、SSH、curl 或模型。完整远端构建、真实容器环境、OA 登录、真实模型输出与视觉验收均留给根任务负责，不由离线测试代替。
 
-当前离线结果：7 项合同测试通过、0 失败、57 条断言；两份 shell 脚本 `bash -n` 通过。新增真实 Git 归档中文文件名、gzip 编码和字节一致性往返检查；Windows 调用显式指定工作目录与 UTF-8 header charset。隔离 PostgreSQL 测试实际导入 18 配方，随后修改管理员设置与版本，再重复导入，确认原管理员选择、员工余额和原 chat 绑定均保留。批次指纹只排除本次新增的 5 个 admission 元数据列：同时改动这 5 列不会误报；故意修改原有批次 prompt 或员工余额时保护校验均正确拒绝。最初测试夹具将同一 SQL 参数同时用于 UUID/text 曾失败，已拆分参数后通过，未因此修改产品代码。
+当前离线结果：7 项合同测试通过、0 失败、58 条断言；两份 shell 脚本 `bash -n` 通过。新增真实 Git 归档中文文件名、gzip 编码和字节一致性往返检查，以及 Docker 保留 `.env.example` 的规则检查；Windows 调用显式指定工作目录与 UTF-8 header charset。Windows bsdtar 在 Bun 测试内直接解压 gzip 曾间歇退出 5，测试现由标准 zlib 解压 gzip，再用 tar 核验文件名和原字节；真实 Linux 上传包另完整解压并核对全部 SHA-256。
+
+隔离 PostgreSQL 测试实际导入 18 配方，随后修改管理员设置与版本，再重复导入，确认原管理员选择、员工余额和原 chat 绑定均保留。批次指纹只排除本次新增的 5 个 admission 元数据列：同时改动这 5 列不会误报；故意修改原有批次 prompt 或员工余额时保护校验均正确拒绝。最初测试夹具将同一 SQL 参数同时用于 UUID/text 曾失败，已拆分参数后通过，未因此修改产品代码。

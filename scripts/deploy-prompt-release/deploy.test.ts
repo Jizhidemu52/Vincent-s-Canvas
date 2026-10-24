@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { assertClean, assertPublicPackage, assertReleaseName, files, manifest, originals, requiredSource, tarOptions } from "./package.mjs";
 import { assertOptimizer, capture, expectedKeys, verify } from "./recipe-state";
 import { createIsolatedPostgres } from "../../server/tests/helpers/isolated-postgres";
@@ -55,8 +56,12 @@ test("UTF-8 Chinese archive paths and exact bytes survive extraction and repacka
   const expected = execFileSync("git", ["show", `HEAD:${originals[0]}`], { cwd: repo, windowsHide: true });
   expect(await readFile(join(first, originals[0]))).toEqual(expected);
   execFileSync("tar", [...tarOptions, "-czf", packed, "-C", first, "."], { cwd: repo, windowsHide: true });
-  expect((await readFile(packed)).subarray(0, 2).toString("hex")).toBe("1f8b");
-  execFileSync("tar", [...tarOptions, "-xf", packed, "-C", second], { cwd: repo, windowsHide: true });
+  const compressed = await readFile(packed);
+  expect(compressed.subarray(0, 2).toString("hex")).toBe("1f8b");
+  // Verify gzip independently of Windows bsdtar's intermittent compressed-extract exit 5 under Bun tests.
+  const unpacked = join(fixture, "repacked.tar");
+  await writeFile(unpacked, gunzipSync(compressed));
+  execFileSync("tar", [...tarOptions, "-xf", unpacked, "-C", second], { cwd: repo, windowsHide: true });
   expect(await readFile(join(second, originals[0]))).toEqual(expected);
   expect(await files(first)).toEqual(await files(second));
 });
@@ -79,6 +84,7 @@ test("deployment contract uses frozen archives, explicit migrate/import order, p
   const prepare = await readFile(join(directory, "prepare.sh"), "utf8");
   const cutover = await readFile(join(directory, "cutover.sh"), "utf8");
   const dockerfile = await readFile(join(directory, "Dockerfile.api"), "utf8");
+  const dockerIgnore = await readFile(join(repo, ".dockerignore"), "utf8");
   expect(packageCode.indexOf("['archive'")).toBeLessThan(packageCode.indexOf("['run', 'build']"));
   expect(packageCode).toContain("await manifest(buildRoot, sourceNames) !== sourceManifest");
   expect(packageCode).toContain("await files(path.join(root, 'server'))");
@@ -91,6 +97,7 @@ test("deployment contract uses frozen archives, explicit migrate/import order, p
   expect(dockerfile).toContain("COPY server/ /app/");
   expect(dockerfile).toContain('CMD ["bun", "src/index.ts"]');
   expect(dockerfile).toContain("COPY docs/manual/prompt-optimization/");
+  expect(dockerIgnore.lastIndexOf("!**/.env.example")).toBeGreaterThan(dockerIgnore.lastIndexOf("**/.env.*"));
 });
 
 test("both operational scripts parse in Bash without executing any external operation", () => {

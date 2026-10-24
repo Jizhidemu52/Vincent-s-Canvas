@@ -59,7 +59,7 @@
 
 - 服务端全套：1483 pass、31 skip、0 fail，11623 断言；跳过项是未连接原生 PostgreSQL/Redis 的集成条件，不把 PGlite 当真实多进程环境。
 - 前端全套：3135 pass、0 fail、29651 断言，包含助手原任务恢复的两个真实组件回归。相关类型检查通过。
-- 付费 QA 脚本类型检查、编译器/矩阵/绑定针对性检查通过；发布脚本 7 项、57 断言通过，含中文归档原字节往返、重复导入保持管理员配置、余额/旧字段改变时拒绝切换。
+- 付费 QA 脚本类型检查、编译器/矩阵/绑定针对性检查通过；发布脚本 7 项、58 断言通过，含中文归档原字节往返、Docker 模板环境文件保留、重复导入保持管理员配置、余额/旧字段改变时拒绝切换。
 - 真实 UI 的调用计数、原图 SHA、缓存与 ZIP 检查见 `testing/*report*`；全部公开文件的大小和 SHA-256 见 [evidence-manifest.json](./testing/evidence-manifest.json)。浏览器/系统权限、真实双员工跨设备与高并发仍按 [待验收](../../content/docs/progress/pending-test.mdx) 保留。
 
 原图、输入、最终提示词、错误与逐图审阅分别位于 `testing/quality-matrix/`、`testing/visual-review-*.{json,md}`、`testing/chat-live-ui/`、`testing/workflow-live-ui/` 和 `testing/supplement-v1/`。运行数据库不在仓库。发布流程见 [部署脚本](../../../scripts/deploy-prompt-release/README.md)，付费重现入口见 [QA 脚本说明](../../../server/scripts/README.prompt-quality.md)；CI 不会自动运行付费脚本。
